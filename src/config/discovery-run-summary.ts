@@ -52,7 +52,7 @@ export interface RunCoverage {
  * Exported so the test can assert every branch lands on one of them rather than on a plausible
  * name nobody has ever seen on screen.
  */
-export const NAMED_TABS = ['Searches', 'Found leads', 'Outreach'] as const;
+export const NAMED_TABS = ['Searches', 'All leads', 'Outreach'] as const;
 
 /** `14 companies` / `1 company` / `no companies` — the merge engine has no plural rules. */
 export function companiesPhrase(n: number): string {
@@ -128,7 +128,7 @@ export function outcomeSentence(
             // assistant-dashboard-registry.js. Renaming a tab without changing this sends users to
             // a tab that is not there — the coupling tests/lead-prompt-surfaces.test.ts already
             // defends for the assistant's own prompt.
-            return 'They are already in your Found leads tab — open it and move the ones worth pursuing to Outreach.';
+            return 'They are already in your All leads tab — open it and move the ones worth pursuing to Outreach.';
     }
 }
 

@@ -1995,7 +1995,7 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
                 jobId,
                 searchConfigured: isSearchConfigured(),
                 message: isSearchConfigured()
-                    ? 'Discovery run started — found leads will appear in your Found leads tab for approval shortly.'
+                    ? 'Discovery run started — found leads will appear in your All leads tab for approval shortly.'
                     : 'Idea approved, but no web search provider is connected yet — connect one to start discovering real leads.',
             });
         }

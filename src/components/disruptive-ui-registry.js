@@ -4952,6 +4952,54 @@
   register('NewsletterCampaignDraftCard', renderNewsletterCampaignDraftCard);
 
   register('blog_post_draft', renderBlogPostDraftCard);
+
+  // ── Built-in: several articles at once (Blog Writer chat, owner 2026-10-27) ──
+  // { type: 'blog_batch_proposal', topics: [{ title, brief }], more, assistantId }
+  // src/utils/blog-chat-batch.ts. One button queues every article through generate-blog.ts (the
+  // background worker); the click dispatches `blog:batch` and chat-session.js makes the call.
+  function renderBlogBatchProposalCard(ui, esc) {
+    const topics = Array.isArray(ui.topics) ? ui.topics.filter((t) => t && t.title) : [];
+    if (!topics.length) return null;
+    const n = topics.length;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Write ${n} article${n === 1 ? '' : 's'} · ${ui.queued ? 'Started' : 'Needs your OK'}</p>
+      <ol class="mt-3 space-y-2 list-decimal pl-5">
+        ${topics.map((t) => `<li class="text-sm text-gray-900"><span class="font-bold">${esc(t.title)}</span>${t.brief ? `<span class="block text-xs text-gray-600 mt-0.5">${esc(t.brief)}</span>` : ''}</li>`).join('')}
+      </ol>
+      ${ui.more ? `<p class="text-xs text-amber-800 mt-2">${esc(String(ui.more))} more were asked for — ask again once these are written.</p>` : ''}
+      <p class="text-xs text-gray-600 mt-3">Each one is written in the background — a minute or two apiece — and lands in the Review column of the Blogs tab. Nothing is published, and each counts as one task.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${ui.queued ? '' : `<button type="button" data-bb-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Write all ${n}</button>
+        <button type="button" data-bb-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-bb-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-bb-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-bb-go], [data-bb-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-bb-cancel]')) { setBusy(true); say('Nothing started.'); return; }
+      if (!e.target.closest('[data-bb-go]')) return;
+      setBusy(true);
+      say('Starting…');
+      el.dispatchEvent(new CustomEvent('blog:batch', {
+        bubbles: true,
+        detail: {
+          assistantId: Number(ui.assistantId) || null,
+          topics: topics.map((t) => ({ title: t.title, brief: t.brief || null })),
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Started.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('blog_batch_proposal', renderBlogBatchProposalCard);
   register('BlogPostDraftCard', renderBlogPostDraftCard);
 
   // ── Built-in: Upgrade Required Card (paywall) ───────────────────────────────

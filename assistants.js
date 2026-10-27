@@ -329,7 +329,7 @@ window.generateAssistantCardHTML = function(assistant) {
     // counted, and a role whose configuration.type has drifted still gets an honest strip.
     //
     // The three lead words are lifted verbatim from the surfaces they link to, so the card and the
-    // page agree: "found" is what the Found leads tab holds, "awaiting you" is the Outreach ▸ Review
+    // page agree: "found" is what the All leads tab holds, "awaiting you" is the Outreach ▸ Review
     // column, and "cleared for outreach" is Approved + Awaiting reply — the same two states the
     // qualified_leads goal counts. Deliberately NOT "qualified": that word means two different
     // things on the detail page already (a live count on the goal, a 90-day count on the
@@ -1458,7 +1458,7 @@ document.addEventListener('bms:notifications-arrived', () => {
  * ⚠️ The Review column is counted with `deliverable=1`, matching what that column actually renders
  * (leads with an address AND a drafted body). Counting it any other way would put a number on the
  * button that the list underneath contradicts — which is the specific bug that made this queue
- * read as a duplicate of the Found leads tab.
+ * read as a duplicate of the All leads tab.
  */
 async function _detailRqRefreshRecordCounts() {
     const aid = window._currentAssistantId;
@@ -1941,7 +1941,13 @@ function _rqOutreachReadinessHtml(statusKey) {
     if (statusKey !== 'review' && statusKey !== 'approved') return '';
 
     const parts = [];
+    // The assistant says it out loud too (assistant-bubbles.js) — once per page visit.
     if (!_rqReadiness.postalAddress) {
+        window.AssistantBubbles?.say('outreach-no-postal', {
+            assistantId: window._currentAssistantId, name: window._currentAssistantName,
+            text: 'I can’t send any outreach yet — anti-spam law needs your business postal address in every email. Add it in Business Information and I’ll be ready.',
+            action: { label: 'Add it', run: () => window.loadView && window.loadView('assets') },
+        });
         parts.push(`<div class="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 my-3">
             <span class="text-sm leading-none mt-0.5">📮</span>
             <p class="text-xs text-amber-900">
@@ -2959,7 +2965,7 @@ function _rqCardChips(r) {
  *
  * ⚠️ Same two columns as the banner, and for the same reason: Review and Archived are the only
  * states the sweep collects. Rendered from the generated mirror (window.LeadRetention) so the
- * number here, the number in the Found leads table's "Deletes in" column and the night the sweep
+ * number here, the number in the All leads table's "Deletes in" column and the night the sweep
  * actually runs are one calculation rather than three.
  */
 function _rqRetentionChip(r, statusKey) {
@@ -3330,7 +3336,7 @@ function _detailRqPaintRecords(statusKey, opts) {
     const emptyMsg = statusKey !== 'review'
         ? 'Nothing here yet.'
         : (opts && opts.deliverableOnly)
-            ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the Found leads tab.'
+            ? 'No emails waiting for you. Leads without a contact address can’t be emailed yet — they’re in the All leads tab.'
             : 'Nothing awaiting your review.';
 
     // ── Send readiness (the pre-flight) ──────────────────────────────────────────
@@ -3388,7 +3394,19 @@ function _detailRqPaintRecords(statusKey, opts) {
         : '';
 
     // The send-readiness banner, above the columns where a send is actually triggered.
-    const readyHtml = _rqOutreachReadinessHtml(statusKey);
+    // Awaiting reply → Conversations (owner, 2026-10-27). This column and the Conversations tab show
+    // the same leads from two angles; the replies, the follow-ups and recording how a deal ended all
+    // live there, so the column says so and gives the way across, rather than looking like a second
+    // place to work the same lead.
+    const convLabel = document.getElementById('conversations-tab-label')?.textContent?.trim() || 'Conversations';
+    const convHtml = ((window._detailReviewQueue || {}).recordType === 'lead' && statusKey === 'scheduled'
+        && !document.getElementById('maintab-btn-conversations')?.classList.contains('hidden'))
+        ? `<div class="flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 my-3">
+             <p class="text-xs text-emerald-900 flex-1 min-w-0">These leads have had their email. Their replies, follow-ups and how each deal ended are on the ${_rqEsc(convLabel)} tab — work them there.</p>
+             <button type="button" onclick="window._activateMainTab && window._activateMainTab('conversations')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer shrink-0">Open ${_rqEsc(convLabel)}</button>
+           </div>`
+        : '';
+    const readyHtml = _rqOutreachReadinessHtml(statusKey) + convHtml;
 
     if (!records.length) {
         container.innerHTML = readyHtml + noticeHtml + `<p class="text-sm text-gray-500 py-10 text-center">${emptyMsg}</p>`;
@@ -3800,7 +3818,7 @@ window._detailRqRecordAct = async function (btn, action) {
         return;
     }
 
-    // Edit the lead record itself — the Found leads tab's own form, opened here.
+    // Edit the lead record itself — the All leads tab's own form, opened here.
     if (action === 'editLead') {
         const rec = _rqRecordsById.get(Number(card.getAttribute('data-rq-record')));
         if (!rec || !window.AssistantDataHub?.editLead) return;
@@ -5056,6 +5074,30 @@ window._setNextUp = function(text) {
     window._detailNextUp = text ? String(text) : null;
     window._renderNeedsYou();
 };
+// ── What pops up when an assistant's page opens (owner, 2026-10-27) ───────────
+// assistant-bubbles.js + assistant-nudges.ts. Waits a moment so the queue loaders have fed the
+// pending-review count, then says only what is true right now: work waiting for you, or being
+// paused. The server adds the Business Mentor's suggestions about this assistant and copies every
+// nudge to Team Chat (once a day). Nothing is said for an archived assistant.
+function _scheduleAssistantNudges(data) {
+    if (!window.AssistantBubbles || !data || data.lifecycleStatus === 'archived') return;
+    const id = Number(data.id);
+    setTimeout(() => {
+        if (Number(window._currentAssistantId) !== id) return;     // the user has moved on
+        const items = [];
+        const n = window._detailOpSignals?.pendingReview || 0;
+        const where = (window._detailReviewQueue || {}).label || 'Review';
+        if (n > 0) {
+            items.push({ key: 'review-waiting', tab: 'review-queue', label: `Open ${where}`,
+                text: `${n} ${n === 1 ? 'thing is' : 'things are'} waiting for you in ${where}. Nothing goes out until you approve it.` });
+        }
+        if (data.lifecycleStatus === 'paused') {
+            items.push({ key: 'paused', text: 'I’m paused, so I’m not doing anything until you start me again.' });
+        }
+        window.AssistantBubbles.pageNudges({ assistantId: id, name: data.name || 'Your assistant', items });
+    }, 2500);
+}
+
 window._renderNeedsYou = function() {
     const strip = document.getElementById('detail-needs-you');
     if (!strip) return;
@@ -5789,7 +5831,7 @@ window._renderLeadRejectionEvidence = async function(assistantId) {
     show();
     if (!payload.reasons.length) {
         host.innerHTML = `
-          <p class="text-sm text-gray-500">Nothing recorded yet. When you reject a lead in the Outreach tab or the Found leads tab, the reason you pick is filed here.</p>`;
+          <p class="text-sm text-gray-500">Nothing recorded yet. When you reject a lead in the Outreach tab or the All leads tab, the reason you pick is filed here.</p>`;
         return;
     }
 
@@ -6601,6 +6643,12 @@ function _applyDashboardRegistry(data) {
     const goalsAnchor = cfg.resultsTabAfter && document.getElementById(`maintab-btn-${cfg.resultsTabAfter}`);
     if (goalsBtn && goalsAnchor) goalsAnchor.after(goalsBtn);
     else if (goalsBtn) document.getElementById('maintab-btn-activity')?.before(goalsBtn);
+    // …and the divider that marks Calendar and Activity as supporting views, on the same roles.
+    const supportDivider = document.getElementById('maintab-support-divider');
+    if (supportDivider) {
+        supportDivider.classList.toggle('hidden', !goalsAnchor);
+        supportDivider.style.display = goalsAnchor ? '' : 'none';
+    }
     if (window._detailResultsInGoalsTab) {
         const panel = document.getElementById('maintab-goals');
         const goalsList = document.getElementById('tab-goals');
@@ -8506,6 +8554,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         // (must run before attachAutoSave so the operational-setup editor inputs exist).
         _applyDashboardRegistry(currentData);
         _detailHydrate(currentData);
+        _scheduleAssistantNudges(currentData);
         _renderMandateSuggestions(currentData);
         _renderOnboardingSummary(currentData);
         _renderOutreachEmailConnect(currentData);

@@ -252,7 +252,7 @@
     // merged. Empty on every hub but the Lead Generator's.
     deletedRecords: [],
     // Is the Deleted section folded open? Collapsed by default: it is a graveyard, and a user
-    // arriving at the Found leads tab is there for live leads. Part of the view state rather than
+    // arriving at the All leads tab is there for live leads. Part of the view state rather than
     // the DOM for the same reason `collapsed` below is — the section is re-rendered on every
     // refresh and a fold recorded in the markup would spring open.
     deletedOpen: false,
@@ -303,7 +303,7 @@
    *
    * Leads only, and fetched separately rather than filtered out of one big response, for two
    * reasons. The graveyard grows without bound while the live list does not, so folding them into
-   * the same fetch would make every Found leads tab load pay for every lead ever dropped. And
+   * the same fetch would make every All leads tab load pay for every lead ever dropped. And
    * `state.records` is read by nine other things (table, filters, groups, counts, selection,
    * paging, CSV, deep-link focus); a single array holding two populations would need each of them
    * to remember which one it meant.

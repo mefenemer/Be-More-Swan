@@ -140,13 +140,13 @@ async function main() {
         const card = await resolveLeadActionProposal(fakeDb([lead('pending_approval', { outreachDraft: null, contactEmail: 'a@b.test', outreachStage: 'review' })]), 1, 2, send);
         assert.match(String(card?.blocked), /No email has been written/);
     });
-    await check('do-not-contact, already sent, still in Found leads and turned down are all blocked', async () => {
+    await check('do-not-contact, already sent, still in All leads and turned down are all blocked', async () => {
         const dnc = await resolveLeadActionProposal(fakeDb([lead('pending_approval', { doNotContact: true, doNotContactReason: 'An existing customer' })]), 1, 2, send);
         assert.match(String(dnc?.blocked), /do-not-contact/);
         const sent = await resolveLeadActionProposal(fakeDb([lead('scheduled', { outreachSentAt: '2026-10-20T09:00:00Z' })]), 1, 2, send);
         assert.match(String(sent?.blocked), /already gone/);
         const triage = await resolveLeadActionProposal(fakeDb([lead('pending_approval', { outreachStage: 'triage' })]), 1, 2, send);
-        assert.match(String(triage?.blocked), /still in Found leads/);
+        assert.match(String(triage?.blocked), /still in All leads/);
         const rejected = await resolveLeadActionProposal(fakeDb([lead('rejected')]), 1, 2, send);
         assert.ok(rejected?.blocked);
     });

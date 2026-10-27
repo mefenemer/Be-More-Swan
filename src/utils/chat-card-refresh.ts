@@ -9,6 +9,7 @@
 import type { getDb } from '../../db/client';
 import { refreshPostActionCards } from './chat-post-action';
 import { refreshBlogActionCards } from './chat-blog-action';
+import { refreshBlogBatchCards } from './chat-blog-batch-refresh';
 import { refreshEmailActionCards } from './chat-email-action';
 import { refreshLeadActionCards } from './chat-lead-action';
 import { refreshAudienceCards } from './chat-audience';
@@ -27,6 +28,7 @@ export async function refreshStoredCards<M extends { uiElement: unknown }>(
 ): Promise<M[]> {
     let out = await refreshPostActionCards(db, organisationId, aiAssistantId, messages);
     out = await refreshBlogActionCards(db, organisationId, aiAssistantId, out);
+    out = await refreshBlogBatchCards(db, organisationId, aiAssistantId, out);
     out = await refreshEmailActionCards(db, organisationId, aiAssistantId, out);
     out = await refreshLeadActionCards(db, organisationId, aiAssistantId, out);
     out = await refreshAudienceCards(db, organisationId, out);

@@ -176,7 +176,7 @@
             <p class="text-sm font-semibold ${configured ? 'text-emerald-800' : 'text-amber-800'}">
               ${configured ? '🔍 Discovery run started' : '⚠️ Search provider not connected'}
             </p>
-            <p class="text-xs text-gray-600 mt-1">${esc(data.message || 'Found leads will appear in your Leads tab for approval shortly.')}</p>
+            <p class="text-xs text-gray-600 mt-1">${esc(data.message || 'All leads will appear in your Leads tab for approval shortly.')}</p>
           </div>`;
       }
       window.showToast?.(configured

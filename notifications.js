@@ -118,6 +118,8 @@ window.updateNotificationBadge = async function() {
 
             _paintNotifBadge(badge, document.getElementById('sidebar-nav-dot'), needsYou, fyi);
             if (_lastNotifBadgeCount !== null && count > _lastNotifBadgeCount) {
+                // …and the new one pops up as a chat bubble from the assistant that sent it.
+                window.AssistantBubbles?.onNotificationsRose?.();
                 // Sound choice by the newly-arrived notification's type. The two "achievement"
                 // moments — a milestone reached, or an assistant becoming ready to work
                 // (provisioning_complete) — play the celebratory Aurora chime, gated by the
@@ -320,7 +322,7 @@ window.NotifKit = (function () {
             } };
         }
         // Leads about to lapse off the retention clock — the Outreach tab is where the decision is
-        // made, so send them there rather than to the Found leads table they will end up in.
+        // made, so send them there rather than to the All leads table they will end up in.
         if (notif.type === 'leads_expiring_soon' && meta.assistantId) {
             return { label: 'Review leads', run: () => {
                 window._assistantDetailInitialTab = 'review-queue';
@@ -863,6 +865,7 @@ window.initNotifications = async function(param) {
             </div>
             ${resolved ? '' : `<div class="notif-row-actions flex items-center gap-3 shrink-0">
                 <button type="button" class="action-cta px-4 py-2 ${st.cta} text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap">${action.label}</button>
+                <button type="button" class="action-done shrink-0 text-xs font-semibold px-2.5 py-1 rounded-md border border-emerald-200 text-emerald-800 hover:bg-emerald-50 whitespace-nowrap">Mark as done</button>
                 <button type="button" class="action-toggle-read shrink-0 text-xs font-semibold px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 whitespace-nowrap">${notif.isRead ? 'Mark as unread' : 'Mark as read'}</button>
             </div>`}
             ${dismissBtnHTML(notif)}
@@ -873,6 +876,13 @@ window.initNotifications = async function(param) {
             if (resolvesClick(notif)) setResolved(notif.id);
             else setRead(notif.id, true);
             action.run();
+        });
+        // "Mark as done" (owner, 2026-10-27): the person has dealt with it some other way, or decided it
+        // needs nothing — e.g. an archived assistant they do NOT want back. Closes it (resolvedAt), so
+        // it leaves the Needs you count, without running the button's action and without deleting it.
+        li.querySelector('.action-done')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setResolved(notif.id);
         });
         // Mute-only acknowledge: marking an action read greys it but keeps it in the tab — the row
         // stays open (and still counted) until it's truly resolved. Mirrors the Updates read toggle
@@ -1462,6 +1472,7 @@ window.NotificationPopover = (function () {
                 ${n.message ? `<p class="text-xs text-gray-500 mt-0.5 line-clamp-2">${K.sanitizeText(n.message)}</p>` : ''}
                 <div class="mt-2 flex items-center gap-2">
                     ${action ? `<button type="button" class="pop-cta px-3 py-1.5 ${st.cta} text-xs font-bold rounded-lg transition whitespace-nowrap">${K.escHtml(action.label)}</button>` : ''}
+                    ${isAction ? '<button type="button" class="pop-done text-[11px] font-semibold text-emerald-700 hover:text-emerald-900 whitespace-nowrap">Done</button>' : ''}
                     ${n.isRead ? '' : '<button type="button" class="pop-read text-[11px] font-semibold text-gray-400 hover:text-gray-700 whitespace-nowrap">Mark read</button>'}
                     <span class="text-[11px] text-gray-400">${K.fmtDate(n.createdAt)}</span>
                 </div>
@@ -1473,6 +1484,14 @@ window.NotificationPopover = (function () {
             n.isRead = true;
             render();
             patch(n.id, { isRead: true });
+        });
+        // Close an action without doing it — same as "Mark as done" on the page.
+        li.querySelector('.pop-done')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            n.isRead = true;
+            n.resolvedAt = new Date().toISOString();
+            render();
+            patch(n.id, { resolved: true });
         });
         li.querySelector('.pop-cta')?.addEventListener('click', (e) => {
             e.stopPropagation();

@@ -1210,6 +1210,20 @@
       }
     }
 
+    // "Write all N" (blog_batch_proposal) → generate-blog.ts's batch branch: one background draft per
+    // article, each landing in Review on the Blogs tab when it is written.
+    async function onBlogBatch(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const r = await postActionCall('generate-blog', { assistantId: d.assistantId || assistantId, batch: d.topics || [] });
+        const n = Number(r.queued) || 0;
+        respond({ ok: true, message: `Writing ${n} article${n === 1 ? '' : 's'} now. Each appears in the Review column of the Blogs tab as it’s finished — usually a minute or two apiece.` });
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
     async function onLeadAction(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1987,6 +2001,7 @@
     container.addEventListener('cta:change', onCallToAction);
     container.addEventListener('site:reviewDecisions', onReviewDecisions);
     container.addEventListener('blog:createDraft', onBlogDraftCreate);
+    container.addEventListener('blog:batch', onBlogBatch);
     container.addEventListener('newsletter:createDraft', onNewsletterDraftCreate);
     container.addEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
     container.addEventListener('audience:createForm', onAudienceFormCreate);
@@ -2076,6 +2091,7 @@
         container.removeEventListener('lead:outreachOffer', onOutreachOffer);
         container.removeEventListener('cta:change', onCallToAction);
         container.removeEventListener('blog:createDraft', onBlogDraftCreate);
+        container.removeEventListener('blog:batch', onBlogBatch);
         container.removeEventListener('newsletter:createDraft', onNewsletterDraftCreate);
         container.removeEventListener('newsletter:createCampaign', onNewsletterCampaignCreate);
         container.removeEventListener('audience:createForm', onAudienceFormCreate);

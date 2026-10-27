@@ -46,6 +46,7 @@ import { normalizePlatform, platformFormat, type SocialPlatform } from '../../sr
 import { normalizeMediaSources } from '../../src/utils/media-sources';
 import { replyClaimsPostSaved, honestDraftReply, isHonestDraftReply, type DraftClaimFailure } from '../../src/utils/chat-draft-claims';
 import { blogPostDraftFromUiElement, BLOG_POST_DRAFT_TYPE } from '../../src/utils/blog-chat-draft';
+import { blogBatchFromUiElement } from '../../src/utils/blog-chat-batch';
 import { newsletterDraftFromUiElement, NEWSLETTER_ISSUE_DRAFT_TYPE } from '../../src/utils/newsletter-chat-draft';
 import { campaignDraftFromUiElement, NEWSLETTER_CAMPAIGN_DRAFT_TYPE } from '../../src/utils/newsletter-campaign-chat-draft';
 import { campaignCadencePromptBlock } from '../../src/config/email-campaign-cadences';
@@ -478,10 +479,10 @@ function spreadsheetFallback(platform: unknown, tabLabel: string, subject: strin
 // the Leads tab action bar (see assistants.js) and those old locations are dead ends.
 function leadGeneratorSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are tabs and buttons on YOUR page inside this platform. They are NOT third-party products, and you must never describe them as external tools, or lump them in with LinkedIn, Apollo, Hunter, or any other outside service:
-- "Searches" tab — the searches themselves. This is the tab the user lands on, and its toolbar holds both the "Find New Leads" and "Review Lead Ideas" buttons. It lists every saved search with its current state — "Not started", "Queued", "Searching now", "Ran 5 minutes ago", "Paused" — and a "Start search" button on any search that is not running. That button is the shortest route to starting a search you proposed in chat; there is no need to send the user back through the form. Each search also carries its own controls: "View results" opens what that search found; "View" shows how the search is set up without changing it; "Edit" changes who it looks for and what it skips; "Schedule" sets how often it repeats (only when started, every day, or on chosen days of the week, at a time they pick); "Archive" retires it, leaving the companies it already found in the Found leads tab. Results are NOT listed on the tab itself — they are behind each search's "View results" button, and that list is read-only.
+- "Searches" tab — the searches themselves. This is the tab the user lands on, and its toolbar holds both the "Find New Leads" and "Review Lead Ideas" buttons. It lists every saved search with its current state — "Not started", "Queued", "Searching now", "Ran 5 minutes ago", "Paused" — and a "Start search" button on any search that is not running. That button is the shortest route to starting a search you proposed in chat; there is no need to send the user back through the form. Each search also carries its own controls: "View results" opens what that search found; "View" shows how the search is set up without changing it; "Edit" changes who it looks for and what it skips; "Schedule" sets how often it repeats (only when started, every day, or on chosen days of the week, at a time they pick); "Archive" retires it, leaving the companies it already found in the All leads tab. Results are NOT listed on the tab itself — they are behind each search's "View results" button, and that list is read-only.
 - "Review Lead Ideas" (button in the Searches toolbar) — the lighter-weight route: you propose ideas for where this business's next customers might be found, and approving one sends you off to find, score and file matching companies. Offer this when the user wants suggestions rather than a standing search they have configured themselves.
 - "Find New Leads" (button in the Searches toolbar) — this is where a search gets created. It opens a short form: a plain-English description of who to find, an optional short name for the search, how often to run (once now / daily / weekly), max leads per run, max searches per run, a token budget per run, terms to exclude, and a "review found leads before any outreach" checkbox. Submitting it runs a real web search, scores what comes back, and files the results.
-- "Found leads" tab — every lead you have scored, with its outreach draft; also where CSV lead lists are imported and exported. It was called "Enrichment", and before that "Leads" — if the user uses either old name, they mean this tab. EVERY company a search finds is already a lead here the moment it is scored, whatever it scored — hot, warm or cold. Nothing has to be approved to make it a lead, and you must never tell a user their results are waiting to "become" leads. The button here is "Move to Outreach", not Approve: it says this company is worth pursuing and moves the lead into the Outreach tab's Review column, where the drafted email is read and approved. It sends nothing, and it is NOT the approval — approving is a separate act on the Outreach tab, and telling a user a lead is approved because they moved it here would have them believe an email is on its way. Rejecting a lead turns it down and teaches the targeting. If a search has "review found leads before any outreach" unticked, its leads arrive already approved and there is no manual step at all. This tab also holds a "Deleted" section: leads that sat in Outreach for 30 days without a decision, or that were rejected and never picked back up, are moved there automatically and kept — with the reason they were dropped — so a later search does not surface the same company as though it were new. Each one carries a "Send back for enrichment" button, which is the only way back into the pipeline and which really does re-read the company's website there and then.
+- "All leads" tab — every lead you have scored, with its outreach draft; also where CSV lead lists are imported and exported. It was called "Found leads", before that "Enrichment", and before that "Leads" — if the user uses any of those old names, they mean this tab. EVERY company a search finds is already a lead here the moment it is scored, whatever it scored — hot, warm or cold. Nothing has to be approved to make it a lead, and you must never tell a user their results are waiting to "become" leads. The button here is "Move to Outreach", not Approve: it says this company is worth pursuing and moves the lead into the Outreach tab's Review column, where the drafted email is read and approved. It sends nothing, and it is NOT the approval — approving is a separate act on the Outreach tab, and telling a user a lead is approved because they moved it here would have them believe an email is on its way. Rejecting a lead turns it down and teaches the targeting. If a search has "review found leads before any outreach" unticked, its leads arrive already approved and there is no manual step at all. This tab also holds a "Deleted" section: leads that sat in Outreach for 30 days without a decision, or that were rejected and never picked back up, are moved there automatically and kept — with the reason they were dropped — so a later search does not surface the same company as though it were new. Each one carries a "Send back for enrichment" button, which is the only way back into the pipeline and which really does re-read the company's website there and then.
 - "Outreach" tab — the emails themselves, in the order they happen: leads waiting to be signed off (each showing the drafted email, with an "Approve & send email" button), then "Approved", then "Awaiting reply" — which means the email has ALREADY GONE and what is scheduled is a reminder to chase, never a send waiting to happen — and "Archived" for the ones turned down. Never call this a queue of pending sends. Nothing chases automatically beyond the follow-up sequence, and the user is the one who presses send. To approve several at once, the user ticks them (or "Select all") in the Review column and presses "Approve & send" — leads whose address is a named person's own inbox, or that are flagged do-not-contact, are skipped and stay there to be approved one by one.
 - "Conversations" tab — what happened after a lead was approved: the outreach thread and any reply. It is also where the user records how a deal ended — won, lost or disqualified — on the conversation that produced it.
 - "Results" tab — straight after Conversations: the goals you are working towards and the figures for how the pipeline is doing.
@@ -500,10 +501,10 @@ function leadActionsPrompt(): string {
 - "send" — approve a lead's outreach email and send it. Only for a lead under "IN OUTREACH, NOT YET EMAILED" that has an email written. The card shows the user the whole email exactly as it will go: who it is to, the subject, every word of the message, the signature and legal footer added at the bottom, and the follow-up emails that would follow if they do not reply. Nothing is sent until they press the button on the card. Do NOT restate, summarise or rewrite the email in your reply — the card shows it word for word. If they want different wording, offer the "improve" card, or tell them to use "Edit draft" on that lead in the Outreach tab, and then ask you again.
 - "send_all" — approve and send several outreach emails at once, when the user asks to approve or send all of them (or a list of them). Leave out "recordIds" for every email waiting in the Outreach tab's Review column, or give the "#" numbers they named. The card shows every email word for word, up to ${LEAD_BULK_MAX} at a time, and lists any lead it will not send and why — a named person's own inbox and a do-not-contact flag each need their own decision, so those are never sent this way. Nothing is sent until they press the card's one button. Do NOT list or summarise the emails in your reply — the card shows them.
 - "improve" — ask for a lead's drafted email (not yet sent) to be rewritten, when the user wants it better, shorter, warmer, to mention something, and so on. Put what they asked for in "instruction", in their words, or null to improve it generally. Clicking rewrites and saves the email — it sends nothing; the new version is on the Outreach tab, and they can ask you to send it afterwards. Do not write the new email yourself in your reply.
-- "move_to_outreach" — move a lead from the Found leads tab into the Outreach tab's Review column, where its email waits to be read. It sends nothing and it is not an approval.
+- "move_to_outreach" — move a lead from the All leads tab into the Outreach tab's Review column, where its email waits to be read. It sends nothing and it is not an approval.
 - "reject" — turn a lead down, before its email has gone.
 - "set_outcome" — record how a deal ended: "won" (with valueGbp only if the user gave a value), or "lost" / "disqualified", which need a lossReason. If they say it was lost but not why, ask them why before emitting the card.
-You never do any of these yourself: the user confirms on the card, and only that click changes anything. So never say an email HAS been sent, or a lead HAS been moved, turned down or marked — say the card is there to confirm. One card per reply. If you cannot tell which lead they mean, ask, quoting the candidates by name. You cannot overrule a do-not-contact flag, type an email's words for them, add or change an email address, or connect an inbox from this chat: for those, name the tab — Outreach for the email and the do-not-contact override, Found leads for the lead's details.`;
+You never do any of these yourself: the user confirms on the card, and only that click changes anything. So never say an email HAS been sent, or a lead HAS been moved, turned down or marked — say the card is there to confirm. One card per reply. If you cannot tell which lead they mean, ask, quoting the candidates by name. You cannot overrule a do-not-contact flag, type an email's words for them, add or change an email address, or connect an inbox from this chat: for those, name the tab — Outreach for the email and the do-not-contact override, All leads for the lead's details.`;
 }
 
 // ── Lead Generator: what is actually IN the Leads tab, right now ──────────────
@@ -635,7 +636,7 @@ async function buildLeadsSnapshot(
             : '\nIN OUTREACH, NOT YET EMAILED: none.';
 
         const truncated = c.total > names.length
-            ? `\nThese are the ${names.length} most recent of ${c.total}. The counts above cover all ${c.total}; this list does not. If the user wants the full list, or wants to filter, sort or group it, send them to the Found leads tab — it does all three.`
+            ? `\nThese are the ${names.length} most recent of ${c.total}. The counts above cover all ${c.total}; this list does not. If the user wants the full list, or wants to filter, sort or group it, send them to the All leads tab — it does all three.`
             : '';
 
         return `YOUR LEADS RIGHT NOW — this workspace's own lead records, counted at the moment this message was sent. These numbers are FACT: when the user asks how many leads they have, how many are hot, or what is waiting on them, answer from here and never say you cannot see their leads, and never estimate.
@@ -646,7 +647,7 @@ Closed: ${c.won} won, ${c.lost} lost.
 ${list}${truncated}
 ${outreachList}
 
-⚠️ These records belong to this business and this assistant alone. They are the ONLY leads you know anything about — do not describe, name or count any other organisation's records, and if a question needs a lead that is not listed above, say so and point at the Found leads tab rather than inventing one.`;
+⚠️ These records belong to this business and this assistant alone. They are the ONLY leads you know anything about — do not describe, name or count any other organisation's records, and if a question needs a lead that is not listed above, say so and point at the All leads tab rather than inventing one.`;
     } catch (err) {
         // A snapshot is context, not the conversation. If the query fails the turn still goes
         // ahead — the prompt simply has no counts, and its own instructions stop the model from
@@ -1873,7 +1874,7 @@ ${rc.leadsSnapshot
     // Absent only when the count query failed, or on a shadow handoff call. Saying "I don't have
     // that to hand" is the honest reply; the failure mode being prevented is the model answering
     // the question anyway from whatever else is in its context.
-    ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the Found leads tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
+    ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the All leads tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
 
 ${leadActionsPrompt()}
 ${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}
@@ -1894,7 +1895,7 @@ HANDOFF PROTOCOL — when you lack the firmographic data to score a named lead c
 
 A later user turn may be marked "[Approved handoff result]" and contain enriched data from CRM Data Assistant — when it does, treat that data as trusted CRM enrichment, complete your original scoring task, and emit the lead_scoring_card. If the user declines the handoff, score with what you have and say which criteria you had to treat as neutral. Only propose a handoff when a specific lead has been named; if no lead is on the table yet, set uiElement to null and ask.
 
-A user turn may also open with "[Imported records]" followed by rows from the user's Found leads tab (CSV upload) — treat each row as an inbound lead to score. When several leads arrive at once, score them one per reply, starting with the most promising, and say how many remain.
+A user turn may also open with "[Imported records]" followed by rows from the user's All leads tab (CSV upload) — treat each row as an inbound lead to score. When several leads arrive at once, score them one per reply, starting with the most promising, and say how many remain.
 
 SPREADSHEET FALLBACK — do not assume this business uses a CRM like HubSpot, and NEVER tell the user an external system is required. Leads can reach you three ways, and you should name whichever fits what they asked: your own discovery searches (above — the answer whenever they want NEW leads); pasted straight into this chat; or imported as a CSV in the "Leads" tab of your dashboard (Excel and Google Sheets users export via File → Download → CSV), which is also where everything you produce exports back out. Never offer CSV import as the answer to "find me some leads" — that is asking the user to go do your job. Every structured result you emit here is saved to the "Leads" tab automatically, so nothing is lost when the conversation ends.
 
@@ -2440,7 +2441,11 @@ A sign-up form:
         // truncates mid-string the JSON never parses, parseStructuredReply degrades to
         // STRUCTURED_REPLY_FALLBACK, and the post the model had just written is discarded in
         // front of the user. max_tokens is a ceiling, not a spend.
-        maxTokens: 4096,
+        // ⚠️ 4096 → 12000 (2026-10-27). With a thinking model on this role (Opus 5.5 thinks always —
+        // Admin ▸ Assistants ▸ Model & rules) the thinking shares this ceiling with the answer, and a
+        // ~950-word article plus its thinking ran out mid-JSON: the owner got "I said that was done,
+        // but no draft came through" on the fifth of five articles.
+        maxTokens: 12000,
         contentSnapshot: 'blog',
         buildRolePrompt: (rc) => [
             sharedContextBlock(rc),
@@ -2455,7 +2460,7 @@ So: NEVER say the post has been saved, filed, added, created, scheduled, publish
 
 Once saved, a draft appears in this assistant's "Blogs" tab and opens in Blog Studio, where they edit it, add pictures, set its SEO, schedule it or publish it. A draft that is only on screen here cannot be approved or scheduled yet — it has to be saved first. Once it is saved and in your list below, you can offer to approve, schedule or reject it (see EXISTING ARTICLES). You can never publish one immediately from this chat: point at Blog Studio for that.
 
-ONE POST PER REPLY. The draft object holds exactly one article, so one reply can only ever offer one. If they ask for several, write the FIRST one properly and offer the next.
+ONE ARTICLE ON SCREEN PER REPLY — AND SEVERAL AT ONCE BY A DIFFERENT ROUTE. The draft object holds exactly one article. When the user asks for more than one in one go ("draft all 5", "write those three", "do them all"), do NOT write any of them in your reply and do NOT say you can only do one. Emit a blog_batch_proposal instead (shape below) listing every article they asked for — its title and a one-sentence brief of the angle, taken from what was discussed. The card has one button, "Write all N". Pressing it sets them all writing in the background; each lands in the Review column of the "Blogs" tab within a few minutes, and nothing is published. Until they press it nothing is being written, so never say the articles are written, drafted, saved or underway — say the card is there to start them. Never leave out an article they asked for.
 
 WHAT YOU CANNOT SEE — you can see your own articles (listed below), but not how any of them is performing. If they ask about performance, say plainly that you cannot see it from here (it is on this assistant's page) and offer to write something new. Never guess at a figure.
 
@@ -2474,6 +2479,12 @@ NEVER claim you have written a post unless THIS reply carries the draft object. 
     "bodyMarkdown": "<the complete article in Markdown, starting with the H1>",
     "tags": ["<up to 5 short topic tags>"]
   }
+}
+
+OR, when they ask for several articles at once (see ONE ARTICLE ON SCREEN PER REPLY), uiElement is instead:
+{
+  "type": "blog_batch_proposal",
+  "topics": [{ "title": "<article title>", "brief": "<one sentence: the angle and what it covers>" }, ...]
 }
 
 OR, to act on an article that already exists (see EXISTING ARTICLES), uiElement is instead:
@@ -3588,7 +3599,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             leadAction = await resolveLeadActionProposal(db, orgId, session.aiAssistantId, leadActionReq);
             uiElement = leadAction;
             if (!leadAction) {
-                content = 'I couldn’t find that lead among this assistant’s leads, so I haven’t set anything up. Which one do you mean? You can also find it on the "Found leads" tab.';
+                content = 'I couldn’t find that lead among this assistant’s leads, so I haven’t set anything up. Which one do you mean? You can also find it on the "All leads" tab.';
             }
         }
         const postActionReq = route === ROUTES.social_media_manager && !draftTarget ? postActionFromUiElement(uiElement) : null;
@@ -3648,7 +3659,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         const blogDraft = route === ROUTES.blog_writer ? blogPostDraftFromUiElement(uiElement) : null;
         if (route === ROUTES.blog_writer) {
             // An action card on an existing article was already checked and rebuilt above — keep it.
-            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft } : blogAction ?? profileCard;
+            // "Draft all 5" — a card that queues them all in the background (src/utils/blog-chat-batch.ts).
+            const blogBatch = blogDraft ? null : blogBatchFromUiElement(uiElement);
+            uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft }
+                : blogBatch ? { ...blogBatch, assistantId: session.aiAssistantId }
+                : blogAction ?? profileCard;
         }
 
         // Same contract for the newsletter route, and the same reason: uiElementJson is persisted

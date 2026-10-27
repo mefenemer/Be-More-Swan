@@ -122,7 +122,7 @@ export default withLambda(async (event) => {
             //
             // ⚠️ LIVE records only, matching every other lead surface (assistant-records.ts
             // defaults to ?retention=live). A lead the retention sweep has moved to Deleted is not
-            // in the Found leads tab's count, and a card that included it would disagree with the
+            // in the All leads tab's count, and a card that included it would disagree with the
             // page it links to. Same predicate, built from the same constant, never retyped.
             //
             // Grouped in ONE query for every assistant in the org, like postRows above — never one

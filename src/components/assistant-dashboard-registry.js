@@ -878,7 +878,7 @@
         // in chat-orchestrator.ts names the tab too — the assistant tells users which tab to go
         // to, and a stale name there sends them to a tab that does not exist. Same coupling the
         // reviewQueue label above carries.
-        label: 'Found leads',
+        label: 'All leads',
         recordType: 'lead',
         // ⚠️ The last two sentences state the RETENTION RULES, and they belong here rather than
         // only on the Deleted section below. The table on this tab carries a "Deletes in" column
@@ -950,7 +950,7 @@
       ideasReview: {
         label: 'Review Lead Ideas',
         title: 'Lead Ideas',
-        description: 'Ideas for where to find your next customers. Approve one and the {role:lead_qualifier} finds matching companies, scores them into your Found leads tab, and suggests the next best action for each.',
+        description: 'Ideas for where to find your next customers. Approve one and the {role:lead_qualifier} finds matching companies, scores them into your All leads tab, and suggests the next best action for each.',
       },
       // "Find New Leads" (assistant-discovery-campaigns.js) — the outbound discovery engine:
       // author an Idea/Blueprint + cadence + guardrails; a background run searches the web,
