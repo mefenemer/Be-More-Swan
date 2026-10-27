@@ -90,6 +90,8 @@
         .hw-copy h3 { font-size:1.6rem; font-weight:800; line-height:1.2; color:#111827; margin:0 0 .8rem; }
         .hw-shot { margin:0; border-radius:1rem; overflow:hidden; border:1px solid #e9e4d8; background:#fff; box-shadow:0 24px 48px -24px rgba(17,24,39,.35); }
         .hw-shot img { display:block; width:100%; height:auto; }
+        .hw-shot video { display:block; width:100%; height:auto; }
+        .hw-film { max-width:52rem; margin:2.5rem auto 0; }
         .hw-shot figcaption { padding:.7rem 1rem; font-size:.85rem; color:#6b7280; border-top:1px solid #f3efe6; background:#fcfbf8; }
 
         /* You stay in charge */
@@ -237,6 +239,13 @@
                 <h2 class="hw-h2">Better together</h2>
                 <p class="hw-lead">One assistant saves you hours. A team changes how your business runs. Your assistants share what they know &mdash; your products, your brand, and what the rest of the team has done this week &mdash; so they build on each other&rsquo;s work instead of repeating it.</p>
             </div>
+            <!-- Team hand-offs film (owner, 2026-10-27): muted, no audio track, loops. Poster is its first
+                 frame, so reduced-motion visitors (paused by the script at the foot of the page) see a still. -->
+            <figure class="hw-shot hw-film">
+                <video id="hw-team-film" src="/images/how-it-works-team-handoffs.mp4" poster="/images/how-it-works-team-handoffs.jpg"
+                       width="1280" height="720" autoplay muted loop playsinline preload="metadata"
+                       aria-label="Three swan assistants passing emails, messages and files to each other around a loop"></video>
+            </figure>
             <div class="hw-rows">
                 <div class="hw-row">
                     <div class="hw-copy">
@@ -317,6 +326,12 @@
         if (window.i18n) window.i18n.apply();
         setupMobileMenu();
     });
+
+    // The team film autoplays; visitors who ask for less motion get the poster frame instead.
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        const film = document.getElementById('hw-team-film');
+        if (film) { film.removeAttribute('autoplay'); film.pause(); }
+    }
 </script>
 </body>
 </html>
