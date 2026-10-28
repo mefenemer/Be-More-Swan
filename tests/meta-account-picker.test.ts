@@ -20,7 +20,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { landmark } from './landmark';
 import {
-    accountsFor, renderAccountPicker, pendingRefKey,
+    accountsFor, connectedAccountNotShared, renderAccountPicker, pendingRefKey,
     signPickerHandle, parsePickerHandle, type IgPage,
 } from '../src/utils/meta-accounts';
 
@@ -242,6 +242,36 @@ test('the picker errors are all handled in the workspace toast', () => {
             `${code} has no message in workspace.html — the user gets the generic "connection failed"`,
         );
     }
+});
+
+// 2026-10-28, Love Cat Studio (org 38): Meta's grant lost the workspace's own Page + Instagram, so a
+// reconnect returned ONLY @bemoreswan (live in org 37). The fast path connected it, the collision
+// block fired, and the owner read "already connected to another workspace" about the wrong account.
+const BMS_ONLY = accountsFor('instagram', [TWO_ACCOUNTS[1]]);
+const LOVE_CAT = '17841467511229378', BMS = '17841414318461950';
+
+test('own account missing and everything returned held elsewhere → not shared', () => {
+    assert.strictEqual(connectedAccountNotShared({ accounts: BMS_ONLY, connectedIds: [LOVE_CAT], heldElsewhereIds: [BMS] }), true);
+});
+
+test('own account returned → normal flow, even if another workspace holds the rest', () => {
+    const both = accountsFor('instagram', TWO_ACCOUNTS);
+    assert.strictEqual(connectedAccountNotShared({ accounts: both, connectedIds: [LOVE_CAT], heldElsewhereIds: [BMS] }), false);
+});
+
+test('a first connect (nothing connected yet) still reaches the collision / move flow', () => {
+    assert.strictEqual(connectedAccountNotShared({ accounts: BMS_ONLY, connectedIds: [], heldElsewhereIds: [BMS] }), false);
+});
+
+test('a free account came back → normal flow (collision not armed, or genuinely new)', () => {
+    assert.strictEqual(connectedAccountNotShared({ accounts: BMS_ONLY, connectedIds: [LOVE_CAT], heldElsewhereIds: [] }), false);
+});
+
+test('the callback checks before the single-account fast path, and the toast has the message', () => {
+    const check = landmark(metaOauth, 'connectedAccountNotShared({ accounts, connectedIds, heldElsewhereIds })');
+    const fast = landmark(metaOauth, 'if (accounts.length === 1) {');
+    assert.ok(check < fast, 'the not-shared check must run before the fast path auto-connects the wrong account');
+    assert.ok(/\baccount_not_shared:/.test(read('../workspace.html')), 'account_not_shared needs a workspace message');
 });
 
 console.log(`\n${passed} passed\n`);

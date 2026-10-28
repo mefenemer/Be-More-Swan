@@ -65,6 +65,29 @@ export function accountsFor(platform: 'instagram' | 'facebook', pageList: IgPage
     return accounts;
 }
 
+/**
+ * True when Meta did not hand back the account this workspace already uses, and everything it DID
+ * hand back is live in another workspace — i.e. the reconnect cannot possibly land on the right
+ * account, and connecting would only trip the tenant-collision block with a misleading "already
+ * connected to another workspace".
+ *
+ * Real case, prod 2026-10-28: one Facebook login owns Love Cat Studio (org 38) and Be More Swan
+ * (org 37). Meta's grant is per login, not per workspace, and Love Cat's Page + Instagram had
+ * dropped out of it — so its posts failed with (#100) subcode 33, and reconnecting from Love Cat
+ * returned ONLY @bemoreswan. The single-account fast path tried to connect that, the collision
+ * block fired, and the owner was told the account "has already been used". The fix is on Meta's
+ * consent screen (tick every business, Page and Instagram account), which is what we now say.
+ */
+export function connectedAccountNotShared(opts: {
+    accounts: MetaAccount[];
+    connectedIds: string[];
+    heldElsewhereIds: string[];
+}): boolean {
+    const returned = new Set(opts.accounts.map(a => a.externalUserId));
+    const missing = opts.connectedIds.some(id => !returned.has(id));
+    return missing && opts.accounts.length > 0 && opts.accounts.every(a => opts.heldElsewhereIds.includes(a.externalUserId));
+}
+
 // ── The hand-off between the two requests ─────────────────────────────────────────────────────
 // Choosing takes a second request, and between the two the long-lived token has to live somewhere.
 // It goes in the vault — encrypted, like every other token — under a single-use key, and the

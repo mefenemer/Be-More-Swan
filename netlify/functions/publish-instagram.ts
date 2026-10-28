@@ -188,6 +188,11 @@ export async function waitForContainerReady(args: {
 function userMessage(reason: FailureReason): string {
     const c = reason.errorCode ?? 0;
     if (c === 190) return 'Instagram connection needs to be reconnected.';
+    // (#100) subcode 33: the token is valid but can no longer see this Instagram account — it was
+    // un-ticked on Meta's consent screen, often while connecting a DIFFERENT workspace on the same
+    // Facebook login (Meta's grant is per login). Not a retry, and not "already connected".
+    if (c === 100 && reason.errorSubcode === 33)
+        return "Meta no longer shares this Instagram account with Be More Swan. Reconnect Instagram, choose “Edit access” on Meta's screen and tick every business, Page and Instagram account you use with us — including any other workspace's.";
     if (reason.errorMessage.toLowerCase().includes('content policy') || reason.errorSubcode === 2207026)
         return "This post was rejected by Instagram's content policy. Please edit and resubmit.";
     if (reason.errorMessage.toLowerCase().includes('format') || reason.errorSubcode === 352)
