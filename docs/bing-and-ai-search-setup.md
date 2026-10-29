@@ -7,7 +7,7 @@ What's already in the code (since 2026-10-29):
 - **Readable pages.** Prices, assistant pages, the assistant library, help articles and the FAQ are all written into the HTML at build time (`scripts/build-seo-html.mjs`), so crawlers that don't run JavaScript can read them.
 - **`/llms.txt`.** A plain summary for AI tools. The introduction is hand-written in `llms.txt`; the assistants, prices and help articles are filled in at each build.
 - **Sitemap.** `/sitemap.xml` now includes one page per live assistant (`/ai-…`).
-- **IndexNow.** The key file is `/<key>.txt` at the repo root. After every production build, `scripts/indexnow-ping.mjs` sends the sitemap's URLs to IndexNow, which shares them with Bing (and Yandex, Seznam, Naver). Staging and preview builds skip it.
+- **IndexNow.** The key file is `/<key>.txt` at the repo root. After every production deploy goes live, the build plugin `netlify/plugins/indexnow` runs `scripts/indexnow-ping.mjs`. It first reads the key back from the live site, then sends the sitemap's URLs to IndexNow, which shares them with Bing (and Yandex, Seznam, Naver). Staging and preview deploys skip it. The result is a `[indexnow]` line near the end of the Netlify deploy log.
 
 ## One-time steps (about 20 minutes, done by the owner)
 
@@ -23,7 +23,9 @@ What's already in the code (since 2026-10-29):
    - `https://bemoreswan.com/pricing`: the plan prices should appear
    - `https://bemoreswan.com/ai-social-media-assistant`: the full assistant copy
    - `https://bemoreswan.com/llms.txt`
-5. Under **IndexNow**, after the next production deploy, submitted URLs should appear within a day. If the first submission shows a key error, that's expected: the build pings before its own deploy goes live. The next deploy succeeds.
+5. Under **IndexNow**, after the next production deploy, submitted URLs should appear within a day.
+
+   ⚠️ **Never ping before the key file is live.** Bing fetches `/<key>.txt` to check the key. If that check fails, Bing keeps refusing the key with `403 UserForbiddedToAccessSite`, even after the file appears. That happened on 2026-10-29: the ping used to run in the build command, before the deploy was published, and every ping after that was refused. The key was rotated and the ping moved to `onSuccess`. If the deploy log ever shows `[indexnow] ⚠️ REFUSED 403`, rotate the key: replace the `<key>.txt` file (new name and content, 32 hex characters, e.g. `openssl rand -hex 16`) and deploy.
 
 ### 2. Automatic rebuild when a plan changes (production site only)
 

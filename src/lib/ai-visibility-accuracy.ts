@@ -3,15 +3,17 @@
 //
 // The facts come from the same places a prospect's AI reads: the live llms.txt (assistants, plans and
 // prices, baked from production at each publish) and the public /connections page (which platforms
-// are live and which are coming), plus plan prices and the trial length straight from the database.
+// are live and which are coming), plus plan prices, the trial length and our own review count and
+// average straight from the database (an answer quoting a star rating we don't have is wrong).
 // Nothing here is typed by hand, so the judge never checks against a stale list.
 //
 // Used by the background fetcher (after each fetched answer) and by the admin function (a pasted
 // answer, and "Check accuracy" for answers fetched before this existed).
 
-import { and, asc, eq, ne } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { masterPlans } from '../../db/schema';
+import { masterPlans, platformReviews } from '../../db/schema';
+import { reviewStats } from '../utils/platform-reviews';
 import { TRIAL_DAYS } from '../utils/trial';
 import { gatewayGenerate } from './ai-gateway';
 import { accuracySystemPrompt, parseAccuracyVerdict, htmlToText } from '../utils/ai-visibility';
@@ -34,10 +36,13 @@ async function fetchText(path: string, max: number): Promise<string> {
 /** The fact sheet the judge checks against. Cached for ten minutes per warm function. */
 export async function loadFacts(): Promise<string> {
     if (cached && Date.now() - cached.at < FACTS_TTL_MS) return cached.text;
-    const [plans, llms, connections] = await Promise.all([
+    const [plans, reviews, llms, connections] = await Promise.all([
         getDb().select({ name: masterPlans.name, monthlyPriceGbp: masterPlans.monthlyPriceGbp, isContactSales: masterPlans.isContactSales })
             .from(masterPlans).where(and(eq(masterPlans.isActive, true), ne(masterPlans.tierKey, 'trial')))
             .orderBy(asc(masterPlans.monthlyPriceGbp)),
+        getDb().select({ rating: platformReviews.rating, status: platformReviews.status, sharedTo: platformReviews.sharedTo })
+            .from(platformReviews).where(inArray(platformReviews.status, ['published', 'hidden']))
+            .then((rows) => reviewStats(rows), () => null),
         fetchText('/llms.txt', 12_000),
         fetchText('/connections', 8_000),
     ]);
@@ -45,6 +50,9 @@ export async function loadFacts(): Promise<string> {
         'PLANS (from the database):',
         ...plans.map((p) => `- ${p.name}: ${p.isContactSales ? 'priced on request' : `£${Number(p.monthlyPriceGbp)} a month`}`),
         `FREE TRIAL: ${TRIAL_DAYS} days.`,
+        reviews && reviews.average != null
+            ? `REVIEWS (from the database, collected in the app): ${reviews.total} reviews, average ${reviews.average} out of 5. Ratings on Trustpilot or G2 are separate and not known here — do not mark a quoted Trustpilot or G2 rating wrong for that reason alone.`
+            : 'REVIEWS: none published yet. Any star rating or review quote attributed to Be More Swan is not something we can confirm.',
         'Be More Swan is a UK-based web app for small businesses at bemoreswan.com. Nothing goes out until the owner approves it, unless they let an assistant publish on its own.',
         '',
         llms ? `=== llms.txt (live) ===\n${llms}` : '(llms.txt could not be read)',

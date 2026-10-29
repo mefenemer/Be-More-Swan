@@ -225,12 +225,34 @@ check('exactly one key file sits at the root, and its content is its own name', 
     assert.strictEqual(read(keys[0]).trim(), keys[0].slice(0, -4));
 });
 
-check('the ping runs last in the build command and is production-gated', () => {
-    assert.match(read('netlify.toml'), /command = "[^"]*build:seo-html && node scripts\/indexnow-ping\.mjs"/);
-    const ping = read('scripts/indexnow-ping.mjs');
-    assert.match(ping, /process\.env\.CONTEXT !== 'production'/);
-    assert.match(ping, /process\.exit\(0\)/, 'a ping must never fail the build');
+check('the ping runs AFTER the deploy is live (onSuccess), never in the build command', () => {
+    // A build-command ping beat the first key file live and got the key refused (403) for good.
+    const toml = read('netlify.toml');
+    assert.doesNotMatch(toml, /command = "[^"]*indexnow/);
+    assert.match(toml, /\[\[plugins\]\]\s*package = "\.\/netlify\/plugins\/indexnow"/);
+    const plugin = read('netlify/plugins/indexnow/index.js');
+    assert.match(plugin, /async onSuccess\(\)/);
+    assert.doesNotMatch(plugin, /onPostBuild|onBuild|onPreBuild/);
+    assert.match(read('netlify/plugins/indexnow/manifest.yml'), /^name: /m);
 });
+
+// pingIndexNow with a fake network: what it fetched, and what it said.
+async function runPing(env: Record<string, string>, liveKey: (key: string) => string | null, indexNow = { status: 202, body: '' }) {
+    const { pingIndexNow } = await import('../scripts/indexnow-ping.mjs');
+    const calls: Array<{ url: string; body?: any }> = [];
+    const fetchImpl = async (url: string, init?: any) => {
+        calls.push({ url, body: init?.body ? JSON.parse(init.body) : undefined });
+        if (url.endsWith('.txt')) {
+            const key = url.split('/').pop()!.slice(0, -4);
+            const t = liveKey(key);
+            return new Response(t ?? 'nf', { status: t == null ? 404 : 200 });
+        }
+        return new Response(indexNow.body, { status: indexNow.status });
+    };
+    const said = await pingIndexNow({ env, extraUrls: ['https://bemoreswan.com/beta', 'https://evil.example/x'], fetchImpl: fetchImpl as any });
+    return { calls, said: String(said) };
+}
+const PROD = { CONTEXT: 'production', URL: 'https://bemoreswan.com' };
 
 console.log('Rebuild on plan change');
 
@@ -245,4 +267,43 @@ check('plan create / edit / delete in Admin rebuild too, and a price edit rebuil
     assert.match(src, /if \(!priceChanged && publishedFields\.some/);
 });
 
-console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);
+// The ping's behaviour needs its fake network, so these checks run last (no top-level await here).
+async function indexNowBehaviour() {
+    console.log('IndexNow (behaviour)');
+    {
+        const r = await runPing({ CONTEXT: 'branch-deploy', URL: 'https://bemoreswan.com' }, (k) => k);
+        check('staging / branch deploys never ping', () => { assert.strictEqual(r.calls.length, 0); assert.match(r.said, /skipped/); });
+    }
+
+    {
+        const r = await runPing(PROD, () => null);
+        check('no ping until the live site serves the key (a ping Bing cannot verify poisons the key)', () => {
+            assert.strictEqual(r.calls.length, 1, 'only the key file may be fetched');
+            assert.ok(r.calls[0].url.endsWith('.txt'));
+            assert.match(r.said, /does not serve the key yet/);
+        });
+    }
+
+    {
+        const r = await runPing(PROD, (k) => `${k}\n`);
+        check('with the key live: one submission of the sitemap plus extra URLs, our host only', () => {
+            const post = r.calls.find((c) => c.url === 'https://api.indexnow.org/indexnow')!;
+            assert.ok(post, 'no submission');
+            assert.strictEqual(post.body.host, 'bemoreswan.com');
+            assert.ok(post.body.urlList.includes('https://bemoreswan.com/beta'));
+            assert.ok(!post.body.urlList.some((u: string) => !u.startsWith('https://bemoreswan.com/')), 'a foreign URL was submitted');
+            assert.match(r.said, /^202 — submitted/);
+        });
+    }
+
+    {
+        const r = await runPing(PROD, (k) => k, { status: 403, body: '{"errorCode":"UserForbiddedToAccessSite"}' });
+        check('a refusal is reported loudly with Bing\'s reason, not as a quiet status line', () => {
+            assert.match(r.said, /REFUSED 403/);
+            assert.match(r.said, /UserForbiddedToAccessSite/);
+        });
+    }
+}
+
+indexNowBehaviour().catch((err) => { console.error(err); process.exitCode = 1; })
+    .finally(() => console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`));

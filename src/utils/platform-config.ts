@@ -84,6 +84,9 @@ export const CONFIG_KEYS = {
     // Stamped by every run of the two checks above, read by platform-watchdog. Without it a check
     // that stopped running is indistinguishable from one that found nothing. See monitor-heartbeat.ts.
     MONITOR_HEARTBEAT:         'monitoring.heartbeat',
+    // { trustpilot?: string, g2?: string } — Be More Swan's OWN "write a review" links, offered to
+    // everyone who reviews us in the app (src/utils/platform-reviews.ts). Set in Admin → Reviews.
+    REVIEW_DESTINATIONS:       'reviews.destinations',
 } as const;
 
 export type ConfigKey = typeof CONFIG_KEYS[keyof typeof CONFIG_KEYS];

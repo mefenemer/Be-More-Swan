@@ -291,6 +291,23 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('Choose a plan', 'link.action_url') + signoff,
     },
 
+    // ── Asking for a review of Be More Swan (src/utils/platform-reviews.ts; sent ONLY by an admin
+    //    from Customers → Beta testers). Free access is mentioned up front: the review form shows it
+    //    beside their review too (DMCC Act 2024). No reward is offered for reviewing. ─────────────
+    {
+        triggerKey: 'platform_review_request',
+        name: 'Review Request — Be More Swan',
+        category: 'Engagement',
+        subject: 'Would you tell others how Be More Swan has worked for you?',
+        preheader: 'Two minutes, in your own words — good or bad.',
+        bodyHtml: greet +
+            p('Thank you for testing Be More Swan with <strong>{{workspace.name | "your business"}}</strong>.') +
+            p('Small businesses find tools like ours by reading what other owners say. Would you write a short, honest review? Good or bad, in your own words — it helps the next owner decide, and it tells us what to fix.') +
+            button('Write a review', 'link.action_url') +
+            p('Because you had free access during the beta, your review will say so. That is the law, and it keeps reviews trustworthy.') +
+            p('You can also find it any time under your initials, top right, then <strong>Leave a review</strong>. If you would rather not be asked, there is a button for that on the form.') + signoff,
+    },
+
     // ── Free 14-day trial (src/utils/trial.ts; sent by trial-sweep.ts) ─────────────────────────
     {
         triggerKey: 'trial_ending_soon',

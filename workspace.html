@@ -2416,6 +2416,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         <div id="header-role-badges" class="flex gap-1 mt-2 flex-wrap"></div>
         <div class="border-t border-gray-100 mt-3 pt-3 flex flex-col gap-1">
           <a href="#" id="header-user-settings" role="menuitem" class="px-2 py-1.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">Account settings</a>
+          <a href="#" id="header-leave-review" role="menuitem" class="px-2 py-1.5 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">Leave a review</a>
           <a href="/logout.html" role="menuitem" class="px-2 py-1.5 rounded-lg text-sm font-medium text-red-600 hover:bg-red-50">Log out</a>
         </div>
       </div>
@@ -2709,6 +2710,11 @@ function formatCurrency(amount, currency) {
         e.preventDefault();
         setOpen(false);
         if (typeof window.loadView === 'function') window.loadView('settings');
+      });
+      document.getElementById('header-leave-review')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        setOpen(false);
+        window.PlatformReview?.open();
       });
     })();
 // --- DYNAMIC HEADER HYDRATION ---
@@ -5989,6 +5995,10 @@ function formatCurrency(amount, currency) {
      keep the revenue aggregates meaningful, and a second copy of them would drift. -->
 <script src="/src/components/lead-bulk-send.js"></script>
 <script src="/src/components/assistant-bubbles.js"></script>
+<!-- "Leave a review" of Be More Swan itself (platform-review.ts): the account menu item, one bubble
+     when it is time, and workspace.html?review=1 from an admin's emailed request. -->
+<script src="/src/components/platform-review.js"></script>
+<script>document.addEventListener('DOMContentLoaded', () => window.PlatformReview?.init());</script>
 <script src="/src/components/image-lightbox.js"></script>
 <script src="/src/components/lead-outcome-modal.js"></script>
 <!-- "Notes" (→ lead-generation.ts add_note). Same reason as the outcome modal above: loaded ahead

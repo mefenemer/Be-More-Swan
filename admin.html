@@ -1060,6 +1060,53 @@
         </div>
       </section>
 
+      <!-- ── Reviews — what people using Be More Swan say about it (admin-platform-reviews.ts) ─────
+           Their words are never edited here. Publishing needs the author's consent; hidden reviews stay
+           in the average. Trustpilot / G2 links are offered to every reviewer alike, whatever their stars. -->
+      <section id="view-platform-reviews" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="mb-5 space-y-1">
+          <p class="text-sm text-gray-500 max-w-3xl">Reviews of Be More Swan from the people using it. The app asks once an account is 14 days old with 5 posts published, or 30 days old — at most three times, a week apart. Ask a beta tester directly from <strong>Beta testers</strong>.</p>
+          <p class="text-xs text-gray-500 max-w-3xl">Beta testers' reviews carry “Received free access during beta” wherever they are shown. Only reviews whose author ticked “you can quote this” can be published.</p>
+        </div>
+        <div id="pr-not-setup" class="hidden bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-3 mb-5">
+          <strong>Not set up on this database yet.</strong> Apply <span class="font-mono">db/z-platform-reviews.sql</span> in the Neon SQL Editor, then reload this page.
+        </div>
+        <div id="pr-tiles" class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5"></div>
+        <div class="bg-white rounded-2xl border border-gray-200 p-4 mb-5">
+          <p class="text-sm font-bold text-gray-900">Where reviewers are sent afterwards</p>
+          <p class="text-xs text-gray-500 mt-0.5">Your own “write a review” links. Offered to everyone after they review, whatever their stars. Leave one empty to not offer it.</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+            <div>
+              <label for="pr-dest-trustpilot" class="text-xs font-bold text-gray-500 uppercase">Trustpilot</label>
+              <input id="pr-dest-trustpilot" type="url" placeholder="https://uk.trustpilot.com/evaluate/bemoreswan.com" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            </div>
+            <div>
+              <label for="pr-dest-g2" class="text-xs font-bold text-gray-500 uppercase">G2</label>
+              <input id="pr-dest-g2" type="url" placeholder="https://www.g2.com/products/be-more-swan/take_survey" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+            </div>
+          </div>
+          <div class="flex justify-end mt-3">
+            <button type="button" onclick="prSaveDestinations()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Save links</button>
+          </div>
+        </div>
+        <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-4 py-3 text-left">From</th>
+                <th class="px-4 py-3 text-left">Review</th>
+                <th class="px-4 py-3 text-left">Shown as</th>
+                <th class="px-4 py-3 text-left">Status</th>
+                <th class="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="pr-tbody">
+              <tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       <!-- ── Coupons — Admin → Revenue → Coupons (admin-coupons.ts) ───────────────────────
            Every coupon here is a real Stripe coupon + promotion code; checkout validates codes
            against Stripe (validate-promo.ts). The create/edit modal lives OUTSIDE this section —
@@ -3303,6 +3350,7 @@ const VIEW_LABELS = {
   'site-styles': 'Site Styles',
   'hosted-sites': 'Hosted Sites',
   'ai-visibility': 'AI Visibility',
+  'platform-reviews': 'Reviews',
 };
 
 // Category → child items mapping.
@@ -3339,6 +3387,8 @@ const ADMIN_CATS = {
     { view: 'inbox',          icon: '📥', label: 'Inbox',            perm: 'view_tickets',            group: 'Inbound' },
     { view: 'issue-reports',  icon: '🐞', label: 'Fix pipeline',     perm: 'view_issue_reports',      group: 'Inbound' },
     { view: 'feature-roadmap',icon: '💡', label: 'Feature Requests', perm: 'manage_feature_requests', group: 'Inbound' },
+    // Reviews OF Be More Swan (admin-platform-reviews.ts). platform_config: no role data has to change.
+    { view: 'platform-reviews', icon: '⭐', label: 'Reviews',        perm: 'platform_config',         group: 'Inbound' },
   ]},
   revenue: { label: 'Revenue', children: [
     { view: 'reconciliation', icon: '🔄', label: 'Stripe Reconciliation', perm: 'view_reconciliation' },
@@ -3714,6 +3764,7 @@ function adminNav(view) {
   if (view === 'plan-moves')      loadPlanMoves();
   if (view === 'partners')        loadPartners();
   if (view === 'beta-testers')    loadBetaTesters();
+  if (view === 'platform-reviews') loadPlatformReviews();
   if (view === 'reconciliation')  loadReconciliation();
   if (view === 'dunning')         loadDunningQueue();
   if (view === 'disputes')        loadDisputes();
@@ -9801,6 +9852,7 @@ async function loadBetaTesters() {
           ${locked ? '' : `<button type="button" onclick="betaSave(${w.organisationId})" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Save</button>`}
           ${e.endsOn && !locked ? `<button type="button" onclick="betaPreview(${w.organisationId})" class="btn-utility px-2.5 py-1 text-xs font-bold rounded-lg">Preview</button>` : ''}
           ${sendBtn}
+          ${w.ownerEmail ? `<button type="button" onclick="betaAskReview(${w.organisationId})" class="btn-utility px-2.5 py-1 text-xs font-bold rounded-lg" title="Email the owner asking for an honest review of Be More Swan">Ask for a review</button>` : ''}
         </td>
       </tr>`;
     }).join('') || '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">Nobody is on the beta plan.</td></tr>';
@@ -9849,6 +9901,83 @@ async function betaSend(orgId, action) {
     const d = await api(BETA_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ organisationId: orgId, action }) });
     window.showToast?.(d.couponProblem ? `Sent, without the coupon: ${d.couponProblem}` : 'Email sent.');
     loadBetaTesters();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function betaAskReview(orgId) {
+  const w = _beta.rows.find((r) => r.organisationId === orgId);
+  if (!w) return;
+  const ok = await window.confirmModal(
+    `Email <strong>${escAdm(w.ownerEmail || '')}</strong> (${escAdm(w.organisationName)}) asking for an honest review of Be More Swan?<br><br>` +
+    'The email says their review will mention their free beta access. The app then asks them once, next time they open it. No reward is offered.',
+    { title: 'Ask for a review', confirmLabel: 'Send email' });
+  if (!ok) return;
+  try {
+    await api(BETA_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ organisationId: orgId, action: 'review_request' }) });
+    window.showToast?.('Email sent.', { icon: '✅' });
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// ── Reviews of Be More Swan (admin-platform-reviews.ts) ───────────────────────
+const PR_API = '/.netlify/functions/admin-platform-reviews';
+async function loadPlatformReviews() {
+  const tbody = document.getElementById('pr-tbody');
+  tbody.innerHTML = '<tr><td colspan="5" class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</td></tr>';
+  try {
+    const d = await api(PR_API);
+    document.getElementById('pr-not-setup').classList.toggle('hidden', d.setUp !== false);
+    document.getElementById('pr-dest-trustpilot').value = d.destinations?.trustpilot || '';
+    document.getElementById('pr-dest-g2').value = d.destinations?.g2 || '';
+    const st = d.stats || { total: 0, pending: 0, published: 0, average: null, shared: {} };
+    const a = d.asks || { asked: 0, optedOut: 0, requested: 0 };
+    const tile = (label, value, sub) => `<div class="bg-white rounded-2xl border border-gray-200 p-4"><p class="text-xs font-bold text-gray-500 uppercase">${label}</p><p class="text-2xl font-bold text-gray-900 mt-1">${value}</p>${sub ? `<p class="text-xs text-gray-500 mt-0.5">${sub}</p>` : ''}</div>`;
+    document.getElementById('pr-tiles').innerHTML =
+      tile('Reviews', st.total, `${st.pending} waiting for you`) +
+      tile('Average', st.average == null ? '—' : `${st.average} ★`, 'published and hidden alike') +
+      tile('Posted publicly', `${st.shared.trustpilot || 0} / ${st.shared.g2 || 0}`, 'clicked through to Trustpilot / G2') +
+      tile('Asked', a.asked, `${a.requested} by email · ${a.optedOut} said don’t ask`);
+    const esc = (v) => escAdm(v == null ? '' : String(v));
+    const day = (v) => v ? new Date(v).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const badge = { pending: 'bg-amber-100 text-amber-800', published: 'bg-emerald-100 text-emerald-700', hidden: 'bg-gray-200 text-gray-700' };
+    tbody.innerHTML = (d.reviews || []).map((r) => {
+      const starsTxt = '★'.repeat(r.rating) + '☆'.repeat(5 - r.rating);
+      const shownAs = r.consentToPublish
+        ? `<p class="font-semibold text-gray-800">${esc(r.displayName)}</p>${r.displayDetail ? `<p class="text-xs text-gray-500">${esc(r.displayDetail)}</p>` : ''}${r.incentiveNote ? `<p class="text-[11px] text-gray-500 mt-1">${esc(r.incentiveNote)}</p>` : ''}`
+        : '<p class="text-xs text-gray-400">Not to be quoted</p>';
+      const btn = (status, label, cls) => `<button type="button" onclick="prDecide(${r.id}, '${status}')" class="${cls} px-2.5 py-1 text-xs font-bold rounded-lg">${label}</button>`;
+      const actions = [
+        r.status !== 'published' && r.consentToPublish ? btn('published', 'Publish', 'btn-primary') : '',
+        r.status !== 'hidden' ? btn('hidden', 'Hide', 'btn-secondary border') : '',
+        r.status === 'hidden' ? btn('pending', 'Unhide', 'btn-secondary border') : '',
+      ].join(' ');
+      return `<tr class="border-t border-gray-100 align-top">
+        <td class="px-4 py-3"><p class="font-semibold text-gray-900">${esc(r.authorName || r.authorEmail)}</p><p class="text-xs text-gray-500">${esc(r.workspaceName || '')}</p><p class="text-[11px] text-gray-400">${day(r.createdAt)}${r.source === 'email' ? ' · from email' : ''}</p></td>
+        <td class="px-4 py-3 max-w-xl"><p class="text-amber-500" aria-label="${r.rating} of 5">${starsTxt}</p><p class="text-gray-800 whitespace-pre-line mt-1">${esc(r.body)}</p>${r.sharedTo?.length ? `<p class="text-[11px] text-gray-500 mt-1">Went on to: ${esc(r.sharedTo.join(', '))}</p>` : ''}</td>
+        <td class="px-4 py-3">${shownAs}</td>
+        <td class="px-4 py-3"><span class="px-2 py-0.5 rounded-full text-xs font-bold ${badge[r.status] || ''}">${esc(r.status)}</span></td>
+        <td class="px-4 py-3 text-right whitespace-nowrap">${actions}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">No reviews yet.</td></tr>';
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" class="px-5 py-5 text-red-500 text-sm">${escAdm(err.message)}</td></tr>`;
+  }
+}
+
+async function prDecide(id, status) {
+  try {
+    await api(PR_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'decide', id, status }) });
+    loadPlatformReviews();
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function prSaveDestinations() {
+  try {
+    await api(PR_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+      action: 'save_destinations',
+      trustpilot: document.getElementById('pr-dest-trustpilot').value,
+      g2: document.getElementById('pr-dest-g2').value,
+    }) });
+    window.showToast?.('Saved.', { icon: '✅' });
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 

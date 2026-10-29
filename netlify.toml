@@ -564,9 +564,9 @@
   # fails to match, which fails the build rather than publishing a page that quietly lost its
   # structured data. Run `npm run build:seo-html` locally to inspect the output (it is idempotent;
   # `git checkout -- .` afterwards).
-  # The final step tells Bing (IndexNow) about the published URLs — production builds only, and it
-  # never fails the build. See scripts/indexnow-ping.mjs and docs/bing-and-ai-search-setup.md.
-  command = "npm run build:css:prod && npm run build:version && npm run build:seo-html && node scripts/indexnow-ping.mjs"
+  # IndexNow (Bing) is NOT pinged here: the build runs before the deploy is published, and a ping
+  # that beats the key file live gets the key refused. The [[plugins]] entry below pings in onSuccess.
+  command = "npm run build:css:prod && npm run build:version && npm run build:seo-html"
   functions = "netlify/functions"
 
 # ⚠️ PIN THE RUNTIME. Unset, the build and the Lambda runtime take whatever Netlify defaults to,
@@ -586,6 +586,11 @@
 # three exist so the versions cannot silently diverge again. See tests/esm-only-imports.test.ts.
 [build.environment]
   NODE_VERSION = "22"
+# Tells IndexNow (Bing) about the published URLs once a PRODUCTION deploy is live. Production-only,
+# never fails a deploy. See netlify/plugins/indexnow and scripts/indexnow-ping.mjs.
+[[plugins]]
+  package = "./netlify/plugins/indexnow"
+
 [dev]
   functions = "netlify/functions"
 [functions]
