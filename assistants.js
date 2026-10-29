@@ -1070,6 +1070,8 @@ window._activateMainTab = function(name) {
     // Signal Inbox renders lazily — init() already fetched (its counts feed the tab badge), so
     // this only paints. Cheap and idempotent.
     if (name === 'signals') window.AssistantSignalInbox?.activate();
+    // Discussions likewise — init() already fetched for the new-threads badge.
+    if (name === 'discussions') window.AssistantDiscussions?.activate();
     // Campaigns renders lazily for the same reason — init() already fetched, because the count
     // feeds both the tab badge and the control strip above the tab bar.
     if (name === 'campaigns') window.AssistantCampaigns?.activate();
@@ -7046,6 +7048,15 @@ function _applyDashboardRegistry(data) {
     if (signalInbox) {
         setText('signals-tab-label', signalInbox.label || 'Searches');
         window.AssistantSignalInbox?.init({ assistantId: data.id, cfg: signalInbox });
+    }
+
+    // Discussions tab — lead roles only (discussionsTab: lead_qualifier): forum threads worth replying
+    // to. init() loads eagerly because the count of new threads is the tab badge.
+    const discussionsTab = cfg.discussionsTab;
+    toggle('maintab-btn-discussions', !!discussionsTab);
+    if (discussionsTab) {
+        setText('discussions-tab-label', discussionsTab.label || 'Discussions');
+        window.AssistantDiscussions?.init({ assistantId: data.id });
     }
 
     // Staged Outreach — lead roles only (reviewQueue.staged: lead_qualifier). The Outreach tab is

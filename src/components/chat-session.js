@@ -1307,6 +1307,43 @@
       window.AssistantDataHub?.refresh?.();
     }
 
+    // Discussions cards → discussions.ts, the same actions as the Discussions tab's buttons. Dispatches
+    // `discussions:changed` so the tab behind the chat reloads. Nothing posts to any site.
+    async function onDiscussionAction(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const aid = d.assistantId || assistantId;
+      const call = (body) => fetch('/.netlify/functions/discussions', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ assistantId: aid, ...body }),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
+        return data;
+      });
+      try {
+        if (d.action === 'set_watch') {
+          const p = d.proposed || {};
+          await call({ action: 'save_watch', topics: p.topics, sites: p.sites, enabled: p.enabled });
+          respond({ ok: true, message: 'Saved. The next scan looks for these on the Discussions tab.' });
+        } else if (d.action === 'scan_now') {
+          await call({ action: 'scan_now' });
+          respond({ ok: true, message: 'Scanning now. New threads appear on the Discussions tab in a minute or two.' });
+        } else if (d.action === 'redraft') {
+          await call({ action: 'redraft', id: d.discussionId, instruction: d.instruction || undefined });
+          respond({ ok: true, message: 'Rewritten. Read the new reply on the Discussions tab — nothing has been posted.' });
+        } else if (d.action === 'mark_replied' || d.action === 'dismiss') {
+          await call({ action: 'set_status', id: d.discussionId, status: d.action === 'dismiss' ? 'dismissed' : 'replied' });
+          respond({ ok: true, message: d.action === 'dismiss' ? 'Dismissed.' : 'Marked as replied.' });
+        } else {
+          throw new Error('Unknown action.');
+        }
+        document.dispatchEvent(new CustomEvent('discussions:changed', { detail: { assistantId: aid } }));
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
+    }
+
     // Mystery Shopper cards → site-audits.ts, the same actions as the Website tab's buttons. Each
     // dispatches `siteaudit:changed` so the tab behind the chat reloads.
     function siteAuditPost(payload) {
@@ -2005,6 +2042,7 @@
     container.addEventListener('email:action', onEmailAction);
     container.addEventListener('audience:action', onAudienceAction);
     container.addEventListener('lead:action', onLeadAction);
+    container.addEventListener('discussion:action', onDiscussionAction);
     container.addEventListener('settings:change', onSettingsChange);
     container.addEventListener('rule:change', onRuleChange);
     container.addEventListener('goal:change', onGoalChange);
@@ -2098,6 +2136,7 @@
         container.removeEventListener('email:action', onEmailAction);
         container.removeEventListener('audience:action', onAudienceAction);
         container.removeEventListener('lead:action', onLeadAction);
+        container.removeEventListener('discussion:action', onDiscussionAction);
         container.removeEventListener('settings:change', onSettingsChange);
         container.removeEventListener('rule:change', onRuleChange);
         container.removeEventListener('goal:change', onGoalChange);
