@@ -6371,3 +6371,54 @@ export const mentorOutcomes = pgTable("mentor_outcomes", {
   uniqueIndex("mentor_outcomes_proposal_uidx").on(t.proposalId),
   index("mentor_outcomes_org_idx").on(t.organisationId, t.acceptedAt),
 ]);
+
+// Admin → Platform → AI Visibility (db/z-ai-visibility.sql). Does Be More Swan come up when a
+// prospect asks an AI assistant? The same questions, asked of each assistant, once a month.
+export const aiVisibilityQuestions = pgTable("ai_visibility_questions", {
+  id: serial("id").primaryKey(),
+  // 'category' | 'industry' | 'comparison' | 'brand'
+  category: text("category").notNull(),
+  text: text("text").notNull().unique(),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const aiVisibilityRuns = pgTable("ai_visibility_runs", {
+  id: serial("id").primaryKey(),
+  label: text("label").notNull().unique(),
+  notes: text("notes"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// One per question × assistant × run. source 'api' = fetched automatically (Claude / ChatGPT through
+// their APIs, labelled "API answer" on the page); 'manual' = asked in the app by an admin.
+export const aiVisibilityAnswers = pgTable("ai_visibility_answers", {
+  id: serial("id").primaryKey(),
+  runId: integer("run_id").notNull().references(() => aiVisibilityRuns.id, { onDelete: "cascade" }),
+  questionId: integer("question_id").notNull().references(() => aiVisibilityQuestions.id, { onDelete: "cascade" }),
+  // 'chatgpt' | 'copilot' | 'gemini' | 'claude' | 'google_ai_overview'
+  assistant: text("assistant").notNull(),
+  source: text("source").notNull().default("manual"),
+  mentioned: boolean("mentioned"),
+  position: integer("position"),
+  // 'our_site' | 'other_site' | 'no_link'
+  link: text("link"),
+  // 'yes' | 'partly' | 'no'
+  accurate: text("accurate"),
+  wrongFacts: text("wrong_facts"),
+  competitors: text("competitors").array().notNull().default([]),
+  notes: text("notes"),
+  answerText: text("answer_text"),
+  citedUrls: text("cited_urls").array().notNull().default([]),
+  model: text("model"),
+  error: text("error"),
+  answeredBy: integer("answered_by").references(() => users.id, { onDelete: "set null" }),
+  answeredAt: timestamp("answered_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("ai_visibility_answers_run_question_assistant_key").on(t.runId, t.questionId, t.assistant),
+  index("ai_visibility_answers_run_idx").on(t.runId, t.assistant),
+]);

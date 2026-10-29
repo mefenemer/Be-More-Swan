@@ -1098,6 +1098,100 @@
         <div id="coupons-stripe-panel" class="hidden mt-6 space-y-4"></div>
       </section>
 
+      <!-- ── AI Visibility — Admin → Platform → Insights (admin-ai-visibility.ts) ──────────────
+           When a prospect asks an AI assistant for help, does Be More Swan come up? The same
+           questions, asked of each assistant, monthly. The answer form (#aiv-modal) lives OUTSIDE
+           this section — a fixed modal inside .admin-view is trapped by its overflow container. -->
+      <section id="view-ai-visibility" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-5">
+          <p class="text-sm text-gray-500 max-w-2xl">Does Be More Swan come up when a prospect asks an AI assistant for help? Ask the same questions every month and watch the trend. Claude and ChatGPT answers can be fetched automatically; the others you ask in the app and record here.</p>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" id="aiv-tab-runs" onclick="aivShowTab('runs')" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Runs</button>
+            <button type="button" id="aiv-tab-questions" onclick="aivShowTab('questions')" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Questions</button>
+          </div>
+        </div>
+
+        <div id="aiv-not-setup" class="hidden bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-xl px-4 py-3 mb-5">
+          <strong>Not set up on this database yet.</strong> Apply <span class="font-mono">db/z-ai-visibility.sql</span> in the Neon SQL Editor, then reload this page.
+        </div>
+        <p id="aiv-error" class="hidden text-sm font-semibold text-red-600 mb-4"></p>
+
+        <!-- Runs -->
+        <div id="aiv-runs-panel">
+          <div class="flex flex-wrap items-end gap-2 mb-4">
+            <div>
+              <label for="aiv-run" class="text-xs font-bold text-gray-500 uppercase">Run</label>
+              <select id="aiv-run" onchange="aivSelectRun(this.value)" class="mt-1 block border border-gray-200 rounded-lg px-3 py-2 text-sm min-w-[14rem]"></select>
+            </div>
+            <button type="button" onclick="aivNewRun()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">New run</button>
+            <button type="button" id="aiv-fetch-btn" onclick="aivFetch(false)" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Fetch Claude + ChatGPT answers</button>
+            <button type="button" id="aiv-refetch-btn" onclick="aivFetch(true)" class="btn-secondary px-3 py-2 text-xs font-bold rounded-lg border" title="Ask again and replace the API answers already fetched for this run. Answers you typed in are never replaced.">Fetch again</button>
+            <button type="button" id="aiv-delete-btn" onclick="aivDeleteRun()" class="btn-destructive px-3 py-2 text-xs font-bold rounded-lg border">Delete run</button>
+          </div>
+          <p id="aiv-progress" class="hidden text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 mb-4"></p>
+          <div id="aiv-empty" class="hidden bg-white rounded-2xl border border-gray-200 p-8 text-center text-sm text-gray-500">No runs yet. Start one with <strong>New run</strong> (e.g. "Baseline Oct 2026"), then fetch the Claude and ChatGPT answers and fill in the rest.</div>
+          <div id="aiv-run-body" class="hidden space-y-6">
+            <div id="aiv-tiles" class="grid grid-cols-2 lg:grid-cols-4 gap-3"></div>
+            <div class="grid gap-6 lg:grid-cols-2">
+              <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto"><table class="w-full text-sm" id="aiv-by-assistant"></table></div>
+              <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto"><table class="w-full text-sm" id="aiv-by-category"></table></div>
+            </div>
+            <div class="grid gap-6 lg:grid-cols-2">
+              <div class="bg-white rounded-2xl border border-gray-200 p-5">
+                <h3 class="text-sm font-bold text-gray-900 mb-1">Who AI recommends instead</h3>
+                <p class="text-xs text-gray-500 mb-3">Tools named in this run's answers, most often first.</p>
+                <div id="aiv-competitors" class="flex flex-wrap gap-1.5"></div>
+              </div>
+              <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+                <table class="w-full text-sm" id="aiv-trend"></table>
+              </div>
+            </div>
+            <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+              <div class="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
+                <h3 class="text-sm font-bold text-gray-900">Answers <span class="font-normal text-gray-500">— click a cell to record or review it</span></h3>
+                <p class="text-[11px] text-gray-500"><span class="inline-block px-1.5 rounded font-bold bg-emerald-100 text-emerald-800">✓ 2</span> named, 2nd in the list · <span class="inline-block px-1.5 rounded font-bold bg-gray-100 text-gray-600">✗</span> not named · <span class="inline-block px-1.5 rounded font-bold bg-amber-100 text-amber-800">!</span> fetch failed · <span class="font-bold text-indigo-600">API</span> fetched automatically</p>
+              </div>
+              <table class="w-full text-sm mt-3" id="aiv-grid"></table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Questions -->
+        <div id="aiv-questions-panel" class="hidden">
+          <div class="bg-white rounded-2xl border border-gray-200 p-5 mb-5">
+            <h3 class="text-sm font-bold text-gray-900 mb-3" id="aiv-q-form-title">Add a question</h3>
+            <input type="hidden" id="aiv-q-id">
+            <div class="grid gap-3 md:grid-cols-[1fr_12rem_6rem_auto] items-end">
+              <div>
+                <label for="aiv-q-text" class="text-xs font-bold text-gray-500 uppercase">Question, as a prospect would ask it</label>
+                <input id="aiv-q-text" maxlength="500" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm" placeholder="What's the best AI tool for marketing a dog groomer?">
+              </div>
+              <div>
+                <label for="aiv-q-cat" class="text-xs font-bold text-gray-500 uppercase">Type</label>
+                <select id="aiv-q-cat" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"></select>
+              </div>
+              <div>
+                <label for="aiv-q-order" class="text-xs font-bold text-gray-500 uppercase">Order</label>
+                <input id="aiv-q-order" type="number" step="10" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+              </div>
+              <div class="flex gap-2">
+                <button type="button" onclick="aivSaveQuestion()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Save</button>
+                <button type="button" onclick="aivResetQuestionForm()" class="btn-secondary px-3 py-2 text-sm font-bold rounded-lg border">Clear</button>
+              </div>
+            </div>
+            <p class="text-[11px] text-gray-400 mt-2">Keep the wording fixed from month to month: a reworded question is a different question, and breaks the trend. Retire a question rather than rewriting it.</p>
+          </div>
+          <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
+                <tr><th class="px-4 py-3 text-left w-16">Order</th><th class="px-4 py-3 text-left">Question</th><th class="px-4 py-3 text-left">Type</th><th class="px-4 py-3 text-left">Status</th><th class="px-4 py-3 text-right">Actions</th></tr>
+              </thead>
+              <tbody id="aiv-q-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- ── Plan moves — Admin → Revenue → Plan moves (admin-plan-moves.ts, src/utils/plan-moves.ts) ──
            Move customers between plans in bulk. Every move starts at the customer's next renewal; a
            price rise at the first renewal 30+ days away; every customer is emailed, coupon included. -->
@@ -2501,6 +2595,79 @@
   </div>
 </div>
 
+<!-- AI Visibility answer form — outside every .admin-view, see view-ai-visibility. -->
+<div id="aiv-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-4xl w-full p-6 relative max-h-[92vh] overflow-y-auto">
+    <button type="button" onclick="aivCloseModal()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold" aria-label="Close">✕</button>
+    <p id="aiv-m-assistant" class="text-xs font-bold uppercase tracking-wide text-indigo-600"></p>
+    <h3 id="aiv-m-question" class="text-base font-bold text-gray-900 mt-1 mb-3 pr-8"></h3>
+    <div class="flex flex-wrap gap-2 mb-4">
+      <button type="button" onclick="aivCopyQuestion()" class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border">Copy question</button>
+      <a id="aiv-m-open" href="#" target="_blank" rel="noopener" class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border">Open in app ↗</a>
+      <span id="aiv-m-source" class="text-[11px] text-gray-500 self-center"></span>
+    </div>
+    <p id="aiv-m-error" class="hidden text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3"></p>
+    <div class="grid gap-5 md:grid-cols-[1fr_16rem]">
+      <div class="space-y-3">
+        <div>
+          <span class="text-xs font-bold text-gray-500 uppercase">Was Be More Swan named? <span class="text-red-500">*</span></span>
+          <div class="flex gap-4 mt-1 text-sm">
+            <label class="flex items-center gap-1.5"><input type="radio" name="aiv-m-mentioned" value="yes" onchange="aivSyncModal()"> Yes</label>
+            <label class="flex items-center gap-1.5"><input type="radio" name="aiv-m-mentioned" value="no" onchange="aivSyncModal()"> No</label>
+          </div>
+        </div>
+        <div id="aiv-m-when-named" class="grid grid-cols-3 gap-3">
+          <div>
+            <label for="aiv-m-position" class="text-xs font-bold text-gray-500 uppercase">Position</label>
+            <input id="aiv-m-position" type="number" min="1" max="50" placeholder="—" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label for="aiv-m-link" class="text-xs font-bold text-gray-500 uppercase">Link</label>
+            <select id="aiv-m-link" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+              <option value="">—</option><option value="our_site">Our site</option><option value="other_site">Other site about us</option><option value="no_link">No link</option>
+            </select>
+          </div>
+          <div>
+            <label for="aiv-m-accurate" class="text-xs font-bold text-gray-500 uppercase">Accurate?</label>
+            <select id="aiv-m-accurate" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+              <option value="">Not checked</option><option value="yes">Yes</option><option value="partly">Partly</option><option value="no">No</option>
+            </select>
+          </div>
+          <div class="col-span-3">
+            <label for="aiv-m-wrong" class="text-xs font-bold text-gray-500 uppercase">What it got wrong</label>
+            <input id="aiv-m-wrong" maxlength="4000" placeholder="e.g. said plans start at £39" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+          </div>
+        </div>
+        <div>
+          <label for="aiv-m-competitors" class="text-xs font-bold text-gray-500 uppercase">Other tools it named</label>
+          <input id="aiv-m-competitors" placeholder="Buffer, Hootsuite, Jasper" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label for="aiv-m-notes" class="text-xs font-bold text-gray-500 uppercase">Notes</label>
+          <input id="aiv-m-notes" maxlength="4000" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label for="aiv-m-answer" class="text-xs font-bold text-gray-500 uppercase">The answer <span class="font-normal normal-case text-gray-400">(paste it in, or fetched automatically)</span></label>
+          <textarea id="aiv-m-answer" rows="9" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed"></textarea>
+          <div id="aiv-m-urls" class="text-[11px] text-gray-500 mt-1 break-all"></div>
+        </div>
+      </div>
+      <aside class="bg-gray-50 border border-gray-200 rounded-xl p-4 text-xs text-gray-600 space-y-2 self-start">
+        <p class="font-bold text-gray-900 text-sm">Facts to check against</p>
+        <div id="aiv-m-facts"></div>
+        <p class="text-gray-400 pt-2 border-t border-gray-200">Ask in a fresh chat with web search on, word for word, no follow-ups. Position = Be More Swan's place in the list of tools (1 = first); blank if it isn't a list.</p>
+      </aside>
+    </div>
+    <div class="flex flex-wrap justify-between gap-2 mt-5">
+      <button type="button" onclick="aivClearAnswer()" class="btn-destructive px-4 py-2 text-sm font-bold rounded-lg border">Clear this answer</button>
+      <div class="flex gap-2">
+        <button type="button" onclick="aivCloseModal()" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Cancel</button>
+        <button type="button" onclick="aivSaveAnswer()" class="btn-primary px-5 py-2 text-sm font-bold rounded-lg">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Coupon create / edit — outside every .admin-view, see view-coupons. -->
 <div id="coupon-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
   <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[90vh] overflow-y-auto">
@@ -3114,6 +3281,7 @@ const VIEW_LABELS = {
   'music-library': 'Music Library',
   'site-styles': 'Site Styles',
   'hosted-sites': 'Hosted Sites',
+  'ai-visibility': 'AI Visibility',
 };
 
 // Category → child items mapping.
@@ -3193,6 +3361,9 @@ const ADMIN_CATS = {
     { view: 'site-styles',          icon: '🎨', label: 'Site Styles',           perm: 'platform_config',         group: 'Configuration' },
     { view: 'analytics',            icon: '📈', label: 'Analytics',             perm: 'view_analytics',          group: 'Insights' },
     { view: 'reward-audits',        icon: '🏆', label: 'Reward Audits',         perm: 'platform_config',         group: 'Insights' },
+    // Does Be More Swan come up when a prospect asks ChatGPT, Claude, Gemini or Copilot? Monthly runs
+    // of the same questions (admin-ai-visibility.ts). platform_config: no role data has to change.
+    { view: 'ai-visibility',        icon: '🔎', label: 'AI Visibility',         perm: 'platform_config',         group: 'Insights' },
     { view: 'systems',              icon: '🛠️', label: 'Systems & Connections', perm: 'view_system_status',      group: 'Operations' },
     { view: 'sandbox',              icon: '🧪', label: 'Sandbox Environment',   perm: 'sandbox_access',          group: 'Operations' },
     { view: 'kill-switches',        icon: '🚨', label: 'Emergency Controls',    perm: 'kill_switch',             group: 'Operations' },
@@ -3552,6 +3723,7 @@ function adminNav(view) {
   if (view === 'swan-contributors')   loadSwanContributors();
   if (view === 'swan-optouts')        loadSwanOptouts();
   if (view === 'music-library')       loadMusicLibrary();
+  if (view === 'ai-visibility')       loadAiVisibility();
 }
 
 // ── US-COMMS-1: Manage Emails (template editor) ──────────────────────────────
@@ -9813,6 +9985,321 @@ async function _pmCancel(payload, what) {
 }
 function pmCancel(id) { return _pmCancel({ ids: [id] }, 'this move'); }
 function pmCancelBatch(batchId) { return _pmCancel({ batchId }, 'every move in this batch that has not started'); }
+
+// ── AI Visibility (admin-ai-visibility.ts) ────────────────────────────────────
+// Monthly runs of the same prospect questions, per assistant. Claude and ChatGPT can be fetched
+// through their APIs (ai-visibility-fetch-background.ts); the rest are asked in the app and typed in.
+const AIV_API = '/.netlify/functions/admin-ai-visibility';
+const _aiv = { data: null, runId: null, run: null, editing: null, poll: null, tab: 'runs' };
+const _aivEsc = (v) => escAdm(v == null ? '' : String(v));
+const _aivPct = (n) => (n == null ? '—' : `${Math.round(n * 100)}%`);
+// The "Open in app" links. Gemini takes no query in its URL, so the question is copied instead.
+const AIV_OPEN = {
+  chatgpt: (q) => `https://chatgpt.com/?q=${encodeURIComponent(q)}&hints=search`,
+  copilot: (q) => `https://copilot.microsoft.com/?q=${encodeURIComponent(q)}`,
+  gemini: () => 'https://gemini.google.com/app',
+  claude: (q) => `https://claude.ai/new?q=${encodeURIComponent(q)}`,
+  google_ai_overview: (q) => `https://www.google.co.uk/search?q=${encodeURIComponent(q)}`,
+};
+
+async function aivPost(body) {
+  return api(AIV_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+}
+
+function _aivError(msg) {
+  const el = document.getElementById('aiv-error');
+  el.textContent = msg || '';
+  el.classList.toggle('hidden', !msg);
+}
+
+async function loadAiVisibility(keepRun) {
+  _aivError('');
+  try {
+    const d = await api(AIV_API);
+    const notSetUp = d.setUp === false;
+    document.getElementById('aiv-not-setup').classList.toggle('hidden', !notSetUp);
+    document.getElementById('aiv-runs-panel').classList.toggle('hidden', notSetUp || _aiv.tab !== 'runs');
+    document.getElementById('aiv-questions-panel').classList.toggle('hidden', notSetUp || _aiv.tab !== 'questions');
+    if (notSetUp) return;
+    _aiv.data = d;
+    const sel = document.getElementById('aiv-run');
+    sel.innerHTML = d.runs.map((r) => `<option value="${r.id}">${_aivEsc(r.label)} — ${r.answered} answered</option>`).join('');
+    const hasRuns = d.runs.length > 0;
+    document.getElementById('aiv-empty').classList.toggle('hidden', hasRuns);
+    document.getElementById('aiv-run-body').classList.toggle('hidden', !hasRuns);
+    ['aiv-fetch-btn', 'aiv-refetch-btn', 'aiv-delete-btn'].forEach((id) => { document.getElementById(id).disabled = !hasRuns; });
+    document.getElementById('aiv-q-cat').innerHTML = d.categories.map((c) => `<option value="${c.key}">${_aivEsc(c.label)}</option>`).join('');
+    aivRenderQuestions();
+    aivRenderTrend();
+    if (!hasRuns) return;
+    const wanted = keepRun && d.runs.some((r) => r.id === _aiv.runId) ? _aiv.runId : d.runs[0].id;
+    sel.value = String(wanted);
+    await aivSelectRun(wanted);
+  } catch (e) {
+    _aivError(e.message);
+  }
+}
+
+function aivShowTab(tab) {
+  _aiv.tab = tab;
+  const setUp = _aiv.data && _aiv.data.setUp !== false;
+  document.getElementById('aiv-runs-panel').classList.toggle('hidden', !setUp || tab !== 'runs');
+  document.getElementById('aiv-questions-panel').classList.toggle('hidden', !setUp || tab !== 'questions');
+  document.getElementById('aiv-tab-runs').classList.toggle('ring-2', tab === 'runs');
+  document.getElementById('aiv-tab-questions').classList.toggle('ring-2', tab === 'questions');
+}
+
+async function aivSelectRun(runId) {
+  _aiv.runId = Number(runId);
+  try {
+    const d = await api(`${AIV_API}?runId=${_aiv.runId}`);
+    _aiv.run = d;
+    aivRenderRun();
+  } catch (e) {
+    _aivError(e.message);
+  }
+}
+
+function _aivTile(label, value, hint) {
+  return `<div class="bg-white rounded-2xl border border-gray-200 p-4">
+    <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">${label}</p>
+    <p class="text-2xl font-extrabold text-gray-900 mt-1">${value}</p>
+    <p class="text-[11px] text-gray-400 mt-0.5">${hint}</p></div>`;
+}
+
+function _aivStatTable(title, keyLabel, rows) {
+  return `<thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide"><tr>
+      <th class="px-4 py-3 text-left">${keyLabel}</th><th class="px-3 py-3 text-right">Answered</th><th class="px-3 py-3 text-right">Named</th>
+      <th class="px-3 py-3 text-right">Rate</th><th class="px-3 py-3 text-right">Avg place</th><th class="px-3 py-3 text-right">Linked us</th><th class="px-3 py-3 text-right">Accurate</th></tr></thead>
+    <tbody>${rows.map((r) => `<tr class="border-t border-gray-100">
+      <td class="px-4 py-2.5 font-semibold text-gray-800">${_aivEsc(r.label)}</td>
+      <td class="px-3 py-2.5 text-right font-mono">${r.answered}</td>
+      <td class="px-3 py-2.5 text-right font-mono">${r.mentioned}</td>
+      <td class="px-3 py-2.5 text-right font-mono font-bold">${_aivPct(r.mentionRate)}</td>
+      <td class="px-3 py-2.5 text-right font-mono">${r.avgPosition == null ? '—' : r.avgPosition.toFixed(1)}</td>
+      <td class="px-3 py-2.5 text-right font-mono">${r.linkedUs}</td>
+      <td class="px-3 py-2.5 text-right font-mono">${r.mentioned ? `${r.accurate} of ${r.mentioned}` : '—'}</td></tr>`).join('')}</tbody>`;
+}
+
+function aivRenderRun() {
+  const { summary, answers } = _aiv.run;
+  const s = summary;
+  document.getElementById('aiv-tiles').innerHTML =
+    _aivTile('Named, unprompted', _aivPct(s.unprompted.mentionRate), `${s.unprompted.mentioned} of ${s.unprompted.answered} answers to questions that don't name us — the number to grow`)
+    + _aivTile('Named, all questions', _aivPct(s.overall.mentionRate), `${s.overall.mentioned} of ${s.overall.answered} answers`)
+    + _aivTile('Average place in lists', s.overall.avgPosition == null ? '—' : s.overall.avgPosition.toFixed(1), '1 = recommended first')
+    + _aivTile('Linked to our site', String(s.overall.linkedUs), 'answers that linked bemoreswan.com');
+  document.getElementById('aiv-by-assistant').innerHTML = _aivStatTable('By assistant', 'Assistant', s.byAssistant);
+  document.getElementById('aiv-by-category').innerHTML = _aivStatTable('By question type', 'Question type', s.byCategory);
+  document.getElementById('aiv-competitors').innerHTML = s.competitors.length
+    ? s.competitors.slice(0, 30).map((c) => `<span class="inline-flex items-center gap-1 bg-gray-100 border border-gray-200 rounded-full px-2.5 py-1 text-xs font-semibold text-gray-700">${_aivEsc(c.name)} <span class="text-gray-400">${c.count}</span></span>`).join('')
+    : '<p class="text-xs text-gray-400">None recorded yet.</p>';
+
+  // Grid: active questions, plus any retired one that has an answer in this run.
+  const d = _aiv.data;
+  const answered = new Set(answers.map((a) => a.questionId));
+  const qs = d.questions.filter((q) => q.isActive || answered.has(q.id));
+  const cell = (q, a) => {
+    const ans = answers.find((x) => x.questionId === q.id && x.assistant === a.key);
+    let inner = '<span class="text-gray-300">—</span>';
+    if (ans && ans.mentioned === true) inner = `<span class="inline-block px-1.5 rounded font-bold bg-emerald-100 text-emerald-800">✓${ans.position ? ' ' + ans.position : ''}</span>`;
+    else if (ans && ans.mentioned === false) inner = '<span class="inline-block px-1.5 rounded font-bold bg-gray-100 text-gray-600">✗</span>';
+    else if (ans && ans.error) inner = `<span class="inline-block px-1.5 rounded font-bold bg-amber-100 text-amber-800" title="${_aivEsc(ans.error)}">!</span>`;
+    const api = ans && ans.source === 'api' ? '<span class="block text-[9px] font-bold text-indigo-600">API</span>' : '';
+    return `<td class="px-2 py-2 text-center"><button type="button" onclick="aivOpenCell(${q.id},'${a.key}')" class="w-full rounded-lg hover:bg-indigo-50 py-1" aria-label="${_aivEsc(a.label)}: ${_aivEsc(q.text)}">${inner}${api}</button></td>`;
+  };
+  document.getElementById('aiv-grid').innerHTML =
+    `<thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide"><tr><th class="px-4 py-3 text-left">Question</th>${d.assistants.map((a) => `<th class="px-2 py-3 text-center w-24">${_aivEsc(a.label)}${a.auto ? '<span class="block text-[9px] text-indigo-600 normal-case">auto</span>' : ''}</th>`).join('')}</tr></thead>`
+    + `<tbody>${qs.map((q) => `<tr class="border-t border-gray-100"><td class="px-4 py-2 text-gray-800">${_aivEsc(q.text)}${q.isActive ? '' : ' <span class="text-[10px] text-gray-400">(retired)</span>'}<span class="block text-[10px] text-gray-400">${_aivEsc((d.categories.find((c) => c.key === q.category) || {}).label || q.category)}</span></td>${d.assistants.map((a) => cell(q, a)).join('')}</tr>`).join('')}</tbody>`;
+  aivRenderTrend();
+}
+
+function aivRenderTrend() {
+  const t = (_aiv.data && _aiv.data.trend) || [];
+  document.getElementById('aiv-trend').innerHTML = `<thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide"><tr><th class="px-4 py-3 text-left">Run</th><th class="px-3 py-3 text-right">Answered</th><th class="px-3 py-3 text-right">Named, unprompted</th><th class="px-3 py-3 text-right">Named, all</th></tr></thead>`
+    + `<tbody>${t.length ? t.map((r) => `<tr class="border-t border-gray-100${r.runId === _aiv.runId ? ' bg-indigo-50' : ''}"><td class="px-4 py-2.5 font-semibold">${_aivEsc(r.label)}</td><td class="px-3 py-2.5 text-right font-mono">${r.overall.answered}</td><td class="px-3 py-2.5 text-right font-mono font-bold">${_aivPct(r.unprompted.mentionRate)}</td><td class="px-3 py-2.5 text-right font-mono">${_aivPct(r.overall.mentionRate)}</td></tr>`).join('') : '<tr><td colspan="4" class="px-4 py-4 text-xs text-gray-400">The trend appears once there are runs.</td></tr>'}</tbody>`;
+}
+
+async function aivNewRun() {
+  const now = new Date();
+  const suggested = (_aiv.data && _aiv.data.runs.length ? '' : 'Baseline ') + now.toLocaleDateString('en-GB', { month: 'short', year: 'numeric' });
+  const label = await window.promptModal('A short name for this month\'s check.', { title: 'New run', value: suggested, required: true, confirmLabel: 'Create run', tone: 'primary' });
+  if (!label) return;
+  try {
+    const d = await aivPost({ action: 'create_run', label });
+    _aiv.runId = d.run.id;
+    await loadAiVisibility(true);
+    window.showToast?.('Run created. Fetch the Claude and ChatGPT answers, then fill in the others.', { icon: '✅' });
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function aivDeleteRun() {
+  const r = _aiv.data && _aiv.data.runs.find((x) => x.id === _aiv.runId);
+  if (!r) return;
+  if (!(await window.confirmModal(`Every answer recorded in "${_aivEsc(r.label)}" is deleted with it. This can't be undone.`, { title: 'Delete this run?', confirmLabel: 'Delete run' }))) return;
+  try { await aivPost({ action: 'delete_run', id: r.id }); _aiv.runId = null; await loadAiVisibility(false); }
+  catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function aivFetch(overwrite) {
+  if (!_aiv.runId) return;
+  const msg = overwrite
+    ? 'Asks every question of Claude and ChatGPT again and replaces the API answers already in this run. Answers you typed in are kept. It takes a few minutes and a small amount of API spend.'
+    : 'Asks every question of Claude and ChatGPT through their APIs, with web search on, and fills in the cells that are still empty. It takes a few minutes and a small amount of API spend.';
+  if (!(await window.confirmModal(msg, { title: overwrite ? 'Fetch the answers again?' : 'Fetch Claude and ChatGPT answers?', confirmLabel: 'Fetch answers', tone: 'primary' }))) return;
+  try {
+    const d = await aivPost({ action: 'fetch_answers', runId: _aiv.runId, overwrite });
+    aivWatchFetch(d.queued);
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+// Poll the run while the background fetch fills it in. Stops when every API cell has an answer or an
+// error, after 15 minutes (the background function's ceiling), or when the admin leaves the page.
+function aivWatchFetch(expected) {
+  clearInterval(_aiv.poll);
+  const startedAt = Date.now();
+  const runId = _aiv.runId;
+  const bar = document.getElementById('aiv-progress');
+  const autos = (_aiv.data.assistants || []).filter((a) => a.auto).map((a) => a.key);
+  const tick = async () => {
+    if (_aiv.runId !== runId || document.getElementById('view-ai-visibility').classList.contains('hidden')) { clearInterval(_aiv.poll); bar.classList.add('hidden'); return; }
+    await aivSelectRun(runId);
+    const done = (_aiv.run.answers || []).filter((a) => autos.includes(a.assistant) && (a.mentioned !== null || a.error)).length;
+    const total = (_aiv.data.questions || []).filter((q) => q.isActive).length * autos.length;
+    bar.textContent = `Fetching Claude and ChatGPT answers… ${Math.min(done, total)} of ${total} done. You can leave this page; it carries on.`;
+    bar.classList.remove('hidden');
+    if (done >= total || Date.now() - startedAt > 15 * 60 * 1000) {
+      clearInterval(_aiv.poll);
+      bar.textContent = done >= total ? `Fetched: ${done} of ${total}. Check "Accurate?" on the answers that name us.` : `Stopped watching after 15 minutes: ${done} of ${total} done. Reload to see any that finish later.`;
+      loadAiVisibility(true);
+    }
+  };
+  _aiv.poll = setInterval(tick, 8000);
+  tick();
+}
+
+function aivOpenCell(questionId, assistant) {
+  const q = _aiv.data.questions.find((x) => x.id === questionId);
+  const a = _aiv.data.assistants.find((x) => x.key === assistant);
+  const ans = (_aiv.run.answers || []).find((x) => x.questionId === questionId && x.assistant === assistant) || null;
+  _aiv.editing = { questionId, assistant, ans };
+  document.getElementById('aiv-m-assistant').textContent = a.label;
+  document.getElementById('aiv-m-question').textContent = q.text;
+  const open = document.getElementById('aiv-m-open');
+  open.href = AIV_OPEN[assistant](q.text);
+  open.textContent = `Open in ${a.label} ↗`;
+  document.getElementById('aiv-m-source').textContent = ans
+    ? `${ans.source === 'api' ? `API answer${ans.model ? ' · ' + ans.model : ''}` : 'Entered by hand'} · ${new Date(ans.answeredAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+    : (a.auto ? 'Not fetched yet — use "Fetch Claude + ChatGPT answers", or ask it yourself.' : '');
+  const err = document.getElementById('aiv-m-error');
+  err.textContent = ans && ans.error ? `The automatic fetch failed: ${ans.error}` : '';
+  err.classList.toggle('hidden', !(ans && ans.error));
+  document.querySelectorAll('input[name="aiv-m-mentioned"]').forEach((r) => { r.checked = ans ? (r.value === 'yes' ? ans.mentioned === true : ans.mentioned === false) : false; });
+  document.getElementById('aiv-m-position').value = ans && ans.position ? ans.position : '';
+  document.getElementById('aiv-m-link').value = (ans && ans.link) || '';
+  document.getElementById('aiv-m-accurate').value = (ans && ans.accurate) || '';
+  document.getElementById('aiv-m-wrong').value = (ans && ans.wrongFacts) || '';
+  document.getElementById('aiv-m-competitors').value = ((ans && ans.competitors) || []).join(', ');
+  document.getElementById('aiv-m-notes').value = (ans && ans.notes) || '';
+  document.getElementById('aiv-m-answer').value = (ans && ans.answerText) || '';
+  document.getElementById('aiv-m-urls').innerHTML = ans && ans.citedUrls && ans.citedUrls.length
+    ? `Sources it used: ${ans.citedUrls.slice(0, 12).map((u) => `<a href="${_aivEsc(u)}" target="_blank" rel="noopener" class="underline">${_aivEsc(u.replace(/^https?:\/\//, '').slice(0, 60))}</a>`).join(' · ')}`
+    : '';
+  const f = _aiv.data.facts || {};
+  document.getElementById('aiv-m-facts').innerHTML =
+    (f.plans || []).map((p) => `<p><strong>${_aivEsc(p.name)}</strong>: ${p.isContactSales ? 'priced on request' : `£${Number(p.monthlyPriceGbp).toLocaleString('en-GB', { maximumFractionDigits: 2 })} a month`}</p>`).join('')
+    + `<p><strong>Free trial</strong>: ${_aivEsc(f.trialDays)} days, no card needed</p>`
+    + '<p><strong>Approval</strong>: nothing goes out until the owner approves it, unless they let an assistant publish on its own</p>'
+    + '<p><strong>Where</strong>: UK-based web app for small businesses, bemoreswan.com</p>';
+  aivSyncModal();
+  document.getElementById('aiv-modal').classList.remove('hidden');
+}
+
+function aivSyncModal() {
+  const named = document.querySelector('input[name="aiv-m-mentioned"]:checked')?.value === 'yes';
+  document.getElementById('aiv-m-when-named').classList.toggle('opacity-40', !named);
+  document.querySelectorAll('#aiv-m-when-named input, #aiv-m-when-named select').forEach((el) => { el.disabled = !named; });
+}
+
+function aivCloseModal() { document.getElementById('aiv-modal').classList.add('hidden'); _aiv.editing = null; }
+
+async function aivCopyQuestion() {
+  try { await navigator.clipboard.writeText(document.getElementById('aiv-m-question').textContent); window.showToast?.('Question copied.', { icon: '✅' }); }
+  catch { window.showToast?.('Could not copy — select the question and copy it by hand.', { icon: '⚠️' }); }
+}
+
+async function aivSaveAnswer() {
+  const e = _aiv.editing;
+  const picked = document.querySelector('input[name="aiv-m-mentioned"]:checked');
+  if (!picked) { window.showToast?.('Say whether Be More Swan was named.', { icon: '⚠️' }); return; }
+  const v = (id) => document.getElementById(id).value;
+  try {
+    await aivPost({
+      action: 'save_answer', runId: _aiv.runId, questionId: e.questionId, assistant: e.assistant,
+      mentioned: picked.value === 'yes', position: v('aiv-m-position') || null, link: v('aiv-m-link') || null,
+      accurate: v('aiv-m-accurate') || null, wrongFacts: v('aiv-m-wrong'), competitors: v('aiv-m-competitors'),
+      notes: v('aiv-m-notes'), answerText: v('aiv-m-answer'),
+    });
+    aivCloseModal();
+    await aivSelectRun(_aiv.runId);
+    _aiv.data.trend = (await api(AIV_API)).trend;
+    aivRenderTrend();
+  } catch (err) { window.showToast?.(err.message, { icon: '⚠️' }); }
+}
+
+async function aivClearAnswer() {
+  const e = _aiv.editing;
+  if (!e || !e.ans) { aivCloseModal(); return; }
+  if (!(await window.confirmModal('The recorded answer for this question and assistant is removed from the run.', { title: 'Clear this answer?', confirmLabel: 'Clear' }))) return;
+  try { await aivPost({ action: 'clear_answer', runId: _aiv.runId, questionId: e.questionId, assistant: e.assistant }); aivCloseModal(); await aivSelectRun(_aiv.runId); }
+  catch (err) { window.showToast?.(err.message, { icon: '⚠️' }); }
+}
+
+function aivRenderQuestions() {
+  const d = _aiv.data;
+  const label = (k) => (d.categories.find((c) => c.key === k) || {}).label || k;
+  document.getElementById('aiv-q-tbody').innerHTML = d.questions.map((q) => `<tr class="border-t border-gray-100${q.isActive ? '' : ' opacity-50'}">
+      <td class="px-4 py-2.5 font-mono text-gray-500">${q.sortOrder}</td>
+      <td class="px-4 py-2.5 text-gray-800">${_aivEsc(q.text)}</td>
+      <td class="px-4 py-2.5 text-gray-600">${_aivEsc(label(q.category))}</td>
+      <td class="px-4 py-2.5">${q.isActive ? '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700">Asked</span>' : '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-gray-100 text-gray-600">Retired</span>'}</td>
+      <td class="px-4 py-2.5 text-right whitespace-nowrap">
+        <button type="button" onclick="aivEditQuestion(${q.id})" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Edit</button>
+        <button type="button" onclick="aivToggleQuestion(${q.id}, ${!q.isActive})" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">${q.isActive ? 'Retire' : 'Ask again'}</button>
+      </td></tr>`).join('') || '<tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">No questions yet.</td></tr>';
+}
+
+function aivEditQuestion(id) {
+  const q = _aiv.data.questions.find((x) => x.id === id);
+  document.getElementById('aiv-q-id').value = q.id;
+  document.getElementById('aiv-q-text').value = q.text;
+  document.getElementById('aiv-q-cat').value = q.category;
+  document.getElementById('aiv-q-order').value = q.sortOrder;
+  document.getElementById('aiv-q-form-title').textContent = 'Edit question';
+  document.getElementById('aiv-q-text').focus();
+}
+
+function aivResetQuestionForm() {
+  ['aiv-q-id', 'aiv-q-text', 'aiv-q-order'].forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('aiv-q-form-title').textContent = 'Add a question';
+}
+
+async function aivSaveQuestion() {
+  const id = Number(document.getElementById('aiv-q-id').value) || undefined;
+  const order = document.getElementById('aiv-q-order').value;
+  const maxOrder = Math.max(0, ...(_aiv.data.questions || []).map((q) => q.sortOrder));
+  try {
+    await aivPost({ action: 'save_question', id, text: document.getElementById('aiv-q-text').value, category: document.getElementById('aiv-q-cat').value, sortOrder: order === '' ? maxOrder + 10 : Number(order) });
+    aivResetQuestionForm();
+    await loadAiVisibility(true);
+    window.showToast?.('Question saved.', { icon: '✅' });
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+async function aivToggleQuestion(id, isActive) {
+  try { await aivPost({ action: 'set_question_active', id, isActive }); await loadAiVisibility(true); }
+  catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
 
 const COUPONS_API = '/.netlify/functions/admin-coupons';
 const _coupons = { items: [], editing: null };
