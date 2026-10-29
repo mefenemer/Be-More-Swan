@@ -10,6 +10,9 @@
  *     `data-waitlist-label="…"` take that label and point at /waitlist.html (or `data-waitlist-href`)
  *     — so a page can say
  *     "we're in beta" without a second copy of this logic.
+ *   - an empty `data-waitlist-notice="beta"` element is given the beta notice. The wording lives
+ *     HERE, never in the page: crawlers read hidden text, and AI assistants repeated a hidden
+ *     "Be More Swan is in beta" from index.html as fact while the site was live (2026-10-29).
  * While it is OFF this file changes nothing.
  *
  * This is presentation only. The lock itself is enforced by auth-guard (redirect) and register.ts
@@ -25,6 +28,10 @@
   'use strict';
 
   var LABEL = 'Join the waitlist';
+  var BETA_NOTICE =
+    '<span class="shrink-0 px-2 py-0.5 rounded-full bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider">Beta</span>' +
+    '<span class="text-sm text-gray-700"><strong class="text-gray-900">Be More Swan is in beta and we\'re looking for testers.</strong> ' +
+    '<a href="/beta.html" class="font-bold text-emerald-700 hover:underline whitespace-nowrap">Become a beta tester →</a></span>';
   var REGISTER_HREF = /(^|\/)register(\.html)?([?#]|$)/;
   var _state = null;
 
@@ -42,6 +49,10 @@
 
   function rewrite(root) {
     if (!root || !root.querySelectorAll) return;
+    var notices = root.querySelectorAll('[data-waitlist-notice="beta"]');
+    for (var n = 0; n < notices.length; n++) {
+      if (!notices[n].firstChild) notices[n].innerHTML = BETA_NOTICE;
+    }
     var shows = root.querySelectorAll('[data-waitlist-show]');
     for (var k = 0; k < shows.length; k++) {
       shows[k].classList.remove('hidden');

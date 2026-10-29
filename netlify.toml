@@ -651,6 +651,13 @@ node_bundler = "esbuild"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow"
 
+# The beta-tester sign-up page: a recruiting page, not a description of the product. Its meta
+# robots tag is the first guard; this covers /beta and /beta.html for crawlers that skip meta.
+[[headers]]
+  for = "/beta*"
+  [headers.values]
+    X-Robots-Tag = "noindex, follow"
+
 [[headers]]
   for = "/dashboard*"
   [headers.values]
