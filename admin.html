@@ -1104,7 +1104,7 @@
            this section — a fixed modal inside .admin-view is trapped by its overflow container. -->
       <section id="view-ai-visibility" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
         <div class="flex flex-wrap items-start justify-between gap-3 mb-5">
-          <p class="text-sm text-gray-500 max-w-2xl">Does Be More Swan come up when a prospect asks an AI assistant for help? Ask the same questions every month and watch the trend. Claude and ChatGPT answers can be fetched automatically; the others you ask in the app and record here.</p>
+          <p class="text-sm text-gray-500 max-w-2xl">Does Be More Swan come up when a prospect asks an AI assistant for help? Ask the same questions every month and watch the trend. Claude, ChatGPT and Gemini answers are fetched automatically; the others you ask in the app and paste in here.</p>
           <div class="flex flex-wrap gap-2">
             <button type="button" id="aiv-tab-runs" onclick="aivShowTab('runs')" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Runs</button>
             <button type="button" id="aiv-tab-questions" onclick="aivShowTab('questions')" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Questions</button>
@@ -1124,25 +1124,30 @@
               <select id="aiv-run" onchange="aivSelectRun(this.value)" class="mt-1 block border border-gray-200 rounded-lg px-3 py-2 text-sm min-w-[14rem]"></select>
             </div>
             <button type="button" onclick="aivNewRun()" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">New run</button>
-            <button type="button" id="aiv-fetch-btn" onclick="aivFetch(false)" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Fetch Claude + ChatGPT answers</button>
-            <button type="button" id="aiv-refetch-btn" onclick="aivFetch(true)" class="btn-secondary px-3 py-2 text-xs font-bold rounded-lg border" title="Ask again and replace the API answers already fetched for this run. Answers you typed in are never replaced.">Fetch again</button>
+            <button type="button" id="aiv-fetch-btn" onclick="aivFetch(false)" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border" title="Claude, ChatGPT and Gemini, through their APIs">Fetch automatic answers</button>
+            <button type="button" id="aiv-refetch-btn" onclick="aivFetch(true)" class="btn-secondary px-3 py-2 text-xs font-bold rounded-lg border" title="Ask Claude, ChatGPT and Gemini again and replace the API answers already fetched for this run. Answers you typed in are never replaced.">Fetch again</button>
             <button type="button" id="aiv-delete-btn" onclick="aivDeleteRun()" class="btn-destructive px-3 py-2 text-xs font-bold rounded-lg border">Delete run</button>
           </div>
           <p id="aiv-progress" class="hidden text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 mb-4"></p>
-          <div id="aiv-empty" class="hidden bg-white rounded-2xl border border-gray-200 p-8 text-center text-sm text-gray-500">No runs yet. Start one with <strong>New run</strong> (e.g. "Baseline Oct 2026"), then fetch the Claude and ChatGPT answers and fill in the rest.</div>
+          <div id="aiv-empty" class="hidden bg-white rounded-2xl border border-gray-200 p-8 text-center text-sm text-gray-500">No runs yet. Start one with <strong>New run</strong> (e.g. "Baseline Oct 2026"), then fetch the automatic answers and fill in the rest.</div>
           <div id="aiv-run-body" class="hidden space-y-6">
             <div id="aiv-tiles" class="grid grid-cols-2 lg:grid-cols-4 gap-3"></div>
             <!-- The assistants with no API: one button each, which walks that column question by
                  question with "Save & next". The grid alone hid this work 2,400px down the page. -->
             <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
               <p class="text-sm font-bold text-gray-900">Fill in by hand</p>
-              <p class="text-xs text-gray-600 mb-3">These assistants have no API. Pick one: each question opens in turn — open it in the app, read the answer, record it, then <strong>Save &amp; next</strong>.</p>
+              <p class="text-xs text-gray-600 mb-3">These assistants have no API, so they're asked only the questions that don't name us. Pick one: each question opens in turn — open it in the app, copy the whole answer, <strong>paste it into the answer box</strong> (the form fills itself in), check it, then <strong>Save &amp; next</strong>.</p>
               <div id="aiv-fill" class="flex flex-wrap gap-2"></div>
+              <div id="aiv-accuracy" class="hidden mt-4 pt-3 border-t border-indigo-100">
+                <p class="text-sm font-bold text-gray-900">Check accuracy</p>
+                <p class="text-xs text-gray-600 mb-3">Claude suggests whether each answer that names us is accurate, against the live prices, assistants and Connections page. A suggestion counts only once you confirm it.</p>
+                <div id="aiv-accuracy-btns" class="flex flex-wrap gap-2"></div>
+              </div>
             </div>
             <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
               <div class="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
                 <h3 class="text-sm font-bold text-gray-900">Answers <span class="font-normal text-gray-500">— click any cell to record or review it</span></h3>
-                <p class="text-[11px] text-gray-500"><span class="inline-block px-1.5 rounded font-bold bg-emerald-100 text-emerald-800">✓ 2</span> named, 2nd in the list · <span class="inline-block px-1.5 rounded font-bold bg-gray-100 text-gray-600">✗</span> not named · <span class="inline-block px-1.5 rounded font-bold bg-amber-100 text-amber-800">!</span> fetch failed · <span class="font-bold text-indigo-600">API</span> fetched automatically</p>
+                <p class="text-[11px] text-gray-500"><span class="inline-block px-1.5 rounded font-bold bg-emerald-100 text-emerald-800">✓ 2</span> named, 2nd in the list · <span class="inline-block px-1.5 rounded font-bold bg-gray-100 text-gray-600">✗</span> not named · <span class="inline-block px-1.5 rounded font-bold bg-amber-100 text-amber-800">!</span> fetch failed · <span class="font-bold text-indigo-600">API</span> fetched automatically · <span class="text-[9px] font-bold text-amber-700">CHECK</span> accuracy suggested, not confirmed</p>
               </div>
               <table class="w-full text-sm mt-3" id="aiv-grid"></table>
             </div>
@@ -2640,6 +2645,7 @@
               <option value="">Not checked</option><option value="yes">Yes</option><option value="partly">Partly</option><option value="no">No</option>
             </select>
           </div>
+          <p id="aiv-m-suggestion" class="hidden col-span-3 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"></p>
           <div class="col-span-3">
             <label for="aiv-m-wrong" class="text-xs font-bold text-gray-500 uppercase">What it got wrong</label>
             <input id="aiv-m-wrong" maxlength="4000" placeholder="e.g. said plans start at £39" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
@@ -2654,8 +2660,12 @@
           <input id="aiv-m-notes" maxlength="4000" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
         </div>
         <div>
-          <label for="aiv-m-answer" class="text-xs font-bold text-gray-500 uppercase">The answer <span class="font-normal normal-case text-gray-400">(paste it in, or fetched automatically)</span></label>
-          <textarea id="aiv-m-answer" rows="6" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed"></textarea>
+          <div class="flex items-end justify-between gap-2">
+            <label for="aiv-m-answer" class="text-xs font-bold text-gray-500 uppercase">The answer <span class="font-normal normal-case text-gray-400">(paste the whole answer — the form fills itself in)</span></label>
+            <button type="button" id="aiv-m-score" onclick="aivScoreAnswer()" class="btn-secondary px-2.5 py-1 text-xs font-bold rounded-lg border">Read this answer</button>
+          </div>
+          <textarea id="aiv-m-answer" rows="6" onpaste="setTimeout(aivScoreAnswer, 0)" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed" placeholder="Paste the assistant's whole answer here."></textarea>
+          <p id="aiv-m-score-status" class="hidden text-[11px] font-semibold text-indigo-700 mt-1"></p>
           <div id="aiv-m-urls" class="text-[11px] text-gray-500 mt-1 break-all"></div>
         </div>
       </div>
@@ -9998,10 +10008,12 @@ function pmCancel(id) { return _pmCancel({ ids: [id] }, 'this move'); }
 function pmCancelBatch(batchId) { return _pmCancel({ batchId }, 'every move in this batch that has not started'); }
 
 // ── AI Visibility (admin-ai-visibility.ts) ────────────────────────────────────
-// Monthly runs of the same prospect questions, per assistant. Claude and ChatGPT can be fetched
-// through their APIs (ai-visibility-fetch-background.ts); the rest are asked in the app and typed in.
+// Monthly runs of the same prospect questions, per assistant. Claude, ChatGPT and Gemini are fetched
+// through their APIs (ai-visibility-fetch-background.ts); the rest are asked in the app and pasted in.
+// Claude suggests "Accurate?" for every answer that names us; only the admin's confirmation counts.
 const AIV_API = '/.netlify/functions/admin-ai-visibility';
-const _aiv = { data: null, runId: null, run: null, editing: null, poll: null, tab: 'runs' };
+// walk: the cells Save & next steps through. scored: the result of reading a pasted answer.
+const _aiv = { data: null, runId: null, run: null, editing: null, poll: null, tab: 'runs', walk: null, scored: null };
 const _aivEsc = (v) => escAdm(v == null ? '' : String(v));
 const _aivPct = (n) => (n == null ? '—' : `${Math.round(n * 100)}%`);
 // The "Open in app" links. Gemini takes no query in its URL, so the question is copied instead.
@@ -10117,7 +10129,8 @@ function aivRenderRun() {
     else if (ans && ans.mentioned === false) inner = '<span class="inline-block px-1.5 rounded font-bold bg-gray-100 text-gray-600">✗</span>';
     else if (ans && ans.error) inner = `<span class="inline-block px-1.5 rounded font-bold bg-amber-100 text-amber-800" title="${_aivEsc(ans.error)}">!</span>`;
     const api = ans && ans.source === 'api' ? '<span class="block text-[9px] font-bold text-indigo-600">API</span>' : '';
-    return `<td class="px-2 py-2 text-center"><button type="button" onclick="aivOpenCell(${q.id},'${a.key}')" class="w-full rounded-lg hover:bg-indigo-50 py-1" aria-label="${_aivEsc(a.label)}: ${_aivEsc(q.text)}">${inner}${api}</button></td>`;
+    const check = _aivNeedsReview(ans) ? '<span class="block text-[9px] font-bold text-amber-700">CHECK</span>' : '';
+    return `<td class="px-2 py-2 text-center"><button type="button" onclick="aivOpenCell(${q.id},'${a.key}')" class="w-full rounded-lg hover:bg-indigo-50 py-1" aria-label="${_aivEsc(a.label)}: ${_aivEsc(q.text)}">${inner}${api}${check}</button></td>`;
   };
   aivRenderFill();
   document.getElementById('aiv-grid').innerHTML =
@@ -10141,7 +10154,7 @@ async function aivNewRun() {
     const d = await aivPost({ action: 'create_run', label });
     _aiv.runId = d.run.id;
     await loadAiVisibility(true);
-    window.showToast?.('Run created. Fetch the Claude and ChatGPT answers, then fill in the others.', { icon: '✅' });
+    window.showToast?.('Run created. Fetch the automatic answers, then fill in the others.', { icon: '✅' });
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
@@ -10156,11 +10169,12 @@ async function aivDeleteRun() {
 async function aivFetch(overwrite) {
   if (!_aiv.runId) return;
   const msg = overwrite
-    ? 'Asks every question of Claude and ChatGPT again and replaces the API answers already in this run. Answers you typed in are kept. It takes a few minutes and a small amount of API spend.'
-    : 'Asks every question of Claude and ChatGPT through their APIs, with web search on, and fills in the cells that are still empty. It takes a few minutes and a small amount of API spend.';
-  if (!(await window.confirmModal(msg, { title: overwrite ? 'Fetch the answers again?' : 'Fetch Claude and ChatGPT answers?', confirmLabel: 'Fetch answers', tone: 'primary' }))) return;
+    ? 'Asks every question of Claude, ChatGPT and Gemini again and replaces the API answers already in this run. Answers you typed in are kept. It takes a few minutes and a small amount of API spend.'
+    : 'Asks every question of Claude, ChatGPT and Gemini through their APIs, with web search on, and fills in the cells that are still empty. Answers that name us get an accuracy suggestion. It takes a few minutes and a small amount of API spend.';
+  if (!(await window.confirmModal(msg, { title: overwrite ? 'Fetch the answers again?' : 'Fetch the automatic answers?', confirmLabel: 'Fetch answers', tone: 'primary' }))) return;
   try {
     const d = await aivPost({ action: 'fetch_answers', runId: _aiv.runId, overwrite });
+    if (d.skipped && d.skipped.length) window.showToast?.(`Skipped ${d.skipped.map((x) => x.assistant).join(', ')}: ${d.skipped.map((x) => x.envVar).join(', ')} is not set on this site.`, { icon: '⚠️' });
     aivWatchFetch(d.queued);
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
@@ -10178,11 +10192,11 @@ function aivWatchFetch(expected) {
     await aivSelectRun(runId);
     const done = (_aiv.run.answers || []).filter((a) => autos.includes(a.assistant) && (a.mentioned !== null || a.error)).length;
     const total = (_aiv.data.questions || []).filter((q) => q.isActive).length * autos.length;
-    bar.textContent = `Fetching Claude and ChatGPT answers… ${Math.min(done, total)} of ${total} done. You can leave this page; it carries on.`;
+    bar.textContent = `Fetching the automatic answers… ${Math.min(done, total)} of ${total} done. You can leave this page; it carries on.`;
     bar.classList.remove('hidden');
     if (done >= total || Date.now() - startedAt > 15 * 60 * 1000) {
       clearInterval(_aiv.poll);
-      bar.textContent = done >= total ? `Fetched: ${done} of ${total}. Check "Accurate?" on the answers that name us.` : `Stopped watching after 15 minutes: ${done} of ${total} done. Reload to see any that finish later.`;
+      bar.textContent = done >= total ? `Fetched: ${done} of ${total}. Accuracy suggestions may take a minute more — then use "Review accuracy suggestions".` : `Stopped watching after 15 minutes: ${done} of ${total} done. Reload to see any that finish later.`;
       loadAiVisibility(true);
     }
   };
@@ -10190,37 +10204,81 @@ function aivWatchFetch(expected) {
   tick();
 }
 
-// The questions a walk goes through, in the grid's order.
-function _aivWalkQuestions() {
-  return (_aiv.data.questions || []).filter((q) => q.isActive);
+// The questions a column walk goes through, in the grid's order. An assistant with no API is asked
+// only the questions that don't name us: brand questions are near-certain mentions and the
+// "named, unprompted" number — the one that moves — leaves them out anyway.
+function _aivWalkQuestions(assistant) {
+  const auto = ((_aiv.data.assistants || []).find((a) => a.key === assistant) || {}).auto;
+  return (_aiv.data.questions || []).filter((q) => q.isActive && (auto || !assistant || q.category !== 'brand'));
 }
+const _aivColumnWalk = (assistant) => _aivWalkQuestions(assistant).map((q) => ({ questionId: q.id, assistant }));
 
 const _aivAnswered = (questionId, assistant) => (_aiv.run.answers || []).some((x) => x.questionId === questionId && x.assistant === assistant && (x.mentioned === true || x.mentioned === false));
+// Named, a suggestion made, not yet confirmed by an admin.
+const _aivNeedsReview = (a) => !!(a && a.mentioned === true && !a.accurate && a.suggestedAccurate);
+// Named, with answer text to check, but no suggestion yet (fetched before suggestions existed).
+const _aivNeedsCheck = (a) => !!(a && a.mentioned === true && !a.accurate && !a.suggestedAccurate && (a.answerText || '').trim());
+const _aivVerdict = { yes: 'Accurate', partly: 'Partly accurate', no: 'Not accurate' };
 
 function aivRenderFill() {
-  const qs = _aivWalkQuestions();
   document.getElementById('aiv-fill').innerHTML = (_aiv.data.assistants || []).filter((a) => !a.auto).map((a) => {
+    const qs = _aivWalkQuestions(a.key);
     const done = qs.filter((q) => _aivAnswered(q.id, a.key)).length;
     const complete = done >= qs.length;
     return `<button type="button" onclick="aivStartColumn('${a.key}')" class="${complete ? 'btn-secondary border' : 'btn-primary'} px-4 py-2 text-sm font-bold rounded-lg">${complete ? '✓ ' : ''}${_aivEsc(a.label)} <span class="font-normal opacity-80">— ${done} of ${qs.length}</span></button>`;
   }).join('');
+  const answers = _aiv.run.answers || [];
+  const review = answers.filter(_aivNeedsReview).length;
+  const unchecked = answers.filter(_aivNeedsCheck).length;
+  const named = answers.filter((a) => a.mentioned === true).length;
+  document.getElementById('aiv-accuracy').classList.toggle('hidden', !named);
+  document.getElementById('aiv-accuracy-btns').innerHTML =
+    `<button type="button" onclick="aivReviewSuggestions()" ${review ? '' : 'disabled'} class="${review ? 'btn-primary' : 'btn-secondary border'} px-4 py-2 text-sm font-bold rounded-lg">Review accuracy suggestions <span class="font-normal opacity-80">— ${review} to confirm</span></button>`
+    + (unchecked ? `<button type="button" onclick="aivCheckAccuracy()" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg">Suggest accuracy for ${unchecked} more</button>` : '');
 }
 
 // Start a column at its first unanswered question (or the first question, when it is complete).
 function aivStartColumn(assistant) {
-  const qs = _aivWalkQuestions();
-  const first = qs.find((q) => !_aivAnswered(q.id, assistant)) || qs[0];
-  if (first) aivOpenCell(first.id, assistant);
+  _aiv.walk = _aivColumnWalk(assistant);
+  const first = _aiv.walk.find((c) => !_aivAnswered(c.questionId, assistant)) || _aiv.walk[0];
+  if (first) aivOpenCell(first.questionId, assistant, true);
 }
 
-// Previous / next question in the same column, without saving.
-function aivStep(dir) {
+// Walk every answer whose accuracy suggestion waits for a confirmation, across all assistants.
+function aivReviewSuggestions() {
+  const qOrder = (_aiv.data.questions || []).map((q) => q.id);
+  const aOrder = (_aiv.data.assistants || []).map((a) => a.key);
+  _aiv.walk = (_aiv.run.answers || []).filter(_aivNeedsReview)
+    .sort((x, y) => qOrder.indexOf(x.questionId) - qOrder.indexOf(y.questionId) || aOrder.indexOf(x.assistant) - aOrder.indexOf(y.assistant))
+    .map((a) => ({ questionId: a.questionId, assistant: a.assistant }));
+  if (_aiv.walk.length) aivOpenCell(_aiv.walk[0].questionId, _aiv.walk[0].assistant, true);
+}
+
+async function aivCheckAccuracy() {
+  try {
+    await aivPost({ action: 'check_accuracy', runId: _aiv.runId });
+    window.showToast?.('Checking accuracy in the background — the suggestions appear in a minute or two.', { icon: '✅' });
+    const runId = _aiv.runId;
+    let ticks = 0;
+    clearInterval(_aiv.poll);
+    _aiv.poll = setInterval(async () => {
+      ticks++;
+      if (_aiv.runId !== runId || ticks > 30) { clearInterval(_aiv.poll); return; }
+      await aivSelectRun(runId);
+      if (!(_aiv.run.answers || []).some(_aivNeedsCheck)) clearInterval(_aiv.poll);
+    }, 8000);
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
+}
+
+function _aivWalkIndex() {
   const e = _aiv.editing;
-  if (!e) return;
-  const qs = _aivWalkQuestions();
-  const i = qs.findIndex((q) => q.id === e.questionId);
-  const next = qs[i + dir];
-  if (next) aivOpenCell(next.id, e.assistant);
+  return e && _aiv.walk ? _aiv.walk.findIndex((c) => c.questionId === e.questionId && c.assistant === e.assistant) : -1;
+}
+
+// Previous / next cell in the current walk, without saving.
+function aivStep(dir) {
+  const next = _aiv.walk && _aiv.walk[_aivWalkIndex() + dir];
+  if (next) aivOpenCell(next.questionId, next.assistant, true);
 }
 
 function aivOpenClicked() {
@@ -10232,11 +10290,15 @@ function aivOpenClicked() {
   }
 }
 
-function aivOpenCell(questionId, assistant) {
+// inWalk: opened by a walk, which keeps its list. A click on a grid cell walks that cell's column.
+function aivOpenCell(questionId, assistant, inWalk) {
+  if (!inWalk || !_aiv.walk) _aiv.walk = _aivColumnWalk(assistant);
   const q = _aiv.data.questions.find((x) => x.id === questionId);
   const a = _aiv.data.assistants.find((x) => x.key === assistant);
   const ans = (_aiv.run.answers || []).find((x) => x.questionId === questionId && x.assistant === assistant) || null;
   _aiv.editing = { questionId, assistant, ans };
+  _aiv.scored = null;
+  document.getElementById('aiv-m-score-status').classList.add('hidden');
   document.getElementById('aiv-m-assistant').textContent = a.label;
   document.getElementById('aiv-m-question').textContent = q.text;
   const open = document.getElementById('aiv-m-open');
@@ -10244,7 +10306,7 @@ function aivOpenCell(questionId, assistant) {
   open.textContent = `Open in ${a.label} ↗`;
   document.getElementById('aiv-m-source').textContent = ans
     ? `${ans.source === 'api' ? `API answer${ans.model ? ' · ' + ans.model : ''}` : 'Entered by hand'} · ${new Date(ans.answeredAt).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
-    : (a.auto ? 'Not fetched yet — use "Fetch Claude + ChatGPT answers", or ask it yourself.' : '');
+    : (a.auto ? 'Not fetched yet — use "Fetch automatic answers", or ask it yourself.' : '');
   const err = document.getElementById('aiv-m-error');
   err.textContent = ans && ans.error ? `The automatic fetch failed: ${ans.error}` : '';
   err.classList.toggle('hidden', !(ans && ans.error));
@@ -10253,6 +10315,7 @@ function aivOpenCell(questionId, assistant) {
   document.getElementById('aiv-m-link').value = (ans && ans.link) || '';
   document.getElementById('aiv-m-accurate').value = (ans && ans.accurate) || '';
   document.getElementById('aiv-m-wrong').value = (ans && ans.wrongFacts) || '';
+  _aivShowSuggestion(ans && ans.suggestedAccurate ? { accurate: ans.suggestedAccurate, wrongFacts: ans.suggestedWrongFacts } : null, !(ans && ans.accurate));
   document.getElementById('aiv-m-competitors').value = ((ans && ans.competitors) || []).join(', ');
   document.getElementById('aiv-m-notes').value = (ans && ans.notes) || '';
   document.getElementById('aiv-m-answer').value = (ans && ans.answerText) || '';
@@ -10265,15 +10328,57 @@ function aivOpenCell(questionId, assistant) {
     + `<p><strong>Free trial</strong>: ${_aivEsc(f.trialDays)} days, no card needed</p>`
     + '<p><strong>Approval</strong>: nothing goes out until the owner approves it, unless they let an assistant publish on its own</p>'
     + '<p><strong>Where</strong>: UK-based web app for small businesses, bemoreswan.com</p>';
-  const qs = _aivWalkQuestions();
-  const i = qs.findIndex((x) => x.id === questionId);
-  document.getElementById('aiv-m-counter').textContent = i >= 0 ? `Question ${i + 1} of ${qs.length}` : '';
+  const i = _aivWalkIndex();
+  document.getElementById('aiv-m-counter').textContent = i >= 0 ? `${i + 1} of ${_aiv.walk.length}` : '';
   document.getElementById('aiv-m-prev').disabled = i <= 0;
-  document.getElementById('aiv-m-next').textContent = i >= 0 && i < qs.length - 1 ? 'Save & next →' : 'Save & finish';
+  document.getElementById('aiv-m-next').textContent = i >= 0 && i < _aiv.walk.length - 1 ? 'Save & next →' : 'Save & finish';
   aivSyncModal();
   const modal = document.getElementById('aiv-modal');
   modal.classList.remove('hidden');
   modal.firstElementChild.scrollTop = 0;
+}
+
+// Show Claude's suggestion and, when nobody has confirmed accuracy yet, pre-fill it: confirming is
+// then one Save. The box says plainly that it is a suggestion.
+function _aivShowSuggestion(sug, prefill) {
+  const box = document.getElementById('aiv-m-suggestion');
+  if (!sug) { box.classList.add('hidden'); box.textContent = ''; return; }
+  box.innerHTML = `<strong>Claude's suggestion: ${_aivEsc(_aivVerdict[sug.accurate] || sug.accurate)}</strong>${sug.wrongFacts ? ` — ${_aivEsc(sug.wrongFacts)}` : ''}${prefill ? '<span class="block text-amber-700 mt-0.5">Filled in below for you to check. It counts once you save.</span>' : ''}`;
+  box.classList.remove('hidden');
+  if (prefill) {
+    document.getElementById('aiv-m-accurate').value = sug.accurate;
+    document.getElementById('aiv-m-wrong').value = sug.wrongFacts || '';
+  }
+}
+
+// Read a pasted answer the way an API answer is read, and fill the form from it.
+async function aivScoreAnswer() {
+  const e = _aiv.editing;
+  const text = document.getElementById('aiv-m-answer').value.trim();
+  const status = document.getElementById('aiv-m-score-status');
+  if (!e || !text) return;
+  const btn = document.getElementById('aiv-m-score');
+  btn.disabled = true;
+  status.textContent = 'Reading the answer and checking it against the facts…';
+  status.classList.remove('hidden');
+  try {
+    const d = await aivPost({ action: 'score_answer', questionId: e.questionId, assistant: e.assistant, answerText: text });
+    if (_aiv.editing !== e) return; // moved on while it was reading
+    document.querySelectorAll('input[name="aiv-m-mentioned"]').forEach((r) => { r.checked = r.value === (d.mentioned ? 'yes' : 'no'); });
+    document.getElementById('aiv-m-position').value = d.position || '';
+    document.getElementById('aiv-m-link').value = d.link || '';
+    document.getElementById('aiv-m-competitors').value = (d.competitors || []).join(', ');
+    document.getElementById('aiv-m-accurate').value = '';
+    document.getElementById('aiv-m-wrong').value = '';
+    _aiv.scored = d.suggestion || null;
+    _aivShowSuggestion(_aiv.scored, true);
+    aivSyncModal();
+    status.textContent = d.mentioned
+      ? `Filled in: named${d.position ? `, number ${d.position} in the list` : ''}${d.suggestion ? '' : ' (no accuracy suggestion this time — set it yourself)'}. Check it, then save.`
+      : 'Filled in: Be More Swan is not named. Check the other tools, then save.';
+  } catch (err) {
+    status.textContent = `Could not read it: ${err.message}`;
+  } finally { btn.disabled = false; }
 }
 
 function aivSyncModal() {
@@ -10294,21 +10399,21 @@ async function aivSaveAnswer(goNext) {
   const picked = document.querySelector('input[name="aiv-m-mentioned"]:checked');
   if (!picked) { window.showToast?.('Say whether Be More Swan was named.', { icon: '⚠️' }); return; }
   const v = (id) => document.getElementById(id).value;
+  const next = goNext && _aiv.walk ? _aiv.walk[_aivWalkIndex() + 1] : null;
   try {
     await aivPost({
       action: 'save_answer', runId: _aiv.runId, questionId: e.questionId, assistant: e.assistant,
       mentioned: picked.value === 'yes', position: v('aiv-m-position') || null, link: v('aiv-m-link') || null,
       accurate: v('aiv-m-accurate') || null, wrongFacts: v('aiv-m-wrong'), competitors: v('aiv-m-competitors'),
       notes: v('aiv-m-notes'), answerText: v('aiv-m-answer'),
+      ...(_aiv.scored ? { suggestedAccurate: _aiv.scored.accurate, suggestedWrongFacts: _aiv.scored.wrongFacts } : {}),
     });
     await aivSelectRun(_aiv.runId);
-    const qs = _aivWalkQuestions();
-    const next = goNext ? qs[qs.findIndex((q) => q.id === e.questionId) + 1] : null;
     if (next) {
-      aivOpenCell(next.id, e.assistant);
+      aivOpenCell(next.questionId, next.assistant, true);
     } else {
       aivCloseModal();
-      if (goNext) window.showToast?.(`That was the last question for ${(_aiv.data.assistants.find((a) => a.key === e.assistant) || {}).label || 'this assistant'}.`, { icon: '✅' });
+      if (goNext) window.showToast?.('That was the last one.', { icon: '✅' });
     }
     _aiv.data.trend = (await api(AIV_API)).trend;
     aivRenderTrend();

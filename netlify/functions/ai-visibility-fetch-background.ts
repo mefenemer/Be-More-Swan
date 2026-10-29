@@ -1,9 +1,13 @@
 // netlify/functions/ai-visibility-fetch-background.ts
-// Admin → AI Visibility → "Fetch answers": ask every active question of Claude and ChatGPT through
-// their APIs, with web search on, and record what comes back.
+// Admin → AI Visibility → "Fetch answers": ask every active question of Claude, ChatGPT and Gemini
+// through their APIs, with web search on, and record what comes back. Every answer that names us then
+// gets a SUGGESTED "Accurate?" (src/lib/ai-visibility-accuracy.ts) for the admin to confirm.
+//
+// mode 'accuracy' skips the asking and only suggests accuracy for answers in the run that name us and
+// have none yet — answers fetched before suggestions existed, or typed in by hand with the answer text.
 //
 // Started by admin-ai-visibility.ts (Bearer CRON_TRIGGER_SECRET, like the other internal
-// `-background` triggers). A background function has 15 minutes; 25 questions × 2 assistants, three
+// `-background` triggers). A background function has 15 minutes; 25 questions × 3 assistants, six
 // at a time, with each searching the web, takes a few. The page polls the run for progress.
 //
 // ── What an "API answer" is, and is not ──────────────────────────────────────────────────────────
@@ -14,8 +18,8 @@
 //
 // ── What it fills in ─────────────────────────────────────────────────────────────────────────────
 // Mentioned, position and "linked to our site" are read off the text (src/utils/ai-visibility.ts
-// detectMention), and known competitors are matched by name. "Accurate?" is left blank on purpose —
-// it needs a person who knows the facts.
+// detectMention), and known competitors are matched by name. "Accurate?" itself is left blank on
+// purpose — only a person confirms it; the model's verdict goes in suggested_accurate.
 //
 // A MANUAL answer is never overwritten: an admin who typed something in meant it. An existing API
 // answer is replaced only when the admin asked for a refetch (overwrite: true).
@@ -24,20 +28,27 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiVisibilityQuestions, aiVisibilityAnswers } from '../../db/schema';
 import { gatewayGenerateGrounded } from '../../src/lib/ai-gateway';
-import { AUTO_ANSWER_SYSTEM, AUTO_ASSISTANTS, detectMention, detectCompetitors, type AssistantKey } from '../../src/utils/ai-visibility';
+import { suggestAccuracy } from '../../src/lib/ai-visibility-accuracy';
+import { AUTO_ANSWER_SYSTEM, AUTO_ASSISTANTS, detectMention, detectCompetitors, readGeminiResponse, type AssistantKey } from '../../src/utils/ai-visibility';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // A Claude answer with web search measured 45 s (2026-10-29), so 50 calls three at a time ran close to
-// the 15-minute ceiling. Five at a time, and no new call starts after 11 minutes — the longest call
+// the 15-minute ceiling. Six at a time (75 calls since Gemini, plus an accuracy check on each answer
+// that names us), and no new call starts after 11 minutes — the longest call
 // (CLAUDE_BUDGET_MS, 3 min) started then still ends inside 15. Whatever is left stays empty, and
 // pressing "Fetch" again fills only the empty and failed cells.
-const CONCURRENCY = 5;
+const CONCURRENCY = 6;
 const STOP_STARTING_AFTER_MS = 11 * 60 * 1000;
 const OPENAI_TIMEOUT_MS = 150_000;
 // The model OpenAI recommends for web search (developers.openai.com, tools-web-search, Oct 2026),
 // closest to what ChatGPT itself runs. An account without access to it falls back once to gpt-5.
 const OPENAI_MODEL = process.env.AI_VISIBILITY_OPENAI_MODEL || 'gpt-5.5';
 const OPENAI_FALLBACK_MODEL = 'gpt-5';
+// Gemini: the model in Google's own grounding examples (ai.google.dev, google-search, Oct 2026), the
+// family the Gemini app runs. A key without access to it falls back once to 2.5 Flash.
+const GEMINI_MODEL = process.env.AI_VISIBILITY_GEMINI_MODEL || 'gemini-3.8-flash';
+const GEMINI_FALLBACK_MODEL = 'gemini-2.5-flash';
+const GEMINI_TIMEOUT_MS = 150_000;
 
 interface Fetched { text: string; urls: string[]; model: string }
 
@@ -111,7 +122,47 @@ async function askChatGpt(question: string): Promise<Fetched> {
     return { text, urls, model: String(data?.model || model) };
 }
 
-const ASK: Record<string, (q: string) => Promise<Fetched>> = { claude: askClaude, chatgpt: askChatGpt };
+// generateContent with the google_search tool: the same search the Gemini app and Google's AI
+// Overviews use. The key goes in a header, never the URL (URLs are logged).
+async function askGemini(question: string): Promise<Fetched> {
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) throw new Error('GEMINI_API_KEY is not set.');
+    const call = (model: string) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+        body: JSON.stringify({
+            systemInstruction: { parts: [{ text: AUTO_ANSWER_SYSTEM }] },
+            contents: [{ role: 'user', parts: [{ text: question }] }],
+            tools: [{ google_search: {} }],
+        }),
+        signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+    });
+    let model = GEMINI_MODEL;
+    let res = await call(model);
+    if ((res.status === 400 || res.status === 404) && model !== GEMINI_FALLBACK_MODEL) {
+        const body = await res.text();
+        if (!/model/i.test(body)) throw new Error(`Gemini HTTP ${res.status}: ${body.slice(0, 300)}`);
+        model = GEMINI_FALLBACK_MODEL;
+        res = await call(model);
+    }
+    if (!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    const data = await res.json();
+    const { text, urls } = readGeminiResponse(data);
+    if (!text) throw new Error(`Gemini returned no answer text${data?.candidates?.[0]?.finishReason ? ` (${data.candidates[0].finishReason})` : ''}.`);
+    return { text, urls, model: String(data?.modelVersion || model) };
+}
+
+const ASK: Record<string, (q: string) => Promise<Fetched>> = { claude: askClaude, chatgpt: askChatGpt, gemini: askGemini };
+
+/** Store Claude's suggested verdict on an answer that names us. Best effort; never throws. */
+async function suggestFor(db: ReturnType<typeof getDb>, answerId: number, question: string, answerText: string): Promise<boolean> {
+    const s = await suggestAccuracy(question, answerText);
+    if (!s) return false;
+    await db.update(aiVisibilityAnswers)
+        .set({ suggestedAccurate: s.accurate, suggestedWrongFacts: s.wrongFacts, suggestedAt: new Date() })
+        .where(eq(aiVisibilityAnswers.id, answerId));
+    return true;
+}
 
 /** Run `fn` over `items`, at most `limit` at a time. */
 async function pool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>, stopAt = Infinity): Promise<number> {
@@ -130,9 +181,26 @@ export default withLambda(async (event) => {
     const auth = event.headers['authorization'] || event.headers['Authorization'] || '';
     if (auth.replace(/^Bearer\s+/i, '').trim() !== secret) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
 
-    let body: { runId?: number; assistants?: string[]; overwrite?: boolean; adminId?: number } = {};
+    let body: { runId?: number; assistants?: string[]; overwrite?: boolean; adminId?: number; mode?: string } = {};
     try { body = JSON.parse(event.body || '{}'); } catch { /* validated below */ }
     const runId = Number(body.runId);
+
+    if (body.mode === 'accuracy') {
+        if (!runId) return { statusCode: 400, body: JSON.stringify({ error: 'runId required.' }) };
+        const db = getDb();
+        const questions = await db.select({ id: aiVisibilityQuestions.id, text: aiVisibilityQuestions.text }).from(aiVisibilityQuestions);
+        const rows = (await db.select().from(aiVisibilityAnswers).where(eq(aiVisibilityAnswers.runId, runId)))
+            .filter((r) => r.mentioned === true && !r.accurate && !r.suggestedAccurate && (r.answerText || '').trim());
+        let done = 0;
+        const startedAt = Date.now();
+        await pool(rows, CONCURRENCY, async (r) => {
+            const q = questions.find((x) => x.id === r.questionId);
+            if (q && await suggestFor(db, r.id, q.text, r.answerText!)) done++;
+        }, startedAt + STOP_STARTING_AFTER_MS);
+        console.log(`[ai-visibility-fetch] run ${runId}: accuracy suggested for ${done} of ${rows.length}`);
+        return { statusCode: 200, body: JSON.stringify({ suggested: done, queued: rows.length }) };
+    }
+
     const assistants = AUTO_ASSISTANTS.filter((a) => (body.assistants || AUTO_ASSISTANTS).includes(a));
     if (!runId || !assistants.length) return { statusCode: 400, body: JSON.stringify({ error: 'runId and assistants required.' }) };
 
@@ -164,9 +232,13 @@ export default withLambda(async (event) => {
             };
             const [row] = await db.select({ id: aiVisibilityAnswers.id, source: aiVisibilityAnswers.source }).from(aiVisibilityAnswers).where(where).limit(1);
             if (row?.source === 'manual') return; // typed in while this was running — theirs wins
-            if (row) await db.update(aiVisibilityAnswers).set(values).where(eq(aiVisibilityAnswers.id, row.id));
-            else await db.insert(aiVisibilityAnswers).values({ runId, questionId: q.id, assistant: a, ...values }).onConflictDoNothing();
+            // A new answer replaces any suggestion made for the old one.
+            const fresh = { ...values, suggestedAccurate: null, suggestedWrongFacts: null, suggestedAt: null };
+            let id = row?.id;
+            if (row) await db.update(aiVisibilityAnswers).set(fresh).where(eq(aiVisibilityAnswers.id, row.id));
+            else id = (await db.insert(aiVisibilityAnswers).values({ runId, questionId: q.id, assistant: a, ...fresh }).onConflictDoNothing().returning({ id: aiVisibilityAnswers.id }))[0]?.id;
             ok++;
+            if (m.mentioned && id) await suggestFor(db, id, q.text, got.text);
         } catch (err) {
             failed++;
             const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);

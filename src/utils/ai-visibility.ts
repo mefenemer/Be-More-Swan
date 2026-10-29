@@ -9,13 +9,13 @@
 export const ASSISTANTS = [
     { key: 'chatgpt', label: 'ChatGPT', auto: true, openUrl: (q: string) => `https://chatgpt.com/?q=${encodeURIComponent(q)}&hints=search` },
     { key: 'copilot', label: 'Microsoft Copilot', auto: false, openUrl: (q: string) => `https://copilot.microsoft.com/?q=${encodeURIComponent(q)}` },
-    { key: 'gemini', label: 'Google Gemini', auto: false, openUrl: (_q: string) => 'https://gemini.google.com/app' },
+    { key: 'gemini', label: 'Google Gemini', auto: true, openUrl: (_q: string) => 'https://gemini.google.com/app' },
     { key: 'claude', label: 'Claude', auto: true, openUrl: (q: string) => `https://claude.ai/new?q=${encodeURIComponent(q)}` },
     { key: 'google_ai_overview', label: 'Google AI Overview', auto: false, openUrl: (q: string) => `https://www.google.co.uk/search?q=${encodeURIComponent(q)}` },
 ] as const;
 export type AssistantKey = typeof ASSISTANTS[number]['key'];
 export const ASSISTANT_KEYS = ASSISTANTS.map((a) => a.key) as readonly string[];
-/** The two assistants whose answers can be fetched through an API. */
+/** The assistants whose answers can be fetched through an API (Gemini since 2026-10-29). */
 export const AUTO_ASSISTANTS = ASSISTANTS.filter((a) => a.auto).map((a) => a.key) as AssistantKey[];
 
 export const CATEGORIES = [
@@ -189,3 +189,73 @@ export const AUTO_ANSWER_SYSTEM =
     'You are a helpful AI assistant answering a member of the public who is in the United Kingdom. ' +
     'Answer their question the way you normally would in a chat, searching the web when that helps. ' +
     'When you recommend products or tools, name them.';
+
+// ── Accuracy suggestions ─────────────────────────────────────────────────────────────────────────
+// "Accurate?" was the slowest judgement on the page. Claude now SUGGESTS it, from the live facts
+// (src/lib/ai-visibility-accuracy.ts), and the suggestion is stored apart from `accurate`: the summary
+// counts only what an admin confirmed, so a model's guess never becomes a reported number unseen.
+
+/** The judge's instructions. `facts` is the live fact sheet; the judge has no web search on purpose. */
+export function accuracySystemPrompt(facts: string): string {
+    return [
+        'You check what an AI assistant told a member of the public about Be More Swan, against the facts below.',
+        'The facts are generated from the live website and database, so they are current and they win over anything the answer says.',
+        '',
+        'Judge ONLY claims about Be More Swan itself (its price, plans, trial, assistants, features, integrations, who it is for, where it is based).',
+        'Ignore what the answer says about other tools.',
+        'A claim is WRONG when the facts contradict it: a different price, an assistant or feature that is not in the live list, an integration the facts list as coming soon or do not list as live, a free trial of a different length.',
+        'A claim the facts neither confirm nor contradict is NOT wrong. Leave it out.',
+        '',
+        'verdict:',
+        '- "yes": nothing it says about Be More Swan is contradicted by the facts.',
+        '- "partly": the gist is right but at least one claim is wrong.',
+        '- "no": the core is wrong: what Be More Swan does, or its prices, or most of the claims.',
+        '',
+        'Reply with JSON only, no prose: {"verdict":"yes"|"partly"|"no","wrong":["each wrong claim, short, with the truth, e.g. said plans start at £39; they start at £29"]}',
+        '',
+        '=== FACTS ===',
+        facts,
+    ].join('\n');
+}
+
+/** Parse the judge's reply. Null when it is not the JSON asked for — the cell is then simply left unsuggested. */
+export function parseAccuracyVerdict(text: string): { accurate: 'yes' | 'partly' | 'no'; wrongFacts: string | null } | null {
+    const m = String(text || '').match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    let obj: any;
+    try { obj = JSON.parse(m[0]); } catch { return null; }
+    const verdict = String(obj?.verdict || '').toLowerCase();
+    if (!(ACCURATE_VALUES as readonly string[]).includes(verdict)) return null;
+    const wrong = (Array.isArray(obj.wrong) ? obj.wrong : [])
+        .map((w: unknown) => String(w ?? '').trim()).filter(Boolean).slice(0, 10);
+    // "yes" with wrong claims listed contradicts itself; trust the list.
+    const accurate = (verdict === 'yes' && wrong.length ? 'partly' : verdict) as 'yes' | 'partly' | 'no';
+    return { accurate, wrongFacts: wrong.length ? wrong.join('; ').slice(0, 4000) : null };
+}
+
+/** Plain text out of an HTML page, for the fact sheet (scripts, styles and tags removed). */
+export function htmlToText(html: string): string {
+    return String(html || '')
+        .replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&pound;/g, '£').replace(/&#39;|&rsquo;/g, "'")
+        .replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').replace(/\n{2,}/g, '\n').trim();
+}
+
+/** Text and source URLs out of a Gemini generateContent reply grounded with Google Search. */
+export function readGeminiResponse(data: any): { text: string; urls: string[] } {
+    const cand = Array.isArray(data?.candidates) ? data.candidates[0] : null;
+    const parts = Array.isArray(cand?.content?.parts) ? cand.content.parts : [];
+    const text = parts.map((p: any) => (typeof p?.text === 'string' && !p.thought ? p.text : '')).join('').trim();
+    const urls: string[] = [];
+    for (const c of Array.isArray(cand?.groundingMetadata?.groundingChunks) ? cand.groundingMetadata.groundingChunks : []) {
+        const web = c?.web;
+        if (!web) continue;
+        // Gemini's chunk `uri` is a vertexaisearch redirect, so it never names the site; its `title`
+        // is the site's domain. Store the domain as a URL so "linked to our site" can be read off it.
+        const title = String(web.title || '').trim();
+        if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(title)) urls.push(`https://${title.toLowerCase()}/`);
+        else if (typeof web.uri === 'string') urls.push(web.uri);
+    }
+    return { text, urls: [...new Set(urls)] };
+}
