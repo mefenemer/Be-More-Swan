@@ -1,39 +1,43 @@
 # Lead Generator: one Outreach tab, in stages, with an editable Follow-up plan
 
-Raised by the owner 2026-10-27. Status:
-- **Phase 1 — BUILT 2026-10-27, not committed.**
+Raised by the owner 2026-10-27. Status: **all four phases are on PROD** — committed to staging as
+d4a12f01 (1), eb447d49 (2), 81c3e335 (3) and 7947b4e0 (4), promoted in PR #500 (merged 2026-10-27).
+All four Help SQL files are **applied on staging AND prod**. ⚠️ Not yet used logged in against the real
+database and AI model — the first real use of the stage strip, a plan save and a preview is the first
+live test.
+
+What each phase built:
+- **Phase 1 — on prod.**
   - `src/config/lead-outreach-phase.ts`, mirrored to the browser as `window.LeadOutreachPhase`
   - `lead-threads.ts` action `board`
   - `tests/lead-outreach-phase.test.ts`
-  - Nothing on screen uses it yet.
-  - `board` has not yet been called against a real database.
-- **Phase 2 — BUILT 2026-10-27, not committed.** Details:
+- **Phase 2 — on prod.** Details:
   - **Stage strip:** `src/components/assistant-lead-outreach.js`.
   - **Conversations list:** reads `board`, shows one stage at a time, and opens hand-sent leads to their notes and outcome.
   - **Tab retired:** the Conversations tab button and panel are removed. `'conversations'` is now an alias for the Outreach tab.
   - **Registry:** `reviewQueue.staged`, and `resultsTabAfter: 'review-queue'`.
-  - **Copy:** the chat prompt and the reply notification now name the stages. The help copy is in `db/help-articles-2026-12zzzzzzzzzz-outreach-stages.sql`, which has **not been applied** to either database.
+  - **Copy:** the chat prompt and the reply notification now name the stages. The help copy is `db/help-articles-2026-12zzzzzzzzzz-outreach-stages.sql` (applied on both databases).
   - **Tests:** `tests/lead-outreach-stages.test.ts`.
   - **Checked in a component test page** (`component-harness-outreach-stages`, port 4533): the real components on the real Outreach markup against a fake API. The `assistants.js` wiring is covered by tests only, not by a logged-in session.
   - **Two bugs found and fixed in that check:**
     - A conversation opened while the list was redrawn stayed on "Loading…" for good.
     - The table's hidden "Open" label widened the whole page on a phone. That one was already true of the old Conversations tab.
-- **Phase 3 — BUILT 2026-10-27, not committed.** Details:
+- **Phase 3 — on prod.** Details:
   - **Rules:** `src/config/follow-up-plan.ts` (limits, no reordering, numbers never reused, the last-email rule).
   - **Writer:** `saveSequenceSteps`, `loadFollowUpPlan` and `haltActiveEnrolmentsForAssistant` in `outreach-sequences.ts`.
   - **Actions:** `get_follow_up_plan` / `save_follow_up_plan`, in **`lead-generation.ts`** rather than `lead-threads.ts`. That's where the other setup answers (`set_outreach_provider`, `set_outreach_offer`) are merged.
   - **Panel:** `src/components/assistant-follow-up-plan.js`, opened from the stage strip.
   - **Chat card:** `follow_up_plan` (`src/utils/chat-follow-up-plan.ts`).
-  - **Copy:** the To approve note quotes the saved plan, and the fixed "3 days, a week" wording is gone from the code. Help copy is in `db/help-articles-2026-12zzzzzzzzzzz-follow-up-plan.sql` (**not applied**).
+  - **Copy:** the To approve note quotes the saved plan, and the fixed "3 days, a week" wording is gone from the code. Help copy is `db/help-articles-2026-12zzzzzzzzzzz-follow-up-plan.sql` (applied on both databases).
   - **Tests:** `tests/follow-up-plan.test.ts`.
 - **Found while building Phase 3: the worker used step NUMBERS** for "the first follow-up" (where the offer link goes), the 5-email cap, and "follow-up number N". Once a plan is edited, numbers have gaps, so all three now use the step's position in the plan. Switching chasing off still affects only NEW approvals unless the owner ticks "also stop the ones running".
-- **Phase 4 — BUILT 2026-10-27, not committed.** Details:
+- **Phase 4 — on prod.** Details:
   - **Drafter:** `previewFollowUp` in `process-sequence-sends.ts` calls the worker's own `draftFollowUp`. It mints no tracked link, sends nothing and writes nothing.
   - **Action:** `preview_follow_up` in `lead-generation.ts`. It checks the lead belongs to this workspace and assistant and is still being followed up, then meters the call as a fair-use **helper** (not a task) before drafting.
   - **Panel:** "Preview with [lead]" and a **Preview this one** button on each step, using the wording on screen even if unsaved.
   - **Conversation row:** **Preview the next one** under Following up.
   - **Chat:** a `follow_up_preview` card. The model never writes the follow-up itself.
-  - **Help:** `db/help-articles-2026-12zzzzzzzzzzzz-follow-up-preview.sql` (**not applied**).
+  - **Help:** `db/help-articles-2026-12zzzzzzzzzzzz-follow-up-preview.sql` (applied on both databases).
   - **Checked** in the component test page against a fake API. Not yet checked against the real model.
 
 Two refinements made during the build:
@@ -219,14 +223,11 @@ built alongside Phase 2.
 - Verify in a component harness that runs the shipped source, as with the earlier outreach
   harnesses in `.claude/launch.json`.
 
-## Small fix found while planning
+## Small fix found while planning — checked, not needed
 
-`set_outcome` stops the chasers through `haltEnrolmentsForRecord`. Check which halt reason that
-writes. If it's `record_closed`, the thread banner will say "The lead was rejected or deleted" on a
-**won** deal. Fixing that needs either a new `outcome_recorded` reason (DDL: drop and re-add the
-CHECK constraint, with a guard so it can be re-run safely; see memory
-`migration-drop-then-add-constraint-trap`) or a different banner when `dealOutcome` is set. The
-banner change needs no DDL.
+The worry was that `set_outcome` stops the chasers with `record_closed`, so the thread banner would
+say "The lead was rejected or deleted" on a **won** deal. Checked 2026-10-29: `haltEnrolmentsForRecord`
+halts with `'manual'` ("deal outcome recorded"), so the banner reads "You stopped it". Nothing to change.
 
 ## Why not Email Flows
 
