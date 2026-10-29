@@ -24,6 +24,7 @@
   <!-- /SEO -->
   <link href="./style.css" rel="stylesheet">
   <script src="/site-theme.js"></script>
+  <script src="/assistant-pages.js"></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
   <link rel="manifest" href="/favicon/manifest.json">
@@ -773,7 +774,9 @@ function openAssistantDetail(roleKey) {
   // Opening a specific role's detail is itself a statement of intent — capture it here too, so it
   // survives whether they convert from the card CTA or from the page.
   if (!_isLoggedIn) rememberIntendedRole(roleKey);
-  window.location.href = `assistant.html?role=${encodeURIComponent(roleKey)}`;
+  // Its own page when the build generated one (assistant-pages.js), else the ?role= shell.
+  const slug = (window.BmsAssistantPages || {})[roleKey];
+  window.location.href = slug ? `/${slug}` : `assistant.html?role=${encodeURIComponent(roleKey)}`;
 }
 
 // Card click → detail modal (ignore clicks on the card's own buttons/links/toggles)

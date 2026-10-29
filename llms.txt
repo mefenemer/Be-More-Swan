@@ -1,0 +1,22 @@
+# Be More Swan
+
+> Be More Swan gives small business owners a team of AI assistants for social media, blog, email, leads and their website. The assistants work in the background, write in the business's own voice, and nothing goes out until the owner approves it.
+
+Be More Swan is a web app for small businesses, run from the UK. Each assistant is a pre-trained role: the owner answers a few setup questions, connects the accounts it needs, and the assistant plans and drafts the work. Posts, articles and emails wait in a review queue for the owner's approval by default; an owner can later let a trusted assistant publish on its own.
+
+Everything below the line is generated from the live site each time it is published, so the assistants, prices and articles listed are current.
+
+- Website: https://bemoreswan.com/
+- Pricing: https://bemoreswan.com/pricing
+- How it works: https://bemoreswan.com/how-it-works
+- All assistants: https://bemoreswan.com/assistants
+- Connections (which platforms are live and which are coming): https://bemoreswan.com/connections
+- FAQ: https://bemoreswan.com/faq
+- Help Centre: https://bemoreswan.com/help
+- Trust and security: https://bemoreswan.com/trust
+- Blog: https://bemoreswan.com/blog
+- Contact: https://bemoreswan.com/contact
+
+<!-- BUILD:LLMS-GENERATED -->
+(Generated at build time by scripts/build-seo-html.mjs: the live assistants, plans and prices, and Help Centre articles.)
+<!-- /BUILD:LLMS-GENERATED -->
