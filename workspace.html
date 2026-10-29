@@ -4338,6 +4338,9 @@ function formatCurrency(amount, currency) {
         picker_cancelled: 'Connection cancelled — no account was chosen, so your connections are unchanged.',
         picker_expired: 'That connection took too long to finish. Please connect again and choose your account.',
         picker_invalid: 'We couldn’t confirm which account you chose. Please connect again.',
+        // One Facebook login, several workspaces: Meta shares accounts per LOGIN, so un-ticking a
+        // business on Meta's screen takes it away from every workspace. Nothing was changed.
+        account_not_shared: `Meta didn’t share this workspace’s ${label} account with Be More Swan — only accounts your other workspace uses came back, so nothing was changed. Connect again, choose “Edit access” on Meta’s screen and tick every business, Page and Instagram account you use with Be More Swan, including your other workspace’s. Un-ticking one disconnects it from every workspace.`,
         // US1 AC1.4: tenant collision — this third-party account is already linked elsewhere.
         tenant_collision: `This ${label} account is already connected to another Be More Swan workspace. To use it, you must join the existing workspace or disconnect it from the other account.`,
       };

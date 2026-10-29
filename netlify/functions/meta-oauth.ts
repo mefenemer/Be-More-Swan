@@ -22,7 +22,7 @@ import { restoreConnectionDependents } from '../../src/utils/connection-recovery
 import { findTenantCollision, recordCollisionAttempt, collisionParam } from '../../src/utils/connection-collision';
 import { requireTenant } from '../../src/utils/tenant';
 import {
-    accountsFor, renderAccountPicker, pendingRefKey, signPickerHandle, parsePickerHandle,
+    accountsFor, connectedAccountNotShared, renderAccountPicker, pendingRefKey, signPickerHandle, parsePickerHandle,
     PENDING_TTL_MS, type IgPage, type MetaAccount, type PendingConnect,
 } from '../../src/utils/meta-accounts';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -477,6 +477,30 @@ export default withLambda(async (event) => {
             // Instagram only: pageList is non-empty by here, so Facebook always has a candidate.
             // Nothing linked means the Page↔Instagram link is missing, not that the login failed.
             return { statusCode: 302, headers: { Location: metaErr('not_business') }, body: '' };
+        }
+
+        // The account this workspace already posts to is missing, and every account Meta did return
+        // belongs to another workspace: the login's grant no longer includes this business. Say so,
+        // instead of letting the collision block report "already connected elsewhere" — which is
+        // true of the wrong account and sends the owner the wrong way. See connectedAccountNotShared.
+        {
+            const live = await db
+                .select({ externalUserId: systemConnections.externalUserId })
+                .from(systemConnections)
+                .where(and(
+                    eq(systemConnections.organisationId, organisationId),
+                    eq(systemConnections.serviceName, platform),
+                    eq(systemConnections.isActive, true),
+                ));
+            const heldElsewhereIds: string[] = [];
+            for (const a of accounts) {
+                if (await findTenantCollision(db, { serviceName: platform, externalUserId: a.externalUserId, organisationId })) heldElsewhereIds.push(a.externalUserId);
+            }
+            const connectedIds = live.map(c => c.externalUserId).filter((id): id is string => Boolean(id));
+            if (connectedAccountNotShared({ accounts, connectedIds, heldElsewhereIds })) {
+                console.log(`[meta-oauth] org ${organisationId}: ${platform} account not in the Meta grant; only accounts held by other workspaces came back`);
+                return { statusCode: 302, headers: { Location: metaErr('account_not_shared') }, body: '' };
+            }
         }
 
         // One reachable account is not a choice — connect it and keep the flow a single hop.

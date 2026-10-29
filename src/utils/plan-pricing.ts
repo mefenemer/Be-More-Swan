@@ -20,6 +20,7 @@ import { and, eq, ne } from 'drizzle-orm';
 import { masterPlans, planPrices, planPriceHistory } from '../../db/schema';
 import { monthlyLookupKey } from './stripe-price';
 import { triggerBlueprintRecompile } from './trigger-blueprint-recompile';
+import { triggerSiteRebuild } from './trigger-site-rebuild';
 
 // `db` is a drizzle instance (getDb()); typed loosely to avoid import cycles, matching the
 // convention in the other src/utils helpers.
@@ -119,6 +120,8 @@ export async function applyPlanPrice(
     //    platform-wide blueprint recompile. Awaited but best-effort — it only pokes the background
     //    worker (202 in ms) and never throws, so a recompile hiccup can't undo the applied price.
     await triggerBlueprintRecompile(`price_change:plan_${plan.id}`);
+    // The same convergence point refreshes the prices baked into the public site for crawlers.
+    await triggerSiteRebuild(`${plan.tierKey} price → £${priceNum}`);
 
     return { stripePriceId: newStripePriceId };
 }

@@ -44,7 +44,9 @@ check('every referenced screenshot and video exists in the repo', () => {
     }
 });
 check('the library opens the page, not the old pop-up', () => {
-    assert.match(read('assistants.html'), /window\.location\.href = `assistant\.html\?role=\$\{encodeURIComponent\(roleKey\)\}`/);
+    // Its own generated page (/ai-…, tests/ai-readability.test.ts) when the build made one, else the
+    // ?role= shell — a page either way, never the pop-up.
+    assert.match(read('assistants.html'), /window\.location\.href = slug \? `\/\$\{slug\}` : `assistant\.html\?role=\$\{encodeURIComponent\(roleKey\)\}`/);
 });
 check('the explainer is NOT in the Lambda-deployed Remotion bundle', () => {
     assert.ok(!/AssistantExplainer/.test(read('remotion/Root.tsx')));

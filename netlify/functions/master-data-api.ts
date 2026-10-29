@@ -44,6 +44,7 @@ import {
     supportedLanguages,
 } from '../../db/schema';
 import { applyPlanPrice } from '../../src/utils/plan-pricing';
+import { triggerSiteRebuild } from '../../src/utils/trigger-site-rebuild';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { isAdminRole, requirePermission } from '../../src/utils/rbac';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -166,6 +167,7 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
         }
 
         void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'master_plan', targetId: row.id, newState: row, ipAddress: ip, userAgent: ua, reason: 'admin_create' });
+        await triggerSiteRebuild(`plan ${tierKey} created`);
         return { statusCode: 201, body: JSON.stringify(row) };
     }
 
@@ -236,6 +238,13 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
         }
 
         void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'master_plan', targetId: id, previousState: prev, newState: row, ipAddress: ip, userAgent: ua, reason: 'admin_update' });
+        // The build bakes each plan's name, audience line, description and limits into the public
+        // site. A price change already rebuilt it inside applyPlanPrice(), so only the other
+        // published fields fire here — one rebuild per save, not two.
+        const publishedFields = ['name', 'tierDescription', 'description', 'assistantLimit', 'monthlyTaskLimit', 'isActive', 'isMostPopular'];
+        if (!priceChanged && publishedFields.some((f) => f in updates && String(updates[f] ?? '') !== String((prev as any)[f] ?? ''))) {
+            await triggerSiteRebuild(`plan ${prev.tierKey} edited`);
+        }
         return { statusCode: 200, body: JSON.stringify(row) };
     }
 
@@ -246,6 +255,7 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
         if (!prev) return notFound();
         await db.delete(masterPlans).where(eq(masterPlans.id, id));
         void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'master_plan', targetId: id, previousState: prev, ipAddress: ip, userAgent: ua, reason: 'admin_delete' });
+        await triggerSiteRebuild(`plan ${prev.tierKey} deleted`);
         return { statusCode: 200, body: JSON.stringify({ ok: true }) };
     }
 

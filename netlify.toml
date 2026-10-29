@@ -564,7 +564,9 @@
   # fails to match, which fails the build rather than publishing a page that quietly lost its
   # structured data. Run `npm run build:seo-html` locally to inspect the output (it is idempotent;
   # `git checkout -- .` afterwards).
-  command = "npm run build:css:prod && npm run build:version && npm run build:seo-html"
+  # The final step tells Bing (IndexNow) about the published URLs — production builds only, and it
+  # never fails the build. See scripts/indexnow-ping.mjs and docs/bing-and-ai-search-setup.md.
+  command = "npm run build:css:prod && npm run build:version && npm run build:seo-html && node scripts/indexnow-ping.mjs"
   functions = "netlify/functions"
 
 # ⚠️ PIN THE RUNTIME. Unset, the build and the Lambda runtime take whatever Netlify defaults to,
@@ -627,6 +629,9 @@ node_bundler = "esbuild"
 #
 # This inverts an allow-list. Everything indexable is: / index about blog pricing contact faq
 # trust privacy terms_of_service data-deletion help assistants connections how-it-works licenses register — those 16
+# — plus one /ai-… page per live assistant, generated at build by scripts/build-seo-html.mjs (Job 6),
+# which also adds them to sitemap.xml. ⚠️ Those slugs start with "ai-" because the /assistant-* rule
+# below would noindex an "assistant-…" one.
 # carry <link rel=canonical> + Open Graph tags and are the entries in sitemap.xml. When you
 # add a public marketing page, add it to sitemap.xml; when you add an app page, add it here.
 #
