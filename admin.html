@@ -1132,6 +1132,20 @@
           <div id="aiv-empty" class="hidden bg-white rounded-2xl border border-gray-200 p-8 text-center text-sm text-gray-500">No runs yet. Start one with <strong>New run</strong> (e.g. "Baseline Oct 2026"), then fetch the Claude and ChatGPT answers and fill in the rest.</div>
           <div id="aiv-run-body" class="hidden space-y-6">
             <div id="aiv-tiles" class="grid grid-cols-2 lg:grid-cols-4 gap-3"></div>
+            <!-- The assistants with no API: one button each, which walks that column question by
+                 question with "Save & next". The grid alone hid this work 2,400px down the page. -->
+            <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
+              <p class="text-sm font-bold text-gray-900">Fill in by hand</p>
+              <p class="text-xs text-gray-600 mb-3">These assistants have no API. Pick one: each question opens in turn — open it in the app, read the answer, record it, then <strong>Save &amp; next</strong>.</p>
+              <div id="aiv-fill" class="flex flex-wrap gap-2"></div>
+            </div>
+            <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+              <div class="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
+                <h3 class="text-sm font-bold text-gray-900">Answers <span class="font-normal text-gray-500">— click any cell to record or review it</span></h3>
+                <p class="text-[11px] text-gray-500"><span class="inline-block px-1.5 rounded font-bold bg-emerald-100 text-emerald-800">✓ 2</span> named, 2nd in the list · <span class="inline-block px-1.5 rounded font-bold bg-gray-100 text-gray-600">✗</span> not named · <span class="inline-block px-1.5 rounded font-bold bg-amber-100 text-amber-800">!</span> fetch failed · <span class="font-bold text-indigo-600">API</span> fetched automatically</p>
+              </div>
+              <table class="w-full text-sm mt-3" id="aiv-grid"></table>
+            </div>
             <div class="grid gap-6 lg:grid-cols-2">
               <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto"><table class="w-full text-sm" id="aiv-by-assistant"></table></div>
               <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto"><table class="w-full text-sm" id="aiv-by-category"></table></div>
@@ -1145,13 +1159,6 @@
               <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
                 <table class="w-full text-sm" id="aiv-trend"></table>
               </div>
-            </div>
-            <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
-              <div class="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
-                <h3 class="text-sm font-bold text-gray-900">Answers <span class="font-normal text-gray-500">— click a cell to record or review it</span></h3>
-                <p class="text-[11px] text-gray-500"><span class="inline-block px-1.5 rounded font-bold bg-emerald-100 text-emerald-800">✓ 2</span> named, 2nd in the list · <span class="inline-block px-1.5 rounded font-bold bg-gray-100 text-gray-600">✗</span> not named · <span class="inline-block px-1.5 rounded font-bold bg-amber-100 text-amber-800">!</span> fetch failed · <span class="font-bold text-indigo-600">API</span> fetched automatically</p>
-              </div>
-              <table class="w-full text-sm mt-3" id="aiv-grid"></table>
             </div>
           </div>
         </div>
@@ -2603,7 +2610,7 @@
     <h3 id="aiv-m-question" class="text-base font-bold text-gray-900 mt-1 mb-3 pr-8"></h3>
     <div class="flex flex-wrap gap-2 mb-4">
       <button type="button" onclick="aivCopyQuestion()" class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border">Copy question</button>
-      <a id="aiv-m-open" href="#" target="_blank" rel="noopener" class="btn-secondary px-3 py-1.5 text-xs font-bold rounded-lg border">Open in app ↗</a>
+      <a id="aiv-m-open" href="#" target="_blank" rel="noopener" onclick="aivOpenClicked()" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Open in app ↗</a>
       <span id="aiv-m-source" class="text-[11px] text-gray-500 self-center"></span>
     </div>
     <p id="aiv-m-error" class="hidden text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3"></p>
@@ -2648,7 +2655,7 @@
         </div>
         <div>
           <label for="aiv-m-answer" class="text-xs font-bold text-gray-500 uppercase">The answer <span class="font-normal normal-case text-gray-400">(paste it in, or fetched automatically)</span></label>
-          <textarea id="aiv-m-answer" rows="9" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed"></textarea>
+          <textarea id="aiv-m-answer" rows="6" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono leading-relaxed"></textarea>
           <div id="aiv-m-urls" class="text-[11px] text-gray-500 mt-1 break-all"></div>
         </div>
       </div>
@@ -2658,11 +2665,15 @@
         <p class="text-gray-400 pt-2 border-t border-gray-200">Ask in a fresh chat with web search on, word for word, no follow-ups. Position = Be More Swan's place in the list of tools (1 = first); blank if it isn't a list.</p>
       </aside>
     </div>
-    <div class="flex flex-wrap justify-between gap-2 mt-5">
+    <!-- Pinned to the bottom of the form: walking 25 questions must not mean scrolling for every one. -->
+    <div class="sticky bottom-0 -mx-6 -mb-6 mt-5 px-6 py-4 bg-white border-t border-gray-100 rounded-b-2xl flex flex-wrap items-center justify-between gap-2">
       <button type="button" onclick="aivClearAnswer()" class="btn-destructive px-4 py-2 text-sm font-bold rounded-lg border">Clear this answer</button>
-      <div class="flex gap-2">
-        <button type="button" onclick="aivCloseModal()" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Cancel</button>
-        <button type="button" onclick="aivSaveAnswer()" class="btn-primary px-5 py-2 text-sm font-bold rounded-lg">Save</button>
+      <div class="flex flex-wrap items-center gap-2">
+        <span id="aiv-m-counter" class="text-xs text-gray-500 mr-1"></span>
+        <button type="button" id="aiv-m-prev" onclick="aivStep(-1)" class="btn-secondary px-3 py-2 text-sm font-bold rounded-lg border">← Previous</button>
+        <button type="button" onclick="aivCloseModal()" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Close</button>
+        <button type="button" onclick="aivSaveAnswer(false)" class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border">Save</button>
+        <button type="button" id="aiv-m-next" onclick="aivSaveAnswer(true)" class="btn-primary px-5 py-2 text-sm font-bold rounded-lg">Save &amp; next →</button>
       </div>
     </div>
   </div>
@@ -10101,13 +10112,14 @@ function aivRenderRun() {
   const qs = d.questions.filter((q) => q.isActive || answered.has(q.id));
   const cell = (q, a) => {
     const ans = answers.find((x) => x.questionId === q.id && x.assistant === a.key);
-    let inner = '<span class="text-gray-300">—</span>';
+    let inner = '<span class="inline-block px-2 py-0.5 rounded-md border border-dashed border-indigo-300 text-[11px] font-bold text-indigo-600">+ Add</span>';
     if (ans && ans.mentioned === true) inner = `<span class="inline-block px-1.5 rounded font-bold bg-emerald-100 text-emerald-800">✓${ans.position ? ' ' + ans.position : ''}</span>`;
     else if (ans && ans.mentioned === false) inner = '<span class="inline-block px-1.5 rounded font-bold bg-gray-100 text-gray-600">✗</span>';
     else if (ans && ans.error) inner = `<span class="inline-block px-1.5 rounded font-bold bg-amber-100 text-amber-800" title="${_aivEsc(ans.error)}">!</span>`;
     const api = ans && ans.source === 'api' ? '<span class="block text-[9px] font-bold text-indigo-600">API</span>' : '';
     return `<td class="px-2 py-2 text-center"><button type="button" onclick="aivOpenCell(${q.id},'${a.key}')" class="w-full rounded-lg hover:bg-indigo-50 py-1" aria-label="${_aivEsc(a.label)}: ${_aivEsc(q.text)}">${inner}${api}</button></td>`;
   };
+  aivRenderFill();
   document.getElementById('aiv-grid').innerHTML =
     `<thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide"><tr><th class="px-4 py-3 text-left">Question</th>${d.assistants.map((a) => `<th class="px-2 py-3 text-center w-24">${_aivEsc(a.label)}${a.auto ? '<span class="block text-[9px] text-indigo-600 normal-case">auto</span>' : ''}</th>`).join('')}</tr></thead>`
     + `<tbody>${qs.map((q) => `<tr class="border-t border-gray-100"><td class="px-4 py-2 text-gray-800">${_aivEsc(q.text)}${q.isActive ? '' : ' <span class="text-[10px] text-gray-400">(retired)</span>'}<span class="block text-[10px] text-gray-400">${_aivEsc((d.categories.find((c) => c.key === q.category) || {}).label || q.category)}</span></td>${d.assistants.map((a) => cell(q, a)).join('')}</tr>`).join('')}</tbody>`;
@@ -10178,6 +10190,48 @@ function aivWatchFetch(expected) {
   tick();
 }
 
+// The questions a walk goes through, in the grid's order.
+function _aivWalkQuestions() {
+  return (_aiv.data.questions || []).filter((q) => q.isActive);
+}
+
+const _aivAnswered = (questionId, assistant) => (_aiv.run.answers || []).some((x) => x.questionId === questionId && x.assistant === assistant && (x.mentioned === true || x.mentioned === false));
+
+function aivRenderFill() {
+  const qs = _aivWalkQuestions();
+  document.getElementById('aiv-fill').innerHTML = (_aiv.data.assistants || []).filter((a) => !a.auto).map((a) => {
+    const done = qs.filter((q) => _aivAnswered(q.id, a.key)).length;
+    const complete = done >= qs.length;
+    return `<button type="button" onclick="aivStartColumn('${a.key}')" class="${complete ? 'btn-secondary border' : 'btn-primary'} px-4 py-2 text-sm font-bold rounded-lg">${complete ? '✓ ' : ''}${_aivEsc(a.label)} <span class="font-normal opacity-80">— ${done} of ${qs.length}</span></button>`;
+  }).join('');
+}
+
+// Start a column at its first unanswered question (or the first question, when it is complete).
+function aivStartColumn(assistant) {
+  const qs = _aivWalkQuestions();
+  const first = qs.find((q) => !_aivAnswered(q.id, assistant)) || qs[0];
+  if (first) aivOpenCell(first.id, assistant);
+}
+
+// Previous / next question in the same column, without saving.
+function aivStep(dir) {
+  const e = _aiv.editing;
+  if (!e) return;
+  const qs = _aivWalkQuestions();
+  const i = qs.findIndex((q) => q.id === e.questionId);
+  const next = qs[i + dir];
+  if (next) aivOpenCell(next.id, e.assistant);
+}
+
+function aivOpenClicked() {
+  // Gemini's link cannot carry the question, so put it on the clipboard as the tab opens.
+  if (_aiv.editing && _aiv.editing.assistant === 'gemini') {
+    navigator.clipboard?.writeText(document.getElementById('aiv-m-question').textContent)
+      .then(() => window.showToast?.('Question copied — paste it into Gemini.', { icon: '✅' }))
+      .catch(() => {});
+  }
+}
+
 function aivOpenCell(questionId, assistant) {
   const q = _aiv.data.questions.find((x) => x.id === questionId);
   const a = _aiv.data.assistants.find((x) => x.key === assistant);
@@ -10211,8 +10265,15 @@ function aivOpenCell(questionId, assistant) {
     + `<p><strong>Free trial</strong>: ${_aivEsc(f.trialDays)} days, no card needed</p>`
     + '<p><strong>Approval</strong>: nothing goes out until the owner approves it, unless they let an assistant publish on its own</p>'
     + '<p><strong>Where</strong>: UK-based web app for small businesses, bemoreswan.com</p>';
+  const qs = _aivWalkQuestions();
+  const i = qs.findIndex((x) => x.id === questionId);
+  document.getElementById('aiv-m-counter').textContent = i >= 0 ? `Question ${i + 1} of ${qs.length}` : '';
+  document.getElementById('aiv-m-prev').disabled = i <= 0;
+  document.getElementById('aiv-m-next').textContent = i >= 0 && i < qs.length - 1 ? 'Save & next →' : 'Save & finish';
   aivSyncModal();
-  document.getElementById('aiv-modal').classList.remove('hidden');
+  const modal = document.getElementById('aiv-modal');
+  modal.classList.remove('hidden');
+  modal.firstElementChild.scrollTop = 0;
 }
 
 function aivSyncModal() {
@@ -10228,7 +10289,7 @@ async function aivCopyQuestion() {
   catch { window.showToast?.('Could not copy — select the question and copy it by hand.', { icon: '⚠️' }); }
 }
 
-async function aivSaveAnswer() {
+async function aivSaveAnswer(goNext) {
   const e = _aiv.editing;
   const picked = document.querySelector('input[name="aiv-m-mentioned"]:checked');
   if (!picked) { window.showToast?.('Say whether Be More Swan was named.', { icon: '⚠️' }); return; }
@@ -10240,8 +10301,15 @@ async function aivSaveAnswer() {
       accurate: v('aiv-m-accurate') || null, wrongFacts: v('aiv-m-wrong'), competitors: v('aiv-m-competitors'),
       notes: v('aiv-m-notes'), answerText: v('aiv-m-answer'),
     });
-    aivCloseModal();
     await aivSelectRun(_aiv.runId);
+    const qs = _aivWalkQuestions();
+    const next = goNext ? qs[qs.findIndex((q) => q.id === e.questionId) + 1] : null;
+    if (next) {
+      aivOpenCell(next.id, e.assistant);
+    } else {
+      aivCloseModal();
+      if (goNext) window.showToast?.(`That was the last question for ${(_aiv.data.assistants.find((a) => a.key === e.assistant) || {}).label || 'this assistant'}.`, { icon: '✅' });
+    }
     _aiv.data.trend = (await api(AIV_API)).trend;
     aivRenderTrend();
   } catch (err) { window.showToast?.(err.message, { icon: '⚠️' }); }

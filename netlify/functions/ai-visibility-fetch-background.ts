@@ -28,10 +28,11 @@ import { AUTO_ANSWER_SYSTEM, AUTO_ASSISTANTS, detectMention, detectCompetitors, 
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // A Claude answer with web search measured 45 s (2026-10-29), so 50 calls three at a time ran close to
-// the 15-minute ceiling. Five at a time, and no new call starts after 13 minutes: whatever is left
-// stays empty, and pressing "Fetch" again fills only the empty cells.
+// the 15-minute ceiling. Five at a time, and no new call starts after 11 minutes — the longest call
+// (CLAUDE_BUDGET_MS, 3 min) started then still ends inside 15. Whatever is left stays empty, and
+// pressing "Fetch" again fills only the empty and failed cells.
 const CONCURRENCY = 5;
-const STOP_STARTING_AFTER_MS = 13 * 60 * 1000;
+const STOP_STARTING_AFTER_MS = 11 * 60 * 1000;
 const OPENAI_TIMEOUT_MS = 150_000;
 // The model OpenAI recommends for web search (developers.openai.com, tools-web-search, Oct 2026),
 // closest to what ChatGPT itself runs. An account without access to it falls back once to gpt-5.
@@ -40,12 +41,19 @@ const OPENAI_FALLBACK_MODEL = 'gpt-5';
 
 interface Fetched { text: string; urls: string[]; model: string }
 
+// ⚠️ Pass a deadline. Without one the gateway falls back to its client's 24 s PER-ATTEMPT timeout
+// (built for request paths), and an answer that searches the web takes ~45 s — so on the first
+// production run (2026-10-29) 22 of 25 Claude calls ended "Request timed out." A deadline makes the
+// gateway give the call the whole remaining budget, with no hidden retries. The gateway still
+// records the cost in ai_usage_log.
+const CLAUDE_BUDGET_MS = 180_000;
+
 async function askClaude(question: string): Promise<Fetched> {
-    // No deadline: this is a background worker, and the gateway records the cost in ai_usage_log.
     const gw = await gatewayGenerateGrounded({
         system: AUTO_ANSWER_SYSTEM,
         messages: [{ role: 'user', content: question }],
         maxTokens: 2500,
+        deadlineMs: CLAUDE_BUDGET_MS,
     });
     return { text: gw.text, urls: gw.searchedUrls, model: gw.model };
 }

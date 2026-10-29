@@ -60,16 +60,24 @@ export function detectCompetitors(text: string, self?: AssistantKey): string[] {
     return COMPETITOR_RES.filter(({ name, re }) => name !== selfName && re.test(t)).map(({ name }) => name);
 }
 
-/** Lines that read as items of a list: "1. X", "2) X", "- X", "* X", "• X", or a markdown heading. */
-const LIST_LINE_RE = /^\s*(?:\d{1,2}[.)]|[-*•]|#{2,4})\s+\S/;
+// Our name at the START of a list entry, after any bold / link markup: "**Be More Swan** — …",
+// "[Be More Swan](…)". An entry that merely mentions us mid-sentence is not us being recommended.
+const LEAD = String.raw`(?:\*\*|__|\[)?\s*(?:be\s*more\s*swan|bemoreswan)`;
+/** "3. **Be More Swan**", "**3.** Be More Swan", "3) Be More Swan" — captures the item's own number. */
+const NUMBERED_LED_RE = new RegExp(String.raw`^\s*(?:\*\*)?(\d{1,2})[.)](?:\*\*)?\s+` + LEAD, 'i');
+const BULLET_RE = /^\s*[-*•]\s+\S/;
+const BULLET_LED_RE = new RegExp(String.raw`^\s*[-*•]\s+` + LEAD, 'i');
 
 /**
  * What can be read off an answer without judgement: was Be More Swan named, where in the list of
  * tools, and did a link point at our site. Accuracy is deliberately NOT guessed — that needs a person
  * who knows the facts.
  *
- * position: the 1-based index, among the answer's list lines, of the first one naming us. Null when
- * we are not named, or are named only in running prose (not a ranked recommendation).
+ * position: our place in a list of recommended tools (1 = first) — the entry's own number in a
+ * numbered list, or its place within a bullet list — counted only when the entry LEADS with our
+ * name. Null when we are named only in prose, mid-sentence in a list item, or in a heading —
+ * "## When Be More Swan makes more sense" is a section of a comparison, not a ranking. Headings were counted as list items until 2026-10-29, which scored a
+ * "Be More Swan or Buffer" comparison as position 7 on the first production run.
  */
 export function detectMention(answerText: string, citedUrls: string[] = []): {
     mentioned: boolean; position: number | null; link: 'our_site' | 'no_link' | null;
@@ -78,9 +86,25 @@ export function detectMention(answerText: string, citedUrls: string[] = []): {
     const mentioned = BRAND_RE.test(text) || citedUrls.some((u) => isOurUrl(u));
     let position: number | null = null;
     if (mentioned) {
-        const items = text.split(/\r?\n/).filter((l) => LIST_LINE_RE.test(l));
-        const idx = items.findIndex((l) => BRAND_RE.test(l));
-        if (idx >= 0) position = idx + 1;
+        const lines = text.split(/\r?\n/);
+        // A numbered entry carries its own rank.
+        for (const l of lines) {
+            const m = NUMBERED_LED_RE.exec(l);
+            if (m) { position = Number(m[1]); break; }
+        }
+        // Otherwise a bullet entry, counted within ITS list: the count restarts at any line that is
+        // neither a bullet, blank, nor an indented continuation (a heading, a paragraph).
+        if (position === null) {
+            let n = 0;
+            for (const l of lines) {
+                if (BULLET_RE.test(l)) {
+                    n++;
+                    if (BULLET_LED_RE.test(l)) { position = n; break; }
+                } else if (l.trim() && !/^\s/.test(l)) {
+                    n = 0;
+                }
+            }
+        }
     }
     const linkedUs = citedUrls.some((u) => isOurUrl(u)) || /https?:\/\/(?:www\.)?bemoreswan\.com/i.test(text);
     // 'other_site' (a review site or directory about us) is a judgement call — left to the admin.

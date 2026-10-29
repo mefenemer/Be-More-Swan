@@ -35,9 +35,29 @@ check('a numbered list: named, with its place among the list items', () => {
     assert.deepStrictEqual(detectMention(text), { mentioned: true, position: 3, link: 'no_link' });
 });
 
-check('bullets and headings count as list items; "BeMoreSwan" and odd spacing still match', () => {
-    assert.strictEqual(detectMention('### Hootsuite\nok\n### BeMoreSwan\nok').position, 2);
+check('a bullet list ranks too, when the entry leads with our name; "BeMoreSwan" and odd spacing match', () => {
     assert.strictEqual(detectMention('- Later\n- be more  swan').position, 2);
+    assert.strictEqual(detectMention('- **Buffer** — x\n- [BeMoreSwan](https://bemoreswan.com) — y').position, 2);
+});
+
+check('a numbered entry keeps its own number, even when the list has gaps or bold numbers', () => {
+    assert.strictEqual(detectMention('**4.** **Be More Swan** — assistants').position, 4);
+    assert.strictEqual(detectMention('Intro\n\n1. Buffer\n\n   details\n\n2. Be More Swan').position, 2);
+});
+
+check('a heading is a section, not a ranking (the "Be More Swan or Buffer" case scored 7 on 2026-10-29)', () => {
+    const comparison = '**Short answer: use Buffer if you mainly schedule.**\n\n## Why I\'d pick Buffer\n\n- you know what to post;\n- want a calendar;\n- need TikTok;\n- care about analytics;\n- want a free plan.\n\n## When Be More Swan makes more sense\n\nChoose **Be More Swan** if you:\n\n- want the tool to write the posts for you;\n- also want blog posts.';
+    assert.deepStrictEqual(detectMention(comparison), { mentioned: true, position: null, link: 'no_link' });
+    assert.strictEqual(detectMention('### Hootsuite\nok\n### BeMoreSwan\nok').position, null);
+});
+
+check('a list item that only mentions us mid-sentence is not us being ranked', () => {
+    assert.strictEqual(detectMention('1. You choose an assistant in Be More Swan.\n2. You connect your tools.').position, null);
+    assert.strictEqual(detectMention('- Tools like Be More Swan can help').position, null);
+});
+
+check('bullet places are counted within their own list, restarting after a heading or paragraph', () => {
+    assert.strictEqual(detectMention('Schedulers:\n- Buffer\n- Later\n\nWriters:\n- Jasper\n- Be More Swan').position, 2);
 });
 
 check('named only in prose: mentioned, but no position (not a ranked recommendation)', () => {
@@ -148,6 +168,15 @@ check('only Claude and ChatGPT are fetched automatically', () => {
     assert.deepStrictEqual([...AUTO_ASSISTANTS].sort(), ['chatgpt', 'claude']);
 });
 
+check('Claude calls get a real budget, not the gateway\'s 24 s per-attempt default (22 of 25 timed out)', () => {
+    const src = read('netlify/functions/ai-visibility-fetch-background.ts');
+    assert.match(src, /deadlineMs: CLAUDE_BUDGET_MS/);
+    const budget = Number(src.match(/const CLAUDE_BUDGET_MS = ([\d_]+);/)![1].replace(/_/g, ''));
+    const stopAfter = src.match(/const STOP_STARTING_AFTER_MS = (\d+) \* 60 \* 1000;/)!;
+    assert.ok(budget >= 120_000, 'a web-search answer takes ~45 s; leave room for searches and a pause_turn resume');
+    assert.ok(Number(stopAfter[1]) * 60_000 + budget <= 15 * 60_000, 'the last call started must finish inside the 15-minute background limit');
+});
+
 check('the fetcher never replaces an answer an admin typed in, even mid-run', () => {
     const src = read('netlify/functions/ai-visibility-fetch-background.ts');
     assert.match(src, /if \(prev\?\.source === 'manual'\) continue;/);
@@ -185,6 +214,21 @@ check('every element id the script reads exists in the page', () => {
     const ids = [...new Set([...script.matchAll(/getElementById\('([a-z0-9-]+)'\)/g)].map((m) => m[1]))];
     const missing = ids.filter((id) => $(`#${id}`).length === 0);
     assert.deepStrictEqual(missing, []);
+});
+
+check('the hand-filled assistants are reachable from the top, not only from the grid 2,400px down', () => {
+    const body = $('#aiv-run-body').html() || '';
+    assert.ok($('#aiv-fill').length === 1, 'fill-in buttons host missing');
+    assert.ok(body.indexOf('id="aiv-fill"') < body.indexOf('id="aiv-grid"'), 'fill-in buttons must come before the grid');
+    assert.ok(body.indexOf('id="aiv-grid"') < body.indexOf('id="aiv-by-assistant"'), 'the grid must come before the breakdown tables');
+    assert.match(html, /function aivStartColumn\(assistant\)/);
+    assert.match(html, /\+ Add<\/span>/, 'an empty cell must look clickable');
+});
+
+check('the form walks a column: Save & next, Previous, and the buttons stay pinned in view', () => {
+    assert.match(html, /onclick="aivSaveAnswer\(true\)"/);
+    assert.match(html, /onclick="aivStep\(-1\)"/);
+    assert.ok($('#aiv-m-next').closest('.sticky').length === 1, 'the action buttons must be sticky inside the form');
 });
 
 check('the page uses the styled dialogs, never native confirm/prompt', () => {
