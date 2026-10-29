@@ -12,9 +12,14 @@
 //   POST { action: 'clear_answer', runId, questionId, assistant }
 //   POST { action: 'save_question', id?, category, text, sortOrder? }
 //   POST { action: 'set_question_active', id, isActive }
-//   POST { action: 'fetch_answers', runId, assistants?: ['claude','chatgpt'], overwrite? }
-//        → hands the run to ai-visibility-fetch-background (25 questions × 2 assistants with web
+//   POST { action: 'fetch_answers', runId, assistants?: ['claude','chatgpt','gemini'], overwrite? }
+//        → hands the run to ai-visibility-fetch-background (25 questions × 3 assistants with web
 //          search is minutes, not the 26 s a request gets). The page polls GET ?runId for progress.
+//   POST { action: 'score_answer', questionId, assistant, answerText }
+//        → an answer pasted from an app, read the same way as an API answer (named? place? link?
+//          competitors?) plus Claude's suggested accuracy. Nothing is saved; the form fills in.
+//   POST { action: 'check_accuracy', runId }
+//        → suggests accuracy, in the background, for every answer in the run that names us and has none.
 //
 // Until db/z-ai-visibility.sql is applied every read answers { setUp: false } and the page says so.
 // Gated on `platform_config`, an existing permission, so no role data changes before it works.
@@ -29,11 +34,17 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { TRIAL_DAYS } from '../../src/utils/trial';
 import {
     ASSISTANTS, ASSISTANT_KEYS, AUTO_ASSISTANTS, CATEGORIES, CATEGORY_KEYS, LINK_VALUES, ACCURATE_VALUES,
-    summarise, cleanCompetitors, type AnswerRow,
+    summarise, cleanCompetitors, detectMention, detectCompetitors, type AnswerRow, type AssistantKey,
 } from '../../src/utils/ai-visibility';
+import { suggestAccuracy } from '../../src/lib/ai-visibility-accuracy';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const TEXT_MAX = 4000;
+// The API key each automatic assistant needs on this site.
+const AUTO_KEY: Record<string, string> = { claude: 'ANTHROPIC_API_KEY', chatgpt: 'OPENAI_API_KEY', gemini: 'GEMINI_API_KEY' };
+// A pasted answer's accuracy check runs inside this request (26 s cap), so it gets a fixed budget and
+// the form is filled without a suggestion when it runs out.
+const SCORE_ACCURACY_BUDGET_MS = 15_000;
 const ANSWER_MAX = 20000;
 
 const json = (statusCode: number, body: unknown) => ({
@@ -178,6 +189,9 @@ export default withLambda(async (event) => {
                 if (link && !(LINK_VALUES as readonly string[]).includes(link)) return json(400, { error: 'Unknown link value.' });
                 const accurate = body.accurate ? String(body.accurate) : null;
                 if (accurate && !(ACCURATE_VALUES as readonly string[]).includes(accurate)) return json(400, { error: 'Unknown accuracy value.' });
+                // A suggestion made for a pasted answer (score_answer) travels with the save.
+                const suggested = body.suggestedAccurate ? String(body.suggestedAccurate) : undefined;
+                if (suggested && !(ACCURATE_VALUES as readonly string[]).includes(suggested)) return json(400, { error: 'Unknown suggested accuracy value.' });
 
                 const [existing] = await db.select().from(aiVisibilityAnswers).where(and(
                     eq(aiVisibilityAnswers.runId, runId), eq(aiVisibilityAnswers.questionId, questionId), eq(aiVisibilityAnswers.assistant, assistant))).limit(1);
@@ -193,6 +207,7 @@ export default withLambda(async (event) => {
                     notes: clip(body.notes),
                     // An API answer keeps its fetched text unless the admin pastes a replacement.
                     answerText: body.answerText !== undefined ? clip(body.answerText, ANSWER_MAX) : existing?.answerText ?? null,
+                    ...(suggested ? { suggestedAccurate: suggested, suggestedWrongFacts: clip(body.suggestedWrongFacts), suggestedAt: new Date() } : {}),
                     answeredBy: admin.id,
                     answeredAt: new Date(),
                 };
@@ -239,15 +254,39 @@ export default withLambda(async (event) => {
                 const [run] = await db.select().from(aiVisibilityRuns).where(eq(aiVisibilityRuns.id, runId)).limit(1);
                 if (!run) return json(404, { error: 'No such run.' });
                 const wanted = Array.isArray(body.assistants) ? body.assistants.map(String) : AUTO_ASSISTANTS;
-                const assistants = AUTO_ASSISTANTS.filter((a) => wanted.includes(a));
-                if (!assistants.length) return json(400, { error: 'Only Claude and ChatGPT answers can be fetched automatically.' });
-                const missingKeys = assistants.filter((a) => (a === 'claude' ? !process.env.ANTHROPIC_API_KEY : !process.env.OPENAI_API_KEY));
-                if (missingKeys.length) return json(400, { error: `No API key is set for ${missingKeys.join(' and ')} on this site.` });
+                // An assistant whose key is missing on this site is skipped rather than failing the
+                // whole fetch; the reply says which, so the page can tell the admin.
+                const requested = AUTO_ASSISTANTS.filter((a) => wanted.includes(a));
+                if (!requested.length) return json(400, { error: 'Only Claude, ChatGPT and Gemini answers can be fetched automatically.' });
+                const skipped = requested.filter((a) => !process.env[AUTO_KEY[a]]);
+                const assistants = requested.filter((a) => !skipped.includes(a));
+                if (!assistants.length) return json(400, { error: `No API key is set on this site for ${skipped.map((a) => AUTO_KEY[a]).join(', ')}.` });
                 const active = await db.select({ id: aiVisibilityQuestions.id }).from(aiVisibilityQuestions).where(eq(aiVisibilityQuestions.isActive, true));
                 const problem = await startFetch(event, { runId, assistants, overwrite: !!body.overwrite, adminId: admin.id });
                 if (problem) return json(502, { error: problem });
                 audit('ai_visibility_run', runId, { fetch: assistants, overwrite: !!body.overwrite });
-                return json(202, { queued: active.length * assistants.length, assistants });
+                return json(202, { queued: active.length * assistants.length, assistants, skipped: skipped.map((a) => ({ assistant: a, envVar: AUTO_KEY[a] })) });
+            }
+            case 'score_answer': {
+                const answerText = clip(body.answerText, ANSWER_MAX);
+                const assistant = String(body.assistant || '');
+                if (!answerText) return json(400, { error: 'Paste the answer first.' });
+                if (!ASSISTANT_KEYS.includes(assistant)) return json(400, { error: 'Unknown assistant.' });
+                const [q] = await db.select({ text: aiVisibilityQuestions.text }).from(aiVisibilityQuestions).where(eq(aiVisibilityQuestions.id, Number(body.questionId))).limit(1);
+                if (!q) return json(404, { error: 'No such question.' });
+                // A pasted answer carries no source list, so "linked" is read from links in the text.
+                const m = detectMention(answerText, []);
+                const suggestion = m.mentioned ? await suggestAccuracy(q.text, answerText, SCORE_ACCURACY_BUDGET_MS) : null;
+                return json(200, { ...m, competitors: detectCompetitors(answerText, assistant as AssistantKey), suggestion });
+            }
+            case 'check_accuracy': {
+                const runId = Number(body.runId);
+                const [run] = await db.select().from(aiVisibilityRuns).where(eq(aiVisibilityRuns.id, runId)).limit(1);
+                if (!run) return json(404, { error: 'No such run.' });
+                if (!process.env.ANTHROPIC_API_KEY) return json(400, { error: 'ANTHROPIC_API_KEY is not set on this site.' });
+                const problem = await startFetch(event, { runId, mode: 'accuracy' });
+                if (problem) return json(502, { error: problem });
+                return json(202, { ok: true });
             }
             default:
                 return json(400, { error: 'Unknown action.' });

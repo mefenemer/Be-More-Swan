@@ -6410,6 +6410,11 @@ export const aiVisibilityAnswers = pgTable("ai_visibility_answers", {
   // 'yes' | 'partly' | 'no'
   accurate: text("accurate"),
   wrongFacts: text("wrong_facts"),
+  // Claude's SUGGESTED accuracy (src/lib/ai-visibility-accuracy.ts), kept apart from `accurate`,
+  // which only an admin sets. db/z-ai-visibility-accuracy.sql.
+  suggestedAccurate: text("suggested_accurate"),
+  suggestedWrongFacts: text("suggested_wrong_facts"),
+  suggestedAt: timestamp("suggested_at"),
   competitors: text("competitors").array().notNull().default([]),
   notes: text("notes"),
   answerText: text("answer_text"),

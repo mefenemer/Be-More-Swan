@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import * as cheerio from 'cheerio';
 import {
     ASSISTANTS, AUTO_ASSISTANTS, CATEGORY_KEYS, detectMention, detectCompetitors, summarise, cleanCompetitors,
-    AUTO_ANSWER_SYSTEM, type AnswerRow,
+    AUTO_ANSWER_SYSTEM, parseAccuracyVerdict, accuracySystemPrompt, readGeminiResponse, htmlToText, type AnswerRow,
 } from '../src/utils/ai-visibility';
 import { readOpenAiResponse } from '../netlify/functions/ai-visibility-fetch-background';
 
@@ -164,8 +164,82 @@ check('the SQL is safe to paste into the Neon editor: no DO blocks, idempotent c
     assert.strictEqual((sql.match(/CREATE TABLE IF NOT EXISTS/g) || []).length, 3);
 });
 
-check('only Claude and ChatGPT are fetched automatically', () => {
-    assert.deepStrictEqual([...AUTO_ASSISTANTS].sort(), ['chatgpt', 'claude']);
+check('Claude, ChatGPT and Gemini are fetched automatically; Copilot and AI Overview are not', () => {
+    assert.deepStrictEqual([...AUTO_ASSISTANTS].sort(), ['chatgpt', 'claude', 'gemini']);
+    const src = read('netlify/functions/ai-visibility-fetch-background.ts');
+    for (const a of AUTO_ASSISTANTS) assert.match(src, new RegExp(`${a}: ask`), `no fetcher for ${a}`);
+});
+
+check('the Gemini key travels in a header, never the URL (URLs are logged)', () => {
+    const src = read('netlify/functions/ai-visibility-fetch-background.ts');
+    assert.match(src, /'x-goog-api-key': key/);
+    assert.doesNotMatch(src, /[?&]key=/);
+    assert.match(src, /tools: \[\{ google_search: \{\} \}\]/);
+});
+
+check('a Gemini reply: answer text without thoughts, sources by their domain (the uri is a redirect)', () => {
+    const r = readGeminiResponse({ candidates: [{
+        content: { parts: [{ text: 'thinking…', thought: true }, { text: '1. **Be More Swan** — ' }, { text: 'UK tool.' }] },
+        groundingMetadata: { groundingChunks: [
+            { web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc', title: 'bemoreswan.com' } },
+            { web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/def', title: 'Some article title' } },
+            { web: { uri: 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/ghi', title: 'BeMoreSwan.com' } },
+        ] },
+    }] });
+    assert.strictEqual(r.text, '1. **Be More Swan** — UK tool.');
+    assert.deepStrictEqual(r.urls, ['https://bemoreswan.com/', 'https://vertexaisearch.cloud.google.com/grounding-api-redirect/def']);
+    assert.strictEqual(detectMention(r.text, r.urls).link, 'our_site');
+    assert.deepStrictEqual(readGeminiResponse({}), { text: '', urls: [] });
+});
+
+check('accuracy verdicts: JSON only, known values, and "yes" with wrong claims is downgraded to partly', () => {
+    assert.deepStrictEqual(parseAccuracyVerdict('{"verdict":"yes","wrong":[]}'), { accurate: 'yes', wrongFacts: null });
+    assert.deepStrictEqual(parseAccuracyVerdict('Here you go:\n{"verdict":"partly","wrong":["said £39; it is £29"," "]}'), { accurate: 'partly', wrongFacts: 'said £39; it is £29' });
+    assert.deepStrictEqual(parseAccuracyVerdict('{"verdict":"yes","wrong":["said Minute Taking is live"]}'), { accurate: 'partly', wrongFacts: 'said Minute Taking is live' });
+    assert.strictEqual(parseAccuracyVerdict('{"verdict":"maybe"}'), null);
+    assert.strictEqual(parseAccuracyVerdict('I think it is accurate.'), null);
+    assert.strictEqual(parseAccuracyVerdict('{not json}'), null);
+});
+
+check('the judge checks only claims about us, and an unconfirmed claim is not "wrong"', () => {
+    const p = accuracySystemPrompt('PLANS: Starter £29');
+    assert.match(p, /ONLY claims about Be More Swan/);
+    assert.match(p, /neither confirm nor contradict is NOT wrong/);
+    assert.ok(p.endsWith('PLANS: Starter £29'));
+});
+
+check('the fact sheet is read from the live llms.txt and Connections page, not a typed list', () => {
+    const src = read('src/lib/ai-visibility-accuracy.ts');
+    assert.match(src, /fetchText\('\/llms\.txt'/);
+    assert.match(src, /fetchText\('\/connections'/);
+    assert.match(src, /masterPlans/);
+    assert.strictEqual(htmlToText('<p>Hi&nbsp;<b>there</b></p><script>x()</script><style>a{}</style>£29'), 'Hi there £29');
+});
+
+check('a suggestion is never counted as accuracy: the summary reads only `accurate`', () => {
+    const rows = [
+        { questionId: 1, assistant: 'claude', mentioned: true, position: null, link: null, accurate: null, competitors: [], suggestedAccurate: 'yes' },
+    ] as unknown as AnswerRow[];
+    assert.strictEqual(summarise(rows, [{ id: 1, category: 'category' }]).overall.accurate, 0);
+    const fn = read('netlify/functions/admin-ai-visibility.ts');
+    assert.doesNotMatch(fn.slice(fn.indexOf('const toRow'), fn.indexOf('async function overview')), /suggested/);
+});
+
+check('the suggestion columns: in the schema, in an idempotent SQL file, and cleared when an answer is refetched', () => {
+    const sql = read('db/z-ai-visibility-accuracy.sql');
+    for (const c of ['suggested_accurate', 'suggested_wrong_facts', 'suggested_at']) {
+        assert.match(sql, new RegExp(`ADD COLUMN IF NOT EXISTS ${c}`));
+        assert.match(read('db/schema.ts'), new RegExp(`"${c}"`));
+    }
+    assert.doesNotMatch(sql, /\bDO\b\s*\$|\$\$/);
+    assert.match(read('netlify/functions/ai-visibility-fetch-background.ts'), /suggestedAccurate: null, suggestedWrongFacts: null, suggestedAt: null/);
+});
+
+check('a pasted answer\'s accuracy check fits inside the 26 s request', () => {
+    const fn = read('netlify/functions/admin-ai-visibility.ts');
+    const budget = Number(fn.match(/const SCORE_ACCURACY_BUDGET_MS = ([\d_]+);/)![1].replace(/_/g, ''));
+    assert.ok(budget <= 18_000, `budget ${budget}ms leaves no room`);
+    assert.match(read('src/lib/ai-visibility-accuracy.ts'), /Promise\.race/);
 });
 
 check('Claude calls get a real budget, not the gateway\'s 24 s per-attempt default (22 of 25 timed out)', () => {
@@ -229,6 +303,19 @@ check('the form walks a column: Save & next, Previous, and the buttons stay pinn
     assert.match(html, /onclick="aivSaveAnswer\(true\)"/);
     assert.match(html, /onclick="aivStep\(-1\)"/);
     assert.ok($('#aiv-m-next').closest('.sticky').length === 1, 'the action buttons must be sticky inside the form');
+});
+
+check('pasting an answer fills the form; hand-filled columns skip the questions that name us', () => {
+    assert.match($('#aiv-m-answer').attr('onpaste') || '', /aivScoreAnswer/);
+    assert.match(html, /action: 'score_answer'/);
+    assert.match(html, /auto \|\| !assistant \|\| q\.category !== 'brand'/);
+});
+
+check('accuracy suggestions are reviewed in one walk and confirmed by a save, never applied in bulk', () => {
+    assert.match(html, /function aivReviewSuggestions\(\)/);
+    assert.ok($('#aiv-m-suggestion').closest('#aiv-m-when-named').length === 1, 'the suggestion sits beside Accurate?');
+    const fn = read('netlify/functions/admin-ai-visibility.ts');
+    assert.doesNotMatch(fn, /accept_all|accurate: .*suggested_accurate/i);
 });
 
 check('the page uses the styled dialogs, never native confirm/prompt', () => {
