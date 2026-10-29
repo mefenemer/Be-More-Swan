@@ -216,6 +216,21 @@ check('every element id the script reads exists in the page', () => {
     assert.deepStrictEqual(missing, []);
 });
 
+check('the hand-filled assistants are reachable from the top, not only from the grid 2,400px down', () => {
+    const body = $('#aiv-run-body').html() || '';
+    assert.ok($('#aiv-fill').length === 1, 'fill-in buttons host missing');
+    assert.ok(body.indexOf('id="aiv-fill"') < body.indexOf('id="aiv-grid"'), 'fill-in buttons must come before the grid');
+    assert.ok(body.indexOf('id="aiv-grid"') < body.indexOf('id="aiv-by-assistant"'), 'the grid must come before the breakdown tables');
+    assert.match(html, /function aivStartColumn\(assistant\)/);
+    assert.match(html, /\+ Add<\/span>/, 'an empty cell must look clickable');
+});
+
+check('the form walks a column: Save & next, Previous, and the buttons stay pinned in view', () => {
+    assert.match(html, /onclick="aivSaveAnswer\(true\)"/);
+    assert.match(html, /onclick="aivStep\(-1\)"/);
+    assert.ok($('#aiv-m-next').closest('.sticky').length === 1, 'the action buttons must be sticky inside the form');
+});
+
 check('the page uses the styled dialogs, never native confirm/prompt', () => {
     const start = html.indexOf("const AIV_API = '/.netlify/functions/admin-ai-visibility';");
     const script = html.slice(start, html.indexOf("const COUPONS_API", start));
