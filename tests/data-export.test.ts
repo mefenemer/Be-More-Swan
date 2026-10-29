@@ -78,6 +78,8 @@ function fakeDb() {
         const out: any = await buildDataExport(db, { userId: 7, organisationId: 3, includeWorkspace: false });
         assert.strictEqual(out.workspace, null);
         assert.ok(out.you.account, 'own account present');
+        assert.ok(out.you.reviewOfBeMoreSwan && 'reviewRequests' in out.you, 'their review of Be More Swan and our asks are theirs');
+        assert.ok(queried.includes('platform_reviews') && queried.includes('platform_review_asks'));
         const orgTables = Object.values(WORKSPACE_TABLES).map((t) => getTableName(t));
         const leaked = queried.filter((t) => orgTables.includes(t) || t === 'organisations' || t === 'user_organisations');
         assert.deepStrictEqual(leaked, []);

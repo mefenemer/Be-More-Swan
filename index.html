@@ -29,10 +29,11 @@
 
          Deliberately ABSENT, and please keep them absent unless the note says otherwise:
 
-         • sameAs — every social URL in this repo (facebook.com/yourpage, x.com/yourhandle, …)
-           is a form *placeholder* in assets.html, not a profile we own. sameAs is an identity
-           claim; pointing it at a non-existent page is worse than omitting it. Add real
-           profile URLs here when they exist.
+         • sameAs — only pages that really are ours (Companies House, Trustpilot). The social
+           URLs in this repo (facebook.com/yourpage, x.com/yourhandle, …) are form
+           *placeholders* in assets.html, not profiles we own. sameAs is an identity claim;
+           pointing it at a non-existent page is worse than omitting it. Add a social
+           profile only once it exists.
 
          • offers/price — plan prices live in the DB (see renderPlanCards in pricing.html) and
            there is no build-time constant to bind to. pricing.html's own hardcoded fallbacks
@@ -40,8 +41,10 @@
            a price in structured data can be shown verbatim in a search result, so a stale one
            is a public misstatement about what we charge. Wire this to the DB or leave it out.
 
-         • aggregateRating/review — we have no review corpus. Marking up ratings we cannot
-           show on the page is a manual-action risk, not a ranking win. -->
+         • aggregateRating/review — not here. They are baked by the build (Job 9,
+           scripts/seo/reviews.mjs) into the REVIEWS-JSONLD region on the #software node, and
+           only once 3+ reviews are published, because marked-up ratings must be visible on
+           the page (the TESTIMONIALS section). Never hand-write them in this block. -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
