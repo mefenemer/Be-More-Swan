@@ -5,6 +5,9 @@
 //   GET                                        → { workspaces, tiers, coupons }
 //   PUT  { organisationId, endsOn, offeredTierKey?, couponCode? }   — set or change the end date + offer
 //   POST { organisationId, action: 'preview' | 'notice' | 'reminder' }
+//   POST { organisationId, action: 'review_request' }   ask the owner for a review of Be More Swan
+//        (platform_review_request email; the app then asks them once next time they open it —
+//        src/utils/platform-reviews.ts). Refused if they already reviewed or said "don't ask again".
 //
 // Owner decisions (2026-10-13) this file enforces:
 //   • the end date is per workspace; it is the notice period;
@@ -18,11 +21,12 @@ import jwt from 'jsonwebtoken';
 import { and, eq, isNull } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { betaEndings, billingCoupons, users } from '../../db/schema';
+import { betaEndings, billingCoupons, platformReviewAsks, platformReviews, users } from '../../db/schema';
 import { requirePermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { renderTemplate, sendTemplatedEmail } from '../../src/utils/email';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { isMissingTable, recordRequest } from '../../src/utils/platform-reviews';
 import { betaOfferFor, loadBetaWorkspaces, loadOfferableTiers, suggestTier, OFFERABLE_TIERS } from '../../src/utils/beta-ending';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -103,6 +107,37 @@ export default withLambda(async (event) => {
 
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed.' });
     const action = String(body.action || '');
+
+    // ── Ask for a review — any beta workspace, ended or not, paid or not ─────────────────────
+    if (action === 'review_request') {
+        if (!ws.ownerUserId || !ws.ownerEmail) return json(400, { error: 'This workspace has no owner to ask.' });
+        try {
+            const [[done], [ask]] = await Promise.all([
+                db.select({ id: platformReviews.id }).from(platformReviews).where(eq(platformReviews.userId, ws.ownerUserId)).limit(1),
+                db.select().from(platformReviewAsks).where(eq(platformReviewAsks.userId, ws.ownerUserId)).limit(1),
+            ]);
+            if (done) return json(409, { error: 'They have already left a review.' });
+            if (ask?.optedOutAt) return json(409, { error: 'They asked not to be asked for a review.' });
+        } catch (err) {
+            if (isMissingTable(err)) return json(503, { error: 'Apply db/z-platform-reviews.sql first.' });
+            throw err;
+        }
+        const sent = await sendTemplatedEmail({
+            triggerKey: 'platform_review_request', to: ws.ownerEmail,
+            vars: {
+                user: { first_name: ws.ownerFirstName || undefined },
+                workspace: { name: ws.organisationName },
+                link: { action_url: `${baseUrl}/workspace.html?review=1` },
+            },
+        });
+        if (!sent) return json(502, { error: 'The email did not send — the template may be switched off in Comms.' });
+        await recordRequest(db, ws.ownerUserId, adminId);
+        await insertAdminAuditLog({
+            adminId, action: 'platform_review_requested', targetType: 'organisation', targetId: orgId,
+            newState: { to: ws.ownerEmail }, ipAddress: ip, userAgent: ua,
+        });
+        return json(200, { ok: true });
+    }
     if (!['preview', 'notice', 'reminder'].includes(action)) return json(400, { error: 'Unknown action.' });
     if (!ws.ending?.endsOn) return json(400, { error: 'Set an end date first.' });
     if (ws.ending.endedAt) return json(409, { error: 'This beta has already ended.' });

@@ -97,7 +97,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'invoices', 'payments', 'stripe_disputes', 'site_orders', 'reward_redemptions', 'reward_audits', 'ai_credit_ledger', 'ai_credit_balance', 'trials', 'plan_moves',
     ], 'Card details and payments'),
     ...group('never', 'What Be More Swan records about the customer, and compliance records', [
-        'dpa_acceptances', 'legal_holds', 'beta_endings', 'risk_assessments', 'security_audits', 'agent_anomalies',
+        'dpa_acceptances', 'legal_holds', 'beta_endings', 'platform_reviews', 'risk_assessments', 'security_audits', 'agent_anomalies',
         'agent_anomaly_thresholds', 'feature_requests',
     ]),
     ...group('never', 'Platform machinery: queues, logs, runs, caches and internal state, with nothing to coach on', [

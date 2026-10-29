@@ -6427,3 +6427,42 @@ export const aiVisibilityAnswers = pgTable("ai_visibility_answers", {
   uniqueIndex("ai_visibility_answers_run_question_assistant_key").on(t.runId, t.questionId, t.assistant),
   index("ai_visibility_answers_run_idx").on(t.runId, t.assistant),
 ]);
+
+// Reviews OF Be More Swan from the people using it (db/z-platform-reviews.sql,
+// src/utils/platform-reviews.ts). Not org_reviews — those are a customer's reviews of their business.
+export const platformReviews = pgTable("platform_reviews", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "set null" }),
+  rating: smallint("rating").notNull(),
+  body: text("body").notNull(),
+  displayName: text("display_name"),
+  displayDetail: text("display_detail"),
+  consentToPublish: boolean("consent_to_publish").notNull().default(false),
+  // What they got from us, shown beside any public quote (DMCC Act 2024) — "Free access during beta".
+  incentiveNote: text("incentive_note"),
+  // 'pending' | 'published' | 'hidden' — hidden is still counted in any average
+  status: text("status").notNull().default("pending"),
+  // 'in_app' | 'email'
+  source: text("source").notNull().default("in_app"),
+  // Public sites they clicked through to afterwards: 'trustpilot' | 'g2'
+  sharedTo: text("shared_to").array().notNull().default([]),
+  decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("platform_reviews_user_uq").on(t.userId),
+  index("platform_reviews_status_idx").on(t.status, t.createdAt),
+]);
+
+export const platformReviewAsks = pgTable("platform_review_asks", {
+  userId: integer("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  askCount: integer("ask_count").notNull().default(0),
+  lastAskedAt: timestamp("last_asked_at"),
+  snoozedUntil: timestamp("snoozed_until"),
+  optedOutAt: timestamp("opted_out_at"),
+  requestedAt: timestamp("requested_at"),
+  requestedBy: integer("requested_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});

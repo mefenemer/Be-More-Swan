@@ -78,6 +78,12 @@ export type AdminAction =
     | 'beta_ending_update'
     | 'beta_notice_sent'
     | 'beta_reminder_sent'
+    // Reviews of Be More Swan (admin-platform-reviews.ts, admin-beta.ts review_request)
+    | 'platform_review_requested'
+    | 'platform_review_published'
+    | 'platform_review_hidden'
+    | 'platform_review_pending'
+    | 'review_destinations_update'
     // Hosted sites (Admin → Trust → Hosted Sites): taking a customer's public website offline, or
     // putting it back, and closing the reports that led there — "who took it down, and why".
     | 'hosted_site_moderation'
