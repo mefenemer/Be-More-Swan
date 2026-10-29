@@ -17,6 +17,17 @@ Everything below the line is generated from the live site each time it is publis
 - Blog: https://bemoreswan.com/blog
 - Contact: https://bemoreswan.com/contact
 
+## Company facts
+
+- Legal name: Be More Swan Ltd, a private limited company registered in England and Wales
+- Company number: 17378263 (https://find-and-update.company-information.service.gov.uk/company/17378263)
+- Founder: Catherine Fenemer
+- Incorporated: 3 August 2026
+- Registered office: 167 - 169 Great Portland Street, 5th Floor, London, W1W 5PF, England
+- Data protection: registered with the UK Information Commissioner's Office, number ZC272072
+- Customer reviews: https://www.trustpilot.com/review/bemoreswan.com
+- Who we are: https://bemoreswan.com/about
+
 <!-- BUILD:LLMS-GENERATED -->
 (Generated at build time by scripts/build-seo-html.mjs: the live assistants, plans and prices, and Help Centre articles.)
 <!-- /BUILD:LLMS-GENERATED -->

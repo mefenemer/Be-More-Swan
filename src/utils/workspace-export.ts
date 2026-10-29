@@ -2,7 +2,8 @@
 // What a self-serve data export contains, in one place (data-export-background.ts builds it).
 //
 // Two parts, because the product is organisation-scoped but GDPR portability is per person:
-//   - `you`       — the requester's own records (profile, agreements, support, their chats). Every
+//   - `you`       — the requester's own records (profile, agreements, support, their chats, their
+//                   review of Be More Swan). Every
 //                   member gets this.
 //   - `workspace` — the organisation's data (assistants, posts, blogs, leads, audience, email,
 //                   campaigns, products, goals, connections). Owners and admins only — the same
@@ -135,7 +136,7 @@ export async function buildDataExport(db: Db, scope: ExportScope) {
     const { userId, organisationId: orgId } = scope;
 
     // ── You ───────────────────────────────────────────────────────────────
-    const [userRows, profileRows, tosRows, ticketRows, issueRows, auditRows, chatRows] = await inBatches([
+    const [userRows, profileRows, tosRows, ticketRows, issueRows, auditRows, chatRows, reviewRows, reviewAskRows] = await inBatches([
         () => rowsWhere(db, s.users, eq(s.users.id, userId)),
         () => rowsWhere(db, s.userProfiles, eq(s.userProfiles.userId, userId)),
         () => rowsWhere(db, s.tosAcceptances, eq(s.tosAcceptances.userId, userId)),
@@ -143,6 +144,9 @@ export async function buildDataExport(db: Db, scope: ExportScope) {
         () => rowsWhere(db, s.issueReports, eq(s.issueReports.userId, userId)),
         () => rowsWhere(db, s.auditLogs, eq(s.auditLogs.userId, userId)),
         () => rowsWhere(db, s.chatSessions, and(eq(s.chatSessions.userId, userId), eq(s.chatSessions.organisationId, orgId))),
+        // Their review of Be More Swan (platform-review.ts) and when we asked them for one.
+        () => rowsWhere(db, s.platformReviews, eq(s.platformReviews.userId, userId)),
+        () => rowsWhere(db, s.platformReviewAsks, eq(s.platformReviewAsks.userId, userId)),
     ]);
     const chatIds = chatRows.map((c) => c.id as number);
     const chatMessages: Record<string, unknown>[] = [];
@@ -171,6 +175,8 @@ export async function buildDataExport(db: Db, scope: ExportScope) {
         issueReports: issueRows,
         activityLog: auditRows,
         chats: chatRows.map((c) => ({ ...c, messages: chatMessages.filter((m) => m.chatSessionId === c.id) })),
+        reviewOfBeMoreSwan: reviewRows[0] ?? null,
+        reviewRequests: reviewAskRows[0] ?? null,
     };
 
     if (!scope.includeWorkspace) {
