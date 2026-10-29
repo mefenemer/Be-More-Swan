@@ -29,9 +29,10 @@ What's already in the code (since 2026-10-29):
 
 Prices are written into the pages at build time. So that a price change in Admin reaches crawlers in minutes rather than at the next release:
 
-1. Netlify → the **production** site → **Site configuration → Build & deploy → Build hooks → Add build hook**. Name it `Site rebuild (plan change)` and set the branch to `main`.
-2. Copy the hook URL. Under **Environment variables**, add `SITE_REBUILD_HOOK` = that URL, scoped to **Functions**.
-3. **Do not set it on the staging site.** The build always reads prices from bemoreswan.com, so a staging plan edit has nothing to rebuild. Setting it there would rebuild production for nothing.
+1. Netlify → the **bemoreswan** site → **Site configuration → Build & deploy → Continuous deployment → Build hooks → Add build hook**. Name it `Site rebuild (plan change)` and set the branch to `main`. Netlify shows a URL like `https://api.netlify.com/build_hooks/<24-character id>`. That URL is the value.
+2. **Site configuration → Environment variables → Add a variable**: key `SITE_REBUILD_HOOK`, value = that URL. Set **Scopes** to include **Functions**, and under **Deploy contexts** give it a value for **Production only**.
+3. **Production only matters.** Staging is a branch deploy of this same site, so a variable set for all contexts reaches staging's functions too. Then a plan edit on staging's database would rebuild production for nothing, because the build always reads prices from bemoreswan.com.
+4. Treat the URL like a password: anyone who has it can trigger production builds. Don't paste it into chats or commit it. If it leaks, delete the hook and make a new one.
 
 Until this variable is set, everything still works. The baked prices just update at the next normal deploy.
 

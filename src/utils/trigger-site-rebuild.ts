@@ -7,10 +7,11 @@
 // a plan edit that copy is stale until the next deploy. This fires a Netlify build hook to make
 // "the next deploy" a few minutes away instead of the next release.
 //
-// ⚠️ SITE_REBUILD_HOOK belongs on the PRODUCTION site only. The build reads its data from
-// bemoreswan.com whichever site runs it, so a staging plan edit changes nothing the build reads —
-// and NETLIFY_PROD_BUILD_HOOK is deliberately not reused, because that one is set where the issue
-// pipeline runs (staging) and would rebuild production on every staging plan edit.
+// ⚠️ SITE_REBUILD_HOOK must be scoped to the PRODUCTION deploy context only. Staging is a branch
+// deploy of the same Netlify site, so an all-contexts value reaches staging's functions too — and
+// the build reads its data from bemoreswan.com whichever deploy runs it, so a staging plan edit
+// changes nothing the build reads. NETLIFY_PROD_BUILD_HOOK is deliberately not reused: it is set
+// where the issue pipeline runs (staging) and would rebuild production on every staging plan edit.
 
 /** How long to wait for Netlify to ACCEPT the build (it answers as soon as it queues it). */
 const DISPATCH_TIMEOUT_MS = 5_000;
