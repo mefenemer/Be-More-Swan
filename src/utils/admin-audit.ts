@@ -57,6 +57,9 @@ export type AdminAction =
     // Music library: withdrawing a track (often one a customer shared with the community) or
     // correcting how it is listed. Same reasoning as the Index — "who took it down, and why".
     | 'music_library_curation'
+    // AI Visibility: editing the question list, opening or deleting a run, starting an API fetch.
+    // Per-cell answers are not logged — they are the admin's own notes, not a change to anything.
+    | 'ai_visibility_change'
     // Deleting a track outright (bulk, from the admin list). Records whether its file was removed
     // or kept because a workspace's post still plays it.
     | 'music_library_delete'
