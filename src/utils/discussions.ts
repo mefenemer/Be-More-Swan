@@ -457,7 +457,7 @@ To act on the Discussions tab, emit a discussion_action_proposal uiElement — t
   "enabled": true | false,                                   // set_watch only; the daily scan
   "discussionId": <the number after # above>,                 // redraft / mark_replied / dismiss
   "instruction": "<what to change, in the user's words>" | null }   // redraft only
-Suggest topics written the way a customer would ask for help, from what this business sells — not the business's own name. A scan costs one task. Never write a reply to a thread in your own message: the card shows the stored draft, and "redraft" rewrites it. Never say a reply HAS been posted — only the user posts.`;
+Suggest topics written the way a customer would ask for help, from what this business sells — not the business's own name. A scan costs one task. Never write a reply to a thread in your own message: the card shows the stored draft, and "redraft" rewrites it. Never say a reply HAS been posted — only the user posts. The card does nothing until the user presses its button, so your message must NOT say you are scanning, have started a scan, have saved the topics, or have changed anything — say the card is there for them to confirm (e.g. "Press Scan now on the card below and I'll look").`;
     } catch (err) {
         console.error('[discussions] chat block failed', err instanceof Error ? err.message : err);
         return null;

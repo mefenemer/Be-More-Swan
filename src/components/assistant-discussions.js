@@ -135,7 +135,7 @@
             <h3 class="text-base font-bold text-gray-900">What to watch</h3>
             <p class="text-sm text-gray-600 mt-1">Write each topic the way a customer would ask for help — “can anyone recommend a bookkeeper for a small café”, not your business name. Up to ${esc(state.maxTopics)}, one per line.</p>
           </div>
-          <button type="button" data-disc-scan class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${w.scanning || state.busy === 'scan' || !w.topics.length ? 'disabled' : ''}>${w.scanning ? 'Scanning…' : 'Scan now'}</button>
+          <button type="button" data-disc-scan class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${w.scanning || state.busy === 'scan' || !d.topics.trim() ? 'disabled' : ''}>${w.scanning ? 'Scanning…' : 'Scan now'}</button>
         </div>
         <label class="block text-xs font-bold text-gray-700 mt-4" for="disc-topics">Topics</label>
         <textarea id="disc-topics" data-disc-topics rows="3" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="best social media scheduler for a small business&#10;how do I get more Google reviews">${esc(d.topics)}</textarea>
@@ -358,9 +358,10 @@
       return;
     }
     if (e.target.matches('[data-disc-topics]')) {
-      const hadDraft = !!state.watchDraft;
+      const before = state.watchDraft;
       state.watchDraft = readWatchForm();
-      if (!hadDraft) render();
+      // Re-render only when Save or Scan now has to switch on or off.
+      if (!before || !before.topics.trim() !== !state.watchDraft.topics.trim()) render();
     }
   });
 
