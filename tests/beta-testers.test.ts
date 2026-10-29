@@ -84,5 +84,28 @@ check('check-capacity hands the client the FEATURE tier and offers beta no "upgr
     assert.match(read('src/utils/next-plan.ts'), /current\.tierKey === BETA_TIER_KEY\) return null;/, 'a £0 plan would otherwise be offered the entry plan as an upgrade');
 });
 
+check('no public page tells a crawler the PRODUCT is in beta (AI assistants repeated it as fact, 2026-10-29)', () => {
+    // Hidden text is still text to a crawler: index.html shipped the notice with display:none, and
+    // Claude told prospects Be More Swan was in beta after the lock came off. The wording lives in
+    // waitlist-mode.js and is written in only while sign-ups are locked.
+    const claim = /(be more swan|we)('re| is| are) (still )?in beta/i;
+    for (const page of ['index.html', 'beta.html', 'pricing.html', 'faq.html', 'how-it-works.html', 'about.html']) {
+        let html: string;
+        try { html = read(page); } catch { continue; }
+        assert.doesNotMatch(html, claim, `${page} says the product is in beta`);
+    }
+    const notice = read('index.html').match(/<div data-waitlist-show data-waitlist-notice="beta"[^>]*>([\s\S]*?)<\/div>/);
+    assert.ok(notice, 'the notice host is missing from index.html');
+    assert.strictEqual(notice![1].trim(), '', 'the notice host must ship empty');
+    const js = read('waitlist-mode.js');
+    assert.match(js, /data-waitlist-notice="beta"/);
+    assert.ok(js.indexOf("if (!s.locked) return;") !== -1, 'the notice must only be written while registration is locked');
+});
+
+check('the beta sign-up page is out of the index by meta tag AND header', () => {
+    assert.match(read('beta.html'), /<meta name="robots" content="noindex/);
+    assert.match(read('netlify.toml'), /for = "\/beta\*"\s*\[headers\.values\]\s*X-Robots-Tag = "noindex/);
+});
+
 if (process.exitCode) console.error('\nbeta testers: FAILED');
 else console.log(`\nbeta testers: ${passed} passed`);

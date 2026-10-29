@@ -112,16 +112,12 @@
 <section class="bg-white py-20 lg:py-24">
     <div class="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center gap-12">
         <div class="md:w-1/2 text-left">
-            <!-- Beta notice — shown only while sign-ups are locked for testing (waitlist-mode.js
-                 reveals [data-waitlist-show]). Ships hidden so it never flashes on a live launch. -->
-            <div data-waitlist-show style="display:none"
-               class="hidden flex items-start gap-3 mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-100">
-                <span class="shrink-0 px-2 py-0.5 rounded-full bg-emerald-700 text-white text-xs font-bold uppercase tracking-wider">Beta</span>
-                <span class="text-sm text-gray-700">
-                    <strong class="text-gray-900">Be More Swan is in beta and we're looking for testers.</strong>
-                    <a href="/beta.html" class="font-bold text-emerald-700 hover:underline whitespace-nowrap">Become a beta tester →</a>
-                </span>
-            </div>
+            <!-- Beta notice — shown only while sign-ups are locked for testing. EMPTY here on purpose:
+                 waitlist-mode.js writes the wording in when the lock is on. Hidden text is still text
+                 to a crawler — while the wording shipped in this file, AI assistants told prospects the
+                 product was still in testing long after the lock came off (AI Visibility, 2026-10-29). -->
+            <div data-waitlist-show data-waitlist-notice="beta" style="display:none"
+               class="hidden flex items-start gap-3 mb-6 p-4 rounded-xl bg-emerald-50 border border-emerald-100"></div>
             <h1 class="text-5xl md:text-6xl font-extrabold text-gray-900 tracking-tight leading-tight mb-6">
                 <!-- Leads with the outcome (owner, 2026-10-21); the subline and paragraph below are the /card
                      wording — a growing team, brand rules, you approve, hours and cost (owner, 2026-10-27); the subline names who it is for (Mystery Shopper, 2026-10-27). -->
