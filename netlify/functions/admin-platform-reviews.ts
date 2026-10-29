@@ -6,6 +6,8 @@
 //   POST { action: 'decide', id, status: 'published' | 'hidden' | 'pending' }
 //   POST { action: 'save_destinations', trustpilot?, g2? }   our own "write a review" links
 //
+// Publishing, hiding or unhiding rebuilds the public site (SITE_REBUILD_HOOK), which bakes the
+// published reviews into the home and pricing pages (scripts/build-seo-html.mjs, Job 9).
 // Publishing needs the author's consent — the server refuses otherwise. Hidden reviews stay in the
 // average. Nothing here edits a reviewer's words. Gated on `platform_config`, an existing permission,
 // so no role data has to change before it works. Asking a beta tester by email lives on the Beta
@@ -19,6 +21,7 @@ import { organisations, platformReviewAsks, platformReviews, users } from '../..
 import { hasPermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { CONFIG_KEYS, getPlatformConfig, setPlatformConfig } from '../../src/utils/platform-config';
+import { triggerSiteRebuild } from '../../src/utils/trigger-site-rebuild';
 import { cleanDestinations, isMissingTable, REVIEW_STATUSES, reviewStats, type ReviewStatus } from '../../src/utils/platform-reviews';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -98,6 +101,8 @@ export default withLambda(async (event) => {
             adminId: admin.id, action: `platform_review_${status}` as const, targetType: 'platform_review', targetId: id,
             previousState: { status: r.status }, newState: { status }, ipAddress: ip, userAgent: ua,
         });
+        // The home and pricing pages bake published reviews and the average at build time (Job 9).
+        if (status !== r.status) await triggerSiteRebuild(`review ${status}`);
         return json(200, { ok: true });
     } catch (err) {
         if (isMissingTable(err)) return method === 'GET' ? json(200, { setUp: false, reviews: [], stats: null, asks: null, destinations: {} }) : json(503, { error: 'Apply db/z-platform-reviews.sql first.' });

@@ -15,6 +15,8 @@
  *      assistant-pages.js, the map that links and forwards to them.
  *   7. Add those pages to sitemap.xml.
  *   8. Fill the generated half of llms.txt.
+ *   9. Bake published reviews of Be More Swan into the home and pricing pages, with their
+ *      Review / AggregateRating JSON-LD (markup in scripts/seo/reviews.mjs).
  *
  * Jobs 5–8 build their markup in scripts/seo/ai-readability.mjs (pure, tested in
  * tests/ai-readability.test.ts); this file does the fetching, the checks and the writes.
@@ -48,6 +50,7 @@ import {
     slugForRole, isLiveRole, buildAssistantPage, assistantPagesJs, libraryStaticCards,
     sitemapEntries, llmsGeneratedSections,
 } from './seo/ai-readability.mjs';
+import { testimonialsHtml, reviewsJsonLd, llmsReviewsLine } from './seo/reviews.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SITE_ORIGIN = 'https://bemoreswan.com';
@@ -673,7 +676,9 @@ async function buildLlmsTxt({ assistants, pages, showcases }) {
     } catch (err) {
         return handleFetchFailure('llms.txt', err);
     }
-    const body = llmsGeneratedSections({ assistants, showcases, pages, plans, enterprisePlan, articles });
+    const reviewsLine = llmsReviewsLine(await fetchReviews());
+    const body = [llmsGeneratedSections({ assistants, showcases, pages, plans, enterprisePlan, articles }), reviewsLine]
+        .filter(Boolean).join('\n\n');
     const res = injectMarked(readFileSync(path, 'utf8'), 'LLMS-GENERATED', body, (h) =>
         ({ html: h, ok: false, reason: 'no <!-- BUILD:LLMS-GENERATED --> region' }));
     if (!res.ok) return fail(`llms.txt: ${res.reason}`);
@@ -681,11 +686,52 @@ async function buildLlmsTxt({ assistants, pages, showcases }) {
     log(`llms.txt (${body.split('\n').length} generated lines)`);
 }
 
+// ── Job 9: reviews ─────────────────────────────────────────────────────────────
+//
+// Reviews an admin published (Admin → Customers → Reviews), whose authors agreed to be quoted. Unlike
+// Jobs 3–8, a fetch failure here is a WARNING, never a failed build: an empty section is a correct
+// page (it is empty until three reviews are published anyway), and get-reviews may not be deployed
+// on bemoreswan.com yet when staging builds. Publishing or hiding a review fires SITE_REBUILD_HOOK.
+const REVIEW_PAGES = ['index.html', 'pricing.html'];
+
+async function fetchReviews() {
+    try {
+        return await fetchJson(`${SITE_ORIGIN}/.netlify/functions/get-reviews`);
+    } catch (err) {
+        log(`WARNING reviews: ${err.message} — publishing without reviews`);
+        return null;
+    }
+}
+
+async function bakeReviews() {
+    const data = await fetchReviews();
+    const section = testimonialsHtml(data);
+    const ld = reviewsJsonLd(data);
+    for (const page of REVIEW_PAGES) {
+        const path = join(ROOT, page);
+        if (!existsSync(path)) { fail(`${page} not found`); continue; }
+        let html = readFileSync(path, 'utf8');
+        // The section's place is chosen in the page source by an (empty) marker region.
+        const body = injectMarked(html, 'TESTIMONIALS', section, (h) => ({ html: h, ok: false, reason: 'no <!-- BUILD:TESTIMONIALS --> region' }));
+        if (!body.ok) { fail(`${page}: ${body.reason}`); continue; }
+        html = body.html;
+        const head = injectMarked(html, 'REVIEWS-JSONLD', ld, (h, block) => {
+            if (!/<\/head>/i.test(h)) return { html: h, ok: false, reason: 'no </head>' };
+            return { html: h.replace(/<\/head>/i, `${block}\n</head>`), ok: true };
+        });
+        if (!head.ok) { fail(`${page}: ${head.reason}`); continue; }
+        writeFileSync(path, head.html);
+    }
+    log(section ? `reviews → ${REVIEW_PAGES.join(', ')} (${data.reviews.length} published, ${data.summary.count} counted)`
+        : 'reviews: fewer than 3 published — section left empty');
+}
+
 inlineFooters();
 buildFaqJsonLd();
 await inlineBlogPosts();
 await inlineHelpArticles();
 await bakePlanPrices();
+await bakeReviews();
 const assistantData = await buildAssistantPages();
 extendSitemap(assistantData.pages);
 await buildLlmsTxt(assistantData);
