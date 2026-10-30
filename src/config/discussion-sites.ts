@@ -162,6 +162,31 @@ export function normaliseSites(raw: unknown): DiscussionSource[] {
     return [...DISCUSSION_SITE_KEYS.filter((k) => list.includes(k)), ...own];
 }
 
+/**
+ * Sites as the chat model wrote them → sources. It may name a built-in by key, label or address
+ * ("Reddit", "reddit.com") and an own forum with or without the `forum:` prefix, or by a suggestion's
+ * label ("Indie Hackers"). Nothing is dropped silently: `rejected` is what isn't a forum address, and
+ * `tooMany` says more than MAX_OWN_FORUMS own forums were asked for — the card says both.
+ */
+export function sitesFromChat(raw: readonly unknown[]): { sites: DiscussionSource[]; rejected: string[]; tooMany: boolean } {
+    const picked: string[] = [];
+    const rejected: string[] = [];
+    for (const v of raw) {
+        if (typeof v !== 'string' || !v.trim()) continue;
+        const bare = v.trim().replace(/^forum:/i, '').trim();
+        const low = bare.toLowerCase();
+        const host = low.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+        const builtIn = DISCUSSION_SITE_KEYS.find((k) => k === low || DISCUSSION_SITES[k].label.toLowerCase() === low
+            || DISCUSSION_SITES[k].hosts.some((h) => host === h || host.endsWith(`.${h}`)));
+        if (builtIn) { picked.push(builtIn); continue; }
+        const address = SUGGESTED_FORUMS.find((f) => f.label.toLowerCase() === low)?.address ?? normaliseForumAddress(bare);
+        if (address) picked.push(`forum:${address}`);
+        else rejected.push(bare.slice(0, 80));
+    }
+    const own = new Set(picked.filter((s) => s.startsWith('forum:')));
+    return { sites: normaliseSites(picked), rejected, tooMany: own.size > MAX_OWN_FORUMS };
+}
+
 /** The Google query for one topic on one source. */
 export function discussionQuery(topic: string, site: DiscussionSource): string {
     return `${sourceInfo(site).siteFilter} ${topic}`;

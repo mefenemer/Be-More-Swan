@@ -78,7 +78,7 @@ const SIGNALS: Record<string, (d: MentorSnapshotData) => Signal> = {
         ? { score: 40, reason: `It would check ${d.business.website!.trim()} each week, the way a customer sees it, and suggest fixes.` }
         : null),
     lead_qualifier: (d) => (d.offerKinds?.some((k) => /service|consult|b2b|trade/i.test(k))
-        ? { score: 42, reason: 'You offer services, and nobody is finding new customers for you yet. A Lead Generator finds businesses that fit and drafts the first email.' }
+        ? { score: 42, reason: 'You offer services, and nobody is finding new customers for you yet. A Lead Generator finds businesses that fit and drafts the first email, and spots forum threads where people ask for what you sell.' }
         : null),
     campaign_orchestrator: (d) => (activeCount(d) >= 2
         ? { score: 38, reason: `You have ${activeCount(d)} active assistants. A Campaign Assistant plans work across them towards one goal.` }
