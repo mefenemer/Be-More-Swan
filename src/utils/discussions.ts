@@ -24,7 +24,7 @@ import {
     DAILY_SCAN_MIN_GAP_MS, DEFAULT_DISCUSSION_SITES, DISCUSSION_FIT_LABELS, DISCUSSION_SITES,
     MAX_THREAD_AGE_DAYS, MAX_TRIAGE_PER_SCAN, MIN_RELEVANCE, RESULTS_PER_SEARCH, SCAN_STALE_MS,
     discussionQuery, isDiscussionSite, looksLikeThread, normaliseSites, normaliseThreadUrl,
-    normaliseTopics, postedAgeDays, siteForUrl, withDisclosure,
+    normaliseTopics, plainForSite, postedAgeDays, siteForUrl, withDisclosure,
     type DiscussionFit, type DiscussionSiteKey, type DiscussionStatus,
 } from '../config/discussion-sites';
 import { isSearchConfigured, search } from '../lib/discovery-search';
@@ -298,7 +298,7 @@ export async function runScan(db: Db, watchId: number): Promise<void> {
                     organisationId: orgId, aiAssistantId: assistantId, site: c.site, url: c.url,
                     title: c.title.slice(0, 300), snippet: c.snippet.slice(0, 600) || null,
                     postedLabel: c.postedLabel, matchedTopic: c.topic, relevance: v.relevance, fit: v.fit,
-                    why: v.why || null, draftReply: withDisclosure(v.reply, sender.businessName),
+                    why: v.why || null, draftReply: withDisclosure(plainForSite(v.reply, c.site), sender.businessName),
                     readFrom: pages[i] ? 'page' : 'snippet',
                 }];
             });
@@ -424,7 +424,7 @@ export async function redraftDiscussion(
     );
     if (!reply) return { ok: false, error: 'The reply couldn’t be rewritten just now — please try again.' };
     const [updated] = await db.update(discussions)
-        .set({ draftReply: withDisclosure(reply, sender.businessName), readFrom: pageText ? 'page' : row.readFrom, updatedAt: sql`now()` })
+        .set({ draftReply: withDisclosure(plainForSite(reply, site), sender.businessName), readFrom: pageText ? 'page' : row.readFrom, updatedAt: sql`now()` })
         .where(eq(discussions.id, row.id))
         .returning();
     return { ok: true, discussion: discussionView(updated) };

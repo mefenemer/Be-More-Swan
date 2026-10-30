@@ -171,6 +171,18 @@ export function withDisclosure(reply: string, businessName: string | null | unde
     return `${body}\n\n${discussionDisclosure(businessName)}`;
 }
 
+/**
+ * Reddit renders markdown. Quora, UK Business Forums and LinkedIn don't — `*this*` pastes as literal
+ * asterisks — so off Reddit the emphasis markers come out (the words stay).
+ */
+export function plainForSite(reply: string, site: DiscussionSiteKey): string {
+    if (site === 'reddit') return reply;
+    return reply
+        .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+        .replace(/(^|[^*\w])\*([^*\n]+)\*(?![*\w])/g, '$1$2')
+        .replace(/`([^`\n]+)`/g, '$1');
+}
+
 /** True when the stored reply still carries a disclosure line (the user may edit the draft). */
 export function hasDisclosure(reply: string | null | undefined): boolean {
     return !!reply && DISCLOSURE_RE.test(reply);

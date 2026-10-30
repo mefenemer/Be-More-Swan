@@ -16,7 +16,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import {
     DISCUSSION_SITE_KEYS, MAX_TOPICS, discussionDisclosure, discussionQuery, hasDisclosure, looksLikeThread,
-    normaliseSites, normaliseThreadUrl, normaliseTopics, postedAgeDays, siteForUrl, withDisclosure,
+    normaliseSites, normaliseThreadUrl, normaliseTopics, plainForSite, postedAgeDays, siteForUrl, withDisclosure,
 } from '../src/config/discussion-sites';
 import { discussionActionFromUiElement } from '../src/utils/chat-discussion-action';
 
@@ -47,7 +47,14 @@ check('hasDisclosure spots a reply the user stripped it from', () => {
 });
 check('the triage prompt tells the model NOT to write a disclosure (code adds it)', () => {
     assert.match(read('src/lib/discussion-triage.ts'), /Do NOT add any disclosure/);
-    assert.match(read('src/utils/discussions.ts'), /draftReply: withDisclosure\(v\.reply, sender\.businessName\)/);
+    assert.match(read('src/utils/discussions.ts'), /draftReply: withDisclosure\(plainForSite\(v\.reply, c\.site\), sender\.businessName\)/);
+});
+
+check('markdown emphasis is kept on Reddit and stripped elsewhere', () => {
+    const r = 'Try **Letterboxd** lists, or *Searching for Sugar Man*. Use `site:` search. 2 * 3 stays.';
+    assert.strictEqual(plainForSite(r, 'reddit'), r);
+    assert.strictEqual(plainForSite(r, 'quora'), 'Try Letterboxd lists, or Searching for Sugar Man. Use site: search. 2 * 3 stays.');
+    assert.match(read('src/utils/discussions.ts'), /withDisclosure\(plainForSite\(reply, site\), sender\.businessName\)/);
 });
 
 console.log('\n──── searching ────');
