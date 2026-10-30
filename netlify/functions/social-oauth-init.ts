@@ -1,6 +1,6 @@
 // netlify/functions/social-oauth-init.ts
 // US-SMM-4.1.1: OAuth 2.0 initiation for LinkedIn and X (Twitter).
-// GET ?platform=linkedin|x  — validates session, builds redirect URL with CSRF state.
+// GET ?platform=linkedin|linkedin_page|x  — validates session, builds redirect URL with CSRF state.
 // The callback redirect_uri carries no query string; `platform` travels inside the signed state.
 // AC1.1.2: CSRF token stored server-side in vault with 10-minute TTL.
 // AC1.1.3: LinkedIn uses minimum required scopes only.
@@ -12,6 +12,7 @@ import { storeSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
 import { X_OAUTH_SCOPES } from '../../src/config/x-scopes';
+import { linkedinPageAccessEnabled, linkedinPageScopes } from '../../src/config/linkedin-capabilities';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CSRF_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -25,7 +26,7 @@ export default withLambda(async (event) => {
 
     const baseUrl = resolveBaseUrl(event.headers);
     if (!baseUrl) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
-    if (!['linkedin', 'x'].includes(platform ?? '')) {
+    if (!['linkedin', 'linkedin_page', 'x'].includes(platform ?? '')) {
         return { statusCode: 400, body: JSON.stringify({ error: 'Unknown platform' }) };
     }
 
@@ -72,6 +73,17 @@ export default withLambda(async (event) => {
         // State carries only non-sensitive routing info; CSRF is validated server-side
         const state = buildState({ platform, userId: String(userId), csrf });
         authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUri)}&scope=${encodeURIComponent(scopes)}&state=${state}`;
+    } else if (platform === 'linkedin_page') {
+        // Company Page: the separate Community Management app (see linkedin-capabilities.ts). Same
+        // callback URL — register it on BOTH LinkedIn apps — with `linkedin_page` riding in state.
+        const clientId = process.env.LINKEDIN_COMMUNITY_CLIENT_ID;
+        if (!clientId || !linkedinPageAccessEnabled()) return { statusCode: 302, headers: { Location: '/workspace.html?oauth_error=not_configured&platform=linkedin' }, body: '' };
+
+        const csrfKey = `oauth_csrf:${userId}:linkedin_page`;
+        await storeSecret(db, csrfKey, { csrf, expiresAt, organisationId: String(organisationId), assistantId });
+
+        const state = buildState({ platform, userId: String(userId), csrf });
+        authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUri)}&scope=${encodeURIComponent(linkedinPageScopes())}&state=${state}`;
     } else {
         // X OAuth 2.0 with PKCE
         const clientId = process.env.X_CLIENT_ID;

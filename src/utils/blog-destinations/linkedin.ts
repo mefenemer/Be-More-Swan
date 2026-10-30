@@ -181,6 +181,14 @@ export const linkedinAdapter: BlogDestinationAdapter<LinkedinCreds> = {
      * this app's scopes reach (/v2/me needs r_liteprofile, which we are not approved for).
      */
     async validate(creds) {
+        // A Company Page connection's token carries no OpenID scope; confirm it by reading the Page.
+        const { isLinkedInPageUrn, fetchLinkedInPageName } = await import('../linkedin-page');
+        if (isLinkedInPageUrn(creds.authorUrn)) {
+            const pageName = await fetchLinkedInPageName(creds.accessToken, creds.authorUrn);
+            return pageName
+                ? { ok: true, accountLabel: pageName }
+                : { ok: false, error: 'LinkedIn could not confirm your Company Page. Reconnect LinkedIn and try again.' };
+        }
         try {
             const res = await fetch('https://api.linkedin.com/v2/userinfo', {
                 headers: { Authorization: `Bearer ${creds.accessToken}` },

@@ -23,6 +23,7 @@ import {
     publishYouTube, publishThreads, refreshXToken, type DriverResult,
 } from '../../src/utils/social-publish';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { isLinkedInPageUrn, fetchLinkedInPageName } from '../../src/utils/linkedin-page';
 
 const PLATFORMS = ['facebook', 'linkedin', 'x', 'threads', 'youtube'] as const;
 type SelfTestPlatform = typeof PLATFORMS[number];
@@ -190,7 +191,17 @@ export default withLambda(async (event) => {
                 : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status, code: result.errorCode ?? null, subcode: result.errorSubcode ?? null });
         }
 
-        // linkedin
+        // linkedin. A Company Page token has no OpenID scope, so /v2/userinfo would refuse it — its
+        // author is the stored organisation URN, confirmed by reading the Page's name.
+        if (isLinkedInPageUrn(conn.externalUserId)) {
+            const pageName = await fetchLinkedInPageName(token, conn.externalUserId!);
+            if (!pageName) return json(200, { preflight: 'fail', detail: 'LinkedIn would not read this Company Page with the stored token.' });
+            if (!wantTestPost) return json(200, { preflight: 'ok', detail: `Company Page ${pageName} (${conn.externalUserId}).` });
+            const pageResult = await publishLinkedIn(testMessage(), token, conn.externalUserId, null);
+            return pageResult.ok
+                ? json(200, { preflight: 'ok', testPost: 'ok', postId: pageResult.id, deleteHint: deleteHint(platform, pageResult.id) })
+                : json(200, { preflight: 'ok', testPost: 'fail', detail: pageResult.error, status: pageResult.status });
+        }
         const author = await resolveLinkedInAuthor(token);
         if (!author.ok) return json(200, { preflight: 'fail', detail: author.error, status: author.status });
         if (!wantTestPost) return json(200, { preflight: 'ok', detail: `Resolved author ${author.urn}.` });

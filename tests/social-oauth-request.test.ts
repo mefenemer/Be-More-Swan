@@ -2,8 +2,9 @@
 // Locks the shape of the LinkedIn / X authorization requests that social-oauth-init.ts builds.
 // These are the details the providers reject on, and each has burned us:
 //   · scopes must be SPACE-delimited (RFC 6749 §3.3) — a comma-joined list was refused outright
-//   · LinkedIn scopes must stay within the app's approved products (OpenID Connect + Share on
-//     LinkedIn); the old r_organization_social set needs Community Management, which we lack
+//   · LinkedIn MEMBER scopes must stay within the main app's approved products (OpenID Connect +
+//     Share on LinkedIn). Company Page scopes belong to the separate Community app and come from
+//     linkedinPageScopes() — never a literal in these files (tests/linkedin-page.test.ts)
 //   · the redirect_uri must carry no query string — `platform` rides in the signed state instead
 // Static assertions against the source, so there is no network or DB in play.
 // Run:  npx tsx tests/social-oauth-request.test.ts

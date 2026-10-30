@@ -1,5 +1,5 @@
 // netlify/functions/social-oauth-callback.ts
-// US-SMM-4.1.1: OAuth 2.0 callback/token exchange for LinkedIn and X (Twitter).
+// US-SMM-4.1.1: OAuth 2.0 callback/token exchange for LinkedIn (member or Company Page) and X (Twitter).
 // GET ?code=...&state=...   — the platform rides in `state` (see social-oauth-init.ts).
 // AC1.1.2: CSRF verified against server-side vault entry with 10-minute TTL.
 
@@ -16,6 +16,9 @@ import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src
 import { restoreConnectionDependents } from '../../src/utils/connection-recovery';
 import { findTenantCollision, recordCollisionAttempt, collisionParam } from '../../src/utils/connection-collision';
 import { X_OAUTH_SCOPES } from '../../src/config/x-scopes';
+import { linkedinPageAccessEnabled } from '../../src/config/linkedin-capabilities';
+import { listAdministeredPages } from '../../src/utils/linkedin-page';
+import { bindLinkedInPage, linkedInPageVaultKey, linkedInPagePickKey, LINKEDIN_PAGE_PICK_TTL_MS, type PendingPagePick } from '../../src/utils/linkedin-page-bind';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function parseState(raw: string): Record<string, string> | null {
@@ -65,7 +68,9 @@ export default withLambda(async (event) => {
     // must be relevant to that assistant's role.
     if (assistantId) {
         const assistant = await resolveAssistantRole(db, organisationId, assistantId);
-        if (!assistant || !isServiceAllowedForAssistant(platform, assistant)) {
+        // A Company Page is a LinkedIn connection as far as relevance goes.
+        const service = platform === 'linkedin_page' ? 'linkedin' : platform;
+        if (!assistant || !isServiceAllowedForAssistant(service, assistant)) {
             return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=connection_not_relevant&platform=${platform}` }, body: '' };
         }
     }
@@ -157,6 +162,52 @@ export default withLambda(async (event) => {
             body: JSON.stringify({ organisationId, platform: 'linkedin' }),
         }).catch(() => {});
 
+        return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=linkedin${assistantId ? `&assistantId=${assistantId}` : ''}` }, body: '' };
+    }
+
+    // ── LinkedIn Company Page (Community Management app) ─────────────────────
+    // Redirects say platform=linkedin: to the user and the workspace toasts this IS LinkedIn.
+    if (platform === 'linkedin_page') {
+        const fail = (reason: string) => ({ statusCode: 302, headers: { Location: `/workspace.html?oauth_error=${reason}&platform=linkedin${assistantId ? `&assistantId=${assistantId}` : ''}` }, body: '' });
+        const clientId     = process.env.LINKEDIN_COMMUNITY_CLIENT_ID;
+        const clientSecret = process.env.LINKEDIN_COMMUNITY_CLIENT_SECRET;
+        if (!clientId || !clientSecret || !linkedinPageAccessEnabled()) return fail('not_configured');
+
+        const tokenRes = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: callbackUri, client_id: clientId, client_secret: clientSecret }),
+        });
+        const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; error_description?: string } = await tokenRes.json().catch(() => ({}));
+        if (!tokenData.access_token) {
+            console.error('[social-oauth-callback] LinkedIn Page token exchange failed:', tokenRes.status, tokenData.error_description ?? '');
+            return fail('token_exchange');
+        }
+
+        let pages;
+        try { pages = await listAdministeredPages(tokenData.access_token); }
+        catch (err) {
+            console.error('[social-oauth-callback] LinkedIn Page list failed:', (err as Error)?.message || err);
+            return fail('token_exchange');
+        }
+        if (!pages.length) return fail('no_linkedin_pages');
+
+        // One token reaches every Page the member administers, so it is stored before the choice.
+        // Community Management apps receive refresh tokens; refresh-social-tokens.ts renews it.
+        await storeSecret(db, linkedInPageVaultKey(organisationId), { token: tokenData.access_token, refreshToken: tokenData.refresh_token ?? null });
+        const tokenExpiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : null;
+
+        if (pages.length > 1) {
+            // Several Pages: workspace.html opens a picker (linkedin-page-pick.ts) on ?linkedin_pick=1.
+            const pending: PendingPagePick = { organisationId, assistantId, pages, tokenExpiresAt: tokenExpiresAt?.toISOString() ?? null, expiresAt: Date.now() + LINKEDIN_PAGE_PICK_TTL_MS };
+            await storeSecret(db, linkedInPagePickKey(userId), pending);
+            return { statusCode: 302, headers: { Location: `/workspace.html?linkedin_pick=1${assistantId ? `&assistantId=${assistantId}` : ''}` }, body: '' };
+        }
+
+        const bound = await bindLinkedInPage(db, { organisationId, userId, assistantId, page: pages[0], tokenExpiresAt });
+        if (!bound.ok) {
+            return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=tenant_collision&platform=linkedin${collisionParam(bound.collisionAttemptId)}` }, body: '' };
+        }
         return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=linkedin${assistantId ? `&assistantId=${assistantId}` : ''}` }, body: '' };
     }
 

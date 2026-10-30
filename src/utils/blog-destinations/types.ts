@@ -96,11 +96,11 @@ export interface SwanIndexCreds {
 /**
  * LinkedIn is SOCIAL-backed: the token is the workspace's existing LinkedIn OAuth connection in
  * system_connections (the same one the Social Media Manager posts through), resolved by store.ts.
- * `authorUrn` is that connection's externalUserId — the member the share is posted as.
+ * `authorUrn` is that connection's externalUserId — the member or Company Page the share is posted as.
  */
 export interface LinkedinCreds {
     accessToken: string;
-    /** `urn:li:person:<sub>`, or the bare sub; empty when the connection row never stored one. */
+    /** `urn:li:person:<sub>`, the bare sub, or `urn:li:organization:<id>` for a Company Page; empty when the row never stored one. */
     authorUrn: string;
 }
 

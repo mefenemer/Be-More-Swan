@@ -12,7 +12,8 @@ import { getSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { LINKEDIN_ORGANISATION_ACCESS, LINKEDIN_MEMBER_ONLY_REASON } from '../../src/config/linkedin-capabilities';
+import { LINKEDIN_MEMBER_ONLY_REASON } from '../../src/config/linkedin-capabilities';
+import { isLinkedInPageUrn } from '../../src/utils/linkedin-page';
 
 const META_PROFILE_SYNC_ENABLED = false;
 
@@ -143,20 +144,16 @@ export default withLambda(async (event) => {
         const secret = await getSecret(db, liConn.vaultRefKey);
         const token  = (secret as { token?: string } | null)?.token;
 
-        if (!LINKEDIN_ORGANISATION_ACCESS) {
-            // Without Community Management the organizationAcls / organizations calls below can
-            // only 403. Skip with the real reason rather than reporting "failed" or "you are not
+        if (!isLinkedInPageUrn(liConn.externalUserId)) {
+            // A personal-feed connection's token cannot touch organizationAcls / organizations — they
+            // can only 403. Skip with the real reason rather than reporting "failed" or "you are not
             // an admin of any organisation", which sends the user hunting for a problem on their end.
             results.linkedin = { status: 'skipped', detail: LINKEDIN_MEMBER_ONLY_REASON };
         } else if (token) {
-            // Fetch the org URN via member roles API
+            // The Page this workspace chose when it connected — never "the first Page the member
+            // administers", which for an agency login is somebody else's business.
             try {
-                const rolesRes = await fetch('https://api.linkedin.com/v2/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&projection=(elements*(organization~(localizedName)))', {
-                    headers: { Authorization: `Bearer ${token}` },
-                    signal: AbortSignal.timeout(5000),
-                });
-                const rolesData: { elements?: Array<{ organization: string }> } = await rolesRes.json();
-                const orgUrn = rolesData.elements?.[0]?.organization;
+                const orgUrn = liConn.externalUserId;
 
                 if (orgUrn) {
                     const patchRes = await fetch(`https://api.linkedin.com/v2/organizations/${orgUrn.split(':').pop()}`, {

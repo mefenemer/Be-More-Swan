@@ -265,6 +265,10 @@ let _connToDelete = null;
 let _userConnections = [];
 // Monthly X posting usage { used, allowance, remaining } (Phase 1) — drives the X-card gauge.
 let _xCredits = null;
+// True when LinkedIn Company Page posting is switched on server-side (linkedinPageAccessEnabled()).
+// Off, LinkedIn connects to the member's personal feed only, exactly as before.
+let _linkedinPages = false;
+const _LINKEDIN_PAGE_OAUTH_URL = '/.netlify/functions/social-oauth-init?platform=linkedin_page';
 
 // A slim usage gauge for the X card: "X posts this month — used / total", where total = monthly
 // allowance + any purchased (non-expiring) bonus. Bar turns amber near the cap, red when spent.
@@ -506,6 +510,9 @@ function _oauthUrl(platform) {
 // re-runs the connect once the account has been freed. Skips the pre-connect checklist on purpose:
 // the person has just been through it.
 window._intOAuthUrlFor = function (platformKey) {
+    // Only a Company Page can collide (a personal profile is exempt), so "Move it here" for LinkedIn
+    // re-runs the Page connect.
+    if (_linkedinPages && String(platformKey || '').toLowerCase() === 'linkedin') return _withAssistantId(_LINKEDIN_PAGE_OAUTH_URL);
     const platform = PLATFORMS.find(p => p.oauthPlatform && p.id.toLowerCase() === String(platformKey || '').toLowerCase());
     return platform ? _oauthUrl(platform) : null;
 };
@@ -522,6 +529,23 @@ window._intStartOAuth = function (platformId) {
     // skipping it lands unprepared users on a raw Facebook error page. The Instagram
     // checklist also covers the "connects through Facebook" warning below.
     if (platform.preConnect) { window._intOpenPreConnect(platformId); return; }
+    // LinkedIn with Company Pages on: ask where posts go. Every Connect / Reconnect button on the
+    // card and the assistant row comes through here, so this is the one place the choice is made.
+    if (platform.id === 'LinkedIn' && _linkedinPages && typeof window.choiceModal === 'function') {
+        _closeDrawerForModal();
+        const current = _userConnections.find(c => String(c.serviceName).toLowerCase() === 'linkedin');
+        const options = [
+            { value: 'page', label: 'A Company Page', description: 'Posts appear on your business’s LinkedIn Page. You must be an admin of the Page.' },
+            { value: 'member', label: 'My personal profile', description: 'Posts appear on your own LinkedIn feed.' },
+        ];
+        // Reconnecting a personal-feed connection: keep that the first answer.
+        if (current && !_isLinkedInPage(current)) options.reverse();
+        window.choiceModal('Where should your LinkedIn posts go?', options, { title: 'Connecting LinkedIn' }).then(choice => {
+            if (choice === 'page') window.location.href = _withAssistantId(_LINKEDIN_PAGE_OAUTH_URL);
+            else if (choice === 'member') window.location.href = _oauthUrl(platform);
+        });
+        return;
+    }
     if (platform.id === 'Instagram' && typeof window.showConfirmModal === 'function') {
         _closeDrawerForModal();
         window.showConfirmModal(
@@ -679,6 +703,7 @@ async function _loadConnections() {
         _searchConsole = data.searchConsole && typeof data.searchConsole === 'object' ? data.searchConsole : null;
         // Monthly X posting usage { used, allowance, remaining } for the X-card gauge (Phase 1).
         _xCredits = (data.xCredits && typeof data.xCredits.allowance === 'number') ? data.xCredits : null;
+        _linkedinPages = data.linkedinPages === true;
     } catch (e) {
         console.warn('Could not load connections:', e);
     }
@@ -1805,9 +1830,17 @@ function _sourceCard(source, conn) {
         </div>`;
 }
 
+// A LinkedIn Company Page connection stores its organisation URN as externalUserId.
+function _isLinkedInPage(conn) {
+    return !!conn && String(conn.externalUserId || '').startsWith('urn:li:organization:');
+}
+
 function _platformCard(platform, conn) {
     const isConnected = !!conn;
-    const handle = conn?.externalUserId || '';
+    // A Company Page shows its name, never the raw urn:li:organization:… id.
+    const handle = _isLinkedInPage(conn)
+        ? `${conn.metadata?.linkedinPageName || 'Company Page'} (Company Page)`
+        : (conn?.externalUserId || '');
 
     const health = _connHealth(conn);
     const statusBadge = _healthBadge(health);
@@ -2190,8 +2223,9 @@ window._intOpenModal = function (platformId) {
     // US-SMM-4.1.1: OAuth platforms redirect instead of showing the token modal
     // (via the pre-connect setup checklist when the platform defines one).
     if (platform.oauthPlatform) {
-        if (platform.preConnect) { window._intOpenPreConnect(platformId); return; }
-        window.location.href = _oauthUrl(platform);
+        // One OAuth entry point, so the pre-connect checklist and the LinkedIn Page/profile
+        // choice apply whichever button started it.
+        window._intStartOAuth(platformId);
         return;
     }
 
