@@ -7,6 +7,7 @@
 -- Written from the code:
 --   form labels, banner, empty states, button names     — src/components/assistant-discussions.js
 --   the four sites + their rules notes                   — src/config/discussion-sites.ts DISCUSSION_SITES
+--   own forums (up to 5, by address) + suggestions      — discussion-sites.ts MAX_OWN_FORUMS, SUGGESTED_FORUMS
 --   up to 5 topics, last 7 days, relevance 50+           — discussion-sites.ts MAX_TOPICS, MAX_THREAD_AGE_DAYS, MIN_RELEVANCE
 --   disclosure line added in code, warning if removed    — withDisclosure / hasDisclosure
 --   page read only where robots.txt allows (else summary) — src/utils/discussions.ts readThread
@@ -39,6 +40,7 @@ Open your Lead Generator and go to **Discussions**. Under **What to watch**:
 
 - **Topics**: up to 5, one per line. Write each one the way a customer would ask for help, not your business name. "Best wedding photographer in Bristol" works far better than "Smith Photography".
 - **Sites**: Reddit, UK Business Forums, Quora and LinkedIn posts. The first three are ticked to start with.
+- **Your own forums**: add up to 5 more by web address, such as a trade forum or a US community. There are a few one-click suggestions, including Indie Hackers and Shopify Community.
 - **Scan every morning**: leave it ticked and your assistant looks for new threads each morning.
 
 Press **Save**, or press **Scan now** to look straight away. New threads appear in a minute or two.

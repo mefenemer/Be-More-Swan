@@ -19,7 +19,10 @@ import { requireTenant } from '../../src/utils/tenant';
 import {
     listDiscussions, redraftDiscussion, saveDraft, saveWatch, setDiscussionStatus, startScan,
 } from '../../src/utils/discussions';
-import { DISCUSSION_SITES, DISCUSSION_SITE_KEYS, DISCUSSION_STATUSES, MAX_TOPICS, type DiscussionStatus } from '../../src/config/discussion-sites';
+import {
+    DISCUSSION_SITES, DISCUSSION_SITE_KEYS, DISCUSSION_STATUSES, MAX_OWN_FORUMS, MAX_TOPICS, SUGGESTED_FORUMS,
+    normaliseForumAddress, type DiscussionStatus,
+} from '../../src/config/discussion-sites';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -64,9 +67,14 @@ export default withLambda(async (event) => {
 
     try {
         if (action === 'list') {
-            return json(200, { ...(await listDiscussions(db, orgId, assistantId)), sites: SITES, maxTopics: MAX_TOPICS });
+            return json(200, { ...(await listDiscussions(db, orgId, assistantId)), sites: SITES, maxTopics: MAX_TOPICS, suggestedForums: SUGGESTED_FORUMS, maxOwnForums: MAX_OWN_FORUMS });
         }
         if (action === 'save_watch') {
+            // An own forum that can't be watched is said out loud, not silently dropped.
+            const own = Array.isArray(body.sites) ? body.sites.filter((v): v is string => typeof v === 'string' && v.startsWith('forum:')) : [];
+            const bad = own.find((v) => !normaliseForumAddress(v));
+            if (bad) return json(422, { error: `“${bad.slice(6)}” isn’t a forum address we can watch. Paste the forum’s web address, like contractortalk.com. Reddit, UK Business Forums, Quora and LinkedIn are ticked above instead.` });
+            if (new Set(own.map((v) => normaliseForumAddress(v))).size > MAX_OWN_FORUMS) return json(422, { error: `You can watch up to ${MAX_OWN_FORUMS} forums of your own.` });
             return json(200, { watch: await saveWatch(db, orgId, assistantId, { topics: body.topics, sites: body.sites, enabled: body.enabled }) });
         }
         if (action === 'scan_now') {

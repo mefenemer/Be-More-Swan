@@ -17,6 +17,7 @@ import path from 'node:path';
 import {
     DISCUSSION_SITE_KEYS, MAX_TOPICS, discussionDisclosure, discussionQuery, hasDisclosure, looksLikeThread,
     normaliseSites, normaliseThreadUrl, normaliseTopics, plainForSite, postedAgeDays, siteForUrl, withDisclosure,
+    MAX_OWN_FORUMS, normaliseForumAddress, sourceInfo,
 } from '../src/config/discussion-sites';
 import { discussionActionFromUiElement } from '../src/utils/chat-discussion-action';
 
@@ -57,6 +58,43 @@ check('markdown emphasis is kept on Reddit and stripped elsewhere', () => {
     assert.match(read('src/utils/discussions.ts'), /withDisclosure\(plainForSite\(reply, site\), sender\.businessName\)/);
 });
 
+console.log('\n──── your own forums ────');
+
+check('a forum address is cleaned to host[/path]; built-ins and junk are refused', () => {
+    assert.strictEqual(normaliseForumAddress('https://www.ContractorTalk.com/forums/?x=1#top'), 'contractortalk.com/forums');
+    assert.strictEqual(normaliseForumAddress('biggerpockets.com/forums/'), 'biggerpockets.com/forums');
+    assert.strictEqual(normaliseForumAddress('reddit.com/r/smallbusiness'), null, 'tick Reddit instead');
+    assert.strictEqual(normaliseForumAddress('old.reddit.com'), null);
+    assert.strictEqual(normaliseForumAddress('localhost'), null);
+    assert.strictEqual(normaliseForumAddress('192.168.0.1'), null);
+    assert.strictEqual(normaliseForumAddress('not a domain'), null);
+});
+check('own forums ride in the sites list after the built-ins, deduped and capped', () => {
+    const many = Array.from({ length: 8 }, (_, i) => `forum:forum${i}.com`);
+    const s = normaliseSites(['forum:WWW.indiehackers.com/', 'quora', 'forum:indiehackers.com', 'reddit', 'forum:reddit.com', ...many]);
+    assert.deepStrictEqual(s.slice(0, 3), ['reddit', 'quora', 'forum:indiehackers.com']);
+    assert.strictEqual(s.filter((x) => x.startsWith('forum:')).length, MAX_OWN_FORUMS);
+});
+check('an own forum is searched with site:, kept to its host and path, and labelled', () => {
+    assert.strictEqual(discussionQuery('need a roofer', 'forum:contractortalk.com'), 'site:contractortalk.com need a roofer');
+    assert.strictEqual(siteForUrl('https://www.biggerpockets.com/forums/899/topics/1-x', ['forum:biggerpockets.com/forums']), 'forum:biggerpockets.com/forums');
+    assert.strictEqual(siteForUrl('https://biggerpockets.com/blog/x', ['forum:biggerpockets.com/forums']), null);
+    assert.strictEqual(sourceInfo('forum:indiehackers.com').label, 'Indie Hackers');
+    assert.strictEqual(sourceInfo('forum:example-forum.org').label, 'example-forum.org');
+});
+check('the generic thread check drops home, file, member and search pages', () => {
+    const f = 'forum:forum.wordreference.com' as const;
+    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/threads/a-question.123/', f), true);
+    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/', f), false);
+    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/attachments/x-pdf.1/', f), false);
+    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/doc.pdf', f), false);
+    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/members/jane.12/', f), false);
+});
+check('own-forum replies are plain text; a bad address is refused out loud', () => {
+    assert.strictEqual(plainForSite('use **this**', 'forum:indiehackers.com'), 'use this');
+    assert.match(read('netlify/functions/discussions.ts'), /isn’t a forum address we can watch/);
+});
+
 console.log('\n──── searching ────');
 
 check('a query is the site filter plus the topic', () => {
@@ -90,6 +128,9 @@ check('one thread is one URL however it was reached', () => {
     assert.strictEqual(a, 'https://reddit.com/r/x/comments/abc/t');
     assert.strictEqual(a, b);
     assert.strictEqual(normaliseThreadUrl('javascript:alert(1)'), null);
+    // Script-page forums keep the thread id, minus tracking and session params.
+    assert.strictEqual(normaliseThreadUrl('https://forum.blu-ray.com/showthread.php?t=123&s=abc&utm_source=x'), 'https://forum.blu-ray.com/showthread.php?t=123');
+    assert.notStrictEqual(normaliseThreadUrl('https://x.org/viewtopic.php?t=1'), normaliseThreadUrl('https://x.org/viewtopic.php?t=2'));
 });
 check('Google’s age label is read; a thread past a week is old', () => {
     assert.strictEqual(postedAgeDays('3 days ago'), 3);

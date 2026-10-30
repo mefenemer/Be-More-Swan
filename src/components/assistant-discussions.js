@@ -29,6 +29,9 @@
     watch: null,
     sites: [],
     maxTopics: 5,
+    // Own forums: one-click suggestions and the cap, both from the server.
+    suggestedForums: [],
+    maxOwnForums: 5,
     filter: 'new',
     loading: false,
     loaded: false,
@@ -72,6 +75,8 @@
       state.watch = data.watch || null;
       state.sites = Array.isArray(data.sites) ? data.sites : [];
       state.maxTopics = data.maxTopics || 5;
+      state.suggestedForums = Array.isArray(data.suggestedForums) ? data.suggestedForums : [];
+      state.maxOwnForums = data.maxOwnForums || 5;
       state.notSetUp = false;
       state.error = null;
     } catch (err) {
@@ -141,6 +146,7 @@
         <textarea id="disc-topics" data-disc-topics rows="3" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="best social media scheduler for a small business&#10;how do I get more Google reviews">${esc(d.topics)}</textarea>
         <p class="text-xs font-bold text-gray-700 mt-3">Sites</p>
         <div class="mt-1 flex flex-wrap gap-4">${siteBoxes}</div>
+        ${ownForumsHtml(d)}
         <label class="inline-flex items-center gap-2 text-sm text-gray-800 mt-2 cursor-pointer">
           <input type="checkbox" data-disc-enabled ${d.enabled ? 'checked' : ''} class="rounded border-gray-300">
           Scan every morning
@@ -150,6 +156,58 @@
           <p class="text-xs text-gray-600">${lastScanLine(w)} A scan costs one task.</p>
         </div>
       </section>`;
+  }
+
+  const ownOf = (sites) => (sites || []).filter((s) => String(s).startsWith('forum:'));
+  const forumLabel = (key) => {
+    const a = key.slice(6);
+    const f = state.suggestedForums.find((x) => x.address === a);
+    return f ? f.label : a;
+  };
+
+  /** "Your own forums": any forum by web address, up to maxOwnForums, plus one-click suggestions. */
+  function ownForumsHtml(d) {
+    const own = ownOf(d.sites);
+    const full = own.length >= state.maxOwnForums;
+    const chips = own.map((k) => `
+      <span class="inline-flex items-center gap-1 rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-800">
+        ${esc(forumLabel(k))}
+        <button type="button" data-disc-forum-remove="${esc(k)}" class="text-gray-500 hover:text-gray-900 ml-1" aria-label="Stop watching ${esc(forumLabel(k))}">×</button>
+      </span>`).join('');
+    const suggestions = state.suggestedForums.filter((f) => !own.includes(`forum:${f.address}`));
+    return `
+        <p class="text-xs font-bold text-gray-700 mt-4">Your own forums</p>
+        <p class="text-xs text-gray-600 mt-1">Add a forum your customers use — a trade forum, a local or US community — by its web address. Up to ${esc(state.maxOwnForums)}.</p>
+        ${chips ? `<div class="mt-2 flex flex-wrap gap-2">${chips}</div>` : ''}
+        ${full ? '' : `
+        <div class="mt-2 flex flex-wrap items-center gap-2">
+          <input type="text" data-disc-forum-input class="flex-1 min-w-0 max-w-sm border border-gray-300 rounded-lg px-3 py-1 text-sm" placeholder="e.g. contractortalk.com" aria-label="Forum web address">
+          <button type="button" data-disc-forum-add class="btn-secondary border px-3 py-1 text-sm font-bold rounded-lg transition">Add</button>
+        </div>
+        ${suggestions.length ? `<p class="text-xs text-gray-600 mt-2">Suggestions: ${suggestions.map((f) => `<button type="button" data-disc-forum-suggest="${esc(f.address)}" title="${esc(f.about)}" class="underline hover:text-gray-900 ml-1">${esc(f.label)}</button>`).join(' · ')}</p>` : ''}`}`;
+  }
+
+  /** Light tidy for display — the server is the judge (save_watch says why it refuses an address). */
+  function tidyForumAddress(raw) {
+    let t = String(raw || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+    return t || null;
+  }
+
+  function addForum(raw) {
+    const a = tidyForumAddress(raw);
+    if (!a) return;
+    const d = state.watchDraft || readWatchForm();
+    const key = `forum:${a}`;
+    if (ownOf(d.sites).includes(key)) { toastOk('That forum is already on the list.'); return; }
+    if (ownOf(d.sites).length >= state.maxOwnForums) { toastErr(`You can watch up to ${state.maxOwnForums} forums of your own.`); return; }
+    state.watchDraft = { ...d, sites: [...d.sites, key] };
+    render();
+  }
+
+  function removeForum(key) {
+    const d = state.watchDraft || readWatchForm();
+    state.watchDraft = { ...d, sites: d.sites.filter((s) => s !== key) };
+    render();
   }
 
   function rulesHtml() {
@@ -256,7 +314,9 @@
     const el = host();
     return {
       topics: (el.querySelector('[data-disc-topics]')?.value || ''),
-      sites: [...el.querySelectorAll('[data-disc-site]')].filter((c) => c.checked).map((c) => c.dataset.discSite),
+      // Ticked built-ins, then the own forums as they stand (they have no checkbox to read).
+      sites: [...el.querySelectorAll('[data-disc-site]')].filter((c) => c.checked).map((c) => c.dataset.discSite)
+        .concat(ownOf((state.watchDraft || state.watch || {}).sites)),
       enabled: !!el.querySelector('[data-disc-enabled]')?.checked,
     };
   }
@@ -337,6 +397,9 @@
     if (b.dataset.discFilter) { state.filter = b.dataset.discFilter; render(); return; }
     if (b.hasAttribute('data-disc-scan')) { scanNow(); return; }
     if (b.hasAttribute('data-disc-save-watch')) { saveWatch(); return; }
+    if (b.dataset.discForumRemove) { removeForum(b.dataset.discForumRemove); return; }
+    if (b.dataset.discForumSuggest) { addForum(b.dataset.discForumSuggest); return; }
+    if (b.matches('[data-disc-forum-add]')) { addForum(host()?.querySelector('[data-disc-forum-input]')?.value); return; }
     if (b.dataset.discCopy) { copyAndOpen(Number(b.dataset.discCopy)); return; }
     if (b.dataset.discStatus) { setStatus(Number(b.dataset.discStatus), b.dataset.status); return; }
     if (b.dataset.discRedraft) { redraft(Number(b.dataset.discRedraft)); return; }
@@ -363,6 +426,12 @@
       // Re-render only when Save or Scan now has to switch on or off.
       if (!before || !before.topics.trim() !== !state.watchDraft.topics.trim()) render();
     }
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !e.target.matches?.('[data-disc-forum-input]') || !host()?.contains(e.target)) return;
+    e.preventDefault();
+    addForum(e.target.value);
   });
 
   document.addEventListener('change', (e) => {

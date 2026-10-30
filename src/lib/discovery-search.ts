@@ -55,6 +55,14 @@ export interface SearchResult {
      * query's own date restriction, not by parsing this.
      */
     date: string | null;
+    /**
+     * false when only the SITE is known, not the page: Google hid the real link behind an opaque
+     * `google.com/goto` redirect and `url` was rebuilt as the site's home page from the address Google
+     * displayed (see serperOrganicToResult). Fine for "which business is this" (discovery's domain);
+     * wrong wherever the exact page matters — evidence links, forum threads — so those skip it.
+     * Absent = the real page URL.
+     */
+    exactUrl?: false;
 }
 
 export interface SearchResponse {
@@ -226,17 +234,53 @@ async function searchSerper(query: string, limit: number, recency?: SearchRecenc
     }
     const data = (await res.json().catch(() => ({}))) as { organic?: Array<Record<string, unknown>> };
     const organic = Array.isArray(data.organic) ? data.organic : [];
-    const results: SearchResult[] = organic.slice(0, limit).map((r) => {
-        const url = typeof r.link === 'string' ? r.link : '';
-        return {
-            title: typeof r.title === 'string' ? r.title : '',
-            url,
-            snippet: typeof r.snippet === 'string' ? r.snippet : '',
-            domain: normaliseDomain(url),
-            date: typeof r.date === 'string' && r.date.trim() ? r.date.trim() : null,
-        };
-    });
+    const mapped = organic.slice(0, limit).map(serperOrganicToResult);
+    const results = mapped.filter((r): r is SearchResult => r !== null);
+    const hidden = organic.slice(0, limit).filter((r) => isGoogleRedirect(r.link)).length;
+    if (hidden) console.log(`[discovery-search] ${hidden}/${mapped.length} results behind google.com/goto — ${hidden - (mapped.length - results.length)} rebuilt as a site, ${mapped.length - results.length} dropped`);
     return { results, costGbp: COST_GBP_PER_CALL };
+}
+
+// ── Google's /goto redirects ─────────────────────────────────────────────────
+// Since late summer 2026 Google wraps many organic links in `https://www.google.com/goto?url=CAES…`.
+// The token is opaque (it does not decode to the address) and Serper passes it through as `link`:
+// on 2026-10-30, 5–7 of every 10 results. Taken at face value each one became the domain
+// `google.com` — a junk "lead" per campaign, and evidence linking to nowhere.
+//
+// We do NOT resolve them by requesting Google: most answers are a bot-check interstitial, and
+// working past that is circumvention. What Google still DISPLAYS beside the result usually starts
+// with the real site ("https://www.xero.com › accounting-software"), so that gives the domain —
+// all lead discovery needs — and the result is marked exactUrl:false. With no site shown (Reddit
+// rows say "570+ comments") the result is dropped.
+
+/** True for Google's own redirect wrappers (`/goto`, `/url`), not for real Google pages. */
+export function isGoogleRedirect(link: unknown): boolean {
+    if (typeof link !== 'string') return false;
+    try {
+        const u = new URL(link);
+        return /(^|\.)google\.[a-z.]+$/i.test(u.hostname) && /^\/(goto|url)$/i.test(u.pathname);
+    } catch { return false; }
+}
+
+/** The site from Google's displayed address ("https://bhp.co.uk › office › leeds" → "bhp.co.uk"), or null. */
+export function hostFromDisplayedLink(displayed: unknown): string | null {
+    if (typeof displayed !== 'string') return null;
+    const m = /^\s*https?:\/\/([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})(?=$|[\s/›:])/i.exec(displayed);
+    if (!m) return null;
+    const host = m[1].toLowerCase();
+    return /(^|\.)google\.[a-z.]+$/.test(host) ? null : host;
+}
+
+/** One Serper organic row → a SearchResult; null when the real site can't be known. Pure. */
+export function serperOrganicToResult(r: Record<string, unknown>): SearchResult | null {
+    const title = typeof r.title === 'string' ? r.title : '';
+    const snippet = typeof r.snippet === 'string' ? r.snippet : '';
+    const date = typeof r.date === 'string' && r.date.trim() ? r.date.trim() : null;
+    const link = typeof r.link === 'string' ? r.link : '';
+    if (!isGoogleRedirect(link)) return { title, url: link, snippet, domain: normaliseDomain(link), date };
+    const host = hostFromDisplayedLink(r.displayedLink);
+    if (!host) return null;
+    return { title, url: `https://${host}/`, snippet, domain: normaliseDomain(host), date, exactUrl: false };
 }
 
 /** A two-letter country code Serper will accept as `gl`, or undefined. Anything else is dropped. */

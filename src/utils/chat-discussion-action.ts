@@ -15,7 +15,7 @@
 
 import type { getDb } from '../../db/client';
 import {
-    DISCUSSION_SITES, MAX_TOPICS, normaliseSites, normaliseTopics, type DiscussionSiteKey,
+    MAX_TOPICS, normaliseSites, normaliseTopics, sourceInfo, type DiscussionSource,
 } from '../config/discussion-sites';
 import { discussionView, loadDiscussion, loadWatch, watchView } from './discussions';
 
@@ -29,7 +29,7 @@ export interface DiscussionActionRequest {
     action: DiscussionAction;
     discussionId: number | null;
     topics: string[] | null;
-    sites: DiscussionSiteKey[] | null;
+    sites: DiscussionSource[] | null;
     enabled: boolean | null;
     instruction: string | null;
 }
@@ -59,7 +59,7 @@ export interface DiscussionActionCard {
     assistantId: number;
     /** set_watch: before and after, as the user reads them. */
     current?: { topics: string[]; sites: string[]; enabled: boolean };
-    proposed?: { topics: string[]; sites: DiscussionSiteKey[]; siteLabels: string[]; enabled: boolean };
+    proposed?: { topics: string[]; sites: DiscussionSource[]; siteLabels: string[]; enabled: boolean };
     /** redraft / mark_replied / dismiss: the thread, from its row. */
     discussionId?: number;
     title?: string;
@@ -80,7 +80,7 @@ export async function resolveDiscussionActionProposal(
 
         if (req.action === 'set_watch' || req.action === 'scan_now') {
             const w = watchView(await loadWatch(db, organisationId, assistantId));
-            const current = { topics: w.topics, sites: w.sites.map((s) => DISCUSSION_SITES[s].label), enabled: w.enabled };
+            const current = { topics: w.topics, sites: w.sites.map((s) => sourceInfo(s).label), enabled: w.enabled };
             if (req.action === 'scan_now') {
                 const blocked = !w.topics.length ? 'There’s nothing to look for yet — add a topic first.'
                     : !w.sites.length ? 'No sites are being watched — choose at least one first.'
@@ -94,7 +94,7 @@ export async function resolveDiscussionActionProposal(
             const blocked = !topics.length ? `Give at least one topic (up to ${MAX_TOPICS}).`
                 : !sites.length ? 'Choose at least one site to watch.'
                 : null;
-            return { ...base, current, proposed: { topics, sites, siteLabels: sites.map((s) => DISCUSSION_SITES[s].label), enabled }, blocked };
+            return { ...base, current, proposed: { topics, sites, siteLabels: sites.map((s) => sourceInfo(s).label), enabled }, blocked };
         }
 
         const row = req.discussionId ? await loadDiscussion(db, organisationId, assistantId, req.discussionId) : null;
