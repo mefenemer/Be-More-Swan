@@ -181,7 +181,7 @@ export function siteForUrl(url: string, sites: readonly DiscussionSource[]): Dis
 }
 
 /**
- * One thread, one row. Drops the query string and fragment (tracking, comment anchors), the
+ * One thread, one row. Drops the query string (except a script page's thread id) and fragment (tracking, comment anchors), the
  * trailing slash, and `www.`/`old.`/`m.` hosts, so the same thread reached two ways dedupes.
  * Null for anything that is not an http(s) URL.
  */
@@ -191,6 +191,14 @@ export function normaliseThreadUrl(raw: string): string | null {
     if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
     const host = u.hostname.toLowerCase().replace(/^(www|old|m|new)\./, '');
     const path = u.pathname.replace(/\/+$/, '') || '/';
+    // Older forum software (vBulletin showthread.php?t=, phpBB viewtopic.php?t=) puts the thread in
+    // the query, so a script page keeps its thread-ish params — or every thread would be one row.
+    if (/\.(php|aspx?|cgi|pl)$/i.test(path)) {
+        const keep = [...u.searchParams.entries()]
+            .filter(([k]) => /^(t|p|f|topic|threadid|thread|tid|pid|id|postid|board|forum)$/i.test(k))
+            .sort(([a], [b]) => a.localeCompare(b));
+        if (keep.length) return `https://${host}${path}?${keep.map(([k, v]) => `${k.toLowerCase()}=${encodeURIComponent(v)}`).join('&')}`;
+    }
     return `https://${host}${path}`;
 }
 

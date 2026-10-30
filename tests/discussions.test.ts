@@ -128,6 +128,9 @@ check('one thread is one URL however it was reached', () => {
     assert.strictEqual(a, 'https://reddit.com/r/x/comments/abc/t');
     assert.strictEqual(a, b);
     assert.strictEqual(normaliseThreadUrl('javascript:alert(1)'), null);
+    // Script-page forums keep the thread id, minus tracking and session params.
+    assert.strictEqual(normaliseThreadUrl('https://forum.blu-ray.com/showthread.php?t=123&s=abc&utm_source=x'), 'https://forum.blu-ray.com/showthread.php?t=123');
+    assert.notStrictEqual(normaliseThreadUrl('https://x.org/viewtopic.php?t=1'), normaliseThreadUrl('https://x.org/viewtopic.php?t=2'));
 });
 check('Google’s age label is read; a thread past a week is old', () => {
     assert.strictEqual(postedAgeDays('3 days ago'), 3);
