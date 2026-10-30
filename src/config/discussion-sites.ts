@@ -48,6 +48,71 @@ export const DISCUSSION_SITES: Record<DiscussionSiteKey, DiscussionSite> = {
     },
 };
 
+// ── Your own forums ──────────────────────────────────────────────────────────────────────────────
+// Beyond the four built-ins, a watch can name up to MAX_OWN_FORUMS forums of its own — a trade forum,
+// a US community, a wedding forum. They live in the SAME `sites` array as `forum:<host[/path]>`
+// entries (no schema change), are searched the same way (`site:<host[/path]>`), and are judged the
+// same way. The thread check is generic, so a stray listing page costs one triage slot at most.
+
+export const MAX_OWN_FORUMS = 5;
+export type OwnForum = `forum:${string}`;
+/** Anything a watch can search: a built-in site key or one of the user's own forums. */
+export type DiscussionSource = DiscussionSiteKey | OwnForum;
+
+/** Starter suggestions, one click each. Each was probed (2026-10-30) and returned threads from the last week. */
+export const SUGGESTED_FORUMS: Array<{ address: string; label: string; about: string }> = [
+    { address: 'indiehackers.com', label: 'Indie Hackers', about: 'founders and online businesses, mostly US' },
+    { address: 'community.shopify.com', label: 'Shopify Community', about: 'online shop owners' },
+    { address: 'warriorforum.com', label: 'Warrior Forum', about: 'internet marketing, mostly US' },
+    { address: 'biggerpockets.com/forums', label: 'BiggerPockets', about: 'US property investors' },
+    { address: 'contractortalk.com', label: 'ContractorTalk', about: 'US builders and trades' },
+];
+
+const OWN_FORUM_NOTE = 'Check this forum’s rules before replying — many only allow a business to be named in a signature or a promotions section. Lead with the help.';
+
+/**
+ * A forum address as the user typed it ("https://www.contractortalk.com/forums/", "biggerpockets.com/forums")
+ * → `host[/path]`, lowercased, no scheme, `www.`, query or trailing slash. Null when it isn't a public
+ * web address, or it is one of the built-in sites (tick that instead).
+ */
+export function normaliseForumAddress(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    let t = raw.trim().toLowerCase().replace(/^forum:/, '');
+    if (!t) return null;
+    if (!/^https?:\/\//.test(t)) t = `https://${t}`;
+    let u: URL;
+    try { u = new URL(t); } catch { return null; }
+    const host = u.hostname.replace(/^www\./, '');
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) || /^\d+(\.\d+)+$/.test(host) || host.endsWith('.local') || host === 'localhost') return null;
+    if (DISCUSSION_SITE_KEYS.some((k) => DISCUSSION_SITES[k].hosts.some((h) => host === h || host.endsWith(`.${h}`)))) return null;
+    const path = u.pathname.replace(/\/+$/, '').replace(/[^a-z0-9/_.-]/g, '').slice(0, 60);
+    return `${host}${path}`;
+}
+
+export function isOwnForum(v: unknown): v is OwnForum {
+    return typeof v === 'string' && v.startsWith('forum:') && normaliseForumAddress(v) === v.slice(6);
+}
+
+export function isDiscussionSource(v: unknown): v is DiscussionSource {
+    return isDiscussionSite(v) || isOwnForum(v);
+}
+
+/** Label, search filter, hosts and rules note for any source. */
+export function sourceInfo(source: DiscussionSource): { label: string; siteFilter: string; hosts: string[]; pathPrefix: string; promotionNote: string; own: boolean } {
+    if (isDiscussionSite(source)) {
+        const s = DISCUSSION_SITES[source];
+        return { label: s.label, siteFilter: s.siteFilter, hosts: s.hosts, pathPrefix: '', promotionNote: s.promotionNote, own: false };
+    }
+    const address = source.slice(6);
+    const slash = address.indexOf('/');
+    const host = slash === -1 ? address : address.slice(0, slash);
+    const suggested = SUGGESTED_FORUMS.find((f) => f.address === address);
+    return {
+        label: suggested?.label ?? address, siteFilter: `site:${address}`, hosts: [host],
+        pathPrefix: slash === -1 ? '' : address.slice(slash), promotionNote: OWN_FORUM_NOTE, own: true,
+    };
+}
+
 /** What a new watch starts with. LinkedIn is off by default — its posts are mostly people selling. */
 export const DEFAULT_DISCUSSION_SITES: DiscussionSiteKey[] = ['reddit', 'ukbf', 'quora'];
 
@@ -84,22 +149,33 @@ export function normaliseTopics(raw: unknown): string[] {
     return out;
 }
 
-export function normaliseSites(raw: unknown): DiscussionSiteKey[] {
+/** Built-in sites in their fixed order, then up to MAX_OWN_FORUMS own forums (`forum:<address>`, cleaned and deduped). */
+export function normaliseSites(raw: unknown): DiscussionSource[] {
     const list = Array.isArray(raw) ? raw : [];
-    return DISCUSSION_SITE_KEYS.filter((k) => list.includes(k));
+    const own: OwnForum[] = [];
+    for (const v of list) {
+        if (typeof v !== 'string' || !v.startsWith('forum:')) continue;
+        const a = normaliseForumAddress(v);
+        if (a && !own.includes(`forum:${a}`)) own.push(`forum:${a}`);
+        if (own.length >= MAX_OWN_FORUMS) break;
+    }
+    return [...DISCUSSION_SITE_KEYS.filter((k) => list.includes(k)), ...own];
 }
 
-/** The Google query for one topic on one site. */
-export function discussionQuery(topic: string, site: DiscussionSiteKey): string {
-    return `${DISCUSSION_SITES[site].siteFilter} ${topic}`;
+/** The Google query for one topic on one source. */
+export function discussionQuery(topic: string, site: DiscussionSource): string {
+    return `${sourceInfo(site).siteFilter} ${topic}`;
 }
 
-/** Which watched site a result URL belongs to, or null when Google strayed off it. */
-export function siteForUrl(url: string, sites: readonly DiscussionSiteKey[]): DiscussionSiteKey | null {
-    let host: string;
-    try { host = new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return null; }
+/** Which watched source a result URL belongs to, or null when Google strayed off it. */
+export function siteForUrl(url: string, sites: readonly DiscussionSource[]): DiscussionSource | null {
+    let host: string; let path: string;
+    try { const u = new URL(url); host = u.hostname.toLowerCase().replace(/^www\./, ''); path = u.pathname.toLowerCase(); } catch { return null; }
     for (const k of sites) {
-        if (DISCUSSION_SITES[k].hosts.some((h) => host === h || host.endsWith(`.${h}`))) return k;
+        const info = sourceInfo(k);
+        if (!info.hosts.some((h) => host === h || host.endsWith(`.${h}`))) continue;
+        if (info.pathPrefix && !path.startsWith(info.pathPrefix)) continue;
+        return k;
     }
     return null;
 }
@@ -122,9 +198,15 @@ export function normaliseThreadUrl(raw: string): string | null {
  * Is this result a THREAD, or a page about the site? Listing pages, profiles and search pages are
  * not something a person can reply to. Conservative — a false keep costs one triage slot.
  */
-export function looksLikeThread(url: string, site: DiscussionSiteKey): boolean {
+export function looksLikeThread(url: string, site: DiscussionSource): boolean {
     let path: string;
     try { path = new URL(url).pathname; } catch { return false; }
+    if (isOwnForum(site)) {
+        // Any forum software: not the home page, not a file, not a member/search/login/tag page.
+        if (path.replace(/\/+$/, '').split('/').filter(Boolean).length < 1) return false;
+        if (/\.(pdf|jpe?g|png|gif|webp|zip|docx?|xlsx?)$/i.test(path)) return false;
+        return !/\/(attachments?|members?|users?|profile|profiles|u|tags?|search|login|register|signup|account|help|about|learning-center|directory)(\/|$)/i.test(path);
+    }
     if (site === 'reddit') return /\/r\/[^/]+\/comments\/[a-z0-9]+/i.test(path);
     if (site === 'ukbf') return /\/threads\//i.test(path);
     if (site === 'linkedin') return /^\/posts\//i.test(path);
@@ -175,7 +257,7 @@ export function withDisclosure(reply: string, businessName: string | null | unde
  * Reddit renders markdown. Quora, UK Business Forums and LinkedIn don't — `*this*` pastes as literal
  * asterisks — so off Reddit the emphasis markers come out (the words stay).
  */
-export function plainForSite(reply: string, site: DiscussionSiteKey): string {
+export function plainForSite(reply: string, site: DiscussionSource): string {
     if (site === 'reddit') return reply;
     return reply
         .replace(/\*\*([^*\n]+)\*\*/g, '$1')

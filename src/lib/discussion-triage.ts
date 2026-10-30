@@ -18,7 +18,7 @@ import { withRoleModel, type RoleModelChoice } from '../utils/assistant-model';
 import { logMessageUsage } from '../utils/ai-usage';
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import type { SenderIdentity } from '../config/sender-identity';
-import { DISCUSSION_SITES, type DiscussionFit, type DiscussionSiteKey } from '../config/discussion-sites';
+import { sourceInfo, type DiscussionFit, type DiscussionSource } from '../config/discussion-sites';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -30,7 +30,7 @@ const CALL_TIMEOUT_MS = 60_000;
 export const THREAD_TEXT_CHARS = 4000;
 
 export interface TriageCandidate {
-    site: DiscussionSiteKey;
+    site: DiscussionSource;
     title: string;
     snippet: string;
     /** The thread page's text, when it could be read (robots.txt allowing). Empty = snippet only. */
@@ -99,7 +99,7 @@ function clampVerdict(raw: unknown): TriageVerdict | null {
 function threadPayload(c: TriageCandidate, index: number) {
     return {
         index,
-        site: DISCUSSION_SITES[c.site].label,
+        site: sourceInfo(c.site).label,
         title: c.title.slice(0, 300),
         // Google's two lines, then the page itself when we could read it.
         snippet: c.snippet.slice(0, 500),

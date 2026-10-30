@@ -21,11 +21,11 @@ import * as cheerio from 'cheerio';
 import type { getDb } from '../../db/client';
 import { aiAssistants, discussions, discussionWatches } from '../../db/schema';
 import {
-    DAILY_SCAN_MIN_GAP_MS, DEFAULT_DISCUSSION_SITES, DISCUSSION_FIT_LABELS, DISCUSSION_SITES,
+    DAILY_SCAN_MIN_GAP_MS, DEFAULT_DISCUSSION_SITES, DISCUSSION_FIT_LABELS,
     MAX_THREAD_AGE_DAYS, MAX_TRIAGE_PER_SCAN, MIN_RELEVANCE, RESULTS_PER_SEARCH, SCAN_STALE_MS,
-    discussionQuery, isDiscussionSite, looksLikeThread, normaliseSites, normaliseThreadUrl,
-    normaliseTopics, plainForSite, postedAgeDays, siteForUrl, withDisclosure,
-    type DiscussionFit, type DiscussionSiteKey, type DiscussionStatus,
+    discussionQuery, isDiscussionSource, looksLikeThread, normaliseSites, normaliseThreadUrl,
+    normaliseTopics, plainForSite, postedAgeDays, siteForUrl, sourceInfo, withDisclosure,
+    type DiscussionFit, type DiscussionSource, type DiscussionStatus,
 } from '../config/discussion-sites';
 import { isSearchConfigured, search } from '../lib/discovery-search';
 import { THREAD_TEXT_CHARS, redraftReply, triageThreads, type TriageCandidate } from '../lib/discussion-triage';
@@ -48,7 +48,7 @@ const MAX_DISPATCH_PER_TICK = 100;
 
 export interface WatchView {
     topics: string[];
-    sites: DiscussionSiteKey[];
+    sites: DiscussionSource[];
     enabled: boolean;
     scanning: boolean;
     lastScannedAt: string | null;
@@ -222,7 +222,7 @@ async function readThread(url: string): Promise<string> {
     }
 }
 
-interface Candidate { site: DiscussionSiteKey; url: string; title: string; snippet: string; postedLabel: string | null; topic: string }
+interface Candidate { site: DiscussionSource; url: string; title: string; snippet: string; postedLabel: string | null; topic: string }
 
 /**
  * Run one claimed scan to the end. Never throws; always releases the watch. Called only by
@@ -322,7 +322,7 @@ export async function runScan(db: Db, watchId: number): Promise<void> {
 
 export interface DiscussionView {
     id: number;
-    site: DiscussionSiteKey;
+    site: DiscussionSource;
     siteLabel: string;
     promotionNote: string;
     url: string;
@@ -344,10 +344,11 @@ export interface DiscussionView {
 type DiscussionRow = typeof discussions.$inferSelect;
 
 export function discussionView(r: DiscussionRow): DiscussionView {
-    const site = isDiscussionSite(r.site) ? r.site : 'reddit';
+    const site: DiscussionSource = isDiscussionSource(r.site) ? r.site : 'reddit';
+    const info = sourceInfo(site);
     const fit = (r.fit === 'asking_for' ? 'asking_for' : 'can_help') as DiscussionFit;
     return {
-        id: r.id, site, siteLabel: DISCUSSION_SITES[site].label, promotionNote: DISCUSSION_SITES[site].promotionNote,
+        id: r.id, site, siteLabel: info.label, promotionNote: info.promotionNote,
         url: r.url, title: r.title, snippet: r.snippet, postedLabel: r.postedLabel, matchedTopic: r.matchedTopic,
         relevance: r.relevance, fit, fitLabel: DISCUSSION_FIT_LABELS[fit], why: r.why, draftReply: r.draftReply,
         readFrom: r.readFrom === 'page' ? 'page' : 'snippet',
@@ -412,7 +413,7 @@ export async function redraftDiscussion(
 ): Promise<{ ok: true; discussion: DiscussionView } | { ok: false; error: string }> {
     const row = await loadDiscussion(db, organisationId, assistantId, id);
     if (!row) return { ok: false, error: 'That thread isn’t in this assistant’s Discussions.' };
-    const site = isDiscussionSite(row.site) ? row.site : 'reddit';
+    const site: DiscussionSource = isDiscussionSource(row.site) ? row.site : 'reddit';
     const [sender, pageText] = await Promise.all([
         loadSenderIdentity(db, organisationId, assistantId),
         readThread(row.url),
@@ -444,19 +445,20 @@ export async function buildDiscussionsChatBlock(db: Db, organisationId: number, 
     try {
         const { discussions: rows, counts, watch } = await listDiscussions(db, organisationId, assistantId);
         const fresh = rows.filter((r) => r.status === 'new').slice(0, CHAT_SNAPSHOT_THREADS);
-        const siteLabels = watch.sites.map((s) => DISCUSSION_SITES[s].label).join(', ') || 'none';
+        const siteLabels = watch.sites.map((s) => sourceInfo(s).label).join(', ') || 'none';
         const lines = fresh.map((r) => `#${r.id} · ${r.siteLabel} · relevance ${r.relevance} · ${r.fitLabel} · "${r.title.replace(/\s+/g, ' ').slice(0, 120)}"`);
-        return `YOUR DISCUSSIONS TAB — public forum threads (${Object.values(DISCUSSION_SITES).map((s) => s.label).join(', ')}) where someone is asking for what this business sells, each with a reply you drafted. You only LISTEN: nothing is ever posted for the user. On each thread the user presses "Copy reply & open thread", pastes the reply and posts it from their own account, then presses "Mark replied". Every draft ends with a disclosure line ("Full disclosure: I work at …"), added automatically — never tell the user to remove it: posting a recommendation without saying it is from the business breaks the sites' rules and UK consumer law.
+        return `YOUR DISCUSSIONS TAB — public forum threads (Reddit, UK Business Forums, Quora, LinkedIn, and any forums of the user's own) where someone is asking for what this business sells, each with a reply you drafted. You only LISTEN: nothing is ever posted for the user. On each thread the user presses "Copy reply & open thread", pastes the reply and posts it from their own account, then presses "Mark replied". Every draft ends with a disclosure line ("Full disclosure: I work at …"), added automatically — never tell the user to remove it: posting a recommendation without saying it is from the business breaks the sites' rules and UK consumer law.
 What it watches: topics ${watch.topics.length ? watch.topics.map((t) => `"${t}"`).join(', ') : '(none yet — nothing is scanned until there is at least one)'}; sites ${siteLabels}; daily scan ${watch.enabled ? 'on' : 'off'}${watch.scanning ? '; a scan is running now' : ''}${watch.lastScannedAt ? `; last scanned ${watch.lastScannedAt.slice(0, 10)}` : '; never scanned'}.
 Threads: ${counts.new} new, ${counts.replied} replied, ${counts.dismissed} dismissed.${fresh.length ? `\nNew threads${counts.new > fresh.length ? ` (the ${fresh.length} most recent of ${counts.new})` : ''}:\n${lines.join('\n')}` : ''}
 
 To act on the Discussions tab, emit a discussion_action_proposal uiElement — the user confirms on the card, and only their click changes anything:
 { "type": "discussion_action_proposal", "action": "set_watch" | "scan_now" | "redraft" | "mark_replied" | "dismiss",
   "topics": ["<phrase someone would search or post, e.g. 'recommend a bookkeeper for a small cafe'>", ...],   // set_watch only, at most 5; the WHOLE list
-  "sites": ["reddit" | "ukbf" | "quora" | "linkedin", ...],   // set_watch only; omit to keep the current sites
+  "sites": ["reddit" | "ukbf" | "quora" | "linkedin" | "forum:<web address, e.g. forum:contractortalk.com>", ...],   // set_watch only; the WHOLE list (keep the ones already watched unless asked to drop them); omit to keep the current sites
   "enabled": true | false,                                   // set_watch only; the daily scan
   "discussionId": <the number after # above>,                 // redraft / mark_replied / dismiss
   "instruction": "<what to change, in the user's words>" | null }   // redraft only
+Own forums: the user can add up to 5 forums of their own by web address (a trade forum, a US community). Suggestions that are known to have recent threads: indiehackers.com (founders, mostly US), community.shopify.com (online shops), warriorforum.com (internet marketing), biggerpockets.com/forums (US property), contractortalk.com (US trades) — offer one only when it fits this business. Never invent a forum address; if they don't know one, suggest they find it and paste it.
 Suggest topics written the way a customer would ask for help, from what this business sells — not the business's own name. A scan costs one task. Never write a reply to a thread in your own message: the card shows the stored draft, and "redraft" rewrites it. Never say a reply HAS been posted — only the user posts. The card does nothing until the user presses its button, so your message must NOT say you are scanning, will scan now, have started a scan, have saved the topics, have marked, dismissed or rewritten anything, or are doing so — say the card is there for them to confirm (e.g. "Press Scan now on the card below and I'll look", "Press Mark replied on the card to file it").
 ONE card per message. When they ask for two things at once (e.g. mark one replied AND dismiss another), send the card for the first and say plainly that you'll do the second next — never say the second is done or happening.`;
     } catch (err) {
