@@ -1093,6 +1093,10 @@ node_bundler = "esbuild"
 [functions.quarterly-bias-reminder]
   schedule = "0 8 1 1,4,7,10 *"
 
+# Monthly reminder to run the AI Visibility check (Admin → Insights → AI Visibility) — 1st at 08:00 UTC
+[functions.ai-visibility-reminder]
+  schedule = "0 8 1 * *"
+
 # US-SMM-2.4.1: Draft horizon gap-fill — HOURLY, on the hour.
 #
 # Was 06:00 UTC daily. That made the assistant look broken: nothing watches for gaps appearing, so

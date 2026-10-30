@@ -23,8 +23,8 @@ check('defaults to hello@bemoreswan.com, overridable and de-duplicated', () => {
     if (was == null) delete process.env.ADMIN_ALERT_EMAIL; else process.env.ADMIN_ALERT_EMAIL = was;
 });
 
-check('all four admin emails send to the inbox, never to an admin user\'s own address', () => {
-    for (const f of ['netlify/functions/quarterly-bias-reminder.ts', 'netlify/functions/bias-sampling.ts', 'netlify/functions/report-security-incident.ts']) {
+check('every admin email goes to the inbox, never to an admin user\'s own address', () => {
+    for (const f of ['netlify/functions/quarterly-bias-reminder.ts', 'netlify/functions/bias-sampling.ts', 'netlify/functions/report-security-incident.ts', 'netlify/functions/ai-visibility-reminder.ts']) {
         const s = read(f);
         assert.match(s, /for \(const to of adminInbox\(\)\)/, `${f} does not email the inbox`);
         assert.doesNotMatch(s, /to: (admin|sa)\.email/, `${f} still emails an admin account`);
@@ -32,6 +32,11 @@ check('all four admin emails send to the inbox, never to an admin user\'s own ad
     const ir = read('src/utils/issue-reports.ts');
     assert.match(ir, /: adminInbox\(\);/);
     assert.doesNotMatch(ir, /eq\(users\.role, 'super_admin'\), eq\(users\.role, 'admin'\)/);
+});
+
+check('the AI Visibility reminder is scheduled monthly and opens the page', () => {
+    assert.match(read('netlify.toml'), /\[functions\.ai-visibility-reminder\]\n  schedule = "0 8 1 \* \*"/);
+    assert.match(read('netlify/functions/ai-visibility-reminder.ts'), /admin\.html\?view=ai-visibility/);
 });
 
 console.log(`\n${passed} checks passed`);
