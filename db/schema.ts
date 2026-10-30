@@ -6466,3 +6466,63 @@ export const platformReviewAsks = pgTable("platform_review_asks", {
   requestedBy: integer("requested_by").references(() => users.id, { onDelete: "set null" }),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+// ── Discussions (Lead Generator) — db/z-discussions.sql ──────────────────────
+// Public forum threads where someone asks for what the business sells, each with a drafted reply
+// that a PERSON posts from their own account. Nothing in the product posts to these sites.
+export const discussionWatches = pgTable("discussion_watches", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  // Plain-English phrases searched for; sites are keys of DISCUSSION_SITES (src/config/discussion-sites.ts).
+  topics: text("topics").array().notNull().default([]),
+  sites: text("sites").array().notNull().default([]),
+  enabled: boolean("enabled").notNull().default(true),
+  // 'idle' | 'running' — held only while a worker is on it; scanStartedAt releases a stuck run.
+  scanStatus: text("scan_status").notNull().default("idle"),
+  scanStartedAt: timestamp("scan_started_at"),
+  lastScannedAt: timestamp("last_scanned_at"),
+  // { searches, found, kept, error? } — what the last scan did, for the tab to say.
+  lastScan: jsonb("last_scan"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("discussion_watches_assistant_uq").on(t.aiAssistantId),
+  index("discussion_watches_org_idx").on(t.organisationId),
+  check("discussion_watches_scan_status_check", sql`${t.scanStatus} IN ('idle','running')`),
+]);
+
+export const discussions = pgTable("discussions", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  site: text("site").notNull(),
+  // Normalised (normaliseThreadUrl) so one thread found by two searches is one row.
+  url: text("url").notNull(),
+  title: text("title").notNull(),
+  snippet: text("snippet"),
+  // Google's own "3 days ago" label, when it gave one.
+  postedLabel: text("posted_label"),
+  matchedTopic: text("matched_topic"),
+  relevance: integer("relevance").notNull().default(0),
+  // 'asking_for' | 'can_help'
+  fit: text("fit").notNull().default("can_help"),
+  why: text("why"),
+  // Always ends with the disclosure line, added in code (discussionDisclosure), never by the model.
+  draftReply: text("draft_reply"),
+  // 'page' | 'snippet' — whether the thread itself was read or only Google's two lines.
+  readFrom: text("read_from").notNull().default("snippet"),
+  // 'new' | 'replied' | 'dismissed'
+  status: text("status").notNull().default("new"),
+  decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("discussions_assistant_url_uq").on(t.aiAssistantId, t.url),
+  index("discussions_assistant_status_idx").on(t.aiAssistantId, t.status, t.createdAt),
+  check("discussions_relevance_check", sql`${t.relevance} BETWEEN 0 AND 100`),
+  check("discussions_fit_check", sql`${t.fit} IN ('asking_for','can_help')`),
+  check("discussions_read_from_check", sql`${t.readFrom} IN ('page','snippet')`),
+  check("discussions_status_check", sql`${t.status} IN ('new','replied','dismissed')`),
+]);

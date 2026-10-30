@@ -119,6 +119,8 @@ jobs:
           # check day is caught early in the day rather than waiting for a once-daily tick to land.
           # `run-mentor-review-dispatch` (6h) queues the Business Mentor's weekly reviews. Idempotent within a
           # week (one scheduled review per workspace per week), so the 6h interval only catches a review day early.
+          # `run-discussion-scan-dispatch` (6h) starts the Lead Generator's daily Discussions scans. Idempotent
+          # within 18h (a watch scanned since is skipped), so the 6h interval only catches a new watch early.
           # `run-partner-sweep` (24h) makes partner commissions past their holding period payable.
           # Idempotent; daily matches production.
           # `run-paid-optimiser` (12h) is the paid-campaign sweep: fatigue pauses, the control
@@ -143,6 +145,7 @@ jobs:
           run-lead-sweeps           21600   300
           run-site-audit-dispatch   21600   120
           run-mentor-review-dispatch 21600  120
+          run-discussion-scan-dispatch 21600 120
           run-paid-optimiser        43200   300
           run-campaign-agent        86400   300
           run-partner-sweep         86400   120

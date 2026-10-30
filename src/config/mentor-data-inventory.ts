@@ -114,7 +114,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'campaign_experiments', 'campaign_links', 'campaign_spend_events', 'class_waitlist', 'content_assets', 'kb_articles',
         'newsletter_sequence_enrolments', 'newsletter_sequence_sends', 'newsletter_sequence_steps', 'outreach_sequences',
         'post_idea_suggestions', 'posted_assets', 'relationship_building_tasks', 'sequence_enrolments', 'sequence_steps',
-        'strategy_proposals', 'visual_brief_options',
+        'strategy_proposals', 'visual_brief_options', 'discussions', 'discussion_watches',
     ]),
 };
 

@@ -965,6 +965,13 @@ node_bundler = "esbuild"
 [functions.dispatch-mentor-reviews]
   schedule = "45 6 * * *"
 
+# The Lead Generator's Discussions scan (src/utils/discussions.ts dispatchDueScans): starts every enabled
+# watch not scanned in the last 18 hours, so a "Scan now" earlier in the day is not repeated. 06:50 UTC —
+# threads from overnight are waiting before the UK working day, off the :00/:15/:20/:30/:40/:45 batch.
+# Staging is poked via run-discussion-scan-dispatch (staging-crons.yml).
+[functions.dispatch-discussion-scans]
+  schedule = "50 6 * * *"
+
 # Is the paid sweep above still running? 09:20 UTC — a DIFFERENT schedule entry from
 # optimise-paid-campaigns on purpose, so one broken entry cannot silently take both.
 #

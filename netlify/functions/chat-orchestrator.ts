@@ -79,6 +79,8 @@ import {
     type ContactProposalCard, type SegmentProposalCard,
 } from '../../src/utils/chat-audience';
 import { LEAD_BULK_MAX, leadActionFromUiElement, resolveLeadActionProposal, sendableDraft, type LeadActionCard } from '../../src/utils/chat-lead-action';
+import { discussionActionFromUiElement, resolveDiscussionActionProposal } from '../../src/utils/chat-discussion-action';
+import { buildDiscussionsChatBlock } from '../../src/utils/discussions';
 import {
     assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
 } from '../../src/utils/chat-assistant-settings';
@@ -213,6 +215,9 @@ interface RouteContext {
     /** This Lead Generator's follow-up plan and the card that changes it — same routes as
      *  leadsSnapshot. src/utils/chat-follow-up-plan.ts. */
     followUpPlanBlock?: string | null;
+    /** This Lead Generator's Discussions tab — what it watches, its new threads, and the card that acts
+     *  on them. Same routes as leadsSnapshot. src/utils/discussions.ts buildDiscussionsChatBlock. */
+    discussionsBlock?: string | null;
     /** This Campaign Assistant's own campaigns and the org's saved searches, read per turn — only
      *  populated for routes with usesCampaignSnapshot. Without it the chat can only ever CREATE:
      *  "add two articles to the spring campaign" has no campaign id to point at. See
@@ -498,6 +503,7 @@ function leadGeneratorSurfaces(): string {
   • "Archived" — turned down before anything was sent.
   Nothing chases automatically beyond the follow-up plan, and the user is the one who presses send on a first email. The "Follow-up plan" button on the Outreach tab is where the user sees and changes that plan — whether to chase at all, how many follow-ups, how long each waits and what each says — and you can propose the same change with a follow_up_plan card (YOUR FOLLOW-UP PLAN below).
 - "Results" tab — straight after Outreach: the goals you are working towards and the figures for how the pipeline is doing.
+- "Discussions" tab — public forum threads (Reddit, UK Business Forums, Quora, LinkedIn posts) from the last week where someone is asking for what this business sells, found by a daily scan of the topics the user chose, each with a reply you drafted. You never post: the user presses "Copy reply & open thread", posts it from their own account, then "Mark replied" (or "Dismiss" to drop a thread). The tab's "What to watch" panel sets the topics and sites, and "Scan now" runs a scan straight away. If the user wants you to post or reply on those sites for them, say plainly that you are built not to — automated or undisclosed self-promotion breaks those sites' rules and UK consumer law — and offer the drafted replies instead.
 
 FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. Emit the discovery_campaign_proposal uiElement (shape 3 below). Write the "who to find" brief yourself, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Approving it SAVES the search — the user does not have to retype anything — but saves it as a draft that has not started: a run costs real money and reaches real strangers, so they start it themselves. Tell them exactly where: the search appears at the top of their Searches tab marked "Not started", with a "Start search" button beside it. Say that plainly in your reply and never claim the search is already running or that leads are already coming in. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
 }
@@ -1894,7 +1900,7 @@ ${rc.leadsSnapshot
     ?? 'YOUR LEADS RIGHT NOW — unavailable for this turn: the lead counts could not be read. If the user asks how many leads they have, say you cannot see the count right now and point them at the All leads tab. Do NOT estimate, and do NOT answer from anything else in this conversation.'}
 
 ${leadActionsPrompt()}
-${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}${rc.followUpPlanBlock ? `\n${rc.followUpPlanBlock}\n` : ''}
+${rc.outreachOfferBlock ? `\n${rc.outreachOfferBlock}\n` : ''}${rc.followUpPlanBlock ? `\n${rc.followUpPlanBlock}\n` : ''}${rc.discussionsBlock ? `\n${rc.discussionsBlock}\n` : ''}
 Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
 
 Ideal customer profile (from setup):
@@ -2927,6 +2933,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const followUpPlanBlock = route.usesLeadSnapshot
         ? await buildFollowUpPlanChatBlock(db, orgId, session.aiAssistantId)
         : null;
+    // Its Discussions tab (src/utils/discussions.ts) — per turn, so a thread marked replied on the tab a
+    // moment ago is not offered again. Null on failure, including before db/z-discussions.sql is applied.
+    const discussionsBlock = route.usesLeadSnapshot
+        ? await buildDiscussionsChatBlock(db, orgId, session.aiAssistantId)
+        : null;
 
     // Per turn, for the same reason as the leads snapshot: a plan approved on the Campaigns tab a
     // moment ago must be visible to the next message, not the one that opened the conversation.
@@ -2996,6 +3007,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         leadsSnapshot,
         outreachOfferBlock,
         followUpPlanBlock,
+        discussionsBlock,
         campaignsSnapshot,
         briefsSnapshot,
         siteAuditSnapshot,
@@ -3630,6 +3642,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // And the Lead Generator's (src/utils/chat-lead-action.ts). Its "send" card carries the stored
         // email verbatim and a fingerprint of it, which send_outreach checks at the click.
         let leadAction: LeadActionCard | null = null;
+        // And its Discussions tab (src/utils/chat-discussion-action.ts), rebuilt from the watch and thread
+        // rows; the click calls discussions.ts, the same endpoint as the tab's buttons.
+        const discussionReq = route === ROUTES.lead_qualifier ? discussionActionFromUiElement(uiElement) : null;
+        if (discussionReq) {
+            uiElement = await resolveDiscussionActionProposal(db, orgId, session.aiAssistantId, discussionReq);
+            if (!uiElement) content = 'I couldn’t find that thread on this assistant’s Discussions tab, so I haven’t set anything up. Which one do you mean? You can also find it on the "Discussions" tab.';
+        }
         const leadActionReq = route === ROUTES.lead_qualifier ? leadActionFromUiElement(uiElement) : null;
         if (leadActionReq) {
             leadAction = await resolveLeadActionProposal(db, orgId, session.aiAssistantId, leadActionReq);

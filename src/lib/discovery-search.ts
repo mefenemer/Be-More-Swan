@@ -92,6 +92,9 @@ export function normaliseDomain(input: string | null | undefined): string | null
     return host.toLowerCase().replace(/^www\./, '') || null;
 }
 
+/** Google's own date restriction (Serper `tbs`). */
+export type SearchRecency = 'week' | 'month' | 'year';
+
 /**
  * Run one search query against the configured provider.
  * @param query the literal query string (an entry from an LLM-generated query array)
@@ -107,7 +110,7 @@ export function normaliseDomain(input: string | null | undefined): string | null
  */
 export async function search(
     query: string,
-    opts: { limit?: number; recency?: 'year' | 'month'; page?: number; country?: string | null; usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null } } = {},
+    opts: { limit?: number; recency?: SearchRecency; page?: number; country?: string | null; usage?: { workspaceId?: number | null; assistantId?: number | null; userId?: number | null } } = {},
 ): Promise<SearchResponse> {
     if (!isSearchConfigured()) throw new SearchNotConfiguredError();
     const limit = Math.max(1, Math.min(opts.limit ?? 10, MAX_RESULTS_PER_CALL));
@@ -200,11 +203,13 @@ export async function fetchPageText(url: string): Promise<string> {
 
 // ── Serper.dev provider ──────────────────────────────────────────────────────
 
-async function searchSerper(query: string, limit: number, recency?: 'year' | 'month', page = 1, country?: string | null): Promise<SearchResponse> {
+async function searchSerper(query: string, limit: number, recency?: SearchRecency, page = 1, country?: string | null): Promise<SearchResponse> {
     // `tbs` is Google's own date restriction, passed through by Serper. Used by the buying-signal
     // sweep, where a funding round from 2019 is not a buying signal — it is history, and feeding it
     // to the re-scorer as though it were news is how a lead gets promoted for nothing.
-    const tbs = recency === 'month' ? 'qdr:m' : recency === 'year' ? 'qdr:y' : undefined;
+    // 'week' is the Discussions scan (src/utils/discussions.ts): a forum thread older than that is
+    // past the point where a reply is welcome.
+    const tbs = recency === 'week' ? 'qdr:w' : recency === 'month' ? 'qdr:m' : recency === 'year' ? 'qdr:y' : undefined;
     const res = await fetch(SERPER_ENDPOINT, {
         method: 'POST',
         headers: { 'X-API-KEY': SERPER_API_KEY as string, 'Content-Type': 'application/json' },

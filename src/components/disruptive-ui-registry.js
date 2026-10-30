@@ -4165,6 +4165,92 @@
 
   register('lead_action_proposal', renderLeadActionProposalCard);
 
+  // ── Built-in: Discussion Action Proposal Card (Lead Generation chat) ───────
+  // { type: 'discussion_action_proposal', action: 'set_watch'|'scan_now'|'redraft'|'mark_replied'|'dismiss',
+  //   assistantId, current?, proposed?, discussionId?, title?, url?, siteLabel?, draftReply?, instruction?,
+  //   blocked, settled? }
+  //
+  // The Discussions tab's buttons, from chat. Every fact comes from the rows
+  // (src/utils/chat-discussion-action.ts). The click dispatches `discussion:action`; chat-session.js
+  // calls discussions.ts, the endpoint the tab uses. Nothing here posts to any site.
+  const DISCUSSION_ACTION_COPY = {
+    set_watch: { head: 'Change what Discussions watches', button: 'Save', busy: 'Saving…' },
+    scan_now: { head: 'Scan for discussions now', button: 'Scan now', busy: 'Starting…' },
+    redraft: { head: 'Rewrite this reply', button: 'Rewrite it', busy: 'Rewriting…' },
+    mark_replied: { head: 'Mark this thread replied', button: 'Mark replied', busy: 'Saving…' },
+    dismiss: { head: 'Dismiss this thread', button: 'Dismiss', busy: 'Dismissing…' },
+  };
+
+  function renderDiscussionActionProposalCard(ui, esc) {
+    const copy = DISCUSSION_ACTION_COPY[ui.action];
+    if (!copy) return null;
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const list = (xs) => (Array.isArray(xs) && xs.length ? xs.map((x) => esc(String(x))).join(', ') : 'none');
+    let bodyHtml = '';
+    if (ui.action === 'set_watch' && ui.proposed) {
+      const p = ui.proposed;
+      const c = ui.current || {};
+      bodyHtml = `
+        <dl class="mt-3 text-sm space-y-2">
+          <div><dt class="font-bold text-gray-700">Topics</dt><dd class="text-gray-900 break-words">${list(p.topics)}</dd>
+            ${c.topics && c.topics.length ? `<dd class="text-xs text-gray-500 break-words">Now: ${list(c.topics)}</dd>` : ''}</div>
+          <div><dt class="font-bold text-gray-700">Sites</dt><dd class="text-gray-900">${list(p.siteLabels)}</dd></div>
+          <div><dt class="font-bold text-gray-700">Daily scan</dt><dd class="text-gray-900">${p.enabled ? 'On' : 'Off'}</dd></div>
+        </dl>
+        <p class="text-xs text-gray-600 mt-3">Saving changes what the daily scan looks for. It posts nothing — you reply to threads yourself.</p>`;
+    } else if (ui.action === 'scan_now') {
+      const c = ui.current || {};
+      bodyHtml = `<p class="text-sm text-gray-800 mt-3">Searches ${list(c.sites)} for the last week of threads about ${list(c.topics)}.</p>
+        <p class="text-xs text-gray-600 mt-2">Costs one task. New threads land on the Discussions tab in a minute or two, each with a drafted reply. Nothing is posted.</p>`;
+    } else if (ui.title) {
+      bodyHtml = `
+        <p class="text-xs text-gray-500 mt-2">#${esc(String(ui.discussionId))} · ${esc(ui.siteLabel || '')}</p>
+        <p class="text-sm font-bold text-gray-900 mt-1 break-words">${ui.url ? `<a href="${esc(ui.url)}" target="_blank" rel="noopener noreferrer" class="underline">${esc(ui.title)}</a>` : esc(ui.title)}</p>
+        ${ui.draftReply ? `<p class="text-xs text-gray-600 mt-3">${ui.action === 'redraft' ? 'The reply as it is now:' : 'The drafted reply:'}</p>
+        <div class="mt-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 max-h-56 overflow-y-auto" tabindex="0"><p class="text-sm text-gray-900 whitespace-pre-wrap break-words">${esc(ui.draftReply)}</p></div>` : ''}
+        ${ui.action === 'redraft' ? `<p class="text-sm text-gray-800 mt-2"><span class="font-bold">What to change:</span> ${esc(ui.instruction || 'improve it generally')}</p>
+        <p class="text-xs text-gray-600 mt-2">Pressing the button rewrites the reply on the Discussions tab, disclosure line included. Nothing is posted.</p>` : ''}
+        ${ui.action === 'mark_replied' ? '<p class="text-xs text-gray-600 mt-2">Only mark it once you’ve posted the reply yourself — this just files the thread under Replied.</p>' : ''}
+        ${ui.action === 'dismiss' ? '<p class="text-xs text-gray-600 mt-2">It moves to Dismissed and won’t be suggested again. You can put it back from there.</p>' : ''}`;
+    }
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${bodyHtml}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-dap-go class="${ui.action === 'dismiss' ? 'btn-secondary border' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
+        <button type="button" data-dap-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-dap-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-dap-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-dap-go], [data-dap-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-dap-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-dap-go]')) return;
+      setBusy(true);
+      say(copy.busy);
+      el.dispatchEvent(new CustomEvent('discussion:action', {
+        bubbles: true,
+        detail: {
+          action: ui.action, assistantId: Number(ui.assistantId) || null,
+          discussionId: Number(ui.discussionId) || null, instruction: ui.instruction || null,
+          proposed: ui.proposed || null,
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            setBusy(false);
+            say(error || 'That didn’t work — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('discussion_action_proposal', renderDiscussionActionProposalCard);
+
   // ── Built-in: Assistant Settings Proposal Card (every structured chat) ─────
   // { type: 'assistant_settings_proposal', setting: 'pause'|'resume'|'draft_horizon'|'review_alerts'|
   //   'content_suggestions', assistantId, assistantName, current, proposed, days, value, enabled,

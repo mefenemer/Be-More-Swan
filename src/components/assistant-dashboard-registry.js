@@ -995,6 +995,14 @@
       signalInbox: {
         label: 'Searches',
       },
+      // "Discussions" tab (assistant-discussions.js → discussions.ts). Public forum threads where
+      // someone asks for what the business sells, each with a drafted reply THE USER posts from their
+      // own account — nothing here posts anywhere (src/config/discussion-sites.ts says why). Sits
+      // after Searches: both are where prospects are found, before they are leads.
+      // ⚠️ The chat-orchestrator system prompt names this tab and its buttons; rename both together.
+      discussionsTab: {
+        label: 'Discussions',
+      },
       // No conversationsTab (retired 2026-10-27): the conversations are the Outreach tab's
       // Following up / Replied / Finished stages — see reviewQueue.staged above.
       // Strategy tab (assistant-strategy.js → strategy-proposals.ts). Phase 5a §7: changes the
