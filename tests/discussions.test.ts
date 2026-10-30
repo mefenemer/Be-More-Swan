@@ -141,6 +141,11 @@ check('the chat card is rebuilt server-side and the prompt names the tab', () =>
     assert.match(o, /"Discussions" tab — public forum threads/);
     assert.match(o, /buildDiscussionsChatBlock\(db, orgId, session\.aiAssistantId\)/);
 });
+check('the chat may not claim a card’s action has happened, and sends one card at a time', () => {
+    const s = read('src/utils/discussions.ts');
+    assert.match(s, /have marked, dismissed or rewritten anything, or are doing so/);
+    assert.match(s, /ONE card per message\. When they ask for two things at once/);
+});
 check('GUI and chat call the same endpoint', () => {
     assert.match(read('src/components/assistant-discussions.js'), /const API = '\/\.netlify\/functions\/discussions'/);
     assert.match(read('src/components/chat-session.js'), /fetch\('\/\.netlify\/functions\/discussions'/);
