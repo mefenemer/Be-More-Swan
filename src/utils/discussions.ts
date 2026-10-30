@@ -259,6 +259,7 @@ export async function runScan(db: Db, watchId: number): Promise<void> {
         const byUrl = new Map<string, Candidate>();
         for (const s of searches) {
             for (const r of s.results) {
+                if (r.exactUrl === false) continue;   // Google hid the thread's address — only the site is known
                 const url = normaliseThreadUrl(r.url);
                 if (!url) continue;
                 const site = siteForUrl(url, [s.site]);

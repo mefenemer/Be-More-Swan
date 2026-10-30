@@ -214,7 +214,8 @@ export async function gatherLeadIntel(
                 const res = await search(query, { limit: 4, recency: q.recency, usage: opts.usage });
                 searchCallsMade++;
                 costGbp += res.costGbp;
-                for (const r of res.results) evidence.push(toEvidence(q.kind, r));
+                // Only real page links: a site rebuilt from a Google redirect would label a home page with an article's headline.
+                for (const r of res.results) if (r.exactUrl !== false) evidence.push(toEvidence(q.kind, r));
             } catch {
                 // A failed query costs nothing and blocks nothing. Keep going: the other three
                 // still have something to say about this company.
