@@ -10,7 +10,7 @@
 // Missing is not zero (§12.3): a paused or unhired assistant is described as such, never as idle.
 
 import { and, asc, count, eq, inArray, ne, or, sql } from 'drizzle-orm';
-import { aiAssistants, goals, masterAssistants, masterPlans, mentorJobs, orgIntroOffer, orgOfferProfile, orgProducts, organisations, plans } from '../../db/schema';
+import { aiAssistants, discussionWatches, discussions, goals, masterAssistants, masterPlans, mentorJobs, orgIntroOffer, orgOfferProfile, orgProducts, organisations, plans } from '../../db/schema';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
 import { SEAT_OCCUPYING_STATUSES, takesASeat } from './assistant-capacity';
 import { resolveAssistantLimit } from './release-paused-limit';
@@ -26,6 +26,8 @@ import { playbookFor, renderPlaybookForMentor } from '../config/mentor-playbooks
 import { loadCommitments, renderCommitmentsForMentor } from './mentor-commitments';
 import { loadTrackRecord, renderTrackRecordForMentor } from './mentor-outcomes';
 import { loadCustomers, renderCustomersForMentor } from './mentor-customers';
+import { TEAM_FEATURES } from '../config/team-features';
+import { isDiscussionSource, sourceInfo } from '../config/discussion-sites';
 
 type Db = any;
 
@@ -54,6 +56,11 @@ export interface MentorSnapshotData {
     strategyDocs?: StrategyDoc[] | null;
     /** Phase 2: its last research answers, with their links — the only sourced facts it may quote. */
     research?: Array<{ question: string; answer: string; sources: string[] }>;
+    /**
+     * Each Lead Generator's Discussions tab, as counts — never the threads or the drafts. null = the
+     * tables aren't there (unknown, not "not set up"); undefined = not read (older fixtures).
+     */
+    discussions?: Array<{ assistantId: number; topics: string[]; sites: string[]; enabled: boolean; newCount: number; repliedCount: number; lastScannedAt: Date | null }> | null;
 }
 
 export type TeamState = 'active' | 'paused_by_user' | 'paused_task_cap' | 'paused_payment' | 'paused_plan_limit' | 'setting_up' | 'archived';
@@ -226,6 +233,8 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
         }
     }
 
+    lines.push(...renderTeamFeatures(d));
+
     lines.push('', ...renderHireRecommendation(recommendHires(d)));
 
     lines.push('', 'GOALS:');
@@ -247,6 +256,30 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
 }
 
 /** Reads the workspace (org-scoped throughout) and renders the block. Throws on a DB error; the caller catches. */
+/**
+ * Newer features of the roles on this team (src/config/team-features.ts), and where each Lead Generator's
+ * Discussions tab stands. Empty when no one on the team has a listed feature. Pure.
+ */
+export function renderTeamFeatures(d: MentorSnapshotData): string[] {
+    const others = d.team.filter((t) => t.state !== 'archived');
+    const roles = [...new Set(others.map((t) => t.roleKey).filter((k): k is string => !!k && !!TEAM_FEATURES[k]?.length))];
+    if (!roles.length) return [];
+    const out = ['', 'WHAT YOUR TEAM CAN DO (newer features — suggest one only when it fits a goal or gap; only for an ACTIVE assistant, otherwise say what resuming it would add; the user sets it up there, you have no card for it):'];
+    for (const k of roles) {
+        const names = others.filter((t) => t.roleKey === k).map((t) => t.name).join(', ');
+        for (const f of TEAM_FEATURES[k]) out.push(`- ${names} — ${f.name} (new ${f.since}): ${f.text}`);
+    }
+    for (const t of others.filter((x) => x.roleKey === 'lead_qualifier')) {
+        if (d.discussions === undefined) continue;
+        if (d.discussions === null) { out.push(`- ${t.name}'s Discussions: can't be read just now — ask, never assume it isn't set up.`); continue; }
+        const w = d.discussions.find((x) => x.assistantId === t.id);
+        if (!w || !w.topics.length) { out.push(`- ${t.name}'s Discussions: not set up yet (no topics).`); continue; }
+        const last = w.lastScannedAt ? `last scan ${w.lastScannedAt.toISOString().slice(0, 10)}` : 'never scanned yet';
+        out.push(`- ${t.name}'s Discussions: watching ${w.topics.map((x) => `"${x}"`).join(', ')} on ${w.sites.join(', ') || 'no sites'}; daily scan ${w.enabled ? 'on' : 'off'}; ${last}; ${w.newCount} new thread${w.newCount === 1 ? '' : 's'} waiting for a reply, ${w.repliedCount} replied.`);
+    }
+    return out;
+}
+
 export async function buildMentorSnapshot(db: Db, orgId: number, userId: number): Promise<string> {
     return (await buildMentorSnapshotParts(db, orgId, userId)).text;
 }
@@ -365,9 +398,30 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         return [{ question: String((r.input as { question?: unknown })?.question ?? ''), answer: res.answer, sources: (res.sources ?? []).map((x) => String(x.url ?? '')).filter(Boolean) }];
     });
 
+    // The Lead Generators' Discussions tabs, as counts (db/z-discussions.sql). Only the watch and a
+    // count per status are read — the threads and drafted replies stay the Lead Generator's.
+    const leadIds = team.filter((t: any) => t.roleKey === 'lead_qualifier').map((t: any) => t.id as number);
+    const discussionState = !leadIds.length ? [] : await optional(async () => {
+        const [watches, counts] = await Promise.all([
+            db.select({ assistantId: discussionWatches.aiAssistantId, topics: discussionWatches.topics, sites: discussionWatches.sites, enabled: discussionWatches.enabled, lastScannedAt: discussionWatches.lastScannedAt })
+                .from(discussionWatches).where(and(eq(discussionWatches.organisationId, orgId), inArray(discussionWatches.aiAssistantId, leadIds))),
+            db.select({ assistantId: discussions.aiAssistantId, status: discussions.status, n: count() }).from(discussions)
+                .where(and(eq(discussions.organisationId, orgId), inArray(discussions.aiAssistantId, leadIds)))
+                .groupBy(discussions.aiAssistantId, discussions.status),
+        ]);
+        const n = (id: number, status: string) => Number((counts as any[]).find((c) => c.assistantId === id && c.status === status)?.n ?? 0);
+        return (watches as any[]).map((w) => ({
+            assistantId: w.assistantId, topics: (w.topics ?? []) as string[], enabled: !!w.enabled,
+            sites: ((w.sites ?? []) as string[]).filter(isDiscussionSource).map((x) => sourceInfo(x).label),
+            newCount: n(w.assistantId, 'new'), repliedCount: n(w.assistantId, 'replied'),
+            lastScannedAt: w.lastScannedAt ? new Date(w.lastScannedAt) : null,
+        }));
+    }, null as MentorSnapshotData['discussions']);
+
     return {
         strategyDocs,
         research,
+        discussions: discussionState,
         plan: { status: (planRow?.status as 'active' | 'past_due' | undefined) ?? null, freeSlots, nextPlanName: nextPlan?.name ?? null },
         catalogue: catalogue.filter((c: any) => c.roleKey).map((c: any) => ({
             roleKey: c.roleKey, name: c.name, description: c.description ?? null,

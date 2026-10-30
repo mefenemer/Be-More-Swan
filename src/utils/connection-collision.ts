@@ -18,6 +18,9 @@
 // ⚠️ LinkedIn is EXEMPT. We post as a personal MEMBER profile (w_member_social), so its id is the
 // person, not a business, and an owner posting for two businesses from their own profile is
 // legitimate. Blocking it would lock that owner out of one of their own workspaces.
+// A LinkedIn COMPANY PAGE connection (external id `urn:li:organization:*`, src/utils/linkedin-page.ts)
+// is a business, so it is NOT exempt and collides like a Facebook Page. ⚠️ The DB backstop index
+// excludes service 'linkedin' wholesale, so for Pages this application check is the only guard.
 //
 // ── When it does collide: move, don't lock out ────────────────────────────────────────────────
 // Parked 2026-09-01 because a real owner was locked out of their own Page (a stray row left in
@@ -42,7 +45,8 @@ export type TenantCollision = { connectionId: number; organisationId: number };
  */
 const canonicalService = (serviceName: string): string => serviceName.toLowerCase();
 
-/** Services whose external id is a PERSON rather than a business account. Never collide. */
+/** Services whose external id is a PERSON rather than a business account. Never collide — except a
+ *  LinkedIn Company Page, whose id is an organisation URN (see findTenantCollision). */
 export const COLLISION_EXEMPT_SERVICES: ReadonlySet<string> = new Set(['linkedin']);
 
 /**
@@ -65,10 +69,9 @@ export async function findTenantCollision(
     params: { serviceName: string; externalUserId: string | null | undefined; organisationId: number },
 ): Promise<TenantCollision | null> {
     if (!tenantCollisionEnforced()) return null;
-    if (COLLISION_EXEMPT_SERVICES.has(canonicalService(params.serviceName))) return null;
-
     const tenantId = params.externalUserId;
     if (!tenantId) return null;
+    if (COLLISION_EXEMPT_SERVICES.has(canonicalService(params.serviceName)) && !tenantId.startsWith('urn:li:organization:')) return null;
 
     const [row] = await db
         .select({ id: systemConnections.id, organisationId: systemConnections.organisationId })

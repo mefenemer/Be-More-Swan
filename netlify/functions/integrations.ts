@@ -16,6 +16,8 @@ import { findDisconnectSharing, planDisconnectRevoke } from '../../src/utils/dis
 import { X_OAUTH_SCOPE_LIST } from '../../src/config/x-scopes';
 import { CRON_RENEWED_SERVICES } from '../../src/config/connection-renewal';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { linkedInClientFor } from '../../src/utils/linkedin-page';
+import { linkedinPageAccessEnabled } from '../../src/config/linkedin-capabilities';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -271,10 +273,10 @@ export default withLambda(async (event) => {
                         };
                     })()
                     : null;
-                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools, mailboxProviders, searchConsole, xCredits }) };
+                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools, mailboxProviders, searchConsole, xCredits, linkedinPages: linkedinPageAccessEnabled() }) };
             }
 
-            return { statusCode: 200, body: JSON.stringify({ connections: merged, xCredits }) };
+            return { statusCode: 200, body: JSON.stringify({ connections: merged, xCredits, linkedinPages: linkedinPageAccessEnabled() }) };
         }
 
         // --- POST: SECURE CONNECTION CREATION ---
@@ -441,6 +443,7 @@ export default withLambda(async (event) => {
                     organisationId: systemConnections.organisationId,
                     assistantId: systemConnections.assistantId,
                     metadata: systemConnections.metadata,
+                    externalUserId: systemConnections.externalUserId,
                 })
                 .from(systemConnections)
                 .where(and(
@@ -475,8 +478,8 @@ export default withLambda(async (event) => {
                             fetch(`https://graph.facebook.com/v19.0/me/permissions?access_token=${token}`, { method: 'DELETE' }).catch(() => {});
                         }
                     } else if (svc === 'linkedin') {
-                        const clientId     = process.env.LINKEDIN_CLIENT_ID;
-                        const clientSecret = process.env.LINKEDIN_CLIENT_SECRET;
+                        // A Company Page token was issued to the Community app — revoke with its keys.
+                        const { clientId, clientSecret } = linkedInClientFor(conn.externalUserId);
                         if (clientId && clientSecret) {
                             fetch('https://www.linkedin.com/oauth/v2/revoke', {
                                 method: 'POST',

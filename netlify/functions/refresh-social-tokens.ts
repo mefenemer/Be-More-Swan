@@ -22,6 +22,7 @@ import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src
 import { systemPauseWorkingAssistants } from '../../src/utils/assistant-lifecycle';
 import { reconnectUrl } from '../../src/utils/connection-recovery';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { linkedInClientFor } from '../../src/utils/linkedin-page';
 
 const CONCURRENCY = 25;
 
@@ -40,6 +41,7 @@ type Conn = {
     serviceName: string;
     vaultRefKey: string | null;
     tokenExpiresAt: Date | null;
+    externalUserId: string | null;
 };
 
 export default withLambda(async () => {
@@ -53,6 +55,7 @@ export default withLambda(async () => {
             serviceName: systemConnections.serviceName,
             vaultRefKey: systemConnections.vaultRefKey,
             tokenExpiresAt: systemConnections.tokenExpiresAt,
+            externalUserId: systemConnections.externalUserId,
         })
         .from(systemConnections)
         .where(and(
@@ -172,7 +175,7 @@ async function refreshConnection(db: ReturnType<typeof getDb>, conn: Conn) {
         // token we just sent and the only copy of its replacement is in `refreshed`.
         const refreshed = conn.serviceName === 'x'
             ? await refreshX(refreshToken)
-            : await refreshLinkedIn(refreshToken);
+            : await refreshLinkedIn(refreshToken, conn.externalUserId);
 
         await persistRotatedToken(db, conn, {
             token: refreshed.accessToken,
@@ -408,9 +411,10 @@ async function refreshX(refreshToken: string) {
 }
 
 // ── LinkedIn — OAuth2 refresh token grant ───────────────────────────────────────
-async function refreshLinkedIn(refreshToken: string) {
-    const clientId     = process.env.LINKEDIN_CLIENT_ID!;
-    const clientSecret = process.env.LINKEDIN_CLIENT_SECRET!;
+// A Company Page token belongs to the Community app and must be renewed with ITS keys.
+async function refreshLinkedIn(refreshToken: string, externalUserId: string | null) {
+    const { clientId, clientSecret } = linkedInClientFor(externalUserId);
+    if (!clientId || !clientSecret) throw new Error('LinkedIn app credentials are not configured.');
 
     const data = await requestGrant(
         'LinkedIn',

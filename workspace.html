@@ -4341,6 +4341,7 @@ function formatCurrency(amount, currency) {
         personal_account: 'Personal Instagram accounts can’t be connected. Click “Connect with Instagram” and follow the setup checklist to switch to a Business or Creator account, then try again.',
         // The account picker (meta-oauth ?action=choose). Nothing is written until an account is
         // chosen, so every one of these leaves the existing connection exactly as it was.
+        no_linkedin_pages: 'You signed in to LinkedIn, but you aren’t an admin of any Company Page, so there’s nothing to post as. Ask a Super admin of your Page to make you an admin (Page → Admin tools → Manage admins), then connect again.',
         picker_cancelled: 'Connection cancelled — no account was chosen, so your connections are unchanged.',
         picker_expired: 'That connection took too long to finish. Please connect again and choose your account.',
         picker_invalid: 'We couldn’t confirm which account you chose. Please connect again.',
@@ -4393,7 +4394,53 @@ function formatCurrency(amount, currency) {
       routeBackToConnections();
     })();
 
-    // US-SMM-4.1.1: oauth_success toast — shown after successful social platform OAuth
+    // LinkedIn Company Page picker. social-oauth-callback sends ?linkedin_pick=1 when the member
+    // administers several Pages; linkedin-page-pick.ts holds the list (the token stays server-side).
+    // Choosing one lands on the ordinary ?oauth_success=linkedin toast; cancelling changes nothing.
+    (async function handleLinkedInPagePick() {
+      if (qs.get('linkedin_pick') !== '1') return;
+      const url = new URL(window.location.href);
+      url.searchParams.delete('linkedin_pick');
+      url.searchParams.delete('assistantId');
+      history.replaceState(null, '', url.toString());
+      const fail = (msg) => window.alertModal ? window.alertModal(msg, { title: 'LinkedIn' }) : alert(msg);
+      try {
+        const res = await fetch('/.netlify/functions/linkedin-page-pick');
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !Array.isArray(data.pages)) return fail(data.error || 'That LinkedIn sign-in has expired. Connect your Company Page again.');
+        const urn = await window.choiceModal(
+          'You’re an admin of more than one LinkedIn Page. Which one should this workspace post as?',
+          // Page names come from LinkedIn and choiceModal renders labels as HTML.
+          data.pages.map(p => ({ value: p.urn, label: window.escapeHtml(p.name) })),
+          { title: 'Choose your Company Page' },
+        );
+        if (!urn) return window.showToast?.('No Page chosen — your LinkedIn connection is unchanged.', { icon: '💼' });
+        const post = await fetch('/.netlify/functions/linkedin-page-pick', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ urn }),
+        });
+        const result = await post.json().catch(() => ({}));
+        if (post.ok) {
+          const next = new URL('/workspace.html', window.location.origin);
+          next.searchParams.set('oauth_success', 'linkedin');
+          if (result.assistantId) next.searchParams.set('assistantId', String(result.assistantId));
+          window.location.replace(next.toString());
+          return;
+        }
+        if (result.error === 'tenant_collision') {
+          const next = new URL('/workspace.html', window.location.origin);
+          next.searchParams.set('oauth_error', 'tenant_collision');
+          next.searchParams.set('platform', 'linkedin');
+          if (result.collision) next.searchParams.set('collision', String(result.collision));
+          window.location.replace(next.toString());
+          return;
+        }
+        fail(result.error || 'We couldn’t connect that Page. Please try again.');
+      } catch {
+        fail('We couldn’t reach Be More Swan to finish connecting LinkedIn. Please try again.');
+      }
+    })();
+
+        // US-SMM-4.1.1: oauth_success toast — shown after successful social platform OAuth
     (function handleOAuthSuccess() {
       const platform = qs.get('oauth_success');
       if (!platform) return;

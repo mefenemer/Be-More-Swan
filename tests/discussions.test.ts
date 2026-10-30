@@ -17,9 +17,10 @@ import path from 'node:path';
 import {
     DISCUSSION_SITE_KEYS, MAX_TOPICS, discussionDisclosure, discussionQuery, hasDisclosure, looksLikeThread,
     normaliseSites, normaliseThreadUrl, normaliseTopics, plainForSite, postedAgeDays, siteForUrl, withDisclosure,
-    MAX_OWN_FORUMS, normaliseForumAddress, sourceInfo,
+    MAX_OWN_FORUMS, normaliseForumAddress, sitesFromChat, sourceInfo,
 } from '../src/config/discussion-sites';
 import { discussionActionFromUiElement } from '../src/utils/chat-discussion-action';
+import { renderMentorSnapshot, renderTeamFeatures } from '../src/utils/mentor-snapshot';
 
 let passed = 0;
 let total = 0;
@@ -191,6 +192,43 @@ check('GUI and chat call the same endpoint', () => {
     assert.match(read('src/components/assistant-discussions.js'), /const API = '\/\.netlify\/functions\/discussions'/);
     assert.match(read('src/components/chat-session.js'), /fetch\('\/\.netlify\/functions\/discussions'/);
     assert.match(read('src/components/disruptive-ui-registry.js'), /register\('discussion_action_proposal', renderDiscussionActionProposalCard\);/);
+});
+
+console.log('\n──── chat: own forums ────');
+
+check('chat sites accept keys, labels, addresses and bare forum addresses', () => {
+    const r = sitesFromChat(['Reddit', 'ukbf', 'https://www.quora.com/', 'contractortalk.com', 'forum:BiggerPockets.com/forums/', 'Indie Hackers']);
+    assert.deepStrictEqual(r.sites, ['reddit', 'ukbf', 'quora', 'forum:contractortalk.com', 'forum:biggerpockets.com/forums', 'forum:indiehackers.com']);
+    assert.deepStrictEqual(r.rejected, []);
+    assert.strictEqual(r.tooMany, false);
+});
+check('a forum the chat can’t watch, or a sixth own forum, reaches the card — never dropped quietly', () => {
+    const bad = discussionActionFromUiElement({ type: 'discussion_action_proposal', action: 'set_watch', sites: ['reddit', 'my local forum'] });
+    assert.deepStrictEqual(bad?.rejectedSites, ['my local forum']);
+    const many = discussionActionFromUiElement({ type: 'discussion_action_proposal', action: 'set_watch', sites: ['a.com', 'b.com', 'c.com', 'd.com', 'e.com', 'f.com'] });
+    assert.strictEqual(many?.tooManyForums, true);
+    const src = read('src/utils/chat-discussion-action.ts');
+    assert.match(src, /isn’t a forum address I can watch/);
+    assert.match(src, /You can watch up to \$\{MAX_OWN_FORUMS\} forums of your own/);
+});
+
+console.log('\n──── Business Mentor ────');
+
+check('the Mentor is told about the Discussions tab and where it stands, as counts only', () => {
+    const base = {
+        business: { description: 'Bookkeeping', industry: null, website: null }, products: [], productCount: 0,
+        offerKinds: ['services'], introOfferAnswered: true, goals: [], plan: { status: 'active' as const, freeSlots: 1 },
+        team: [{ id: 7, name: 'Lena', role: 'Lead Generator', state: 'active' as const, roleKey: 'lead_qualifier' }],
+    };
+    const off = renderTeamFeatures({ ...base, discussions: [] }).join('\n');
+    assert.match(off, /Lena — Discussions tab \(new 2026-10-30\)/);
+    assert.match(off, /the USER posts it/);
+    assert.match(off, /Lena's Discussions: not set up yet/);
+    const on = renderTeamFeatures({ ...base, discussions: [{ assistantId: 7, topics: ['need a bookkeeper'], sites: ['Reddit', 'contractortalk.com'], enabled: true, newCount: 3, repliedCount: 1, lastScannedAt: new Date('2026-10-30T07:00:00Z') }] }).join('\n');
+    assert.match(on, /watching "need a bookkeeper" on Reddit, contractortalk\.com; daily scan on; last scan 2026-10-30; 3 new threads waiting for a reply, 1 replied/);
+    assert.match(renderTeamFeatures({ ...base, discussions: null }).join('\n'), /never assume it isn't set up/);
+    assert.deepStrictEqual(renderTeamFeatures({ ...base, team: [{ ...base.team[0], roleKey: 'social_media_manager' }] }), []);
+    assert.match(renderMentorSnapshot({ ...base, discussions: [] }), /WHAT YOUR TEAM CAN DO/);
 });
 
 console.log('\n──── wiring ────');

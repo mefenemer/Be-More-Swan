@@ -15,7 +15,7 @@
 
 import type { getDb } from '../../db/client';
 import {
-    MAX_TOPICS, normaliseSites, normaliseTopics, sourceInfo, type DiscussionSource,
+    MAX_OWN_FORUMS, MAX_TOPICS, normaliseTopics, sitesFromChat, sourceInfo, type DiscussionSource,
 } from '../config/discussion-sites';
 import { discussionView, loadDiscussion, loadWatch, watchView } from './discussions';
 
@@ -30,6 +30,10 @@ export interface DiscussionActionRequest {
     discussionId: number | null;
     topics: string[] | null;
     sites: DiscussionSource[] | null;
+    /** set_watch: forum addresses it asked for that can't be watched — the card says so, never drops them quietly. */
+    rejectedSites?: string[];
+    /** set_watch: more than MAX_OWN_FORUMS own forums were asked for. */
+    tooManyForums?: boolean;
     enabled: boolean | null;
     instruction: string | null;
 }
@@ -45,12 +49,13 @@ export function discussionActionFromUiElement(uiElement: unknown): DiscussionAct
     const discussionId = Number.isInteger(id) && id > 0 ? id : null;
     if ((action === 'redraft' || action === 'mark_replied' || action === 'dismiss') && !discussionId) return null;
     const topics = Array.isArray(ui.topics) ? normaliseTopics(ui.topics) : null;
-    const sites = Array.isArray(ui.sites) ? normaliseSites(ui.sites) : null;
+    const fromChat = Array.isArray(ui.sites) ? sitesFromChat(ui.sites) : null;
+    const sites = fromChat ? fromChat.sites : null;
     const enabled = typeof ui.enabled === 'boolean' ? ui.enabled : null;
     if (action === 'set_watch' && !topics && !sites && enabled === null) return null;
     const instruction = action === 'redraft' && typeof ui.instruction === 'string' && ui.instruction.trim()
         ? ui.instruction.trim().slice(0, 600) : null;
-    return { action, discussionId, topics, sites, enabled, instruction };
+    return { action, discussionId, topics, sites, rejectedSites: fromChat?.rejected ?? [], tooManyForums: fromChat?.tooMany ?? false, enabled, instruction };
 }
 
 export interface DiscussionActionCard {
@@ -91,7 +96,10 @@ export async function resolveDiscussionActionProposal(
             const topics = req.topics ?? w.topics;
             const sites = req.sites ?? w.sites;
             const enabled = req.enabled ?? w.enabled;
-            const blocked = !topics.length ? `Give at least one topic (up to ${MAX_TOPICS}).`
+            const bad = req.rejectedSites?.[0];
+            const blocked = bad ? `“${bad}” isn’t a forum address I can watch. Ask again with the forum’s web address, like contractortalk.com.`
+                : req.tooManyForums ? `You can watch up to ${MAX_OWN_FORUMS} forums of your own — say which to drop.`
+                : !topics.length ? `Give at least one topic (up to ${MAX_TOPICS}).`
                 : !sites.length ? 'Choose at least one site to watch.'
                 : null;
             return { ...base, current, proposed: { topics, sites, siteLabels: sites.map((s) => sourceInfo(s).label), enabled }, blocked };
