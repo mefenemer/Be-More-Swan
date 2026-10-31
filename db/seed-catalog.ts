@@ -120,6 +120,19 @@ const CATALOG = [
         isActive: true,
     },
     {
+        // docs/video-producer-plan.md. Brief → storyboard → a finished short vertical video (a post).
+        // ⚠️ db/z-video-producer-role.sql inserts this row on existing databases, HIDDEN — this entry
+        // is for a FRESH database. Go-live is the admin status change, never an edit here.
+        roleKey: 'video_producer',
+        name: 'Video Producer',
+        description: 'Turns what you want to say into a short vertical video for Reels, Shorts and Facebook — it writes the script from your business details, picks the footage and pictures, adds a voiceover and captions, and lines it up with your posts. You check the storyboard before anything is made, and approve the finished video before it goes out.',
+        category: 'Marketing & Sales',
+        iconKey: 'megaphone',
+        iconColor: 'orange',
+        comingSoon: false,
+        isActive: false,
+    },
+    {
         // docs/website-assistant-plan.md. Builds and keeps up to date the business's website from a
         // conversation. ⚠️ db/z-website-assistant.sql inserts this row on existing databases, HIDDEN —
         // this entry is for a FRESH database. Go-live is the admin status change, never an edit here.

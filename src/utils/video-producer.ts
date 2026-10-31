@@ -58,6 +58,22 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const BUILD_COSTS = { image: IMAGE_CREDIT_COST, video: VIDEO_CREDIT_COST, voiceover: VOICEOVER_CREDIT_COST };
 
+/**
+ * Fill what a brief leaves out from the assistant's setup answers (defaultVoice, defaultLength,
+ * defaultAllowAi, defaultCta — assistant-onboarding-schemas.js video_producer). The brief always
+ * wins; setup only fills gaps. Pure.
+ */
+export function withSetupDefaults(raw: unknown, onboardingContext: unknown): Record<string, unknown> {
+    const b = { ...((raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>) };
+    const setup = (onboardingContext && typeof onboardingContext === 'object' ? onboardingContext : {}) as Record<string, unknown>;
+    const has = (k: string) => b[k] != null && b[k] !== '';
+    if (!has('voice') && b.voiceover !== false && isVoiceId(setup.defaultVoice)) b.voice = setup.defaultVoice;
+    if (!has('lengthS') && isVideoLength(setup.defaultLength)) b.lengthS = Number(setup.defaultLength);
+    if (!has('allowAi') && typeof setup.defaultAllowAi === 'string') b.allowAi = setup.defaultAllowAi;
+    if (!has('cta') && typeof setup.defaultCta === 'string' && setup.defaultCta.trim()) b.cta = setup.defaultCta;
+    return b;
+}
+
 /** Normalise a brief from a request body. Pure; returns an error string when unusable. */
 export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: string[] } } | { error: string } {
     const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -401,10 +417,35 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
     }
     const sb = row.storyboard as Storyboard | null;
     return {
-        id: row.id, title: row.title, status: row.status, brief: row.brief, storyboard: sb, changes: row.changes, note: row.note,
+        id: row.id, aiAssistantId: row.aiAssistantId, title: row.title, status: row.status, brief: row.brief, storyboard: sb, changes: row.changes, note: row.note,
         scheduledPostId: row.scheduledPostId, creditsSpent: row.creditsSpent,
         estimate: sb ? estimateCredits(sb, row.brief as VideoBrief, BUILD_COSTS) : null,
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),
         createdAt: row.createdAt, updatedAt: row.updatedAt,
     };
+}
+
+/**
+ * What the chat may know about this assistant's videos, per turn — ids it may name in a card, and
+ * nothing it could mistake for a promise (no thumbnails, no URLs). Newest first, at most 10.
+ */
+export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: number): Promise<string> {
+    await sweepStuckProjects(db, orgId).catch(() => 0);
+    const rows = await db.select().from(videoProjects)
+        .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, assistantId)))
+        .orderBy(desc(videoProjects.createdAt)).limit(10);
+    if (!rows.length) return 'YOUR VIDEOS: none yet.';
+    const WAITING: Record<string, string> = {
+        planning: 'writing the storyboard', planned: 'storyboard waiting for the user to check it and press "Make the video"',
+        building: 'being made', built: 'made — the finished video is in the Review Queue for approval',
+        failed: 'stopped', cancelled: 'cancelled', draft: 'not started',
+    };
+    return ['YOUR VIDEOS (newest first; use only these ids):', ...rows.map((r) => {
+        const sb = r.storyboard as Storyboard | null;
+        const brief = r.brief as VideoBrief;
+        const scenes = sb ? ` · ${sb.scenes.length} scenes` : '';
+        const cost = sb && (r.status === 'planned' || r.status === 'failed') ? ` · would use ${estimateCredits(sb, brief, BUILD_COSTS)} credits to make` : '';
+        const note = r.note ? ` · note: ${r.note.slice(0, 160)}` : '';
+        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}) — ${WAITING[r.status] ?? r.status}${cost}${note}`;
+    })].join('\n');
 }

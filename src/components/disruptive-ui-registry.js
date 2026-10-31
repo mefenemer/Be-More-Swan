@@ -1569,6 +1569,108 @@
 
   register('visual_brief_proposal', renderVisualBriefProposalCard);
 
+  // ── Built-ins: Video Producer cards (docs/video-producer-plan.md §5.10) ─────────────────────
+  // { type: 'video_brief_proposal', message, purpose?, lengthS?, cta?, voiceover?, allowAi?, platforms? }
+  // { type: 'video_replan_proposal', projectId, feedback? }
+  //
+  // The chat twins of "New video" and "Plan it again" on the Videos tab — the same video-projects.ts
+  // actions. Both are FREE (planning is one model call). Making the video spends credits, so no card
+  // can do it: that is "Make the video" on the Videos tab, which states the cost first.
+  function renderVideoBriefProposalCard(ui, esc) {
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const PLATFORMS = { instagram: 'Instagram Reel', youtube: 'YouTube Short', facebook: 'Facebook Reel' };
+    const ALLOW = { stock_and_ai: 'Stock first, AI where it fits', stock_only: 'Stock and your own pictures only', ai_first: 'Leans on AI' };
+    const brief = {
+      message: clean(ui.message, 1200),
+      purpose: clean(ui.purpose, 60) || 'promo',
+      lengthS: [15, 30, 60].includes(Number(ui.lengthS)) ? Number(ui.lengthS) : 30,
+      cta: clean(ui.cta, 200),
+      voiceover: ui.voiceover !== false,
+      allowAi: ALLOW[ui.allowAi] ? ui.allowAi : 'stock_and_ai',
+      platforms: (Array.isArray(ui.platforms) ? ui.platforms : ['instagram']).filter((p) => PLATFORMS[p]),
+    };
+    if (!brief.platforms.length) brief.platforms = ['instagram'];
+    const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
+    const runnable = brief.message.length >= 10;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">New video · Approval needed</p>
+      <p class="text-sm text-gray-900 mt-2 break-words">${runnable ? esc(brief.message) : '<span class="text-amber-700">It needs a sentence or two on what the video is about.</span>'}</p>
+      ${row('Length', `${brief.lengthS} seconds`)}
+      ${row('Kind', brief.purpose)}
+      ${row('Ends with', brief.cta)}
+      ${row('Voiceover', brief.voiceover ? 'Yes, with captions' : 'No — on-screen text only')}
+      ${row('Pictures from', ALLOW[brief.allowAi])}
+      ${row('For', brief.platforms.map((p) => PLATFORMS[p]).join(', '))}
+      <p class="text-xs text-gray-600 mt-2">Planning the storyboard is free. You check it on the Videos tab before anything is made — the cost of making it is shown there first.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vdp-save ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Plan this video</button>
+        <button type="button" data-vdp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vdp-status></p>`;
+    const status = el.querySelector('[data-vdp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vdp-cancel]')) { setBusy(true); say('Not planned.'); return; }
+      if (!e.target.closest('[data-vdp-save]')) return;
+      setBusy(true);
+      say('Starting the storyboard…');
+      el.dispatchEvent(new CustomEvent('video:create', {
+        bubbles: true,
+        detail: {
+          brief,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'Could not start that — please try again.', 'error'); return; }
+            say('Started. The storyboard appears on the Videos tab in about a minute.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  function renderVideoReplanProposalCard(ui, esc) {
+    const projectId = Number(ui.projectId);
+    const feedback = typeof ui.feedback === 'string' ? ui.feedback.replace(/\s+/g, ' ').trim().slice(0, 600) : '';
+    const ok = Number.isInteger(projectId) && projectId > 0;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Plan the video again · Approval needed</p>
+      ${feedback ? `<p class="text-xs text-gray-700 mt-2"><span class="font-bold">Your notes:</span> ${esc(feedback)}</p>` : ''}
+      <p class="text-xs text-gray-600 mt-2">Free. The new storyboard replaces the current one, and any scenes already made for it are dropped.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vrp-go ${ok ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Plan it again</button>
+        <button type="button" data-vrp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vrp-status></p>`;
+    const status = el.querySelector('[data-vrp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vrp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-vrp-go]')) return;
+      setBusy(true);
+      say('Re-planning…');
+      el.dispatchEvent(new CustomEvent('video:replan', {
+        bubbles: true,
+        detail: {
+          projectId, feedback,
+          respond({ ok: done, error }) {
+            if (!done) { setBusy(false); say(error || 'Could not re-plan that — please try again.', 'error'); return; }
+            say('Re-planning. The new storyboard appears on the Videos tab in about a minute.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('video_brief_proposal', renderVideoBriefProposalCard);
+  register('video_replan_proposal', renderVideoReplanProposalCard);
+
   // ── Built-ins: Mystery Shopper cards (docs/mystery-shopper-plan.md §4.6) ──────────────────────
   // The chat twins of the Website tab's buttons — same server actions (site-audits.ts), handled in
   // chat-session.js. Each writes only on the user's click; a check that re-scores spends a task and

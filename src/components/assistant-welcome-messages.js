@@ -69,6 +69,9 @@
     brand_designer: {
       working: 'Tell me what a picture is for and I’ll put options in front of you to choose from',
     },
+    video_producer: {
+      working: 'Tell me what you’d like a video about — I’ll plan the storyboard for you to check before anything is made',
+    },
     website_assistant: {
       working: 'Open the Website tab and press “Write my site” (or “Import my current site” if you already have one) — or just tell me in chat what your site should say',
     },

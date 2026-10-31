@@ -40,6 +40,8 @@ export const RULE_READING_ROLES: ReadonlySet<string> = new Set([
     // The Brand Designer: its chat, and its art direction (visual-briefs.ts writeArtDirection),
     // both read these. The Rules-tab copy says so (registry rulesScope 'designer').
     'brand_designer',
+    // Video Producer: its chat, and its storyboard planner (video-producer.ts planProject).
+    'video_producer',
     // Campaign Assistant and CRM Data Assistant (2026-10-09): their work is planned and proposed in
     // chat, and their Rules tab said rules "won't change what it does today" — true, and fixable.
     // A rule like "never brief the Blog Writer about pricing" now reaches the planner.

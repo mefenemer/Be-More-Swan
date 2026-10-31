@@ -459,6 +459,7 @@ window.generateAssistantCardHTML = function(assistant) {
         ...(dReg.mentorTab ? [['🧭', dReg.mentorTab.label || 'Overview', 'mentor']] : []),
         ...(dReg.mentorPlanTab ? [['🗺️', dReg.mentorPlanTab.label || 'Plan', 'mentorplan']] : []),
         ...(dReg.briefsTab ? [['🎨', dReg.briefsTab.label || 'Briefs', 'briefs']] : []),
+        ...(dReg.videosTab ? [['🎬', dReg.videosTab.label || 'Videos', 'videos']] : []),
         ...(dReg.siteAuditTab ? [['🔍', dReg.siteAuditTab.label || 'Website', 'website']] : []),
         ...(dReg.siteEditorTab ? [['🌐', dReg.siteEditorTab.label || 'Website', 'sitebuilder']] : []),
         ...(dReg.hideReviewQueue ? [] : [['✅', dReg.reviewQueue?.label || 'Review', 'review-queue']]),
@@ -1078,6 +1079,7 @@ window._activateMainTab = function(name) {
     if (name === 'email-campaigns') window.AssistantEmailCampaigns?.activate();
     // Briefs (Brand Designer) renders lazily too — init() already fetched for the badge.
     if (name === 'briefs') window.AssistantBriefs?.activate();
+    if (name === 'videos') window.AssistantVideos?.activate();
     // Overview (Business Mentor) — init() already fetched; this only repaints.
     if (name === 'mentor') window.AssistantMentorOverview?.activate();
     // Plan (Business Mentor, Phase 2) — init() already fetched; this repaints and resumes any poll.
@@ -5713,6 +5715,13 @@ function _applyAssistantRulesScope() {
         if (subtitle) subtitle.textContent = 'Custom rules for this assistant — for example a claim your site must never make, or words you never use.';
         return;
     }
+    if (window._detailRulesScope === 'video') {
+        note.classList.remove(...AMBER);
+        note.classList.add(...EMERALD);
+        text.textContent = 'Your Video Producer follows these rules in every storyboard it plans, and whenever you ask it for something in chat. Changes apply from the next storyboard.';
+        if (subtitle) subtitle.textContent = 'Custom rules for this assistant — for example a claim your videos must never make, or footage you never want.';
+        return;
+    }
     if (window._detailRulesScope === 'designer') {
         note.classList.remove(...AMBER);
         note.classList.add(...EMERALD);
@@ -7017,6 +7026,15 @@ function _applyDashboardRegistry(data) {
     if (briefsTab) {
         setText('briefs-tab-label', briefsTab.label || 'Briefs');
         window.AssistantBriefs?.init({ assistantId: data.id, assistantName: data.name });
+    }
+
+    // Videos tab — Video Producer only (videosTab: video_producer). init() loads eagerly: the count of
+    // storyboards waiting for the owner is the tab badge, visible from every tab.
+    const videosTab = cfg.videosTab;
+    toggle('maintab-btn-videos', !!videosTab);
+    if (videosTab) {
+        setText('videos-tab-label', videosTab.label || 'Videos');
+        window.AssistantVideos?.init({ assistantId: data.id, assistantName: data.name });
     }
 
     // Website tab — Mystery Shopper only (siteAuditTab: mystery_shopper). init() loads eagerly: the

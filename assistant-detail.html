@@ -713,6 +713,13 @@
         <!-- `hidden` loses to `inline-flex` (equal specificity, later in style.css): pinned inline too. -->
         <span id="briefs-review-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Videos — Video Producer only (videosTab: video_producer). Brief → storyboard → "Make the video".
+           assistant-videos.js → video-projects.ts. Design: docs/video-producer-plan.md §5. -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-videos" id="maintab-btn-videos" data-maintab="videos" class="main-tab-btn hidden">
+        <span id="videos-tab-label">Videos</span>
+        <!-- `hidden` loses to `inline-flex` (equal specificity, later in style.css): pinned inline too. -->
+        <span id="videos-review-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
       <!-- Website — Mystery Shopper only (siteAuditTab: mystery_shopper). The site's score, the
            suggested fixes, competitor changes and past checks. Sits first: it is what the role is for.
            assistant-site-audit.js → site-audits.ts. Design: docs/mystery-shopper-plan.md §4 -->
@@ -1095,6 +1102,12 @@
   <div id="maintab-briefs" role="tabpanel" aria-labelledby="maintab-btn-briefs" class="main-tab-content hidden">
     <div id="briefs-host"></div>
   </div><!-- /maintab-briefs -->
+
+  <!-- Videos — Video Producer only. Rendered lazily by assistant-videos.js on first activation;
+       init() fetches eagerly because the count of storyboards waiting for the owner drives the badge. -->
+  <div id="maintab-videos" role="tabpanel" aria-labelledby="maintab-btn-videos" class="main-tab-content hidden">
+    <div id="videos-host"></div>
+  </div><!-- /maintab-videos -->
 
   <!-- Website — Mystery Shopper only. Rendered lazily by assistant-site-audit.js on first activation;
        init() fetches eagerly because the count of undecided fixes drives the tab badge. -->

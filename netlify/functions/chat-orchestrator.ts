@@ -59,6 +59,8 @@ import { voiceDirective } from '../../src/utils/voice-profile';
 import { RULE_READING_ROLES, loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
 import { activeAndPausedRoleKeys, buildCampaignsSnapshot, withoutInactiveOrders } from '../../src/utils/campaign-plan';
 import { buildBriefsSnapshot } from '../../src/utils/visual-briefs';
+import { buildVideosSnapshot } from '../../src/utils/video-producer';
+import { MAX_AI_CLIPS } from '../../src/lib/storyboard';
 import { buildSiteAuditSnapshot } from '../../src/utils/site-audit-snapshot';
 import { buildSiteSnapshot } from '../../src/utils/site-store';
 import { LIMITS as SITE_LIMITS, SECTION_TYPES } from '../../src/utils/site-definition';
@@ -228,6 +230,8 @@ interface RouteContext {
     /** This Brand Designer's briefs and the options awaiting a decision, by id — read per turn for
      *  routes with usesBriefsSnapshot. Without it "use the second one" has no option to point at. */
     briefsSnapshot?: string | null;
+    /** This Video Producer's videos by id — read per turn for routes with usesVideosSnapshot. */
+    videosSnapshot?: string | null;
     /** This Mystery Shopper's site, scores and suggested fixes by id — read per turn for routes with
      *  usesSiteAuditSnapshot (src/utils/site-audit-snapshot.ts). */
     siteAuditSnapshot?: string | null;
@@ -266,6 +270,8 @@ interface AssistantRoute {
     usesCampaignSnapshot?: boolean;
     /** When true the handler reads this assistant's briefs for this turn (rc.briefsSnapshot). */
     usesBriefsSnapshot?: boolean;
+    /** When true the handler reads this assistant's videos for this turn (rc.videosSnapshot). */
+    usesVideosSnapshot?: boolean;
     /** When true the handler reads this assistant's website checks for this turn (rc.siteAuditSnapshot). */
     usesSiteAuditSnapshot?: boolean;
     /** When true the handler reads the whole workspace for the Business Mentor (rc.mentorSnapshot). */
@@ -720,6 +726,16 @@ function brandDesignerSurfaces(): string {
 // ⚠️ The tab and button names below are copied from assistant-dashboard-registry.js (siteEditorTab
 // label 'Website') and src/components/assistant-site-editor.js. tests/website-assistant-wiring.test.ts
 // checks each name against those files.
+// ⚠️ The tab and button names below are copied from assistant-dashboard-registry.js (videosTab label
+// 'Videos') and src/components/assistant-videos.js. tests/video-producer-role.test.ts checks each.
+function videoProducerSurfaces(): string {
+    return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
+- "Videos" tab — the tab the user lands on. "New video" at the top writes a brief without chatting. Each video shows one sentence on what it is waiting for. A planned video shows its storyboard — every scene's voiceover line, on-screen text and where its picture comes from — with "Change" on each scene, "Plan it again" (with notes), "Make the video" (it states the credits first) and "Cancel".
+- "Review Queue" tab — where a finished video waits for the user to approve it, like any post. Approving renders it with the captions and schedules it.
+- "Calendar" tab — your videos on their posting days.
+Everything you can do here, the user can also do there by hand.`;
+}
+
 function websiteAssistantSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform:
 - "Website" tab — the tab the user lands on. Four sub-tabs, left to right in the order a site is made: "Set up" (what the website does, business details and footer, "Import my current site", and "Start again from scratch" with "Replace my draft"), "Design" (templates — start from a ready-made layout — one page or several, colours, lettering, corners, logo), "Pages" (each page's title, address, search title and description, and its sections, each with "Edit", "↑", "↓" and "Remove", plus "Add a section", "+ Page" and "Add your own words", and the parts in [square brackets] still to fill in) and "Publish" (below). Beside them, whichever is open: the live "Preview", with "Desktop" and "Phone".
@@ -1646,6 +1662,65 @@ or, to decide on options:
     "decisions": [ { "optionId": <number from the list above>, "decision": "approve" | "reject", "reason": ${REJECT_REASONS.map((r) => `"${r}"`).join(' | ')}, "note": "<the user's words, optional>" } ],
     "remake": true | false     // offer the next round once these are decided
   }
+}`,
+            ].filter(Boolean).join('\n\n');
+        },
+        parseResponse: parseStructuredReply,
+    },
+
+    // Video Producer (docs/video-producer-plan.md §5.10). Turns "I want a video about…" into a BRIEF;
+    // the storyboard is planned in the background (free — one model call, like any draft). Wire shapes:
+    // video_brief_proposal and video_replan_proposal, matching disruptive-ui-registry.js.
+    //
+    // ⚠️ The chat never MAKES a video: building spends credits, so "Make the video" is a click on the
+    // Videos tab, where the cost is shown. Setup keys must match assistant-onboarding-schemas.js.
+    video_producer: {
+        model: DEFAULT_MODEL,
+        maxTokens: 1200,
+        usesVideosSnapshot: true,
+        buildRolePrompt: (rc) => {
+            const length = onboardingValue(rc, 'defaultLength');
+            const cta = onboardingValue(rc, 'defaultCta');
+            const allow = onboardingValue(rc, 'defaultAllowAi');
+            return [
+                sharedContextBlock(rc),
+                `You are this business's Video Producer. You make short vertical videos (Instagram Reels, YouTube Shorts, Facebook Reels) — 15, 30 or 60 seconds — from what the user wants to say. You write a brief; a storyboard is planned from it (scenes, each with a voiceover line, optional on-screen text, and stock footage, stock photos, their own pictures, a branded card, an AI picture or an AI clip); the user checks it; then the video is made with a voiceover, captions and the on-screen text, and lands in the Review Queue.
+
+${videoProducerSurfaces()}
+
+${length ? `Their usual length (from setup): ${String(length)} seconds.` : ''}
+${cta ? `Their usual call to action (from setup): ${String(cta)}` : ''}
+${allow === 'stock_only' ? 'They chose stock footage, photos and their own pictures only at setup: set "allowAi": "stock_only" unless they ask for AI.' : ''}
+
+${rc.videosSnapshot ?? 'Your list of videos could not be read this turn. Do not guess what exists: if the user refers to a video, ask them to check the "Videos" tab, and do not emit a projectId.'}
+
+WHAT IT COSTS. Planning a storyboard is free. Making the video uses credits only for AI pictures (1 each), AI clips (5 each, at most ${MAX_AI_CLIPS} per video) and the voiceover (1). Stock footage, stock photos, their own pictures and branded cards are free. The exact figure is on "Make the video" before they press it. You cannot make the video from this chat — say where the button is.
+
+WHAT YOU CANNOT DO. You do not watch footage the user gives you and cannot pick the best moments from it. You do not make videos longer than 60 seconds, or for TikTok yet. You never claim a video exists, or is being made, before the "Videos" tab says so. Use only facts from the business information — never invent prices, offers or claims.
+
+WRITING A BRIEF. When the user describes a video they want, emit a video_brief_proposal. "message" is what the video must say, in their words plus the facts it needs. Ask one short question instead of proposing when you cannot tell what the video is about. Approving the card starts the storyboard; it appears on the "Videos" tab in about a minute.
+
+CHANGING A STORYBOARD. When the user wants a planned video done differently, emit a video_replan_proposal with the video's id from the list above and their notes. Approving it plans the storyboard again with those notes (free). To change a single scene, tell them to press "Change" on that scene on the "Videos" tab.
+
+Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the two shapes below, or null:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {
+    "type": "video_brief_proposal",
+    "message": "<what the video must say>",
+    "purpose": "promo" | "product spotlight" | "offer" | "tip" | "event",
+    "lengthS": 15 | 30 | 60,
+    "cta": "<the call to action — omit unless known>",
+    "voiceover": true | false,
+    "allowAi": "stock_and_ai" | "stock_only" | "ai_first",
+    "platforms": ["instagram", "youtube", "facebook"]   // any of these
+  }
+}
+
+or, to plan an existing video again:
+{
+  "reply": "your conversational message to the user",
+  "uiElement": { "type": "video_replan_proposal", "projectId": <number from the list above>, "feedback": "<the user's notes>" }
 }`,
             ].filter(Boolean).join('\n\n');
         },
@@ -2955,6 +3030,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         })
         : null;
 
+    // Per turn: a storyboard finished a moment ago must be offered as "planned", not "planning".
+    const videosSnapshot = route.usesVideosSnapshot
+        ? await buildVideosSnapshot(db, orgId, session.aiAssistantId).catch((err) => {
+            console.error('[chat-orchestrator] videos snapshot failed:', err);
+            return null;
+        })
+        : null;
+
     // Per turn, like the others: a contact added on the Audience page a moment ago must be counted.
     const audienceSnapshot = route.usesAudienceSnapshot ? await buildAudienceSnapshot(db, orgId) : null;
 
@@ -3015,6 +3098,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         siteAuditSnapshot,
         siteSnapshot,
         contentSnapshot,
+        videosSnapshot,
         audienceSnapshot,
         mentorSnapshot,
         attachmentsBlock,

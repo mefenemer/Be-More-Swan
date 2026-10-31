@@ -3,9 +3,8 @@
 Added 2026-10-31, from an owner discussion of a "faceless YouTube" AI video stack (ChatGPT +
 Midjourney + Leonardo + ImageFX + Veo + Runway + Suno + CapCut, roughly $100–$245/month at verified
 2026-10-31 prices) and what Be More Swan would need to do the same job as one assistant.
-Status: **Phases 0–5 built 2026-10-31 (code + tests, on staging, NOT yet live-verified — see §7.1 and
-§7.2); Phases 6–7 not started.** Phase 5 has no screen yet — its endpoints are ready for the Phase 6
-role page and chat. Owner decisions taken 2026-10-31: D1 Video Producer, D2 OpenAI TTS, D3 Kling
+Status: **Phases 0–6 built 2026-10-31 (code + tests, NOT yet live-verified — §7.1–7.3); Phase 7 not
+started.** The role is inserted HIDDEN; go-live is the admin status change after a live staging run. Owner decisions taken 2026-10-31: D1 Video Producer, D2 OpenAI TTS, D3 Kling
 via fal (env-switchable), D4 per scene, capped. Anything else below exists only if marked ✅.
 
 Related: [brand-designer-plan.md](./brand-designer-plan.md) (visual briefs: stock / AI image / AI
@@ -289,6 +288,13 @@ never uncovered), `stillMotion` on the render job, `imageMotion` prop + `MovingS
 composition. The weekly YouTube Short pushes in; a forced retry keeps the move. No editor control yet —
 Phase 5 sets motion per still scene. Tests: `tests/still-motion.test.ts`.
 
+### 7.3 Before Phase 6 is live
+
+1. Apply `db/z-video-producer-role.sql` to staging and prod.
+2. On staging: Admin ▸ Configuration ▸ Assistants → set Video Producer to a visible status, hire it in a
+   test workspace on a video plan, then brief → storyboard → Make the video → approve → check the render.
+3. Write the deferred go-live pieces (help, showcase, pricing, copy) before it is shown to customers.
+
 ### 7.2 Before Phase 5 is live
 
 1. Everything in 7.1 — the Remotion redeploy is now mandatory: an old bundle cannot draw a still scene
@@ -336,7 +342,26 @@ Phase 5 sets motion per still scene. Tests: `tests/still-motion.test.ts`.
 `video-assembly.ts`, render, storyboard review panel. Tests: storyboard validator, assembler (pure),
 per-scene retry, credit hold/refund.
 
-**Phase 6 — the role**
+**Phase 6 — the role** ✅ (hidden until go-live)
+- Catalogue: `db/z-video-producer-role.sql` (HIDDEN row + grants ai_video / ai_image / ai_music) —
+  **apply to BOTH DBs**; `seed-catalog.ts` + `master_assistants.json` for fresh DBs.
+- Wiring: `VIDEO_PRODUCER_ROLE_KEY`, connection map `['social','design']` (security), build manifest,
+  role label, prompt layers + model picker ("Planning video storyboards"), Rules reach its planner and
+  chat (Rules-tab copy scope 'video'), onboarding (voice, length, call to action; operational: where
+  scenes come from) — setup answers fill whatever a brief leaves out (`withSetupDefaults`).
+- **Videos tab** (`src/components/assistant-videos.js`): New video, storyboard with "Change" per scene,
+  "Plan it again" with notes, "Make the video — uses N credits", Cancel, badge = storyboards waiting.
+  Review Queue + Calendar as for posts. Checked in a stubbed harness at desktop and phone width.
+- **Chat**: route `video_producer` with a per-turn videos snapshot; cards `video_brief_proposal` and
+  `video_replan_proposal` (both free); no card can make (spend on) a video.
+- Dashboard: post-insights KPIs reworded for video; goal `videos_published` (poll-goal-telemetry).
+- Starter prompts, welcome line, bottleneck chips. Tests: `tests/video-producer-role.test.ts`.
+- **Deferred to go-live** (the role is hidden, so nothing public may name it yet): help article (dated
+  SQL), showcase page JSON, pricing row, marketing copy (`assistant-role-content` / `db/z-copy-*`),
+  Business Mentor + Ask Your Team routing, assistant photo. The Videos tab's form doesn't pre-select the
+  setup voice/length yet (the server fills them only when a brief omits them, e.g. from chat).
+
+**Phase 6 — as planned**
 Full assistant onboarding checklist pass: catalogue entry (`comingSoon: true`),
 connection map (security — explicit entry), onboarding schema with one `operational` step, chat
 route + prompt layers, surface registry flags (not social-shaped by default), dashboard (4 KPI cards,

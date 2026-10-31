@@ -440,6 +440,69 @@
       },
     ],
 
+    // Video Producer (docs/video-producer-plan.md §5.2). Keys read by video-projects.ts / the Videos tab
+    // as the new-video defaults (every video can change them) and by its chat route — keep in step with
+    // chat-orchestrator.ts ROUTES.video_producer and src/components/assistant-videos.js.
+    video_producer: [
+      {
+        title: 'Your videos',
+        description: 'Your Video Producer writes the script from your business details and Products & Services. Set how your videos usually sound — you can change it on any video.',
+        fields: [
+          {
+            key: 'defaultVoice',
+            label: 'Which voice should read your voiceovers?',
+            type: 'dropdown',
+            required: true,
+            options: [
+              { value: 'coral', label: 'Warm and friendly' },
+              { value: 'sage', label: 'Calm and clear' },
+              { value: 'verse', label: 'Bright and upbeat' },
+              { value: 'alloy', label: 'Neutral and steady' },
+              { value: 'onyx', label: 'Deep and confident' },
+              { value: 'shimmer', label: 'Light and lively' },
+            ],
+          },
+          {
+            key: 'defaultLength',
+            label: 'How long should your videos usually be?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: '15', label: '15 seconds', description: 'One quick point — the most likely to be watched to the end.' },
+              { value: '30', label: '30 seconds', description: 'Room for a problem, the answer and a call to action.' },
+              { value: '60', label: '60 seconds', description: 'A short explainer or product walk-through.' },
+            ],
+          },
+          {
+            key: 'defaultCta',
+            label: 'What should viewers do at the end?',
+            type: 'text',
+            required: false,
+            placeholder: 'e.g. Book through the link in our bio',
+            helpText: 'Optional. Used as the call to action unless you give a different one on a video.',
+          },
+        ],
+      },
+      {
+        title: 'Operational set-up',
+        description: 'Where its footage and pictures come from unless you choose otherwise on a video.',
+        operational: true,
+        fields: [
+          {
+            key: 'defaultAllowAi',
+            label: 'Where should scenes come from by default?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'stock_and_ai', label: 'Stock first, AI where stock won\u2019t fit', description: 'Stock footage and photos are free. AI pictures use 1 credit, AI clips 5 (at most 3 per video).' },
+              { value: 'stock_only', label: 'Stock footage, photos and my own pictures only', description: 'Never spends credits on pictures. A voiceover still uses 1.' },
+              { value: 'ai_first', label: 'Lean on AI', description: 'More AI scenes when they suit the video — still at most 3 AI clips.' },
+            ],
+          },
+        ],
+      },
+    ],
+
     lead_qualifier: [
       {
         title: 'Who is your ideal customer?',

@@ -59,6 +59,12 @@
 
     // About the pain of GETTING pictures — not of writing or posting, which belongs to the other
     // assistants and would point the user at the wrong hire.
+    video_producer: [
+      { title: 'The Reels Gap', text: 'Every platform is pushing video and our feed is all still photos, because making a video takes an afternoon we never have.' },
+      { title: 'The Editing Wall', text: 'We have the ideas and even some clips, but stitching them together with music, captions and a voiceover is where it always stops.' },
+      { title: 'The Silent Video', text: 'Most people watch with the sound off, and our videos have no captions, so the message never lands.' },
+      { title: 'The Expensive Freelancer', text: 'A video producer or agency costs more per video than we can justify for social media.' },
+    ],
     brand_designer: [
       { title: 'The Same Three Photos', text: 'Every post ends up using the same few pictures, because finding anything new and on-brand takes longer than writing the post.' },
       { title: 'The Off-Brand Stock Photo', text: 'The stock photos we find look like everyone else’s, in colours that have nothing to do with our brand.' },

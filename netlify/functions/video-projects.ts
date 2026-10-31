@@ -23,7 +23,7 @@ import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { resolveBaseUrl } from '../../src/utils/base-url';
-import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects } from '../../src/utils/video-producer';
+import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults } from '../../src/utils/video-producer';
 import { enforceStoryboard, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -64,7 +64,12 @@ export default withLambda(async (event) => {
             const row = await load(id);
             return row ? json(200, { project: await projectView(db, orgId, row) }) : json(404, { error: 'Video not found.' });
         }
-        const rows = await db.select().from(videoProjects).where(eq(videoProjects.organisationId, orgId))
+        // ?assistantId=N narrows to one assistant's videos (its Videos tab); still org-scoped first.
+        const forAssistant = Number(event.queryStringParameters?.assistantId);
+        const rows = await db.select().from(videoProjects)
+            .where(Number.isInteger(forAssistant) && forAssistant > 0
+                ? and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, forAssistant))
+                : eq(videoProjects.organisationId, orgId))
             .orderBy(desc(videoProjects.createdAt)).limit(50);
         return json(200, { projects: await Promise.all(rows.map((r) => projectView(db, orgId, r))) });
     }
@@ -83,13 +88,15 @@ export default withLambda(async (event) => {
     }
 
     if (action === 'create') {
-        const parsed = readBrief(body.brief);
-        if ('error' in parsed) return json(400, { error: parsed.error });
         const assistantId = Number(body.assistantId);
         if (!Number.isInteger(assistantId)) return json(400, { error: 'assistantId is required.' });
-        const [a] = await db.select({ id: aiAssistants.id }).from(aiAssistants)
+        const [a] = await db.select({ id: aiAssistants.id, onboardingContext: aiAssistants.onboardingContext }).from(aiAssistants)
             .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1);
         if (!a) return json(404, { error: 'Assistant not found.' });
+        // What the brief leaves out comes from the assistant's setup (assistant-onboarding-schemas.js
+        // video_producer) — a chat card that names no voice gets the voice the owner chose at hire.
+        const parsed = readBrief(withSetupDefaults(body.brief, a.onboardingContext));
+        if ('error' in parsed) return json(400, { error: parsed.error });
         const blocked = await enforcePromptModeration({ text: `${parsed.brief.message}\n${parsed.brief.cta ?? ''}`, userId, organisationId: orgId, source: 'video-projects' });
         if (blocked) return blocked;
         const [row] = await db.insert(videoProjects).values({

@@ -34,6 +34,9 @@ export const NEWSLETTER_ROLE_KEY = 'newsletter_editor';
 /** The Brand Designer — briefs, a review grid of options, approved pictures into the library. */
 export const BRAND_DESIGNER_ROLE_KEY = 'brand_designer';
 
+/** The Video Producer — brief → storyboard → finished short video (docs/video-producer-plan.md). */
+export const VIDEO_PRODUCER_ROLE_KEY = 'video_producer';
+
 /** The Mystery Shopper — reads the business's website as a buyer would, scores it, re-checks weekly. */
 export const MYSTERY_SHOPPER_ROLE_KEY = 'mystery_shopper';
 
