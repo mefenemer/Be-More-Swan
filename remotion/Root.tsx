@@ -53,13 +53,21 @@ export const RemotionRoot: React.FC = () => {
                         // vertical. Several clips have no single source to inherit from — that is the
                         // whole point of a timeline — so the target ratio decides, defaulting to the
                         // 9:16 master that four of the six platforms take as-is.
-                        const ratio = props.targetRatio ?? (timeline.length > 1 ? DEFAULT_TARGET_RATIO : null);
+                        // A still scene has no size of its own worth inheriting either — state the frame.
+                        const ratio = props.targetRatio ?? (timeline.length > 1 || timeline.some((c) => c.kind === 'image') ? DEFAULT_TARGET_RATIO : null);
                         const frame = frameForRatio(ratio);
                         if (frame) { width = frame.width; height = frame.height; }
 
                         const clips: TimelineClip[] = [];
                         let total = 0;
                         for (const clip of timeline) {
+                            // A still is exactly as long as it is held — nothing to open or measure.
+                            if (clip.kind === 'image') {
+                                const durationInFrames = Math.max(1, Math.ceil((clip.holdS ?? 3) * fps));
+                                total += durationInFrames;
+                                clips.push({ ...clip, durationInFrames });
+                                continue;
+                            }
                             let full: number | null = null;
                             try {
                                 const meta = await getVideoMetadata(clip.src);

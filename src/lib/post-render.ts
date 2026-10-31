@@ -18,7 +18,7 @@ import type { Overlay } from './overlay-geometry';
 import { renderableAudio } from './audio-overlays';
 import { isStillMotion, type StillMotion } from './still-motion';
 import { buildCaptionCues, captionAccent, type CaptionSource, type CaptionTrack, type SpokenWordLike } from './captions';
-import { DEFAULT_TARGET_RATIO, readVideoEdit, renderableClips, resolveClipGain, resolveTrim } from './video-edit';
+import { DEFAULT_TARGET_RATIO, editHasStills, readVideoEdit, renderableClips, resolveClipGain, resolveTrim } from './video-edit';
 import { reframeRatioFor } from '../utils/format-router';
 
 type Db = ReturnType<typeof getDb>;
@@ -285,6 +285,10 @@ export interface ResolvedClip {
     outS?: number;
     /** 0..1 on the clip's own camera audio. Absent = leave it alone (the composition plays it at 1). */
     gain?: number;
+    /** A still scene: an image held for holdS seconds, optionally moving (video-edit.ts VideoClip). */
+    kind?: 'image';
+    holdS?: number;
+    motion?: StillMotion;
 }
 
 /**
@@ -321,21 +325,29 @@ export async function resolveEditClips(
         return externalUrl ?? null;
     };
 
-    const clips = base.kind === 'video' ? renderableClips(videoEdit) : [];
+    // A timeline with a still scene renders whatever the base is — a storyboard may OPEN on a picture.
+    const clips = base.kind === 'video' || editHasStills(videoEdit) ? renderableClips(videoEdit) : [];
     if (clips.length) {
         const ids = [...new Set(clips.map(c => c.assetId))];
         const rows = await db
             .select({ id: contentAssets.id, assetType: contentAssets.assetType, storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl })
             .from(contentAssets)
             .where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
-        const byId = new Map(rows.filter(r => (r.assetType ?? '').toLowerCase() === 'video').map(r => [r.id, r]));
+        const byId = new Map(rows.map(r => [r.id, r]));
 
         const out: ResolvedClip[] = [];
         for (const clip of clips) {
             const asset = byId.get(clip.assetId);
             if (!asset) continue;
+            // The asset must be what the clip says it is: an image for a still, a video otherwise.
+            const type = (asset.assetType ?? '').toLowerCase();
+            if (type !== (clip.kind === 'image' ? 'image' : 'video')) continue;
             const src = await srcFor(asset.storageKey, asset.externalUrl);
             if (!src) continue;
+            if (clip.kind === 'image') {
+                out.push({ id: clip.id, assetId: clip.assetId, src, kind: 'image', holdS: clip.holdS, ...(clip.motion ? { motion: clip.motion } : {}) });
+                continue;
+            }
             // The trim is resolved with no known duration on purpose: content_assets stores none, so
             // the real length is measured inside the render and the bounds clamped there.
             const trim = resolveTrim(clip, null);
@@ -504,6 +516,7 @@ export function renderFingerprint(identity: RenderIdentity): string {
     const clips = renderableClips(identity.videoEdit);
     const clipKey = clips.length
         ? clips.map(c => {
+            if (c.kind === 'image') return [c.assetId, 'still', c.holdS ?? '', c.motion ?? ''].join(',');
             const trim = resolveTrim(c, null);
             const gain = resolveClipGain(c, identity.hasTimelineAudio);
             return [c.assetId, trim?.inS ?? '', trim?.outS ?? '', gain ?? ''].join(',');

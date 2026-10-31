@@ -110,7 +110,7 @@ export interface RenderInput {
      * Advisory — the composition intersects each one with the file's real duration, because nothing
      * on this side of the render can open a video to check. See src/lib/video-edit.ts.
      */
-    clips?: Array<{ id: string; src: string; inS?: number; outS?: number; gain?: number }>;
+    clips?: Array<{ id: string; src: string; inS?: number; outS?: number; gain?: number; kind?: 'image'; holdS?: number; motion?: StillMotion }>;
     /** 'w:h' of the output frame, when it cannot be inherited from a single source clip. */
     targetRatio?: string;
     /**

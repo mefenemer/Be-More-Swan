@@ -67,7 +67,8 @@ check('the weekly Short pushes in, a retry keeps the move, the worker passes it 
     const trig = readFileSync(join(root, 'netlify/functions/trigger-post-render.ts'), 'utf8');
     assert.ok(trig.includes('priorMotion = readStillMotion(prior?.renderInput);'), 'a forced retry must keep the movement');
     const worker = readFileSync(join(root, 'netlify/functions/render-post-video-background.ts'), 'utf8');
-    assert.ok(worker.includes("base.kind === 'image' && readStillMotion(job.renderInput) !== 'none'"));
+    // A still backdrop is "not a timeline" since Phase 5 (a storyboard can open on a picture).
+    assert.ok(worker.includes("!useTimeline && readStillMotion(job.renderInput) !== 'none'"));
 });
 
 check('the composition treats imageMotion as optional and keeps contain for a still that stays put', () => {

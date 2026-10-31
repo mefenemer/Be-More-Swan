@@ -5378,6 +5378,30 @@ export const productUpdateSends = pgTable("product_update_sends", {
 // A brief says what a picture is FOR; each round of generation adds options; the user approves.
 // Options are NOT content_assets: the library lists every content_assets row, so candidates would
 // bury real pictures. Approving an option is what creates the content_assets row.
+// The Video Producer (docs/video-producer-plan.md §5, db/z-video-producer.sql): one video from brief
+// to finished post. The storyboard is stored AFTER src/lib/storyboard.ts enforced its rules.
+export const videoProjects = pgTable("video_projects", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  title: text().notNull().default("New video"),
+  status: text().notNull().default("draft"),
+  brief: jsonb().notNull(),
+  storyboard: jsonb(),
+  changes: jsonb().notNull().default([]),
+  sceneAssets: jsonb("scene_assets").notNull().default({}),
+  voiceoverAssetId: integer("voiceover_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  scheduledPostId: integer("scheduled_post_id").references(() => scheduledPosts.id, { onDelete: "set null" }),
+  crosspostGroupId: text("crosspost_group_id"),
+  creditHold: integer("credit_hold").notNull().default(0),
+  creditsSpent: integer("credits_spent").notNull().default(0),
+  note: text(),
+  startedAt: timestamp("started_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 export const visualBriefs = pgTable("visual_briefs", {
   id: serial().primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),

@@ -40,6 +40,13 @@ export type TimelineClip = {
      * mix rather than a rule that has to be re-derived to be understood.
      */
     gain?: number;
+    /**
+     * A still scene (Video Producer, Phase 5): `src` is an image, held for `holdS` seconds, moving
+     * per `motion`. calculateMetadata turns holdS into durationInFrames; nothing is measured.
+     */
+    kind?: 'image';
+    holdS?: number;
+    motion?: StillMotion;
     durationInFrames?: number;
 };
 
@@ -231,10 +238,12 @@ const CaptionLayer: React.FC<{ track: CaptionTrack; height: number; fps: number 
  * drags the bars along with it, which reads as a mistake. A still with no movement keeps 'contain'
  * (below) — the reviewer picked the picture, not a crop of it.
  */
-const MovingStill: React.FC<{ src: string; motion: StillMotion }> = ({ src, motion }) => {
+const MovingStill: React.FC<{ src: string; motion: StillMotion; frames?: number }> = ({ src, motion, frames }) => {
     const frame = useCurrentFrame();
     const { durationInFrames } = useVideoConfig();
-    const progress = durationInFrames > 1 ? frame / (durationInFrames - 1) : 0;
+    // Inside a timeline the scene's own length is passed in; the frame is already sequence-relative.
+    const total = frames ?? durationInFrames;
+    const progress = total > 1 ? Math.min(frame / (total - 1), 1) : 0;
     return (
         <AbsoluteFill style={{ overflow: 'hidden' }}>
             <Img src={src} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: stillMotionTransform(motion, progress), transformOrigin: 'center center' }} />
@@ -273,7 +282,9 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
                 ? <Series>
                     {timeline.map((c) => (
                         <Series.Sequence key={c.id} durationInFrames={c.durationInFrames ?? evenShare}>
-                            <OffthreadVideo
+                            {c.kind === 'image'
+                                ? <MovingStill src={c.src} motion={c.motion ?? 'none'} frames={c.durationInFrames ?? evenShare} />
+                                : <OffthreadVideo
                                 src={c.src}
                                 style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition }}
                                 // The clip's own sound. Left undefined when nobody has an opinion,
@@ -291,7 +302,7 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
                                 // duration would re-round the end of every untrimmed clip for no reason.
                                 trimBefore={c.inS ? Math.max(0, Math.round(c.inS * fps)) : undefined}
                                 trimAfter={c.outS != null ? Math.max(1, Math.round(c.outS * fps)) : undefined}
-                            />
+                            />}
                         </Series.Sequence>
                     ))}
                   </Series>

@@ -9,28 +9,25 @@
 // audio overlays (timing, fades, mute-under), exactly as a music-library track is — the renderer knows
 // nothing about where an assetId came from.
 //
-// Word timings (for captions, Phase 3) live on content_assets.render_params as
-// { kind: 'voiceover', voice, script, words } — no new column, so nothing reads a column before its
-// migration (a bare db.select() would break every read of the table until it was applied). A transcription failure keeps the audio and
-// stores words: [] — captions are then absent, never invented.
+// The making (speech, word timings, storage) is src/utils/voiceover-asset.ts, shared with the Video
+// Producer. Word timings live on content_assets.render_params = { kind: 'voiceover', voice, script,
+// words }; a transcription failure keeps the audio with words: [] — captions absent, never invented.
 //
 // Gate: the sound capability (`ai_music_generation`) — a voiceover is sound on a post. Cost: 1
 // (VOICEOVER_CREDIT_COST, owner decision 2026-10-31), held before the call, refunded on any failure.
 
-import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { mediaGenerationJobs, contentAssets } from '../../db/schema';
+import { mediaGenerationJobs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/utils/assistant-capabilities';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { holdCredits, settleHold, VOICEOVER_CREDIT_COST } from '../../src/utils/ai-credits';
-import { logAiUsage } from '../../src/utils/ai-usage';
-import { persistBufferToR2, r2IsConfigured } from '../../src/lib/media-persist';
+import { r2IsConfigured } from '../../src/lib/media-persist';
+import { makeVoiceoverAsset } from '../../src/utils/voiceover-asset';
 import {
-    VOICES, DEFAULT_VOICE, VOICEOVER_MAX_CHARS, TTS_MODEL, isVoiceId, cleanScript,
-    synthesizeSpeech, transcribeWords, voiceoverCostUsd, TtsError, type SpokenWord,
+    VOICES, DEFAULT_VOICE, VOICEOVER_MAX_CHARS, TTS_MODEL, isVoiceId, cleanScript, TtsError,
 } from '../../src/lib/tts';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -94,50 +91,19 @@ export default withLambda(async (event) => {
         await db.insert(mediaGenerationJobs).values({ ...jobBase, status, errorMessage: `[voiceover] ${message}`.slice(0, 1000) }).catch(() => {});
     };
 
-    let mp3: Buffer;
+    const name = voiceoverName(body.name, script);
+    let made;
     try {
-        mp3 = await synthesizeSpeech(script, voice);
+        made = await makeVoiceoverAsset(db, { orgId, userId, script, voice, name });
     } catch (err) {
-        const e = err instanceof TtsError ? err : new TtsError(err instanceof Error ? err.message : 'speech failed');
-        await refund(e.message, e.kind === 'policy' ? 'flagged' : 'failed');
-        console.error('[generate-voiceover] speech failed:', e.kind, e.message);
-        return json(e.kind === 'policy' ? 422 : 502, {
-            error: e.kind === 'policy' ? 'That script could not be read aloud. Please change the wording.' : 'The voiceover could not be made. Your credit was not used.',
+        const e = err instanceof TtsError ? err : null;
+        await refund(err instanceof Error ? err.message : 'voiceover failed', e?.kind === 'policy' ? 'flagged' : 'failed');
+        console.error('[generate-voiceover] failed:', e?.kind ?? 'save', err instanceof Error ? err.message : err);
+        return json(e?.kind === 'policy' ? 422 : 502, {
+            error: e?.kind === 'policy' ? 'That script could not be read aloud. Please change the wording.' : 'The voiceover could not be made. Your credit was not used.',
         });
     }
-
-    // Timings are a bonus, never a reason to lose the audio the customer paid for.
-    let words: SpokenWord[] = [];
-    let durationS: number | null = null;
-    try {
-        ({ words, durationS } = await transcribeWords(mp3));
-    } catch (err) {
-        console.warn('[generate-voiceover] transcription failed — saving without word timings:', err instanceof Error ? err.message : err);
-    }
-
-    try {
-        const stored = await persistBufferToR2({ orgId, bytes: mp3, contentType: 'audio/mpeg', folder: 'voiceovers' });
-        const name = voiceoverName(body.name, script);
-        const [job] = await db.insert(mediaGenerationJobs).values({ ...jobBase, status: 'completed' })
-            .returning({ id: mediaGenerationJobs.id });
-        const [asset] = await db.insert(contentAssets).values({
-            userId, organisationId: orgId, name,
-            assetType: 'audio', mimeType: 'audio/mpeg',
-            fileSize: stored.fileSize, storageKey: stored.storageKey,
-            durationS, provider: 'openai', prompt: script,
-            renderParams: { kind: 'voiceover', voice, script, words },
-            generationJobId: job.id, status: 'pending',
-        }).returning({ id: contentAssets.id });
-        await db.update(mediaGenerationJobs).set({ resultAssetIds: [asset.id], updatedAt: new Date() })
-            .where(eq(mediaGenerationJobs.id, job.id)).catch(() => {});
-        await settleHold(db, { orgId, amount: VOICEOVER_CREDIT_COST, success: true, mediaType: 'voiceover', userId, jobId: job.id });
-        void logAiUsage({ workspaceId: orgId, userId, model: TTS_MODEL, inputTokens: 0, outputTokens: 0, costUsdOverride: voiceoverCostUsd(durationS), sessionId: 'voiceover' });
-
-        const url = await presignR2Get(stored.storageKey).catch(() => null);
-        return json(200, { assetId: asset.id, url, name, durationS, words, voice });
-    } catch (err) {
-        await refund(err instanceof Error ? err.message : 'save failed', 'failed');
-        console.error('[generate-voiceover] save failed:', err);
-        return json(500, { error: 'The voiceover could not be saved. Your credit was not used.' });
-    }
+    await settleHold(db, { orgId, amount: VOICEOVER_CREDIT_COST, success: true, mediaType: 'voiceover', userId, jobId: made.jobId });
+    const url = await presignR2Get(made.storageKey).catch(() => null);
+    return json(200, { assetId: made.assetId, url, name, durationS: made.durationS, words: made.words, voice });
 });

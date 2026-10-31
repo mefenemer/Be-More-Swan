@@ -8819,6 +8819,8 @@ function _pcePreviewTick(video) {
  * measurement needs the clip's url to still be fetchable.
  */
 function _pceClipFullLength(c) {
+    // A still is as long as it is held; there is no file length to measure.
+    if (c && c.kind === 'image') return c.holdS != null ? c.holdS : 3;
     const measured = _pceClipDurations[c.assetId];
     if (measured != null) return measured;
     return c.sourceDurationS != null ? c.sourceDurationS : null;
@@ -9502,6 +9504,14 @@ async function _pcePersistVideoEdit(postId, clips, frames) {
     const edit = {
         clips: clips.map((c) => {
             const out = { id: c.id, assetId: c.assetId };
+            // A still scene (Video Producer storyboard) keeps what makes it a still. Dropping these
+            // turned it into a "video" clip pointing at a picture, which the renderer then skips.
+            if (c.kind === 'image') {
+                out.kind = 'image';
+                if (c.holdS != null) out.holdS = c.holdS;
+                if (c.motion) out.motion = c.motion;
+                return out;
+            }
             if (c.inS) out.inS = c.inS;
             if (c.outS != null) out.outS = c.outS;
             if (c.gain != null) out.gain = c.gain;

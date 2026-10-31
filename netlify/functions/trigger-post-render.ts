@@ -30,7 +30,7 @@ import { postFormatSpec } from '../../src/config/post-formats';
 import { frameMeta, frameMetaFromJson, queuePostRender, readFingerprint, readPostVideoEdit, readStillMotion, renderPlanFor, renderableOverlays, resolveOverlayVideoBase } from '../../src/lib/post-render';
 import type { StillMotion } from '../../src/lib/still-motion';
 import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
-import { editChangesMedia } from '../../src/lib/video-edit';
+import { editHasStills, editChangesMedia } from '../../src/lib/video-edit';
 import { remotionConfigured } from '../../src/lib/remotion-lambda';
 import { r2IsConfigured } from '../../src/lib/media-persist';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -106,7 +106,7 @@ export default withLambda(async (event) => {
     const declared = postFormatSpec(post.formatKey);
     const forceVideo = base.kind === 'image' && declared?.media === 'video';
 
-    if (!forceVideo && !needsVideoRender({ hasVideo: base.kind === 'video', textOverlays: overlays.length, audioOverlays: audioCount, hasEdit })) {
+    if (!forceVideo && !needsVideoRender({ hasVideo: base.kind === 'video' || editHasStills(videoEdit), textOverlays: overlays.length, audioOverlays: audioCount, hasEdit })) {
         await db.update(scheduledPosts).set({ renderStatus: null, updatedAt: new Date() }).where(eq(scheduledPosts.id, postId));
         // 'not_video' keeps the existing contract with gpQueueVideoRender: a photo whose text still
         // bakes in the browser must fall through to that path, not stop here.

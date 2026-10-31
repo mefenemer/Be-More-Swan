@@ -102,11 +102,12 @@ async function main() {
     await check('the endpoint holds before speaking, refunds every failure, keeps audio when timings fail', () => {
         const fn = readFileSync(join(root, 'netlify/functions/generate-voiceover.ts'), 'utf8');
         const hold = fn.indexOf("holdCredits(db, { orgId, amount: VOICEOVER_CREDIT_COST, mediaType: 'voiceover' })");
-        const speak = fn.indexOf('await synthesizeSpeech(');
+        const speak = fn.indexOf('await makeVoiceoverAsset(');
         assert.ok(hold > 0 && speak > hold, 'credits must be held before OpenAI is called');
         assert.ok(fn.includes("mediaType: 'voiceover', userId });"), 'refunds must name the voiceover kind');
-        assert.ok(/catch \(err\) \{\s*console\.warn\('\[generate-voiceover\] transcription failed/.test(fn), 'a transcription failure must not lose the audio');
-        assert.ok(fn.includes("renderParams: { kind: 'voiceover', voice, script, words }"), 'captions read the words from render_params');
+        const helper = readFileSync(join(root, 'src/utils/voiceover-asset.ts'), 'utf8');
+        assert.ok(/catch \(err\) \{\s*console\.warn\('\[voiceover-asset\] transcription failed/.test(helper), 'a transcription failure must not lose the audio');
+        assert.ok(helper.includes("renderParams: { kind: 'voiceover', voice: args.voice, script: args.script, words }"), 'captions read the words from render_params');
         assert.ok(fn.indexOf('enforcePromptModeration(') < hold, 'moderation before spend');
         const toml = readFileSync(join(root, 'netlify.toml'), 'utf8');
         assert.ok(/\[functions\.generate-voiceover\]\s*\n\s*timeout = 26/.test(toml), 'speech + transcription need the 26 s ceiling');

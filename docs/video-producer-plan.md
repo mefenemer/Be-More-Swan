@@ -3,8 +3,9 @@
 Added 2026-10-31, from an owner discussion of a "faceless YouTube" AI video stack (ChatGPT +
 Midjourney + Leonardo + ImageFX + Veo + Runway + Suno + CapCut, roughly $100–$245/month at verified
 2026-10-31 prices) and what Be More Swan would need to do the same job as one assistant.
-Status: **Phases 0–4 built 2026-10-31 (code + tests, on staging, NOT yet live-verified — see §7.1);
-Phases 5–7 not started.** Owner decisions taken 2026-10-31: D1 Video Producer, D2 OpenAI TTS, D3 Kling
+Status: **Phases 0–5 built 2026-10-31 (code + tests, on staging, NOT yet live-verified — see §7.1 and
+§7.2); Phases 6–7 not started.** Phase 5 has no screen yet — its endpoints are ready for the Phase 6
+role page and chat. Owner decisions taken 2026-10-31: D1 Video Producer, D2 OpenAI TTS, D3 Kling
 via fal (env-switchable), D4 per scene, capped. Anything else below exists only if marked ✅.
 
 Related: [brand-designer-plan.md](./brand-designer-plan.md) (visual briefs: stock / AI image / AI
@@ -288,6 +289,14 @@ never uncovered), `stillMotion` on the render job, `imageMotion` prop + `MovingS
 composition. The weekly YouTube Short pushes in; a forced retry keeps the move. No editor control yet —
 Phase 5 sets motion per still scene. Tests: `tests/still-motion.test.ts`.
 
+### 7.2 Before Phase 5 is live
+
+1. Everything in 7.1 — the Remotion redeploy is now mandatory: an old bundle cannot draw a still scene
+   and the render FAILS (not degrades) on a storyboard with one.
+2. Apply `db/z-video-producer.sql` to staging and prod (the endpoints read the table).
+3. Live checks: create → plan → edit a scene → build → the post appears in the Review Queue → approve →
+   it renders with stills moving, the clip trimmed, captions and the on-screen text.
+
 ### 7.1 Before Phases 0–4 are live
 
 1. **Deploy BOTH Remotion sites** (`remotion:deploy-site` staging + prod, then `npm run
@@ -302,7 +311,27 @@ Phase 5 sets motion per still scene. Tests: `tests/still-motion.test.ts`.
    exercised in a browser (it needs a signed-in session); My Content's animate flow was, in a stubbed
    harness.
 
-**Phase 5 — storyboard + assembly (the core)**
+**Phase 5 — storyboard + assembly (the core)** ✅ server side (no screen until Phase 6)
+- **Still scenes on the timeline:** `VideoClip.kind = 'image'` + `holdS` + `motion` (video-edit.ts);
+  resolved, fingerprinted and rendered (`MovingStill` inside the Series; Root.tsx sizes a still by its
+  hold). A timeline with a still renders even when the post's base is a picture. The post editor's save
+  now keeps still scenes (it rebuilt clips from five fields and would have dropped them).
+- `src/lib/storyboard.ts` — every rule in §5.3 enforced in code; scene lengths come from the
+  voiceover's word timings (`sceneTimingsFromWords`); credit estimate.
+- `src/utils/video-producer.ts` — `planProject` (one model call, role model `video_producer`, the
+  assistant's Rules), `buildProject` (one voiceover for the script, each scene sourced: Pexels video /
+  photo, the workspace's own pictures, brand card, FLUX, Kling; then one `pending_approval` post per
+  platform — ig_reel / yt_short / fb_reel — with the video_edit, the captioned voiceover and the
+  on-screen text as timed overlays). Held up front, settled per scene, rest refunded; finished scenes
+  kept for a re-build; stuck projects swept after 20 min with the hold refunded.
+- `netlify/functions/video-projects.ts` (create / replan with notes / edit_scene / build / cancel;
+  gated like AI video) + `process-video-project-background.ts`.
+- `src/utils/voiceover-asset.ts` — the speak-time-store step shared with the editor's voiceover.
+- `db/z-video-producer.sql` — **apply to BOTH DBs before deploy**.
+- Not in v1: music under the video (add it in the editor), per-scene re-roll of a single option.
+  Tests: `tests/storyboard.test.ts`, `tests/video-producer.test.ts`.
+
+**Phase 5 — as planned**
 `db/z-video-producer.sql`, storyboard generation with code-enforced rules, per-scene sourcing,
 `video-assembly.ts`, render, storyboard review panel. Tests: storyboard validator, assembler (pure),
 per-scene retry, credit hold/refund.
