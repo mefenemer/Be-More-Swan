@@ -4532,6 +4532,57 @@
 
   register('platforms_proposal', renderPlatformsProposalCard);
 
+  // ── Built-in: Site Directory Card (every structured chat) ────────────────────────────────
+  // { type: 'site_directory', action: 'refresh'|'exclude'|'include', path, pageTitle, sourceUrl, blocked, settled? }
+  // Built by src/utils/chat-site-directory.ts. The click POSTs to site-directory.ts — the same action
+  // as Business Information ▸ Website Pages (docs/site-directory-plan.md §7).
+  function renderSiteDirectoryCard(ui, esc) {
+    const action = ui.action === 'exclude' || ui.action === 'include' ? ui.action : 'refresh';
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const page = ui.pageTitle ? `${esc(String(ui.pageTitle))} <span class="text-gray-500">(${esc(String(ui.path || ''))})</span>` : esc(String(ui.path || ''));
+    const what = action === 'refresh'
+      ? `Re-read ${ui.sourceUrl ? esc(String(ui.sourceUrl)) : 'your website'} so every assistant has its current pages.`
+      : action === 'exclude' ? `Leave out ${page} — no assistant will link to it or read it.` : `Put back ${page} — assistants can link to it again.`;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Website pages · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      <p class="text-sm text-gray-900 mt-2 break-words">${what}</p>
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked || ui.settled ? '' : `<button type="button" data-sd-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${action === 'refresh' ? 'Re-read my site' : action === 'exclude' ? 'Leave it out' : 'Put it back'}</button>
+        <button type="button" data-sd-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-sd-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-sd-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-sd-go], [data-sd-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-sd-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-sd-go]')) return;
+      setBusy(true);
+      say(action === 'refresh' ? 'Starting…' : 'Saving…');
+      try {
+        const res = await fetch('/.netlify/functions/site-directory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(action === 'refresh' ? { action } : { action, path: ui.path }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'That didn’t work — please try again.');
+        say(action === 'refresh'
+          ? (data.status === 'reading' ? 'Reading your site now — it takes a minute or two. See Business Information ▸ Website Pages.' : `Done — ${Array.isArray(data.pages) ? data.pages.length : 0} pages read.`)
+          : action === 'exclude' ? 'Left out. Assistants won’t use that page.' : 'Put back.');
+      } catch (err) {
+        setBusy(false);
+        say(err && err.message ? err.message : 'That didn’t work — please try again.', 'error');
+      }
+    });
+    return el;
+  }
+
+  register('site_directory', renderSiteDirectoryCard);
+
   // ── Built-in: Library Proposal Cards (Support Agent's Knowledge Base; Social / Blog Inspo) ────
   // { type: 'kb_article_proposal', assistantId, title, content, blocked, settled? }
   // { type: 'inspo_proposal', assistantId, kind: 'text'|'url', title, body, url, note, blocked, settled? }

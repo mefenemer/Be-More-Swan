@@ -43,6 +43,11 @@ export interface SenderIdentity {
      */
     productsBlock?: string | null;
     /**
+     * The pages of the sender's website (src/utils/site-directory.ts siteDirectoryPromptBlock), as
+     * text — so an email about garden design can point at the garden-design page, not the homepage.
+     */
+    siteDirectoryBlock?: string | null;
+    /**
      * The sending assistant's email signature (src/utils/outreach-signature.ts), when one is set.
      * Its presence changes ONE instruction: the draft must not sign off, because the signature is
      * appended in code after the last sentence and a model sign-off would print twice.
@@ -90,6 +95,10 @@ export function senderIdentityBlock(sender: SenderIdentity): string {
 
     const products = (sender.productsBlock || '').trim();
     if (products) lines.push(products);
+
+    // Which page fits the prospect. The email's own rules still decide whether a link goes in at all.
+    const pages = (sender.siteDirectoryBlock || '').trim();
+    if (pages) lines.push(`${pages}\nIn outreach: when the email's rules allow a link, use the page that matches what this prospect needs, never the homepage by default.`);
 
     // Every outreach prompt — src/constants/special-category-rule.ts.
     lines.push(SPECIAL_CATEGORY_RULE);

@@ -11031,7 +11031,7 @@ async function _loadSiteMetrics(assistantId) {
         const sections = pages.reduce((n, p) => n + (p.sections || []).length, 0);
         const holes = (data.placeholders || []).length;
 
-        valEl('engagement').textContent = `${pages.length}/${data.maxPages}`;
+        valEl('engagement').textContent = `${pages.length}`;
         _setKpiCard('engagement', { empty: !pages.length });
         if (trendEl('engagement')) trendEl('engagement').textContent = '—';
 

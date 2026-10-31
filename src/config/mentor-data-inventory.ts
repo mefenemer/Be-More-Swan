@@ -30,6 +30,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('always', 'The team: every assistant, its state and its set-up answers', ['ai_assistants'], 'Your team: each assistant, whether it is active or paused, and its set-up answers'),
     ...group('always', 'Goals and their progress across the team', ['goals'], 'Goals and how close each one is'),
     ...group('always', 'Brand Knowledge, as every chat reads it (business-knowledge.ts)', ['workspace_assets'], 'Brand Knowledge documents and links'),
+    ...group('always', 'The website\'s pages and the pages it lacks, as every chat reads it (site-directory.ts)', ['site_directories'], 'Your website\'s pages and what each one offers'),
     ...group('always', 'What the team did and has booked, as every chat reads it (team-activity.ts)', [
         'scheduled_posts', 'blog_posts', 'newsletter_issues',
     ], 'What your assistants did in the last two weeks and what is booked next'),

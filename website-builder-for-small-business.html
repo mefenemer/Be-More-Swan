@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>A Website Builder That Writes Your Site For You | Be More Swan</title>
+    <!-- SEO: canonical + social share metadata -->
+    <meta name="description" content="Get a small business website written for you from your own business details, hosted on a free address or your own domain, with a Business Mentor included. An alternative to Wix and Squarespace.">
+    <link rel="canonical" href="https://bemoreswan.com/website-builder-for-small-business">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Be More Swan">
+    <meta property="og:title" content="A website builder that writes your site for you">
+    <meta property="og:description" content="Your small business website, written from your own business details. Plus a Business Mentor to grow the business behind it.">
+    <meta property="og:url" content="https://bemoreswan.com/website-builder-for-small-business">
+    <meta property="og:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="607">
+    <meta property="og:image:alt" content="Be More Swan — your digital workforce">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="A website builder that writes your site for you">
+    <meta name="twitter:description" content="Your small business website, written from your own business details. Plus a Business Mentor to grow the business behind it.">
+    <meta name="twitter:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta name="twitter:image:alt" content="Be More Swan — your digital workforce">
+    <!-- /SEO -->
+    <link href="./style.css" rel="stylesheet">
+    <script src="/site-theme.js"></script>
+    <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="/favicon/manifest.json">
+    <script src="/src/i18n.js"></script>
+  <script src="/waitlist-mode.js" defer></script>
+    <!-- Website-first landing page (owner, 2026-10-31): for people looking for a website builder —
+         the Website Assistant plus the Business Mentor on The Workflow Saver, set against Wix and
+         Squarespace.
+
+         Every claim is one the product already makes publicly (checked 2026-10-31):
+           · Website Assistant showcase (/ai-website-assistant, db/assistant-showcases.json): drafts
+             from business details/products/brand kit, [placeholders] not invented facts, live
+             desktop/phone preview, free yourname.bemoreswan.site or own domain, import from
+             Wix/Squarespace/WordPress (home page + menu pages), search titles/sitemap, 1 task per
+             draft or import, editing free, no code and no drag-and-drop.
+           · No plan limits website pages (owner, 2026-10-31).
+           · Business Mentor help article ("Meet Your Business Mentor"): every plan, takes no seat,
+             established vs new-business start, at most 3 suggestions a week, nothing changes
+             without a click, chat free under fair use.
+         NOT claimed: shop, bookings, forms or reviews sections — built, but not on the public
+         showcase. Add them here only once the showcase says so.
+
+         Competitors: only general, checkable statements (templates, drag-and-drop editors, AI
+         tools that suggest starter text, app marketplaces). No Wix/Squarespace prices — they vary
+         by region and billing period and sources disagree; re-check before adding any.
+
+         On £29 the Website Assistant IS the plan's one assistant — the page says so plainly.
+         Prices are data-plan-price slots (PRICE_SLOT_PAGES in scripts/build-seo-html.mjs).
+         Styles are plain CSS on the theme tokens, as in how-it-works.html. -->
+    <style>
+        .wb-wrap { max-width: 72rem; margin: 0 auto; padding: 0 1rem; }
+        .wb-narrow { max-width: 46rem; margin: 0 auto; }
+        .wb-eyebrow { display:inline-block; padding:.25rem .75rem; border-radius:9999px; font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background:var(--color-emerald-50); color:var(--color-emerald-700); border:1px solid var(--color-emerald-100); }
+        .wb-h1 { font-size: clamp(2.1rem, 5vw, 3.6rem); font-weight: 800; line-height: 1.08; letter-spacing: -.02em; color: #111827; margin: 1.25rem 0; }
+        .wb-h1 em { font-style: normal; color: var(--color-emerald-700); }
+        .wb-h2 { font-size: clamp(1.6rem, 3.5vw, 2.3rem); font-weight: 800; line-height: 1.15; letter-spacing: -.015em; color: #111827; margin: 0 0 1rem; }
+        .wb-lead { font-size: 1.15rem; line-height: 1.65; color: #4b5563; }
+        .wb-p { font-size: 1.05rem; line-height: 1.7; color: #4b5563; margin: 0 0 1rem; }
+        .wb-section { padding: 4.5rem 0; }
+        .wb-section-white { background: #fff; border-top: 1px solid #f0ebe0; border-bottom: 1px solid #f0ebe0; }
+        .wb-center { text-align: center; }
+        .wb-small { font-size: .9rem; color: #6b7280; margin-top: 1rem; }
+        .wb-ctas { display:flex; flex-wrap:wrap; gap:.75rem; justify-content:center; margin-top:2rem; }
+        .wb-price-line { font-size: 1.05rem; font-weight: 700; color: #111827; margin-top: 1.25rem; }
+
+        /* Story rows: words beside a screenshot (how-it-works.html pattern) */
+        .wb-rows { display:flex; flex-direction:column; gap:4rem; margin-top:3rem; }
+        .wb-row { display:grid; grid-template-columns:1fr; gap:2rem; align-items:center; }
+        @media (min-width: 900px) {
+            .wb-row { grid-template-columns: 5fr 7fr; gap:3.5rem; }
+            .wb-row.wb-flip { grid-template-columns: 7fr 5fr; }
+            .wb-row.wb-flip .wb-copy { order: 2; }
+        }
+        .wb-step { display:inline-flex; align-items:center; justify-content:center; width:2.25rem; height:2.25rem; border-radius:9999px; background:var(--color-emerald-700); color:#fff; font-weight:800; margin-bottom:1rem; }
+        .wb-copy h3 { font-size:1.5rem; font-weight:800; line-height:1.2; color:#111827; margin:0 0 .8rem; }
+        .wb-shot { margin:0; border-radius:1rem; overflow:hidden; border:1px solid #e9e4d8; background:#fff; box-shadow:0 24px 48px -24px rgba(17,24,39,.35); }
+        .wb-shot img { display:block; width:100%; height:auto; }
+        .wb-shot figcaption { padding:.7rem 1rem; font-size:.85rem; color:#6b7280; border-top:1px solid #f3efe6; background:#fcfbf8; }
+
+        /* What £29 gets you */
+        .wb-two { display:grid; grid-template-columns:1fr; gap:1.25rem; margin-top:2.5rem; }
+        @media (min-width: 768px) { .wb-two { grid-template-columns:1fr 1fr; } }
+        .wb-card { background:#fff; border:1px solid #f0ebe0; border-radius:1.25rem; padding:1.75rem; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+        .wb-card h3 { font-size:1.2rem; font-weight:800; color:#111827; margin:0 0 .6rem; }
+        .wb-card ul { margin:.75rem 0 0; padding:0; list-style:none; }
+        .wb-card li { position:relative; padding-left:1.4rem; margin:.5rem 0; color:#4b5563; line-height:1.55; }
+        .wb-card li::before { content:''; position:absolute; left:0; top:.6em; width:.55rem; height:.55rem; border-radius:9999px; background:var(--color-emerald-700); opacity:.75; }
+        .wb-note { margin-top:1.5rem; background:var(--color-emerald-50); border:1px solid var(--color-emerald-100); border-radius:1rem; padding:1.25rem 1.5rem; color:#374151; line-height:1.65; }
+        .wb-note strong { color:#111827; }
+
+        /* Comparison table: scrolls in its own box on a phone, labels stay put */
+        .wb-table-box { margin-top: 2.5rem; overflow-x: auto; -webkit-overflow-scrolling: touch; border:1px solid #f0ebe0; border-radius:1.25rem; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+        .wb-table { width: 100%; min-width: 38rem; border-collapse: collapse; font-size: .95rem; }
+        .wb-table th, .wb-table td { padding: .9rem 1rem; text-align: left; vertical-align: top; border-bottom: 1px solid #f3efe6; line-height: 1.5; }
+        .wb-table thead th { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; background: #fcfbf8; }
+        .wb-table tbody th { font-weight: 700; color: #111827; width: 24%; }
+        .wb-table th:first-child { position: sticky; left: 0; z-index: 1; background: #fff; }
+        .wb-table thead th:first-child { background: #fcfbf8; }
+        .wb-table td { color: #4b5563; }
+        .wb-table .wb-us { background: var(--color-emerald-50); color: #111827; font-weight: 600; }
+        .wb-table thead .wb-us { color: var(--color-emerald-700); }
+        .wb-table tr:last-child th, .wb-table tr:last-child td { border-bottom: 0; }
+        .wb-scroll-hint { display:block; font-size:.8rem; color:#9ca3af; margin-top:.6rem; text-align:center; }
+        @media (min-width: 768px) { .wb-scroll-hint { display:none; } }
+
+        .wb-honest { background:#fff; border:1px solid #f0ebe0; border-radius:1.25rem; padding:1.75rem; margin-top:2rem; }
+        .wb-honest ul { margin:.5rem 0 1rem; padding:0; list-style:none; }
+        .wb-honest li { position:relative; padding-left:1.4rem; margin:.7rem 0; color:#4b5563; line-height:1.6; }
+        .wb-honest li::before { content:''; position:absolute; left:0; top:.6em; width:.55rem; height:.55rem; border-radius:9999px; background:var(--color-emerald-700); opacity:.75; }
+        .wb-honest li strong { color:#111827; }
+
+        .wb-faq { margin-top:2rem; }
+        .wb-faq details { background:#fff; border:1px solid #f0ebe0; border-radius:1rem; padding:1.1rem 1.25rem; margin-bottom:.75rem; }
+        .wb-faq summary { cursor:pointer; font-weight:700; color:#111827; list-style:none; }
+        .wb-faq summary::-webkit-details-marker { display:none; }
+        .wb-faq summary::after { content:'+'; float:right; color:var(--color-emerald-700); font-weight:800; }
+        .wb-faq details[open] summary::after { content:'−'; }
+        .wb-faq details p { margin:.75rem 0 0; color:#4b5563; line-height:1.65; }
+
+        .wb-band { background: var(--color-emerald-700); color:#fff; border-radius:1.75rem; padding:3rem 1.5rem; text-align:center; }
+        @media (min-width: 768px) { .wb-band { padding:4rem; } }
+        .wb-band h2 { color:#fff; }
+        .wb-band p { color:rgba(255,255,255,.92); font-size:1.1rem; line-height:1.7; margin:0 auto 1rem; max-width:40rem; }
+        .wb-band a.wb-band-link { color:#fff; text-decoration:underline; }
+    </style>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Do I need to know how to build a website?", "acceptedAnswer": { "@type": "Answer", "text": "No. There is no code and no drag-and-drop. You describe what you want, or edit the words directly, and the layout is handled for you." } },
+        { "@type": "Question", "name": "Can I move my site over from Wix or Squarespace?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, if it is your own. Give the Website Assistant the address of your current site, whether it is on Wix, Squarespace, WordPress or built for you, and it reads your home page and the pages in its menu into a draft. Your own words are kept as they are. You see the imported draft beside your current one and choose whether to use it." } },
+        { "@type": "Question", "name": "Can I use my own domain?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. When you publish, your site goes live on its own free address, yourname.bemoreswan.site, or on a domain you own." } },
+        { "@type": "Question", "name": "How many pages can I have?", "acceptedAnswer": { "@type": "Answer", "text": "As many as your site needs. No plan limits how many pages your website has." } },
+        { "@type": "Question", "name": "Will it make up reviews or prices?", "acceptedAnswer": { "@type": "Answer", "text": "No. It only states what is in your business details and products. Anything else, such as a customer quote or a number, is left as a [placeholder] for you to fill in." } },
+        { "@type": "Question", "name": "What does the Business Mentor do?", "acceptedAnswer": { "@type": "Answer", "text": "Your Business Mentor is a guide and coach included on every plan. It looks across your workspace, tells you what it would sort out first, helps you plan and checks your week with you. It never changes anything without your click." } },
+        { "@type": "Question", "name": "Is the Business Mentor included on the £29 plan?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Every plan includes a Business Mentor, and it does not take up your plan's assistant place. On The Workflow Saver you choose one assistant; choose the Website Assistant and you get your website and your Mentor." } }
+      ]
+    }
+    </script>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<main class="flex-grow">
+
+    <!-- Hero -->
+    <section class="wb-section">
+        <div class="wb-wrap wb-center">
+            <div class="wb-narrow">
+                <span class="wb-eyebrow">For small business websites</span>
+                <h1 class="wb-h1">A website builder that <em>writes your website for you</em></h1>
+                <p class="wb-lead">Most website builders hand you a template and leave you to fill it. Our Website Assistant writes every page from your own business details, shows you a live preview, and publishes it when you&rsquo;re happy. Your Business Mentor then helps you grow the business behind it.</p>
+                <p class="wb-price-line"><span data-plan-prices-ready hidden>Website and Business Mentor from <span data-plan-price="saver"></span> a month.</span></p>
+                <div class="wb-ctas">
+                    <a href="register.html" data-waitlist-label="Join the waitlist" class="btn-primary inline-block px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">Start your free trial</a>
+                    <a href="/assistant.html?role=mystery_shopper#free-website-check" class="btn-secondary inline-block px-8 py-4 text-lg font-bold rounded-lg border transition">Check my current site free</a>
+                </div>
+                <p class="wb-small">14 days free &middot; no card needed &middot; no code, no drag-and-drop</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- The problem -->
+    <section class="wb-section wb-section-white">
+        <div class="wb-wrap">
+            <div class="wb-narrow wb-center">
+                <h2 class="wb-h2">The hard part of a website was never the template</h2>
+                <p class="wb-lead">It&rsquo;s knowing what to say. Which pages you need, what goes in the headline, what makes a stranger trust you, and what you want them to do next. A blank template doesn&rsquo;t answer any of that, and that&rsquo;s where most small business websites stall.</p>
+                <p class="wb-lead" style="margin-top:1rem;"><strong style="color:#111827;">So we start with the words, written from what you&rsquo;ve told us about your business, and handle the layout for you.</strong></p>
+            </div>
+        </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="wb-section">
+        <div class="wb-wrap">
+            <div class="wb-narrow wb-center">
+                <h2 class="wb-h2">From conversation to live website</h2>
+                <p class="wb-lead">Tell it about your business once. It drafts the site; you fill in the facts only you know and press Publish.</p>
+            </div>
+            <div class="wb-rows">
+                <div class="wb-row">
+                    <div class="wb-copy">
+                        <div class="wb-step" aria-hidden="true">1</div>
+                        <h3>Tell it about your site</h3>
+                        <p class="wb-p">What visitors should do, the pages you want and how it should feel. It already knows your business details, your products and your brand kit, so you&rsquo;re not starting from nothing.</p>
+                        <p class="wb-p">Already have a site on Wix, Squarespace or WordPress? Give it the address and it reads your current pages into a draft.</p>
+                    </div>
+                    <figure class="wb-shot">
+                        <img src="/images/assistants/website_assistant/design.jpg" alt="The Website Assistant's design settings beside a live preview of a coffee roaster's website" width="800" height="500" loading="lazy" decoding="async">
+                        <figcaption>Starts from your brand colours, and refuses text that would be hard to read.</figcaption>
+                    </figure>
+                </div>
+                <div class="wb-row wb-flip">
+                    <div class="wb-copy">
+                        <div class="wb-step" aria-hidden="true">2</div>
+                        <h3>Get every page drafted</h3>
+                        <p class="wb-p">Headings, wording, the questions buyers ask and a clear next step on every page, in plain British English. Every page gets its own search title and description, and your site gets a sitemap.</p>
+                        <p class="wb-p">It never makes things up. Where a page needs a fact only you know, like a customer quote or how long you&rsquo;ve been trading, it leaves a clear [placeholder] for you.</p>
+                    </div>
+                    <figure class="wb-shot">
+                        <img src="/images/assistants/website_assistant/editor.jpg" alt="The website editor listing four placeholders to fill in, beside a live preview of the home page" width="800" height="500" loading="lazy" decoding="async">
+                        <figcaption>The editor lists every [placeholder] left to fill in before you publish.</figcaption>
+                    </figure>
+                </div>
+                <div class="wb-row">
+                    <div class="wb-copy">
+                        <div class="wb-step" aria-hidden="true">3</div>
+                        <h3>Change anything, then publish</h3>
+                        <p class="wb-p">Edit the words yourself and see the change in the preview straight away, on a desktop or a phone. Or ask in chat, and it shows you exactly what it will change before anything is saved.</p>
+                        <p class="wb-p">Press Publish and your site goes live on a free address, yourname.bemoreswan.site, or on a domain you own. You can go back to an earlier version or take it offline at any time.</p>
+                    </div>
+                    <figure class="wb-shot">
+                        <img src="/images/assistants/website_assistant/edit.jpg" alt="Editing a section of a website page in the Website Assistant" width="800" height="500" loading="lazy" decoding="async">
+                        <figcaption>Edit a heading, a button or a whole section and see it at once.</figcaption>
+                    </figure>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- What you get -->
+    <section class="wb-section wb-section-white">
+        <div class="wb-wrap">
+            <div class="wb-narrow wb-center">
+                <h2 class="wb-h2">What you get <span data-plan-prices-ready hidden>for <span data-plan-price="saver"></span> a month</span></h2>
+                <p class="wb-lead">A website, and someone in your corner for the business behind it.</p>
+            </div>
+            <div class="wb-two">
+                <div class="wb-card">
+                    <h3>Your Website Assistant</h3>
+                    <p class="wb-p" style="margin:0;">Writes, builds and publishes your website with you.</p>
+                    <ul>
+                        <li>Every page your site needs, drafted from your business details</li>
+                        <li>Hosting on a free address, or your own domain</li>
+                        <li>Live preview on desktop and phone</li>
+                        <li>Search titles, descriptions and a sitemap on every site</li>
+                        <li>Bring over your current Wix, Squarespace or WordPress site</li>
+                    </ul>
+                </div>
+                <div class="wb-card">
+                    <h3>Your Business Mentor</h3>
+                    <p class="wb-p" style="margin:0;">Your guide and coach, included on every plan.</p>
+                    <ul>
+                        <li>Tells you what it would sort out first</li>
+                        <li>Helps you plan, and checks your week with you</li>
+                        <li>Starting out? It begins with an idea check: who buys, why, and how to test it cheaply</li>
+                        <li>At most 3 suggestions a week, and nothing changes without your click</li>
+                        <li>Chatting with it doesn&rsquo;t use your tasks, under fair use</li>
+                    </ul>
+                </div>
+            </div>
+            <div class="wb-note">
+                <strong>Good to know:</strong> The Workflow Saver includes one assistant, and here that&rsquo;s your Website Assistant. Your Mentor doesn&rsquo;t take up that place. When you&rsquo;re ready for social media, blog, email and lead generation too, The Busywork Buster<span data-plan-prices-ready hidden> (<span data-plan-price="buster"></span> a month)</span> gives you every assistant working as one team. <a href="pricing.html" class="underline">Compare plans</a>.
+            </div>
+        </div>
+    </section>
+
+    <!-- Comparison -->
+    <section class="wb-section">
+        <div class="wb-wrap">
+            <div class="wb-narrow wb-center">
+                <h2 class="wb-h2">Be More Swan vs a website builder like Wix or Squarespace</h2>
+                <p class="wb-lead">Both get you a website. The difference is who does the thinking.</p>
+            </div>
+            <div class="wb-table-box">
+                <table class="wb-table">
+                    <thead>
+                        <tr>
+                            <th scope="col"><span class="sr-only">Compared on</span></th>
+                            <th scope="col" class="wb-us">Be More Swan</th>
+                            <th scope="col">A typical website builder</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <th scope="row">Where you start</th>
+                            <td class="wb-us">Your business details, products and brand kit</td>
+                            <td>A template you choose</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">The words on the page</th>
+                            <td class="wb-us">Every page written for you, with [placeholders] instead of made-up facts</td>
+                            <td>You write them, often with AI tools that suggest starter text</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Design</th>
+                            <td class="wb-us">Your colours and logo; the layout is handled for you</td>
+                            <td>Lots of templates and full drag-and-drop control</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Making changes</th>
+                            <td class="wb-us">Edit the words, or ask in chat and approve the change</td>
+                            <td>Edit it yourself in the editor</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Business advice</th>
+                            <td class="wb-us">A Business Mentor on every plan</td>
+                            <td>Help articles and support for the builder</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">After launch</th>
+                            <td class="wb-us">Add assistants for social media, blog, email and leads when you&rsquo;re ready</td>
+                            <td>Add-ons and apps from their marketplace</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <span class="wb-scroll-hint">Swipe the table to see both columns</span>
+        </div>
+    </section>
+
+    <!-- Honest -->
+    <section class="wb-section wb-section-white">
+        <div class="wb-wrap">
+            <div class="wb-narrow">
+                <h2 class="wb-h2 wb-center">When Wix or Squarespace is the better choice</h2>
+                <p class="wb-lead wb-center">We&rsquo;d rather you pick the right tool than the wrong one with us.</p>
+                <div class="wb-honest">
+                    <p class="wb-p" style="margin-bottom:0;">Choose a traditional website builder if:</p>
+                    <ul>
+                        <li><strong>You want full control over the design.</strong> If you love placing every element yourself, a drag-and-drop editor gives you more freedom than we do.</li>
+                        <li><strong>You rely on a particular app or plugin.</strong> Their marketplaces have many more add-ons than we do.</li>
+                    </ul>
+                    <p class="wb-p" style="margin:0;">If what you want is a clear, professional website without writing it yourself, plus help growing the business behind it, that&rsquo;s what we&rsquo;re built for.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Questions -->
+    <section class="wb-section">
+        <div class="wb-wrap">
+            <div class="wb-narrow">
+                <h2 class="wb-h2 wb-center">Common questions</h2>
+                <div class="wb-faq">
+                    <details>
+                        <summary>Do I need to know how to build a website?</summary>
+                        <p>No. There is no code and no drag-and-drop. You describe what you want, or edit the words directly, and the layout is handled for you.</p>
+                    </details>
+                    <details>
+                        <summary>Can I move my site over from Wix or Squarespace?</summary>
+                        <p>Yes, if it is your own. Give the Website Assistant the address of your current site, whether it is on Wix, Squarespace, WordPress or built for you, and it reads your home page and the pages in its menu into a draft. Your own words are kept as they are. You see the imported draft beside your current one and choose whether to use it.</p>
+                    </details>
+                    <details>
+                        <summary>Can I use my own domain?</summary>
+                        <p>Yes. When you publish, your site goes live on its own free address, yourname.bemoreswan.site, or on a domain you own.</p>
+                    </details>
+                    <details>
+                        <summary>How many pages can I have?</summary>
+                        <p>As many as your site needs. No plan limits how many pages your website has.</p>
+                    </details>
+                    <details>
+                        <summary>Will it make up reviews or prices?</summary>
+                        <p>No. It only states what is in your business details and products. Anything else, such as a customer quote or a number, is left as a [placeholder] for you to fill in.</p>
+                    </details>
+                    <details>
+                        <summary>What does the Business Mentor do?</summary>
+                        <p>Your Business Mentor is a guide and coach included on every plan. It looks across your workspace, tells you what it would sort out first, helps you plan and checks your week with you. It never changes anything without your click.</p>
+                    </details>
+                    <details>
+                        <summary>Is the Business Mentor included on the cheaper plan?</summary>
+                        <p>Yes. Every plan includes a Business Mentor, and it doesn&rsquo;t take up your plan&rsquo;s assistant place. On The Workflow Saver you choose one assistant; choose the Website Assistant and you get your website and your Mentor.</p>
+                    </details>
+                    <details>
+                        <summary>Does it use tasks?</summary>
+                        <p>Drafting your whole site, importing your current site, or having it place your own words on a page each uses 1 task from your monthly allowance. Editing pages yourself, and approving changes it suggests in chat, costs nothing.</p>
+                    </details>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Closing -->
+    <section class="wb-section">
+        <div class="wb-wrap">
+            <div class="wb-band">
+                <h2 class="wb-h2">Get your website written this week</h2>
+                <p>Try it free for 14 days. No card needed, no code, and nothing goes live until you press Publish.</p>
+                <div class="wb-ctas">
+                    <a href="register.html" data-waitlist-label="Join the waitlist" class="btn-inverse inline-block px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">Start your free trial</a>
+                </div>
+                <p style="margin-top:1.5rem;font-size:1rem;">Already have a site? <a class="wb-band-link" href="/assistant.html?role=mystery_shopper#free-website-check">See how it scores with a stranger</a> in about 30 seconds, free.</p>
+            </div>
+        </div>
+    </section>
+
+</main>
+
+<div id="footer-placeholder"></div>
+
+<script src="./mobileMenu.js"></script>
+<script src="./plan-prices.js"></script>
+<script>
+    async function loadComponent(id, path) {
+        try {
+            const r = await fetch(path);
+            if (r.ok) document.getElementById(id).innerHTML = await r.text();
+        } catch {}
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadComponent('nav-placeholder', './components/nav.html');
+        loadComponent('footer-placeholder', './components/footer.html');
+        if (window.i18n) window.i18n.apply();
+        setupMobileMenu();
+    });
+</script>
+</body>
+</html>

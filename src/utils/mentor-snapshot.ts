@@ -28,6 +28,7 @@ import { loadTrackRecord, renderTrackRecordForMentor } from './mentor-outcomes';
 import { loadCustomers, renderCustomersForMentor } from './mentor-customers';
 import { TEAM_FEATURES } from '../config/team-features';
 import { isDiscussionSource, sourceInfo } from '../config/discussion-sites';
+import { loadSiteDirectoryGaps } from './site-directory-store';
 
 type Db = any;
 
@@ -61,6 +62,12 @@ export interface MentorSnapshotData {
      * tables aren't there (unknown, not "not set up"); undefined = not read (older fixtures).
      */
     discussions?: Array<{ assistantId: number; topics: string[]; sites: string[]; enabled: boolean; newCount: number; repliedCount: number; lastScannedAt: Date | null }> | null;
+    /**
+     * What the website lacks, from the site page directory (src/utils/site-directory.ts directoryGaps):
+     * no contact/about page, Business Information products no page names. Empty = none found or the
+     * site hasn't been read; undefined = not read (older fixtures).
+     */
+    websiteGaps?: string[];
 }
 
 export type TeamState = 'active' | 'paused_by_user' | 'paused_task_cap' | 'paused_payment' | 'paused_plan_limit' | 'setting_up' | 'archived';
@@ -244,6 +251,11 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
         return `- ${g.id ? `#${g.id} ` : ''}${g.assistant}: ${g.label} — now ${latest}, target ${g.target} by ${g.targetDate.toISOString().slice(0, 10)} (${g.status.replace(/_/g, ' ')})${goalNotes(g)}`;
     }));
 
+    if (d.websiteGaps?.length) {
+        lines.push('', 'WEBSITE GAPS (from the pages read off their website — Business Information ▸ Website Pages; suggest the page, never write it yourself):');
+        lines.push(...d.websiteGaps.map((g) => `- ${g}`));
+    }
+
     if (d.strategyDocs !== undefined) lines.push('', ...renderStrategyForMentor(d.strategyDocs));
     lines.push('', ...renderPlaybookForMentor(playbookFor(d.offerKinds)));
     if (d.research?.length) {
@@ -418,10 +430,14 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         }));
     }, null as MentorSnapshotData['discussions']);
 
+    // The site page directory's gaps (site-directory-store.ts). Never throws.
+    const websiteGaps = await loadSiteDirectoryGaps(db, orgId);
+
     return {
         strategyDocs,
         research,
         discussions: discussionState,
+        websiteGaps,
         plan: { status: (planRow?.status as 'active' | 'past_due' | undefined) ?? null, freeSlots, nextPlanName: nextPlan?.name ?? null },
         catalogue: catalogue.filter((c: any) => c.roleKey).map((c: any) => ({
             roleKey: c.roleKey, name: c.name, description: c.description ?? null,

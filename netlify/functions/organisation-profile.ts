@@ -13,6 +13,7 @@ import { organisations, users } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { businessDomainOf } from '../../src/utils/email-domain';
 import { cleanSocialHandles } from '../../src/utils/social-handles';
+import { refreshDirectoryAfterAddressChange } from '../../src/utils/site-directory-store';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -116,6 +117,7 @@ export default withLambda(async (event) => {
             updatedAt:           new Date(),
         };
 
+        const [before] = await db.select({ websiteUrl: organisations.websiteUrl }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
         const [saved] = await db.update(organisations)
             .set(values).where(eq(organisations.id, orgId))
             .returning({
@@ -128,6 +130,9 @@ export default withLambda(async (event) => {
                 socialHandles:       organisations.socialHandles,
                 targetAudience:      organisations.targetAudience,
             });
+        // A new website address: re-read the site page directory every assistant uses
+        // (src/utils/site-directory-store.ts). Never throws; a hosted site is unaffected.
+        if ((before?.websiteUrl ?? '') !== (saved?.websiteUrl ?? '')) await refreshDirectoryAfterAddressChange(db, orgId);
 
         return json(200, { success: true, profile: saved });
     } catch (err) {

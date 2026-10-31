@@ -136,7 +136,7 @@ export function buildDraftPrompt(brief: DraftBrief): { system: string; user: str
         brief.rulesBlock ? `${brief.rulesBlock}\nEvery word of the site must follow these rules.` : '',
         brief.request ? `<request>\n${brief.request}\n</request>` : '',
         `<rules>
-- Write a complete site of at most ${brief.maxPages} page${brief.maxPages === 1 ? '' : 's'}. The first page is the home page (slug ""). Give every other page a short lowercase slug.
+- Write a complete site with the pages this business needs (never more than ${brief.maxPages}). The first page is the home page (slug ""). Give every other page a short lowercase slug.
 - The home page opens with a hero whose headline says what the business does and who it is for, in plain words — no slogans a competitor could use. Its main button leads to the action a visitor should take.
 - Plain British English. Short sentences. No jargon, no hype.
 - NEVER invent facts: no testimonials, reviews, customer names, prices, numbers, years, awards, guarantees or results that are not in the business details or products above. Where a page genuinely needs one, write a clear placeholder in square brackets — e.g. "[number] customers since [year]" — for the owner to fill in.

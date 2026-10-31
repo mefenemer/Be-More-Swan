@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Be More Swan vs a Marketing Agency or Freelancer | Be More Swan</title>
+    <!-- SEO: canonical + social share metadata -->
+    <meta name="description" content="Compare the cost, speed and control of hiring a marketing agency or freelancer with Be More Swan's team of AI assistants for social media, blog, email and leads.">
+    <link rel="canonical" href="https://bemoreswan.com/be-more-swan-vs-marketing-agency">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Be More Swan">
+    <meta property="og:title" content="Be More Swan vs a Marketing Agency or Freelancer">
+    <meta property="og:description" content="An agency gives you people. Be More Swan gives you a team of AI assistants that write in your voice and wait for your approval.">
+    <meta property="og:url" content="https://bemoreswan.com/be-more-swan-vs-marketing-agency">
+    <meta property="og:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="607">
+    <meta property="og:image:alt" content="Be More Swan — your digital workforce">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Be More Swan vs a Marketing Agency or Freelancer">
+    <meta name="twitter:description" content="An agency gives you people. Be More Swan gives you a team of AI assistants that write in your voice and wait for your approval.">
+    <meta name="twitter:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta name="twitter:image:alt" content="Be More Swan — your digital workforce">
+    <!-- /SEO -->
+    <link href="./style.css" rel="stylesheet">
+    <script src="/site-theme.js"></script>
+    <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="/favicon/manifest.json">
+    <script src="/src/i18n.js"></script>
+  <script src="/waitlist-mode.js" defer></script>
+    <!-- Comparison page (owner, 2026-10-31): Be More Swan vs a marketing agency or freelancer.
+         Draft copy: docs/marketing/comparison-page-vs-agency.md.
+
+         Every claim about us is one how-it-works.html already makes (checked there 2026-10-20):
+         approval by default, a rejected draft's reason becomes a rule, assistants share the products
+         list and each other's work, flat fee with a hard task cap, no card for the 14-day trial.
+         Facebook/Instagram publishing is NOT claimed (Meta App Review pending) — platforms point at
+         /connections instead.
+
+         Market figures are third-party and cited at the foot of the page: Whito's UK retainer
+         benchmarks (social media £800–£2,500 a month, ex VAT, verified 19 Oct 2026) and YunoJuno's
+         2026 rates report via Whito (social media manager £326 a day). Re-check them when you touch
+         the copy. Our prices are data-plan-price slots: filled by plan-prices.js and baked at build
+         (PRICE_SLOT_PAGES in scripts/build-seo-html.mjs) — never type one here.
+
+         Styles are plain CSS on the site's theme tokens, like how-it-works.html: style.css is a
+         compiled Tailwind build, and a utility class it doesn't already contain fails silently. -->
+    <style>
+        .vs-wrap { max-width: 72rem; margin: 0 auto; padding: 0 1rem; }
+        .vs-narrow { max-width: 46rem; margin: 0 auto; }
+        .vs-eyebrow { display:inline-block; padding:.25rem .75rem; border-radius:9999px; font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background:var(--color-emerald-50); color:var(--color-emerald-700); border:1px solid var(--color-emerald-100); }
+        .vs-h1 { font-size: clamp(2.1rem, 5vw, 3.5rem); font-weight: 800; line-height: 1.1; letter-spacing: -.02em; color: #111827; margin: 1.25rem 0; }
+        .vs-h1 em { font-style: normal; color: var(--color-emerald-700); }
+        .vs-h2 { font-size: clamp(1.6rem, 3.5vw, 2.3rem); font-weight: 800; line-height: 1.15; letter-spacing: -.015em; color: #111827; margin: 0 0 1rem; }
+        .vs-lead { font-size: 1.15rem; line-height: 1.65; color: #4b5563; }
+        .vs-p { font-size: 1.05rem; line-height: 1.7; color: #4b5563; margin: 0 0 1rem; }
+        .vs-section { padding: 4.5rem 0; }
+        .vs-section-white { background: #fff; border-top: 1px solid #f0ebe0; border-bottom: 1px solid #f0ebe0; }
+        .vs-center { text-align: center; }
+        .vs-small { font-size: .9rem; color: #6b7280; margin-top: 1rem; }
+        .vs-ctas { display:flex; flex-wrap:wrap; gap:.75rem; justify-content:center; margin-top:2rem; }
+
+        /* The comparison table scrolls inside its own box on a phone; the page never does. */
+        .vs-table-box { margin-top: 2.5rem; overflow-x: auto; -webkit-overflow-scrolling: touch; border:1px solid #f0ebe0; border-radius:1.25rem; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+        .vs-table { width: 100%; min-width: 44rem; border-collapse: collapse; font-size: .95rem; }
+        .vs-table th, .vs-table td { padding: .9rem 1rem; text-align: left; vertical-align: top; border-bottom: 1px solid #f3efe6; line-height: 1.5; }
+        .vs-table thead th { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; background: #fcfbf8; }
+        .vs-table tbody th { font-weight: 700; color: #111827; width: 22%; }
+        /* Row labels stay put while the other columns swipe past them on a phone. */
+        .vs-table th:first-child { position: sticky; left: 0; z-index: 1; background: #fff; }
+        .vs-table thead th:first-child { background: #fcfbf8; }
+        .vs-table td { color: #4b5563; }
+        .vs-table .vs-us { background: var(--color-emerald-50); color: #111827; font-weight: 600; }
+        .vs-table thead .vs-us { color: var(--color-emerald-700); }
+        .vs-table tr:last-child th, .vs-table tr:last-child td { border-bottom: 0; }
+        .vs-scroll-hint { display:block; font-size:.8rem; color:#9ca3af; margin-top:.6rem; text-align:center; }
+        @media (min-width: 768px) { .vs-scroll-hint { display:none; } }
+
+        /* Cost cards */
+        .vs-costs { display:grid; grid-template-columns:1fr; gap:1rem; margin-top:2.5rem; }
+        @media (min-width: 768px) { .vs-costs { grid-template-columns:repeat(3,1fr); } }
+        .vs-cost { background:#fff; border:1px solid #f0ebe0; border-radius:1.25rem; padding:1.5rem; }
+        .vs-cost strong { display:block; font-size:1rem; color:#111827; margin-bottom:.25rem; }
+        .vs-cost .vs-num { display:block; font-size:1.9rem; font-weight:800; color:#6b7280; margin:.5rem 0; letter-spacing:-.01em; }
+        .vs-cost p { margin:0; color:#4b5563; line-height:1.55; font-size:.95rem; }
+        .vs-cost.vs-cost-us { background: var(--color-emerald-50); border-color: var(--color-emerald-100); }
+        .vs-cost.vs-cost-us .vs-num { color: var(--color-emerald-700); }
+
+        /* Promise cards */
+        .vs-cards { display:grid; grid-template-columns:1fr; gap:1rem; margin-top:2.5rem; }
+        @media (min-width: 768px) { .vs-cards { grid-template-columns:repeat(2,1fr); } }
+        .vs-card { background:#fff; border:1px solid #f0ebe0; border-radius:1rem; padding:1.5rem; }
+        .vs-card h3 { font-size:1.1rem; font-weight:800; color:#111827; margin:0 0 .5rem; }
+        .vs-card p { margin:0; color:#4b5563; line-height:1.6; }
+
+        /* When to hire people */
+        .vs-honest { background:#fff; border:1px solid #f0ebe0; border-radius:1.25rem; padding:1.75rem; margin-top:2rem; }
+        .vs-honest ul { margin:.5rem 0 1rem; padding:0; list-style:none; }
+        .vs-honest li { position:relative; padding-left:1.4rem; margin:.7rem 0; color:#4b5563; line-height:1.6; }
+        .vs-honest li::before { content:''; position:absolute; left:0; top:.6em; width:.55rem; height:.55rem; border-radius:9999px; background:var(--color-emerald-700); opacity:.75; }
+        .vs-honest li strong { color:#111827; }
+
+        /* Questions */
+        .vs-faq { margin-top:2rem; }
+        .vs-faq details { background:#fff; border:1px solid #f0ebe0; border-radius:1rem; padding:1.1rem 1.25rem; margin-bottom:.75rem; }
+        .vs-faq summary { cursor:pointer; font-weight:700; color:#111827; list-style:none; }
+        .vs-faq summary::-webkit-details-marker { display:none; }
+        .vs-faq summary::after { content:'+'; float:right; color:var(--color-emerald-700); font-weight:800; }
+        .vs-faq details[open] summary::after { content:'−'; }
+        .vs-faq details p { margin:.75rem 0 0; color:#4b5563; line-height:1.65; }
+
+        .vs-band { background: var(--color-emerald-700); color:#fff; border-radius:1.75rem; padding:3rem 1.5rem; text-align:center; }
+        @media (min-width: 768px) { .vs-band { padding:4rem; } }
+        .vs-band h2 { color:#fff; }
+        .vs-band p { color:rgba(255,255,255,.92); font-size:1.1rem; line-height:1.7; margin:0 auto 1rem; max-width:40rem; }
+        .vs-band a.vs-band-link { color:#fff; text-decoration:underline; }
+
+        .vs-sources { font-size:.8rem; color:#9ca3af; line-height:1.6; margin-top:2rem; }
+        .vs-sources a { color:#6b7280; text-decoration:underline; }
+    </style>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Is Be More Swan an agency?", "acceptedAnswer": { "@type": "Answer", "text": "No. Be More Swan is a web app that gives you a team of AI assistants. They do the day-to-day marketing work, and you approve everything before it goes out." } },
+        { "@type": "Question", "name": "Will it sound like me, or like a robot?", "acceptedAnswer": { "@type": "Answer", "text": "Each assistant learns your business from your setup answers, your website and any brand documents you add, and writes in your voice. When you turn a draft down and say why, it turns that into a rule it follows next time." } },
+        { "@type": "Question", "name": "Does anything get published without me seeing it?", "acceptedAnswer": { "@type": "Answer", "text": "Not by default. Every post, article and email waits for your approval. Once you trust an assistant, you can choose to let some work go out on its own, and switch that off again whenever you like." } },
+        { "@type": "Question", "name": "Which platforms does it post to?", "acceptedAnswer": { "@type": "Answer", "text": "The Connections page at bemoreswan.com/connections lists which platforms are live today and which are coming soon." } },
+        { "@type": "Question", "name": "What if I want to stop?", "acceptedAnswer": { "@type": "Answer", "text": "Cancel any time from your billing page. There is no contract or notice period." } },
+        { "@type": "Question", "name": "Can I use Be More Swan and an agency together?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Some businesses use an agency for big creative work such as a rebrand or a campaign shoot, and Be More Swan for the everyday posts, articles, emails and leads in between." } }
+      ]
+    }
+    </script>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<main class="flex-grow">
+
+    <!-- Hero -->
+    <section class="vs-section">
+        <div class="vs-wrap vs-center">
+            <div class="vs-narrow">
+                <span class="vs-eyebrow">Compare</span>
+                <h1 class="vs-h1">Be More Swan vs hiring a <em>marketing agency or freelancer</em></h1>
+                <p class="vs-lead">An agency gives you people. Be More Swan gives you a team of AI assistants that write in your voice, work every day, and wait for your approval before anything goes out.</p>
+                <div class="vs-ctas">
+                    <a href="register.html" data-waitlist-label="Join the waitlist" class="btn-primary inline-block px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">Start your free trial</a>
+                    <a href="pricing.html" class="btn-secondary inline-block px-8 py-4 text-lg font-bold rounded-lg border transition">See pricing</a>
+                </div>
+                <p class="vs-small">14 days free &middot; no card needed</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- At a glance -->
+    <section class="vs-section vs-section-white">
+        <div class="vs-wrap">
+            <div class="vs-narrow vs-center">
+                <h2 class="vs-h2">The short version</h2>
+                <p class="vs-lead">Three ways to get your marketing done, side by side.</p>
+            </div>
+            <div class="vs-table-box">
+                <table class="vs-table">
+                    <thead>
+                        <tr>
+                            <th scope="col"><span class="sr-only">Compared on</span></th>
+                            <th scope="col" class="vs-us">Be More Swan</th>
+                            <th scope="col">Marketing agency</th>
+                            <th scope="col">Freelancer</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <th scope="row">Typical cost</th>
+                            <td class="vs-us"><span data-plan-prices-ready hidden><span data-plan-price="saver"></span> a month for one assistant, or <span data-plan-price="buster"></span> a month for every assistant</span></td>
+                            <td>£800&ndash;£2,500 a month for social media alone, plus VAT</td>
+                            <td>Around £326 a day for a social media manager</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Getting started</th>
+                            <td class="vs-us">Answer a few setup questions and your first drafts arrive</td>
+                            <td>Proposal, contract and onboarding</td>
+                            <td>Finding the right person, then briefing them</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">What&rsquo;s covered</th>
+                            <td class="vs-us">Social media, blog, email, leads and your website, from one place</td>
+                            <td>Whatever is in the scope you pay for</td>
+                            <td>Usually one skill, such as social media</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Approving the work</th>
+                            <td class="vs-us">One review queue. Nothing goes out until you approve it</td>
+                            <td>Rounds of emails and calls</td>
+                            <td>Messages back and forth</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Changes and extras</th>
+                            <td class="vs-us">One flat monthly fee. No surprise bills</td>
+                            <td>Often a new quote</td>
+                            <td>More hours, more cost</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Contract</th>
+                            <td class="vs-us">None. Cancel any time</td>
+                            <td>Varies by agency</td>
+                            <td>Varies by person</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Big creative ideas</th>
+                            <td class="vs-us">Assistants plan around your goals; you set the direction</td>
+                            <td>Their strongest point</td>
+                            <td>Depends on the person</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <span class="vs-scroll-hint">Swipe the table to compare with an agency and a freelancer</span>
+        </div>
+    </section>
+
+    <!-- Cost -->
+    <section class="vs-section">
+        <div class="vs-wrap">
+            <div class="vs-narrow vs-center">
+                <h2 class="vs-h2">What you&rsquo;d actually pay</h2>
+                <p class="vs-lead">Typical UK prices for social media help, next to a team that also covers your blog, email and leads.</p>
+            </div>
+            <div class="vs-costs">
+                <div class="vs-cost">
+                    <strong>A marketing agency</strong>
+                    <span class="vs-num">£800&ndash;£2,500</span>
+                    <p>A month for social media alone, before VAT and ad spend.</p>
+                </div>
+                <div class="vs-cost">
+                    <strong>A freelancer</strong>
+                    <span class="vs-num">£326 a day</span>
+                    <p>The average for a freelance social media manager. Two days a month comes to about £650.</p>
+                </div>
+                <div class="vs-cost vs-cost-us">
+                    <strong>Be More Swan</strong>
+                    <span class="vs-num"><span data-plan-prices-ready hidden><span data-plan-price="buster"></span> a month</span></span>
+                    <p>Every assistant, working as one team on your social media, blog, email and leads. Save 20% when you pay annually.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Where we win -->
+    <section class="vs-section vs-section-white">
+        <div class="vs-wrap">
+            <div class="vs-narrow vs-center">
+                <h2 class="vs-h2">Where Be More Swan wins</h2>
+            </div>
+            <div class="vs-cards">
+                <div class="vs-card">
+                    <h3>You stay in control, without the email ping-pong</h3>
+                    <p>Every post, article and email waits in your review queue, shown the way your customers will see it. Approve it, change a word, or send it back with a note. No briefs, no &ldquo;can we jump on a call&rdquo;, no waiting days for version two.</p>
+                </div>
+                <div class="vs-card">
+                    <h3>It learns how you like things</h3>
+                    <p>When you turn a draft down and say why, your assistant turns that into a rule it follows next time. The first week you&rsquo;ll make a few changes. A month in, you&rsquo;ll mostly be pressing Approve.</p>
+                </div>
+                <div class="vs-card">
+                    <h3>The whole team pulls the same way</h3>
+                    <p>Your assistants share what they know: your products, your brand, and what the rest of the team has done this week. A new offer turns up in your posts, your newsletter and your outreach without you briefing three different people.</p>
+                </div>
+                <div class="vs-card">
+                    <h3>No lock-in, no surprise bills</h3>
+                    <p>No contract and no notice period. Work is counted in tasks, and when the month&rsquo;s allowance is used your assistants simply pause. Try it free for 14 days without a card.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- When to hire people -->
+    <section class="vs-section">
+        <div class="vs-wrap">
+            <div class="vs-narrow">
+                <h2 class="vs-h2 vs-center">When an agency or freelancer is the better choice</h2>
+                <p class="vs-lead vs-center">We&rsquo;d rather you pick the right option than the wrong one with us.</p>
+                <div class="vs-honest">
+                    <p class="vs-p" style="margin-bottom:0;">Hire people if:</p>
+                    <ul>
+                        <li><strong>You need a full rebrand, a big campaign idea or a video shoot.</strong> Creative strategy and production are what good agencies do best.</li>
+                        <li><strong>You&rsquo;d rather not look at anything.</strong> Our assistants draft and you approve. If you want someone else to make every decision, an agency suits you better.</li>
+                        <li><strong>You&rsquo;re spending heavily on paid ads.</strong> Managing large ad budgets day to day is specialist work.</li>
+                    </ul>
+                    <p class="vs-p" style="margin:0;">You can also use both: an agency for the big creative moments, and Be More Swan for the everyday posts, articles, emails and leads that keep your business visible in between.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Questions -->
+    <section class="vs-section vs-section-white">
+        <div class="vs-wrap">
+            <div class="vs-narrow">
+                <h2 class="vs-h2 vs-center">Common questions</h2>
+                <div class="vs-faq">
+                    <details>
+                        <summary>Is Be More Swan an agency?</summary>
+                        <p>No. Be More Swan is a web app that gives you a team of AI assistants. They do the day-to-day marketing work, and you approve everything before it goes out.</p>
+                    </details>
+                    <details>
+                        <summary>Will it sound like me, or like a robot?</summary>
+                        <p>Each assistant learns your business from your setup answers, your website and any brand documents you add, and writes in your voice. When you turn a draft down and say why, it turns that into a rule it follows next time.</p>
+                    </details>
+                    <details>
+                        <summary>Does anything get published without me seeing it?</summary>
+                        <p>Not by default. Every post, article and email waits for your approval. Once you trust an assistant, you can choose to let some work go out on its own, and switch that off again whenever you like.</p>
+                    </details>
+                    <details>
+                        <summary>Which platforms does it post to?</summary>
+                        <p>Our <a href="connections.html" class="underline">Connections page</a> lists which platforms are live today and which are coming soon.</p>
+                    </details>
+                    <details>
+                        <summary>What if I want to stop?</summary>
+                        <p>Cancel any time from your billing page. There is no contract or notice period.</p>
+                    </details>
+                    <details>
+                        <summary>Can I use Be More Swan and an agency together?</summary>
+                        <p>Yes. Some businesses use an agency for big creative work such as a rebrand or a campaign shoot, and Be More Swan for the everyday posts, articles, emails and leads in between.</p>
+                    </details>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Closing -->
+    <section class="vs-section">
+        <div class="vs-wrap">
+            <div class="vs-band">
+                <h2 class="vs-h2">See how much a team of assistants could take off your plate</h2>
+                <p>Try every assistant free for 14 days. No card needed, and you can cancel any time.</p>
+                <div class="vs-ctas">
+                    <a href="register.html" data-waitlist-label="Join the waitlist" class="btn-inverse inline-block px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">Start your free trial</a>
+                </div>
+                <p style="margin-top:1.5rem;font-size:1rem;">Or start smaller: <a class="vs-band-link" href="/assistant.html?role=mystery_shopper#free-website-check">get a free first-impression score for your website</a> in about 30 seconds.</p>
+            </div>
+            <p class="vs-sources vs-center">
+                Market prices are typical UK figures, not quotations. Agency: Whito,
+                <a href="https://whito.co.uk/research/uk-agency-retainers/" rel="noopener" target="_blank">UK marketing retainer benchmarks</a>
+                (social media, monthly, excluding VAT and ad spend; verified October 2026). Freelancer: YunoJuno Freelancer Rates Report 2026, via Whito,
+                <a href="https://whito.co.uk/research/freelance-marketer-vs-agency-day-rates/" rel="noopener" target="_blank">freelance marketer vs agency day rates</a>.
+            </p>
+        </div>
+    </section>
+
+</main>
+
+<div id="footer-placeholder"></div>
+
+<script src="./mobileMenu.js"></script>
+<script src="./plan-prices.js"></script>
+<script>
+    async function loadComponent(id, path) {
+        try {
+            const r = await fetch(path);
+            if (r.ok) document.getElementById(id).innerHTML = await r.text();
+        } catch {}
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadComponent('nav-placeholder', './components/nav.html');
+        loadComponent('footer-placeholder', './components/footer.html');
+        if (window.i18n) window.i18n.apply();
+        setupMobileMenu();
+    });
+</script>
+</body>
+</html>

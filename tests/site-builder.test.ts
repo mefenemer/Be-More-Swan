@@ -125,12 +125,16 @@ check('page addresses: cleaned, unique, never reserved; exactly one home, listed
     assert.strictEqual(noHome.pages[0].slug, '', 'with no home page, the first page becomes home');
 });
 
-check(`the plan's page cap holds (default ${DEFAULT_MAX_PAGES}), and says so`, () => {
-    const pages = Array.from({ length: 7 }, (_, i) => ({ title: `Page ${i + 1}`, slug: i ? `p${i}` : '' }));
+check(`no plan cap: only the safety ceiling (${DEFAULT_MAX_PAGES}) holds, and it never mentions a plan`, () => {
+    // Owner, 2026-10-31: no plan limits website pages. 7 pages used to be cut to the £29 plan's 5.
+    assert.ok(DEFAULT_MAX_PAGES >= 100, 'the ceiling is a safety net, not a plan limit');
+    const seven = Array.from({ length: 7 }, (_, i) => ({ title: `Page ${i + 1}`, slug: i ? `p${i}` : '' }));
+    assert.strictEqual(normaliseSiteDefinition({ pages: seven }).definition.pages.length, 7);
+    const pages = Array.from({ length: DEFAULT_MAX_PAGES + 2 }, (_, i) => ({ title: `Page ${i + 1}`, slug: i ? `p${i}` : '' }));
     const r = normaliseSiteDefinition({ pages });
     assert.strictEqual(r.definition.pages.length, DEFAULT_MAX_PAGES);
-    assert.ok(r.warnings.some((w) => /Your plan includes 5 pages/.test(w)));
-    assert.strictEqual(normaliseSiteDefinition({ pages }, { maxPages: 10 }).definition.pages.length, 7);
+    assert.ok(r.warnings.some((w) => /A site can have up to \d+ pages/.test(w)));
+    assert.ok(!r.warnings.some((w) => /plan/i.test(w)), 'the warning must not blame a plan');
 });
 
 check('navigation only lists real pages, once each', () => {
@@ -181,7 +185,7 @@ check('add a page: gets an id and an address; refused at the plan cap with a sen
     const page = r.definition.pages.find((p) => p.title === 'Our Menu')!;
     assert.ok(page.id && page.slug === 'our-menu');
     const capped = applySiteOperation(good(), { op: 'add_page', title: 'Third' }, { maxPages: 2 });
-    assert.ok(!capped.ok && /Your plan includes 2 pages/.test(capped.error));
+    assert.ok(!capped.ok && /A site can have up to 2 pages/.test(capped.error) && !/plan/i.test(capped.error));
 });
 
 check('the home page cannot be removed; removing a page takes it out of the menu', () => {

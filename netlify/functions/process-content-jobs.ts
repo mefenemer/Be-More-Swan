@@ -44,6 +44,7 @@ import { fireOrchestrations } from '../../src/utils/orchestration';
 import { operationalSetupLines } from '../../src/utils/operational-setup';
 import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
 import { loadOfferingsText, loadProductsBlock } from '../../src/utils/org-products';
+import { loadSiteDirectoryBlock } from '../../src/utils/site-directory-store';
 import { socialHookFor } from '../../src/config/hook-styles';
 import { platformCraftBlock } from '../../src/constants/platform-craft';
 import { loadRoleModel, roleKeyOfAssistant } from '../../src/utils/assistant-model';
@@ -740,6 +741,10 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // product added a minute ago is in the next draft without a recompile. Never throws.
         const productsBlock = await loadProductsBlock(db, job.organisation_id, (onboarding as { businessName?: string | null }).businessName ?? null);
         if (productsBlock) systemPrompt += `\n\n${productsBlock}`;
+        // The pages of their website (site-directory-store.ts), so a post links the page it is about
+        // rather than the homepage. Read live, capped; never throws.
+        const siteDirectoryBlock = await loadSiteDirectoryBlock(db, job.organisation_id);
+        if (siteDirectoryBlock) systemPrompt += `\n\n${siteDirectoryBlock}`;
 
         systemPrompt += `\n\n${SPECIAL_CATEGORY_RULE}`;
         systemPrompt += `\n\n${CONTENT_QUALITY_STANDARDS}`;

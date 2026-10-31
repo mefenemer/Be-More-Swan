@@ -6526,3 +6526,29 @@ export const discussions = pgTable("discussions", {
   check("discussions_read_from_check", sql`${t.readFrom} IN ('page','snippet')`),
   check("discussions_status_check", sql`${t.status} IN ('new','replied','dismissed')`),
 ]);
+
+// The site page directory (db/z-site-directory.sql, src/utils/site-directory.ts): one per workspace,
+// a map of its website — each page's address, title, one-line summary and what it offers — that
+// every live assistant reads (capped). 'hosted' is read from the published Be More Swan site,
+// 'crawl' from organisations.website_url. A failed refresh keeps the last good pages; `excluded`
+// (paths the owner left out) survives every refresh.
+export const siteDirectories = pgTable("site_directories", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  source: text().notNull(),
+  sourceUrl: text("source_url").notNull(),
+  status: text().notNull().default("reading"),
+  pages: jsonb().notNull().default([]),
+  excluded: jsonb().notNull().default([]),
+  message: text(),
+  refreshedAt: timestamp("refreshed_at", { withTimezone: true }),
+  nextRefreshAt: timestamp("next_refresh_at", { withTimezone: true }),
+  requestedBy: integer("requested_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("site_directories_org_uq").on(t.organisationId),
+  index("site_directories_due_idx").on(t.nextRefreshAt),
+  check("site_directories_source_check", sql`${t.source} IN ('hosted','crawl')`),
+  check("site_directories_status_check", sql`${t.status} IN ('reading','ready','failed')`),
+]);

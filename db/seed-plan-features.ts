@@ -60,10 +60,8 @@ const DEFS: Def[] = [
       category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'assistantLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
     { key: 'monthly_task_limit', label: 'Completed Tasks / Month', description: 'One finished piece of work: a post, an article, a lead search or an email. AI video and music count as 20',
       category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'monthlyTaskLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
-    // Feature-stored number; the plans' own values (5 / 15) are set in master data, so no `values`
-    // here — a re-seed must not rewrite them (db/z-pricing-copy-2026-10-20.sql adds the row).
-    { key: 'website_pages', label: 'Website Pages', description: 'Pages on the website your Website Assistant writes and publishes for you',
-      category: 'Capacity', valueType: 'number', storageTarget: 'feature', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
+    // website_pages removed 2026-10-31 (owner): no plan limits website pages.
+    // db/z-no-website-page-limit.sql clears the plans' values and switches the catalog row off.
     // app_connection_limit / app_connections removed 2026-10-20 (owner): no plan limits app
     // connections — it depends on which assistants you hire. db/z-plans-no-connection-limit-team-soon.sql
     // clears the limits and switches both catalog rows off.

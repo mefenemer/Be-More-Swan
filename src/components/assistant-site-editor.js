@@ -742,7 +742,7 @@
     return `
       ${card(`
         <div class="flex flex-wrap gap-2 items-center">${pageTabs}
-          ${d.pages.length < state.data.maxPages ? btn('data-site-add-page', '+ Page') : `<span class="text-xs text-gray-500">${esc(state.data.maxPages)} of ${esc(state.data.maxPages)} pages on your plan — the most it includes.</span> ${btn('data-site-billing', 'See plans')}`}</div>
+          ${d.pages.length < state.data.maxPages ? btn('data-site-add-page', '+ Page') : `<span class="text-xs text-gray-500">${esc(state.data.maxPages)} pages is the most a site can have.</span>`}</div>
         <p class="text-sm font-black text-gray-900 mt-4 mb-3">Sections on ${esc(p.title)}</p>
         <ul class="space-y-2">${sections || (adding ? '' : '<li class="text-xs text-gray-500">No sections yet.</li>')}${adding && adding.at == null ? addPickerHtml(false) : ''}</ul>
         ${adding && adding.at == null ? '' : `<div class="mt-4">${btn('data-site-add-open', '+ Add a section')}</div>`}`)}
@@ -1383,7 +1383,7 @@
       <label class="flex items-start gap-2 text-xs text-gray-700 mt-3"><input type="checkbox" data-site-import-own ${f.own ? 'checked' : ''}> <span>This website belongs to my business, and I have the right to use its words and pictures.</span></label>
       ${f.error ? `<p class="text-xs font-semibold text-red-600 mt-2">${esc(f.error)}</p>` : ''}
       <div class="mt-3">${btn('data-site-import-go', 'Read my site', where === 'start')}</div>
-      <p class="text-xs text-gray-500 mt-2">${who} reads your home page and the pages in its menu (up to ${esc(state.data.maxPages)} on your plan) and lays your own words out as your new site. Nothing is reworded or made up — anything missing is left in [square brackets] for you. Prices aren't copied; they belong in Business Information. You see the result before it replaces anything. Uses 1 task, only if a draft is made.</p>`;
+      <p class="text-xs text-gray-500 mt-2">${who} reads your home page and the pages in its menu and lays your own words out as your new site. Nothing is reworded or made up — anything missing is left in [square brackets] for you. Prices aren't copied; they belong in Business Information. You see the result before it replaces anything. Uses 1 task, only if a draft is made.</p>`;
     if (where === 'start') {
       return card(`<p class="text-sm font-black text-gray-900">Already have a website?</p>
         <p class="text-xs text-gray-500 mt-1">Bring it over from Wix, Squarespace, WordPress or anywhere else.</p>${form}`, 'border-emerald-200');
@@ -1413,7 +1413,7 @@
       ${list(`Prices we found (${(r.prices || []).length}) — not copied: add them in Business Information ▸ Products & Services`, r.prices, 'text-amber-800')}
       ${list(`Left out as menus or notices (${(r.leftOut || []).length}) — check nothing important is here`, r.leftOut)}
       ${list(`Didn't fit on its page (${(r.notCarried || []).length})`, r.notCarried, 'text-amber-800')}
-      ${list(`Pages in your menu not imported — your plan has ${esc(state.data.maxPages)} pages (${(r.notImported || []).length})`, r.notImported)}
+      ${list(`Pages in your menu not imported (${(r.notImported || []).length}) — add them yourself with + Page`, r.notImported)}
       ${r.hadForm ? '<p class="text-xs text-gray-500 mt-2">Your old site had a form. Enquiries from the new contact form come to you on the Enquiries tab; for an email sign-up, add a sign-up section with one of your forms.</p>' : ''}
       <div class="flex flex-wrap gap-2 mt-3">
         ${btn('data-site-import-preview', state.previewImport ? 'Show my current draft' : 'Preview the imported site', !state.previewImport)}

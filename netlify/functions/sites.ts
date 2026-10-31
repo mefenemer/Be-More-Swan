@@ -104,6 +104,7 @@ import {
 import { triggerSiteDraft } from '../../src/utils/trigger-site-draft';
 import { acceptImport, discardImport, importView, loadImport, startSiteImport } from '../../src/utils/site-import-store';
 import { cleanImportUrl } from '../../src/utils/site-import';
+import { refreshDirectoryAfterAddressChange, refreshDirectoryAfterPublish } from '../../src/utils/site-directory-store';
 import { hasTaskCapacity, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 
 function json(statusCode: number, body: unknown) {
@@ -322,12 +323,16 @@ export default withLambda(async (event) => {
         const r = await publishSite(db, site, userId, maxPages);
         if (!r.ok) return json(400, { error: r.error });
         await purgeSitePages(r.site.slug);
+        // Every assistant's map of the site (site-directory-store.ts) — rebuilt from the new version, no fetch.
+        await refreshDirectoryAfterPublish(db, orgId);
         return json(200, await view(r.site));
     }
 
     if (action === 'unpublish') {
         const down = await unpublishSite(db, site);
         await purgeSitePages(site.slug);
+        // The directory falls back to the website address in Business Information (or none). Never throws.
+        await refreshDirectoryAfterAddressChange(db, orgId);
         return json(200, await view(down));
     }
 

@@ -52,7 +52,7 @@ check('nothing labelled further down: refused with what to do; the plan\'s page 
     assert.ok(!r.ok && /nothing to split/.test(r.error));
     const one = ok(applySiteOperation(site, { op: 'combine_pages' }));
     const capped = applySiteOperation(one, { op: 'split_pages' }, { maxPages: 2 });
-    assert.ok(!capped.ok && /your plan includes 2/.test(capped.error));
+    assert.ok(!capped.ok && /a site can have up to 2/.test(capped.error));
 });
 
 check('no menu labels (sections added straight onto Home): pages by what each section is', () => {

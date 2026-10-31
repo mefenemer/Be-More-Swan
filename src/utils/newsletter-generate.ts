@@ -19,6 +19,7 @@
 
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { loadProductsBlock } from './org-products';
+import { loadSiteDirectoryBlock } from './site-directory-store';
 import { emailOpeningBlock } from '../config/hook-styles';
 import { emailCraftBlock } from '../constants/email-craft';
 import { adaptForModel, replyText } from '../config/model-options';
@@ -339,6 +340,9 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
         notes ? `Source material / author notes:\n${notes}` : '',
         // What the business sells (Business Information ▸ Products & Services). Never throws.
         await loadProductsBlock(db, organisationId, org?.name ?? null),
+        // The pages of their website (site-directory-store.ts) — in the BRIEF, so a link to the right
+        // page survives groundLinks. Never throws.
+        (await loadSiteDirectoryBlock(db, organisationId)) ?? '',
         // Its call-to-action setting (src/config/call-to-action.ts) — in the BRIEF, so the button's
         // link is one groundLinks keeps. Never on an incident or policy notice: those are not
         // marketing, and an offer in one reads as exactly that. '' when it keeps its own.
@@ -844,6 +848,7 @@ export async function draftSequenceEmail(db: Db, opts: SequenceDraftOptions): Pr
         org?.targetAudience ? `Audience: ${org.targetAudience}` : '',
         str(opts.notes, 4000) ? `The author wants this email to cover:\n${str(opts.notes, 4000)}` : '',
         await loadProductsBlock(db, organisationId, org?.name ?? null),
+        (await loadSiteDirectoryBlock(db, organisationId)) ?? '',
         SPECIAL_CATEGORY_RULE,
     ].filter(Boolean).join('\n') || 'Write the email from what you know about the business.';
 

@@ -69,6 +69,8 @@ import { HANDOFF_TARGETS } from '../../src/utils/site-audit-prompts';
 const HANDOFF_TARGETS_PROMPT = HANDOFF_TARGETS.map((t) => `"${t}"`).join(' | ');
 import { loadProductsBlock } from '../../src/utils/org-products';
 import { loadBusinessKnowledgeBlock } from '../../src/utils/business-knowledge';
+import { loadSiteDirectoryBlock } from '../../src/utils/site-directory-store';
+import { buildSiteDirectoryChatBlock, resolveSiteDirectoryCard, SITE_DIRECTORY_CARD_TYPE } from '../../src/utils/chat-site-directory';
 import { buildTeamActivityBlock } from '../../src/utils/team-activity';
 import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../../src/utils/content-snapshot';
 import { postActionFromUiElement, resolvePostActionProposal, type PostActionCard } from '../../src/utils/chat-post-action';
@@ -1672,7 +1674,7 @@ FACTS. Never put a fact on their site that is not in their business details, the
 ${SITE_COPY_CRAFT}
 
 CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short "summary" of what changes, and "ops" — the changes, in order, using ONLY pageIds and sectionIds listed above. They land together or not at all. The operations:
-- {"op":"add_page","title":"...","slug":"..."}   (their plan's page limit is shown above)
+- {"op":"add_page","title":"...","slug":"..."}   (no plan limits how many pages a site has)
 - {"op":"update_page","pageId":"...","title":"...","slug":"...","seo":{"title":"...","description":"..."},"hideFromMenu":true|false}   (any subset; hideFromMenu keeps a page — e.g. a landing page for an ad — out of the menu but reachable by its address; never the home page)
 - {"op":"remove_page","pageId":"..."}   (never the home page)
 - {"op":"add_section","pageId":"...","index":<position, optional>,"section":{"type":"<one of ${SECTION_TYPES.join(', ')}>","props":{...}}}
@@ -3037,6 +3039,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // assistant applies. The chat never read them before 2026-10-23, so a post or article drafted
     // here ignored the owner's brand guide. Same loader and caps as blueprint §11. Never throws.
     const knowledgeBlock = await loadBusinessKnowledgeBlock(db, orgId);
+    // The site page directory (docs/site-directory-plan.md): each page of their website — address,
+    // title, one line, what it offers — so an answer links the right page, not the homepage. Every
+    // route, every turn, through THE loader; capped at 2,500 characters. Never throws.
+    const siteDirectoryBlock = await loadSiteDirectoryBlock(db, orgId);
     const teamBlock = await buildTeamActivityBlock(db, orgId, session.aiAssistantId, {
         timezone: resolvePostingSchedule(
             assistantRow.onboardingContext && typeof assistantRow.onboardingContext === 'object' && !Array.isArray(assistantRow.onboardingContext)
@@ -3086,6 +3092,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // Customer reviews for the Email Marketing chat (src/utils/chat-reviews.ts) — the Website Assistant's
     // prompt carries its own. Null for every other role; never throws.
     const reviewsBlock = offersOwnCards ? await buildReviewsBlock(db, orgId, assistantRow.roleKey) : null;
+    // What the directory last read, what is left out, and the site_directory card that re-reads the
+    // site or leaves a page out — the same action as Business Information ▸ Website Pages
+    // (src/utils/chat-site-directory.ts). Structured routes only; never throws.
+    const siteDirectoryCardBlock = offersOwnCards ? await buildSiteDirectoryChatBlock(db, orgId) : null;
     // The signed-in user's own My Account settings, read-only (src/utils/chat-my-account.ts). Every
     // route, every role; null when the read fails.
     const myAccountBlock = await buildMyAccountBlock(db, userId, session.aiAssistantId, assistantRow.roleKey);
@@ -3108,7 +3118,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
         ].join('\n\n');
     })() : '';
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock].filter(Boolean).join('\n\n');
 
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3230,7 +3240,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                     baseSystemPrompt: shadowRow?.systemPrompt ?? null,
                     onboardingContext: shadowRow?.onboardingContext ?? null,
                     business,
-                }) + (productsBlock ? `\n\n${productsBlock}` : '') + (knowledgeBlock ? `\n\n${knowledgeBlock}` : ''),
+                }) + (productsBlock ? `\n\n${productsBlock}` : '') + (knowledgeBlock ? `\n\n${knowledgeBlock}` : '') + (siteDirectoryBlock ? `\n\n${siteDirectoryBlock}` : ''),
                 shadowRow?.onboardingContext ?? null,
             );
 
@@ -3596,6 +3606,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             const r = ctaCardFrom(uiElement, await listGiftForms(db, orgId));
             if (r && 'error' in r) { uiElement = null; content = `${r.error} I haven’t changed anything — you can also change it on Business Information ▸ Products & Services.`; }
             else if (r) { ctaCard = r; uiElement = r; }
+        }
+        // Re-read the site, or leave a page out / put it back (src/utils/chat-site-directory.ts), rebuilt
+        // against the stored directory; the click POSTs to site-directory.ts as Business Information does.
+        if (route !== defaultRoute && (uiElement as { type?: unknown } | null)?.type === SITE_DIRECTORY_CARD_TYPE) {
+            uiElement = await resolveSiteDirectoryCard(db, orgId, uiElement);
+            if (!uiElement) content = 'I couldn’t read your website pages just now, so I haven’t changed anything. Please try again in a moment, or use Business Information ▸ Website Pages.';
         }
         // One card for the "keep it" checks below: a change to the assistant's own profile.
         const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | FollowUpPlanCard | CtaCard | SetupFieldCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? followUpPlanCard ?? ctaCard ?? setupFieldCard;
