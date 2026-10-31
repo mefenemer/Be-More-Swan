@@ -94,6 +94,8 @@ export const WORKSPACE_TABLES: Record<string, any> = {
     websiteEnquiries: s.siteEnquiries,
     // An imported draft of their old site waiting for review (site-import.ts), if any.
     websiteImports: s.siteImports,
+    // The map of their website every assistant reads (site-directory.ts), and the pages they left out.
+    websitePages: s.siteDirectories,
     websiteOrders: s.siteOrders,
     bookings: s.bookings,
     bookingSettings: s.bookingSettings,

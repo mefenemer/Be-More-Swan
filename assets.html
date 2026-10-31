@@ -28,6 +28,7 @@
       <button type="button" class="bizinfo-tab" data-tab="hours">Hours &amp; Location</button>
       <!-- Shown only for a business that takes bookings ("What does your business offer?"). -->
       <button type="button" class="bizinfo-tab hidden" data-tab="bookings">Bookings</button>
+      <button type="button" class="bizinfo-tab" data-tab="sitepages">Website Pages</button>
       <button type="button" class="bizinfo-tab" data-tab="legal">Legal &amp; Billing</button>
       <button type="button" class="bizinfo-tab" data-tab="team">Team Members</button>
       <button type="button" class="bizinfo-tab" data-tab="assets">Brand Assets</button>
@@ -2238,6 +2239,95 @@
   })();
   </script>
   </div><!-- /panel: assets -->
+
+  <!-- ══ Website Pages (docs/site-directory-plan.md) ═══════════════════════ -->
+  <!-- The site page directory every assistant reads: each page's address, title, one line and what it
+       offers. site-directory.ts is the one action, shared with the chat's site_directory card. -->
+  <div class="bizinfo-tab-panel hidden max-w-4xl" data-panel="sitepages">
+  <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+      <div class="min-w-0">
+        <h2 class="text-lg font-extrabold text-gray-900">Your website's pages</h2>
+        <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Every assistant reads this list, so a post, article or email links the page it is about instead of your homepage. It is read again every week. Prices are never taken from your website — Products &amp; Services stays the place for them.</p>
+      </div>
+      <button type="button" id="sd-refresh" class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Re-read my site</button>
+    </div>
+    <p id="sd-status" class="text-sm text-gray-600 break-words" role="status" aria-live="polite">Loading…</p>
+    <ul id="sd-list" class="mt-4 divide-y divide-gray-100"></ul>
+  </section>
+  <script>
+  (function () {
+    const panel = document.querySelector('.bizinfo-tab-panel[data-panel="sitepages"]');
+    const statusEl = document.getElementById('sd-status');
+    const listEl = document.getElementById('sd-list');
+    const refreshBtn = document.getElementById('sd-refresh');
+    const esc = (v) => window.escapeHtml ? window.escapeHtml(String(v ?? '')) : String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const when = (iso) => iso ? new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+    let view = null;
+    let poll = null;
+
+    async function call(method, body) {
+      const res = await fetch('/.netlify/functions/site-directory', method === 'GET' ? {} : {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'That didn’t work — please try again.');
+      return data;
+    }
+
+    function render() {
+      const v = view;
+      if (!v) return;
+      const src = v.source === 'hosted' ? 'your Be More Swan site' : 'your website';
+      let line;
+      if (v.status === 'none') line = 'Your website hasn’t been read yet. Add your website address on Business Profile (or publish your Be More Swan site), then press Re-read my site.';
+      else if (v.status === 'reading') line = `Reading ${esc(v.sourceUrl || src)} now — this takes a minute or two.`;
+      else line = `Read from <a class="text-emerald-700 underline" href="${esc(v.sourceUrl)}" target="_blank" rel="noopener">${esc(v.sourceUrl)}</a> (${src}) on ${esc(when(v.refreshedAt))}.`;
+      if (v.message) line += ` <span class="${v.status === 'failed' ? 'text-amber-800' : 'text-gray-500'}">${esc(v.message)}</span>`;
+      if (v.canRefreshAt && v.status !== 'reading') line += ` <span class="text-gray-500">You can re-read it again after ${esc(new Date(v.canRefreshAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }))}.</span>`;
+      statusEl.innerHTML = line;
+      refreshBtn.disabled = v.status === 'reading' || !!v.canRefreshAt;
+      listEl.innerHTML = (v.pages || []).map((p) => `
+        <li class="py-3 flex flex-wrap sm:flex-nowrap items-start gap-3 ${p.excluded ? 'opacity-60' : ''}">
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-bold text-gray-900 break-words">${esc(p.title)} <a class="font-normal text-xs text-emerald-700 underline break-all" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.path)}</a></p>
+            ${p.summary ? `<p class="text-sm text-gray-600 mt-0.5 break-words">${esc(p.summary)}</p>` : ''}
+            ${p.offers && p.offers.length ? `<p class="text-xs text-gray-500 mt-1 break-words">Offers: ${p.offers.map(esc).join(' · ')}</p>` : ''}
+            ${p.excluded ? '<p class="text-xs font-semibold text-gray-500 mt-1">Left out — no assistant uses this page.</p>' : ''}
+          </div>
+          <button type="button" data-sd-toggle="${esc(p.path)}" data-sd-excluded="${p.excluded ? '1' : ''}" class="btn-secondary min-h-[44px] sm:min-h-0 px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 shrink-0">${p.excluded ? 'Put back' : 'Leave out'}</button>
+        </li>`).join('');
+      clearTimeout(poll);
+      if (v.status === 'reading') poll = setTimeout(load, 8000);
+    }
+
+    async function load() {
+      try { view = await call('GET'); render(); }
+      catch (err) { statusEl.textContent = err.message; }
+    }
+
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.disabled = true;
+      statusEl.textContent = 'Starting…';
+      try { view = await call('POST', { action: 'refresh' }); render(); }
+      catch (err) { statusEl.textContent = err.message; refreshBtn.disabled = false; }
+    });
+    listEl.addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-sd-toggle]');
+      if (!btn) return;
+      btn.disabled = true;
+      try { view = await call('POST', { action: btn.dataset.sdExcluded ? 'include' : 'exclude', path: btn.dataset.sdToggle }); render(); }
+      catch (err) { btn.disabled = false; window.showToast?.(err.message, { icon: '⚠️' }); }
+    });
+
+    // Read on first open only, like the other tabs.
+    let loaded = false;
+    const maybeLoad = () => { if (!loaded && !panel.classList.contains('hidden')) { loaded = true; load(); } };
+    new MutationObserver(maybeLoad).observe(panel, { attributes: true, attributeFilter: ['class'] });
+    maybeLoad();
+  })();
+  </script>
+  </div><!-- /panel: sitepages -->
 
   <!-- ── Tab switching (mirrors Account Settings) ─────────────────────────── -->
   <script>

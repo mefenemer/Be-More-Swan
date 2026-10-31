@@ -51,6 +51,7 @@ export const CRAWLERS = {
     leadDiscovery: { token: OUR_TOKEN, userAgent: USER_AGENTS.leadDiscovery },
     mysteryShopper: { token: 'bemoreswan-mysteryshopper', userAgent: USER_AGENTS.mysteryShopper },
     siteImport: { token: 'bemoreswan-siteimport', userAgent: USER_AGENTS.siteImport },
+    siteDirectory: { token: 'bemoreswan-sitedirectory', userAgent: USER_AGENTS.siteDirectory },
 } as const satisfies Record<string, Crawler>;
 
 interface Rule { path: string; allow: boolean }

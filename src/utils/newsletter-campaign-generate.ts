@@ -13,6 +13,7 @@
 
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { loadProductsBlock } from './org-products';
+import { loadSiteDirectoryBlock } from './site-directory-store';
 import Anthropic from '@anthropic-ai/sdk';
 import { eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
@@ -63,6 +64,8 @@ export async function draftCampaignEmails(db: Db, input: CampaignPlanInput): Pro
     const kind = cadenceFor(input.campaignType);
     // What the business sells (Business Information ▸ Products & Services). Never throws.
     const productsBlock = await loadProductsBlock(db, input.organisationId, org?.name ?? null);
+    // The pages of their website (site-directory-store.ts): links the email may use. Never throws.
+    const siteDirectoryBlock = await loadSiteDirectoryBlock(db, input.organisationId);
 
     const plan = steps.map((s, i) => `  Email ${i + 1} — Day ${s.day}: ${s.role}`).join('\n');
     const system = [
@@ -77,9 +80,10 @@ ${input.triggerEvent === 'subscribed' ? 'They enter the moment they subscribe.' 
 The whole plan (you write ONE of these; the others are written separately, in the same voice):
 ${plan}`,
         input.facts
-            ? `Facts and links the business gave you — the ONLY facts and URLs you may use${productsBlock ? ', together with the products below' : ''}:\n${input.facts}`
-            : productsBlock ? 'The business gave no other links: the only URLs you may write are the product links below.' : 'The business gave no links. Write no URLs at all.',
+            ? `Facts and links the business gave you — the ONLY facts and URLs you may use${productsBlock || siteDirectoryBlock ? ', together with the products and website pages below' : ''}:\n${input.facts}`
+            : productsBlock || siteDirectoryBlock ? 'The business gave no other links: the only URLs you may write are the product links and website pages below.' : 'The business gave no links. Write no URLs at all.',
         productsBlock ?? '',
+        siteDirectoryBlock ?? '',
         SPECIAL_CATEGORY_RULE,
         input.avoid ? `Avoid: ${input.avoid}` : '',
         kind.note ? `For this kind of campaign: ${kind.note}` : '',
@@ -134,7 +138,7 @@ ${plan}`,
             newsletters: written,
         },
     // The product links are supplied links too — the prompt offered them, so grounding must keep them.
-    }, [input.facts, input.goal, input.audience, productsBlock ?? ''].join('\n'));
+    }, [input.facts, input.goal, input.audience, productsBlock ?? '', siteDirectoryBlock ?? ''].join('\n'));
     if (!draft) throw new Error('The emails came back in a form we could not read. Try again.');
     return draft;
 }

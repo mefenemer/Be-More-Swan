@@ -84,7 +84,7 @@ await check('the Studio builder goes through the chat card\'s normaliser, ground
     assert.match(GEN, /campaignDraftFromUiElement\(\{/);
     // Plus the product links from Business Information ▸ Products & Services (2026-10-09): the
     // prompt offers them, so grounding must keep them — still nothing the business did not supply.
-    assert.match(GEN, /\[input\.facts, input\.goal, input\.audience, productsBlock \?\? ''\]\.join/);
+    assert.match(GEN, /\[input\.facts, input\.goal, input\.audience, productsBlock \?\? '', siteDirectoryBlock \?\? ''\]\.join/);
     assert.match(GEN, /Open with exactly "Hi \$\{GREETING_EXAMPLE\}," on its own line/, 'one greeting across the series — and a real one');
 });
 

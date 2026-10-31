@@ -14,6 +14,7 @@ import { aiAssistants, organisations } from '../../db/schema';
 import { signatureFromContext } from './outreach-signature';
 import type { SenderIdentity } from '../config/sender-identity';
 import { loadProductsBlock } from './org-products';
+import { loadSiteDirectoryBlock } from './site-directory-store';
 import { resolveOutreachOffer } from './outreach-offer';
 import type { ResolvedOutreachOffer } from '../config/outreach-offer';
 
@@ -57,6 +58,8 @@ export async function loadSenderIdentity(db: Db, organisationId: number, assista
             websiteUrl: org?.websiteUrl ?? null,
             // Never throws — no products (or no table yet) is simply no block.
             productsBlock: await loadProductsBlock(db, organisationId, org?.name ?? null),
+            // The pages of their website (site-directory-store.ts). Never throws.
+            siteDirectoryBlock: await loadSiteDirectoryBlock(db, organisationId),
             signature,
             outreachOffer,
         };

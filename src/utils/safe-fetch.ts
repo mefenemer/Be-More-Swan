@@ -344,6 +344,8 @@ export const USER_AGENTS = {
     mysteryShopper: 'BeMoreSwan-MysteryShopper/1.0 (+https://bemoreswan.com)',
     /** Website Assistant "Import my current site": reading the owner's own site to rebuild it. Honours robots.txt. */
     siteImport: 'BeMoreSwan-SiteImport/1.0 (+https://bemoreswan.com)',
+    /** The site page directory: a weekly map of the owner's own site for every assistant (site-directory.ts). Honours robots.txt. */
+    siteDirectory: 'BeMoreSwan-SiteDirectory/1.0 (+https://bemoreswan.com)',
 } as const;
 
 /**

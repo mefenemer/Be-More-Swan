@@ -37,6 +37,8 @@ import {
 } from './layout-ir';
 import { sourceBlogImages, MAX_SOURCED_IMAGES } from './blog-media-source';
 import { loadProductsBlock } from './org-products';
+import { BLOG_INTERNAL_LINKS_HINT } from './site-directory';
+import { loadSiteDirectoryBlock } from './site-directory-store';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -356,6 +358,9 @@ export async function generateBlogBody(
         notes ? `Author notes / source material:\n${notes}` : '',
         // What the business sells (Business Information ▸ Products & Services). Never throws.
         await loadProductsBlock(db, organisationId, org?.name ?? null),
+        // The pages of their website (site-directory-store.ts) — in the BRIEF, so the internal links
+        // it asks for survive groundLinks. Never throws; null when the site hasn't been read.
+        await (async () => { const b = await loadSiteDirectoryBlock(db, organisationId); return b ? `${b}\n${BLOG_INTERNAL_LINKS_HINT}` : ''; })(),
         // Its call-to-action setting (src/config/call-to-action.ts) — in the BRIEF, so its link
         // survives groundLinks below. '' when it keeps its own. Never throws.
         ctaBriefLine(await loadCtaForAssistant(db, organisationId, post.assistantId), 'blog'),

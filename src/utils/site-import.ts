@@ -51,8 +51,8 @@ export function cleanImportUrl(raw: unknown): string | null {
 // ── Which pages ─────────────────────────────────────────────────────────────────────────────────
 
 /** Pages that are never the business's content: shop machinery, accounts, legal small print, posts. */
-const SKIP_PATH = /\/(cart|basket|checkout|account|my-account|login|log-in|signin|sign-in|register|members?|search|privacy|privacy-policy|cookies?|cookie-policy|terms|terms-and-conditions|legal|accessibility|sitemap|feed|tag|category|author|wp-admin|wp-login)(\/|$)|\/(blog|news|post|posts|product|products|shop|store|events?)\/.+/i;
-const FILE_PATH = /\.(pdf|jpe?g|png|gif|webp|svg|zip|docx?|xlsx?|mp4|mp3)$/i;
+export const SKIP_PATH = /\/(cart|basket|checkout|account|my-account|login|log-in|signin|sign-in|register|members?|search|privacy|privacy-policy|cookies?|cookie-policy|terms|terms-and-conditions|legal|accessibility|sitemap|feed|tag|category|author|wp-admin|wp-login)(\/|$)|\/(blog|news|post|posts|product|products|shop|store|events?)\/.+/i;
+export const FILE_PATH = /\.(pdf|jpe?g|png|gif|webp|svg|zip|docx?|xlsx?|mp4|mp3)$/i;
 
 const CONTACT_PAGE = /contact|get-in-touch|get in touch|enquir|find-us|find us/;
 

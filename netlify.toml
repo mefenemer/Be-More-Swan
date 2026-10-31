@@ -913,6 +913,11 @@ node_bundler = "esbuild"
 [functions.draft-site-background]
   external_node_modules = ["@sparticuz/chromium", "puppeteer-core"]
 
+# The site page directory's worker (docs/site-directory-plan.md) renders up to 5 JavaScript-drawn
+# pages per refresh in headless Chrome, like the import above.
+[functions.site-directory-background]
+  external_node_modules = ["@sparticuz/chromium", "puppeteer-core"]
+
 [functions.task-volume-check]
   schedule = "0 8 * * *"
 
@@ -957,6 +962,12 @@ node_bundler = "esbuild"
 # run-site-audit-dispatch (staging-crons.yml).
 [functions.dispatch-site-audits]
   schedule = "30 6 * * *"
+
+# The site page directory's weekly refresh (src/utils/site-directory-store.ts dispatchDueDirectories):
+# daily tick, each workspace due a week after its last read. Staging: run-site-directory-dispatch
+# (staging-crons.yml).
+[functions.dispatch-site-directories]
+  schedule = "50 5 * * *"
 
 # The Business Mentor's weekly review (src/utils/mentor-review.ts dispatchDueReviews): queues every
 # workspace whose review day is today in UK time (Monday by default), or was earlier this week and missed.

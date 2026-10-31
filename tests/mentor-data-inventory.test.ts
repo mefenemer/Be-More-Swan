@@ -46,6 +46,8 @@ const ALWAYS_READERS = [
     'src/utils/mentor-review.ts',
     'src/utils/mentor-commitments.ts',
     'src/utils/mentor-outcomes.ts',
+    // The site page directory: every chat reads it, and the snapshot its gaps (docs/site-directory-plan.md).
+    'src/utils/site-directory-store.ts',
 ].filter((f) => { try { read(f); return true; } catch { return false; } }).map((f) => [f, read(f)] as const);
 
 const base: MentorSnapshotData = {
