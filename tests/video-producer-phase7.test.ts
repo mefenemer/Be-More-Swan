@@ -279,4 +279,12 @@ check('approving or rejecting the finished video settles its campaign order at o
     assert.match(fn, /await import\('\.\/campaign-reconciler'\)/, 'lazy: the reconciler imports this module');
 });
 
+check('the page\'s "Needs you" strip counts waiting storyboards, not only the review queue', () => {
+    const a = read('assistants.js');
+    assert.match(a, /window\._detailNeedsYouSource = cfg\.videosTab \? 'videos' :/);
+    assert.match(a, /source === 'videos' \? boards \+ reviewN : reviewN/);
+    const v = read('src/components/assistant-videos.js');
+    assert.ok(v.indexOf('window._setNeedsYouCount?.(n);') < v.indexOf("if (!el) return;"), 'fed even when the badge is missing');
+});
+
 console.log(`\n${passed} checks passed`);

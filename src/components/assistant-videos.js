@@ -87,9 +87,11 @@
   }
 
   function updateBadge() {
+    const n = state.videos.filter((v) => v.status === 'planned').length;
+    // The page's "Needs you" strip counts the same storyboards (assistants.js _renderNeedsYou 'videos').
+    window._setNeedsYouCount?.(n);
     const el = document.getElementById('videos-review-badge');
     if (!el) return;
-    const n = state.videos.filter((v) => v.status === 'planned').length;
     el.textContent = n > 99 ? '99+' : String(n);
     el.classList.toggle('hidden', n === 0);
     el.style.display = n === 0 ? 'none' : '';

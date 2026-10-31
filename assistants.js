@@ -5141,9 +5141,15 @@ window._renderNeedsYou = function() {
     const onLanding = document.querySelector('.main-tab-btn.active-tab')?.dataset.maintab === landing;
     if (!source || !onLanding) { strip.classList.add('hidden'); return; }
 
-    const n = source === 'briefs' ? (window._detailNeedsYouOverride || 0) : (window._detailOpSignals?.pendingReview || 0);
-    const where = source === 'briefs' ? 'Briefs' : ((window._detailReviewQueue || {}).label || 'Review');
-    const targetTab = source === 'briefs' ? 'briefs' : 'review-queue';
+    const reviewN = window._detailOpSignals?.pendingReview || 0;
+    const reviewLabel = (window._detailReviewQueue || {}).label || 'Review';
+    // 'videos': storyboards waiting for "Make the video" (assistant-videos.js) + finished videos to approve.
+    const boards = source === 'videos' ? (window._detailNeedsYouOverride || 0) : 0;
+    const n = source === 'briefs' ? (window._detailNeedsYouOverride || 0) : source === 'videos' ? boards + reviewN : reviewN;
+    const where = source === 'briefs' ? 'Briefs'
+        : source === 'videos' ? (boards && reviewN ? `Videos and ${reviewLabel}` : boards ? 'Videos' : reviewLabel)
+        : reviewLabel;
+    const targetTab = source === 'briefs' ? 'briefs' : (source === 'videos' && boards) ? 'videos' : 'review-queue';
     const text = document.getElementById('needs-you-text');
     const go = document.getElementById('needs-you-go');
     const next = document.getElementById('next-up-text');
@@ -6641,8 +6647,10 @@ function _applyDashboardRegistry(data) {
     // Role-chosen landing tab (SMM opens on its "Posts" pipeline); null → HTML default (Data Hub).
     window._detailDefaultMainTab = cfg.defaultMainTab || null;
     // The "Needs you" strip's source for this role: the review queue's count, the Brand Designer's
-    // Briefs badge, or nothing for a role with neither. Its figures are reset per assistant.
-    window._detailNeedsYouSource = !cfg.hideReviewQueue ? 'review' : (cfg.briefsTab ? 'briefs' : null);
+    // Briefs badge, the Video Producer's storyboards PLUS its review queue (it lands on Videos, so a
+    // review-only count said "Nothing needs you" over two waiting storyboards — staging, 2026-10-31),
+    // or nothing for a role with none. Its figures are reset per assistant.
+    window._detailNeedsYouSource = cfg.videosTab ? 'videos' : !cfg.hideReviewQueue ? 'review' : (cfg.briefsTab ? 'briefs' : null);
     window._detailNeedsYouOverride = 0;
     window._detailNextUp = null;
     // Results sits right after the landing tab: "your work, then how it is going". It was near the
