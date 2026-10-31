@@ -99,7 +99,7 @@ check('the Videos tab is mounted, activated and binds to document', () => {
     assert.ok(read('workspace.html').includes('<script src="/src/components/assistant-videos.js"></script>'));
     const a = read('assistants.js');
     assert.ok(a.includes("if (name === 'videos') window.AssistantVideos?.activate();"));
-    assert.ok(a.includes('window.AssistantVideos?.init({ assistantId: data.id, assistantName: data.name });'));
+    assert.ok(a.includes('window.AssistantVideos?.init({ assistantId: data.id, assistantName: data.name, setup: data.context });'));
     const tab = read('src/components/assistant-videos.js');
     assert.ok(tab.includes("document.addEventListener('click'") && tab.includes("document.addEventListener('submit'"));
     assert.ok(tab.includes("document.addEventListener('video:changed'"), 'chat writes must reload the tab');

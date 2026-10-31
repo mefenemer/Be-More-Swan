@@ -13,6 +13,10 @@
 //      campaign_order_id column (newsletter_issues, visual_briefs).
 //   2. An Orchestrations HAND-OFF (orchestration_runs) — social drafts only, looked up by job id in
 //      get-social-drafts.ts, which already did this for its "Hand-off from" pill.
+//   4. A Video Producer video (db/z-video-producer-phase7.sql): a campaign's commission_video names the
+//      Campaign Assistant (through the order, as 1); "Make a video version" names the assistant whose post
+//      it was made from. Traced through video_projects (scheduled_post_id / crosspost_group_id) — a video
+//      post has no drafting job. Autopilot and the owner's own videos have no requester.
 //   3. A Business Mentor POST REQUEST (mentor_outcomes.job_id, db/z-business-mentor-phase-3.sql): the
 //      user accepted the Mentor's suggestion to ask a Social Media assistant for a post, and the job that
 //      drafted it is linked to that suggestion (generate-post.ts → mentor-outcomes.ts linkOutcomeJob). The
@@ -22,9 +26,9 @@
 // The name is the assistant's CURRENT name (renames show through). A deleted Campaign Assistant
 // leaves no pill rather than a wrong one. Never throws — a failed lookup is a missing pill.
 
-import { and, eq, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, or } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, campaignOrders, campaigns, contentGenerationJobs, mentorOutcomes, mentorProposals, orchestrationRuns } from '../../db/schema';
+import { aiAssistants, campaignOrders, campaigns, contentGenerationJobs, mentorOutcomes, mentorProposals, orchestrationRuns, scheduledPosts, videoProjects } from '../../db/schema';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -123,6 +127,51 @@ export async function requesterNamesForBlogPosts(db: Db, organisationId: number,
         }
     } catch (err) {
         console.warn('[requested-by] blog lookup skipped:', err instanceof Error ? err.message : err);
+    }
+    return out;
+}
+
+/**
+ * scheduled_posts.id → requester name, for the Video Producer's finished videos: the Campaign Assistant
+ * for a campaign's video, the source post's assistant for "Make a video version". Each platform row of
+ * a cross-posted video is found through its group.
+ */
+export async function requesterNamesForVideoPosts(db: Db, organisationId: number, posts: Array<{ id: number; crosspostGroupId?: string | null }>): Promise<Map<number, string>> {
+    const out = new Map<number, string>();
+    const ids = [...new Set(posts.map((p) => p.id).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return out;
+    const groups = [...new Set(posts.map((p) => p.crosspostGroupId).filter((g): g is string => typeof g === 'string' && g.length > 0))];
+    try {
+        const projects = await db
+            .select({ postId: videoProjects.scheduledPostId, group: videoProjects.crosspostGroupId, origin: videoProjects.origin, orderId: videoProjects.campaignOrderId, sourcePostId: videoProjects.sourcePostId })
+            .from(videoProjects)
+            .where(and(
+                eq(videoProjects.organisationId, organisationId),
+                inArray(videoProjects.origin, ['campaign', 'handoff']),
+                groups.length ? or(inArray(videoProjects.scheduledPostId, ids), inArray(videoProjects.crosspostGroupId, groups)) : inArray(videoProjects.scheduledPostId, ids),
+            ));
+        if (!projects.length) return out;
+        const orderNames = await requesterNamesForOrders(db, organisationId, projects.map((p) => p.orderId));
+        const sourceIds = projects.map((p) => p.sourcePostId).filter((n): n is number => n != null);
+        const sourceNames = new Map<number, string>();
+        if (sourceIds.length) {
+            const rows = await db.select({ id: scheduledPosts.id, name: aiAssistants.name })
+                .from(scheduledPosts)
+                .innerJoin(aiAssistants, eq(aiAssistants.id, scheduledPosts.assistantId))
+                .where(and(eq(scheduledPosts.organisationId, organisationId), inArray(scheduledPosts.id, sourceIds)));
+            for (const r of rows) if (r.name) sourceNames.set(r.id, r.name);
+        }
+        for (const post of posts) {
+            const pr = projects.find((p) => p.postId === post.id || (post.crosspostGroupId && p.group === post.crosspostGroupId));
+            if (!pr) continue;
+            const name = pr.origin === 'campaign'
+                ? (pr.orderId != null ? orderNames.get(pr.orderId) : undefined)
+                : (pr.sourcePostId != null ? sourceNames.get(pr.sourcePostId) : undefined);
+            if (name) out.set(post.id, name);
+        }
+    } catch (err) {
+        // Before db/z-video-producer-phase7.sql the columns are missing: no pill, never a broken list.
+        console.warn('[requested-by] video lookup skipped:', err instanceof Error ? err.message : err);
     }
     return out;
 }

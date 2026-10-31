@@ -25,6 +25,7 @@ import { platformFormat, normalizePlatform, PLATFORM_FORMATS } from '../../src/c
 import { resolveLiveSocialConnections } from '../../src/utils/live-social-connections';
 import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
 import { readCachedReview, openWarnings } from '../../src/utils/post-quality-review';
+import { settleVideoOrderForPost } from '../../src/utils/campaign-video-order';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
 
@@ -214,6 +215,8 @@ export default withLambda(async (event) => {
             resourceId: String(postId),
             newState: { rejectionReason: rejectionReason.trim(), rejectedAt: now.toISOString() },
         }).catch(() => {});
+        // A campaign's video (Video Producer): turning it down settles its order now.
+        await settleVideoOrderForPost(db, rejected.organisationId, postId);
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -637,6 +640,9 @@ export default withLambda(async (event) => {
     const confirmation = action === 'publish_now'
         ? `Post approved and queued to publish now on ${post.platform}.`
         : `Post approved — ${scheduler} scheduled it for ${dateLabel} on ${post.platform}.`;
+
+    // A campaign's video (Video Producer): approving it delivers its order now, releasing what waits on it.
+    await settleVideoOrderForPost(db, post.organisationId, postId);
 
     return {
         statusCode: 200,

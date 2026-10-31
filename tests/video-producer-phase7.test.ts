@@ -119,6 +119,9 @@ check('every way a video starts goes through startProject (setup defaults apply 
     for (const f of ['src/utils/video-autopilot.ts', 'src/utils/video-handoff.ts', 'src/utils/campaign-video-order.ts']) {
         assert.match(read(f), /startProject\(db, \{/, f);
     }
+    // approve-post / reject-post import the order module: the video pipeline must stay out of them.
+    const orderImports = read('src/utils/campaign-video-order.ts').split('\n').filter((l) => l.startsWith('import ')).join('\n');
+    assert.ok(!orderImports.includes('video-producer'), 'campaign-video-order must load video-producer lazily');
     const parsed = readBrief(withSetupDefaults({ message: 'A spotlight on our oat latte' }, { defaultLength: '15', defaultCta: 'Pop in today' }));
     assert.ok(!('error' in parsed));
     if (!('error' in parsed)) { assert.strictEqual(parsed.brief.lengthS, 15); assert.strictEqual(parsed.brief.cta, 'Pop in today'); }
@@ -248,6 +251,32 @@ check('the Campaign Assistant is told it is free to plan and a click to make, an
     assert.match(chat, /\| "commission_visuals" \| "commission_video",/);
     assert.match(chat, /\| "brand_designer" \| "video_producer" \| "human",/);
     assert.match(chat, /AUTOPILOT\. \$\{perWeek > 0/);
+});
+
+console.log('\n──── the gaps after Phase 7 ────');
+
+check('the New video form starts from the setup answers', () => {
+    const v = read('src/components/assistant-videos.js');
+    assert.match(v, /function setupDefaults\(\)/);
+    for (const k of ['defaultLength', 'defaultVoice', 'defaultAllowAi', 'defaultCta']) assert.ok(v.includes(`s.${k}`), k);
+    assert.match(read('assistants.js'), /AssistantVideos\?\.init\(\{ assistantId: data\.id, assistantName: data\.name, setup: data\.context \}\)/);
+});
+
+check('campaign and hand-off videos say who asked for them, in both post lists', () => {
+    const rb = read('src/utils/requested-by.ts');
+    assert.match(rb, /export async function requesterNamesForVideoPosts/);
+    assert.match(rb, /inArray\(videoProjects\.origin, \['campaign', 'handoff'\]\)/, 'autopilot and the owner\'s own videos have no requester');
+    assert.match(read('netlify/functions/get-social-drafts.ts'), /videoRequesters\.get\(d\.id\)/);
+    assert.match(read('netlify/functions/scheduled-posts.ts'), /videoRequesters\.get\(p\.id\)/);
+});
+
+check('approving or rejecting the finished video settles its campaign order at once', () => {
+    const ap = read('netlify/functions/approve-post.ts');
+    assert.equal((ap.match(/await settleVideoOrderForPost\(db, /g) || []).length, 2, 'approve and the reject branch');
+    assert.match(read('netlify/functions/reject-post.ts'), /await settleVideoOrderForPost\(db, post\.organisationId, postId\)/);
+    const fn = read('src/utils/campaign-video-order.ts');
+    assert.match(fn, /if \(verdict\.kind !== 'delivered' && verdict\.kind !== 'rejected' && verdict\.kind !== 'failed'\) return;/);
+    assert.match(fn, /await import\('\.\/campaign-reconciler'\)/, 'lazy: the reconciler imports this module');
 });
 
 console.log(`\n${passed} checks passed`);

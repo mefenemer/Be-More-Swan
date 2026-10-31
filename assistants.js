@@ -7034,7 +7034,7 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-videos', !!videosTab);
     if (videosTab) {
         setText('videos-tab-label', videosTab.label || 'Videos');
-        window.AssistantVideos?.init({ assistantId: data.id, assistantName: data.name });
+        window.AssistantVideos?.init({ assistantId: data.id, assistantName: data.name, setup: data.context });
     }
 
     // Website tab — Mystery Shopper only (siteAuditTab: mystery_shopper). init() loads eagerly: the

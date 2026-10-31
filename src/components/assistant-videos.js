@@ -43,7 +43,7 @@
   };
 
   const state = {
-    assistantId: null, assistantName: null, videos: [], loaded: false, loadError: null,
+    assistantId: null, assistantName: null, setup: {}, videos: [], loaded: false, loadError: null,
     rendered: false, form: false, editing: null, replanning: null, notes: {}, busy: new Set(), pollTimer: null,
   };
 
@@ -96,8 +96,22 @@
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
+  // The form starts from the setup answers (assistant-onboarding-schemas.js video_producer) — the same
+  // defaults the server fills for a brief that leaves them out (video-producer.ts withSetupDefaults).
+  function setupDefaults() {
+    const s = state.setup || {};
+    return {
+      lengthS: ['15', '30', '60'].includes(String(s.defaultLength)) ? String(s.defaultLength) : '30',
+      voice: VOICES.some(([id]) => id === s.defaultVoice) ? s.defaultVoice : VOICES[0][0],
+      allowAi: ['stock_and_ai', 'stock_only', 'ai_first'].includes(s.defaultAllowAi) ? s.defaultAllowAi : 'stock_and_ai',
+      cta: typeof s.defaultCta === 'string' ? s.defaultCta : '',
+    };
+  }
+  const sel = (on) => (on ? ' selected' : '');
+
   function formHtml() {
     if (!state.form) return '';
+    const d = setupDefaults();
     return `
       <form data-vid-form class="bg-white border border-gray-200 rounded-xl p-4 mb-4 space-y-3">
         <p class="text-sm font-bold text-gray-900">New video</p>
@@ -105,13 +119,13 @@
           <textarea name="message" rows="3" maxlength="1200" required class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Our autumn menu is here — pumpkin spice latte and cinnamon buns, this week only."></textarea></label>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Length</span>
-            <select name="lengthS" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="15">15 seconds</option><option value="30" selected>30 seconds</option><option value="60">60 seconds</option></select></label>
+            <select name="lengthS" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${['15', '30', '60'].map((n) => `<option value="${n}"${sel(d.lengthS === n)}>${n} seconds</option>`).join('')}</select></label>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Call to action (optional)</span>
-            <input name="cta" maxlength="200" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Pop in this week"></label>
+            <input name="cta" maxlength="200" value="${esc(d.cta)}" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Pop in this week"></label>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Voice</span>
-            <select name="voice" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${VOICES.map(([id, l]) => `<option value="${id}">${esc(l)}</option>`).join('')}<option value="">No voiceover — on-screen text only</option></select></label>
+            <select name="voice" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${VOICES.map(([id, l]) => `<option value="${id}"${sel(d.voice === id)}>${esc(l)}</option>`).join('')}<option value="">No voiceover — on-screen text only</option></select></label>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Pictures from</span>
-            <select name="allowAi" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="stock_and_ai">Stock first, AI where it fits</option><option value="stock_only">Stock and my own pictures only</option><option value="ai_first">Lean on AI</option></select></label>
+            <select name="allowAi" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="stock_and_ai"${sel(d.allowAi === 'stock_and_ai')}>Stock first, AI where it fits</option><option value="stock_only"${sel(d.allowAi === 'stock_only')}>Stock and my own pictures only</option><option value="ai_first"${sel(d.allowAi === 'ai_first')}>Lean on AI</option></select></label>
         </div>
         <fieldset><legend class="text-xs font-bold text-gray-600 mb-1">Post it as</legend>
           <div class="flex flex-wrap gap-3 text-sm text-gray-700">
@@ -301,9 +315,10 @@
   document.addEventListener('video:changed', () => { if (state.assistantId) load(); });
 
   window.AssistantVideos = {
-    init({ assistantId, assistantName }) {
+    init({ assistantId, assistantName, setup }) {
       state.assistantId = assistantId;
       state.assistantName = assistantName || null;
+      state.setup = setup && typeof setup === 'object' ? setup : {};
       state.rendered = false; state.form = false; state.editing = null; state.replanning = null; state.notes = {};
       load();   // eager: the planned count is the tab badge
     },

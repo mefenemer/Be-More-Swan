@@ -369,8 +369,7 @@ per-scene retry, credit hold/refund.
 - Starter prompts, welcome line, bottleneck chips. Tests: `tests/video-producer-role.test.ts`.
 - **Deferred to go-live** (the role is hidden, so nothing public may name it yet): help article (dated
   SQL), showcase page JSON, pricing row, marketing copy (`assistant-role-content` / `db/z-copy-*`),
-  Business Mentor + Ask Your Team routing, assistant photo. The Videos tab's form doesn't pre-select the
-  setup voice/length yet (the server fills them only when a brief omits them, e.g. from chat).
+  Business Mentor + Ask Your Team routing, assistant photo.
 
 **Phase 6 — as planned**
 Full assistant onboarding checklist pass: catalogue entry (`comingSoon: true`),
@@ -396,11 +395,12 @@ SQL file), showcase page JSON, pricing row, Business Mentor + Ask Your Team rout
   if that takes video. Chat twin: `post_action_proposal` action `video_version` in the Social Media chat.
 - **`commission_video`** (`src/utils/campaign-video-order.ts`): ONE video per order, 2 tasks, artefact
   `video_project`. Starts a free storyboard; making it is the Videos-tab click; delivered when the finished post
-  is approved (reconciler, hourly — there is no settle-now hook on post approval yet). Wired through the vocab,
+  is approved — settled at once by approve-post / reject-post (`settleVideoOrderForPost`), the hourly
+  reconciler as the backstop. Wired through the vocab,
   ORCHESTRATABLE_ROLE_KEYS, plan brief fields (`videoMessage`, `cta`, `videoLength`), the Campaign Assistant
   prompt, the plan card, the Campaigns tab's Add work form, the mirror, the team feed and the work-state links.
-- Not done: "Requested by" pills on campaign/hand-off videos (requested-by.ts reads jobs and orders, not
-  video_projects); a settle-now call when the finished video is approved. Tests:
+- "Requested by" on campaign and hand-off videos (`requesterNamesForVideoPosts`, both post lists); the
+  Videos tab form now starts from the setup voice, length, sources and call to action. Tests:
   `tests/video-producer-phase7.test.ts`.
 
 **Phase 8 — later, separately decided**

@@ -7,7 +7,7 @@ import { getDb } from '../../db/client';
 import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets, postRenderJobs, orchestrationRuns } from '../../db/schema';
 import { resolvePostMedia, isVideoMedia, presignR2Get, resolvePostMediaList } from '../../src/utils/social-publish';
 import { requireTenant } from '../../src/utils/tenant';
-import { requesterNamesForJobIds } from '../../src/utils/requested-by';
+import { requesterNamesForJobIds, requesterNamesForVideoPosts } from '../../src/utils/requested-by';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { displayCaption } from '../../src/utils/model-json';
 import { diagnosePostFailure } from '../../src/utils/post-failure-diagnosis';
@@ -284,6 +284,9 @@ export default withLambda(async (event) => {
         // traced through the job, or — for an orchestration draft — the assistant that handed off.
         // Feeds the second pill on the card ("Requested by Lyra" beside "Created by Marvin").
         const orderRequesters = await requesterNamesForJobIds(db, organisationId, drafts.map(d => d.jobId));
+        // A Video Producer video has no job: its campaign order or source post is on the video project.
+        const videoRequesters = await requesterNamesForVideoPosts(db, organisationId,
+            drafts.filter(d => !d.jobId && d.postFormat === 'video').map(d => ({ id: d.id, crosspostGroupId: d.crosspostGroupId })));
 
         // Which of these drafts carry an editable branded text card. One query for the whole page
         // rather than one per draft — this only drives whether an "Edit card" button appears, and
@@ -514,7 +517,7 @@ export default withLambda(async (event) => {
                 // Name of the assistant whose post triggered this hand-off — orchestration drafts only.
                 handoffFrom: handoffFrom.get(d.id) ?? null,
                 // Who asked for it, when another assistant did — null for the assistant's own work.
-                requestedBy: (d.jobId ? orderRequesters.get(d.jobId) : undefined) ?? handoffFrom.get(d.id) ?? null,
+                requestedBy: (d.jobId ? orderRequesters.get(d.jobId) : undefined) ?? handoffFrom.get(d.id) ?? videoRequesters.get(d.id) ?? null,
                 // The saved text-overlay design, so the Review canvas can paint it live on open without
                 // a per-post get-post-image round trip. Normalised to an array the client renders directly.
                 slides,

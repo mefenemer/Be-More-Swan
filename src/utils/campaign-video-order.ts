@@ -12,16 +12,19 @@
 //                was spent on it — real work they did not want.
 //   failed     → refunded: the storyboard never came back, or it was cancelled before anything was made.
 //
-// Settled by the hourly reconciler (judgeVideoOrder), through the ONE settlement path. A project that
+// Settled the moment the user approves or rejects the finished video (approve-post.ts, reject-post.ts →
+// settleVideoOrderForPost), and by the hourly reconciler (judgeVideoOrder) as the backstop — both
+// through the ONE settlement path. A project that
 // stopped part-way ('failed' with a storyboard) stays in review: "Make the video" again re-uses what
 // was already made, so it is not a dead order.
 //
-// ⚠️ Imports neither campaign-reconciler nor campaign-orders (the reconciler imports THIS module).
+// ⚠️ Imports neither campaign-reconciler nor campaign-orders (the reconciler imports THIS module), and
+// loads video-producer only inside createVideoForOrder: approve-post and reject-post import this file,
+// and must not carry the whole video pipeline (fal, speech, Pexels) to approve an ordinary post.
 
 import { and, eq, or } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, campaigns, scheduledPosts, videoProjects } from '../../db/schema';
-import { startProject } from './video-producer';
 import { VIDEO_ORDER_LENGTHS } from '../config/campaign-vocab';
 
 type Db = ReturnType<typeof getDb>;
@@ -60,6 +63,7 @@ export async function createVideoForOrder(db: Db, ctx: {
     ]);
     if (!campaign) return { ok: false, message: 'The campaign could not be found.' };
     if (!producer) return { ok: false, message: 'The Video Producer could not be found.' };
+    const { startProject } = await import('./video-producer');
     const started = await startProject(db, {
         organisationId: ctx.organisationId, assistantId: ctx.targetAssistantId, createdBy: null,
         brief: videoBriefForOrder(ctx.brief, campaign), onboardingContext: producer.onboardingContext,
@@ -127,4 +131,31 @@ export async function judgeVideoOrder(db: Db, order: { id: number; organisationI
         statuses = rows.map((r) => r.status);
     }
     return judgeVideoProject(project ?? null, statuses);
+}
+
+/**
+ * Settle a campaign's video order NOW, after the user approved or rejected one of its finished posts,
+ * rather than at the next hourly reconcile — so work waiting on the video is released at once. Only a
+ * FINAL verdict settles. Best-effort and never throws: the decision is already saved, and the
+ * reconciler settles anything this misses. The reconciler is imported LAZILY (it imports this module).
+ */
+export async function settleVideoOrderForPost(db: Db, organisationId: number | null | undefined, postId: number): Promise<void> {
+    if (!organisationId) return;
+    try {
+        const [post] = await db.select({ group: scheduledPosts.crosspostGroupId }).from(scheduledPosts)
+            .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, organisationId))).limit(1);
+        if (!post) return;
+        const [project] = await db.select({ id: videoProjects.id, orderId: videoProjects.campaignOrderId }).from(videoProjects)
+            .where(and(
+                eq(videoProjects.organisationId, organisationId),
+                post.group ? or(eq(videoProjects.scheduledPostId, postId), eq(videoProjects.crosspostGroupId, post.group))! : eq(videoProjects.scheduledPostId, postId),
+            )).limit(1);
+        if (!project?.orderId) return;
+        const verdict = await judgeVideoOrder(db, { id: project.orderId, organisationId, artefactId: project.id });
+        if (verdict.kind !== 'delivered' && verdict.kind !== 'rejected' && verdict.kind !== 'failed') return;
+        const { settleOrderNow } = await import('./campaign-reconciler');
+        await settleOrderNow(db, project.orderId, { kind: verdict.kind, summary: verdict.summary });
+    } catch (err) {
+        console.error('[campaign-video-order] settle failed — the hourly reconcile will retry:', postId, err instanceof Error ? err.message : err);
+    }
 }

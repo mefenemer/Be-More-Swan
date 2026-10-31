@@ -161,7 +161,7 @@ check('the chat is told which orders can run here, and how to write a picture or
     assert.match(orch, /- Brand Designer \("commission_visuals"\)/);
     assert.match(orch, /"commission_visuals" MUST carry "show"/);
     assert.match(orch, /\| "ab_test_posts" \| "commission_visuals"( \| "[a-z_]+")*,/);
-    assert.match(orch, /\| "brand_designer" \| "human",/);
+    assert.match(orch, /\| "brand_designer"( \| "[a-z_]+")* \| "human",/);
     assert.match(orch, /BRIEFS FROM CAMPAIGNS\./, 'the Brand Designer\'s own chat knows where those briefs came from');
 });
 
