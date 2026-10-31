@@ -49,6 +49,7 @@ export interface WorkItem {
 /** Where each kind of finished work is reviewed, on the receiving assistant's page. */
 const REVIEW_TAB: Record<string, { tab: string; label: string }> = {
     visual_brief: { tab: 'briefs', label: 'Open the brief' },
+    video_project: { tab: 'videos', label: 'Open the video' },
     newsletter_sequence: { tab: 'email-campaigns', label: 'Review the emails' },
     newsletter_issue: { tab: 'email-campaigns', label: 'Review the emails' },
     scheduled_post: { tab: 'review-queue', label: 'Review the posts' },

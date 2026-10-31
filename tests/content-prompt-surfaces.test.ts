@@ -146,7 +146,7 @@ for (const r of ROLES) {
         // chat-email-action.ts) — but only by proposing a card the user confirms.
         if (r.helper === 'socialSurfaces') {
             assert.ok(/only that click changes anything/.test(surfaces), 'the social chat must say the user\'s click acts, not the chat');
-            assert.ok(/never say a post HAS been approved, rejected, retried, moved, removed, shortened or lengthened/.test(surfaces));
+            assert.ok(/never say a post HAS been approved, rejected, retried, moved, removed, shortened, lengthened or made into a video/.test(surfaces));
         } else if (r.helper === 'blogSurfaces') {
             assert.ok(/only that click changes anything/.test(surfaces), 'the blog chat must say the user\'s click acts, not the chat');
             assert.ok(/never say an article HAS been approved, scheduled, unscheduled, rejected, removed, shortened, lengthened or revised/.test(surfaces));

@@ -92,7 +92,8 @@ check('the migration widens BOTH checks as supersets, in one transaction, and mo
     assert.match(sql, /CHECK \(origin IN \('user', 'chat', 'campaign'\)\)/);
     assert.match(sql, /WHERE role_key = 'brand_designer' AND works_with = '\["standalone"\]'::jsonb/);
     assert.match(sql, /NOT \(works_with \? 'brand_designer'\)/);
-    assert.match(read('db/schema.ts'), /'newsletter_sequence','newsletter_issue','visual_brief'\)`\)/);
+    // Later widenings append (z-video-producer-phase7.sql adds 'video_project'); this list stays inside.
+    assert.match(read('db/schema.ts'), /'newsletter_sequence','newsletter_issue','visual_brief'(,'[a-z_]+')*\)`\)/);
 });
 
 console.log('\n──── placing it never spends an AI credit ────');
@@ -159,7 +160,7 @@ check('the chat is told which orders can run here, and how to write a picture or
     const orch = read('netlify/functions/chat-orchestrator.ts');
     assert.match(orch, /- Brand Designer \("commission_visuals"\)/);
     assert.match(orch, /"commission_visuals" MUST carry "show"/);
-    assert.match(orch, /\| "ab_test_posts" \| "commission_visuals",/);
+    assert.match(orch, /\| "ab_test_posts" \| "commission_visuals"( \| "[a-z_]+")*,/);
     assert.match(orch, /\| "brand_designer" \| "human",/);
     assert.match(orch, /BRIEFS FROM CAMPAIGNS\./, 'the Brand Designer\'s own chat knows where those briefs came from');
 });

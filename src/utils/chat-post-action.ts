@@ -16,7 +16,8 @@
 // The card in disruptive-ui-registry.js shows those facts; only the user's click acts, and the click
 // calls the SAME endpoints the Posts tab does (approve-post, reject-post, retry-failed-post,
 // reschedule-post-chat, scheduled-posts DELETE for remove, rewrite-post-text + scheduled-posts PATCH
-// for shorter / longer — the post editor's own two buttons), so every gate those apply — a disconnected account, an open compliance
+// for shorter / longer — the post editor's own two buttons; video-projects `from_post` for video_version, the Review
+// Queue's "Make a video version"), so every gate those apply — a disconnected account, an open compliance
 // warning, a time in the past — applies here too. Nothing here writes.
 //
 // A cross-post is one post on several platforms, one row each. The Posts tab acts on the whole
@@ -31,7 +32,7 @@ import { scheduledPosts } from '../../db/schema';
 type Db = ReturnType<typeof getDb>;
 
 export const POST_ACTION_PROPOSAL_TYPE = 'post_action_proposal';
-export const POST_ACTIONS = ['approve', 'reject', 'retry', 'reschedule', 'remove', 'shorter', 'longer'] as const;
+export const POST_ACTIONS = ['approve', 'reject', 'retry', 'reschedule', 'remove', 'shorter', 'longer', 'video_version'] as const;
 export type PostAction = typeof POST_ACTIONS[number];
 
 /** Which rows each action applies to — the statuses its endpoint accepts. */
@@ -52,6 +53,9 @@ const ACTIONABLE: Record<PostAction, readonly string[]> = {
     // is left off: it is mid-send, and changing the words now would race the publisher.
     shorter: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
     longer: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
+    // video-projects `from_post` (video-handoff.ts): any post that still stands — a published one
+    // too, since a video version of a post that did well is the point. Not one that was turned down.
+    video_version: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'publishing', 'published', 'paused', 'paused_credits', 'failed'],
 };
 
 /** Said on the card when the post is not in a state the action applies to. */
@@ -63,6 +67,7 @@ const NOT_NOW: Record<PostAction, string> = {
     remove: 'This post can’t be removed: it has already gone out, is publishing right now, or was already removed or rejected.',
     shorter: 'This post’s words can’t be changed now: it has already gone out, is publishing, or was removed or rejected.',
     longer: 'This post’s words can’t be changed now: it has already gone out, is publishing, or was removed or rejected.',
+    video_version: 'This post was removed or rejected, so there is nothing to make a video from.',
 };
 
 const TEXT_MAX = 200;
@@ -148,6 +153,14 @@ export async function resolvePostActionProposal(
         // others are aligned to the time it resolves (as the review modal does).
         rows.sort((a, b) => (a.id === post.id ? -1 : b.id === post.id ? 1 : a.id - b.id));
         const gist = String(post.caption ?? '').replace(/\s+/g, ' ').trim();
+        // A video version needs someone to make it: an active Video Producer (owner, 2026-10-24 — never
+        // hand work to an unhired or paused assistant). Loaded lazily: it pulls in the video pipeline.
+        let videoBlocked: string | null = null;
+        if (req.action === 'video_version' && rows.length) {
+            const { activeVideoProducer } = await import('./video-handoff');
+            if (!await activeVideoProducer(db, organisationId)) videoBlocked = 'There is no active Video Producer on your team to make it — hire one, or resume yours.';
+            else if (gist.length < 10) videoBlocked = 'This post has too few words to make a video from.';
+        }
 
         return {
             type: POST_ACTION_PROPOSAL_TYPE,
@@ -161,7 +174,7 @@ export async function resolvePostActionProposal(
             text: gist.length > TEXT_MAX ? `${gist.slice(0, TEXT_MAX)}…` : gist,
             reason: req.reason,
             when: req.when,
-            blocked: rows.length ? null : NOT_NOW[req.action],
+            blocked: rows.length ? videoBlocked : NOT_NOW[req.action],
         };
     } catch (err) {
         console.error('[chat-post-action] could not resolve the proposal (non-fatal)', err);

@@ -939,6 +939,7 @@
       lead_qualifier: 'Lead Generation Assistant',
       newsletter_editor: 'Email Marketing Assistant',
       brand_designer: 'Brand Designer',
+      video_producer: 'Video Producer',
       human: 'A person on your team',
     };
 
@@ -1001,7 +1002,7 @@
           : Number.isFinite(Number(o.quantity)) && o.quantity !== null && o.quantity !== ''
             ? Math.max(1, Math.min(spec.maxQuantity, Math.floor(Number(o.quantity))))
             : (spec.defaultQuantity || 1);
-        const detail = [o.angle, o.idea, o.task, o.hypothesis, o.show, o.headline].find((v) => typeof v === 'string' && v.trim());
+        const detail = [o.angle, o.idea, o.task, o.hypothesis, o.show, o.headline, o.videoMessage].find((v) => typeof v === 'string' && v.trim());
         // An A/B test (§9.8) shows BOTH angles — the user is approving a comparison, not one post.
         const testNote = o.action === 'ab_test_posts' && typeof o.angleA === 'string' && typeof o.angleB === 'string'
           ? `A: ${o.angleA.trim()} · B: ${o.angleB.trim()} — per angle, every post still comes to you`
@@ -1021,6 +1022,10 @@
         const sources = Array.isArray(o.sources) ? o.sources : null;
         const pictureNote = o.action === 'commission_visuals'
           ? `${sources && !sources.some((x) => x === 'ai_image' || x === 'ai_video') ? 'Stock and branded cards, made straight away' : 'Stock and branded cards straight away; AI images and video only when you ask for options on its Briefs tab'} — you choose; the picture joins this campaign`
+          : '';
+        // A video (Video Producer, Phase 7) says the plan is free and the making is a later click.
+        const videoNote = o.action === 'commission_video'
+          ? 'Storyboard planned straight away, free — you make the video from the Videos tab, where any AI credits are shown'
           : '';
         // A person's task (§9.5) names who, says nothing is sent to them, and shows what waits.
         const humanNote = o.action === 'request_human_task'
@@ -1045,7 +1050,8 @@
           detail: detail ? String(detail).trim() : '',
           forWho,
           emailNote,
-          pictureNote,
+          // Same line on the card as the picture note — one is never both.
+          pictureNote: pictureNote || videoNote,
           humanNote,
           testNote,
           afterNote,
@@ -3708,7 +3714,7 @@
   register('social_post_draft', renderSocialPostDraftCard);
 
   // ── Built-in: Post Action Proposal Card (Social Media chat) ────────────────
-  // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove', postId,
+  // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove'|'shorter'|'longer'|'video_version', postId,
   //   postIds, platforms, status, publishDate, timezone, text, reason, when, blocked }
   //
   // The chat's hands on a post that already exists — the twin of the Posts tab's Approve, Reject,
@@ -3729,6 +3735,8 @@
     // The post editor's "Make it shorter" / "Make it longer", every platform of the post.
     shorter: { head: 'Make this post shorter', button: 'Make it shorter', busy: 'Rewriting…' },
     longer: { head: 'Make this post longer', button: 'Make it longer', busy: 'Rewriting…' },
+    // The Review Queue's "Make a video version" (Video Producer, Phase 7) — a free storyboard.
+    video_version: { head: 'Make a video version', button: 'Plan the video', busy: 'Starting the storyboard…' },
   };
 
   function renderPostActionProposalCard(ui, esc) {
@@ -3767,6 +3775,7 @@
         <textarea id="bap-instruction-${postId}" data-bap-instruction rows="3" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
         <p class="text-xs text-gray-600 mt-2">The article is rewritten and saved in place, using your Business Knowledge for anything new — no invented facts. Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
+      ${!blocked && ui.action === 'video_version' ? '<p class="text-xs text-gray-600 mt-3">Your Video Producer plans a short video saying what this post says — free. You check the storyboard on its Videos tab before anything is made; the cost of making it is shown there first. This post stays as it is.</p>' : ''}
       ${!blocked && (ui.action === 'shorter' || ui.action === 'longer') ? `<p class="text-xs text-gray-600 mt-3">${ui.action === 'shorter' ? 'About half the length — same message, nothing new added.' : 'About half as long again — it develops what the post already says, with no invented facts.'} Each platform’s caption is rewritten and saved. It stays where it is in your queue.</p>` : ''}
       ${!blocked && ui.action === 'retry' && ui.when ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Try again at:</span> ${esc(ui.when)}</p>
         <p class="text-xs text-gray-500 mt-1">The exact time is worked out when you press the button, and said back to you here. If the same problem is still there, it will fail again.</p>` : ''}

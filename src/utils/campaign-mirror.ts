@@ -56,6 +56,7 @@ const ASSIGNEE_NAMES: Record<string, string> = {
     lead_qualifier: 'Lead Generation Assistant',
     newsletter_editor: 'Email Marketing Assistant',
     brand_designer: 'Brand Designer',
+    video_producer: 'Video Producer',
     human: 'A person on your team',
 };
 

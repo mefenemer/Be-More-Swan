@@ -3,9 +3,9 @@
 Added 2026-10-31, from an owner discussion of a "faceless YouTube" AI video stack (ChatGPT +
 Midjourney + Leonardo + ImageFX + Veo + Runway + Suno + CapCut, roughly $100–$245/month at verified
 2026-10-31 prices) and what Be More Swan would need to do the same job as one assistant.
-Status: **Phases 0–6 built 2026-10-31 (code + tests, NOT yet live-verified — §7.1–7.3); Phase 7 not
-started.** The role is inserted HIDDEN; go-live is the admin status change after a live staging run. Owner decisions taken 2026-10-31: D1 Video Producer, D2 OpenAI TTS, D3 Kling
-via fal (env-switchable), D4 per scene, capped. Anything else below exists only if marked ✅.
+Status: **Phases 0–7 built 2026-10-31 (code + tests, NOT yet live-verified — §7.1–7.4).** The role is inserted HIDDEN; go-live is the admin status change after a live staging run. Owner decisions taken 2026-10-31: D1 Video Producer, D2 OpenAI TTS, D3 Kling
+via fal (env-switchable), D4 per scene, capped; D7 taken as recommended when Phase 7 was built (autopilot off by
+default, 1–3 a week, storyboards only). Anything else below exists only if marked ✅.
 
 Related: [brand-designer-plan.md](./brand-designer-plan.md) (visual briefs: stock / AI image / AI
 video / brand-card options — the sourcing engine this plan reuses),
@@ -288,6 +288,17 @@ never uncovered), `stillMotion` on the render job, `imageMotion` prop + `MovingS
 composition. The weekly YouTube Short pushes in; a forced retry keeps the move. No editor control yet —
 Phase 5 sets motion per still scene. Tests: `tests/still-motion.test.ts`.
 
+### 7.4 Before Phase 7 is live
+
+1. Apply `db/z-video-producer-phase7.sql` to staging and prod **before** the code deploys — video_projects is
+   read with a bare `db.select()` and the mirror names its four new columns.
+2. Live checks: turn autopilot on for the test Video Producer, POST `/.netlify/functions/video-autopilot` on
+   staging → a storyboard marked "Planned by autopilot"; "Make a video version" on a post in the Review Queue
+   (and the same from the Social Media chat) → one storyboard, a second click opens the same one; a campaign
+   plan with "Commission a video" → storyboard on the Videos tab → Make the video → approve the post → the
+   order shows delivered after the next reconciler run (hourly).
+3. The Review Queue block and the chat cards were not exercised in a browser (they need a signed-in session).
+
 ### 7.3 Before Phase 6 is live
 
 1. Apply `db/z-video-producer-role.sql` to staging and prod.
@@ -368,8 +379,29 @@ route + prompt layers, surface registry flags (not social-shaped by default), da
 Results tab), starter prompts, goal metrics, notifications, assistant features, help article (dated
 SQL file), showcase page JSON, pricing row, Business Mentor + Ask Your Team routing, build manifest.
 
-**Phase 7 — cadence and hand-offs**
-Autopilot videos per week; Social Media Manager "make a video version"; Campaign `commission_video`.
+**Phase 7 — cadence and hand-offs** ✅ (needs `db/z-video-producer-phase7.sql` on both DBs)
+- `video_projects.origin` ('user' | 'autopilot' | 'handoff' | 'campaign'), `source_post_id` (one live video
+  per post — partial unique index), `campaign_id`, `campaign_order_id`. Every way in goes through ONE function,
+  `startProject` (video-producer.ts), so setup defaults apply to all of them. The Videos tab and the chat
+  snapshot say where each video came from.
+- **Autopilot** (`src/utils/video-autopilot.ts`, cron `video-autopilot` 05:30 UTC): setup question "Should it
+  plan videos for you each week?" (off / 1 / 2 / 3; D7). STORYBOARDS ONLY — it never builds, so it never spends;
+  each waits for "Make the video". Spaced 7 / 3 / 2 days; adds none while two of its storyboards wait; topics
+  rotate through Products & Services, least recently featured first, else a tip from the business description;
+  nothing at all from a name alone. Same gates as the Videos tab (plan with video, feature, task capacity) and
+  skips paused assistants. Chat changes it through the generic set-up change card.
+- **"Make a video version"** (`src/utils/video-handoff.ts`): a block in the Review Queue post view (any post that
+  is not a video and not rejected; offered only when `video-projects?producer=1` finds an ACTIVE Video Producer
+  on a plan with video) → `video-projects` `from_post` → a storyboard from the post's own words, on its platform
+  if that takes video. Chat twin: `post_action_proposal` action `video_version` in the Social Media chat.
+- **`commission_video`** (`src/utils/campaign-video-order.ts`): ONE video per order, 2 tasks, artefact
+  `video_project`. Starts a free storyboard; making it is the Videos-tab click; delivered when the finished post
+  is approved (reconciler, hourly — there is no settle-now hook on post approval yet). Wired through the vocab,
+  ORCHESTRATABLE_ROLE_KEYS, plan brief fields (`videoMessage`, `cta`, `videoLength`), the Campaign Assistant
+  prompt, the plan card, the Campaigns tab's Add work form, the mirror, the team feed and the work-state links.
+- Not done: "Requested by" pills on campaign/hand-off videos (requested-by.ts reads jobs and orders, not
+  video_projects); a settle-now call when the finished video is approved. Tests:
+  `tests/video-producer-phase7.test.ts`.
 
 **Phase 8 — later, separately decided**
 TikTok publishing (OAuth scopes are scaffolded in `oauth-integrations.ts`, but there is no publish

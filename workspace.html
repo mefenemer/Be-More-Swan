@@ -1887,6 +1887,8 @@ window.showComplianceModals = function showComplianceModals(force) {
 
       </div>
       <div id="post-review-archive" class="hidden mt-4 text-xs"></div>
+      <!-- "Make a video version" (Video Producer Phase 7, src/utils/video-handoff.ts) — painted by _rqVideoPaint. -->
+      <div id="post-review-video" class="hidden mt-3 text-xs"></div>
     </div>
     <!-- Footer: actions -->
     <div id="post-review-actions" class="border-t border-gray-100 p-4 space-y-3 shrink-0">
@@ -18038,6 +18040,7 @@ function _rqReviewRenderActive() {
     // Reviewable drafts get the action footer; archived (rejected) posts are read-only with a countdown.
     const reviewable = ['pending_approval', 'draft', 'in_review'].includes(post.status);
     document.getElementById('post-review-actions').classList.toggle('hidden', !reviewable);
+    _rqVideoPaint(post);
 
     // ── Step 7 labels + which footer you get ──────────────────────────────────────────────────
     // The footer's own Approve/Reject buttons are gone: approving and rejecting BOTH live in step 7
@@ -18146,6 +18149,78 @@ function _rqReviewRenderActive() {
     document.getElementById('post-review-feedback').value = '';
     document.getElementById('post-review-reason').value = '';
     rqReviewToggle();
+}
+
+// ── "Make a video version" (Video Producer, Phase 7) ────────────────────────────────────────────
+// Hands this post's words to the workspace's Video Producer, which plans a storyboard on its Videos
+// tab. Offered only when there IS an active Video Producer on a plan with video (asked once per page
+// load — video-projects.ts ?producer=1), and never on a post that is already a video. Nothing is made
+// or spent here: the storyboard waits for "Make the video" on the Videos tab. A second click returns
+// the video the first one started (one per post, held by a unique index).
+let _rqVideoProducer;          // undefined = not asked yet; null = none; { id, name }
+let _rqVideoProducerAsk = null;
+let _rqVideoBusy = false;
+
+function _rqVideoProducerLoad() {
+    if (_rqVideoProducerAsk) return _rqVideoProducerAsk;
+    _rqVideoProducerAsk = fetch('/.netlify/functions/video-projects?producer=1', { credentials: 'same-origin' })
+        .then(r => r.ok ? r.json() : { producer: null })
+        .then(d => { _rqVideoProducer = d && d.producer ? d.producer : null; return _rqVideoProducer; })
+        .catch(() => { _rqVideoProducer = null; return null; });
+    return _rqVideoProducerAsk;
+}
+
+async function _rqVideoPaint(post) {
+    const el = document.getElementById('post-review-video');
+    if (!el) return;
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    _rqVideoBusy = false;
+    if (!post || _rqMediaIsVideo(post) || !String(post.caption || '').trim() || post.status === 'rejected') return;
+    const shownFor = _rqReviewPostId;
+    const producer = await _rqVideoProducerLoad();
+    if (!producer || _rqReviewPostId !== shownFor) return;   // the user may have moved on to another post
+    el.className = 'mt-3 text-xs rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-700';
+    el.innerHTML = `
+        <p class="font-semibold text-gray-800">Make a video version</p>
+        <p class="mt-0.5 text-gray-600">${_rqEsc(producer.name)} plans a short video from this post. You check the storyboard on its Videos tab before anything is made or any credit is used.</p>
+        <button type="button" id="rq-video-go" onclick="_rqVideoFromPost()" class="btn-secondary mt-2 py-1.5 px-3 text-xs font-bold border rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Make a video version</button>
+        <span id="rq-video-msg" class="block mt-1.5"></span>`;
+    el.classList.remove('hidden');
+}
+
+async function _rqVideoFromPost() {
+    const postId = _rqReviewPostId;
+    if (!postId || _rqVideoBusy) return;
+    const go = document.getElementById('rq-video-go');
+    const msg = document.getElementById('rq-video-msg');
+    _rqVideoBusy = true;
+    if (go) { go.disabled = true; go.textContent = 'Starting…'; }
+    try {
+        const res = await fetch('/.netlify/functions/video-projects', {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'from_post', postId }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.message || d.error || 'Could not start the video.');
+        if (msg) {
+            msg.className = 'block mt-1.5 font-semibold text-gray-800';
+            msg.innerHTML = `${d.created ? `${_rqEsc(d.assistantName)} is planning the storyboard — about a minute.` : 'There is already a video for this post.'}
+                <button type="button" onclick="_rqVideoOpenTab(${Number(d.assistantId)})" class="ml-1 underline cursor-pointer">Open the Videos tab</button>`;
+        }
+        if (go) go.remove();
+    } catch (err) {
+        if (msg) { msg.className = 'block mt-1.5 font-semibold text-red-600'; msg.textContent = err.message; }
+        if (go) { go.disabled = false; go.textContent = 'Make a video version'; }
+        _rqVideoBusy = false;
+    }
+}
+
+function _rqVideoOpenTab(assistantId) {
+    if (!Number.isInteger(assistantId) || assistantId <= 0) return;
+    closePostReview();
+    window._assistantDetailInitialTab = 'videos';
+    window.routeToAssistantDetail(String(assistantId));
 }
 
 // ── "Post this somewhere else too" ──────────────────────────────────────────────────────────────

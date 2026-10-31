@@ -38,6 +38,7 @@ import { logMediaCost } from './ai-usage';
 import { makeVoiceoverAsset } from './voiceover-asset';
 import { DEFAULT_VOICE, isVoiceId, cleanScript } from '../lib/tts';
 import { presignR2Get } from './social-publish';
+import { resolveBaseUrl } from './base-url';
 import {
     enforceStoryboard, estimateCredits, parseStoryboardJson, sceneTimingsFromWords, scriptOf, isStillSource,
     storyboardSystemPrompt, storyboardUserPrompt, isVideoLength,
@@ -96,6 +97,58 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
             platforms: platforms.length ? [...new Set(platforms)] : ['instagram'],
         },
     };
+}
+
+// ── Start ───────────────────────────────────────────────────────────────────────────────────────
+
+/** Where a video came from (video_projects.origin, db/z-video-producer-phase7.sql). */
+export type VideoOrigin = 'user' | 'autopilot' | 'handoff' | 'campaign';
+/** The same words as the Videos tab (assistant-videos.js ORIGIN). 'user' says nothing — the owner asked. */
+const ORIGIN_LABELS: Record<string, string> = { autopilot: 'planned by autopilot', handoff: 'from one of their posts', campaign: 'for a campaign' };
+
+/**
+ * Wake the background worker. MUST be awaited — Lambda freezes on return (see generate-ai-video).
+ * Headers are optional: a cron or a campaign order has none, and resolveBaseUrl falls back to the
+ * deploy's own URL. A wake that never arrives leaves the project 'planning' until the stuck sweep
+ * fails it (20 min) — never spent, never silent.
+ */
+export async function wakeVideoWorker(payload: Record<string, unknown>, headers?: Record<string, string | undefined>): Promise<boolean> {
+    const baseUrl = resolveBaseUrl(headers);
+    if (!baseUrl) { console.error('[video-producer] no base URL — worker not woken', payload); return false; }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+        await fetch(`${baseUrl}/.netlify/functions/process-video-project-background`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal,
+        });
+        return true;
+    } catch (err) {
+        console.error('[video-producer] could not wake the worker:', err);
+        return false;
+    } finally { clearTimeout(timer); }
+}
+
+/**
+ * Create a project and start planning it — the ONE way a video begins, whoever asked: the Videos
+ * tab and chat cards ('user'), the weekly autopilot, "Make a video version" on a post ('handoff'),
+ * or a Campaign Assistant order. What the brief leaves out comes from the assistant's setup.
+ * Planning is free; nothing here spends. Returns the row, or why the brief is unusable.
+ */
+export async function startProject(db: Db, args: {
+    organisationId: number; assistantId: number; createdBy: number | null; brief: unknown; onboardingContext: unknown;
+    origin: VideoOrigin; sourcePostId?: number | null; campaignId?: number | null; campaignOrderId?: number | null;
+    headers?: Record<string, string | undefined>;
+}): Promise<{ ok: true; row: typeof videoProjects.$inferSelect } | { ok: false; error: string }> {
+    const parsed = readBrief(withSetupDefaults(args.brief, args.onboardingContext));
+    if ('error' in parsed) return { ok: false, error: parsed.error };
+    const [row] = await db.insert(videoProjects).values({
+        organisationId: args.organisationId, aiAssistantId: args.assistantId, createdBy: args.createdBy,
+        title: parsed.brief.message.slice(0, 60), status: 'planning', brief: parsed.brief,
+        origin: args.origin, sourcePostId: args.sourcePostId ?? null,
+        campaignId: args.campaignId ?? null, campaignOrderId: args.campaignOrderId ?? null,
+    }).returning();
+    await wakeVideoWorker({ projectId: row.id, action: 'plan' }, args.headers);
+    return { ok: true, row };
 }
 
 /** The workspace's own pictures the planner may use as product photos — newest first. */
@@ -419,6 +472,7 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
     return {
         id: row.id, aiAssistantId: row.aiAssistantId, title: row.title, status: row.status, brief: row.brief, storyboard: sb, changes: row.changes, note: row.note,
         scheduledPostId: row.scheduledPostId, creditsSpent: row.creditsSpent,
+        origin: row.origin, sourcePostId: row.sourcePostId, campaignId: row.campaignId,
         estimate: sb ? estimateCredits(sb, row.brief as VideoBrief, BUILD_COSTS) : null,
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),
         createdAt: row.createdAt, updatedAt: row.updatedAt,
@@ -446,6 +500,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         const scenes = sb ? ` · ${sb.scenes.length} scenes` : '';
         const cost = sb && (r.status === 'planned' || r.status === 'failed') ? ` · would use ${estimateCredits(sb, brief, BUILD_COSTS)} credits to make` : '';
         const note = r.note ? ` · note: ${r.note.slice(0, 160)}` : '';
-        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}) — ${WAITING[r.status] ?? r.status}${cost}${note}`;
+        const from = ORIGIN_LABELS[r.origin] ? ` · ${ORIGIN_LABELS[r.origin]}` : '';
+        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${from}) — ${WAITING[r.status] ?? r.status}${cost}${note}`;
     })].join('\n');
 }

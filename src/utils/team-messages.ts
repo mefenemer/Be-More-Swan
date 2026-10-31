@@ -115,6 +115,7 @@ const REVIEW_TAB: Record<string, { tab: string; label: string }> = {
     draft_blog_pillar: { tab: 'review-queue', label: 'Review the articles' },
     draft_email_campaign: { tab: 'email-campaigns', label: 'Review the emails' },
     commission_visuals: { tab: 'briefs', label: 'Open the brief' },
+    commission_video: { tab: 'videos', label: 'Open the video' },
     run_lead_search: { tab: 'signals', label: 'Open the search' },
 };
 
@@ -186,6 +187,11 @@ export async function noteOrderIssued(db: Db, o: OrderCtx & { summary?: string |
             await askAboutVideo(db, { ...o, targetAssistantId: o.targetAssistantId });
             return;
         }
+        // Video Producer, Phase 7: the storyboard is planned at once (free); making it is their click.
+        case 'commission_video':
+            return postOncePerOrder(db, o.orderId, { ...base, toUser: true, kind: 'started',
+                body: 'On it — I am planning the storyboard now, free. It will be on my Videos tab in about a minute: check the scenes, then press “Make the video” — that is where any AI credits are shown.',
+                link: { assistantId: o.targetAssistantId, tab: 'videos', label: 'Open the video' } });
         default:
             return;
     }

@@ -1132,6 +1132,10 @@ node_bundler = "esbuild"
 # than social, which drains every minute).
 [functions.blog-horizon-fill]
   schedule = "0 5 * * *"
+# Video Producer autopilot (src/utils/video-autopilot.ts): storyboards only, never spends — making
+# the video is the owner's click. Half an hour after blog-horizon-fill so they do not share a compute window.
+[functions.video-autopilot]
+  schedule = "30 5 * * *"
 [functions.process-blog-jobs]
   schedule = "*/10 * * * *"
 

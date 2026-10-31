@@ -19,7 +19,7 @@
 // action the executor cannot dispatch. The one place free text belongs is `campaigns.objective`,
 // which is the founder's own sentence and is never parsed.
 
-import { BLOG_WRITER_ROLE_KEY, BRAND_DESIGNER_ROLE_KEY, LEAD_GENERATOR_ROLE_KEY, NEWSLETTER_ROLE_KEY, SMM_ROLE_KEY } from '../constants/roles';
+import { BLOG_WRITER_ROLE_KEY, BRAND_DESIGNER_ROLE_KEY, LEAD_GENERATOR_ROLE_KEY, NEWSLETTER_ROLE_KEY, SMM_ROLE_KEY, VIDEO_PRODUCER_ROLE_KEY } from '../constants/roles';
 
 // ── Campaign mode ────────────────────────────────────────────────────────────
 /**
@@ -187,6 +187,7 @@ export const CAMPAIGN_ORDER_ACTIONS = [
     'request_human_task',
     'ab_test_posts',
     'commission_visuals',
+    'commission_video',
 ] as const;
 
 /**
@@ -195,6 +196,9 @@ export const CAMPAIGN_ORDER_ACTIONS = [
  * teammate is not commanded — they are asked, and they say when it is done.
  */
 export const HUMAN_ROLE_KEY = 'human';
+
+/** commission_video: the lengths a brief may ask for, in seconds (storyboard.ts VideoLength). */
+export const VIDEO_ORDER_LENGTHS = ['15', '30', '60'] as const;
 export type CampaignOrderAction = typeof CAMPAIGN_ORDER_ACTIONS[number];
 
 export interface OrderActionSpec {
@@ -219,7 +223,7 @@ export interface OrderActionSpec {
     /** How many when the brief does not say. Absent = 1. */
     defaultQuantity?: number;
     /** What comes back, matching campaign_orders.artefact_kind. */
-    artefactKind: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | 'newsletter_sequence' | 'newsletter_issue' | 'visual_brief' | null;
+    artefactKind: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | 'newsletter_sequence' | 'newsletter_issue' | 'visual_brief' | 'video_project' | null;
 }
 
 export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = {
@@ -325,6 +329,20 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
         takesQuantity: true,
         maxQuantity: 20,
         artefactKind: 'visual_brief',
+    },
+    // Video Producer plan, Phase 7. ONE video per order (two videos are two orders): the Video
+    // Producer plans a storyboard for free; the user makes it from the Videos tab, where the AI
+    // credits are shown, and approves the finished video in the Review Queue like any post.
+    commission_video: {
+        roleKey: VIDEO_PRODUCER_ROLE_KEY,
+        label: 'Commission a video',
+        description: 'Briefs the Video Producer for one short vertical video on this campaign\u2019s message, for Reels, Shorts or Facebook. It plans the storyboard straight away, free; you check it on its Videos tab and press \u201cMake the video\u201d, where any AI credits are shown. The finished video waits in your Review Queue for approval like any post.',
+        // The storyboard and the edit are a bigger unit of work than a post. AI clips, AI pictures and
+        // the voiceover are charged in AI CREDITS, separately and only on the user's click.
+        workItemsPerUnit: 2,
+        takesQuantity: false,
+        maxQuantity: 1,
+        artefactKind: 'video_project',
     },
 };
 

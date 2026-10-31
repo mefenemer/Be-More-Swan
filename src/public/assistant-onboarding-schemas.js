@@ -481,6 +481,20 @@
             placeholder: 'e.g. Book through the link in our bio',
             helpText: 'Optional. Used as the call to action unless you give a different one on a video.',
           },
+          {
+            // src/utils/video-autopilot.ts (owner decision D7: off by default; always reviewed).
+            // Storyboards only — making the video stays a click, so autopilot never spends a credit.
+            key: 'autopilotPerWeek',
+            label: 'Should it plan videos for you each week?',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: '0', label: 'No, I\u2019ll ask for each video', description: 'Nothing is planned until you ask on the Videos tab or in chat.' },
+              { value: '1', label: 'One a week', description: 'A storyboard about one of your products or services, ready for you to check. Nothing is made or spent until you press \u201cMake the video\u201d.' },
+              { value: '2', label: 'Two a week', description: 'The same, twice a week. It waits while two storyboards are still waiting for you.' },
+              { value: '3', label: 'Three a week', description: 'The same, three times a week. It waits while two storyboards are still waiting for you.' },
+            ],
+          },
         ],
       },
       {

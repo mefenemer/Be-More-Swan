@@ -8,6 +8,9 @@
 //   POST { action:'edit_scene', id, sceneId, patch }    → changes one scene (re-checked by the rules)
 //   POST { action:'build', id }                          → holds the estimate, builds in the background
 //   POST { action:'cancel', id }
+//   POST { action:'from_post', postId }                 → "Make a video version" of a post (video-handoff.ts):
+//                                                          plans a storyboard for the active Video Producer
+//   GET  ?producer=1                                    → { producer: { id, name } | null } — is the button offered?
 //
 // Planning is free (one model call, like any draft). Building spends: the estimate is on the project
 // before the click, held at the click, settled scene by scene (src/utils/video-producer.ts).
@@ -22,27 +25,12 @@ import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/ut
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
-import { resolveBaseUrl } from '../../src/utils/base-url';
-import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults } from '../../src/utils/video-producer';
+import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker } from '../../src/utils/video-producer';
 import { enforceStoryboard, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
+import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-
-/** Wake the background worker. MUST be awaited — Lambda freezes on return (see generate-ai-video). */
-async function wake(headers: Record<string, string | undefined>, payload: Record<string, unknown>): Promise<void> {
-    const baseUrl = resolveBaseUrl(headers);
-    if (!baseUrl) { console.error('[video-projects] no base URL — worker not woken', payload); return; }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
-    try {
-        await fetch(`${baseUrl}/.netlify/functions/process-video-project-background`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: controller.signal,
-        });
-    } catch (err) {
-        console.error('[video-projects] could not wake the worker:', err);
-    } finally { clearTimeout(timer); }
-}
 
 export default withLambda(async (event) => {
     const db = getDb();
@@ -58,6 +46,13 @@ export default withLambda(async (event) => {
     };
 
     if (event.httpMethod === 'GET') {
+        // The Review Queue asks before it offers "Make a video version": an active Video Producer AND
+        // a plan that makes videos (the same gate the POST below applies).
+        if (event.queryStringParameters?.producer) {
+            const producer = await activeVideoProducer(db, orgId);
+            const can = !!producer && tierCanGenerateVideo(await getActiveTierKeyByOrg(db, orgId));
+            return json(200, { producer: can ? { id: producer!.id, name: producer!.name } : null });
+        }
         await sweepStuckProjects(db, orgId).catch((err) => console.error('[video-projects] sweep failed:', err));
         const id = Number(event.queryStringParameters?.id);
         if (Number.isInteger(id) && id > 0) {
@@ -99,12 +94,22 @@ export default withLambda(async (event) => {
         if ('error' in parsed) return json(400, { error: parsed.error });
         const blocked = await enforcePromptModeration({ text: `${parsed.brief.message}\n${parsed.brief.cta ?? ''}`, userId, organisationId: orgId, source: 'video-projects' });
         if (blocked) return blocked;
-        const [row] = await db.insert(videoProjects).values({
-            organisationId: orgId, aiAssistantId: assistantId, createdBy: userId,
-            title: parsed.brief.message.slice(0, 60), status: 'planning', brief: parsed.brief,
-        }).returning();
-        await wake(headers, { projectId: row.id, action: 'plan' });
-        return json(202, { project: await projectView(db, orgId, row) });
+        const started = await startProject(db, {
+            organisationId: orgId, assistantId, createdBy: userId, brief: body.brief, onboardingContext: a.onboardingContext, origin: 'user', headers,
+        });
+        if (!started.ok) return json(400, { error: started.error });
+        return json(202, { project: await projectView(db, orgId, started.row) });
+    }
+
+    if (action === 'from_post') {
+        const postId = Number(body.postId);
+        if (!Number.isInteger(postId) || postId <= 0) return json(400, { error: 'postId is required.' });
+        const made = await videoFromPost(db, { organisationId: orgId, userId, postId, headers });
+        if (!made.ok) return json(made.status, { error: made.error });
+        return json(made.created ? 202 : 200, {
+            created: made.created, assistantId: made.assistantId, assistantName: made.assistantName,
+            project: await projectView(db, orgId, made.project),
+        });
     }
 
     const id = Number(body.id);
@@ -121,7 +126,7 @@ export default withLambda(async (event) => {
         // A new plan means new scenes: what was sourced for the old ones no longer fits.
         await db.update(videoProjects).set({ status: 'planning', note: null, sceneAssets: {}, voiceoverAssetId: null, updatedAt: new Date() })
             .where(eq(videoProjects.id, row.id));
-        await wake(headers, { projectId: row.id, action: 'plan', feedback });
+        await wakeVideoWorker({ projectId: row.id, action: 'plan', feedback }, headers);
         return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
     }
 
@@ -161,7 +166,7 @@ export default withLambda(async (event) => {
         if (!hold.ok) return json(402, { error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit });
         await db.update(videoProjects).set({ status: 'building', creditHold: hold.credits, startedAt: new Date(), note: null, updatedAt: new Date() })
             .where(eq(videoProjects.id, row.id));
-        await wake(headers, { projectId: row.id, action: 'build' });
+        await wakeVideoWorker({ projectId: row.id, action: 'build' }, headers);
         return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
     }
 

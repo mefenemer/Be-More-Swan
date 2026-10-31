@@ -4320,8 +4320,9 @@ export const campaignOrders = pgTable("campaign_orders", {
   index("campaign_orders_target_idx").on(t.targetAssistantId, t.status),
   check("campaign_orders_status_check", sql`${t.status} IN ('queued','issued','in_review','delivered','blocked','cancelled','rejected')`),
   check("campaign_orders_cost_check", sql`${t.costWorkItems} >= 0 AND ${t.costGbp} >= 0`),
-  // Widened by db/z-campaign-email-orders.sql (§9.7) — an email order's artefact is a sequence or an email.
-  check("campaign_orders_artefact_check", sql`${t.artefactKind} IS NULL OR ${t.artefactKind} IN ('scheduled_post','blog_post','discovery_campaign','assistant_record','newsletter_sequence','newsletter_issue','visual_brief')`),
+  // Widened by db/z-campaign-email-orders.sql (§9.7) — an email order's artefact is a sequence or an email —
+  // and by db/z-video-producer-phase7.sql (a video order's artefact is its video_projects row).
+  check("campaign_orders_artefact_check", sql`${t.artefactKind} IS NULL OR ${t.artefactKind} IN ('scheduled_post','blog_post','discovery_campaign','assistant_record','newsletter_sequence','newsletter_issue','visual_brief','video_project')`),
   check("campaign_orders_no_self_block_check", sql`${t.blockedOnOrderId} IS NULL OR ${t.blockedOnOrderId} <> ${t.id}`),
 ]);
 
@@ -5397,6 +5398,11 @@ export const videoProjects = pgTable("video_projects", {
   creditHold: integer("credit_hold").notNull().default(0),
   creditsSpent: integer("credits_spent").notNull().default(0),
   note: text(),
+  // db/z-video-producer-phase7.sql — what the video came from: 'user' | 'autopilot' | 'handoff' | 'campaign'.
+  origin: text().notNull().default("user"),
+  sourcePostId: integer("source_post_id").references(() => scheduledPosts.id, { onDelete: "set null" }),
+  campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
+  campaignOrderId: integer("campaign_order_id").references(() => campaignOrders.id, { onDelete: "set null" }),
   startedAt: timestamp("started_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

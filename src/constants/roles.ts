@@ -63,4 +63,8 @@ export const ORCHESTRATABLE_ROLE_KEYS: string[] = [
     // brief; the checkable artefact is that brief (visual_brief), delivered when the user approves
     // an option. Nothing it makes is used until a human approves it.
     BRAND_DESIGNER_ROLE_KEY,
+    // Video Producer plan, Phase 7 — a campaign commissions a video. The delegable unit is ONE
+    // video project (a free storyboard); making it is the user's click, and the finished video is an
+    // ordinary post they approve. The checkable artefact is the project (video_project).
+    VIDEO_PRODUCER_ROLE_KEY,
 ];

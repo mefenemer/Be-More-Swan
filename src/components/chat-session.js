@@ -847,6 +847,13 @@
           message = over.length === ids.length
             ? 'The new version ran past the platform’s limit, so nothing was changed. Open the post to edit it by hand.'
             : `${what} — saved.${over.length ? ` ${over.length} platform${over.length === 1 ? '' : 's'} kept the old wording: the new one ran past that platform’s limit.` : ''} Open the post to read it.`;
+        } else if (d.action === 'video_version') {
+          // The Review Queue's "Make a video version" — video-projects.ts `from_post`. Free: it plans
+          // a storyboard on the Video Producer's Videos tab; making the video is a click there.
+          const r = await postActionCall('video-projects', { action: 'from_post', postId: d.postId });
+          message = r.created
+            ? `${r.assistantName || 'Your Video Producer'} is planning the storyboard — it appears on its Videos tab in about a minute.`
+            : 'There is already a video for this post — it’s on your Video Producer’s Videos tab.';
         } else {
           throw new Error('Unknown action.');
         }

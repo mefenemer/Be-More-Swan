@@ -35,6 +35,13 @@
     cancelled: 'Cancelled.',
   };
 
+  // Where a video came from (video_projects.origin, Phase 7). 'user' says nothing — the owner asked.
+  const ORIGIN = {
+    autopilot: 'Planned by autopilot',
+    handoff: 'From one of your posts',
+    campaign: 'For a campaign',
+  };
+
   const state = {
     assistantId: null, assistantName: null, videos: [], loaded: false, loadError: null,
     rendered: false, form: false, editing: null, replanning: null, notes: {}, busy: new Set(), pollTimer: null,
@@ -174,7 +181,7 @@
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <p class="text-sm font-bold text-gray-900 break-words">${esc(v.title)}</p>
-            <p class="text-xs text-gray-600 mt-0.5">${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status] || v.status)}</p>
+            <p class="text-xs text-gray-600 mt-0.5">${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status] || v.status)}</p>
             ${v.note ? `<p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mt-1.5">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
