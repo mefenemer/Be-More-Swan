@@ -1273,6 +1273,12 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <span class="block text-[10px] font-bold text-gray-500 mb-0.5">Volume — <span id="insp-audio-vol-label">100%</span></span>
                   <input id="insp-audio-volume" type="range" min="0" max="100" step="5" value="100" class="w-full cursor-pointer accent-emerald-600">
                 </label>
+                <!-- Voiceovers only (the clip carries a `captions` flag): burn the spoken words in.
+                     The words come from the voiceover's own transcription, timed to the voice. -->
+                <label id="insp-audio-captions-row" class="hidden mt-2 flex items-start gap-2 cursor-pointer">
+                  <input id="insp-audio-captions" type="checkbox" class="mt-0.5 cursor-pointer">
+                  <span class="text-[11px] text-gray-700"><span class="font-bold">Show captions</span> — the words appear on the video as they're spoken. They're added when the video is made, so they don't show in this preview.</span>
+                </label>
                 <p class="text-[10px] text-gray-400 mt-1.5">Leave both times blank to play across the whole post. Or drag the clip on the track above.</p>
               </div>
 
@@ -1763,6 +1769,36 @@ window.showComplianceModals = function showComplianceModals(force) {
                      paid from the plan's AI credits. See netlify/functions/generate-ai-music.ts. -->
                 <button type="button" data-genmusic-act="open"
                   class="btn-assistant px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer">&#10024; Generate music</button>
+                <!-- The fifth way: a voiceover read from a script by an AI voice (OpenAI speech).
+                     See netlify/functions/generate-voiceover.ts. -->
+                <button type="button" data-voice-act="open"
+                  class="btn-assistant px-3 py-2 rounded-lg text-xs font-bold transition cursor-pointer">&#127908; Add a voiceover</button>
+              </div>
+
+              <!-- ── Voiceover ──────────────────────────────────────────────────────────────────
+                   Inline, like Generate music. The script is the customer's words (or the
+                   assistant's, pasted in); the voice is one of six described by how it sounds.
+                   It plays its full length — the video is extended to fit, never the voice cut. -->
+              <div id="insp-voice" class="hidden mt-3 rounded-xl border border-gray-200 bg-gray-50 p-2.5">
+                <div class="flex items-center justify-between mb-2">
+                  <p class="text-[11px] font-bold text-gray-600">Add a voiceover to this post</p>
+                  <button type="button" data-voice-act="close" class="text-[11px] font-bold text-gray-400 hover:text-gray-700 cursor-pointer" aria-label="Close voiceover">&times;</button>
+                </div>
+                <label class="block text-[10px] font-bold uppercase tracking-wider text-gray-400" for="insp-voice-text">What it says</label>
+                <textarea id="insp-voice-text" rows="4" maxlength="1200"
+                  class="w-full mt-1 text-xs border border-gray-300 rounded-lg px-2 py-1.5"
+                  placeholder="Autumn's here, and so is our seasonal menu. Pop in this week for 10% off any hot drink."></textarea>
+                <div class="flex items-center justify-between mt-1">
+                  <p id="insp-voice-length" class="text-[10px] text-gray-500"></p>
+                  <p id="insp-voice-count" class="text-[10px] text-gray-400">0 / 1200</p>
+                </div>
+                <label class="block mt-2 text-[10px] font-bold uppercase tracking-wider text-gray-400" for="insp-voice-voice">Voice</label>
+                <select id="insp-voice-voice" class="w-full mt-1 text-xs border border-gray-300 rounded-lg px-2 py-1.5"></select>
+                <p id="insp-voice-meta" class="mt-1.5 text-[10px] text-gray-500"></p>
+                <button type="button" id="insp-voice-go" data-voice-act="generate"
+                  class="btn-assistant mt-2 w-full py-2 rounded-lg text-xs font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-default">Make the voiceover</button>
+                <p id="insp-voice-msg" class="hidden mt-2 text-[11px] font-semibold text-gray-500"></p>
+                <p class="mt-2 text-[10px] text-gray-400">An AI voice reads your words. Any music on the post is turned down under it — change that on the music's row.</p>
               </div>
 
               <!-- ── Generate music ────────────────────────────────────────────────────────────
@@ -1851,6 +1887,8 @@ window.showComplianceModals = function showComplianceModals(force) {
 
       </div>
       <div id="post-review-archive" class="hidden mt-4 text-xs"></div>
+      <!-- "Make a video version" (Video Producer Phase 7, src/utils/video-handoff.ts) — painted by _rqVideoPaint. -->
+      <div id="post-review-video" class="hidden mt-3 text-xs"></div>
     </div>
     <!-- Footer: actions -->
     <div id="post-review-actions" class="border-t border-gray-100 p-4 space-y-3 shrink-0">
@@ -6067,6 +6105,7 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/assistant-campaigns.js"></script>
 <!-- Briefs tab (brand_designer) — briefs, a grid of options, approve into the library (brand-briefs.ts). -->
 <script src="/src/components/assistant-briefs.js"></script>
+<script src="/src/components/assistant-videos.js"></script>
 <script src="/src/components/assistant-mentor-overview.js"></script>
 <script src="/src/components/assistant-mentor-plan.js"></script>
 <script src="/src/components/mentor-commitments.js"></script>
@@ -8783,6 +8822,8 @@ function _pcePreviewTick(video) {
  * measurement needs the clip's url to still be fetchable.
  */
 function _pceClipFullLength(c) {
+    // A still is as long as it is held; there is no file length to measure.
+    if (c && c.kind === 'image') return c.holdS != null ? c.holdS : 3;
     const measured = _pceClipDurations[c.assetId];
     if (measured != null) return measured;
     return c.sourceDurationS != null ? c.sourceDurationS : null;
@@ -9466,6 +9507,14 @@ async function _pcePersistVideoEdit(postId, clips, frames) {
     const edit = {
         clips: clips.map((c) => {
             const out = { id: c.id, assetId: c.assetId };
+            // A still scene (Video Producer storyboard) keeps what makes it a still. Dropping these
+            // turned it into a "video" clip pointing at a picture, which the renderer then skips.
+            if (c.kind === 'image') {
+                out.kind = 'image';
+                if (c.holdS != null) out.holdS = c.holdS;
+                if (c.motion) out.motion = c.motion;
+                return out;
+            }
             if (c.inS) out.inS = c.inS;
             if (c.outS != null) out.outS = c.outS;
             if (c.gain != null) out.gain = c.gain;
@@ -16085,6 +16134,12 @@ function _pceRefreshAudioTiming() {
     if (volEl) volEl.value = Math.round((clip.volume == null ? 1 : clip.volume) * 100);
     const volLbl = _pceEl('insp-audio-vol-label');
     if (volLbl) volLbl.textContent = `${Math.round((clip.volume == null ? 1 : clip.volume) * 100)}%`;
+    // Captions: only a voiceover carries the flag, so only its row offers the switch.
+    const capRow = _pceEl('insp-audio-captions-row');
+    const capEl = _pceEl('insp-audio-captions');
+    const isVoice = typeof clip.captions === 'boolean';
+    if (capRow) { capRow.classList.toggle('hidden', !isVoice); capRow.style.display = isVoice ? 'flex' : 'none'; }
+    if (capEl) capEl.checked = clip.captions !== false;
 
     if (!_pceAudioTimingBound) {
         _pceAudioTimingBound = true;
@@ -16109,6 +16164,12 @@ function _pceRefreshAudioTiming() {
             _pceRenderAudioList();
             if (persist) _pcePersistAudio(_rqReviewPostId);
         };
+        _pceEl('insp-audio-captions')?.addEventListener('change', (ev) => {
+            const cur = _pceAudioClips().find((a) => a.id && a.id === _pceSelectedAudioId);
+            if (!cur || typeof cur.captions !== 'boolean') return;
+            cur.captions = !!ev.target.checked;
+            _pcePersistAudio(_rqReviewPostId);
+        });
         for (const id of ['insp-audio-start', 'insp-audio-end', 'insp-audio-volume']) {
             _pceEl(id)?.addEventListener('input', () => commit(false));
             _pceEl(id)?.addEventListener('change', () => commit(true));
@@ -16210,7 +16271,8 @@ const _pceMusicPreviewEls = {};
 async function _pceOpenMusicLibrary() {
     const host = document.getElementById('insp-music');
     if (!host) return;
-    _pceCloseGenMusic();   // one picker at a time — the two panels stack otherwise
+    _pceCloseGenMusic();   // one picker at a time — the panels stack otherwise
+    if (typeof _pceCloseVoice === 'function') _pceCloseVoice();
     _pceMusic.open = true;
     host.classList.remove('hidden');
     if (_pceMusic.tracks.length || _pceMusic.loading) { _pceRenderMusicList(); return; }
@@ -16472,6 +16534,144 @@ function _pceGenDefaultName() {
     }, true);
 })();
 
+// ── Voiceover (OpenAI speech + word timings) ─────────────────────────────────────────────────────
+//
+// The fifth way to get sound onto a post. ENDS where the library ends: an asset id becomes a clip in
+// `post.audio` through the same placement and the same save. Two differences, both deliberate:
+//   · no "ends with the video" bound — a voice is never cut mid-sentence (the renderer extends);
+//   · music already on the post is turned DOWN to 35 % so the words can be heard. Visible on the
+//     music's own row, and changed there like any volume.
+// Synchronous on the server (speech + timings inside one request), so there is nothing to poll.
+
+const _PCE_VOICE_DUCK = 0.35;
+let _pceVoice = { open: false, busy: false, voices: null, cost: null, unit: 'credits', balance: null };
+
+(function _pceBindVoiceOnce() {
+    // Bound to DOCUMENT at load, like the music panels — the inspector is re-rendered under us.
+    document.addEventListener('click', (ev) => {
+        const el = ev.target && ev.target.closest && ev.target.closest('[data-voice-act]');
+        if (!el) return;
+        ev.preventDefault();
+        const act = el.getAttribute('data-voice-act');
+        if (act === 'open') _pceOpenVoice();
+        else if (act === 'close') _pceCloseVoice();
+        else if (act === 'generate') _pceGenerateVoice();
+    }, true);
+    document.addEventListener('input', (ev) => {
+        if (ev.target && ev.target.id === 'insp-voice-text') _pceRenderVoice();
+    }, true);
+})();
+
+async function _pceOpenVoice() {
+    _pceVoice.open = true;
+    _pceCloseMusicLibraryOnly();
+    _pceCloseGenMusic();
+    document.getElementById('insp-voice')?.classList.remove('hidden');
+    _pceRenderVoice();
+    try {
+        const [v, b] = await Promise.all([
+            _pceVoice.voices ? null : fetch('/.netlify/functions/generate-voiceover').then((r) => (r.ok ? r.json() : null)),
+            fetch('/.netlify/functions/get-ai-credit-balance').then((r) => (r.ok ? r.json() : null)),
+        ]);
+        if (v) { _pceVoice.voices = v.voices || []; _pceVoice.defaultVoice = v.defaultVoice; _pceVoice.cost = v.cost; }
+        if (b) { _pceVoice.balance = b.balance; _pceVoice.unit = b.unit || 'credits'; }
+    } catch { /* the server is the gate; the panel just says less */ }
+    _pceRenderVoice();
+}
+
+function _pceCloseVoice() {
+    _pceVoice.open = false;
+    document.getElementById('insp-voice')?.classList.add('hidden');
+}
+
+function _pceSetVoiceMsg(text, kind) {
+    const el = document.getElementById('insp-voice-msg');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = (text ? '' : 'hidden ') + 'mt-2 text-[11px] font-semibold '
+        + (kind === 'error' ? 'text-red-600' : kind === 'ok' ? 'text-gray-700' : 'text-gray-500');
+}
+
+function _pceRenderVoice() {
+    const sel = document.getElementById('insp-voice-voice');
+    if (sel && _pceVoice.voices && !sel.options.length) {
+        sel.innerHTML = _pceVoice.voices.map((v) => `<option value="${v.id}">${v.label}</option>`).join('');
+        if (_pceVoice.defaultVoice) sel.value = _pceVoice.defaultVoice;
+    }
+    const text = document.getElementById('insp-voice-text')?.value || '';
+    const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    const count = document.getElementById('insp-voice-count');
+    if (count) count.textContent = `${text.length} / 1200`;
+    // ~2.5 spoken words a second — the same pace the storyboard plans against.
+    const len = document.getElementById('insp-voice-length');
+    if (len) len.textContent = words ? `About ${Math.max(1, Math.round(words / 2.5))} seconds` : '';
+    const meta = document.getElementById('insp-voice-meta');
+    if (meta) {
+        const unit = _pceVoice.unit === 'tasks' ? (_pceVoice.cost === 1 ? 'task' : 'tasks') : (_pceVoice.cost === 1 ? 'credit' : 'credits');
+        meta.textContent = _pceVoice.cost != null
+            ? `Uses ${_pceVoice.cost} ${unit}${_pceVoice.balance != null ? ` · ${_pceVoice.balance} left` : ''}`
+            : '';
+    }
+    const go = document.getElementById('insp-voice-go');
+    if (go) { go.disabled = _pceVoice.busy || !text.trim(); go.textContent = _pceVoice.busy ? 'Making it\u2026' : 'Make the voiceover'; }
+}
+
+async function _pceGenerateVoice() {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    const text = (document.getElementById('insp-voice-text')?.value || '').trim();
+    if (!post || !text || _pceVoice.busy) return;
+    if (!Array.isArray(post.audio)) post.audio = [];
+    if (post.audio.length >= 10) { _pceSetVoiceMsg('That\u2019s the most sound a post can carry (10 clips).', 'error'); return; }
+    _pceVoice.busy = true;
+    _pceSetVoiceMsg('Recording the voiceover\u2026 this takes a few seconds.');
+    _pceRenderVoice();
+    try {
+        const res = await fetch('/.netlify/functions/generate-voiceover', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, voice: document.getElementById('insp-voice-voice')?.value }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(body.error === 'insufficient_credits'
+                ? (body.unit === 'tasks' ? 'Your monthly tasks are used up \u2014 they reset on the 1st.' : 'You don\u2019t have enough credits for a voiceover.')
+                : (body.message || body.error || 'The voiceover could not be made.'));
+        }
+        const clip = {
+            id: `a${body.assetId}_${Date.now().toString(36)}`,
+            assetId: body.assetId,
+            label: String(body.name || 'Voiceover').slice(0, 120),
+            volume: 1,
+            url: body.url || null,
+            name: body.name,
+            // Burned-in captions, on by default — the switch is on this clip's row. Only set when the
+            // server got word timings back; without them there is nothing to show.
+            ...(Array.isArray(body.words) && body.words.length ? { captions: true } : {}),
+        };
+        _pcePlaceNewSound(post, clip);
+        // Turn the music down under the voice — only clips still at full volume, so a level the
+        // user already chose is left alone.
+        let ducked = 0;
+        for (const a of post.audio) { if ((a.volume == null || a.volume >= 1) && a.assetId !== body.assetId) { a.volume = _PCE_VOICE_DUCK; ducked++; } }
+        post.audio.push(clip);
+        if (body.durationS) _pceAudioDurations[body.assetId] = body.durationS;
+        _pceSelectedAudioId = clip.id;
+        await _pceMeasureAudio(post);
+        _pceRefreshAudioInspector();
+        _rqRenderTimeline(post);
+        _pceRenderLayers();
+        await _pcePersistAudio(postId);
+        _pceSetVoiceMsg(ducked ? 'Added. The music is turned down under it.' : 'Added to this post.', 'ok');
+        window.showToast?.('Voiceover added to this post.', { icon: '\uD83C\uDFA4' });
+        if (_pceVoice.balance != null && _pceVoice.cost != null) _pceVoice.balance = Math.max(0, _pceVoice.balance - _pceVoice.cost);
+    } catch (err) {
+        _pceSetVoiceMsg(err.message || 'The voiceover could not be made.', 'error');
+    } finally {
+        _pceVoice.busy = false;
+        _pceRenderVoice();
+    }
+}
+
 function _pceSyncGenName() {
     const el = document.getElementById('insp-genmusic-name');
     if (el && !_pceGen.nameTouched) el.value = _pceGenDefaultName();
@@ -16495,6 +16695,7 @@ async function _pceOpenGenMusic() {
     _pceGen.open = true;
     _pceGenResetShare();
     _pceCloseMusicLibraryOnly();
+    if (typeof _pceCloseVoice === 'function') _pceCloseVoice();
     document.getElementById('insp-genmusic')?.classList.remove('hidden');
     _pceRenderGenMusic();
     // The balance is a courtesy line, not a gate — the server decides. A failed read just leaves it out.
@@ -17839,6 +18040,7 @@ function _rqReviewRenderActive() {
     // Reviewable drafts get the action footer; archived (rejected) posts are read-only with a countdown.
     const reviewable = ['pending_approval', 'draft', 'in_review'].includes(post.status);
     document.getElementById('post-review-actions').classList.toggle('hidden', !reviewable);
+    _rqVideoPaint(post);
 
     // ── Step 7 labels + which footer you get ──────────────────────────────────────────────────
     // The footer's own Approve/Reject buttons are gone: approving and rejecting BOTH live in step 7
@@ -17947,6 +18149,78 @@ function _rqReviewRenderActive() {
     document.getElementById('post-review-feedback').value = '';
     document.getElementById('post-review-reason').value = '';
     rqReviewToggle();
+}
+
+// ── "Make a video version" (Video Producer, Phase 7) ────────────────────────────────────────────
+// Hands this post's words to the workspace's Video Producer, which plans a storyboard on its Videos
+// tab. Offered only when there IS an active Video Producer on a plan with video (asked once per page
+// load — video-projects.ts ?producer=1), and never on a post that is already a video. Nothing is made
+// or spent here: the storyboard waits for "Make the video" on the Videos tab. A second click returns
+// the video the first one started (one per post, held by a unique index).
+let _rqVideoProducer;          // undefined = not asked yet; null = none; { id, name }
+let _rqVideoProducerAsk = null;
+let _rqVideoBusy = false;
+
+function _rqVideoProducerLoad() {
+    if (_rqVideoProducerAsk) return _rqVideoProducerAsk;
+    _rqVideoProducerAsk = fetch('/.netlify/functions/video-projects?producer=1', { credentials: 'same-origin' })
+        .then(r => r.ok ? r.json() : { producer: null })
+        .then(d => { _rqVideoProducer = d && d.producer ? d.producer : null; return _rqVideoProducer; })
+        .catch(() => { _rqVideoProducer = null; return null; });
+    return _rqVideoProducerAsk;
+}
+
+async function _rqVideoPaint(post) {
+    const el = document.getElementById('post-review-video');
+    if (!el) return;
+    el.classList.add('hidden');
+    el.innerHTML = '';
+    _rqVideoBusy = false;
+    if (!post || _rqMediaIsVideo(post) || !String(post.caption || '').trim() || post.status === 'rejected') return;
+    const shownFor = _rqReviewPostId;
+    const producer = await _rqVideoProducerLoad();
+    if (!producer || _rqReviewPostId !== shownFor) return;   // the user may have moved on to another post
+    el.className = 'mt-3 text-xs rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-700';
+    el.innerHTML = `
+        <p class="font-semibold text-gray-800">Make a video version</p>
+        <p class="mt-0.5 text-gray-600">${_rqEsc(producer.name)} plans a short video from this post. You check the storyboard on its Videos tab before anything is made or any task is used.</p>
+        <button type="button" id="rq-video-go" onclick="_rqVideoFromPost()" class="btn-secondary mt-2 py-1.5 px-3 text-xs font-bold border rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Make a video version</button>
+        <span id="rq-video-msg" class="block mt-1.5"></span>`;
+    el.classList.remove('hidden');
+}
+
+async function _rqVideoFromPost() {
+    const postId = _rqReviewPostId;
+    if (!postId || _rqVideoBusy) return;
+    const go = document.getElementById('rq-video-go');
+    const msg = document.getElementById('rq-video-msg');
+    _rqVideoBusy = true;
+    if (go) { go.disabled = true; go.textContent = 'Starting…'; }
+    try {
+        const res = await fetch('/.netlify/functions/video-projects', {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'from_post', postId }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.message || d.error || 'Could not start the video.');
+        if (msg) {
+            msg.className = 'block mt-1.5 font-semibold text-gray-800';
+            msg.innerHTML = `${d.created ? `${_rqEsc(d.assistantName)} is planning the storyboard — about a minute.` : 'There is already a video for this post.'}
+                <button type="button" onclick="_rqVideoOpenTab(${Number(d.assistantId)})" class="ml-1 underline cursor-pointer">Open the Videos tab</button>`;
+        }
+        if (go) go.remove();
+    } catch (err) {
+        if (msg) { msg.className = 'block mt-1.5 font-semibold text-red-600'; msg.textContent = err.message; }
+        if (go) { go.disabled = false; go.textContent = 'Make a video version'; }
+        _rqVideoBusy = false;
+    }
+}
+
+function _rqVideoOpenTab(assistantId) {
+    if (!Number.isInteger(assistantId) || assistantId <= 0) return;
+    closePostReview();
+    window._assistantDetailInitialTab = 'videos';
+    window.routeToAssistantDetail(String(assistantId));
 }
 
 // ── "Post this somewhere else too" ──────────────────────────────────────────────────────────────

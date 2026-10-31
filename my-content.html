@@ -205,6 +205,13 @@
 
         <!-- Generation form -->
         <div id="vid-form" class="space-y-4">
+          <!-- "Animate this picture" from the viewer (image-to-video, 2026-10-31): the clip starts from
+               this picture, so the prompt describes the MOVEMENT and the picture decides the shape. -->
+          <div id="vid-from-image" class="hidden items-center gap-3 bg-gray-50 border border-gray-200 rounded-lg p-2">
+            <img id="vid-from-image-thumb" alt="" class="w-12 h-12 rounded object-cover shrink-0">
+            <p class="text-xs text-gray-700 flex-1 min-w-0">Animating <strong id="vid-from-image-name" class="break-words"></strong>. Describe how it should move.</p>
+            <button type="button" onclick="window._mcVidClearImage()" class="text-xs font-bold text-gray-500 hover:text-gray-800 cursor-pointer">Remove</button>
+          </div>
           <div>
             <div class="flex items-center justify-between mb-1">
               <label for="vid-prompt" class="block text-sm font-bold text-gray-700">Describe your video <span class="text-red-500">*</span></label>
@@ -220,6 +227,15 @@
               <button type="button" id="vid-dur-6" onclick="window._mcVidSetDuration(6)" class="flex-1 py-1.5 text-sm font-bold rounded-md transition bg-white shadow text-gray-900 cursor-pointer">6s</button>
               <button type="button" id="vid-dur-10" onclick="window._mcVidSetDuration(10)" class="flex-1 py-1.5 text-sm font-bold rounded-md transition text-gray-500 hover:text-gray-700 cursor-pointer">10s</button>
             </div>
+          </div>
+          <div id="vid-shape-row">
+            <label for="vid-shape" class="block text-sm font-bold text-gray-700 mb-1">Shape</label>
+            <select id="vid-shape" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+              <option value="9:16">Tall (9:16) — Reels, Shorts, Stories</option>
+              <option value="4:5">Portrait (4:5) — feed</option>
+              <option value="1:1">Square</option>
+              <option value="16:9">Wide (16:9) — YouTube, website</option>
+            </select>
           </div>
 
           <div class="flex items-center justify-between text-xs bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2">
@@ -318,7 +334,13 @@
       <img id="view-asset-image" alt="" class="hidden max-w-full max-h-[70vh] rounded-xl object-contain">
       <p id="view-asset-empty" class="hidden text-sm text-gray-500">This asset has no previewable media.</p>
     </div>
-    <div class="px-5 py-3 border-t border-gray-100 flex justify-end">
+    <div class="px-5 py-3 border-t border-gray-100 flex justify-end gap-2">
+      <!-- Shown for pictures only; the video tab and generate-ai-video are the real gates. -->
+      <button id="view-asset-animate" type="button" onclick="window._mcAnimateViewed()" style="display:none"
+        class="btn-utility px-4 py-2 text-sm font-bold rounded-lg transition inline-flex items-center gap-2 cursor-pointer">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        Animate this picture
+      </button>
       <!-- Points at content-asset-download, NOT at the media URL itself: the `download` attribute
            is ignored cross-origin, and every asset URL (presigned R2, Pexels CDN) is cross-origin,
            so a direct href navigates to the picture instead of saving it. No target="_blank" —

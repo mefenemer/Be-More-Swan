@@ -34,6 +34,9 @@ export const NEWSLETTER_ROLE_KEY = 'newsletter_editor';
 /** The Brand Designer — briefs, a review grid of options, approved pictures into the library. */
 export const BRAND_DESIGNER_ROLE_KEY = 'brand_designer';
 
+/** The Video Producer — brief → storyboard → finished short video (docs/video-producer-plan.md). */
+export const VIDEO_PRODUCER_ROLE_KEY = 'video_producer';
+
 /** The Mystery Shopper — reads the business's website as a buyer would, scores it, re-checks weekly. */
 export const MYSTERY_SHOPPER_ROLE_KEY = 'mystery_shopper';
 
@@ -60,4 +63,8 @@ export const ORCHESTRATABLE_ROLE_KEYS: string[] = [
     // brief; the checkable artefact is that brief (visual_brief), delivered when the user approves
     // an option. Nothing it makes is used until a human approves it.
     BRAND_DESIGNER_ROLE_KEY,
+    // Video Producer plan, Phase 7 — a campaign commissions a video. The delegable unit is ONE
+    // video project (a free storyboard); making it is the user's click, and the finished video is an
+    // ordinary post they approve. The checkable artefact is the project (video_project).
+    VIDEO_PRODUCER_ROLE_KEY,
 ];

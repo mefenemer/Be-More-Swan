@@ -22,6 +22,8 @@
 
 import { renderMediaOnLambda, getRenderProgress, type AwsRegion } from '@remotion/lambda/client';
 import type { Overlay } from './overlay-geometry';
+import type { CaptionTrack } from './captions';
+import type { StillMotion } from './still-motion';
 
 const REGION = process.env.REMOTION_REGION as AwsRegion | undefined;
 const FUNCTION_NAME = process.env.REMOTION_LAMBDA_FUNCTION_NAME;
@@ -94,6 +96,8 @@ export interface RenderInput {
                         // Empty when the post is a STILL — imageSrc carries it instead.
     /** A still backdrop. Set instead of videoSrc for a photo + audio post, which has to become an mp4. */
     imageSrc?: string;
+    /** Slow movement on that still. Absent = none; ignored by a bundle older than 2026-10-31. */
+    imageMotion?: StillMotion;
     /** Timed audio — voice notes and sound. Already resolved to fetchable URLs. */
     audio?: Array<{ id: string; src: string; startS?: number; endS?: number; volume: number; fadeInS?: number; fadeOutS?: number }>;
     /**
@@ -106,7 +110,7 @@ export interface RenderInput {
      * Advisory — the composition intersects each one with the file's real duration, because nothing
      * on this side of the render can open a video to check. See src/lib/video-edit.ts.
      */
-    clips?: Array<{ id: string; src: string; inS?: number; outS?: number; gain?: number }>;
+    clips?: Array<{ id: string; src: string; inS?: number; outS?: number; gain?: number; kind?: 'image'; holdS?: number; motion?: StillMotion }>;
     /** 'w:h' of the output frame, when it cannot be inherited from a single source clip. */
     targetRatio?: string;
     /**
@@ -115,6 +119,8 @@ export interface RenderInput {
      */
     framePosition?: { offsetX: number; offsetY: number };
     overlays: Overlay[];
+    /** Voiceover captions (src/lib/captions.ts). Absent when nothing is said — and ignored by a bundle older than 2026-10-31. */
+    captions?: CaptionTrack;
     width: number;
     height: number;
     fps: number;

@@ -13,10 +13,12 @@
 
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { contentAssets, postRenderJobs, scheduledPosts, scheduledPostAssets } from '../../db/schema';
+import { contentAssets, organisations, postRenderJobs, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import type { Overlay } from './overlay-geometry';
 import { renderableAudio } from './audio-overlays';
-import { DEFAULT_TARGET_RATIO, readVideoEdit, renderableClips, resolveClipGain, resolveTrim } from './video-edit';
+import { isStillMotion, type StillMotion } from './still-motion';
+import { buildCaptionCues, captionAccent, type CaptionSource, type CaptionTrack, type SpokenWordLike } from './captions';
+import { DEFAULT_TARGET_RATIO, editHasStills, readVideoEdit, renderableClips, resolveClipGain, resolveTrim } from './video-edit';
 import { reframeRatioFor } from '../utils/format-router';
 
 type Db = ReturnType<typeof getDb>;
@@ -236,6 +238,42 @@ export async function resolveAudioTracks(
 
 const AUDIO_URL_TTL_SEC = 3600;
 
+/**
+ * Captions for the voiceovers on a post (Video Producer plan, Phase 3).
+ *
+ * Words come from each voiceover asset's own transcription (render_params.words, written by
+ * generate-voiceover) — never from a script — and only for clips not switched off (`captions !==
+ * false`). Org-scoped for the same reason as resolveAudioTracks. Returns null when there is nothing
+ * to caption, so the render input simply has no `captions` and an old bundle never sees the field.
+ *
+ * The accent is the brand's primary colour when it reads over footage (captionAccent), read here so
+ * the composition stays free of database knowledge.
+ */
+export async function resolveCaptionTrack(db: Db, raw: unknown, orgId: number): Promise<CaptionTrack | null> {
+    const overlays = renderableAudio(raw).filter(a => a.captions !== false);
+    if (!overlays.length) return null;
+    const ids = [...new Set(overlays.map(a => a.assetId))];
+    const rows = await db
+        .select({ id: contentAssets.id, assetType: contentAssets.assetType, renderParams: contentAssets.renderParams })
+        .from(contentAssets)
+        .where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
+    const wordsById = new Map<number, SpokenWordLike[]>();
+    for (const r of rows) {
+        const p = r.renderParams as { kind?: unknown; words?: unknown } | null;
+        if ((r.assetType ?? '').toLowerCase() !== 'audio' || p?.kind !== 'voiceover' || !Array.isArray(p.words)) continue;
+        wordsById.set(r.id, p.words as SpokenWordLike[]);
+    }
+    const sources: CaptionSource[] = overlays
+        .filter(a => wordsById.has(a.assetId))
+        .map(a => ({ startS: a.startS, endS: a.endS, words: wordsById.get(a.assetId)! }));
+    const cues = buildCaptionCues(sources);
+    if (!cues.length) return null;
+    const [org] = await db.select({ brandKit: organisations.brandKit }).from(organisations)
+        .where(eq(organisations.id, orgId)).limit(1).catch(() => [] as Array<{ brandKit: unknown }>);
+    const kit = (org?.brandKit ?? null) as { primaryColor?: string } | null;
+    return { cues, accent: captionAccent(kit?.primaryColor) };
+}
+
 /** One clip of the timeline, resolved to something Lambda can fetch. */
 export interface ResolvedClip {
     id: string;
@@ -247,6 +285,10 @@ export interface ResolvedClip {
     outS?: number;
     /** 0..1 on the clip's own camera audio. Absent = leave it alone (the composition plays it at 1). */
     gain?: number;
+    /** A still scene: an image held for holdS seconds, optionally moving (video-edit.ts VideoClip). */
+    kind?: 'image';
+    holdS?: number;
+    motion?: StillMotion;
 }
 
 /**
@@ -283,21 +325,29 @@ export async function resolveEditClips(
         return externalUrl ?? null;
     };
 
-    const clips = base.kind === 'video' ? renderableClips(videoEdit) : [];
+    // A timeline with a still scene renders whatever the base is — a storyboard may OPEN on a picture.
+    const clips = base.kind === 'video' || editHasStills(videoEdit) ? renderableClips(videoEdit) : [];
     if (clips.length) {
         const ids = [...new Set(clips.map(c => c.assetId))];
         const rows = await db
             .select({ id: contentAssets.id, assetType: contentAssets.assetType, storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl })
             .from(contentAssets)
             .where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
-        const byId = new Map(rows.filter(r => (r.assetType ?? '').toLowerCase() === 'video').map(r => [r.id, r]));
+        const byId = new Map(rows.map(r => [r.id, r]));
 
         const out: ResolvedClip[] = [];
         for (const clip of clips) {
             const asset = byId.get(clip.assetId);
             if (!asset) continue;
+            // The asset must be what the clip says it is: an image for a still, a video otherwise.
+            const type = (asset.assetType ?? '').toLowerCase();
+            if (type !== (clip.kind === 'image' ? 'image' : 'video')) continue;
             const src = await srcFor(asset.storageKey, asset.externalUrl);
             if (!src) continue;
+            if (clip.kind === 'image') {
+                out.push({ id: clip.id, assetId: clip.assetId, src, kind: 'image', holdS: clip.holdS, ...(clip.motion ? { motion: clip.motion } : {}) });
+                continue;
+            }
             // The trim is resolved with no known duration on purpose: content_assets stores none, so
             // the real length is measured inside the render and the bounds clamped there.
             const trim = resolveTrim(clip, null);
@@ -466,6 +516,7 @@ export function renderFingerprint(identity: RenderIdentity): string {
     const clips = renderableClips(identity.videoEdit);
     const clipKey = clips.length
         ? clips.map(c => {
+            if (c.kind === 'image') return [c.assetId, 'still', c.holdS ?? '', c.motion ?? ''].join(',');
             const trim = resolveTrim(c, null);
             const gain = resolveClipGain(c, identity.hasTimelineAudio);
             return [c.assetId, trim?.inS ?? '', trim?.outS ?? '', gain ?? ''].join(',');
@@ -474,7 +525,7 @@ export function renderFingerprint(identity: RenderIdentity): string {
         : `base:${identity.baseAssetId}`;
 
     const audioKey = renderableAudio(identity.audioOverlays)
-        .map(a => [a.assetId, a.startS ?? '', a.endS ?? '', a.volume, a.fadeInS ?? '', a.fadeOutS ?? ''].join(','))
+        .map(a => [a.assetId, a.startS ?? '', a.endS ?? '', a.volume, a.fadeInS ?? '', a.fadeOutS ?? '', a.captions === false ? 'nocap' : ''].join(','))
         .join('|');
 
     const frame = identity.framePosition
@@ -519,6 +570,11 @@ export interface FrameMeta { width: number; height: number; fps: number; duratio
  */
 export interface RenderJobInput extends FrameMeta {
     forceVideo?: boolean;
+    /**
+     * Slow movement on a still backdrop (src/lib/still-motion.ts). On the job, like forceVideo,
+     * because it is a choice about THIS render that the post itself does not record.
+     */
+    stillMotion?: StillMotion;
     /** The ratio this job renders at — the master, or this platform's re-frame of it. */
     targetRatio?: string;
     /**
@@ -532,6 +588,12 @@ export interface RenderJobInput extends FrameMeta {
 /** True when this job must produce a video even with nothing to burn in. Defensive: old rows have no flag. */
 export function readForceVideo(raw: unknown): boolean {
     return !!(raw && typeof raw === 'object' && (raw as Record<string, unknown>).forceVideo === true);
+}
+
+/** The job's still movement, or 'none' — old rows and anything unrecognised render a still still. */
+export function readStillMotion(raw: unknown): StillMotion {
+    const v = raw && typeof raw === 'object' ? (raw as Record<string, unknown>).stillMotion : undefined;
+    return isStillMotion(v) ? v : 'none';
 }
 
 /** A job's stored fingerprint, or null on a row written before this field existed. */

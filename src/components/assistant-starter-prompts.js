@@ -28,6 +28,13 @@
     ],
     // Each produces a BRIEF — what the picture is for — which is the only input this assistant
     // needs. None asks it to generate or spend: making options is a click the user makes.
+    // Each one ends in a brief card or a re-plan card — planning is free; making the video is a click
+    // on the Videos tab, where the cost is shown.
+    video_producer: [
+      'Make a 30-second video about our autumn menu, ending with "Pop in this week".',
+      'Turn our best-selling product into a 15-second Reel.',
+      'Plan my latest storyboard again with more energy.',
+    ],
     brand_designer: [
       'I need a square image for a post about our spring offer — warm and bright.',
       'Make a branded card that says "Booking now open for summer".',

@@ -213,7 +213,8 @@ check('music has its own capability switch, not AI images', () => {
 });
 
 check('an audio settle is ledgered as music_generation', () => {
-    assert.ok(credits.includes("params.mediaType === 'audio' ? 'music_generation'"));
+    // A voiceover shares the audio reason on the legacy path (no migration) — Video Producer Phase 2.
+    assert.ok(credits.includes("params.mediaType === 'audio' || params.mediaType === 'voiceover' ? 'music_generation'"));
     assert.ok(/export const MUSIC_CREDIT_COST = \d+;/.test(credits));
 });
 

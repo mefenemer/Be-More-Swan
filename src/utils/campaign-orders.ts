@@ -31,6 +31,7 @@
 import { triggerCampaignEmailDraft } from './trigger-campaign-email-draft';
 import { fileTaskTicket, isPmProvider } from './campaign-tickets';
 import { createBriefForOrder } from './campaign-visual-order';
+import { createVideoForOrder } from './campaign-video-order';
 import { endRound, startRound } from './visual-briefs';
 import { triggerBriefRound } from './trigger-brief-round';
 import { visualBriefs } from '../../db/schema';
@@ -419,7 +420,7 @@ interface ExecutorResult {
     message?: string;
     /** True when the order is complete the moment it is issued (steering orders). */
     terminal?: boolean;
-    artefactKind?: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | 'visual_brief';
+    artefactKind?: 'scheduled_post' | 'blog_post' | 'discovery_campaign' | 'visual_brief' | 'video_project';
     artefactId?: number;
     summary?: string;
 }
@@ -661,5 +662,18 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
             }
         }
         return { ok: true, artefactKind: 'visual_brief', artefactId: made.briefId, summary };
+    },
+
+    // Video Producer plan, Phase 7 — ONE video project, linked to the campaign and this order. Its
+    // storyboard is planned now (free); making the video waits for the user's "Make the video" on the
+    // Videos tab, because that is the click that shows and spends the AI credits. See
+    // src/utils/campaign-video-order.ts.
+    commission_video: async (db, ctx, orderId) => {
+        const made = await createVideoForOrder(db, ctx, orderId);
+        if (!made.ok) return { ok: false, message: made.message };
+        return {
+            ok: true, artefactKind: 'video_project', artefactId: made.projectId,
+            summary: 'The Video Producer is planning the storyboard — check it on its Videos tab, then press "Make the video"',
+        };
     },
 };

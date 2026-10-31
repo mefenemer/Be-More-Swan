@@ -34,7 +34,7 @@ import { audienceLine } from '../config/campaign-audience';
 import { countCampaignOutcome } from './campaign-outcomes';
 import { experimentResults, learningsPromptBlock } from './campaign-learning';
 import {
-    CAMPAIGN_OUTCOME_LABELS, CAMPAIGN_STATUS_LABELS, HUMAN_ROLE_KEY, ORDER_ACTION_SPECS, isOrderAction, orderWorkItems,
+    CAMPAIGN_OUTCOME_LABELS, CAMPAIGN_STATUS_LABELS, HUMAN_ROLE_KEY, ORDER_ACTION_SPECS, VIDEO_ORDER_LENGTHS, isOrderAction, orderWorkItems,
     type CampaignOrderAction, type CampaignOutcomeMetric, type CampaignStatus,
 } from '../config/campaign-vocab';
 
@@ -53,6 +53,7 @@ export const ORDER_ROLE_LABELS: Record<string, string> = {
     lead_qualifier: 'Lead Generation Assistant',
     newsletter_editor: 'Email Marketing Assistant',
     brand_designer: 'Brand Designer',
+    video_producer: 'Video Producer',
     human: 'A person on your team',
 };
 
@@ -92,6 +93,9 @@ const BRIEF_TEXT_FIELDS: Record<string, number> = {
     // commission_visuals (Brand Designer, Phase 3): what the picture shows, exact words for a
     // branded card, what it must not show — read by campaign-visual-order.ts createBriefForOrder.
     show: 1000, headline: 120, mustAvoid: 300,
+    // commission_video (Video Producer, Phase 7): what the video says, and its call to action — read
+    // by campaign-video-order.ts videoBriefForOrder.
+    videoMessage: 1000, cta: 200,
 };
 /** Closed vocabularies — anything else is dropped, and the worker picks the stage's default. */
 const BRIEF_ENUM_FIELDS: Record<string, readonly string[]> = {
@@ -103,6 +107,8 @@ const BRIEF_ENUM_FIELDS: Record<string, readonly string[]> = {
     // commission_visuals: what the picture is for, and its shape (visual-brief-vocab.ts).
     purpose: BRIEF_PURPOSES,
     aspectRatio: BRIEF_ASPECT_RATIOS,
+    // commission_video: 15, 30 or 60 seconds; absent = the Video Producer's own setup.
+    videoLength: VIDEO_ORDER_LENGTHS,
 };
 
 function cleanBrief(rec: Record<string, unknown>): Record<string, unknown> {
@@ -115,7 +121,9 @@ function cleanBrief(rec: Record<string, unknown>): Record<string, unknown> {
         if (typeof v === 'string' && v.trim()) out[k] = v.trim().slice(0, max);
     }
     for (const [k, allowed] of Object.entries(BRIEF_ENUM_FIELDS)) {
-        if (typeof src[k] === 'string' && allowed.includes(src[k] as string)) out[k] = src[k];
+        // A length arrives as a number from a model ("videoLength": 30) — compared as its text.
+        const v = typeof src[k] === 'number' ? String(src[k]) : src[k];
+        if (typeof v === 'string' && allowed.includes(v)) out[k] = v;
     }
     // A real calendar date or nothing — "by Friday" is not a due date we can show as overdue.
     if (typeof src.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(src.dueDate.trim())

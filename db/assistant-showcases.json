@@ -378,6 +378,67 @@
       }
     ]
   },
+  "video_producer": {
+    "headline": "Say what the video is about. Check the storyboard. Approve the video.",
+    "overview": [
+      "The Video Producer makes short vertical videos for Instagram Reels, YouTube Shorts and Facebook Reels. It writes the script from your business details and products, picks stock footage, your own pictures, branded cards or AI scenes, and adds a voiceover and captions.",
+      "You check the storyboard scene by scene before anything is made, and approve the finished video in your Review Queue before it goes out. Nothing posts on its own."
+    ],
+    "highlights": [
+      "15, 30 or 60 seconds",
+      "Voiceover and captions",
+      "Storyboard before anything is made",
+      "Nothing posts until you approve"
+    ],
+    "steps": [
+      {
+        "title": "Say what it should say",
+        "body": "A sentence or two — an offer, a product, a tip. Pick the length, voice and where it posts."
+      },
+      {
+        "title": "Check the storyboard",
+        "body": "Every scene with its voiceover line and words on screen. Change any scene, or ask for a new plan with your notes."
+      },
+      {
+        "title": "Make the video",
+        "body": "It shows what it will use before you press it, then voices, captions and edits the video."
+      },
+      {
+        "title": "Approve it",
+        "body": "The finished video lands in your Review Queue like any post, ready to approve or edit."
+      }
+    ],
+    "features": [
+      {
+        "title": "Your products, your pictures",
+        "body": "Product scenes use your own photos — it never uses AI to picture what you sell. AI scenes never have words painted into them.",
+        "image": "/images/assistants/video_producer/storyboard.jpg",
+        "alt": "A Video Producer storyboard: each scene with its voiceover line, words on screen and where its picture comes from"
+      },
+      {
+        "title": "Voiceover and captions included",
+        "body": "Six voices to choose from. Captions show each word as it’s spoken, so the video works with the sound off."
+      },
+      {
+        "title": "Videos from your posts and campaigns",
+        "body": "Turn a post into a video version with one click, have it plan up to three storyboards a week, or let your Campaign Assistant commission one."
+      }
+    ],
+    "faqs": [
+      {
+        "q": "Does it use tasks?",
+        "a": "Planning a storyboard is free. Making the video uses tasks only for AI scenes and the voiceover: 20 tasks for an AI clip (at most 3 in a video), 1 for an AI picture and 1 for the voiceover. Stock footage, stock photos, your own pictures and branded cards use none. Making videos is on the Busywork Buster plan."
+      },
+      {
+        "q": "Can it edit my own footage?",
+        "a": "Not yet — it doesn’t watch footage you give it or pick the best moments. It builds videos from stock footage, your own pictures, branded cards and AI scenes, and you can fine-tune the finished video in the post editor."
+      },
+      {
+        "q": "Which platforms does it post to?",
+        "a": "Instagram Reels, YouTube Shorts and Facebook Reels, up to 60 seconds. Not TikTok yet."
+      }
+    ]
+  },
   "mystery_shopper": {
     "headline": "See your website through a stranger's eyes, and fix what's costing you sales.",
     "overview": [

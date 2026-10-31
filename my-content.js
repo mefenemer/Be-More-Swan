@@ -687,7 +687,49 @@ window._mcViewAsset = function (id) {
         dl.classList.add('hidden');
     }
 
+    // "Animate this picture" (image-to-video, 2026-10-31). style.display, not `hidden` — same
+    // inline-flex trap as the download button above.
+    const animate = document.getElementById('view-asset-animate');
+    if (animate) animate.style.display = url && asset.assetType === 'image' ? '' : 'none';
+    _mcViewedId = asset.id;
+
     modal.classList.remove('hidden');
+};
+
+let _mcViewedId = null;
+
+// Opens the Generate AI Video tab with the viewed picture as the clip's start frame. The capability
+// check runs first: with no assistant that can make video, the tab stays hidden and we say so.
+window._mcAnimateViewed = async function () {
+    const asset = Object.values(_assets).flat().find(a => a.id === _mcViewedId);
+    if (!asset) return;
+    window._mcCloseViewer();
+    _openUploadModal();
+    await _mcLoadCapabilities();
+    if (!_mcCaps.assistantCanVideo) {
+        const err = document.getElementById('upload-error');
+        if (err) { err.textContent = 'None of your assistants can create videos yet.'; err.classList.remove('hidden'); }
+        return;
+    }
+    _mcSwitchTab('video');
+    _mcVidImageAssetId = asset.id;
+    const box = document.getElementById('vid-from-image');
+    document.getElementById('vid-from-image-thumb').src = asset.storageUrl || asset.externalUrl || '';
+    document.getElementById('vid-from-image-name').textContent = asset.name || 'this picture';
+    box.classList.remove('hidden'); box.style.display = 'flex';
+    document.getElementById('vid-shape-row').style.display = 'none';
+    const prompt = document.getElementById('vid-prompt');
+    if (prompt) { prompt.placeholder = 'A slow push-in, steam drifting up from the cup'; prompt.focus(); }
+};
+
+window._mcVidClearImage = function () {
+    _mcVidImageAssetId = null;
+    const box = document.getElementById('vid-from-image');
+    if (box) { box.classList.add('hidden'); box.style.display = 'none'; }
+    const row = document.getElementById('vid-shape-row');
+    if (row) row.style.display = '';
+    const prompt = document.getElementById('vid-prompt');
+    if (prompt) prompt.placeholder = 'Slow cinematic pan across a sunlit artisan bakery, steam rising from fresh bread';
 };
 
 window._mcCloseViewer = function () {
@@ -748,6 +790,7 @@ function _openUploadModal() {
     document.getElementById('vid-insufficient')?.classList.add('hidden');
     document.getElementById('vid-form')?.classList.remove('hidden');
     if (typeof _mcVidSetDuration === 'function') _mcVidSetDuration(6);
+    if (typeof window._mcVidClearImage === 'function') window._mcVidClearImage();
     document.getElementById('modal-upload')?.classList.remove('hidden');
 }
 
@@ -1035,6 +1078,7 @@ window._mcSaveAiSelection = async function () {
 // ── Generate AI Video ─────────────────────────────────────────────
 let _mcVidJobId = null;
 let _mcVidDuration = 6;
+let _mcVidImageAssetId = null;
 let _mcVidPollTimer = null;
 
 window._mcVidPromptInput = function () {
@@ -1088,7 +1132,11 @@ window._mcGenerateVideo = async function () {
         const res = await fetch('/.netlify/functions/generate-ai-video', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt, durationSeconds: _mcVidDuration }),
+            body: JSON.stringify({
+                prompt, durationSeconds: _mcVidDuration,
+                aspectRatio: document.getElementById('vid-shape')?.value || '9:16',
+                ...(_mcVidImageAssetId ? { imageAssetId: _mcVidImageAssetId } : {}),
+            }),
         });
 
         if (res.status === 403) {

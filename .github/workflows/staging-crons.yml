@@ -123,6 +123,8 @@ jobs:
           # within 18h (a watch scanned since is skipped), so the 6h interval only catches a new watch early.
           # `run-site-directory-dispatch` (24h) starts the site page directory's weekly refreshes. Idempotent:
           # a workspace is due only a week after its last read.
+          # `run-video-autopilot` (6h) writes the Video Producer's weekly storyboards (video-autopilot.ts).
+          # Idempotent: a storyboard is due only after its spacing (7/3/2 days); never makes a video.
           # `run-partner-sweep` (24h) makes partner commissions past their holding period payable.
           # Idempotent; daily matches production.
           # `run-paid-optimiser` (12h) is the paid-campaign sweep: fatigue pauses, the control
@@ -147,6 +149,7 @@ jobs:
           run-lead-sweeps           21600   300
           run-site-audit-dispatch   21600   120
           run-site-directory-dispatch 86400 120
+          run-video-autopilot       21600   120
           run-mentor-review-dispatch 21600  120
           run-discussion-scan-dispatch 21600 120
           run-paid-optimiser        43200   300

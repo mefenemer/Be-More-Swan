@@ -37,6 +37,7 @@
     newsletter_editor: 'Email Marketing', brand_designer: 'Brand Designer', campaign_orchestrator: 'Campaign',
     mystery_shopper: 'Mystery Shopper',
     website_assistant: 'Website Assistant',
+    video_producer: 'Video Producer',
   };
   const KIND_CHIPS = {
     brief: ['Brief', 'bg-gray-50 text-gray-600 border-gray-200'],

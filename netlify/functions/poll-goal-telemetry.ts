@@ -451,6 +451,14 @@ async function fetchMetric(
                 .where(and(eq(scheduledPosts.assistantId, goal.assistantId), eq(scheduledPosts.status, 'published')));
             return { value: Number(row?.v ?? 0), disconnected: false };
         }
+        case 'videos_published': {
+            // Video Producer — its videos are ordinary posts (one per platform), so count published ones.
+            const [row] = await db
+                .select({ v: sql<number>`count(*)::int` })
+                .from(scheduledPosts)
+                .where(and(eq(scheduledPosts.assistantId, goal.assistantId), eq(scheduledPosts.status, 'published'), eq(scheduledPosts.postFormat, 'video')));
+            return { value: Number(row?.v ?? 0), disconnected: false };
+        }
         case 'posts_published': {
             // Blog Writer outcome — published long-form posts (blog_posts), mirroring 'content_published'.
             const [row] = await db

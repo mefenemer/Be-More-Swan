@@ -742,6 +742,32 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // Video Producer: "Plan this video" / "Plan it again" — video-projects.ts `create` / `replan`, the
+    // same actions as the Videos tab. Both are free; nothing here can make (spend on) a video.
+    function videoProjectsCall(body) {
+      return fetch('/.netlify/functions/video-projects', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify(body),
+      }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || data.error || `That didn\u2019t work (HTTP ${res.status}).`);
+        document.dispatchEvent(new CustomEvent('video:changed', { detail: { assistantId } }));
+        return data;
+      });
+    }
+    function onVideoCreate(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      videoProjectsCall({ action: 'create', assistantId, brief: d.brief || {} })
+        .then(() => respond({ ok: true })).catch((err) => respond({ ok: false, error: err.message }));
+    }
+    function onVideoReplan(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      videoProjectsCall({ action: 'replan', id: d.projectId, feedback: d.feedback || '' })
+        .then(() => respond({ ok: true })).catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // Post action card (Social Media chat) → the endpoints the Posts tab's own buttons call:
     // approve-post, reject-post, retry-failed-post, reschedule-post-chat. A cross-post is acted on
     // row by row as the tab does it (reject-post takes the group itself; a reschedule moves the named
@@ -821,6 +847,13 @@
           message = over.length === ids.length
             ? 'The new version ran past the platform’s limit, so nothing was changed. Open the post to edit it by hand.'
             : `${what} — saved.${over.length ? ` ${over.length} platform${over.length === 1 ? '' : 's'} kept the old wording: the new one ran past that platform’s limit.` : ''} Open the post to read it.`;
+        } else if (d.action === 'video_version') {
+          // The Review Queue's "Make a video version" — video-projects.ts `from_post`. Free: it plans
+          // a storyboard on the Video Producer's Videos tab; making the video is a click there.
+          const r = await postActionCall('video-projects', { action: 'from_post', postId: d.postId });
+          message = r.created
+            ? `${r.assistantName || 'Your Video Producer'} is planning the storyboard — it appears on its Videos tab in about a minute.`
+            : 'There is already a video for this post — it’s on your Video Producer’s Videos tab.';
         } else {
           throw new Error('Unknown action.');
         }
@@ -2037,6 +2070,8 @@
     container.addEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
     container.addEventListener('campaign:saveLearning', onCampaignSaveLearning);
     container.addEventListener('brief:create', onBriefCreate);
+    container.addEventListener('video:create', onVideoCreate);
+    container.addEventListener('video:replan', onVideoReplan);
     container.addEventListener('post:action', onPostAction);
     container.addEventListener('blog:action', onBlogAction);
     container.addEventListener('email:action', onEmailAction);
@@ -2131,6 +2166,8 @@
         container.removeEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
         container.removeEventListener('campaign:saveLearning', onCampaignSaveLearning);
         container.removeEventListener('brief:create', onBriefCreate);
+        container.removeEventListener('video:create', onVideoCreate);
+        container.removeEventListener('video:replan', onVideoReplan);
         container.removeEventListener('post:action', onPostAction);
         container.removeEventListener('blog:action', onBlogAction);
         container.removeEventListener('email:action', onEmailAction);

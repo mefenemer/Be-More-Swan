@@ -280,7 +280,7 @@
       const video = kinds.ai === 'video';
       const can = video ? !!(aiCaps.assistantCanVideo && aiCaps.tierCanVideo) : !!aiCaps.canImage;
       aiForm.hidden = !(aiCaps.canImage || aiCaps.assistantCanVideo);
-      $('[data-mp-ai-shape]').hidden = video;
+      // Video honours the shape too since image-to-video (2026-10-31): the clip starts from a frame drawn at it.
       $('[data-mp-ai-go]').disabled = !can;
       const cost = video ? aiCaps.videoCost : aiCaps.imageCost;
       $('[data-mp-ai-cost]').textContent = can && cost ? `Uses ${unitWord(cost, aiCaps.unit)}${video ? ' · a 6-second clip, ready in a few minutes' : ' · four to choose from'}` : '';
@@ -337,7 +337,7 @@
     });
     async function createVideo(prompt) {
       say(`${who} has started your video — this takes a few minutes. You can keep this open.`);
-      const res = await api('generate-ai-video', { method: 'POST', body: JSON.stringify({ prompt, aspectRatio: '16:9', durationSeconds: 6 }) });
+      const res = await api('generate-ai-video', { method: 'POST', body: JSON.stringify({ prompt, aspectRatio: $('[data-mp-ai-shape]').value, durationSeconds: 6 }) });
       if (closed) return;
       if (!res.ok) { say(res.body && res.body.error === 'insufficient_credits' ? creditMessage(res.body) : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be started. Please try again.', true); return; }
       const jobId = res.body.jobId;

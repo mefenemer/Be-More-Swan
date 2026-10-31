@@ -522,6 +522,9 @@
     idea: ['Brief', 1000], angle: ['Angle', 300], audience: ['Audience', 300], facts: ['Points to make, links and facts', 2000],
     hypothesis: ['What you are testing', 300], angleA: ['Angle A', 300], angleB: ['Angle B', 300],
     show: ['What the picture shows', 1000], headline: ['Words on it', 120], mustAvoid: ['What it must avoid', 300],
+    // commission_video (Video Producer, Phase 7). Without these the plan editor showed a video order
+    // with no words at all (found on staging, 2026-10-31).
+    videoMessage: ['What the video says', 1000], cta: ['How it ends (call to action)', 200],
     assignee: ['Who', 80], task: ['What they are asked to do', 500], name: ['Name', 120],
   };
   // The fields each kind of work reads. Any OTHER labelled field already on the brief is shown too,
@@ -536,6 +539,7 @@
     request_human_task: ['assignee', 'task'],
     ab_test_posts: ['hypothesis', 'angleA', 'angleB'],
     commission_visuals: ['show', 'headline', 'mustAvoid'],
+    commission_video: ['videoMessage', 'cta'],
   };
   const EMAIL_TRIGGER_LABELS = {
     form: 'People who sign up through a form (a follow-up)',
@@ -1177,6 +1181,8 @@
     ab_test_posts: { field: 'hypothesis', label: 'What are you testing?', placeholder: 'e.g. Does a customer story beat a how-to on LinkedIn?', required: true },
     // Brand Designer, Phase 3. Required unless card words are given — checked on submit.
     commission_visuals: { field: 'show', label: 'What should the picture show?', placeholder: 'e.g. A small team celebrating in a bright studio', required: false },
+    // Video Producer, Phase 7. Optional: without it the campaign's objective is the message.
+    commission_video: { field: 'videoMessage', label: 'What should the video say? (optional)', placeholder: 'Leave blank to use this campaign\'s objective', required: false },
   };
 
   function actionSpec(key) {

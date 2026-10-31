@@ -23,7 +23,7 @@ import { SCHEDULE_ACTIVE_STATUSES, AWAITING_REVIEW_STATUSES } from '../../src/co
 import { diagnosePostFailure } from '../../src/utils/post-failure-diagnosis';
 import { PLATFORM_FORMATS } from '../../src/config/platform-formats';
 import { keepDisclosureOnCaption } from '../../src/utils/post-disclosure';
-import { requesterNamesForJobIds } from '../../src/utils/requested-by';
+import { requesterNamesForJobIds, requesterNamesForVideoPosts } from '../../src/utils/requested-by';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -145,8 +145,12 @@ export default withLambda(async (event) => {
             // A failed post carries its plain-English cause, so the chip can say WHY without the
             // owner opening it — the same diagnosis the Review card shows.
             const requesters = user.organisationId != null ? await requesterNamesForJobIds(db, user.organisationId, rows.map((p) => p.jobId)) : new Map<string, string>();
+            // Video Producer videos carry no job; their requester is on the video project.
+            const videoRequesters = user.organisationId != null
+                ? await requesterNamesForVideoPosts(db, user.organisationId, rows.filter((p) => !p.jobId).map((p) => ({ id: p.id, crosspostGroupId: p.crosspostGroupId })))
+                : new Map<number, string>();
             const posts = rows.map(({ jobId, ...p }) => {
-                const withReq = { ...p, requestedBy: (jobId ? requesters.get(jobId) : undefined) ?? null };
+                const withReq = { ...p, requestedBy: (jobId ? requesters.get(jobId) : undefined) ?? videoRequesters.get(p.id) ?? null };
                 return p.status !== 'failed' ? withReq : {
                     ...withReq,
                     failure: diagnosePostFailure(

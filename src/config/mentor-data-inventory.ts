@@ -76,6 +76,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ]),
     ...group('on_request', 'Email results: sends and link clicks (totals)', ['newsletter_sends', 'newsletter_link_clicks', 'newsletter_sequences']),
     ...group('on_request', 'Brand Designer briefs and Inspo titles', ['visual_briefs', 'inspo_items']),
+    ...group('on_request', 'Video Producer videos: titles, status and what they cost', ['video_projects']),
     ...group('on_request', 'The user\'s own support tickets and issue reports, with status', ['support_tickets', 'issue_reports']),
     ...group('on_request', 'A half-finished assistant set-up, to offer picking it up', ['onboarding_drafts']),
     ...group('on_request', 'Bookings: counts and upcoming, when bookings are in use', ['bookings', 'booking_settings', 'class_sessions']),

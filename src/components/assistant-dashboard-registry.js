@@ -588,6 +588,34 @@
       defaultMainTab: 'briefs',
     },
 
+    // Video Producer (docs/video-producer-plan.md). Its videos are ordinary POSTS (one per platform), so
+    // the Review Queue, Calendar and post insights all work as they do for the Social Media Assistant —
+    // the KPI labels below are the post-insights labels, reworded for video. The Videos tab is where a
+    // video is briefed, its storyboard checked and "Make the video" pressed (assistant-videos.js).
+    video_producer: {
+      kpis: [
+        { label: 'Engagement Rate by Reach', title: 'Watched and Liked', desc: 'Of everyone who saw your videos, how many stopped to engage with them.' },
+        { label: 'Organic Reach Growth', title: 'New Viewers', desc: 'How far your videos are spreading beyond your existing followers.' },
+        { label: 'Click-Through Rate', title: 'Did What You Asked', desc: 'How many viewers took the action your video asked for.' },
+        { label: 'Meaningful Engagement', title: 'Saves, Shares & DMs', desc: 'The signals that turn a view into a customer — weighed above likes.' },
+      ],
+      reviewQueue: { kind: 'posts', label: 'Review Queue' },
+      hideDataHub: true,
+      // Goals: 'videos_published' (goal-metrics.ts), counted from its published posts.
+      modules: {
+        hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
+      },
+      // ⚠️ If you rename this tab, change videoProducerSurfaces() in chat-orchestrator.ts too —
+      // tests/video-producer-role.test.ts fails until both agree.
+      videosTab: { label: 'Videos' },
+      // Rules tab: read by its storyboard planner and its chat (video-producer.ts, RULE_READING_ROLES).
+      rulesScope: 'video',
+      defaultMainTab: 'videos',
+    },
+
     // Website Assistant (docs/website-assistant-plan.md). Its work is ONE site — a draft edited on the
     // Website tab (and in chat), published from the Publish card there. No posts, records or review
     // queue: the preview IS its review surface. Its Activity tab reads its drafts, publishes, import,

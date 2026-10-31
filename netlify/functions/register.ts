@@ -3,7 +3,7 @@ import { Handler } from '@netlify/functions';
 import { eq, and } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
-import { users, organisations, userOrganisations, userProfiles, userReferrals, referralInvites, plans } from '../../db/schema';
+import { users, organisations, userOrganisations, userProfiles, userReferrals, referralInvites, plans, signupSources } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { isRegistrationLocked } from '../../src/utils/platform-config';
@@ -14,6 +14,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { businessDomainOf } from '../../src/utils/email-domain';
 import { findPaidDomainWorkspace } from '../../src/utils/domain-workspace';
 import { isEuCountry } from '../../src/config/compliance';
+import { cleanSignupSource } from '../../src/utils/visit-source';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const slugify = (str: string) =>
@@ -67,6 +68,7 @@ export default withLambda(async (event) => {
         let planTier = body.planTier?.trim() || null;
         const attributionRef = body.attributionRef?.trim() || null; // US-AUD-5.3.1 SC5
         const referralRef = body.referralRef?.trim().toUpperCase() || null;   // US-GAP-8.2: workspace referral code (codes are upper case)
+        const signupSource = cleanSignupSource(body.signupSource);   // growth funnel: the marketing source visit-count.js credited
         const partnerToken = typeof body.partnerToken === 'string' ? body.partnerToken.trim() : '';   // approved partner's private link
         // US4 (Domain Consolidation): set once the user has seen the consolidation prompt and
         // explicitly chose to create their own separate workspace anyway.
@@ -373,6 +375,17 @@ export default withLambda(async (event) => {
                 }
             } catch (refErr) {
                 console.warn('[referral] Failed to record referral:', refErr);
+            }
+        }
+
+        // Growth funnel (db/z-growth-funnel.sql): which marketing brought this account. Never blocks a
+        // sign-up — before the SQL is applied, or on any error, the account simply has no source.
+        if (signupSource && resultUser) {
+            try {
+                await db.insert(signupSources).values({ userId: resultUser.id, ...signupSource }).onConflictDoNothing();
+            } catch (srcErr) {
+                const code = (srcErr as { code?: string; cause?: { code?: string } })?.code ?? (srcErr as { cause?: { code?: string } })?.cause?.code;
+                if (code !== '42P01') console.warn('[register] signup source not saved:', srcErr);
             }
         }
 

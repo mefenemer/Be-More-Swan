@@ -9,6 +9,7 @@
 // Knowledge, Inspo) are listed by name only: their content is the customer's, and differs per
 // workspace. Pure.
 
+import { storyboardSystemPrompt } from '../lib/storyboard';
 import { CONTENT_QUALITY_STANDARDS } from '../constants/content-quality';
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { emailCraftBlock } from '../constants/email-craft';
@@ -108,6 +109,14 @@ const DESIGNER: PromptLayer[] = [
       text: 'The brief (what it shows, exact card words, mood, must include / avoid, purpose and shape), the brand colours (in words for images), the workspace\'s picture guidelines, the assistant\'s Rules, and the reasons earlier options were turned down. Colour codes are removed from image prompts in code.' },
 ];
 
+// Video Producer (docs/video-producer-plan.md §5.3): the storyboard planner. Its rules are enforced
+// again in code (src/lib/storyboard.ts enforceStoryboard) — the prompt asks, the code decides.
+const VIDEO: PromptLayer[] = [
+    { key: 'storyboard_craft', title: 'Storyboard craft', kind: 'craft', usedBy: 'Planning video storyboards', source: 'src/lib/storyboard.ts', text: storyboardSystemPrompt() },
+    { key: 'workspace_video', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Planning video storyboards', source: 'src/utils/video-producer.ts',
+      text: 'The brief (what it must say, length, call to action, voiceover on or off, which sources are allowed), today\'s date, the business name, industry, description and Products & Services, up to 30 of the workspace\'s own pictures (id and name) for product shots, the assistant\'s Rules, and the owner\'s notes on the last version.' },
+];
+
 const CAMPAIGNS: PromptLayer[] = [
     { key: 'campaign_craft', title: 'Campaign planning craft', kind: 'craft', usedBy: 'Chat (campaign plans)', source: 'src/constants/campaign-craft.ts', text: CAMPAIGN_PLANNING_CRAFT },
     { key: 'workspace_campaigns', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Chat (campaign plans)', source: 'src/utils/campaign-plan.ts',
@@ -139,6 +148,7 @@ const BY_ROLE: Record<string, PromptLayer[]> = {
     website_assistant: WEBSITE,
     mystery_shopper: SHOPPER,
     brand_designer: DESIGNER,
+    video_producer: VIDEO,
     campaign_orchestrator: CAMPAIGNS,
     business_mentor: MENTOR,
 };
@@ -166,6 +176,7 @@ export const ROLE_MODEL_PATHS: Record<string, { label: string; defaultModel: str
         { label: 'Rewriting the owner\'s own words (Low thinking at most)', defaultModel: 'claude-sonnet-4-6' },
     ],
     brand_designer: [{ label: 'Art direction for visual briefs', defaultModel: 'claude-sonnet-4-6' }],
+    video_producer: [{ label: 'Planning video storyboards', defaultModel: 'claude-sonnet-4-6' }],
     // Background jobs (src/utils/mentor-jobs.ts MENTOR_JOB_DEFAULT_MODEL), not held to Low thinking (§2.4.1).
     business_mentor: [
         { label: 'Strategy documents', defaultModel: 'claude-opus-5-5' },

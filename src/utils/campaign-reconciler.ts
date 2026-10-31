@@ -50,6 +50,7 @@ import {
 } from '../../db/schema';
 import { EMAIL_ORDER_ACTION, findStrandedEmailOrders } from './campaign-email-order';
 import { judgeVisualOrder } from './campaign-visual-order';
+import { judgeVideoOrder } from './campaign-video-order';
 import { triggerCampaignEmailDraft } from './trigger-campaign-email-draft';
 import { checkTaskTickets } from './campaign-tickets';
 import { isScheduleActive } from '../config/post-status';
@@ -643,6 +644,9 @@ export async function reconcileCampaigns(db: Db): Promise<ReconcileResult> {
                 // the Briefs tab; this is the backstop, and it re-attaches approved pictures.
                 : order.action === 'commission_visuals'
                     ? await judgeVisualOrder(db, order)
+                // Video Producer (Phase 7): storyboard → "Make the video" → the post approved.
+                : order.action === 'commission_video'
+                    ? await judgeVideoOrder(db, order)
                     // narrow_targeting and adjust_messaging are terminal the moment they are
                     // issued, so they never appear here. If one does, something set the status by
                     // hand — leave it alone rather than inventing a delivery.

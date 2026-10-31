@@ -459,6 +459,7 @@ window.generateAssistantCardHTML = function(assistant) {
         ...(dReg.mentorTab ? [['🧭', dReg.mentorTab.label || 'Overview', 'mentor']] : []),
         ...(dReg.mentorPlanTab ? [['🗺️', dReg.mentorPlanTab.label || 'Plan', 'mentorplan']] : []),
         ...(dReg.briefsTab ? [['🎨', dReg.briefsTab.label || 'Briefs', 'briefs']] : []),
+        ...(dReg.videosTab ? [['🎬', dReg.videosTab.label || 'Videos', 'videos']] : []),
         ...(dReg.siteAuditTab ? [['🔍', dReg.siteAuditTab.label || 'Website', 'website']] : []),
         ...(dReg.siteEditorTab ? [['🌐', dReg.siteEditorTab.label || 'Website', 'sitebuilder']] : []),
         ...(dReg.hideReviewQueue ? [] : [['✅', dReg.reviewQueue?.label || 'Review', 'review-queue']]),
@@ -1078,6 +1079,7 @@ window._activateMainTab = function(name) {
     if (name === 'email-campaigns') window.AssistantEmailCampaigns?.activate();
     // Briefs (Brand Designer) renders lazily too — init() already fetched for the badge.
     if (name === 'briefs') window.AssistantBriefs?.activate();
+    if (name === 'videos') window.AssistantVideos?.activate();
     // Overview (Business Mentor) — init() already fetched; this only repaints.
     if (name === 'mentor') window.AssistantMentorOverview?.activate();
     // Plan (Business Mentor, Phase 2) — init() already fetched; this repaints and resumes any poll.
@@ -3051,6 +3053,8 @@ const _RQ_BRIEF_LABELS = [
     ['idea', 'Brief'], ['angle', 'Angle'], ['audience', 'Audience'], ['facts', 'Points to make'],
     ['hypothesis', 'Testing'], ['angleA', 'Angle A'], ['angleB', 'Angle B'],
     ['show', 'Picture shows'], ['headline', 'Words on it'], ['mustAvoid', 'Avoid'],
+    // commission_video (Video Producer, Phase 7) — what the video says, how it ends, how long.
+    ['videoMessage', 'Video says'], ['cta', 'Ends with'], ['videoLength', 'Length (seconds)'],
     ['assignee', 'Who'], ['task', 'Task'], ['dueDate', 'Due'], ['name', 'Name'],
 ];
 const _RQ_EMAIL_TRIGGER_LABELS = {
@@ -5139,9 +5143,15 @@ window._renderNeedsYou = function() {
     const onLanding = document.querySelector('.main-tab-btn.active-tab')?.dataset.maintab === landing;
     if (!source || !onLanding) { strip.classList.add('hidden'); return; }
 
-    const n = source === 'briefs' ? (window._detailNeedsYouOverride || 0) : (window._detailOpSignals?.pendingReview || 0);
-    const where = source === 'briefs' ? 'Briefs' : ((window._detailReviewQueue || {}).label || 'Review');
-    const targetTab = source === 'briefs' ? 'briefs' : 'review-queue';
+    const reviewN = window._detailOpSignals?.pendingReview || 0;
+    const reviewLabel = (window._detailReviewQueue || {}).label || 'Review';
+    // 'videos': storyboards waiting for "Make the video" (assistant-videos.js) + finished videos to approve.
+    const boards = source === 'videos' ? (window._detailNeedsYouOverride || 0) : 0;
+    const n = source === 'briefs' ? (window._detailNeedsYouOverride || 0) : source === 'videos' ? boards + reviewN : reviewN;
+    const where = source === 'briefs' ? 'Briefs'
+        : source === 'videos' ? (boards && reviewN ? `Videos and ${reviewLabel}` : boards ? 'Videos' : reviewLabel)
+        : reviewLabel;
+    const targetTab = source === 'briefs' ? 'briefs' : (source === 'videos' && boards) ? 'videos' : 'review-queue';
     const text = document.getElementById('needs-you-text');
     const go = document.getElementById('needs-you-go');
     const next = document.getElementById('next-up-text');
@@ -5711,6 +5721,13 @@ function _applyAssistantRulesScope() {
         note.classList.add(...EMERALD);
         text.textContent = 'Your Mystery Shopper follows these rules in the replacement wording it suggests on every check, and whenever you ask it for something in chat. Changes apply from the next check.';
         if (subtitle) subtitle.textContent = 'Custom rules for this assistant — for example a claim your site must never make, or words you never use.';
+        return;
+    }
+    if (window._detailRulesScope === 'video') {
+        note.classList.remove(...AMBER);
+        note.classList.add(...EMERALD);
+        text.textContent = 'Your Video Producer follows these rules in every storyboard it plans, and whenever you ask it for something in chat. Changes apply from the next storyboard.';
+        if (subtitle) subtitle.textContent = 'Custom rules for this assistant — for example a claim your videos must never make, or footage you never want.';
         return;
     }
     if (window._detailRulesScope === 'designer') {
@@ -6632,8 +6649,10 @@ function _applyDashboardRegistry(data) {
     // Role-chosen landing tab (SMM opens on its "Posts" pipeline); null → HTML default (Data Hub).
     window._detailDefaultMainTab = cfg.defaultMainTab || null;
     // The "Needs you" strip's source for this role: the review queue's count, the Brand Designer's
-    // Briefs badge, or nothing for a role with neither. Its figures are reset per assistant.
-    window._detailNeedsYouSource = !cfg.hideReviewQueue ? 'review' : (cfg.briefsTab ? 'briefs' : null);
+    // Briefs badge, the Video Producer's storyboards PLUS its review queue (it lands on Videos, so a
+    // review-only count said "Nothing needs you" over two waiting storyboards — staging, 2026-10-31),
+    // or nothing for a role with none. Its figures are reset per assistant.
+    window._detailNeedsYouSource = cfg.videosTab ? 'videos' : !cfg.hideReviewQueue ? 'review' : (cfg.briefsTab ? 'briefs' : null);
     window._detailNeedsYouOverride = 0;
     window._detailNextUp = null;
     // Results sits right after the landing tab: "your work, then how it is going". It was near the
@@ -7017,6 +7036,15 @@ function _applyDashboardRegistry(data) {
     if (briefsTab) {
         setText('briefs-tab-label', briefsTab.label || 'Briefs');
         window.AssistantBriefs?.init({ assistantId: data.id, assistantName: data.name });
+    }
+
+    // Videos tab — Video Producer only (videosTab: video_producer). init() loads eagerly: the count of
+    // storyboards waiting for the owner is the tab badge, visible from every tab.
+    const videosTab = cfg.videosTab;
+    toggle('maintab-btn-videos', !!videosTab);
+    if (videosTab) {
+        setText('videos-tab-label', videosTab.label || 'Videos');
+        window.AssistantVideos?.init({ assistantId: data.id, assistantName: data.name, setup: data.context });
     }
 
     // Website tab — Mystery Shopper only (siteAuditTab: mystery_shopper). init() loads eagerly: the

@@ -27,6 +27,8 @@
 // overlays (overlay-geometry.ts) and audio (audio-overlays.ts). An absent bound means "the clip's
 // own edge", which is why a trim of nothing is representable and harmless.
 
+import { isStillMotion, type StillMotion } from './still-motion';
+
 /** One source clip on the timeline. */
 export interface VideoClip {
     id: string;
@@ -42,6 +44,26 @@ export interface VideoClip {
      * full volume" want to be distinguishable when the mute-under-music default lands.
      */
     gain?: number;
+    /**
+     * A STILL scene (Video Producer plan, Phase 5): `assetId` is an image, held for `holdS` seconds
+     * with an optional slow movement (src/lib/still-motion.ts). Absent = a video clip, as always.
+     * inS/outS/gain mean nothing on a still and are dropped by the sanitiser.
+     * ⚠️ A Remotion bundle older than 2026-10-31 cannot draw one — redeploy both sites first.
+     */
+    kind?: 'image';
+    holdS?: number;
+    motion?: StillMotion;
+}
+
+/** Longest a single still may be held — a scene, not a slideshow. */
+export const MAX_STILL_HOLD_S = 30;
+/** What a still with no stated hold gets. */
+export const DEFAULT_STILL_HOLD_S = 3;
+
+/** Does this edit contain a still scene? Such a timeline renders even when the post's base is a picture. */
+export function editHasStills(raw: unknown): boolean {
+    const edit = readVideoEdit(raw);
+    return !!edit && edit.clips.some(c => c.kind === 'image');
 }
 
 /** Per-platform framing of the master. Phase 4. */
@@ -148,6 +170,18 @@ export function sanitiseVideoEdit(raw: unknown): VideoEdit | null {
         const assetId = Number(c.assetId);
         if (!Number.isInteger(assetId) || assetId <= 0) continue;
 
+        if (c.kind === 'image') {
+            const hold = time(c.holdS);
+            clips.push({
+                id: typeof c.id === 'string' ? c.id.slice(0, 64) : `s${assetId}_${clips.length}`,
+                assetId,
+                kind: 'image',
+                holdS: clamp(hold && hold > 0 ? hold : DEFAULT_STILL_HOLD_S, 0.5, MAX_STILL_HOLD_S),
+                ...(isStillMotion(c.motion) && c.motion !== 'none' ? { motion: c.motion } : {}),
+            });
+            continue;
+        }
+
         const inS = time(c.inS);
         let outS = time(c.outS);
         // A zero-length or inverted window degrades to "to the end of the clip" rather than a
@@ -231,7 +265,8 @@ export function editHasTrim(raw: unknown): boolean {
  */
 export function editChangesMedia(raw: unknown): boolean {
     const clips = renderableClips(raw);
-    return clips.length > 1 || clips.some(clipIsTrimmed);
+    // A still scene only exists once it has been rendered into the video.
+    return clips.length > 1 || clips.some(c => c.kind === 'image' || clipIsTrimmed(c));
 }
 
 /**

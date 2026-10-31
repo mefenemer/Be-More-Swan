@@ -13,7 +13,10 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, mediaGenerationJobs } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { status as falStatus, result as falResult, extractVideo, falConfigured, FalContentPolicyError } from '../../src/lib/fal-gateway';
+import {
+    status as falStatus, result as falResult, extractVideo, falConfigured, FalContentPolicyError,
+    submitFramedVideo, ASPECT_RATIOS, type AspectRatio, type VideoDurationSeconds,
+} from '../../src/lib/fal-gateway';
 import { logMediaCost } from '../../src/utils/ai-usage';
 import { settleHold } from '../../src/utils/ai-credits';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
@@ -56,20 +59,38 @@ export default withLambda(async (event: HandlerEvent) => {
         let videoUrl: string;
         let videoContentType = 'video/mp4';
 
-        if (!falConfigured() || !job.falStatusUrl || !job.falResponseUrl) {
+        if (!falConfigured()) {
             // Mock mode — simulate a short delay then use a placeholder clip.
             await sleep(3_000);
             videoUrl = MOCK_VIDEO_URL;
         } else {
+            // Image-to-video with no picture supplied (generate-ai-video): draw the start frame and
+            // submit HERE — the frame takes 5–15 s, too long for the synchronous request. The URLs are
+            // written back so a re-run of this worker polls instead of submitting (and paying) twice.
+            let statusUrl = job.falStatusUrl;
+            let responseUrl = job.falResponseUrl;
+            if (!statusUrl || !responseUrl) {
+                const aspectRatio: AspectRatio = ASPECT_RATIOS.includes(job.aspectRatio as AspectRatio) ? (job.aspectRatio as AspectRatio) : '9:16';
+                const sub = await submitFramedVideo({
+                    prompt: job.prompt, aspectRatio,
+                    durationSeconds: ((job.durationSeconds ?? 6) > 7 ? 10 : 6) as VideoDurationSeconds,
+                    usage: { workspaceId: orgId, userId: job.userId, assistantId: job.assistantId ?? null },
+                });
+                statusUrl = sub.statusUrl;
+                responseUrl = sub.responseUrl;
+                await db.update(mediaGenerationJobs)
+                    .set({ falRequestId: sub.requestId, falStatusUrl: statusUrl, falResponseUrl: responseUrl, updatedAt: new Date() })
+                    .where(eq(mediaGenerationJobs.id, jobId));
+            }
             // Poll Fal until completion or timeout.
             const deadline = Date.now() + POLL_TIMEOUT_MS;
             while (true) {
-                const s = await falStatus(job.falStatusUrl);
+                const s = await falStatus(statusUrl);
                 if (s === 'COMPLETED') break;
                 if (Date.now() > deadline) { await fail('Video generation timed out.', 'failed'); return { statusCode: 200, body: 'timeout' }; }
                 await sleep(POLL_INTERVAL_MS);
             }
-            const payload = await falResult(job.falResponseUrl);
+            const payload = await falResult(responseUrl);
             const video = extractVideo(payload);
             // Charged by fal on a COMPLETED job, so recorded here rather than at submit.
             logMediaCost(job.model, { durationSeconds: job.durationSeconds ?? 6 }, { workspaceId: orgId, userId: job.userId, assistantId: job.assistantId ?? null, sessionId: 'fal-video' });
