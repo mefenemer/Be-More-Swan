@@ -79,6 +79,11 @@ const DEFS: Def[] = [
     { key: 'ai_video_generation', label: 'AI Video Generation', description: 'Generate short-form videos from a prompt — 20 tasks each',
       category: 'AI Media Generation', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: DASH, buster: CHECK, employee: CHECK } },
+    // Video Producer (docs/video-producer-plan.md §7.5) — live 2026-10-31; db/z-video-producer-plan-feature.sql.
+    // The same plans as AI video (ai-credits.ts VIDEO_TIERS).
+    { key: 'video_producer', label: 'Video Producer', description: 'Short vertical videos with a voiceover and captions, from a storyboard you approve. AI clips use 20 tasks each',
+      category: 'AI Media Generation', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
+      values: { saver: DASH, buster: CHECK, employee: CHECK } },
     { key: 'credits_rollover', label: 'Unused Credits Roll Over', description: "Any credits you don't use carry forward to the next month",
       category: 'AI Media Generation', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: CHECK, buster: CHECK, employee: CHECK } },

@@ -1,6 +1,7 @@
--- db/_go-live-video-producer-plan-feature.sql — "Video Producer" on the pricing page (docs/video-producer-plan.md §7.3).
+-- db/z-video-producer-plan-feature.sql — "Video Producer" on the pricing page (docs/video-producer-plan.md §7.3).
 --
--- ⚠️ APPLY AT GO-LIVE ONLY — the same day the Video Producer's status goes Live. The pricing.html comparison
+-- ✅ APPLIED to staging and prod at go-live, 2026-10-31. Kept for a fresh database's migrate pass.
+-- (Written as APPLY AT GO-LIVE ONLY — the same day the Video Producer's status goes Live.) The pricing.html comparison
 -- table renders plan_features straight away, so applying this while the role is Hidden advertises an
 -- assistant nobody can hire. At go-live also add the same row to db/seed-plan-features.ts (after
 -- ai_video_generation: saver DASH, buster CHECK, employee CHECK) so a re-seed keeps it.
@@ -10,9 +11,8 @@
 -- The wording is only what the code does: a storyboard you approve first, voiceover and captions, AI scenes
 -- in tasks (src/config/task-weights.ts: ai_video 20, ai_image 1, ai_voiceover 1).
 --
--- The leading underscore keeps the migrate runner from applying it in a routine pass (it skips `_` files).
--- Paste it by hand at go-live, then rename it to db/z-video-producer-plan-feature.sql in the same commit as
--- the seed row, so the ledger and the file agree.
+-- It sat as db/_go-live-video-producer-plan-feature.sql (the migrate runner skips `_` files) until go-live,
+-- then was renamed here in the same commit as the seed row.
 --
 -- Idempotent. Paste into the Neon SQL Editor, staging then prod. Expect 1 row from the first RETURNING,
 -- and the three plans from the second.

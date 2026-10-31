@@ -311,6 +311,9 @@ Phase 5 sets motion per still scene. Tests: `tests/still-motion.test.ts`.
 
 ### 7.5 Go-live day (role status → Live) — in this order
 
+⚠️ PROD HAS NONE OF THE VIDEO PRODUCER CODE until the staging→main release. Order on the day: release
+(PR staging→main, merged) → Admin status Live on prod → publish the help articles → check the catalogue.
+
 Written 2026-10-31 from the code. Nothing below is public until these steps run; the role is Hidden.
 Claims kept to §9 — no "first", "unique" or "replaces $X of tools", so no competitor check gates them.
 
@@ -324,9 +327,9 @@ Claims kept to §9 — no "first", "unique" or "replaces $X of tools", so no com
    (renders only once the role is Live — the public list shows active roles only). Screenshot
    `images/assistants/video_producer/storyboard.jpg` (the real Videos tab, fictional Willowbrook Coffee data, from
    a stubbed local page) and overview video `videos/assistants/video_producer.mp4` (`render-assistant-videos.mjs`).
-5. Pricing: paste `db/_go-live-video-producer-plan-feature.sql` (underscore = the migrate runner skips it), add
-   the same row to `db/seed-plan-features.ts`, rename the file to `db/z-video-producer-plan-feature.sql`.
-6. FAQ: paste the block below into `faq.html` under "How It Actually Works", after the Business Mentor answers.
+5. ✅ Pricing (2026-10-31): applied to staging and prod; seed row added; file renamed to
+   `db/z-video-producer-plan-feature.sql`. ⚠️ Live on prod's pricing table BEFORE the code release — release next.
+6. ✅ FAQ (2026-10-31): the block below is in `faq.html` after the Business Mentor answers (reaches prod with the release).
 7. Already live in code, gated by the role being active: Business Mentor hire pick (`mentor-hire.ts`
    video_producer — only Live roles, only on a plan that makes video, only with a Social Media Assistant);
    Ask Your Team names the Video Producer for video requests only when one is on the team.

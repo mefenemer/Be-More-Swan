@@ -1,7 +1,7 @@
 // tests/video-producer-go-live.test.ts
 // The Video Producer's go-live copy (docs/video-producer-plan.md §7.5): help articles, website page,
-// pricing row, Mentor and Ask Your Team — held back until the role is Live, and every figure the copy
-// states matching the code.
+// pricing row, FAQ, Mentor and Ask Your Team — every figure the copy states matching the code. The
+// pricing row and FAQ went live 2026-10-31; the help articles stay unpublished until the role is Live.
 //
 // What goes wrong silently if these drift:
 //   · copy quoting credits while the hold takes tasks (the Videos tab did, until 2026-10-31)
@@ -127,15 +127,17 @@ check('the website page exists, and only renders for a Live role', () => {
     assert.match(read('netlify/functions/master-assistants.ts'), /\.where\(eq\(masterAssistants\.isActive, true\)\)/);
 });
 
-check('the pricing row is out of the migrate runner\'s reach and out of the seed', () => {
-    assert.ok(existsSync(join(root, 'db/_go-live-video-producer-plan-feature.sql')));
-    assert.ok(!existsSync(join(root, 'db/z-video-producer-plan-feature.sql')), 'a z- file would be applied by a routine migrate pass');
-    assert.match(read('scripts/db-migrate.mjs'), /!f\.startsWith\('_'\)/);
-    assert.doesNotMatch(read('db/seed-plan-features.ts'), /key: 'video_producer'/, 'the seed row goes in at go-live');
-    const sql = read('db/_go-live-video-producer-plan-feature.sql');
+check('the pricing row (live 2026-10-31) is in the migrations and the seed, on the plans that make video', () => {
+    assert.ok(!existsSync(join(root, 'db/_go-live-video-producer-plan-feature.sql')), 'renamed at go-live');
+    const sql = read('db/z-video-producer-plan-feature.sql');
     assert.match(sql, /tier_key IN \('buster', 'employee'\)/);
     assert.match(read('src/utils/ai-credits.ts'), /VIDEO_TIERS = \['buster', 'employee'\]/);
     assert.match(sql, /AND NOT EXISTS \(SELECT 1 FROM plan_features WHERE key = 'video_producer'\)/, 'a re-run shifts nothing');
+    const seed = read('db/seed-plan-features.ts');
+    assert.match(seed, /key: 'video_producer'[\s\S]{0,400}values: \{ saver: DASH, buster: CHECK, employee: CHECK \}/);
+    const faq = read('faq.html');
+    assert.ok(faq.includes('What does the Video Producer make?') && faq.includes('Does making a video use my tasks?'));
+    assert.match(faq, new RegExp(`${TASK_WEIGHTS.ai_video} tasks for an AI clip \\(at most ${MAX_AI_CLIPS} in a video\\)`));
 });
 
 check('the Mentor recommends it only when Live, on a plan with video, with someone posting', () => {
