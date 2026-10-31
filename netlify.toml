@@ -633,7 +633,7 @@ node_bundler = "esbuild"
 #      and resolves by specificity only when two rules set the SAME header).
 #
 # This inverts an allow-list. Everything indexable is: / index about blog pricing contact faq
-# trust privacy terms_of_service data-deletion help assistants connections how-it-works be-more-swan-vs-marketing-agency licenses register — those 17
+# trust privacy terms_of_service data-deletion help assistants connections how-it-works be-more-swan-vs-marketing-agency website-builder-for-small-business licenses register — those 18
 # — plus one /ai-… page per live assistant, generated at build by scripts/build-seo-html.mjs (Job 6),
 # which also adds them to sitemap.xml. ⚠️ Those slugs start with "ai-" because the /assistant-* rule
 # below would noindex an "assistant-…" one.
