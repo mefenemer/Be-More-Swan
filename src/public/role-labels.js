@@ -20,6 +20,7 @@
     newsletter_editor: 'Email Marketing Assistant',
     campaign_orchestrator: 'Campaign Assistant',
     brand_designer: 'Brand Designer',
+    video_producer: 'Video Producer',
     mystery_shopper: 'Mystery Shopper',
     website_assistant: 'Website Assistant',
     lead_qualifier: 'Lead Generation Assistant',

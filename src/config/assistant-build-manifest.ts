@@ -27,6 +27,7 @@ export const ASSISTANT_BUILD: Readonly<Record<string, RoleBuild>> = {
     newsletter_editor:         { setup: 'schema', chat: true, dashboard: true },
     campaign_orchestrator:     { setup: 'schema', chat: true, dashboard: true },
     brand_designer:            { setup: 'schema', chat: true, dashboard: true },
+    video_producer:            { setup: 'schema', chat: true, dashboard: true },
     lead_qualifier:            { setup: 'schema', chat: true, dashboard: true },
     accounts_receivable_clerk: { setup: 'schema', chat: true, dashboard: true },
     tier1_support_agent:       { setup: 'schema', chat: true, dashboard: true },

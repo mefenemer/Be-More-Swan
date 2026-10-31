@@ -28,6 +28,8 @@ export const TASK_WEIGHTS = {
     ai_music: 20,
     // A track the user marks as shareable keeps today's 3:5 discount against a private one.
     ai_music_shared: 12,
+    // A voiceover (Video Producer plan, Phase 2, decided 2026-10-31: 1 per video). Costs us cents.
+    ai_voiceover: 1,
     x_link_post: 10,
     // The Business Mentor's background work (docs/business-mentor-plan.md §2.1, decided: 1 task each).
     mentor_research: 1,
@@ -39,7 +41,7 @@ export const TASK_WEIGHTS = {
 export type WorkKind = keyof typeof TASK_WEIGHTS;
 
 /** Kinds that are AI-generated media — the per-assistant autonomous media cap counts these. */
-export const MEDIA_KINDS: readonly WorkKind[] = ['ai_image', 'ai_video', 'ai_music', 'ai_music_shared'];
+export const MEDIA_KINDS: readonly WorkKind[] = ['ai_image', 'ai_video', 'ai_music', 'ai_music_shared', 'ai_voiceover'];
 
 export function taskWeight(kind: WorkKind): number {
     return TASK_WEIGHTS[kind];
@@ -60,6 +62,7 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     ai_video: 'AI videos',
     ai_music: 'AI music',
     ai_music_shared: 'AI music (shared)',
+    ai_voiceover: 'AI voiceovers',
     x_link_post: 'X posts with a link',
     mentor_research: 'Business Mentor research',
     mentor_strategy: 'Business Mentor plan drafts',

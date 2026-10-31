@@ -20,8 +20,8 @@ import { getDb } from '../../db/client';
 import { contentAssets, postRenderJobs, scheduledPosts } from '../../db/schema';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
-import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, readPostVideoEdit, renderPlanFor, renderableOverlays, resolveAudioTracks, resolveEditClips, resolveOverlayVideoBase } from '../../src/lib/post-render';
-import { editChangesMedia } from '../../src/lib/video-edit';
+import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, readPostVideoEdit, readStillMotion, renderPlanFor, renderableOverlays, resolveAudioTracks, resolveCaptionTrack, resolveEditClips, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { editChangesMedia, editHasStills } from '../../src/lib/video-edit';
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../../src/lib/remotion-lambda';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -100,6 +100,14 @@ export default withLambda(async (event: HandlerEvent) => {
         const videoEdit = await readPostVideoEdit(db, job.postId, job.organisationId);
         const overlays = renderableOverlays(post.imageOverlays);
         const audio = await resolveAudioTracks(db, post.audioOverlays, job.organisationId, presignR2Get);
+        // Voiceover captions. A failed read renders without them rather than failing a paid render —
+        // the words are a layer on top, the post is still publishable.
+        const captions = audio.length
+            ? await resolveCaptionTrack(db, post.audioOverlays, job.organisationId).catch((err) => {
+                console.error(`[render-post-video-background] job ${jobId} captions skipped:`, err);
+                return null;
+            })
+            : null;
         const base = await resolveOverlayVideoBase(db, job.postId, job.organisationId);
         if (!base) { await fail('The post no longer has media to render.'); return { statusCode: 200, body: 'No media' }; }
 
@@ -146,14 +154,19 @@ export default withLambda(async (event: HandlerEvent) => {
             return { statusCode: 200, body: 'No overlays left' };
         }
 
+        // A TIMELINE render: a video post, or a storyboard whose scenes include stills (Video Producer
+        // Phase 5) — that renders as a timeline even when the post's base is a picture.
+        const useTimeline = base.kind === 'video' || (editHasStills(videoEdit) && timeline.some(c => c.kind === 'image'));
         // Every clip is presigned inside resolveEditClips; a still has no timeline and is presigned here.
-        if (base.kind === 'video' && !timeline.length) {
+        if (useTimeline && !timeline.length) {
             await fail('The post’s video could not be read.');
             return { statusCode: 200, body: 'No source' };
         }
-        const mediaSrc = base.kind === 'image'
+        const mediaSrc = !useTimeline
             ? (base.storageKey ? await presignR2Get(base.storageKey, SOURCE_URL_TTL_SEC) : base.externalUrl!)
             : timeline[0].src;
+        // The old-bundle fallback (videoSrc) only makes sense when the first clip IS a video.
+        const firstIsVideo = useTimeline && timeline[0].kind !== 'image';
 
         // The snapshot is authoritative (it carries the duration, which is stored nowhere else); the
         // recompute is the fallback for a row written before render_input existed.
@@ -165,16 +178,19 @@ export default withLambda(async (event: HandlerEvent) => {
             // videoSrc + videoTrim describe the FIRST clip only. They are sent alongside `clips`
             // purely so props from this deploy still render on the previous site bundle, which a git
             // push does not update — an old bundle then produces clip one instead of nothing at all.
-            videoSrc: base.kind === 'video' ? mediaSrc : '',
-            ...(base.kind === 'image' ? { imageSrc: mediaSrc } : {}),
-            ...(base.kind === 'video' && (timeline[0].inS || timeline[0].outS != null)
+            videoSrc: firstIsVideo ? mediaSrc : '',
+            ...(!useTimeline ? { imageSrc: mediaSrc } : {}),
+            ...(!useTimeline && readStillMotion(job.renderInput) !== 'none' ? { imageMotion: readStillMotion(job.renderInput) } : {}),
+            ...(firstIsVideo && (timeline[0].inS || timeline[0].outS != null)
                 ? { videoTrim: { inS: timeline[0].inS ?? 0, outS: timeline[0].outS ?? null } }
                 : {}),
-            ...(base.kind === 'video' ? { clips: timeline } : {}),
+            ...(useTimeline ? { clips: timeline } : {}),
             ...(plan.targetRatio ? { targetRatio: plan.targetRatio } : {}),
             ...(plan.framePosition ? { framePosition: plan.framePosition } : {}),
             audio,
             overlays,
+            // Absent unless there are words: an old site bundle ignores the field either way.
+            ...(captions ? { captions } : {}),
             ...meta,
         });
         await db.update(postRenderJobs)

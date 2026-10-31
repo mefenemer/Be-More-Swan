@@ -138,7 +138,8 @@ check('every successful generation records its cost — once, where the provider
     const gen = fal.slice(fal.indexOf('export async function generateImages('), fal.indexOf('export type VideoDurationSeconds'));
     assert.ok(/logMediaCost\(IMAGE_MODEL, \{ images \}/.test(gen), 'generateImages no longer records image cost');
     assert.ok(/logMediaCost\(job\.model, \{ durationSeconds/.test(read('netlify/functions/process-media-job-background.ts')), 'a completed video job records nothing');
-    assert.ok(/extractVideo\([\s\S]{0,120}\n\s*logMediaCost\(VIDEO_MODEL/.test(read('src/utils/visual-briefs.ts')), 'a brief video records nothing');
+    // Since image-to-video (2026-10-31) the brief logs the model actually billed (Kling or Hailuo).
+    assert.ok(/extractVideo\([\s\S]{0,120}\n\s*logMediaCost\(sub\.model, \{ durationSeconds: sub\.billedSeconds/.test(read('src/utils/visual-briefs.ts')), 'a brief video records nothing');
     const music = read('netlify/functions/process-music-job-background.ts');
     assert.ok(/success: true[\s\S]{0,300}logMediaCost\(job\.model/.test(music), 'a finished music track records nothing (and it must be after the SUCCESS settle)');
     // Nothing reaches fal or Stability around these: a new direct caller would be unpriced.

@@ -45,6 +45,7 @@ import { createNotification } from '../../src/utils/notify';
 import { assembleBlueprint } from '../../src/utils/blueprint';
 import { releasePostMedia } from '../../src/utils/release-post-media';
 import { triggerContentDrain } from '../../src/utils/trigger-drain';
+import { settleVideoOrderForPost } from '../../src/utils/campaign-video-order';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Cap on the feedback we paste into the regeneration prompt (mirrors request-post-changes.ts). */
@@ -316,6 +317,9 @@ export default withLambda(async (event) => {
             } catch { /* non-blocking */ }
         })();
     }
+
+    // A campaign's video (Video Producer): turning it down settles its order now.
+    await settleVideoOrderForPost(db, post.organisationId, postId);
 
     return {
         statusCode: 200,

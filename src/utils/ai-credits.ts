@@ -37,6 +37,8 @@ export const VIDEO_CREDIT_COST = 5;
 // video, so the same price to the customer. One track is sized to the whole video, so one is usually
 // all a post needs. Available on any paid tier with credits, like images; NOT premium-only.
 export const MUSIC_CREDIT_COST = 5;
+/** One voiceover (Video Producer plan, Phase 2 — owner decision 2026-10-31: 1 per video). */
+export const VOICEOVER_CREDIT_COST = 1;
 // …or less when the customer SHARES the track with the Be More Swan community instead of owning it
 // (terms §11.8): Be More Swan owns a shared track and adds it to the library every workspace can use,
 // so the customer is paying for a track and contributing one. The choice is made per generation and
@@ -57,7 +59,11 @@ export function tierCanGenerateVideo(tierKey: string | null | undefined): boolea
     return !!t && (VIDEO_TIERS as readonly string[]).includes(t);
 }
 
-export function creditCostFor(mediaType: 'image' | 'video' | 'audio'): number {
+/** What a credit charge bought. 'voiceover' is speech, kept apart from 'audio' (music) so it is priced and counted as itself. */
+export type MediaKind = 'image' | 'video' | 'audio' | 'voiceover';
+
+export function creditCostFor(mediaType: MediaKind): number {
+    if (mediaType === 'voiceover') return VOICEOVER_CREDIT_COST;
     if (mediaType === 'audio') return MUSIC_CREDIT_COST;
     return mediaType === 'video' ? VIDEO_CREDIT_COST : IMAGE_CREDIT_COST;
 }
@@ -70,8 +76,9 @@ export interface CreditBalance {
 }
 
 /** The WorkKind a credit charge becomes under the single task allowance. */
-export function workKindForMedia(mediaType: 'image' | 'video' | 'audio', amount: number): WorkKind {
+export function workKindForMedia(mediaType: MediaKind, amount: number): WorkKind {
     if (mediaType === 'video') return 'ai_video';
+    if (mediaType === 'voiceover') return 'ai_voiceover';
     if (mediaType === 'audio') return amount === MUSIC_SHARED_CREDIT_COST ? 'ai_music_shared' : 'ai_music';
     return 'ai_image';
 }
@@ -80,7 +87,7 @@ export function workKindForMedia(mediaType: 'image' | 'video' | 'audio', amount:
  * Convert a credit amount to tasks. Images are 1:1; video and music are ×4 (5 credits → 20 tasks,
  * a shared 3-credit track → 12). A combined hold (Brand Designer: image + video) passes the split.
  */
-export function tasksForCredits(mediaType: 'image' | 'video' | 'audio', amount: number): number {
+export function tasksForCredits(mediaType: MediaKind, amount: number): number {
     if (amount <= 0) return 0;
     const kind = workKindForMedia(mediaType, amount);
     const perCredit = TASK_WEIGHTS[kind] / (mediaType === 'audio' ? (kind === 'ai_music_shared' ? MUSIC_SHARED_CREDIT_COST : MUSIC_CREDIT_COST) : creditCostFor(mediaType));
@@ -195,7 +202,7 @@ export async function holdCredits(db: Db, params: {
     orgId: number;
     amount: number;
     /** Single task allowance: what the credits buy, so they convert to the right number of tasks. */
-    mediaType?: 'image' | 'video' | 'audio';
+    mediaType?: MediaKind;
     /** Single task allowance: the task cost when the hold mixes media (overrides mediaType). */
     tasks?: number;
 }): Promise<{ ok: boolean; balance: number; unit: 'credits' | 'tasks'; cost: number }> {
@@ -226,7 +233,7 @@ export async function holdAutonomousCredits(db: Db, params: {
     orgId: number;
     amount: number;
     monthlyCap: number;
-    mediaType?: 'image' | 'video' | 'audio';
+    mediaType?: MediaKind;
     /** Single task allowance: the cap is per assistant and counts media items, not credits. */
     assistantId?: number | null;
 }): Promise<{ ok: boolean; balance: number; reason?: 'insufficient_balance' | 'cap_reached' }> {
@@ -268,7 +275,7 @@ export async function settleHold(db: Db, params: {
     orgId: number;
     amount: number;
     success: boolean;
-    mediaType: 'image' | 'video' | 'audio';
+    mediaType: MediaKind;
     userId?: number | null;
     jobId?: number | null;
     isAutonomous?: boolean;
@@ -297,8 +304,11 @@ export async function settleHold(db: Db, params: {
         `);
         // ⚠️ 'music_generation' needs db/z-ai-music-generation.sql applied — the ledger's CHECK lists
         // every reason, and an unknown one fails the INSERT after the hold has already been consumed.
+        // A voiceover is recorded under 'music_generation' (the audio reason the CHECK already
+        // allows) rather than a new reason that would need a migration: this legacy credits path is
+        // off on both DBs (unified_task_metering), where the task ledger names it 'ai_voiceover'.
         const reason = params.mediaType === 'video' ? 'video_generation'
-            : params.mediaType === 'audio' ? 'music_generation'
+            : params.mediaType === 'audio' || params.mediaType === 'voiceover' ? 'music_generation'
             : 'image_generation';
         await db.execute(sql`
             INSERT INTO ai_credit_ledger (organisation_id, user_id, delta, reason, job_id, balance_after, is_autonomous)

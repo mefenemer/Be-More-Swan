@@ -1,8 +1,14 @@
 // netlify/functions/generate-ai-video.ts
-// Epic 1, US2: manual AI video generation (Hailuo 2.3) — asynchronous.
+// Epic 1, US2: manual AI video generation — asynchronous.
 //
-//   POST { prompt, aspectRatio, durationSeconds }  → tier check → moderate → hold 5 credits
+//   POST { prompt, aspectRatio, durationSeconds, imageAssetId? }  → tier check → moderate → hold 5 credits
 //          → submit to Fal → create processing job → trigger background poller → { jobId }   (<500ms)
+//
+// Since 2026-10-31 (Video Producer plan, Phase 1) clips are image-to-video (FAL_I2V_MODEL, Kling):
+//   · imageAssetId given → animate that picture from the library; submitted here (no image step).
+//   · no picture         → the WORKER draws one FLUX frame at `aspectRatio` and submits it. The frame
+//                          takes 5–15 s, too long for this synchronous function.
+// So `aspectRatio` is now honoured, not metadata. FAL_I2V_MODEL='off' restores Hailuo text-to-video.
 //   GET  ?jobId=N                                  → { status, assetId?, errorMessage? }  (frontend polls)
 //
 // Video is restricted to the two upper plans (buster/employee) — tierCanGenerateVideo(). Credits are
@@ -19,7 +25,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import {
-    submitVideo, falConfigured, ASPECT_RATIOS, VIDEO_DURATIONS,
+    submitVideo, submitFramedVideo, imageToVideoEnabled, imageToVideoInput, I2V_MODEL, falConfigured, ASPECT_RATIOS, VIDEO_DURATIONS,
     FalContentPolicyError, FalError, type AspectRatio, type VideoDurationSeconds,
 } from '../../src/lib/fal-gateway';
 import { holdCredits, settleHold, tierCanGenerateVideo, VIDEO_CREDIT_COST } from '../../src/utils/ai-credits';
@@ -29,8 +35,8 @@ const PROMPT_MAX = 1000;
 const VIDEO_MODEL = process.env.FAL_VIDEO_MODEL ?? 'fal-ai/minimax/hailuo-2.3/standard/text-to-video';
 // Hailuo 2.3 text-to-video only accepts 6s or 10s clips (see VIDEO_DURATIONS in fal-gateway).
 const VALID_DURATIONS = VIDEO_DURATIONS;
-// Hailuo text-to-video has no aspect-ratio input; we still record one on the job/asset for
-// downstream display, defaulting to a vertical/Reel frame when the client doesn't supply one.
+// The frame of the clip. Image-to-video honours it (the start frame is drawn at it); the Hailuo
+// fallback has no aspect input and only records it. Defaults to a vertical/Reel frame.
 const DEFAULT_ASPECT: AspectRatio = '9:16';
 
 // Kick the background poller. MUST be awaited: on Lambda the runtime freezes as soon as the handler
@@ -100,12 +106,11 @@ export default withLambda(async (event) => {
         return { statusCode: 403, body: JSON.stringify({ error: 'video_requires_upgrade', message: 'AI video generation is available on the Busywork Buster and Digital Employee plans.' }) };
     }
 
-    let body: { prompt?: string; aspectRatio?: string; durationSeconds?: number };
+    let body: { prompt?: string; aspectRatio?: string; durationSeconds?: number; imageAssetId?: number };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
 
     const prompt = (body.prompt || '').trim();
-    // Aspect ratio is metadata only — the model ignores it — so accept a valid hint or default.
     const aspectRatio: AspectRatio = ASPECT_RATIOS.includes(body.aspectRatio as AspectRatio)
         ? (body.aspectRatio as AspectRatio)
         : DEFAULT_ASPECT;
@@ -124,6 +129,22 @@ export default withLambda(async (event) => {
     const blocked = await enforcePromptModeration({ text: prompt, userId, organisationId: orgId, source: 'generate-ai-video' });
     if (blocked) return blocked;
 
+    // A picture to animate: must be this workspace's own image. Presigned for an hour — fal fetches
+    // it once at the start of the job.
+    let startImageUrl: string | null = null;
+    if (body.imageAssetId != null) {
+        if (!imageToVideoEnabled()) return { statusCode: 400, body: JSON.stringify({ error: 'Animating a picture is not available right now.' }) };
+        const [img] = await db
+            .select({ storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl, assetType: contentAssets.assetType })
+            .from(contentAssets)
+            .where(and(eq(contentAssets.id, Number(body.imageAssetId)), eq(contentAssets.organisationId, orgId)))
+            .limit(1);
+        if (!img || img.assetType !== 'image') return { statusCode: 400, body: JSON.stringify({ error: 'That picture could not be found in your library.' }) };
+        if (img.storageKey) { try { startImageUrl = await presignR2Get(img.storageKey); } catch { /* fall through */ } }
+        if (!startImageUrl) startImageUrl = img.externalUrl;
+        if (!startImageUrl) return { statusCode: 400, body: JSON.stringify({ error: 'That picture has no file to animate.' }) };
+    }
+
     // Hold 5 credits; insufficient → 402 with upgrade CTA payload.
     const hold = await holdCredits(db, { orgId, amount: VIDEO_CREDIT_COST, mediaType: 'video' });
     if (!hold.ok) {
@@ -141,12 +162,26 @@ export default withLambda(async (event) => {
         return { statusCode: 202, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job.id, mock: true }) };
     }
 
-    try {
-        const { requestId, statusUrl, responseUrl } = await submitVideo({ prompt, durationSeconds });
+    // No picture to start from: the worker draws the frame and submits (see the header). The job's
+    // durationSeconds is the length that will be BILLED, so the cost log prices the real clip.
+    if (imageToVideoEnabled() && !startImageUrl) {
+        const billed = imageToVideoInput(I2V_MODEL, { imageUrl: '', prompt, durationSeconds }).billedSeconds;
         const [job] = await db.insert(mediaGenerationJobs).values({
-            organisationId: orgId, userId, mediaType: 'video', prompt, aspectRatio, durationSeconds,
-            model: VIDEO_MODEL, creditCost: VIDEO_CREDIT_COST, status: 'processing',
-            falRequestId: requestId, falStatusUrl: statusUrl, falResponseUrl: responseUrl,
+            organisationId: orgId, userId, mediaType: 'video', prompt, aspectRatio, durationSeconds: billed,
+            model: I2V_MODEL, creditCost: VIDEO_CREDIT_COST, status: 'processing',
+        }).returning({ id: mediaGenerationJobs.id });
+        await triggerWorker(event.headers as any, job.id);
+        return { statusCode: 202, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job.id }) };
+    }
+
+    try {
+        const sub = imageToVideoEnabled()
+            ? await submitFramedVideo({ prompt, startImageUrl, aspectRatio, durationSeconds, usage: { workspaceId: orgId, userId } })
+            : { ...(await submitVideo({ prompt, durationSeconds })), model: VIDEO_MODEL, billedSeconds: durationSeconds };
+        const [job] = await db.insert(mediaGenerationJobs).values({
+            organisationId: orgId, userId, mediaType: 'video', prompt, aspectRatio, durationSeconds: sub.billedSeconds,
+            model: sub.model, creditCost: VIDEO_CREDIT_COST, status: 'processing',
+            falRequestId: sub.requestId, falStatusUrl: sub.statusUrl, falResponseUrl: sub.responseUrl,
         }).returning({ id: mediaGenerationJobs.id });
         await triggerWorker(event.headers as any, job.id);
         return { statusCode: 202, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job.id }) };

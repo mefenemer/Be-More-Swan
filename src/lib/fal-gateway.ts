@@ -16,6 +16,11 @@
 //                           (Hailuo 2.3 Standard, 768p, 5 credits). NOTE: the bare
 //                           'fal-ai/minimax/hailuo-2.3' is NOT a routable endpoint — it 404s on
 //                           poll ("Path /hailuo-2.3 not found"); the variant suffix is required.
+//   FAL_I2V_MODEL         — image-to-video, defaults to 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video'
+//                           (Kling, $0.07/s on fal's pricing page 2026-10-31). The clip is framed by
+//                           its start image, so a 9:16 FLUX frame gives a 9:16 clip — the thing Hailuo
+//                           text-to-video can never do. Set to 'off' to fall back to FAL_VIDEO_MODEL.
+//                           Kling v3 ('fal-ai/kling-video/v3/pro/image-to-video', $0.14/s) also works.
 //   FAL_SAFETY_TOLERANCE  — FLUX safety level 1 (strictest) … 6 (most permissive); default 2
 //   FAL_OUTPUT_FORMAT     — 'png' (default, lossless — best for crisp text overlays) or 'jpeg'
 
@@ -25,6 +30,7 @@ import { logMediaCost } from '../utils/ai-usage';
 import { NO_TEXT_RULE } from './image-prompt';
 const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 export const VIDEO_MODEL = process.env.FAL_VIDEO_MODEL ?? 'fal-ai/minimax/hailuo-2.3/standard/text-to-video';
+export const I2V_MODEL = process.env.FAL_I2V_MODEL ?? 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video';
 
 // FLUX 1.1 Pro safety_tolerance: 1 (strictest) … 6 (most permissive). We run our own prompt
 // moderation upstream, so the model-level gate is a backstop — keep Fal's default of 2.
@@ -271,6 +277,63 @@ export async function submitVideo(opts: {
         duration: String(opts.durationSeconds),
     };
     return submit(VIDEO_MODEL, input);
+}
+
+// ── Image-to-video (Video Producer plan, Phase 1) ─────────────────────────────────────────────
+
+/** Is image-to-video switched on? 'off' (or empty) keeps the old Hailuo text-to-video path. */
+export function imageToVideoEnabled(model: string = I2V_MODEL): boolean {
+    return !!model && model !== 'off';
+}
+
+/**
+ * Build the request body for an image-to-video model. Pure. Kling's families disagree:
+ *   · v2.x  — `image_url`, duration "5" | "10"
+ *   · v3/o3 — `start_image_url`, duration "3"…"15", and `generate_audio` (default TRUE — we turn it
+ *             off: the soundtrack is ours, from the music library / voiceover, never a model's guess)
+ * `billedSeconds` is the clip length actually asked for, for the cost log.
+ */
+export function imageToVideoInput(model: string, opts: { imageUrl: string; prompt: string; durationSeconds: number }): { input: Record<string, unknown>; billedSeconds: number } {
+    const isV3 = /\/(v3|o3)\//.test(model);
+    if (isV3) {
+        const d = Math.min(Math.max(Math.round(opts.durationSeconds), 3), 15);
+        return { input: { prompt: opts.prompt, start_image_url: opts.imageUrl, duration: String(d), generate_audio: false }, billedSeconds: d };
+    }
+    const d = opts.durationSeconds > 7 ? 10 : 5;
+    return { input: { prompt: opts.prompt, image_url: opts.imageUrl, duration: String(d) }, billedSeconds: d };
+}
+
+export interface FramedVideoSubmit extends FalSubmitResult {
+    /** The model that will be billed — log the cost against this, not VIDEO_MODEL. */
+    model: string;
+    billedSeconds: number;
+    /** The still the clip starts from (null on the text-to-video fallback). */
+    frameUrl: string | null;
+}
+
+/**
+ * Submit one AI clip in the frame you asked for. With image-to-video on: use `startImageUrl` (a
+ * product photo, a library picture) or draw one FLUX frame from `imagePrompt` at `aspectRatio`, then
+ * animate it with `prompt` (the motion). With it off: the old Hailuo text-to-video. Poll the result
+ * with status()/result() exactly as before — the queue shape is the same.
+ */
+export async function submitFramedVideo(opts: {
+    prompt: string;
+    imagePrompt?: string;
+    startImageUrl?: string | null;
+    aspectRatio: AspectRatio;
+    durationSeconds: VideoDurationSeconds;
+    usage?: { workspaceId?: number | null; userId?: number | null; assistantId?: number | null };
+}): Promise<FramedVideoSubmit> {
+    if (!imageToVideoEnabled()) {
+        const sub = await submitVideo({ prompt: opts.prompt, durationSeconds: opts.durationSeconds });
+        return { ...sub, model: VIDEO_MODEL, billedSeconds: opts.durationSeconds, frameUrl: null };
+    }
+    const frameUrl = opts.startImageUrl
+        || (await generateImages({ prompt: opts.imagePrompt || opts.prompt, aspectRatio: opts.aspectRatio, numImages: 1, usage: opts.usage }))[0].url;
+    const { input, billedSeconds } = imageToVideoInput(I2V_MODEL, { imageUrl: frameUrl, prompt: opts.prompt, durationSeconds: opts.durationSeconds });
+    const sub = await submit(I2V_MODEL, input);
+    return { ...sub, model: I2V_MODEL, billedSeconds, frameUrl };
 }
 
 /** Extract the mp4 video URL from a COMPLETED Hailuo job result payload. */

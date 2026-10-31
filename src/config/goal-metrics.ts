@@ -544,6 +544,21 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         realism: { maxDailyDelta: 50 },
     },
     {
+        // Video Producer (docs/video-producer-plan.md). Its videos are posts; counted from scheduled_posts
+        // like content_published, by poll-goal-telemetry.ts. Published, not made: a video nobody
+        // approved is not an outcome.
+        key: 'videos_published',
+        label: 'Videos Published',
+        unit: 'videos',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['video_producer'],
+        description: 'Videos from this assistant that you approved and that went out.',
+        available: true,
+        realism: { maxDailyDelta: 20 },
+    },
+    {
         // Website Assistant (docs/website-assistant-plan.md). Pages that are READY: they have content
         // and nothing left in [square brackets] for the owner to fill in. Counted from the site draft by
         // poll-goal-telemetry.ts. Until publishing exists (step 3) this is the honest measure of

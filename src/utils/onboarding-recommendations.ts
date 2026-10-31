@@ -43,7 +43,7 @@ export interface Recommendation {
     route: RecommendationRoute;
 }
 
-const CONTENT_ROLES = ['social_media_manager', 'blog_writer', 'newsletter_editor', 'brand_designer'];
+const CONTENT_ROLES = ['social_media_manager', 'blog_writer', 'newsletter_editor', 'brand_designer', 'video_producer'];
 
 async function soft<T>(fn: () => Promise<T>): Promise<T | undefined> {
     try { return await fn(); } catch (err) {

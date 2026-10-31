@@ -43,11 +43,11 @@ async function main() {
         assert.ok(src.includes('.from(orchestrationRuns)'));
     });
     await check('every list that feeds a card sends requestedBy', () => {
-        assert.ok(read('netlify/functions/get-social-drafts.ts').includes('requestedBy: (d.jobId ? orderRequesters.get(d.jobId) : undefined) ?? handoffFrom.get(d.id) ?? null'));
+        assert.ok(read('netlify/functions/get-social-drafts.ts').includes('requestedBy: (d.jobId ? orderRequesters.get(d.jobId) : undefined) ?? handoffFrom.get(d.id) ?? videoRequesters.get(d.id) ?? null'));
         assert.ok(read('netlify/functions/blog-posts.ts').includes('requestedBy: requesters.get(p.id) ?? null'));
         const nl = read('netlify/functions/newsletter-issues.ts');
         assert.strictEqual((nl.match(/requestedBy: campaignOrderId != null/g) || []).length, 2, 'the Review feed and the full list');
-        assert.ok(read('netlify/functions/scheduled-posts.ts').includes('requestedBy: (jobId ? requesters.get(jobId) : undefined) ?? null'));
+        assert.ok(read('netlify/functions/scheduled-posts.ts').includes('requestedBy: (jobId ? requesters.get(jobId) : undefined) ?? videoRequesters.get(p.id) ?? null'));
         assert.ok(read('src/utils/visual-briefs.ts').includes('requestedBy: (b.campaignId ? campaignRequester.get(b.campaignId) : undefined)'));
     });
     await check('every card draws the second pill', () => {

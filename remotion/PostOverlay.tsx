@@ -17,7 +17,9 @@ import React from 'react';
 import { AbsoluteFill, Audio, Img, OffthreadVideo, Sequence, Series, continueRender, delayRender, useCurrentFrame, useVideoConfig } from 'remotion';
 import { overlayAnimAt, overlayBoxStyle, overlayFrameRange, type Overlay } from '../src/lib/overlay-geometry';
 import { audioGainAt } from '../src/lib/audio-overlays';
-import { googleFamiliesFor, googleFontsHref } from '../src/lib/overlay-fonts';
+import { googleFamiliesFor, googleFontsHref, overlayFontStack } from '../src/lib/overlay-fonts';
+import { stillMotionTransform, type StillMotion } from '../src/lib/still-motion';
+import { CAPTION_FALLBACK_ACCENT, CAPTION_FONT_ID, captionLayout, cueAt, type CaptionTrack } from '../src/lib/captions';
 
 /**
  * One clip of the timeline.
@@ -38,6 +40,13 @@ export type TimelineClip = {
      * mix rather than a rule that has to be re-derived to be understood.
      */
     gain?: number;
+    /**
+     * A still scene (Video Producer, Phase 5): `src` is an image, held for `holdS` seconds, moving
+     * per `motion`. calculateMetadata turns holdS into durationInFrames; nothing is measured.
+     */
+    kind?: 'image';
+    holdS?: number;
+    motion?: StillMotion;
     durationInFrames?: number;
 };
 
@@ -61,6 +70,11 @@ export type PostOverlayProps = {
      * rendered together into an mp4 here.
      */
     imageSrc?: string;
+    /**
+     * Slow movement on that still (src/lib/still-motion.ts). Absent or 'none' = the picture stays put,
+     * letterboxed as before. Added 2026-10-31; an older bundle ignores it and renders the still still.
+     */
+    imageMotion?: StillMotion;
     audio?: AudioTrack[];
     /**
      * The trim on the base clip, in seconds against the SOURCE. Superseded by `clips` — kept only so
@@ -91,6 +105,12 @@ export type PostOverlayProps = {
      */
     framePosition?: { offsetX: number; offsetY: number };
     overlays: Overlay[];
+    /**
+     * Voiceover captions — phrases timed on the timeline, built server-side from the voiceover's own
+     * transcription (src/lib/captions.ts). Absent when nothing is said. Added 2026-10-31: a bundle
+     * older than that ignores the field and renders exactly as before, captionless.
+     */
+    captions?: CaptionTrack;
     // Frame metadata: the worker passes the base clip's real dimensions/fps/length; calculateMetadata
     // (Root.tsx) reads these so one composition serves every aspect ratio.
     width?: number;
@@ -182,14 +202,64 @@ const AnimatedBox: React.FC<{ ov: Overlay; frames: number; height: number; fps: 
     );
 };
 
-export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, audio, videoTrim, clips, framePosition, overlays }) => {
+/**
+ * The caption on screen now, the spoken word in the accent colour.
+ *
+ * Reads the composition's own frame (it is not inside a <Sequence>), so `t` is timeline seconds —
+ * the same clock the cues were built on. One phrase at a time; between phrases, nothing.
+ */
+const CaptionLayer: React.FC<{ track: CaptionTrack; height: number; fps: number }> = ({ track, height, fps }) => {
+    const frame = useCurrentFrame();
+    const hit = cueAt(track.cues, frame / fps);
+    if (!hit) return null;
+    const { fontSizePx, bottomPct, sidePct, strokePx } = captionLayout(height);
+    const accent = track.accent || CAPTION_FALLBACK_ACCENT;
+    return (
+        <div style={{
+            position: 'absolute', left: `${sidePct}%`, right: `${sidePct}%`, bottom: `${bottomPct}%`,
+            textAlign: 'center', fontFamily: overlayFontStack(CAPTION_FONT_ID), fontSize: fontSizePx,
+            lineHeight: 1.15, color: '#FFFFFF', letterSpacing: '0.01em',
+            // A stroke AND a shadow: the stroke holds the letter shapes over white footage, the
+            // shadow lifts them off busy backgrounds. Either alone fails on one of the two.
+            WebkitTextStroke: `${strokePx}px rgba(0,0,0,0.85)`, paintOrder: 'stroke fill',
+            textShadow: `0 ${strokePx}px ${strokePx * 3}px rgba(0,0,0,0.55)`,
+        }}>
+            {hit.cue.words.map((w, i) => (
+                <span key={i} style={{ color: i === hit.wordIndex ? accent : '#FFFFFF' }}>
+                    {i ? ' ' : ''}{w.text}
+                </span>
+            ))}
+        </div>
+    );
+};
+
+/**
+ * A still that moves. 'cover', not 'contain': a picture that zooms or pans inside letterbox bars
+ * drags the bars along with it, which reads as a mistake. A still with no movement keeps 'contain'
+ * (below) — the reviewer picked the picture, not a crop of it.
+ */
+const MovingStill: React.FC<{ src: string; motion: StillMotion; frames?: number }> = ({ src, motion, frames }) => {
+    const frame = useCurrentFrame();
+    const { durationInFrames } = useVideoConfig();
+    // Inside a timeline the scene's own length is passed in; the frame is already sequence-relative.
+    const total = frames ?? durationInFrames;
+    const progress = total > 1 ? Math.min(frame / (total - 1), 1) : 0;
+    return (
+        <AbsoluteFill style={{ overflow: 'hidden' }}>
+            <Img src={src} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: stillMotionTransform(motion, progress), transformOrigin: 'center center' }} />
+        </AbsoluteFill>
+    );
+};
+
+export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, imageMotion, audio, videoTrim, clips, framePosition, overlays, captions }) => {
     const { height, fps, durationInFrames } = useVideoConfig();
     const boxes = (overlays || []).filter((o) => o && String(o.text || '').trim());
     const tracks = (audio || []).filter((a) => a && a.src);
     const timeline = timelineOf({ clips, videoSrc, videoTrim });
+    const captionTrack = captions && Array.isArray(captions.cues) && captions.cues.length ? captions : null;
     // Only the families these boxes actually name — a render with two overlays should not wait on
-    // eight downloads, and a render with none should not wait at all.
-    useOverlayFonts(googleFamiliesFor(boxes.map((b) => b.fontFamily)));
+    // eight downloads, and a render with none should not wait at all. Captions add their one face.
+    useOverlayFonts(googleFamiliesFor([...boxes.map((b) => b.fontFamily), ...(captionTrack ? [CAPTION_FONT_ID] : [])]));
     // Only reached when calculateMetadata could not measure the files (the Studio preview, or every
     // source unreadable). Splitting the composition evenly is not accurate, but it keeps every clip
     // visible for the same share of the piece instead of collapsing them all onto frame 0.
@@ -212,7 +282,9 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, au
                 ? <Series>
                     {timeline.map((c) => (
                         <Series.Sequence key={c.id} durationInFrames={c.durationInFrames ?? evenShare}>
-                            <OffthreadVideo
+                            {c.kind === 'image'
+                                ? <MovingStill src={c.src} motion={c.motion ?? 'none'} frames={c.durationInFrames ?? evenShare} />
+                                : <OffthreadVideo
                                 src={c.src}
                                 style={{ width: '100%', height: '100%', objectFit: 'cover', objectPosition }}
                                 // The clip's own sound. Left undefined when nobody has an opinion,
@@ -230,11 +302,15 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, au
                                 // duration would re-round the end of every untrimmed clip for no reason.
                                 trimBefore={c.inS ? Math.max(0, Math.round(c.inS * fps)) : undefined}
                                 trimAfter={c.outS != null ? Math.max(1, Math.round(c.outS * fps)) : undefined}
-                            />
+                            />}
                         </Series.Sequence>
                     ))}
                   </Series>
-                : imageSrc ? <Img src={imageSrc} style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : null}
+                : imageSrc
+                    ? (imageMotion && imageMotion !== 'none'
+                        ? <MovingStill src={imageSrc} motion={imageMotion} />
+                        : <Img src={imageSrc} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />)
+                    : null}
 
             {/* Timed audio. The same [startS, endS) window the text boxes use, through the same
                 helper, so a voice note and a caption timed to the same moment land on the same
@@ -271,6 +347,10 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, au
                     </Sequence>
                 );
             })}
+
+            {/* Captions under the text boxes in paint order, so a box the user placed over the
+                caption area still wins. */}
+            {captionTrack ? <CaptionLayer track={captionTrack} height={height} fps={fps} /> : null}
 
             {boxes.map((ov) => {
                 // Half-open [startS, endS) → a <Sequence> window, computed by the shared helper so it

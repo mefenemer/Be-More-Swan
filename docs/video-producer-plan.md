@@ -3,7 +3,10 @@
 Added 2026-10-31, from an owner discussion of a "faceless YouTube" AI video stack (ChatGPT +
 Midjourney + Leonardo + ImageFX + Veo + Runway + Suno + CapCut, roughly $100–$245/month at verified
 2026-10-31 prices) and what Be More Swan would need to do the same job as one assistant.
-Status: **proposed, not started.** Nothing below exists yet unless marked ✅ (already built, reused).
+Status: **Phases 0–7 built 2026-10-31 and checked live on staging except one real render (§7.3). Go-live copy
+written and held back (§7.5).** The role is inserted HIDDEN; go-live is the admin status change after a live staging run. Owner decisions taken 2026-10-31: D1 Video Producer, D2 OpenAI TTS, D3 Kling
+via fal (env-switchable), D4 per scene, capped; D7 taken as recommended when Phase 7 was built (autopilot off by
+default, 1–3 a week, storyboards only). Anything else below exists only if marked ✅.
 
 Related: [brand-designer-plan.md](./brand-designer-plan.md) (visual briefs: stock / AI image / AI
 video / brand-card options — the sourcing engine this plan reuses),
@@ -248,42 +251,210 @@ words per second), no on-screen text from the image model, own product photos fo
 
 Phases 1–4 each ship on their own and improve existing assistants. The role comes last.
 
-**Phase 0 — prerequisites (mostly no code)**
-- Owner decisions D1–D7 (§8).
-- fal + TTS balances on `check-provider-balances`; fal failure rate on the watchdog.
-- Read both deployed Remotion `bundle.js` files and confirm they match the repo.
-- Confirm the YouTube upload audit status.
-- Competitor check (§2) — written down before any marketing copy.
+**Phase 0 — prerequisites (mostly no code)** ✅ code part done
+- Owner decisions D1–D4 ✅ (2026-10-31); D5–D7 still open.
+- ✅ fal, Anthropic, Stability were already probed; **OpenAI added** (`probeOpenAi` in
+  `src/utils/provider-balance.ts` — a one-character speech call, since OpenAI has no balance endpoint).
+- ⏳ Read both deployed Remotion `bundle.js` files and confirm they match the repo.
+- ⏳ Confirm the YouTube upload audit status.
+- ⏳ Competitor check (§2) — written down before any marketing copy.
 
-**Phase 1 — image-to-video**
-`submitImageToVideo` in `fal-gateway.ts`; `ai_video` options in `visual-briefs.ts` start from a FLUX
-frame; aspect ratio honoured. Benefits the Brand Designer and My Content immediately.
+**Phase 1 — image-to-video** ✅
+`submitFramedVideo` / `imageToVideoInput` in `fal-gateway.ts`; `FAL_I2V_MODEL` defaults to
+`fal-ai/kling-video/v2.5-turbo/pro/image-to-video` ($0.07/s, fal pricing page 2026-10-31 — v3 Pro is
+$0.14/s, 3× Hailuo per clip at the same 5 credits). `'off'` restores Hailuo. Brand Designer AI-video
+options start from a FLUX frame at the brief's ratio; My Content's video form honours the shape and
+can **animate a library picture** ("Animate this picture" in the viewer). Frame drawing happens in
+`process-media-job-background` (5–15 s is too long for the synchronous request). Both Kling models
+priced in `MEDIA_LIST_PRICE_USD`. Tests: `tests/image-to-video.test.ts`.
 
-**Phase 2 — voiceover**
-TTS gateway + metering, `content_assets` audio, voice picker, "Add voiceover" in the post editor's
-Sound inspector. Benefits the Social Media Manager's reels.
+**Phase 2 — voiceover** ✅
+`src/lib/tts.ts` (gpt-4o-mini-tts + whisper-1 word timings), `generate-voiceover.ts` (synchronous,
+26 s timeout, 1 credit / 1 task — new `ai_voiceover` work kind, no migration), six labelled voices,
+"Add a voiceover" panel in the post editor's Sound section. Music already on the post is turned down
+to 35 % under the voice; a voiceover is never bounded to the video's length. Words stored on
+`content_assets.render_params = { kind: 'voiceover', voice, script, words }`. Gate:
+`ai_music_generation` (the sound capability). Tests: `tests/voiceover.test.ts`.
 
-**Phase 3 — captions**
-Word timings (from TTS or a transcription pass), `captions` layer in the composition, brand styling,
-both Remotion sites deployed.
+**Phase 3 — captions** ✅ (needs a Remotion site deploy to show)
+`src/lib/captions.ts` (phrases ≤ 4 words / 26 chars, spoken word in the brand colour when it reads on
+video, else yellow), `resolveCaptionTrack` in `post-render.ts`, `captions` prop + `CaptionLayer` in
+`remotion/PostOverlay.tsx`, per-clip "Show captions" switch on voiceover rows (default on). Not shown in
+the editor preview yet — the switch says so. The `captions` flag is in the render fingerprint.
+Tests: `tests/captions.test.ts`.
 
-**Phase 4 — motion on stills**
-`motion` prop on the image branch; weekly Short picks it up.
+**Phase 4 — motion on stills** ✅ (needs a Remotion site deploy to show)
+`src/lib/still-motion.ts` (push-in / pull-out / pans, eased, 6 %, pan travel bounded so the frame is
+never uncovered), `stillMotion` on the render job, `imageMotion` prop + `MovingStill` in the
+composition. The weekly YouTube Short pushes in; a forced retry keeps the move. No editor control yet —
+Phase 5 sets motion per still scene. Tests: `tests/still-motion.test.ts`.
 
-**Phase 5 — storyboard + assembly (the core)**
+### 7.4 Before Phase 7 is live
+
+1. Apply `db/z-video-producer-phase7.sql` to staging and prod **before** the code deploys — video_projects is
+   read with a bare `db.select()` and the mirror names its four new columns.
+2. Live checks: turn autopilot on for the test Video Producer, POST `/.netlify/functions/run-video-autopilot`
+   on staging with `Authorization: Bearer $CRON_TRIGGER_SECRET` (scheduled functions never run on a branch
+   deploy; staging-crons.yml pokes it every 6h) → a storyboard marked "Planned by autopilot"; "Make a video version" on a post in the Review Queue
+   (and the same from the Social Media chat) → one storyboard, a second click opens the same one; a campaign
+   plan with "Commission a video" → storyboard on the Videos tab → Make the video → approve the post → the
+   order shows delivered after the next reconciler run (hourly).
+3. The Review Queue block and the chat cards were not exercised in a browser (they need a signed-in session).
+
+### 7.3 Before Phase 6 is live
+
+1. ✅ Apply `db/z-video-producer-role.sql` to staging and prod (2026-10-31).
+2. ⏳ On staging (2026-10-31, workspace 58, Video Producer #60): hired; storyboards, autopilot, "Make a video
+   version" (Review Queue + Social chat) and a campaign's video order all checked live. NOT yet run: one real
+   "Make the video" → approve → render (spends tasks; the voiceover, captions and render path end to end).
+3. ✅ Go-live pieces written 2026-10-31, all held back until go-live — see §7.5.
+
+### 7.5 Go-live day (role status → Live) — in this order
+
+⚠️ PROD HAS NONE OF THE VIDEO PRODUCER CODE until the staging→main release. Order on the day: release
+(PR staging→main, merged) → Admin status Live on prod → publish the help articles → check the catalogue.
+
+Written 2026-10-31 from the code. Nothing below is public until these steps run; the role is Hidden.
+Claims kept to §9 — no "first", "unique" or "replaces $X of tools", so no competitor check gates them.
+
+1. Costs are in TASKS everywhere (fixed 2026-10-31): the Videos tab, setup, chat and campaign copy quoted
+   credits (5 per AI clip) while the hold took tasks (20 per clip — `task-weights.ts`). `buildEstimate`
+   (video-producer.ts) now shows the same figure the hold takes, in the workspace's unit.
+2. Admin ▸ Configuration ▸ Assistants → Video Producer → Live (prod).
+3. Help Centre: `db/help-articles-2026-12zzzzzzzzzzzzzz-video-producer.sql` inserts three articles UNPUBLISHED
+   (safe to apply any time). Publish with the UPDATE at its foot — after that, Ask Your Team answers from them.
+4. Website page: `db/assistant-showcases.json` → `db/z-assistant-showcases.sql` has the `video_producer` entry
+   (renders only once the role is Live — the public list shows active roles only). Screenshot
+   `images/assistants/video_producer/storyboard.jpg` (the real Videos tab, fictional Willowbrook Coffee data, from
+   a stubbed local page) and overview video `videos/assistants/video_producer.mp4` (`render-assistant-videos.mjs`).
+5. ✅ Pricing (2026-10-31): applied to staging and prod; seed row added; file renamed to
+   `db/z-video-producer-plan-feature.sql`. ⚠️ Live on prod's pricing table BEFORE the code release — release next.
+6. ✅ FAQ (2026-10-31): the block below is in `faq.html` after the Business Mentor answers (reaches prod with the release).
+7. Already live in code, gated by the role being active: Business Mentor hire pick (`mentor-hire.ts`
+   video_producer — only Live roles, only on a plan that makes video, only with a Social Media Assistant);
+   Ask Your Team names the Video Producer for video requests only when one is on the team.
+8. Not written (owner's call): marketing copy beyond the catalogue row, the homepage, an assistant photo.
+
+FAQ block for `faq.html` (same markup as the Business Mentor answers):
+
+```html
+<!-- Video Producer (docs/video-producer-plan.md §7.5). Claims checked against the code (§9). -->
+<details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
+    <summary class="flex justify-between items-center font-semibold cursor-pointer list-none px-6 py-5 text-gray-900 hover:text-emerald-700 transition-colors">
+        <span>What does the Video Producer make?</span>
+        <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </summary>
+    <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
+        Short vertical videos, 15, 30 or 60 seconds, for Instagram Reels, YouTube Shorts and Facebook Reels. It writes the script from your business details and products, builds each scene from stock footage, your own pictures, branded cards or AI, and adds a voiceover and captions. You check the storyboard before anything is made, and the finished video waits in your Review Queue for your approval. It doesn't edit footage you give it, make long YouTube videos or post to TikTok yet.
+    </div>
+</details>
+<details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
+    <summary class="flex justify-between items-center font-semibold cursor-pointer list-none px-6 py-5 text-gray-900 hover:text-emerald-700 transition-colors">
+        <span>Does making a video use my tasks?</span>
+        <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </summary>
+    <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
+        Planning a storyboard is free. Making the video uses tasks only for AI scenes and the voiceover: 20 tasks for an AI clip (at most 3 in a video), 1 for an AI picture and 1 for the voiceover. Stock footage, stock photos, your own pictures and branded cards use none, and the exact number is on the "Make the video" button before you press it. Making videos is on the Busywork Buster plan.
+    </div>
+</details>
+```
+
+### 7.2 Before Phase 5 is live
+
+1. Everything in 7.1 — the Remotion redeploy is now mandatory: an old bundle cannot draw a still scene
+   and the render FAILS (not degrades) on a storyboard with one.
+2. Apply `db/z-video-producer.sql` to staging and prod (the endpoints read the table).
+3. Live checks: create → plan → edit a scene → build → the post appears in the Review Queue → approve →
+   it renders with stills moving, the clip trimmed, captions and the on-screen text.
+
+### 7.1 Before Phases 0–4 are live
+
+1. **Deploy BOTH Remotion sites** (`remotion:deploy-site` staging + prod, then `npm run
+   remotion:site-drift`) — captions and moving stills live in the bundle; pushing does not update it.
+   Until then old bundles ignore both props and render exactly as before (safe, just absent).
+2. `OPENAI_API_KEY` set in every Netlify context (voiceovers answer 503 without it).
+3. Optional: `FAL_I2V_MODEL` to choose another model; nothing to set for the default.
+4. No SQL in Phases 0–4.
+5. Live checks nobody has run yet: one real Kling clip (confirms the request shape and the 9:16
+   frame), one real voiceover (confirms OpenAI + whisper word timings), one render with captions
+   and one moving still on staging after the site deploy. The post-editor voiceover panel was not
+   exercised in a browser (it needs a signed-in session); My Content's animate flow was, in a stubbed
+   harness.
+
+**Phase 5 — storyboard + assembly (the core)** ✅ server side (no screen until Phase 6)
+- **Still scenes on the timeline:** `VideoClip.kind = 'image'` + `holdS` + `motion` (video-edit.ts);
+  resolved, fingerprinted and rendered (`MovingStill` inside the Series; Root.tsx sizes a still by its
+  hold). A timeline with a still renders even when the post's base is a picture. The post editor's save
+  now keeps still scenes (it rebuilt clips from five fields and would have dropped them).
+- `src/lib/storyboard.ts` — every rule in §5.3 enforced in code; scene lengths come from the
+  voiceover's word timings (`sceneTimingsFromWords`); credit estimate.
+- `src/utils/video-producer.ts` — `planProject` (one model call, role model `video_producer`, the
+  assistant's Rules), `buildProject` (one voiceover for the script, each scene sourced: Pexels video /
+  photo, the workspace's own pictures, brand card, FLUX, Kling; then one `pending_approval` post per
+  platform — ig_reel / yt_short / fb_reel — with the video_edit, the captioned voiceover and the
+  on-screen text as timed overlays). Held up front, settled per scene, rest refunded; finished scenes
+  kept for a re-build; stuck projects swept after 20 min with the hold refunded.
+- `netlify/functions/video-projects.ts` (create / replan with notes / edit_scene / build / cancel;
+  gated like AI video) + `process-video-project-background.ts`.
+- `src/utils/voiceover-asset.ts` — the speak-time-store step shared with the editor's voiceover.
+- `db/z-video-producer.sql` — **apply to BOTH DBs before deploy**.
+- Not in v1: music under the video (add it in the editor), per-scene re-roll of a single option.
+  Tests: `tests/storyboard.test.ts`, `tests/video-producer.test.ts`.
+
+**Phase 5 — as planned**
 `db/z-video-producer.sql`, storyboard generation with code-enforced rules, per-scene sourcing,
 `video-assembly.ts`, render, storyboard review panel. Tests: storyboard validator, assembler (pure),
 per-scene retry, credit hold/refund.
 
-**Phase 6 — the role**
+**Phase 6 — the role** ✅ (hidden until go-live)
+- Catalogue: `db/z-video-producer-role.sql` (HIDDEN row + grants ai_video / ai_image / ai_music) —
+  **apply to BOTH DBs**; `seed-catalog.ts` + `master_assistants.json` for fresh DBs.
+- Wiring: `VIDEO_PRODUCER_ROLE_KEY`, connection map `['social','design']` (security), build manifest,
+  role label, prompt layers + model picker ("Planning video storyboards"), Rules reach its planner and
+  chat (Rules-tab copy scope 'video'), onboarding (voice, length, call to action; operational: where
+  scenes come from) — setup answers fill whatever a brief leaves out (`withSetupDefaults`).
+- **Videos tab** (`src/components/assistant-videos.js`): New video, storyboard with "Change" per scene,
+  "Plan it again" with notes, "Make the video — uses N credits", Cancel, badge = storyboards waiting.
+  Review Queue + Calendar as for posts. Checked in a stubbed harness at desktop and phone width.
+- **Chat**: route `video_producer` with a per-turn videos snapshot; cards `video_brief_proposal` and
+  `video_replan_proposal` (both free); no card can make (spend on) a video.
+- Dashboard: post-insights KPIs reworded for video; goal `videos_published` (poll-goal-telemetry).
+- Starter prompts, welcome line, bottleneck chips. Tests: `tests/video-producer-role.test.ts`.
+- **Deferred to go-live** (the role is hidden, so nothing public may name it yet): help article (dated
+  SQL), showcase page JSON, pricing row, marketing copy (`assistant-role-content` / `db/z-copy-*`),
+  Business Mentor + Ask Your Team routing, assistant photo.
+
+**Phase 6 — as planned**
 Full assistant onboarding checklist pass: catalogue entry (`comingSoon: true`),
 connection map (security — explicit entry), onboarding schema with one `operational` step, chat
 route + prompt layers, surface registry flags (not social-shaped by default), dashboard (4 KPI cards,
 Results tab), starter prompts, goal metrics, notifications, assistant features, help article (dated
 SQL file), showcase page JSON, pricing row, Business Mentor + Ask Your Team routing, build manifest.
 
-**Phase 7 — cadence and hand-offs**
-Autopilot videos per week; Social Media Manager "make a video version"; Campaign `commission_video`.
+**Phase 7 — cadence and hand-offs** ✅ (needs `db/z-video-producer-phase7.sql` on both DBs)
+- `video_projects.origin` ('user' | 'autopilot' | 'handoff' | 'campaign'), `source_post_id` (one live video
+  per post — partial unique index), `campaign_id`, `campaign_order_id`. Every way in goes through ONE function,
+  `startProject` (video-producer.ts), so setup defaults apply to all of them. The Videos tab and the chat
+  snapshot say where each video came from.
+- **Autopilot** (`src/utils/video-autopilot.ts`, cron `video-autopilot` 05:30 UTC): setup question "Should it
+  plan videos for you each week?" (off / 1 / 2 / 3; D7). STORYBOARDS ONLY — it never builds, so it never spends;
+  each waits for "Make the video". Spaced 7 / 3 / 2 days; adds none while two of its storyboards wait; topics
+  rotate through Products & Services, least recently featured first, else a tip from the business description;
+  nothing at all from a name alone. Same gates as the Videos tab (plan with video, feature, task capacity) and
+  skips paused assistants. Chat changes it through the generic set-up change card.
+- **"Make a video version"** (`src/utils/video-handoff.ts`): a block in the Review Queue post view (any post that
+  is not a video and not rejected; offered only when `video-projects?producer=1` finds an ACTIVE Video Producer
+  on a plan with video) → `video-projects` `from_post` → a storyboard from the post's own words, on its platform
+  if that takes video. Chat twin: `post_action_proposal` action `video_version` in the Social Media chat.
+- **`commission_video`** (`src/utils/campaign-video-order.ts`): ONE video per order, 2 tasks, artefact
+  `video_project`. Starts a free storyboard; making it is the Videos-tab click; delivered when the finished post
+  is approved — settled at once by approve-post / reject-post (`settleVideoOrderForPost`), the hourly
+  reconciler as the backstop. Wired through the vocab,
+  ORCHESTRATABLE_ROLE_KEYS, plan brief fields (`videoMessage`, `cta`, `videoLength`), the Campaign Assistant
+  prompt, the plan card, the Campaigns tab's Add work form, the mirror, the team feed and the work-state links.
+- "Requested by" on campaign and hand-off videos (`requesterNamesForVideoPosts`, both post lists); the
+  Videos tab form now starts from the setup voice, length, sources and call to action. Tests:
+  `tests/video-producer-phase7.test.ts`.
 
 **Phase 8 — later, separately decided**
 TikTok publishing (OAuth scopes are scaffolded in `oauth-integrations.ts`, but there is no publish

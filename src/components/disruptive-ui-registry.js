@@ -939,6 +939,7 @@
       lead_qualifier: 'Lead Generation Assistant',
       newsletter_editor: 'Email Marketing Assistant',
       brand_designer: 'Brand Designer',
+      video_producer: 'Video Producer',
       human: 'A person on your team',
     };
 
@@ -1001,7 +1002,7 @@
           : Number.isFinite(Number(o.quantity)) && o.quantity !== null && o.quantity !== ''
             ? Math.max(1, Math.min(spec.maxQuantity, Math.floor(Number(o.quantity))))
             : (spec.defaultQuantity || 1);
-        const detail = [o.angle, o.idea, o.task, o.hypothesis, o.show, o.headline].find((v) => typeof v === 'string' && v.trim());
+        const detail = [o.angle, o.idea, o.task, o.hypothesis, o.show, o.headline, o.videoMessage].find((v) => typeof v === 'string' && v.trim());
         // An A/B test (§9.8) shows BOTH angles — the user is approving a comparison, not one post.
         const testNote = o.action === 'ab_test_posts' && typeof o.angleA === 'string' && typeof o.angleB === 'string'
           ? `A: ${o.angleA.trim()} · B: ${o.angleB.trim()} — per angle, every post still comes to you`
@@ -1021,6 +1022,10 @@
         const sources = Array.isArray(o.sources) ? o.sources : null;
         const pictureNote = o.action === 'commission_visuals'
           ? `${sources && !sources.some((x) => x === 'ai_image' || x === 'ai_video') ? 'Stock and branded cards, made straight away' : 'Stock and branded cards straight away; AI images and video only when you ask for options on its Briefs tab'} — you choose; the picture joins this campaign`
+          : '';
+        // A video (Video Producer, Phase 7) says the plan is free and the making is a later click.
+        const videoNote = o.action === 'commission_video'
+          ? 'Storyboard planned straight away, free — you make the video from the Videos tab, where the tasks it uses are shown first'
           : '';
         // A person's task (§9.5) names who, says nothing is sent to them, and shows what waits.
         const humanNote = o.action === 'request_human_task'
@@ -1045,7 +1050,8 @@
           detail: detail ? String(detail).trim() : '',
           forWho,
           emailNote,
-          pictureNote,
+          // Same line on the card as the picture note — one is never both.
+          pictureNote: pictureNote || videoNote,
           humanNote,
           testNote,
           afterNote,
@@ -1568,6 +1574,108 @@
   }
 
   register('visual_brief_proposal', renderVisualBriefProposalCard);
+
+  // ── Built-ins: Video Producer cards (docs/video-producer-plan.md §5.10) ─────────────────────
+  // { type: 'video_brief_proposal', message, purpose?, lengthS?, cta?, voiceover?, allowAi?, platforms? }
+  // { type: 'video_replan_proposal', projectId, feedback? }
+  //
+  // The chat twins of "New video" and "Plan it again" on the Videos tab — the same video-projects.ts
+  // actions. Both are FREE (planning is one model call). Making the video spends credits, so no card
+  // can do it: that is "Make the video" on the Videos tab, which states the cost first.
+  function renderVideoBriefProposalCard(ui, esc) {
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const PLATFORMS = { instagram: 'Instagram Reel', youtube: 'YouTube Short', facebook: 'Facebook Reel' };
+    const ALLOW = { stock_and_ai: 'Stock first, AI where it fits', stock_only: 'Stock and your own pictures only', ai_first: 'Leans on AI' };
+    const brief = {
+      message: clean(ui.message, 1200),
+      purpose: clean(ui.purpose, 60) || 'promo',
+      lengthS: [15, 30, 60].includes(Number(ui.lengthS)) ? Number(ui.lengthS) : 30,
+      cta: clean(ui.cta, 200),
+      voiceover: ui.voiceover !== false,
+      allowAi: ALLOW[ui.allowAi] ? ui.allowAi : 'stock_and_ai',
+      platforms: (Array.isArray(ui.platforms) ? ui.platforms : ['instagram']).filter((p) => PLATFORMS[p]),
+    };
+    if (!brief.platforms.length) brief.platforms = ['instagram'];
+    const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
+    const runnable = brief.message.length >= 10;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">New video · Approval needed</p>
+      <p class="text-sm text-gray-900 mt-2 break-words">${runnable ? esc(brief.message) : '<span class="text-amber-700">It needs a sentence or two on what the video is about.</span>'}</p>
+      ${row('Length', `${brief.lengthS} seconds`)}
+      ${row('Kind', brief.purpose)}
+      ${row('Ends with', brief.cta)}
+      ${row('Voiceover', brief.voiceover ? 'Yes, with captions' : 'No — on-screen text only')}
+      ${row('Pictures from', ALLOW[brief.allowAi])}
+      ${row('For', brief.platforms.map((p) => PLATFORMS[p]).join(', '))}
+      <p class="text-xs text-gray-600 mt-2">Planning the storyboard is free. You check it on the Videos tab before anything is made — the cost of making it is shown there first.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vdp-save ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Plan this video</button>
+        <button type="button" data-vdp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vdp-status></p>`;
+    const status = el.querySelector('[data-vdp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vdp-cancel]')) { setBusy(true); say('Not planned.'); return; }
+      if (!e.target.closest('[data-vdp-save]')) return;
+      setBusy(true);
+      say('Starting the storyboard…');
+      el.dispatchEvent(new CustomEvent('video:create', {
+        bubbles: true,
+        detail: {
+          brief,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'Could not start that — please try again.', 'error'); return; }
+            say('Started. The storyboard appears on the Videos tab in about a minute.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  function renderVideoReplanProposalCard(ui, esc) {
+    const projectId = Number(ui.projectId);
+    const feedback = typeof ui.feedback === 'string' ? ui.feedback.replace(/\s+/g, ' ').trim().slice(0, 600) : '';
+    const ok = Number.isInteger(projectId) && projectId > 0;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Plan the video again · Approval needed</p>
+      ${feedback ? `<p class="text-xs text-gray-700 mt-2"><span class="font-bold">Your notes:</span> ${esc(feedback)}</p>` : ''}
+      <p class="text-xs text-gray-600 mt-2">Free. The new storyboard replaces the current one, and any scenes already made for it are dropped.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vrp-go ${ok ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Plan it again</button>
+        <button type="button" data-vrp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vrp-status></p>`;
+    const status = el.querySelector('[data-vrp-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vrp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-vrp-go]')) return;
+      setBusy(true);
+      say('Re-planning…');
+      el.dispatchEvent(new CustomEvent('video:replan', {
+        bubbles: true,
+        detail: {
+          projectId, feedback,
+          respond({ ok: done, error }) {
+            if (!done) { setBusy(false); say(error || 'Could not re-plan that — please try again.', 'error'); return; }
+            say('Re-planning. The new storyboard appears on the Videos tab in about a minute.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('video_brief_proposal', renderVideoBriefProposalCard);
+  register('video_replan_proposal', renderVideoReplanProposalCard);
 
   // ── Built-ins: Mystery Shopper cards (docs/mystery-shopper-plan.md §4.6) ──────────────────────
   // The chat twins of the Website tab's buttons — same server actions (site-audits.ts), handled in
@@ -3606,7 +3714,7 @@
   register('social_post_draft', renderSocialPostDraftCard);
 
   // ── Built-in: Post Action Proposal Card (Social Media chat) ────────────────
-  // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove', postId,
+  // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove'|'shorter'|'longer'|'video_version', postId,
   //   postIds, platforms, status, publishDate, timezone, text, reason, when, blocked }
   //
   // The chat's hands on a post that already exists — the twin of the Posts tab's Approve, Reject,
@@ -3627,6 +3735,8 @@
     // The post editor's "Make it shorter" / "Make it longer", every platform of the post.
     shorter: { head: 'Make this post shorter', button: 'Make it shorter', busy: 'Rewriting…' },
     longer: { head: 'Make this post longer', button: 'Make it longer', busy: 'Rewriting…' },
+    // The Review Queue's "Make a video version" (Video Producer, Phase 7) — a free storyboard.
+    video_version: { head: 'Make a video version', button: 'Plan the video', busy: 'Starting the storyboard…' },
   };
 
   function renderPostActionProposalCard(ui, esc) {
@@ -3665,6 +3775,7 @@
         <textarea id="bap-instruction-${postId}" data-bap-instruction rows="3" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
         <p class="text-xs text-gray-600 mt-2">The article is rewritten and saved in place, using your Business Knowledge for anything new — no invented facts. Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
+      ${!blocked && ui.action === 'video_version' ? '<p class="text-xs text-gray-600 mt-3">Your Video Producer plans a short video saying what this post says — free. You check the storyboard on its Videos tab before anything is made; the cost of making it is shown there first. This post stays as it is.</p>' : ''}
       ${!blocked && (ui.action === 'shorter' || ui.action === 'longer') ? `<p class="text-xs text-gray-600 mt-3">${ui.action === 'shorter' ? 'About half the length — same message, nothing new added.' : 'About half as long again — it develops what the post already says, with no invented facts.'} Each platform’s caption is rewritten and saved. It stays where it is in your queue.</p>` : ''}
       ${!blocked && ui.action === 'retry' && ui.when ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Try again at:</span> ${esc(ui.when)}</p>
         <p class="text-xs text-gray-500 mt-1">The exact time is worked out when you press the button, and said back to you here. If the same problem is still there, it will fail again.</p>` : ''}

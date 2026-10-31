@@ -163,9 +163,16 @@ export function readCachedReview(
     return cached;
 }
 
-/** A warning raised about the platform's own AI-disclosure line, which quotes it. */
+/**
+ * A warning raised about the platform's own AI-disclosure line. Either it quotes the line, or it
+ * paraphrases it — a review cached on staging on 2026-10-26 said "the Felix / Be More Swan AI assistant
+ * mention is unrelated to the film business", which the quote-only test let through, so the old
+ * warning still showed and still gated approval. A business's own post has no reason to name Be More
+ * Swan's AI assistant except through that footer.
+ */
 export function isAboutDisclosureFooter(warning: string): boolean {
-    return /\bcomposed with\b/i.test(warning) && /be more swan|ai digital assistant/i.test(warning);
+    if (/\bcomposed with\b/i.test(warning) && /be more swan|ai digital assistant/i.test(warning)) return true;
+    return /be more swan/i.test(warning) && /\b(ai|assistant|digital assistant)\b/i.test(warning);
 }
 
 /**

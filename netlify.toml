@@ -1132,6 +1132,10 @@ node_bundler = "esbuild"
 # than social, which drains every minute).
 [functions.blog-horizon-fill]
   schedule = "0 5 * * *"
+# Video Producer autopilot (src/utils/video-autopilot.ts): storyboards only, never spends — making
+# the video is the owner's click. Half an hour after blog-horizon-fill so they do not share a compute window.
+[functions.video-autopilot]
+  schedule = "30 5 * * *"
 [functions.process-blog-jobs]
   schedule = "*/10 * * * *"
 
@@ -1174,6 +1178,10 @@ node_bundler = "esbuild"
 # are ready. Raise the timeout to Netlify's synchronous max so a slow Flux-2 run completes
 # instead of being killed mid-poll (raw 502). The poll budget in fal-gateway stays under this.
 [functions.generate-ai-image]
+  timeout = 26
+
+# Voiceover: OpenAI speech (≤15 s) + whisper word timings (≤8 s), both inside one request.
+[functions.generate-voiceover]
   timeout = 26
 
 # Admin → Revenue → Partners ▸ Partner Ops chat: a Claude tool loop (read tools + action cards).

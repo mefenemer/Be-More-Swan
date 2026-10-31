@@ -27,7 +27,7 @@ import { ART_DIRECTION_CRAFT } from '../constants/art-direction-craft';
 import { logMediaCost } from './ai-usage';
 import {
     FalContentPolicyError, FalError, extractVideo, falConfigured, generateImages, result as falResult, status as falStatus,
-    submitVideo, type AspectRatio,
+    submitFramedVideo, imageToVideoEnabled, I2V_MODEL, type AspectRatio,
 } from '../lib/fal-gateway';
 import { renderBrandCard, type CardVariant } from '../lib/brand-card';
 import { deleteR2Object, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
@@ -216,7 +216,7 @@ export function artDirectionSystemPrompt(): string {
 
 1. "imagePrompt" — a prompt for an AI image model (FLUX). One paragraph, under 900 characters. Describe the scene, subject, composition, lighting and mood concretely. Steer colour towards the brand colours given. NEVER ask for words, letters, signs, captions or logos in the image — image models render text badly, and the words go on branded cards instead. Never name a real person or a trademark.
 2. "stockKeywords" — 2 to 4 plain words to search a stock photo library (Pexels). Visual nouns, no adjectives about quality, no punctuation.
-3. "videoPrompt" — a prompt for a 6-second AI video (Hailuo): the same scene with ONE simple motion (a slow push-in, a pan, people moving naturally). One continuous shot, no cuts, no words on screen. Under 900 characters.
+3. "videoPrompt" — a prompt for a 6-second AI video that animates the image above: the same scene with ONE simple motion (a slow push-in, a pan, people moving naturally). One continuous shot, no cuts, no words on screen. Under 900 characters.
 4. "cardHeadlines" — one or two short headlines (max 90 characters each) for a typographic card in the brand's colours. If the brief gives exact words, the FIRST headline is those words unchanged. Never invent a price, a statistic, a date or an offer the brief does not state.
 
 Respect every "must avoid" in the brief in all four. When earlier options were turned down, the reasons are listed: change what the reason names, keep what it does not.
@@ -592,16 +592,21 @@ async function stockVideoOptions(db: Db, brief: BriefRow, ad: ArtDirection, excl
 const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
 
 /**
- * One 6-second Hailuo clip, waited for inside the round (the round already runs in a background
+ * One 6-second AI clip, waited for inside the round (the round already runs in a background
  * function with 15 minutes) and copied into R2 — fal's URLs expire. Every attempt writes a
  * media_generation_jobs row, so the platform-wide failure alert sees this path too. A clip that has
  * not arrived by VIDEO_POLL_DEADLINE_MS is abandoned and refunded rather than left to the sweep.
  */
+// Since 2026-10-31 (Video Producer plan, Phase 1) the clip starts from a FLUX frame drawn at the
+// brief's aspect ratio and is animated by an image-to-video model — so a 9:16 brief gets a 9:16 clip
+// that looks like the AI image options next to it. FAL_I2V_MODEL='off' restores Hailuo text-to-video.
 async function aiVideoOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId: number | null) {
     const prompt = ad.videoPrompt || ad.imagePrompt;
+    const usage = { workspaceId: brief.organisationId, userId, assistantId: brief.aiAssistantId };
     const job = {
         organisationId: brief.organisationId, userId, assistantId: brief.aiAssistantId, mediaType: 'video',
-        prompt, aspectRatio: brief.aspectRatio, durationSeconds: 6, model: VIDEO_MODEL, creditCost: VIDEO_CREDIT_COST,
+        prompt, aspectRatio: brief.aspectRatio, durationSeconds: 6,
+        model: imageToVideoEnabled() ? I2V_MODEL : VIDEO_MODEL, creditCost: VIDEO_CREDIT_COST,
     };
     let url: string;
     let contentType = 'video/mp4';
@@ -609,14 +614,16 @@ async function aiVideoOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId:
         if (!falConfigured()) {
             url = MOCK_VIDEO_URL;
         } else {
-            const sub = await submitVideo({ prompt, durationSeconds: 6 });
+            const sub = await submitFramedVideo({
+                prompt, imagePrompt: ad.imagePrompt, aspectRatio: brief.aspectRatio as AspectRatio, durationSeconds: 6, usage,
+            });
             const deadline = Date.now() + VIDEO_POLL_DEADLINE_MS;
             while ((await falStatus(sub.statusUrl)) !== 'COMPLETED') {
                 if (Date.now() > deadline) throw new Error('video_timeout');
                 await sleep(VIDEO_POLL_INTERVAL_MS);
             }
             const v = extractVideo(await falResult(sub.responseUrl));
-            logMediaCost(VIDEO_MODEL, { durationSeconds: 6 }, { workspaceId: brief.organisationId, userId, assistantId: brief.aiAssistantId, sessionId: 'fal-video' });
+            logMediaCost(sub.model, { durationSeconds: sub.billedSeconds }, { ...usage, sessionId: 'fal-video' });
             url = v.url;
             contentType = v.contentType || contentType;
         }
