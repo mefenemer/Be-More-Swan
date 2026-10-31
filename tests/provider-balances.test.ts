@@ -19,6 +19,7 @@ import {
     assessProviders, classifyAnthropicError, readFalBalance, probeAnthropic, FAL_LOCK_PATTERN,
     readStabilityBalance, STABILITY_TRACK_CREDITS, DEFAULT_STABILITY_LOW_BALANCE_CREDITS,
     assessMediaFailures, type FalLockEvidence, type MediaFailureEvidence,
+    classifyOpenAiFailure, probeOpenAi,
 } from '../src/utils/provider-balance';
 import { dueForAlert } from '../netlify/functions/check-provider-balances';
 
@@ -207,6 +208,36 @@ async function main() {
         assert.ok(fn.includes("stabilityLowBalanceCredits: stabilityLow, mediaFailures"), 'the evidence never reaches the rules');
         assert.ok(fn.includes("!~ '${FAL_LOCK_PATTERN}'"), 'the lock has its own rule — counting it here sends two emails for one outage');
         assert.ok(fn.includes("NOT LIKE 'Superseded:%'"), 'operator clean-up is not a platform failure');
+    });
+
+    // ── OpenAI (voiceovers) ─────────────────────────────────────────────────────────────────────
+    await check('OpenAI: insufficient_quota is an outage, a plain 429 is not', () => {
+        assert.strictEqual(classifyOpenAiFailure(429, '{"error":{"code":"insufficient_quota"}}').status, 'exhausted');
+        assert.strictEqual(classifyOpenAiFailure(429, '{"error":{"code":"rate_limit_exceeded"}}').status, 'transient');
+        assert.strictEqual(classifyOpenAiFailure(401, '').status, 'key_rejected');
+        assert.strictEqual(classifyOpenAiFailure(503, '').status, 'transient');
+    });
+
+    await check('OpenAI probe never throws and says not_configured without a key', async () => {
+        const saved = process.env.OPENAI_API_KEY;
+        delete process.env.OPENAI_API_KEY;
+        assert.deepStrictEqual(await probeOpenAi(), { status: 'not_configured' });
+        process.env.OPENAI_API_KEY = 'sk-test';
+        const boom = await probeOpenAi((async () => { throw new Error('ECONNRESET'); }) as unknown as typeof fetch);
+        assert.strictEqual(boom.status, 'transient');
+        const ok = await probeOpenAi((async () => new Response(new Uint8Array([1]), { status: 200 })) as unknown as typeof fetch);
+        assert.deepStrictEqual(ok, { status: 'ok' });
+        if (saved === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = saved;
+    });
+
+    await check('OpenAI exhausted/key problems alert; transient and absent do not', () => {
+        const base = { fal: { status: 'ok', balance: 100, currency: 'USD' } as const, falEvidence: noEvidence, anthropic: { status: 'ok' } as const };
+        assert.deepStrictEqual(assessProviders({ ...base, openai: { status: 'exhausted', detail: 'x' } }).map(p => p.provider), ['openai']);
+        assert.deepStrictEqual(assessProviders({ ...base, openai: { status: 'key_rejected', httpStatus: 401 } }).map(p => p.provider), ['openai']);
+        assert.deepStrictEqual(assessProviders({ ...base, openai: { status: 'transient', detail: '429' } }), []);
+        assert.deepStrictEqual(assessProviders(base), []);
+        const fn = readFileSync(join(root, 'netlify/functions/check-provider-balances.ts'), 'utf8');
+        assert.ok(fn.includes('probeOpenAi()') && fn.includes('mediaFailures, openai'), 'the OpenAI probe never reaches the rules');
     });
 
     console.log(`\n${passed} checks passed`);

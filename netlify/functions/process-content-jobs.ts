@@ -1178,6 +1178,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                         // worker would treat "no overlays" as "nothing to do" and clear the gate,
                         // leaving a still attached to a video-only platform.
                         forceVideo: true,
+                        // A slow push-in, so ten seconds of card read as video rather than a frozen
+                        // frame (src/lib/still-motion.ts — gentle enough not to crop the card's words).
+                        stillMotion: 'push_in',
                     },
                     // No request headers here — this is a cron. resolveBaseUrl falls back to
                     // BASE_URL / DEPLOY_PRIME_URL, which are set in every deploy context.

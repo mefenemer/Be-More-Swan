@@ -1176,6 +1176,10 @@ node_bundler = "esbuild"
 [functions.generate-ai-image]
   timeout = 26
 
+# Voiceover: OpenAI speech (≤15 s) + whisper word timings (≤8 s), both inside one request.
+[functions.generate-voiceover]
+  timeout = 26
+
 # Admin → Revenue → Partners ▸ Partner Ops chat: a Claude tool loop (read tools + action cards).
 # Synchronous max, and the function keeps its own 21s budget under it (admin-partners-chat.ts).
 [functions.admin-partners-chat]

@@ -31,6 +31,12 @@ export interface AudioOverlay {
     /** Fade in/out in seconds — a hard cut into speech is jarring, and this is cheap to render. */
     fadeInS?: number;
     fadeOutS?: number;
+    /**
+     * Burn this clip's words into the video as captions (src/lib/captions.ts). Only a voiceover has
+     * words to show, so only the voiceover panel sets it; absent on every other clip. A voiceover
+     * with it absent is captioned too — `false` is the only way to turn captions off.
+     */
+    captions?: boolean;
 }
 
 export const AUDIO_DEFAULTS = { volume: 1, fadeInS: 0.05, fadeOutS: 0.05 };
@@ -75,6 +81,7 @@ export function sanitiseAudioOverlays(raw: unknown): AudioOverlay[] | null {
             fadeOutS: time(o.fadeOutS) ?? AUDIO_DEFAULTS.fadeOutS,
             ...(startS != null ? { startS } : {}),
             ...(endS != null ? { endS } : {}),
+            ...(typeof o.captions === 'boolean' ? { captions: o.captions } : {}),
         });
     }
     return out;

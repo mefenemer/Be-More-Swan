@@ -149,11 +149,14 @@ export function logMessageUsage(
 //     1024×1024 image (1.05 MP) is billed as 2 MP. Rounded up here too: overstating a cost is the
 //     safe error in a margin view.
 //   • fal Hailuo 2.3 Standard text-to-video: $0.28 per 6 s, $0.56 per 10 s.
+//   • fal Kling image-to-video (fal pricing page 2026-10-31): v2.5 Turbo Pro $0.07/s, v3 Pro $0.14/s.
 //   • Stability Stable Audio 3.0: 26 credits per SUCCESSFUL track at $0.01 a credit.
 export const MEDIA_LIST_PRICE_USD: Record<string, { perMegapixel?: number; perDuration?: Record<number, number>; perItem?: number }> = {
     'fal-ai/flux-pro/v1.1': { perMegapixel: 0.04 },
     // Priced per clip LENGTH, not per second: 10 s is not 10/6 of 6 s.
     'fal-ai/minimax/hailuo-2.3/standard/text-to-video': { perDuration: { 6: 0.28, 10: 0.56 } },
+    'fal-ai/kling-video/v2.5-turbo/pro/image-to-video': { perDuration: { 5: 0.35, 10: 0.70 } },
+    'fal-ai/kling-video/v3/pro/image-to-video': { perDuration: { 3: 0.42, 4: 0.56, 5: 0.70, 6: 0.84, 8: 1.12, 10: 1.40, 15: 2.10 } },
     'stable-audio-3': { perItem: 0.26 },
 };
 

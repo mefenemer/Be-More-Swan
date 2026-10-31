@@ -20,7 +20,7 @@ import { getDb } from '../../db/client';
 import { contentAssets, postRenderJobs, scheduledPosts } from '../../db/schema';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
-import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, readPostVideoEdit, renderPlanFor, renderableOverlays, resolveAudioTracks, resolveEditClips, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, readPostVideoEdit, readStillMotion, renderPlanFor, renderableOverlays, resolveAudioTracks, resolveCaptionTrack, resolveEditClips, resolveOverlayVideoBase } from '../../src/lib/post-render';
 import { editChangesMedia } from '../../src/lib/video-edit';
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../../src/lib/remotion-lambda';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -100,6 +100,14 @@ export default withLambda(async (event: HandlerEvent) => {
         const videoEdit = await readPostVideoEdit(db, job.postId, job.organisationId);
         const overlays = renderableOverlays(post.imageOverlays);
         const audio = await resolveAudioTracks(db, post.audioOverlays, job.organisationId, presignR2Get);
+        // Voiceover captions. A failed read renders without them rather than failing a paid render —
+        // the words are a layer on top, the post is still publishable.
+        const captions = audio.length
+            ? await resolveCaptionTrack(db, post.audioOverlays, job.organisationId).catch((err) => {
+                console.error(`[render-post-video-background] job ${jobId} captions skipped:`, err);
+                return null;
+            })
+            : null;
         const base = await resolveOverlayVideoBase(db, job.postId, job.organisationId);
         if (!base) { await fail('The post no longer has media to render.'); return { statusCode: 200, body: 'No media' }; }
 
@@ -167,6 +175,7 @@ export default withLambda(async (event: HandlerEvent) => {
             // push does not update — an old bundle then produces clip one instead of nothing at all.
             videoSrc: base.kind === 'video' ? mediaSrc : '',
             ...(base.kind === 'image' ? { imageSrc: mediaSrc } : {}),
+            ...(base.kind === 'image' && readStillMotion(job.renderInput) !== 'none' ? { imageMotion: readStillMotion(job.renderInput) } : {}),
             ...(base.kind === 'video' && (timeline[0].inS || timeline[0].outS != null)
                 ? { videoTrim: { inS: timeline[0].inS ?? 0, outS: timeline[0].outS ?? null } }
                 : {}),
@@ -175,6 +184,8 @@ export default withLambda(async (event: HandlerEvent) => {
             ...(plan.framePosition ? { framePosition: plan.framePosition } : {}),
             audio,
             overlays,
+            // Absent unless there are words: an old site bundle ignores the field either way.
+            ...(captions ? { captions } : {}),
             ...meta,
         });
         await db.update(postRenderJobs)

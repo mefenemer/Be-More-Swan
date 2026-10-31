@@ -27,7 +27,8 @@ import { postRenderJobs, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { postFormatSpec } from '../../src/config/post-formats';
-import { frameMeta, frameMetaFromJson, queuePostRender, readFingerprint, readPostVideoEdit, renderPlanFor, renderableOverlays, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { frameMeta, frameMetaFromJson, queuePostRender, readFingerprint, readPostVideoEdit, readStillMotion, renderPlanFor, renderableOverlays, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import type { StillMotion } from '../../src/lib/still-motion';
 import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
 import { editChangesMedia } from '../../src/lib/video-edit';
 import { remotionConfigured } from '../../src/lib/remotion-lambda';
@@ -136,6 +137,7 @@ export default withLambda(async (event) => {
     // error anywhere. The earlier job's snapshot holds the numbers the drafter actually chose, and
     // reusing them is precisely what "try the render again" ought to mean.
     let meta = frameMeta(body, base);
+    let priorMotion: StillMotion = 'none';
     if (forceVideo) {
         const [prior] = await db
             .select({ renderInput: postRenderJobs.renderInput })
@@ -144,6 +146,8 @@ export default withLambda(async (event) => {
             .orderBy(desc(postRenderJobs.id))
             .limit(1);
         meta = frameMetaFromJson(prior?.renderInput) ?? meta;
+        // The movement too — a retry is the same render, not a stiller one.
+        priorMotion = readStillMotion(prior?.renderInput);
     }
 
     // ── Is a sibling already rendering this exact file? ─────────────────────────────────────────
@@ -197,6 +201,7 @@ export default withLambda(async (event) => {
         input: {
             ...meta,
             ...(forceVideo ? { forceVideo: true } : {}),
+            ...(priorMotion !== 'none' ? { stillMotion: priorMotion } : {}),
             ...(plan.targetRatio ? { targetRatio: plan.targetRatio } : {}),
             fingerprint: plan.fingerprint,
         },

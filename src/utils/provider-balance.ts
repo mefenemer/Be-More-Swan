@@ -22,6 +22,10 @@
 //           no separate admin key that could explain it away.
 // Anthropic — there is no balance endpoint. A 1-token Haiku call (~$0.00001) either succeeds or
 //           fails with the credit-balance 400 the outage produced. isUpstreamBlocked owns that test.
+// OpenAI  — no balance endpoint either, and the free ones (GET /v1/models) prove the key but not the
+//           quota. So the probe is the call customers make: a one-character voiceover (a fraction of
+//           a cent). 429 `insufficient_quota` = out of money; any other 429 is rate limiting. Since
+//           2026-10-31 customer voiceovers (Video Producer plan, Phase 2) depend on it, not only the tour.
 //
 // Every probe NEVER throws: a monitoring call that crashes is a monitor that reports "fine".
 
@@ -179,8 +183,42 @@ export async function probeAnthropic(
     }
 }
 
+export const OPENAI_SPEECH_URL = 'https://api.openai.com/v1/audio/speech';
+
+export type OpenAiProbe =
+    | { status: 'ok' }
+    | { status: 'exhausted'; detail: string }            // 429 insufficient_quota
+    | { status: 'key_rejected'; httpStatus: number }     // 401/403
+    | { status: 'transient'; detail: string }            // other 429, 5xx, network — not alerted on
+    | { status: 'not_configured' };
+
+/** Sort an OpenAI HTTP failure. Pure — the body is the error JSON text (may be empty). */
+export function classifyOpenAiFailure(httpStatus: number, body: string): Exclude<OpenAiProbe, { status: 'ok' } | { status: 'not_configured' }> {
+    const detail = `HTTP ${httpStatus}: ${body.slice(0, 300)}`;
+    if (httpStatus === 401 || httpStatus === 403) return { status: 'key_rejected', httpStatus };
+    if (httpStatus === 429 && /insufficient_quota|exceeded your current quota|billing/i.test(body)) return { status: 'exhausted', detail };
+    return { status: 'transient', detail };
+}
+
+export async function probeOpenAi(fetchImpl: typeof fetch = fetch): Promise<OpenAiProbe> {
+    const key = process.env.OPENAI_API_KEY;
+    if (!key) return { status: 'not_configured' };
+    try {
+        const res = await fetchImpl(OPENAI_SPEECH_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+            body: JSON.stringify({ model: 'gpt-4o-mini-tts', voice: 'alloy', input: '.', response_format: 'mp3' }),
+            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        });
+        if (res.ok) { await res.arrayBuffer().catch(() => null); return { status: 'ok' }; }
+        return classifyOpenAiFailure(res.status, await res.text().catch(() => ''));
+    } catch (err) {
+        return { status: 'transient', detail: err instanceof Error ? err.message : String(err) };
+    }
+}
+
 export interface ProviderProblem {
-    provider: 'fal' | 'fal_media' | 'anthropic' | 'stability';
+    provider: 'fal' | 'fal_media' | 'anthropic' | 'stability' | 'openai';
     /** 'down' = customers are affected now; 'low' = they will be soon. */
     severity: 'down' | 'low';
     headline: string;
@@ -202,6 +240,8 @@ export function assessProviders(input: {
     stabilityLowBalanceCredits?: number;
     /** Optional so existing callers and tests that predate it are unchanged. */
     mediaFailures?: MediaFailureEvidence[];
+    /** Optional so existing callers and tests that predate voiceover are unchanged. */
+    openai?: OpenAiProbe;
 }): ProviderProblem[] {
     const problems: ProviderProblem[] = [];
     const low = input.falLowBalanceUsd ?? DEFAULT_FAL_LOW_BALANCE_USD;
@@ -253,6 +293,15 @@ export function assessProviders(input: {
     } else if (input.anthropic.status === 'key_rejected') {
         problems.push({ provider: 'anthropic', severity: 'down', headline: 'Anthropic rejected our API key — all AI drafting is failing',
             lines: [`Probe said: ${input.anthropic.detail}`, 'Check ANTHROPIC_API_KEY in the Netlify environment.'] });
+    }
+    // ── OpenAI (voiceovers + tour narration) ─────────────────────────────────────────────────────
+    if (input.openai?.status === 'exhausted') {
+        problems.push({ provider: 'openai', severity: 'down', headline: 'OpenAI quota is EXHAUSTED — voiceovers are failing',
+            lines: [`Probe said: ${input.openai.detail}`,
+                'Top up at https://platform.openai.com/settings/organization/billing. Customers get their AI credits back on every failed voiceover; the guided tour falls back to the browser voice.'] });
+    } else if (input.openai?.status === 'key_rejected') {
+        problems.push({ provider: 'openai', severity: 'down', headline: 'OpenAI rejected our API key — voiceovers are failing',
+            lines: [`Speech endpoint answered HTTP ${input.openai.httpStatus}.`, 'Check OPENAI_API_KEY in the Netlify environment (every context).'] });
     }
     problems.push(...assessMediaFailures(input.mediaFailures ?? []));
     return problems;

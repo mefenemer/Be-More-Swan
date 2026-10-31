@@ -3,7 +3,9 @@
 Added 2026-10-31, from an owner discussion of a "faceless YouTube" AI video stack (ChatGPT +
 Midjourney + Leonardo + ImageFX + Veo + Runway + Suno + CapCut, roughly $100–$245/month at verified
 2026-10-31 prices) and what Be More Swan would need to do the same job as one assistant.
-Status: **proposed, not started.** Nothing below exists yet unless marked ✅ (already built, reused).
+Status: **Phases 0–4 built 2026-10-31 (code + tests, on staging, NOT yet live-verified — see §7.1);
+Phases 5–7 not started.** Owner decisions taken 2026-10-31: D1 Video Producer, D2 OpenAI TTS, D3 Kling
+via fal (env-switchable), D4 per scene, capped. Anything else below exists only if marked ✅.
 
 Related: [brand-designer-plan.md](./brand-designer-plan.md) (visual briefs: stock / AI image / AI
 video / brand-card options — the sourcing engine this plan reuses),
@@ -248,27 +250,57 @@ words per second), no on-screen text from the image model, own product photos fo
 
 Phases 1–4 each ship on their own and improve existing assistants. The role comes last.
 
-**Phase 0 — prerequisites (mostly no code)**
-- Owner decisions D1–D7 (§8).
-- fal + TTS balances on `check-provider-balances`; fal failure rate on the watchdog.
-- Read both deployed Remotion `bundle.js` files and confirm they match the repo.
-- Confirm the YouTube upload audit status.
-- Competitor check (§2) — written down before any marketing copy.
+**Phase 0 — prerequisites (mostly no code)** ✅ code part done
+- Owner decisions D1–D4 ✅ (2026-10-31); D5–D7 still open.
+- ✅ fal, Anthropic, Stability were already probed; **OpenAI added** (`probeOpenAi` in
+  `src/utils/provider-balance.ts` — a one-character speech call, since OpenAI has no balance endpoint).
+- ⏳ Read both deployed Remotion `bundle.js` files and confirm they match the repo.
+- ⏳ Confirm the YouTube upload audit status.
+- ⏳ Competitor check (§2) — written down before any marketing copy.
 
-**Phase 1 — image-to-video**
-`submitImageToVideo` in `fal-gateway.ts`; `ai_video` options in `visual-briefs.ts` start from a FLUX
-frame; aspect ratio honoured. Benefits the Brand Designer and My Content immediately.
+**Phase 1 — image-to-video** ✅
+`submitFramedVideo` / `imageToVideoInput` in `fal-gateway.ts`; `FAL_I2V_MODEL` defaults to
+`fal-ai/kling-video/v2.5-turbo/pro/image-to-video` ($0.07/s, fal pricing page 2026-10-31 — v3 Pro is
+$0.14/s, 3× Hailuo per clip at the same 5 credits). `'off'` restores Hailuo. Brand Designer AI-video
+options start from a FLUX frame at the brief's ratio; My Content's video form honours the shape and
+can **animate a library picture** ("Animate this picture" in the viewer). Frame drawing happens in
+`process-media-job-background` (5–15 s is too long for the synchronous request). Both Kling models
+priced in `MEDIA_LIST_PRICE_USD`. Tests: `tests/image-to-video.test.ts`.
 
-**Phase 2 — voiceover**
-TTS gateway + metering, `content_assets` audio, voice picker, "Add voiceover" in the post editor's
-Sound inspector. Benefits the Social Media Manager's reels.
+**Phase 2 — voiceover** ✅
+`src/lib/tts.ts` (gpt-4o-mini-tts + whisper-1 word timings), `generate-voiceover.ts` (synchronous,
+26 s timeout, 1 credit / 1 task — new `ai_voiceover` work kind, no migration), six labelled voices,
+"Add a voiceover" panel in the post editor's Sound section. Music already on the post is turned down
+to 35 % under the voice; a voiceover is never bounded to the video's length. Words stored on
+`content_assets.render_params = { kind: 'voiceover', voice, script, words }`. Gate:
+`ai_music_generation` (the sound capability). Tests: `tests/voiceover.test.ts`.
 
-**Phase 3 — captions**
-Word timings (from TTS or a transcription pass), `captions` layer in the composition, brand styling,
-both Remotion sites deployed.
+**Phase 3 — captions** ✅ (needs a Remotion site deploy to show)
+`src/lib/captions.ts` (phrases ≤ 4 words / 26 chars, spoken word in the brand colour when it reads on
+video, else yellow), `resolveCaptionTrack` in `post-render.ts`, `captions` prop + `CaptionLayer` in
+`remotion/PostOverlay.tsx`, per-clip "Show captions" switch on voiceover rows (default on). Not shown in
+the editor preview yet — the switch says so. The `captions` flag is in the render fingerprint.
+Tests: `tests/captions.test.ts`.
 
-**Phase 4 — motion on stills**
-`motion` prop on the image branch; weekly Short picks it up.
+**Phase 4 — motion on stills** ✅ (needs a Remotion site deploy to show)
+`src/lib/still-motion.ts` (push-in / pull-out / pans, eased, 6 %, pan travel bounded so the frame is
+never uncovered), `stillMotion` on the render job, `imageMotion` prop + `MovingStill` in the
+composition. The weekly YouTube Short pushes in; a forced retry keeps the move. No editor control yet —
+Phase 5 sets motion per still scene. Tests: `tests/still-motion.test.ts`.
+
+### 7.1 Before Phases 0–4 are live
+
+1. **Deploy BOTH Remotion sites** (`remotion:deploy-site` staging + prod, then `npm run
+   remotion:site-drift`) — captions and moving stills live in the bundle; pushing does not update it.
+   Until then old bundles ignore both props and render exactly as before (safe, just absent).
+2. `OPENAI_API_KEY` set in every Netlify context (voiceovers answer 503 without it).
+3. Optional: `FAL_I2V_MODEL` to choose another model; nothing to set for the default.
+4. No SQL in Phases 0–4.
+5. Live checks nobody has run yet: one real Kling clip (confirms the request shape and the 9:16
+   frame), one real voiceover (confirms OpenAI + whisper word timings), one render with captions
+   and one moving still on staging after the site deploy. The post-editor voiceover panel was not
+   exercised in a browser (it needs a signed-in session); My Content's animate flow was, in a stubbed
+   harness.
 
 **Phase 5 — storyboard + assembly (the core)**
 `db/z-video-producer.sql`, storyboard generation with code-enforced rules, per-scene sourcing,
