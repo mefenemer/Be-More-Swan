@@ -35,6 +35,8 @@ const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('en-GB'
 export function siteDirectoryChatBlock(view: DirectoryView): string {
     const status = view.status === 'none'
         ? 'Your website has not been read yet.'
+        : !view.refreshedAt && view.status === 'failed'
+            ? `We tried to read ${view.sourceUrl ?? 'the website'} but couldn't${view.message ? `: ${view.message}` : '.'} So no pages are known yet.`
         : `Read from ${view.sourceUrl ?? 'the website'} (${view.source === 'hosted' ? 'the published Be More Swan site' : 'their own website'}), last read ${when(view.refreshedAt)}${view.status === 'reading' ? ' — being read again right now' : ''}${view.status === 'failed' && view.message ? ` — the last attempt failed: ${view.message}` : ''}.`;
     const left = view.pages.filter((p) => p.excluded);
     return `WEBSITE PAGES — Business Information ▸ Website Pages. ${status}

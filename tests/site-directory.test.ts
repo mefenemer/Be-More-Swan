@@ -282,6 +282,9 @@ const page = (over: Partial<DirectoryPage>): DirectoryPage => ({ url: `${SITE}/x
         // Re-read an hour ago by hand → the card says when it can run again.
         const recent = directoryView({ ...row, requestedBy: 5, updatedAt: new Date('2026-10-31T09:30:00Z') }, new Date('2026-10-31T10:00:00Z'));
         assert.ok(/last hour/.test(siteDirectoryCardFrom({ type: 'site_directory', action: 'refresh' }, recent)!.blocked ?? ''));
+        // Refused before it ever read a page (robots.txt): says why, never "last read never".
+        const refused = siteDirectoryChatBlock(directoryView({ ...row, status: 'failed', refreshedAt: null, pages: [], excluded: [], message: 'x.example asks crawlers like ours not to read this page (robots.txt), so we didn\'t.' }));
+        assert.ok(/We tried to read .*robots\.txt.*no pages are known yet/.test(refused), refused);
         const block = siteDirectoryChatBlock(view);
         assert.ok(block.includes('/about (About)') && /never say the site HAS been re-read/.test(block));
     });

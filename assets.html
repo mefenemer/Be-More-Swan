@@ -2282,6 +2282,8 @@
       let line;
       if (v.status === 'none') line = 'Your website hasn’t been read yet. Add your website address on Business Profile (or publish your Be More Swan site), then press Re-read my site.';
       else if (v.status === 'reading') line = `Reading ${esc(v.sourceUrl || src)} now — this takes a minute or two.`;
+      // Failed before it ever read anything: there is no "read on" date to show, only why.
+      else if (!v.refreshedAt) line = `We tried to read <a class="text-emerald-700 underline" href="${esc(v.sourceUrl)}" target="_blank" rel="noopener">${esc(v.sourceUrl)}</a> but couldn’t.`;
       else line = `Read from <a class="text-emerald-700 underline" href="${esc(v.sourceUrl)}" target="_blank" rel="noopener">${esc(v.sourceUrl)}</a> (${src}) on ${esc(when(v.refreshedAt))}.`;
       if (v.message) line += ` <span class="${v.status === 'failed' ? 'text-amber-800' : 'text-gray-500'}">${esc(v.message)}</span>`;
       if (v.canRefreshAt && v.status !== 'reading') line += ` <span class="text-gray-500">You can re-read it again after ${esc(new Date(v.canRefreshAt).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }))}.</span>`;
