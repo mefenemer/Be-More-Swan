@@ -11,6 +11,7 @@
 
 import { and, asc, count, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { aiAssistants, discussionWatches, discussions, goals, masterAssistants, masterPlans, mentorJobs, orgIntroOffer, orgOfferProfile, orgProducts, organisations, plans } from '../../db/schema';
+import { tierCanGenerateVideo } from './ai-credits';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
 import { SEAT_OCCUPYING_STATUSES, takesASeat } from './assistant-capacity';
 import { resolveAssistantLimit } from './release-paused-limit';
@@ -52,7 +53,7 @@ export interface MentorSnapshotData {
     /** id = the goals row, so a goal card can name it (fixtures may leave it out). */
     goals: Array<{ id?: number; assistant: string; label: string; latest: number | null; target: number; targetDate: Date; status: string; metricKey?: string | null }>;
     /** The live plan, to cross-check pause reasons: `status` null = no active or past-due plan; `freeSlots` null = unlimited. */
-    plan: { status: 'active' | 'past_due' | null; freeSlots: number | null; nextPlanName?: string | null };
+    plan: { status: 'active' | 'past_due' | null; freeSlots: number | null; nextPlanName?: string | null; /** The plan makes videos (ai-credits.ts tierCanGenerateVideo) — the Video Producer pick needs it. */ canMakeVideo?: boolean };
     /** Phase 2: its strategy documents (null = the table isn't there yet; undefined = not read). */
     strategyDocs?: StrategyDoc[] | null;
     /** Phase 2: its last research answers, with their links — the only sourced facts it may quote. */
@@ -438,7 +439,7 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         research,
         discussions: discussionState,
         websiteGaps,
-        plan: { status: (planRow?.status as 'active' | 'past_due' | undefined) ?? null, freeSlots, nextPlanName: nextPlan?.name ?? null },
+        plan: { status: (planRow?.status as 'active' | 'past_due' | undefined) ?? null, freeSlots, nextPlanName: nextPlan?.name ?? null, canMakeVideo: tierCanGenerateVideo(planRow?.tierKey ?? null) },
         catalogue: catalogue.filter((c: any) => c.roleKey).map((c: any) => ({
             roleKey: c.roleKey, name: c.name, description: c.description ?? null,
             status: statusOf({ isActive: !!c.isActive, comingSoon: !!c.comingSoon, lifecycleState: c.lifecycleState ?? '' }),

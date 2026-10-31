@@ -18183,7 +18183,7 @@ async function _rqVideoPaint(post) {
     el.className = 'mt-3 text-xs rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-700';
     el.innerHTML = `
         <p class="font-semibold text-gray-800">Make a video version</p>
-        <p class="mt-0.5 text-gray-600">${_rqEsc(producer.name)} plans a short video from this post. You check the storyboard on its Videos tab before anything is made or any credit is used.</p>
+        <p class="mt-0.5 text-gray-600">${_rqEsc(producer.name)} plans a short video from this post. You check the storyboard on its Videos tab before anything is made or any task is used.</p>
         <button type="button" id="rq-video-go" onclick="_rqVideoFromPost()" class="btn-secondary mt-2 py-1.5 px-3 text-xs font-bold border rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Make a video version</button>
         <span id="rq-video-msg" class="block mt-1.5"></span>`;
     el.classList.remove('hidden');

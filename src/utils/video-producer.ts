@@ -39,6 +39,7 @@ import { makeVoiceoverAsset } from './voiceover-asset';
 import { DEFAULT_VOICE, isVoiceId, cleanScript } from '../lib/tts';
 import { presignR2Get } from './social-publish';
 import { resolveBaseUrl } from './base-url';
+import { isUnifiedTaskMetering } from './task-metering-flag';
 import {
     enforceStoryboard, estimateCredits, parseStoryboardJson, sceneTimingsFromWords, scriptOf, isStillSource,
     storyboardSystemPrompt, storyboardUserPrompt, isVideoLength,
@@ -459,6 +460,18 @@ export async function holdBuild(db: Db, orgId: number, storyboard: Storyboard, b
     return hold.ok ? { ok: true as const, credits } : { ok: false as const, credits, balance: hold.balance, unit: hold.unit, cost: hold.cost };
 }
 
+/**
+ * What making this storyboard costs, in the unit the workspace is billed in — the SAME figure the hold
+ * takes (holdBuild → holdCredits). Under the single task allowance (unified_task_metering, on for
+ * everyone since 2026-10-17) that is weighted tasks: 20 per AI clip, 1 per AI picture, 1 for the
+ * voiceover. Before go-live the Videos tab still quoted credits (5 per clip) while the hold took tasks.
+ */
+export async function buildEstimate(orgId: number, storyboard: Storyboard, brief: VideoBrief): Promise<{ estimate: number; unit: 'tasks' | 'credits' }> {
+    return await isUnifiedTaskMetering(orgId)
+        ? { estimate: buildTasks(storyboard, brief), unit: 'tasks' }
+        : { estimate: estimateCredits(storyboard, brief, BUILD_COSTS), unit: 'credits' };
+}
+
 /** A project as the review panel shows it — presigned thumbnails for the scenes already made. */
 export async function projectView(db: Db, orgId: number, row: typeof videoProjects.$inferSelect) {
     const ids = Object.values((row.sceneAssets ?? {}) as Record<string, number>);
@@ -473,7 +486,7 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         id: row.id, aiAssistantId: row.aiAssistantId, title: row.title, status: row.status, brief: row.brief, storyboard: sb, changes: row.changes, note: row.note,
         scheduledPostId: row.scheduledPostId, creditsSpent: row.creditsSpent,
         origin: row.origin, sourcePostId: row.sourcePostId, campaignId: row.campaignId,
-        estimate: sb ? estimateCredits(sb, row.brief as VideoBrief, BUILD_COSTS) : null,
+        ...(sb ? await buildEstimate(orgId, sb, row.brief as VideoBrief) : { estimate: null, unit: null }),
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),
         createdAt: row.createdAt, updatedAt: row.updatedAt,
     };
@@ -489,6 +502,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, assistantId)))
         .orderBy(desc(videoProjects.createdAt)).limit(10);
     if (!rows.length) return 'YOUR VIDEOS: none yet.';
+    const tasks = await isUnifiedTaskMetering(orgId);
     const WAITING: Record<string, string> = {
         planning: 'writing the storyboard', planned: 'storyboard waiting for the user to check it and press "Make the video"',
         building: 'being made', built: 'made — the finished video is in the Review Queue for approval',
@@ -498,7 +512,9 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         const sb = r.storyboard as Storyboard | null;
         const brief = r.brief as VideoBrief;
         const scenes = sb ? ` · ${sb.scenes.length} scenes` : '';
-        const cost = sb && (r.status === 'planned' || r.status === 'failed') ? ` · would use ${estimateCredits(sb, brief, BUILD_COSTS)} credits to make` : '';
+        const n = sb ? (tasks ? buildTasks(sb, brief) : estimateCredits(sb, brief, BUILD_COSTS)) : 0;
+        const unit = tasks ? (n === 1 ? 'task' : 'tasks') : (n === 1 ? 'credit' : 'credits');
+        const cost = sb && (r.status === 'planned' || r.status === 'failed') ? ` · would use ${n} ${unit} to make` : '';
         const note = r.note ? ` · note: ${r.note.slice(0, 160)}` : '';
         const from = ORIGIN_LABELS[r.origin] ? ` · ${ORIGIN_LABELS[r.origin]}` : '';
         return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${from}) — ${WAITING[r.status] ?? r.status}${cost}${note}`;

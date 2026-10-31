@@ -3,7 +3,7 @@
  * The Video Producer's Videos tab — docs/video-producer-plan.md §5.2–5.8.
  *
  * A video goes: brief → storyboard (planned in the background, free) → the owner checks every scene,
- * changes any, or plans it again with notes → "Make the video" (states the credits first) → a finished
+ * changes any, or plans it again with notes → "Make the video" (states the tasks first) → a finished
  * post in the Review Queue.
  *
  * Backed by netlify/functions/video-projects.ts — the SAME actions the chat cards call (chat-session.js
@@ -60,7 +60,9 @@
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const msg = data.error === 'insufficient_credits'
-        ? (data.unit === 'tasks' ? 'Your monthly tasks are used up — they reset on the 1st.' : `You need ${data.cost} credits for this video and have ${data.balance}.`)
+        ? (data.unit === 'tasks'
+          ? `Not enough tasks left this month: this video needs ${data.cost}, and ${data.balance} ${data.balance === 1 ? 'is' : 'are'} left. Change AI scenes to stock to use fewer.`
+          : `You need ${data.cost} credits for this video and have ${data.balance}.`)
         : (data.message || data.error || `That didn’t work (HTTP ${res.status}).`);
       throw new Error(msg);
     }
@@ -189,7 +191,9 @@
     const sb = v.storyboard;
     const busy = state.busy.has(v.id);
     const canMake = (v.status === 'planned' || v.status === 'failed') && sb && sb.scenes && sb.scenes.length >= 3;
-    const cost = v.estimate == null ? '' : (v.estimate === 0 ? ' — free' : ` — uses ${v.estimate} credit${v.estimate === 1 ? '' : 's'}`);
+    // The same figure the hold takes, in the workspace's unit (video-producer.ts buildEstimate).
+    const unit = v.unit === 'credits' ? 'credit' : 'task';
+    const cost = v.estimate == null ? '' : (v.estimate === 0 ? ' — free' : ` — uses ${v.estimate} ${unit}${v.estimate === 1 ? '' : 's'}`);
     const replanning = state.replanning === v.id;
     const note = state.notes[v.id];
     return `

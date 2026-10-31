@@ -336,9 +336,9 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
     commission_video: {
         roleKey: VIDEO_PRODUCER_ROLE_KEY,
         label: 'Commission a video',
-        description: 'Briefs the Video Producer for one short vertical video on this campaign\u2019s message, for Reels, Shorts or Facebook. It plans the storyboard straight away, free; you check it on its Videos tab and press \u201cMake the video\u201d, where any AI credits are shown. The finished video waits in your Review Queue for approval like any post.',
+        description: 'Briefs the Video Producer for one short vertical video on this campaign\u2019s message, for Reels, Shorts or Facebook. It plans the storyboard straight away, free; you check it on its Videos tab and press \u201cMake the video\u201d, where the tasks it uses are shown first. The finished video waits in your Review Queue for approval like any post.',
         // The storyboard and the edit are a bigger unit of work than a post. AI clips, AI pictures and
-        // the voiceover are charged in AI CREDITS, separately and only on the user's click.
+        // the voiceover are charged as weighted tasks, separately and only on the user's "Make the video".
         workItemsPerUnit: 2,
         takesQuantity: false,
         maxQuantity: 1,

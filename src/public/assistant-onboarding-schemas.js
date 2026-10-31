@@ -483,7 +483,7 @@
           },
           {
             // src/utils/video-autopilot.ts (owner decision D7: off by default; always reviewed).
-            // Storyboards only — making the video stays a click, so autopilot never spends a credit.
+            // Storyboards only — making the video stays a click, so autopilot never spends a task.
             key: 'autopilotPerWeek',
             label: 'Should it plan videos for you each week?',
             type: 'radio',
@@ -508,8 +508,8 @@
             type: 'radio',
             required: true,
             options: [
-              { value: 'stock_and_ai', label: 'Stock first, AI where stock won\u2019t fit', description: 'Stock footage and photos are free. AI pictures use 1 credit, AI clips 5 (at most 3 per video).' },
-              { value: 'stock_only', label: 'Stock footage, photos and my own pictures only', description: 'Never spends credits on pictures. A voiceover still uses 1.' },
+              { value: 'stock_and_ai', label: 'Stock first, AI where stock won\u2019t fit', description: 'Stock footage and photos use no extra tasks. An AI picture uses 1 task, an AI clip 20 (at most 3 per video).' },
+              { value: 'stock_only', label: 'Stock footage, photos and my own pictures only', description: 'No tasks for pictures. A voiceover still uses 1 task.' },
               { value: 'ai_first', label: 'Lean on AI', description: 'More AI scenes when they suit the video — still at most 3 AI clips.' },
             ],
           },

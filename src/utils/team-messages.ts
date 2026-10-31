@@ -190,7 +190,7 @@ export async function noteOrderIssued(db: Db, o: OrderCtx & { summary?: string |
         // Video Producer, Phase 7: the storyboard is planned at once (free); making it is their click.
         case 'commission_video':
             return postOncePerOrder(db, o.orderId, { ...base, toUser: true, kind: 'started',
-                body: 'On it — I am planning the storyboard now, free. It will be on my Videos tab in about a minute: check the scenes, then press “Make the video” — that is where any AI credits are shown.',
+                body: 'On it — I am planning the storyboard now, free. It will be on my Videos tab in about a minute: check the scenes, then press “Make the video” — that is where the tasks it uses are shown first.',
                 link: { assistantId: o.targetAssistantId, tab: 'videos', label: 'Open the video' } });
         default:
             return;

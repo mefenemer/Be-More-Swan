@@ -80,6 +80,11 @@ const SIGNALS: Record<string, (d: MentorSnapshotData) => Signal> = {
     lead_qualifier: (d) => (d.offerKinds?.some((k) => /service|consult|b2b|trade/i.test(k))
         ? { score: 42, reason: 'You offer services, and nobody is finding new customers for you yet. A Lead Generator finds businesses that fit and drafts the first email, and spots forum threads where people ask for what you sell.' }
         : null),
+    // Only on a plan that makes videos (the same gate as its Videos tab), and only once someone posts —
+    // a video needs somewhere to go, and the Social Media Assistant's posts are what it turns into videos.
+    video_producer: (d) => (d.plan.canMakeVideo && has(d, 'social_media_manager')
+        ? { score: 36, reason: 'Your Social Media Assistant posts for you, but nobody makes videos. A Video Producer turns your posts and products into short Reels and Shorts, with a voiceover and captions, for you to approve.' }
+        : null),
     campaign_orchestrator: (d) => (activeCount(d) >= 2
         ? { score: 38, reason: `You have ${activeCount(d)} active assistants. A Campaign Assistant plans work across them towards one goal.` }
         : null),

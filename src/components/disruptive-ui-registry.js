@@ -1025,7 +1025,7 @@
           : '';
         // A video (Video Producer, Phase 7) says the plan is free and the making is a later click.
         const videoNote = o.action === 'commission_video'
-          ? 'Storyboard planned straight away, free — you make the video from the Videos tab, where any AI credits are shown'
+          ? 'Storyboard planned straight away, free — you make the video from the Videos tab, where the tasks it uses are shown first'
           : '';
         // A person's task (§9.5) names who, says nothing is sent to them, and shows what waits.
         const humanNote = o.action === 'request_human_task'

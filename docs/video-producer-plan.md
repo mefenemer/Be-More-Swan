@@ -3,7 +3,8 @@
 Added 2026-10-31, from an owner discussion of a "faceless YouTube" AI video stack (ChatGPT +
 Midjourney + Leonardo + ImageFX + Veo + Runway + Suno + CapCut, roughly $100–$245/month at verified
 2026-10-31 prices) and what Be More Swan would need to do the same job as one assistant.
-Status: **Phases 0–7 built 2026-10-31 (code + tests, NOT yet live-verified — §7.1–7.4).** The role is inserted HIDDEN; go-live is the admin status change after a live staging run. Owner decisions taken 2026-10-31: D1 Video Producer, D2 OpenAI TTS, D3 Kling
+Status: **Phases 0–7 built 2026-10-31 and checked live on staging except one real render (§7.3). Go-live copy
+written and held back (§7.5).** The role is inserted HIDDEN; go-live is the admin status change after a live staging run. Owner decisions taken 2026-10-31: D1 Video Producer, D2 OpenAI TTS, D3 Kling
 via fal (env-switchable), D4 per scene, capped; D7 taken as recommended when Phase 7 was built (autopilot off by
 default, 1–3 a week, storyboards only). Anything else below exists only if marked ✅.
 
@@ -302,10 +303,58 @@ Phase 5 sets motion per still scene. Tests: `tests/still-motion.test.ts`.
 
 ### 7.3 Before Phase 6 is live
 
-1. Apply `db/z-video-producer-role.sql` to staging and prod.
-2. On staging: Admin ▸ Configuration ▸ Assistants → set Video Producer to a visible status, hire it in a
-   test workspace on a video plan, then brief → storyboard → Make the video → approve → check the render.
-3. Write the deferred go-live pieces (help, showcase, pricing, copy) before it is shown to customers.
+1. ✅ Apply `db/z-video-producer-role.sql` to staging and prod (2026-10-31).
+2. ⏳ On staging (2026-10-31, workspace 58, Video Producer #60): hired; storyboards, autopilot, "Make a video
+   version" (Review Queue + Social chat) and a campaign's video order all checked live. NOT yet run: one real
+   "Make the video" → approve → render (spends tasks; the voiceover, captions and render path end to end).
+3. ✅ Go-live pieces written 2026-10-31, all held back until go-live — see §7.5.
+
+### 7.5 Go-live day (role status → Live) — in this order
+
+Written 2026-10-31 from the code. Nothing below is public until these steps run; the role is Hidden.
+Claims kept to §9 — no "first", "unique" or "replaces $X of tools", so no competitor check gates them.
+
+1. Costs are in TASKS everywhere (fixed 2026-10-31): the Videos tab, setup, chat and campaign copy quoted
+   credits (5 per AI clip) while the hold took tasks (20 per clip — `task-weights.ts`). `buildEstimate`
+   (video-producer.ts) now shows the same figure the hold takes, in the workspace's unit.
+2. Admin ▸ Configuration ▸ Assistants → Video Producer → Live (prod).
+3. Help Centre: `db/help-articles-2026-12zzzzzzzzzzzzzz-video-producer.sql` inserts three articles UNPUBLISHED
+   (safe to apply any time). Publish with the UPDATE at its foot — after that, Ask Your Team answers from them.
+4. Website page: `db/assistant-showcases.json` → `db/z-assistant-showcases.sql` has the `video_producer` entry
+   (renders only once the role is Live — the public list shows active roles only). Screenshot
+   `images/assistants/video_producer/storyboard.jpg` (the real Videos tab, fictional Willowbrook Coffee data, from
+   a stubbed local page) and overview video `videos/assistants/video_producer.mp4` (`render-assistant-videos.mjs`).
+5. Pricing: paste `db/_go-live-video-producer-plan-feature.sql` (underscore = the migrate runner skips it), add
+   the same row to `db/seed-plan-features.ts`, rename the file to `db/z-video-producer-plan-feature.sql`.
+6. FAQ: paste the block below into `faq.html` under "How It Actually Works", after the Business Mentor answers.
+7. Already live in code, gated by the role being active: Business Mentor hire pick (`mentor-hire.ts`
+   video_producer — only Live roles, only on a plan that makes video, only with a Social Media Assistant);
+   Ask Your Team names the Video Producer for video requests only when one is on the team.
+8. Not written (owner's call): marketing copy beyond the catalogue row, the homepage, an assistant photo.
+
+FAQ block for `faq.html` (same markup as the Business Mentor answers):
+
+```html
+<!-- Video Producer (docs/video-producer-plan.md §7.5). Claims checked against the code (§9). -->
+<details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
+    <summary class="flex justify-between items-center font-semibold cursor-pointer list-none px-6 py-5 text-gray-900 hover:text-emerald-700 transition-colors">
+        <span>What does the Video Producer make?</span>
+        <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </summary>
+    <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
+        Short vertical videos, 15, 30 or 60 seconds, for Instagram Reels, YouTube Shorts and Facebook Reels. It writes the script from your business details and products, builds each scene from stock footage, your own pictures, branded cards or AI, and adds a voiceover and captions. You check the storyboard before anything is made, and the finished video waits in your Review Queue for your approval. It doesn't edit footage you give it, make long YouTube videos or post to TikTok yet.
+    </div>
+</details>
+<details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
+    <summary class="flex justify-between items-center font-semibold cursor-pointer list-none px-6 py-5 text-gray-900 hover:text-emerald-700 transition-colors">
+        <span>Does making a video use my tasks?</span>
+        <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </summary>
+    <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
+        Planning a storyboard is free. Making the video uses tasks only for AI scenes and the voiceover: 20 tasks for an AI clip (at most 3 in a video), 1 for an AI picture and 1 for the voiceover. Stock footage, stock photos, your own pictures and branded cards use none, and the exact number is on the "Make the video" button before you press it. Making videos is on the Busywork Buster plan.
+    </div>
+</details>
+```
 
 ### 7.2 Before Phase 5 is live
 
