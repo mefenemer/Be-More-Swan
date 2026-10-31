@@ -105,8 +105,12 @@ function usable(s: string | null | undefined): s is string {
 /** Headings every site has that say nothing about what the page offers. */
 const GENERIC_HEADING = /^(home|welcome.*|hello.*|hi there.*|about( us| me)?|contact( us| me)?|get in touch|say hello|find us|follow us.*|faqs?|(common )?questions|frequently asked questions|what we (do|offer)|our services|services|testimonials|reviews|what (our )?(customers|clients|people) say.*|our story|meet the team|the team|gallery|blog|latest (news|posts)|news(letter)?|sign up.*|subscribe.*|join (us|our).*|menu|book now|shop now|learn more|read more|more|why (choose )?us\??|how it works|opening (hours|times)|hours|location|address|social|instagram|facebook|copyright.*|privacy.*|terms.*|cookies?.*)$/i;
 
+/** Lines that are a form's reply, a step number or a legal clause — never something the page offers. */
+const NOT_AN_OFFER = /^(\d+|step \d+)[.):]\s|thank you|message sent|something went wrong|required field/i;
+
 function offerOk(s: string): boolean {
     const t = tidy(s);
+    if (NOT_AN_OFFER.test(t)) return false;
     // A question heading ("How long does it take?") is an FAQ, not something the page offers.
     return usable(t) && t.length <= OFFER_MAX && !t.endsWith('?') && !GENERIC_HEADING.test(t.replace(/[.!:]+$/, ''));
 }
@@ -188,13 +192,19 @@ export function orderChildSitemaps(urls: string[]): string[] {
     return [...urls].sort((a, b) => score(a) - score(b));
 }
 
+/**
+ * Small print and dead ends the import's SKIP_PATH misses (it splits words on "/" and "-" only, so
+ * /terms_of_service and /privacy.html slipped through on bemoreswan.com, 2026-10-31).
+ */
+const DIRECTORY_SKIP = /\/(terms[\w-]*|privacy[\w-]*|cookies?[\w-]*|dpa|gdpr|licen[cs]es?|legal[\w-]*|data-deletion|accessibility|404|thank-?you|thanks)(\.html?)?$/i;
+
 /** A page address worth listing: same site, a web page, not shop machinery or legal small print. */
 function worthListing(href: string, homeHost: string): URL | null {
     let u: URL;
     try { u = new URL(href); } catch { return null; }
     if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
     if (bareHost(u.hostname) !== homeHost) return null;
-    if (FILE_PATH.test(u.pathname) || SKIP_PATH.test(u.pathname)) return null;
+    if (FILE_PATH.test(u.pathname) || SKIP_PATH.test(u.pathname) || DIRECTORY_SKIP.test(u.pathname)) return null;
     return u;
 }
 

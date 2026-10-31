@@ -70,6 +70,9 @@ const page = (over: Partial<DirectoryPage>): DirectoryPage => ({ url: `${SITE}/x
         assert.ok(urls.includes('https://www.willow.example/workshops/beginners'), 'www is the same site');
         assert.strictEqual(urls.filter((u) => directoryPath(u) === '/services').length, 1, 'no duplicate for a trailing slash');
         for (const bad of ['other.example', '.pdf', '/blog/a-post', '/cart', '/terms', '/privacy-policy']) assert.ok(!urls.some((u) => u.includes(bad)), `${bad} left out`);
+        // bemoreswan.com, 2026-10-31: underscores and .html slipped past the import's rule.
+        const legal = pickDirectoryUrls({ home: SITE, navLinks: [], sitemapUrls: [`${SITE}/terms_of_service`, `${SITE}/privacy.html`, `${SITE}/dpa`, `${SITE}/licenses.html`, `${SITE}/pricing`] });
+        assert.deepStrictEqual(legal.map(directoryPath), ['/', '/pricing']);
         // The menu comes before the sitemap.
         assert.ok(urls.indexOf(`${SITE}/services`) < urls.indexOf(`${SITE}/gallery`));
     });
@@ -96,6 +99,12 @@ const page = (over: Partial<DirectoryPage>): DirectoryPage => ({ url: `${SITE}/x
         assert.ok(!/£/.test(all), `no price: ${all}`);
         assert.strictEqual(e.kind, 'service');
         assert.strictEqual(e.title, 'Services');
+    });
+
+    await check('step numbers and form replies are not offers', () => {
+        const html = '<html><head><title>Home</title></head><body><h1>Studio</h1><h2>1. Select your class</h2><h2>Message sent — thank you!</h2><h2>Wheel throwing</h2><p>' + 'Pottery classes for beginners in Bristol, every weekend. '.repeat(3) + '</p></body></html>';
+        const e = entryFromImportPage(readImportPage(html, `${SITE}/`), `${SITE}/`);
+        assert.deepStrictEqual(e.offers, ['Wheel throwing']);
     });
 
     await check('page kinds by rule', () => {
