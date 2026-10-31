@@ -63,12 +63,12 @@ check('the brand kit becomes the theme; an unreadable one falls back to readable
     assert.strictEqual(bad.logoUrl, null);
 });
 
-check('the draft prompt forbids invented facts, sets the page cap and carries the house rules', () => {
+check('the draft prompt forbids invented facts, sets the safety ceiling and carries the house rules', () => {
     const p = buildDraftPrompt({ business, productsBlock: '<products>Espresso blend £12/kg</products>', rulesBlock: '<rules_block>Never say "best"</rules_block>',
         goal: 'Ask for a quote', pagesWanted: 'Home, Wholesale, Contact', style: 'Friendly', request: 'Mention free delivery', maxPages: 5 });
     assert.match(p.user, /NEVER invent facts/);
     assert.match(p.user, /placeholder in square brackets/);
-    assert.match(p.user, /at most 5 pages/);
+    assert.match(p.user, /never more than 5\)/);
     assert.match(p.user, /Espresso blend £12\/kg/);
     assert.match(p.user, /Never say "best"[\s\S]*follow these rules/);
     assert.match(p.user, /What a visitor should do: Ask for a quote/);
@@ -110,12 +110,15 @@ check('role key, catalogue row (HIDDEN), seed entry', () => {
     assert.match(sql, /ON CONFLICT \(role_key\) DO NOTHING/);
 });
 
-check('pages per plan: a plan feature, 5 on £29, never overwriting an admin\'s number, hidden from pricing until go-live', () => {
-    const sql = read('db/z-website-assistant.sql');
-    assert.match(sql, /'website_pages'/);
-    assert.match(sql, /'\{"website_pages": 5\}'::jsonb\s*\n\s*WHERE tier_key = 'saver' AND NOT \(COALESCE\(features, '\{\}'::jsonb\) \? 'website_pages'\)/);
-    assert.match(sql, /'Capacity', 'number', 'feature', 'Unlimited', 'Custom',[\s\S]*?false\s*\)\s*ON CONFLICT \(key\) DO NOTHING/);
-    assert.match(read('src/utils/site-store.ts'), /getActiveFeaturesByOrg\(db, orgId\)\)\.website_pages/);
+check('no plan limits website pages (owner, 2026-10-31): nothing reads website_pages, the SQL clears it', () => {
+    const store = read('src/utils/site-store.ts');
+    assert.ok(!/website_pages\)|\.website_pages\b/.test(store.replace(/\/\*[\s\S]*?\*\//g, '')), 'site-store reads the plan feature again');
+    assert.match(store, /export async function maxPagesFor\([^)]*\): Promise<number> \{\s*return DEFAULT_MAX_PAGES;/);
+    const sql = read('db/z-no-website-page-limit.sql');
+    assert.match(sql, /SET features = features - 'website_pages'/);
+    assert.match(sql, /SET is_enabled = FALSE[\s\S]*?WHERE key = 'website_pages'/);
+    assert.ok(!read('db/assistant-showcases.json').includes('Up to 5 pages'), 'the showcase still quotes a page limit');
+    assert.ok(!/Website Pages<br>/.test(read('pricing.html')), 'the pricing table still has a Website Pages row');
 });
 
 check('connections (explicit empty), build manifest, rules, labels, copy', () => {
@@ -228,12 +231,13 @@ check('the section form: asks before losing changes, opens in view, one save at 
     assert.match(editor, /data-site-beside[^>]*><span aria-hidden="true">/);
 });
 
-check('UX quick wins: placeholders go to where they are, plan limit and load failure have a next step', () => {
+check('UX quick wins: placeholders go to where they are, the page ceiling and load failure are explained', () => {
     assert.match(editor, /btn\(`data-site-fix="\$\{i\}"`/);
     const fix = editor.slice(editor.indexOf("const fix = t('[data-site-fix]');"), editor.indexOf("const fix = t('[data-site-fix]');") + 1400);
     assert.match(fix, /leaveEditor\(\)/);
     assert.match(fix, /state\.focusEditor = true/);
-    assert.match(editor, /pages on your plan — the most it includes\.<\/span> \$\{btn\('data-site-billing', 'See plans'\)\}/);
+    assert.match(editor, /pages is the most a site can have\.<\/span>/);
+    assert.ok(!/pages on your plan/.test(editor), 'the editor still blames the plan for a page limit');
     assert.match(editor, /btn\('data-site-retry', 'Try again', true\)/);
     assert.match(editor, /show\('maintab-btn-calendar', featureOn\('bookings'\)\)/);
     assert.match(editor, /if \(s\.credit\)|s\.credit \?/);

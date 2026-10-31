@@ -286,8 +286,13 @@ export const EDITOR_LIMITS = {
     linkLabel: LIMITS.ctaLabel,
 } as const;
 
-/** Pages a site may have when the plan sets no number (decision D1: 5 on £29). */
-export const DEFAULT_MAX_PAGES = 5;
+/**
+ * The most pages a site may have. No plan limits pages (owner, 2026-10-31 — the £29 plan's 5 and
+ * the Busywork Buster's 15 were removed); this is only a safety ceiling so a runaway draft or
+ * import can't build an unusable site. Not advertised anywhere — if a real customer reaches it,
+ * raise it.
+ */
+export const DEFAULT_MAX_PAGES = 100;
 /** Below this, body text on the background is hard to read (WCAG AA for body text). */
 export const MIN_TEXT_CONTRAST = 4.5;
 /** Page addresses we serve ourselves, which a page may never take. */
@@ -750,7 +755,7 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
         if (slug === '' && usedSlugs.has('')) slug = slugify(title) || 'page';   // a second "home" becomes a normal page
         let unique = slug; let n = 2;
         while (usedSlugs.has(unique)) unique = `${slug}-${n++}`;
-        if (pages.length >= maxPages) { warn(`Your plan includes ${maxPages} page${maxPages === 1 ? '' : 's'}, so "${title}" was left out.`); continue; }
+        if (pages.length >= maxPages) { warn(`A site can have up to ${maxPages} page${maxPages === 1 ? '' : 's'}, so "${title}" was left out.`); continue; }
         let id = typeof p.id === 'string' && ID_RE.test(p.id) && !usedPageIds.has(p.id) ? p.id : '';
         if (!id) { let k = pages.length + 1; do { id = `p${k++}`; } while (usedPageIds.has(id)); }
         usedPageIds.add(id); usedSlugs.add(unique);
@@ -934,7 +939,7 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
 
     switch (op.op) {
         case 'add_page': {
-            if (next.pages.length >= maxPages) return { ok: false, error: `Your plan includes ${maxPages} page${maxPages === 1 ? '' : 's'}, and this site has them all. Remove one, or move to a plan with more.` };
+            if (next.pages.length >= maxPages) return { ok: false, error: `A site can have up to ${maxPages} page${maxPages === 1 ? '' : 's'}, and this one has them all. Remove a page to add another.` };
             const title = cleanText(op.title, LIMITS.pageTitle);
             if (!title) return { ok: false, error: 'A new page needs a title.' };
             next.pages.push({ id: '', slug: slugify(op.slug || title) || 'page', title, seo: { title: null, description: null }, sections: [], hideFromMenu: false });
@@ -1074,7 +1079,7 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
             // A part whose page already exists (a Contact page, say) joins it rather than making a second.
             const existing = (title: string) => rest.find((p) => p.slug === slugify(title) || p.title.toLowerCase() === title.toLowerCase());
             const newCount = plan.parts.filter((pt) => !existing(pt.title)).length;
-            if (1 + rest.length + newCount > maxPages) return { ok: false, error: `That would make ${1 + rest.length + newCount} pages, and your plan includes ${maxPages}. ${plan.byLabel ? 'Remove a menu label from a section to keep it on the home page' : 'Remove a section from the home page'}, or move to a plan with more pages.` };
+            if (1 + rest.length + newCount > maxPages) return { ok: false, error: `That would make ${1 + rest.length + newCount} pages, and a site can have up to ${maxPages}. ${plan.byLabel ? 'Remove a menu label from a section to keep it on the home page' : 'Remove a section from the home page'} first.` };
             const taken = new Set(next.pages.map((p) => p.slug));
             const made: SitePageDef[] = [];
             const target = new Map<Section, SitePageDef>();

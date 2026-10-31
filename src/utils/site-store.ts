@@ -26,7 +26,6 @@ import { normalizeBrandKit } from './brand-kit';
 import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
-import { getActiveFeaturesByOrg } from './plan-features';
 import {
     applySiteOperation, assetIdsIn, DEFAULT_MAX_PAGES, FEATURE_LABELS, markVideos, normaliseSiteDefinition, SITE_FEATURES, withoutAssets, type SiteDefinition, type SiteOperation,
 } from './site-definition';
@@ -45,14 +44,13 @@ export const DRAFT_TIMEOUT_MS = 10 * 60 * 1000;
 /** Set-up keys (assistant-onboarding-schemas.js → website_assistant), read by the AI draft. */
 export const SITE_SETUP_KEYS = { goal: 'siteGoal', pages: 'pagesWanted', style: 'siteStyle', currentSite: 'currentWebsite' } as const;
 
-/** Pages this workspace's plan allows (Plan Features `website_pages`; decision D1: 5 on £29). */
-export async function maxPagesFor(db: Db, orgId: number): Promise<number> {
-    try {
-        const n = Number((await getActiveFeaturesByOrg(db, orgId)).website_pages);
-        return Number.isInteger(n) && n > 0 ? n : DEFAULT_MAX_PAGES;
-    } catch {
-        return DEFAULT_MAX_PAGES;
-    }
+/**
+ * Pages this workspace's site may have. No plan limits pages (owner, 2026-10-31: the `website_pages`
+ * plan feature — 5 on £29, 15 on the Busywork Buster — was removed), so every workspace gets the
+ * same safety ceiling. Kept as a per-workspace call so every caller already passes it through.
+ */
+export async function maxPagesFor(_db: Db, _orgId: number): Promise<number> {
+    return DEFAULT_MAX_PAGES;
 }
 
 async function businessFacts(db: Db, orgId: number, userId: number | null): Promise<{ facts: BusinessFacts; brandKit: unknown }> {
@@ -401,7 +399,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
                 : `private draft — not published${site.slug ? ` (address chosen: ${siteOrigin(site.slug)})` : ''}`}${drafting ? '; an AI draft of the whole site is being written right now' : ''}.`,
         'Publishing, taking the site offline, choosing its address and connecting a domain they own (like yourbusiness.co.uk — they add one or two DNS settings where they bought it, and the card shows exactly what) are buttons on the Website tab only — you cannot do them from chat; point them to the Publish card there.',
         `Can they press Publish now: ${(() => { const b = publishBlocker(site, d); return b ? `NO — ${b}` : 'yes'; })()}`,
-        `Pages: ${d.pages.length} of ${maxPages} on their plan. Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
+        `Pages: ${d.pages.length} (no plan limits pages). Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
         d.settings.features
             ? `What this website does (their choice): ${d.settings.features.map((f) => FEATURE_LABELS[f]).join('; ') || 'only the basics'}. Switched OFF — never propose these kinds of section: ${SITE_FEATURES.filter((f) => !d.settings.features!.includes(f)).map((f) => FEATURE_LABELS[f]).join('; ') || 'nothing'}. To switch one on or off, propose set_settings with the full "features" list (${SITE_FEATURES.join(', ')}).`

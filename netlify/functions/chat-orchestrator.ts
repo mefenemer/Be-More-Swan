@@ -1672,7 +1672,7 @@ FACTS. Never put a fact on their site that is not in their business details, the
 ${SITE_COPY_CRAFT}
 
 CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short "summary" of what changes, and "ops" — the changes, in order, using ONLY pageIds and sectionIds listed above. They land together or not at all. The operations:
-- {"op":"add_page","title":"...","slug":"..."}   (their plan's page limit is shown above)
+- {"op":"add_page","title":"...","slug":"..."}   (no plan limits how many pages a site has)
 - {"op":"update_page","pageId":"...","title":"...","slug":"...","seo":{"title":"...","description":"..."},"hideFromMenu":true|false}   (any subset; hideFromMenu keeps a page — e.g. a landing page for an ad — out of the menu but reachable by its address; never the home page)
 - {"op":"remove_page","pageId":"..."}   (never the home page)
 - {"op":"add_section","pageId":"...","index":<position, optional>,"section":{"type":"<one of ${SECTION_TYPES.join(', ')}>","props":{...}}}
