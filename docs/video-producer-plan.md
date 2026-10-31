@@ -292,8 +292,9 @@ Phase 5 sets motion per still scene. Tests: `tests/still-motion.test.ts`.
 
 1. Apply `db/z-video-producer-phase7.sql` to staging and prod **before** the code deploys — video_projects is
    read with a bare `db.select()` and the mirror names its four new columns.
-2. Live checks: turn autopilot on for the test Video Producer, POST `/.netlify/functions/video-autopilot` on
-   staging → a storyboard marked "Planned by autopilot"; "Make a video version" on a post in the Review Queue
+2. Live checks: turn autopilot on for the test Video Producer, POST `/.netlify/functions/run-video-autopilot`
+   on staging with `Authorization: Bearer $CRON_TRIGGER_SECRET` (scheduled functions never run on a branch
+   deploy; staging-crons.yml pokes it every 6h) → a storyboard marked "Planned by autopilot"; "Make a video version" on a post in the Review Queue
    (and the same from the Social Media chat) → one storyboard, a second click opens the same one; a campaign
    plan with "Commission a video" → storyboard on the Videos tab → Make the video → approve the post → the
    order shows delivered after the next reconciler run (hourly).
