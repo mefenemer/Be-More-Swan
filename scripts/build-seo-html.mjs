@@ -72,6 +72,7 @@ const FOOTER_PAGES = [
     'assistants.html',
     'connections.html',
     'how-it-works.html',
+    'be-more-swan-vs-marketing-agency.html',
     'faq.html',
     'trust.html',
     'contact.html',
@@ -513,7 +514,7 @@ async function inlineHelpArticles() {
 // from master_plans, just once more at build time. To keep the baked copy from going stale, saving
 // a plan in Admin fires SITE_REBUILD_HOOK (src/utils/trigger-site-rebuild.ts), so the published
 // page is a rebuild behind the database, not a release behind it.
-const PRICE_SLOT_PAGES = ['index.html', 'pricing.html'];
+const PRICE_SLOT_PAGES = ['index.html', 'pricing.html', 'be-more-swan-vs-marketing-agency.html'];
 
 async function bakePlanPrices() {
     let data;
