@@ -6552,3 +6552,25 @@ export const siteDirectories = pgTable("site_directories", {
   check("site_directories_source_check", sql`${t.source} IN ('hosted','crawl')`),
   check("site_directories_status_check", sql`${t.status} IN ('reading','ready','failed')`),
 ]);
+
+// Growth funnel (db/z-growth-funnel.sql; Admin → Analytics). Daily totals of public page views from
+// our own cookieless counter — no IP, user agent, cookie or visitor id; a row is only a count.
+export const siteVisitCounts = pgTable("site_visit_counts", {
+  day: date("day", { mode: "string" }).notNull(),
+  path: text("path").notNull(),
+  source: text("source").notNull(),
+  campaign: text("campaign").notNull().default(""),
+  views: integer("views").notNull().default(0),
+  entries: integer("entries").notNull().default(0),
+}, (t) => [
+  primaryKey({ columns: [t.day, t.path, t.source, t.campaign] }),
+  index("site_visit_counts_day_idx").on(t.day),
+]);
+
+// The source a new account arrived with (src/utils/visit-source.ts cleanSignupSource), when known.
+export const signupSources = pgTable("signup_sources", {
+  userId: integer("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  source: text("source").notNull(),
+  campaign: text("campaign").notNull().default(""),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

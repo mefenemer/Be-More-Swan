@@ -31,6 +31,7 @@
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
   <link rel="manifest" href="/favicon/manifest.json">
+  <script src="/visit-count.js" defer></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
 
@@ -229,6 +230,15 @@
       note.className = 'text-xs mt-1 font-semibold ' + (d.valid ? 'text-emerald-700' : 'text-amber-700');
     } catch (e) { note.classList.add('hidden'); }
   }
+  // Growth funnel: the marketing source this visit was credited to (visit-count.js). Never holds the
+  // sign-up up for long — after 1.5 s it goes without, and the account simply has no source.
+  async function currentSignupSource() {
+    try {
+      const s = await Promise.race([window.VisitSource?.ready, new Promise((r) => setTimeout(() => r(null), 1500))]);
+      return s && s.source ? { source: s.source, campaign: s.campaign || '' } : undefined;
+    } catch { return undefined; }
+  }
+
   function currentReferralRef() {
     if (PARTNER_TOKEN) return undefined;
     const v = (document.getElementById('invitedBy')?.value || '').trim().toUpperCase();
@@ -286,7 +296,7 @@
       const response = await fetch('/.netlify/functions/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ firstName, lastName, email, businessName, planTier, attributionRef: sessionStorage.getItem('attribution_ref') || undefined, referralRef: currentReferralRef(), partnerToken: PARTNER_TOKEN || undefined })
+        body: JSON.stringify({ firstName, lastName, email, businessName, planTier, attributionRef: sessionStorage.getItem('attribution_ref') || undefined, referralRef: currentReferralRef(), partnerToken: PARTNER_TOKEN || undefined, signupSource: await currentSignupSource() })
       });
 
       const data = await response.json();
@@ -378,6 +388,7 @@
           ...pendingSignup, planTier, forceNewWorkspace: true,
           attributionRef: sessionStorage.getItem('attribution_ref') || undefined,
           referralRef: currentReferralRef(),
+          signupSource: await currentSignupSource(),
         }),
       });
       const data = await response.json();
