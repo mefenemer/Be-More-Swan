@@ -3053,6 +3053,8 @@ const _RQ_BRIEF_LABELS = [
     ['idea', 'Brief'], ['angle', 'Angle'], ['audience', 'Audience'], ['facts', 'Points to make'],
     ['hypothesis', 'Testing'], ['angleA', 'Angle A'], ['angleB', 'Angle B'],
     ['show', 'Picture shows'], ['headline', 'Words on it'], ['mustAvoid', 'Avoid'],
+    // commission_video (Video Producer, Phase 7) — what the video says, how it ends, how long.
+    ['videoMessage', 'Video says'], ['cta', 'Ends with'], ['videoLength', 'Length (seconds)'],
     ['assignee', 'Who'], ['task', 'Task'], ['dueDate', 'Due'], ['name', 'Name'],
 ];
 const _RQ_EMAIL_TRIGGER_LABELS = {

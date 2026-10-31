@@ -69,5 +69,11 @@ check('a stored warning about the footer is dropped on read; others are kept', (
     assert.ok(!isAboutDisclosureFooter(other));
     assert.deepStrictEqual(readCachedReview(review, caption)!.complianceWarnings, [other]);
 });
+check('a stored warning that PARAPHRASES the footer is dropped too (staging, 2026-10-31)', () => {
+    const w = "Rule 16 flags content 'not relevant to our business' on X. The Felix / Be More Swan AI assistant mention is unrelated to the film business and may trigger this rule.";
+    assert.ok(isAboutDisclosureFooter(w));
+    assert.ok(!isAboutDisclosureFooter('Rule 16 flags content not relevant to our business: the post is about cooking classes.'));
+    assert.ok(!isAboutDisclosureFooter('The claim "award-winning" has no source.'));
+});
 
 console.log(`\n${passed} passed, 0 failed\n`);

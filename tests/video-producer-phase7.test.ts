@@ -287,4 +287,15 @@ check('the page\'s "Needs you" strip counts waiting storyboards, not only the re
     assert.ok(v.indexOf('window._setNeedsYouCount?.(n);') < v.indexOf("if (!el) return;"), 'fed even when the badge is missing');
 });
 
+check('every brief field a plan can carry has a label in the plan editor and in Decisions', () => {
+    const camp = read('src/components/assistant-campaigns.js');
+    const labels = camp.slice(camp.indexOf('const PLAN_FIELD_LABELS = {'), camp.indexOf('const PLAN_EDIT_FIELDS = {'));
+    const edit = camp.slice(camp.indexOf('const PLAN_EDIT_FIELDS = {'), camp.indexOf('const EMAIL_TRIGGER_LABELS'));
+    // "Edit this plan" destructures a label for every field it shows: a missing one throws.
+    for (const f of new Set([...edit.matchAll(/'([a-zA-Z]+)'/g)].map((m) => m[1]))) {
+        assert.ok(new RegExp(`\\b${f}: \\[`).test(labels), `PLAN_FIELD_LABELS has no label for ${f}`);
+    }
+    assert.match(read('assistants.js'), /\['videoMessage', 'Video says'\]/);
+});
+
 console.log(`\n${passed} checks passed`);
