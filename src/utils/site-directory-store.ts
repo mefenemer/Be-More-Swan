@@ -24,7 +24,8 @@ import { fetchSiteHtml } from './site-fetch';
 import { siteOrigin } from './site-hosting';
 import { cleanImportUrl } from './site-import';
 import { createPageRenderer } from './site-js-render';
-import { maxPagesFor, publishedDefinition, type SiteRow } from './site-store';
+import { maxPagesFor, publishedDefinition } from './site-published';
+import type { SiteRow } from './site-store';
 
 type Db = ReturnType<typeof getDb>;
 export type SiteDirectoryRow = typeof siteDirectories.$inferSelect;

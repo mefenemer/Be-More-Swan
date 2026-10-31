@@ -111,9 +111,12 @@ check('role key, catalogue row (HIDDEN), seed entry', () => {
 });
 
 check('no plan limits website pages (owner, 2026-10-31): nothing reads website_pages, the SQL clears it', () => {
-    const store = read('src/utils/site-store.ts');
-    assert.ok(!/website_pages\)|\.website_pages\b/.test(store.replace(/\/\*[\s\S]*?\*\//g, '')), 'site-store reads the plan feature again');
-    assert.match(store, /export async function maxPagesFor\([^)]*\): Promise<number> \{\s*return DEFAULT_MAX_PAGES;/);
+    const store = read('src/utils/site-store.ts') + read('src/utils/site-published.ts');
+    assert.ok(!/website_pages\)|\.website_pages\b/.test(store.replace(/\/\*[\s\S]*?\*\//g, '')), 'the site code reads the plan feature again');
+    assert.match(read('src/utils/site-published.ts'), /export async function maxPagesFor\([^)]*\): Promise<number> \{\s*return DEFAULT_MAX_PAGES;/);
+    // The directory (read by every drafting assistant) must not import the whole Website Assistant:
+    // site-store pulls in satori, whose wasm load broke campaign-tickets.test.ts on 2026-10-31.
+    assert.ok(!/from '\.\/site-store'/.test(read('src/utils/site-directory-store.ts').replace(/import type[^\n]*\n/g, '')), 'site-directory-store imports site-store at runtime again');
     const sql = read('db/z-no-website-page-limit.sql');
     assert.match(sql, /SET features = features - 'website_pages'/);
     assert.match(sql, /SET is_enabled = FALSE[\s\S]*?WHERE key = 'website_pages'/);

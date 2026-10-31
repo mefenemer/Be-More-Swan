@@ -44,14 +44,10 @@ export const DRAFT_TIMEOUT_MS = 10 * 60 * 1000;
 /** Set-up keys (assistant-onboarding-schemas.js → website_assistant), read by the AI draft. */
 export const SITE_SETUP_KEYS = { goal: 'siteGoal', pages: 'pagesWanted', style: 'siteStyle', currentSite: 'currentWebsite' } as const;
 
-/**
- * Pages this workspace's site may have. No plan limits pages (owner, 2026-10-31: the `website_pages`
- * plan feature — 5 on £29, 15 on the Busywork Buster — was removed), so every workspace gets the
- * same safety ceiling. Kept as a per-workspace call so every caller already passes it through.
- */
-export async function maxPagesFor(_db: Db, _orgId: number): Promise<number> {
-    return DEFAULT_MAX_PAGES;
-}
+// The page ceiling and the published read live in site-published.ts (light imports, for readers
+// that don't need the rest of this module); re-exported so existing callers are unchanged.
+export { maxPagesFor, publishedDefinition } from './site-published';
+import { maxPagesFor, publishedDefinition } from './site-published';
 
 async function businessFacts(db: Db, orgId: number, userId: number | null): Promise<{ facts: BusinessFacts; brandKit: unknown }> {
     const [org] = await db.select({
@@ -291,14 +287,6 @@ export async function listSiteVersions(db: Db, siteId: number): Promise<Array<{ 
     const rows = await db.select({ version: siteVersions.version, publishedAt: siteVersions.publishedAt, definition: siteVersions.definition })
         .from(siteVersions).where(eq(siteVersions.siteId, siteId)).orderBy(desc(siteVersions.version)).limit(KEEP_VERSIONS);
     return rows.map((r) => ({ version: r.version, publishedAt: r.publishedAt, pages: Array.isArray((r.definition as SiteDefinition)?.pages) ? (r.definition as SiteDefinition).pages.length : 0 }));
-}
-
-/** The published definition, through the gate (a plan's page cap lowered since still holds). */
-export async function publishedDefinition(db: Db, site: SiteRow, maxPages: number): Promise<SiteDefinition | null> {
-    if (site.publishedVersion == null) return null;
-    const [row] = await db.select({ definition: siteVersions.definition }).from(siteVersions)
-        .where(and(eq(siteVersions.siteId, site.id), eq(siteVersions.version, site.publishedVersion))).limit(1);
-    return row ? normaliseSiteDefinition(row.definition, { maxPages }).definition : null;
 }
 
 /** Copy an earlier version back into the DRAFT. Nothing changes live until the owner publishes. */
