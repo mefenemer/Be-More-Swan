@@ -46,6 +46,8 @@ export interface PexelsVideoCandidate {
     photographerUrl: string;   // user.url
     width: number;
     height: number;
+    /** Seconds (Pexels' own `duration`). Absent on results cached before 2026-11-01. */
+    duration?: number;
 }
 
 const PEXELS_SEARCH_URL = 'https://api.pexels.com/v1/search';
@@ -152,6 +154,7 @@ export async function pexelsVideoSearch(query: string, page = 1, perPage = 15, o
             photographerUrl: v?.user?.url || '',
             width: best?.w || Number(v?.width) || 0,
             height: best?.h || Number(v?.height) || 0,
+            ...(Number(v?.duration) > 0 ? { duration: Number(v.duration) } : {}),
         };
     }).filter(c => c.url && c.providerAssetId && c.providerAssetId !== 'vundefined');
 }
@@ -311,6 +314,8 @@ export async function createPexelsAsset(
         externalUrl: candidate.url,         // US3 AC3.1 — hotlink, never permanently hosted
         provider: 'pexels',
         providerAssetId: candidate.providerAssetId,
+        // A clip's length, so a timeline never asks it for a frame past its end (video-producer.ts).
+        ...('duration' in candidate && candidate.duration ? { durationS: candidate.duration } : {}),
         attributionName: candidate.photographer,   // US3 AC3.2
         attributionUrl: candidate.photographerUrl, // US3 AC3.2
         // Pexels returns real pixel dimensions — store them so the platform preview can check the

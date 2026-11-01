@@ -31,7 +31,7 @@ import { loadOrgProducts, renderProductFacts } from './org-products';
 import { normalizeBrandKit } from './brand-kit';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, type MediaKind } from './ai-credits';
 import { TASK_WEIGHTS } from '../config/task-weights';
-import { createPexelsAsset, searchUniqueImages, searchUniqueVideos } from './pexels';
+import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
 import { submitFramedVideo, status as falStatus, result as falResult, extractVideo, falConfigured } from '../lib/fal-gateway';
 import { logMediaCost } from './ai-usage';
@@ -272,7 +272,7 @@ export function sceneClips(scenes: Scene[], assetIds: Record<string, number>, du
 async function sourceScene(db: Db, args: {
     scene: Scene; orgId: number; userId: number; assistantId: number | null; brandName: string; exclude: string[];
     kit: ReturnType<typeof normalizeBrandKit>; seed: number;
-}): Promise<{ assetId: number; mediaKind?: MediaKind; cost?: number } | null> {
+}): Promise<{ assetId: number; mediaKind?: MediaKind; cost?: number; asStill?: boolean } | null> {
     const { scene, orgId, userId } = args;
     const context = scene.keywords || scene.prompt || scene.voiceover;
     switch (scene.source) {
@@ -281,12 +281,22 @@ async function sourceScene(db: Db, args: {
         case 'stock_video': {
             // Portrait first: the video is 9:16, and a centre-cropped landscape clip cuts people's heads
             // off. Any shape only when portrait finds nothing — a cropped clip beats an empty scene.
-            const opts = { limit: 3, keywords: scene.keywords, exclude: args.exclude };
-            const r = await searchUniqueVideos(db, orgId, context, { ...opts, orientation: 'portrait' });
-            const c = r.candidates[0] ?? (await searchUniqueVideos(db, orgId, context, opts)).candidates[0];
-            if (!c) return null;
-            args.exclude.push(c.providerAssetId);
-            return { assetId: await createPexelsAsset(db, { userId, orgId, candidate: c, assetType: 'video' }) };
+            //
+            // Long enough, too: a clip shorter than its scene made Remotion ask for a frame past its end
+            // ("No frame found at position…") and the WHOLE render failed (sample videos, 2026-11-01).
+            // Only a clip whose Pexels duration covers the scene (+0.3 s) is used; with none, the scene
+            // becomes a moving stock photo, which can be held for any length.
+            const need = scene.targetS + 0.3;
+            const longEnough = (cs: PexelsVideoCandidate[]) => cs.find((x) => (x.duration ?? 0) >= need);
+            const opts = { limit: 8, keywords: scene.keywords, exclude: args.exclude };
+            const c = longEnough((await searchUniqueVideos(db, orgId, context, { ...opts, orientation: 'portrait' })).candidates)
+                ?? longEnough((await searchUniqueVideos(db, orgId, context, opts)).candidates);
+            if (c) {
+                args.exclude.push(c.providerAssetId);
+                return { assetId: await createPexelsAsset(db, { userId, orgId, candidate: c, assetType: 'video' }) };
+            }
+            const photo = await sourceScene(db, { ...args, scene: { ...scene, source: 'stock_photo' } });
+            return photo ? { ...photo, asStill: true } : null;
         }
         case 'stock_photo': {
             const opts = { limit: 3, keywords: scene.keywords, exclude: args.exclude };
@@ -401,6 +411,12 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                 console.error(`[video-producer] build ${projectId} scene ${scene.id} failed:`, err);
             }
             if (paid) await settle(scene.source === 'ai_video' ? 'video' : 'image', paid, !!made);
+            if (made?.asStill) {
+                // No stock clip was long enough: the scene is a moving still now, and the storyboard says
+                // so — the timeline holds it (sceneClips) and the Videos tab shows it as a stock photo.
+                storyboard.scenes[i] = { ...scene, source: 'stock_photo', motion: scene.motion && scene.motion !== 'none' ? scene.motion : 'push_in' };
+                await save({ storyboard });
+            }
             if (made) done[scene.id] = made.assetId; else missing.push(`scene ${i + 1}`);
             await save({});
         }

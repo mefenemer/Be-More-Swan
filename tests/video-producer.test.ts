@@ -143,8 +143,7 @@ check('the SQL file and the Drizzle mirror agree on the table', () => {
 
 check('stock is searched portrait first (9:16 video), any shape only when portrait finds nothing', () => {
     const vp = readFileSync(join(root, 'src/utils/video-producer.ts'), 'utf8');
-    assert.match(vp, /searchUniqueVideos\(db, orgId, context, \{ \.\.\.opts, orientation: 'portrait' \}\)/);
-    assert.match(vp, /r\.candidates\[0\] \?\? \(await searchUniqueVideos\(db, orgId, context, opts\)\)\.candidates\[0\]/);
+    assert.match(vp, /searchUniqueVideos\(db, orgId, context, \{ \.\.\.opts, orientation: 'portrait' \}\)\)\.candidates\)\s*\?\? longEnough\(\(await searchUniqueVideos\(db, orgId, context, opts\)\)\.candidates\)/);
     assert.match(vp, /searchUniqueImages\(db, orgId, context, \{ \.\.\.opts, orientation: 'portrait' \}\)/);
     const px = readFileSync(join(root, 'src/utils/pexels.ts'), 'utf8');
     assert.match(px, /\.\.\.\(orientation \? \{ orientation \} : \{\}\)/, 'sent to Pexels');
@@ -159,6 +158,17 @@ check('on-screen text shrinks to fit one line of a 9:16 frame', () => {
     assert.ok(long.length * 0.5 * pct <= 0.9 * 9 / 16 + 1e-9, 'fits ~90% of the frame width');
     assert.strictEqual(onScreenFontPct('x'.repeat(200)), 0.028, 'never unreadably small');
     assert.strictEqual(sceneOverlays([{ ...storyboard.scenes[0], id: 'l', source: 'stock_video' as const, onScreenText: long }], [3])[0].fontSizePct, pct);
+});
+
+check('a stock clip is only used when it covers its scene; otherwise the scene becomes a moving still', () => {
+    const vp = readFileSync(join(root, 'src/utils/video-producer.ts'), 'utf8');
+    assert.match(vp, /const need = scene\.targetS \+ 0\.3;/);
+    assert.match(vp, /cs\.find\(\(x\) => \(x\.duration \?\? 0\) >= need\)/, 'unknown length counts as too short');
+    assert.match(vp, /return photo \? \{ \.\.\.photo, asStill: true \} : null;/);
+    assert.match(vp, /storyboard\.scenes\[i\] = \{ \.\.\.scene, source: 'stock_photo'/, 'the storyboard says what it became, so the timeline holds it');
+    const px = readFileSync(join(root, 'src/utils/pexels.ts'), 'utf8');
+    assert.match(px, /Number\(v\?\.duration\) > 0 \? \{ duration: Number\(v\.duration\) \}/);
+    assert.match(px, /durationS: candidate\.duration/);
 });
 
 console.log(`\n${passed} checks passed`);
