@@ -46,6 +46,9 @@
       .sc-feature.sc-flip > .sc-copy { order: 2; }
     }
     .sc-shot { display: block; width: 100%; border-radius: 0.875rem; border: 1px solid #e5e7eb; box-shadow: 0 20px 40px -20px rgba(31,30,27,.35); cursor: zoom-in; background: #fff; }
+    .sc-samples { display: grid; gap: 1.5rem; }
+    @media (min-width: 768px) { .sc-samples { grid-template-columns: repeat(auto-fit, minmax(0, 320px)); justify-content: center; } }
+    .sc-sample video { display: block; width: 100%; aspect-ratio: 9 / 16; object-fit: cover; background: #111; border-radius: 0.875rem; }
     .sc-steps { display: grid; gap: 1rem; }
     @media (min-width: 768px) { .sc-steps { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
     .sc-lightbox { position: fixed; inset: 0; z-index: 100; background: rgba(17,17,17,.85); display: none; align-items: center; justify-content: center; padding: 1rem; cursor: zoom-out; }
@@ -110,6 +113,20 @@
   // the Video Producer makes videos, which only the plans in ai-credits.ts VIDEO_TIERS can. Keep in
   // step with scripts/seo/ai-readability.mjs PLAN_NOTES (the crawler copy of this page).
   const PLAN_NOTES = { video_producer: 'On the Busywork Buster plan' };
+
+  // Sample work a role made, shown under How it works. Real output, made by the assistant itself on
+  // staging for made-up businesses (2026-11-01) — never a mock-up. Kept here, like ILLUSTRATIONS, so
+  // it ships with the deploy and needs no SQL run. Files: videos/samples/<role>/.
+  const SAMPLE_VIDEOS = {
+    video_producer: {
+      title: 'See what it makes',
+      intro: 'Videos for made-up businesses, each made by the Video Producer from a sentence or two: the script, the scenes, the voiceover and the captions. We changed a scene or two on the storyboard before making them, as you can. Nothing was edited afterwards.',
+      items: [
+        { src: '/videos/samples/video_producer/willowbrook-coffee.mp4', poster: '/videos/samples/video_producer/willowbrook-coffee.jpg', business: 'Willowbrook Coffee', kind: 'Product spotlight', meta: '15 seconds · Warm and friendly voice · Instagram Reel · Stock and a branded card' },
+        { src: '/videos/samples/video_producer/harbour-yoga.mp4', poster: '/videos/samples/video_producer/harbour-yoga.jpg', business: 'Harbour Yoga', kind: 'Offer', meta: '29 seconds · Bright and upbeat voice · Facebook Reel · One AI clip, then stock' },
+      ],
+    },
+  };
 
   // A role's swan character, shown in the hero. Kept here, not in the showcase
   // JSON, so adding one ships with the deploy and needs no SQL run.
@@ -179,6 +196,7 @@
     const features = Array.isArray(s.features) ? s.features : [];
     const faqs = Array.isArray(s.faqs) ? s.faqs : [];
     const art = ILLUSTRATIONS[roleKey];
+    const samples = SAMPLE_VIDEOS[roleKey] || null;
     // With a character, the swan takes the hero and the video moves down into How it works — unless
     // there are no steps to hold it, then the video keeps the hero.
     const heroArt = art && (!video || steps.length) ? art : null;
@@ -253,6 +271,23 @@
         </li>`).join('')}
       </ol>
       ${heroArt && video ? `<div class="max-w-4xl mx-auto mt-12">${videoBlock}</div>` : ''}
+    </section>` : ''}
+
+    ${samples ? `
+    <!-- Sample work (SAMPLE_VIDEOS) -->
+    <section class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-14" id="sc-samples">
+      <h2 class="text-3xl font-extrabold text-gray-900 mb-3 text-center">${esc(samples.title)}</h2>
+      <p class="text-gray-600 leading-relaxed text-center max-w-2xl mx-auto mb-10">${esc(samples.intro)}</p>
+      <div class="sc-samples">${samples.items.map((v) => `
+        <figure class="sc-sample bg-white rounded-2xl border border-gray-200 shadow-sm p-3">
+          <video controls playsinline preload="none" poster="${esc(v.poster)}" aria-label="${esc(`Sample video for ${v.business}`)}"><source src="${esc(v.src)}" type="video/mp4"></video>
+          <figcaption class="px-1 pt-3 pb-1">
+            <p class="font-bold text-gray-900">${esc(v.business)} <span class="font-normal text-gray-500">· ${esc(v.kind)}</span></p>
+            <p class="text-xs text-gray-500 mt-1 leading-relaxed">${esc(v.meta)}</p>
+          </figcaption>
+        </figure>`).join('')}
+      </div>
+      <p class="text-xs text-gray-400 text-center mt-6">Sample businesses. The stock footage comes from Pexels.</p>
     </section>` : ''}
 
     ${features.length ? `

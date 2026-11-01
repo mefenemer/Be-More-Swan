@@ -170,4 +170,14 @@ check('its website page has its swan, and does not say "Included in every plan"'
     assert.match(read('src/utils/ai-credits.ts'), /VIDEO_TIERS = \['buster', 'employee'\]/);
 });
 
+check('its sample videos are real files, for made-up businesses, with a poster each', () => {
+    const page = read('assistant.html');
+    const block = page.slice(page.indexOf('const SAMPLE_VIDEOS = {'), page.indexOf('function render('));
+    const files = [...block.matchAll(/(?:src|poster): '(\/videos\/samples\/video_producer\/[\w-]+\.(?:mp4|jpg))'/g)].map((m) => m[1]);
+    assert.ok(files.length >= 4, 'at least two videos, each with a poster');
+    for (const f of files) assert.ok(existsSync(join(root, f)), f);
+    assert.doesNotMatch(block, /__\w+_META__/, 'every card has its real length and voice');
+    assert.doesNotMatch(block, /Marmalade/, 'never the staging workspace the samples were made in');
+});
+
 console.log(`\n${passed} checks passed`);
