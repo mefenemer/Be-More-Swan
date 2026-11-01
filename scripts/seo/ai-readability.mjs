@@ -191,7 +191,10 @@ const pageDescription = (c, sc) => String((sc && sc.headline) || c.tagline || c.
  * assistant.html, so the brief moment before the live render replaces it looks like the page.
  * Every class here already appears in assistant.html's template and so exists in style.css.
  */
-export function assistantStaticHtml(c, sc, pages) {
+/** The plan line under "Get started" — the same map as assistant.html PLAN_NOTES. */
+export const PLAN_NOTES = { video_producer: 'On the Busywork Buster plan' };
+
+export function assistantStaticHtml(c, sc, pages, roleKey = c && c.roleKey) {
     const s = sc || {};
     const overview = Array.isArray(s.overview) ? s.overview : (c.description ? [c.description] : []);
     const highlights = Array.isArray(s.highlights) && s.highlights.length ? s.highlights : (c.keyFeatures || []);
@@ -210,7 +213,7 @@ export function assistantStaticHtml(c, sc, pages) {
     if (lead) L.push(`      <p class="text-xl font-bold text-emerald-700 mb-6">${escHtml(lead)}</p>`);
     if (highlights.length) L.push(`      <ul class="space-y-2.5 mb-8">${highlights.map((h) => `<li class="text-gray-700 font-medium">${escHtml(h)}</li>`).join('')}</ul>`);
     L.push('      <a href="/pricing" class="btn-golive inline-block font-bold px-6 py-3 text-base rounded-xl">Get started</a>');
-    L.push('      <p class="text-xs text-gray-400 mt-4">Included in every plan · You approve its work before anything goes out</p>');
+    L.push(`      <p class="text-xs text-gray-400 mt-4">${escHtml(PLAN_NOTES[roleKey] || 'Included in every plan')} · You approve its work before anything goes out</p>`);
     L.push('    </section>');
     if (overview.length) {
         L.push('    <section class="bg-white border-y border-gray-100"><div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-14">');
@@ -321,7 +324,7 @@ export function buildAssistantPage(template, { roleKey, slug, c, sc, pages, ogIm
     swap('robots noindex', /\s*<meta name="robots" content="noindex, follow">/, () => '');
     swap('</head>', /<\/head>/, () => `${assistantJsonLd(c, sc, slug)}\n</head>`);
     swap('#sc-loading', /<div id="sc-loading" class="/, () => '<div id="sc-loading" class="hidden ');
-    swap('#sc-root', /(<div id="sc-root" class="hidden"><\/div>)/, (m) => `${m}\n\n${assistantStaticHtml(c, sc, pages)}`);
+    swap('#sc-root', /(<div id="sc-root" class="hidden"><\/div>)/, (m) => `${m}\n\n${assistantStaticHtml(c, sc, pages, roleKey)}`);
     return { html, errors };
 }
 
