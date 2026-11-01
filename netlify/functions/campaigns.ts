@@ -345,6 +345,11 @@ export default withLambda(async (event) => {
                 jp: sql<number>`(SELECT count(*)::int FROM content_generation_jobs j WHERE j.campaign_order_id = ${campaignOrders.id} AND j.status = 'processing')`,
                 jc: sql<number>`(SELECT count(*)::int FROM content_generation_jobs j WHERE j.campaign_order_id = ${campaignOrders.id} AND j.status = 'completed')`,
                 jf: sql<number>`(SELECT count(*)::int FROM content_generation_jobs j WHERE j.campaign_order_id = ${campaignOrders.id} AND j.status NOT IN ('queued','processing','completed'))`,
+                // A picture brief's or video's own status, so "waiting on you" is live (artefactWaitingOnYou).
+                artefactStatus: sql<string | null>`CASE ${campaignOrders.artefactKind}
+                    WHEN 'video_project' THEN (SELECT v.status FROM video_projects v WHERE v.id = ${campaignOrders.artefactId})
+                    WHEN 'visual_brief' THEN (SELECT b.status FROM visual_briefs b WHERE b.id = ${campaignOrders.artefactId})
+                    END`,
             }).from(campaignOrders)
                 .where(eq(campaignOrders.campaignId, r.id))
                 .orderBy(campaignOrders.id);
@@ -353,6 +358,7 @@ export default withLambda(async (event) => {
                 resultSummary: o.resultSummary, artefactKind: o.artefactKind, targetAssistantId: o.targetAssistantId,
                 brief: (o.brief ?? {}) as Record<string, unknown>,
                 jobs: { queued: Number(o.jq) || 0, processing: Number(o.jp) || 0, completed: Number(o.jc) || 0, failed: Number(o.jf) || 0 },
+                artefactStatus: o.artefactStatus ?? null,
             })));
             const step = nextStep({ status: r.status }, !!pendingPlan, work);
             items.push({ ...r, ...totals, orders: live ?? { open: 0, inReview: 0, delivered: 0 }, pendingPlan, progress, humanTasks, assets, tests, work, nextStep: step });

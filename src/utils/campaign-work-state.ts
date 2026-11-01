@@ -27,6 +27,27 @@ export interface WorkOrderRow {
     brief: Record<string, unknown>;
     /** Drafting jobs this order enqueued, by status. Absent for orders that enqueue none. */
     jobs?: { queued: number; processing: number; completed: number; failed: number };
+    /** The artefact's OWN status, read live: video_projects.status or visual_briefs.status. */
+    artefactStatus?: string | null;
+}
+
+/**
+ * When a commissioned picture brief or video is waiting on the user's click, say so — live, from the
+ * brief or video itself. Before 2026-10-31 an issued order read "working" ("Nothing needed from you")
+ * until the hourly reconciler moved it to review, while a storyboard or options sat waiting for the
+ * user (found on staging). Null when the artefact is not waiting on them. Pure.
+ */
+export function artefactWaitingOnYou(kind: string | null, status: string | null | undefined): string | null {
+    if (kind === 'video_project') {
+        if (status === 'planned') return 'Storyboard ready — check it and press "Make the video" on the Video Producer\'s Videos tab.';
+        if (status === 'failed') return 'The video stopped part-way — press "Make the video" again on the Videos tab.';
+        if (status === 'built') return 'Video made — waiting for your approval in the Review Queue.';
+    }
+    if (kind === 'visual_brief') {
+        if (status === 'in_review') return 'Options are ready — choose the ones you like on the Brand Designer\'s Briefs tab.';
+        if (status === 'open') return 'Waiting for you to ask the Brand Designer for options on its Briefs tab.';
+    }
+    return null;
 }
 
 export interface WorkItem {
@@ -94,6 +115,9 @@ export function describeWork(orders: WorkOrderRow[]): WorkItem[] {
                 return { ...base, state: 'queued', text: `Queued. It starts within about ${DRAIN_MINUTES} minutes.` };
             default: break; // 'issued'
         }
+
+        const yours = artefactWaitingOnYou(o.artefactKind, o.artefactStatus);
+        if (yours) return { ...base, state: 'waiting_you', text: yours, link: review };
 
         if (o.action === 'request_human_task') {
             const who = typeof o.brief.assignee === 'string' && o.brief.assignee ? o.brief.assignee : 'a person on your team';

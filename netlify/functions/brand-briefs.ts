@@ -112,6 +112,9 @@ export default withLambda(async (event) => {
             briefs,
             vocab: briefVocabForClient(),
             credits: balance ? balance.balance : null,
+            // What `credits` counts: 'tasks' under the single task allowance (getBalance), so the tab
+            // quotes tasks, not AI credits. 1,000,000 tasks = an uncapped plan (no "left" to show).
+            unit: balance?.unit ?? 'credits',
             aiAvailable,
             // Null when AI video can be made here; otherwise WHY not, in words (feature or plan) —
             // the form shows it beside the greyed-out tick box rather than a bare "unavailable".

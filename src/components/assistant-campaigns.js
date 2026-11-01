@@ -1474,7 +1474,9 @@
       ? 'No active plan, so your assistants cannot take on campaign work.'
       : gate.limit == null
         ? `${esc(String(gate.used ?? 0))} tasks used this month. Your plan has no monthly limit.`
-        : `${esc(String(gate.used ?? 0))} of ${esc(String(gate.limit))} tasks used this month · ${esc(String(gate.remaining ?? 0))} left`;
+        // `remaining` includes bonus tasks (campaign-ledger.ts readPlanTaskGate), so say so — otherwise
+        // "28 of 10500 used · 11396 left" reads as a sum that doesn't add up (staging, 2026-10-31).
+        : `${esc(String(gate.used ?? 0))} of ${esc(String(gate.limit))} tasks used this month · ${esc(String(gate.remaining ?? 0))} left${Number(gate.bonus) > 0 ? `, including ${esc(String(gate.bonus))} bonus tasks` : ''}`;
 
     host.innerHTML = `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-wrap items-center justify-between gap-4">

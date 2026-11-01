@@ -45,16 +45,18 @@ export const ASPECT_LABELS: Record<BriefAspectRatio, string> = {
 export const BRIEF_SOURCES = ['stock', 'ai_image', 'brand_card', 'stock_video', 'ai_video'] as const;
 export type BriefSource = typeof BRIEF_SOURCES[number];
 
-export const SOURCE_SPECS: Record<BriefSource, { label: string; cost: string; optionsPerRound: number; credits: number }> = {
-    stock:      { label: 'Stock photos',  cost: 'Free (Pexels)',                                         optionsPerRound: 4, credits: 0 },
+// `tasks` = what one round of that source takes from the monthly allowance under the single task allowance
+// (task-weights.ts) — what the Briefs tab and the chat quote, as the Video Producer does since 2026-10-31.
+export const SOURCE_SPECS: Record<BriefSource, { label: string; cost: string; optionsPerRound: number; credits: number; tasks: number }> = {
+    stock:      { label: 'Stock photos',  cost: 'Free (Pexels)',                                         optionsPerRound: 4, credits: 0, tasks: 0 },
     // `cost` is what the brief form shows. Since the single task allowance (docs/task-metering.md) it is
     // in tasks; `credits` stays the internal hold amount that ai-credits.ts converts (tasksForCredits).
-    ai_image:   { label: 'AI images',     cost: `${TASK_WEIGHTS.ai_image} task for 4 images`,           optionsPerRound: 4, credits: IMAGE_CREDIT_COST },
-    brand_card: { label: 'Branded cards', cost: 'Free — your colours, font and logo',                   optionsPerRound: 2, credits: 0 },
-    stock_video: { label: 'Stock videos', cost: 'Free (Pexels)',                                         optionsPerRound: 2, credits: 0 },
+    ai_image:   { label: 'AI images',     cost: `${TASK_WEIGHTS.ai_image} task for 4 images`,           optionsPerRound: 4, credits: IMAGE_CREDIT_COST, tasks: TASK_WEIGHTS.ai_image },
+    brand_card: { label: 'Branded cards', cost: 'Free — your colours, font and logo',                   optionsPerRound: 2, credits: 0, tasks: 0 },
+    stock_video: { label: 'Stock videos', cost: 'Free (Pexels)',                                         optionsPerRound: 2, credits: 0, tasks: 0 },
     // One clip per round: four clips would be 80 tasks for one brief. Busywork Buster (and Digital Employee) only
     // (tierCanGenerateVideo) — the same lock as AI video everywhere else.
-    ai_video:   { label: 'AI video',      cost: `${TASK_WEIGHTS.ai_video} tasks for one 6-second clip (Busywork Buster plan)`, optionsPerRound: 1, credits: VIDEO_CREDIT_COST },
+    ai_video:   { label: 'AI video',      cost: `${TASK_WEIGHTS.ai_video} tasks for one 6-second clip (Busywork Buster plan)`, optionsPerRound: 1, credits: VIDEO_CREDIT_COST, tasks: TASK_WEIGHTS.ai_video },
 };
 
 /** The sources whose options are VIDEOS. */
