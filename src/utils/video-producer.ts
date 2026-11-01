@@ -33,7 +33,7 @@ import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVE
 import { TASK_WEIGHTS } from '../config/task-weights';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
-import { submitFramedVideo, status as falStatus, result as falResult, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, I2V_MODEL } from '../lib/fal-gateway';
+import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, I2V_MODEL } from '../lib/fal-gateway';
 import { logMediaCost } from './ai-usage';
 import { makeVoiceoverAsset } from './voiceover-asset';
 import { DEFAULT_VOICE, isVoiceId, cleanScript } from '../lib/tts';
@@ -54,7 +54,15 @@ type Db = ReturnType<typeof getDb>;
 /** The platforms a Video Producer video can go to today, and the vertical format on each. */
 export const VIDEO_DESTINATIONS: Record<string, string> = { instagram: 'ig_reel', youtube: 'yt_short', facebook: 'fb_reel' };
 
-const AI_CLIP_DEADLINE_MS = 9 * 60 * 1000;
+/**
+ * One attempt at an AI clip. Kling 3's slowest bake-off clip took 4 m 25 s (2026-11-01); a staging
+ * build that day had one job report IN_PROGRESS for 9 minutes and never finish. An attempt past this
+ * is cancelled at Fal and tried once more from the same first frame. Two attempts plus the
+ * voiceover stay inside the 15-minute background-function ceiling, because stock scenes are made
+ * while the AI clips generate (buildProject).
+ */
+export const AI_CLIP_ATTEMPT_MS = 6 * 60 * 1000;
+export const AI_CLIP_ATTEMPTS = 2;
 const AI_CLIP_POLL_MS = 5000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -353,17 +361,29 @@ async function sourceScene(db: Db, args: {
             };
         case 'ai_video': {
             if (!falConfigured()) return null;
-            const sub = await submitFramedVideo({
-                prompt: `${scene.prompt || context}. Slow, steady camera movement; one continuous shot.`,
-                imagePrompt: scene.prompt || context, aspectRatio: '9:16',
-                durationSeconds: aiClipSeconds(scene.targetS),
-                usage: { workspaceId: orgId, userId, assistantId: args.assistantId },
-            });
-            const deadline = Date.now() + AI_CLIP_DEADLINE_MS;
-            while ((await falStatus(sub.statusUrl)) !== 'COMPLETED') {
-                if (Date.now() > deadline) throw new Error('An AI clip took too long and was abandoned.');
-                await sleep(AI_CLIP_POLL_MS);
+            let frameUrl: string | null = null;
+            let sub: Awaited<ReturnType<typeof submitFramedVideo>> | null = null;
+            for (let attempt = 1; attempt <= AI_CLIP_ATTEMPTS && !sub; attempt++) {
+                const tried = await submitFramedVideo({
+                    prompt: `${scene.prompt || context}. Slow, steady camera movement; one continuous shot.`,
+                    imagePrompt: scene.prompt || context, startImageUrl: frameUrl, aspectRatio: '9:16',
+                    durationSeconds: aiClipSeconds(scene.targetS),
+                    usage: { workspaceId: orgId, userId, assistantId: args.assistantId },
+                });
+                frameUrl ??= tried.frameUrl;   // a retry animates the same picture, not a new one
+                const deadline = Date.now() + AI_CLIP_ATTEMPT_MS;
+                let finished = false;
+                while (Date.now() < deadline) {
+                    if ((await falStatus(tried.statusUrl)) === 'COMPLETED') { finished = true; break; }
+                    await sleep(AI_CLIP_POLL_MS);
+                }
+                if (finished) sub = tried;
+                else {
+                    await falCancel(tried.statusUrl);
+                    console.warn(`[video-producer] AI clip attempt ${attempt} timed out and was cancelled (${tried.model})`);
+                }
             }
+            if (!sub) throw new Error('An AI clip took too long and was abandoned.');
             const v = extractVideo(await falResult(sub.responseUrl));
             logMediaCost(sub.model, { durationSeconds: sub.billedSeconds }, { workspaceId: orgId, userId, assistantId: args.assistantId, sessionId: 'fal-video' });
             const stored = await persistRemoteMediaToR2({ orgId, url: v.url, contentType: v.contentType || 'video/mp4', folder: 'video-producer', label: 'AI scene' });
@@ -434,10 +454,10 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         const durations = sceneTimingsFromWords(storyboard, words) ?? storyboard.scenes.map((s) => s.targetS);
 
         // 2. Every scene's picture or clip. Already-made scenes are kept (a re-build after a failure).
-        // AI clips go first and all at once: each spends minutes at the model (Kling 3 averaged 3 m 48 s
-        // in the 2026-11-01 bake-off), and made one after another, three of them plus the voiceover
-        // ran into this worker's 15-minute ceiling. The rest follow in order — stock scenes share
-        // `exclude`, so the same clip isn't picked twice.
+        // AI clips all at once: each spends minutes at the model (Kling 3 averaged 3 m 48 s in the
+        // 2026-11-01 bake-off), and made one after another, three of them plus the voiceover ran into
+        // this worker's 15-minute ceiling. The other scenes go one by one alongside them — stock
+        // scenes share `exclude`, so the same clip isn't picked twice.
         const exclude: string[] = [];
         const failed = new Set<number>();
         const makeScene = async (i: number) => {
@@ -460,10 +480,12 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             await save({});
         };
         const todo = storyboard.scenes.map((_, i) => i).filter((i) => !done[storyboard.scenes[i].id]);
-        await Promise.all(todo.filter((i) => storyboard.scenes[i].source === 'ai_video').map(makeScene));
-        // The parallel saves can land out of order; this one writes every clip made so far.
+        // The other scenes are made in order meanwhile (stock took ~5 minutes on its own in the same
+        // staging build), so a retried AI clip still fits the worker's ceiling.
+        const others = (async () => { for (const i of todo) if (storyboard.scenes[i].source !== 'ai_video') await makeScene(i); })();
+        await Promise.all([...todo.filter((i) => storyboard.scenes[i].source === 'ai_video').map(makeScene), others]);
+        // The parallel saves can land out of order; this one writes every scene made.
         await save({});
-        for (const i of todo) if (storyboard.scenes[i].source !== 'ai_video') await makeScene(i);
         const missing = [...failed].sort((a, b) => a - b).map((i) => `scene ${i + 1}`);
         if (missing.length) throw new Error(`Couldn't find pictures for ${missing.join(', ')}. Change those scenes or try again — the finished scenes are kept.`);
 

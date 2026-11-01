@@ -177,6 +177,17 @@ export async function status(statusUrl: string): Promise<FalJobStatus> {
     return (data?.status as FalJobStatus) ?? 'IN_PROGRESS';
 }
 
+/**
+ * Ask Fal to stop a queued or running job. A job we have stopped waiting for keeps running (and
+ * billing) at the model unless it is cancelled. Best effort: a job that has already finished, or a
+ * network fault, is not an error here.
+ */
+export async function cancel(statusUrl: string): Promise<void> {
+    try {
+        await fetch(statusUrl.replace(/\/status$/, '/cancel'), { method: 'PUT', headers: { Authorization: `Key ${FAL_KEY}` } });
+    } catch { /* best effort */ }
+}
+
 /** Fetch the final result payload of a COMPLETED job. */
 export async function result(responseUrl: string): Promise<any> {
     return getJson(responseUrl);

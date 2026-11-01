@@ -17,7 +17,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitiseVideoEdit, editHasStills, editChangesMedia, MAX_STILL_HOLD_S } from '../src/lib/video-edit';
 import { renderFingerprint } from '../src/lib/post-render';
-import { readBrief, sceneClips, sceneOverlays, buildTasks, onScreenFontPct, scriptOverBudget, aiClipSeconds, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
+import { readBrief, sceneClips, sceneOverlays, buildTasks, onScreenFontPct, scriptOverBudget, aiClipSeconds, AI_CLIP_ATTEMPTS, AI_CLIP_ATTEMPT_MS, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
 import { enforceStoryboard, type VideoBrief } from '../src/lib/storyboard';
 import { captionLayout } from '../src/lib/captions';
 
@@ -200,14 +200,26 @@ check('an AI clip covers the scene\'s spoken length, with the stock margin, in l
     assert.match(read('src/utils/video-producer.ts'), /durationSeconds: aiClipSeconds\(scene\.targetS\),/);
 });
 
-check('a build makes its AI clips at the same time, before the other scenes', () => {
+check('a build makes its AI clips at the same time, with the other scenes alongside', () => {
     const src = read('src/utils/video-producer.ts');
     const build = src.slice(src.indexOf('export async function buildProject('), src.indexOf('export const STUCK_AFTER_MS'));
-    const parallel = build.indexOf(".filter((i) => storyboard.scenes[i].source === 'ai_video').map(makeScene))");
-    const rest = build.indexOf("if (storyboard.scenes[i].source !== 'ai_video') await makeScene(i);");
-    assert.ok(parallel > 0 && build.lastIndexOf('await Promise.all(', parallel) > 0, 'AI clips under one Promise.all');
-    assert.ok(rest > parallel, 'the other scenes after, one by one (they share exclude)');
-    assert.ok(build.slice(parallel, rest).includes('await save({});'), 'one save after the parallel batch');
+    assert.match(build, /const others = \(async \(\) => \{ for \(const i of todo\) if \(storyboard\.scenes\[i\]\.source !== 'ai_video'\) await makeScene\(i\); \}\)\(\);/,
+        'the other scenes one by one (they share exclude)');
+    assert.match(build, /await Promise\.all\(\[\.\.\.todo\.filter\(\(i\) => storyboard\.scenes\[i\]\.source === 'ai_video'\)\.map\(makeScene\), others\]\);/);
+    const after = build.slice(build.indexOf('map(makeScene), others]);'));
+    assert.ok(after.indexOf('await save({});') < after.indexOf('const missing'), 'one save after the parallel batch');
+});
+
+check('a stuck AI clip is cancelled at Fal and tried once more from the same picture, inside the worker ceiling', () => {
+    const src = read('src/utils/video-producer.ts');
+    assert.strictEqual(AI_CLIP_ATTEMPTS, 2);
+    assert.ok(AI_CLIP_ATTEMPTS * AI_CLIP_ATTEMPT_MS + 90_000 < 15 * 60 * 1000, 'two attempts + the voiceover fit 15 minutes');
+    assert.ok(AI_CLIP_ATTEMPT_MS > 4.5 * 60 * 1000, 'longer than the slowest bake-off clip (4 m 25 s)');
+    const clip = src.slice(src.indexOf("case 'ai_video': {"), src.indexOf('export async function buildProject('));
+    assert.match(clip, /await falCancel\(tried\.statusUrl\);/);
+    assert.match(clip, /startImageUrl: frameUrl/);
+    assert.match(clip, /frameUrl \?\?= tried\.frameUrl;/);
+    assert.match(read('src/lib/fal-gateway.ts'), /statusUrl\.replace\(\/\\\/status\$\/, '\/cancel'\), \{ method: 'PUT'/);
 });
 
 console.log(`\n${passed} checks passed`);
