@@ -156,6 +156,11 @@ export interface PlanTaskGate {
     atCap: boolean;
     /** True when there is no active/past_due plan at all — a paywall, not a cap. */
     noPlan: boolean;
+    /**
+     * Bonus tasks (task_bonus — left-over credits converted at the task cutover; they never expire).
+     * `remaining` includes them, so without this "28 of 10500 used · 11396 left" read as an error.
+     */
+    bonus?: number;
 }
 
 /**
@@ -178,5 +183,5 @@ export async function readPlanTaskGate(db: Db, organisationId: number): Promise<
         return { limit: null, used: usage.used, remaining: null, atCap: false, noPlan: false };
     }
     const remaining = Math.max(0, usage.remaining);
-    return { limit: usage.limit, used: usage.used, remaining, atCap: remaining <= 0, noPlan: false };
+    return { limit: usage.limit, used: usage.used, remaining, atCap: remaining <= 0, noPlan: false, bonus: usage.bonus };
 }

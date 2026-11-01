@@ -31,6 +31,7 @@
     briefs: [],
     vocab: null,
     credits: null,
+    unit: 'credits',
     aiAvailable: false,
     /** Null when AI video can be made here; otherwise why not, in words. */
     aiVideoUnavailable: null,
@@ -84,7 +85,7 @@
       return `Not enough tasks left this month: a round needs ${data.cost}, and ${data.balance} ${data.balance === 1 ? 'is' : 'are'} left. Edit the brief and untick AI images and video to use stock photos and branded cards, which use no extra tasks.`;
     }
     if (data && data.code === 'insufficient_credits') {
-      return `Not enough AI credits: a round needs ${data.cost}, and ${data.balance} ${data.balance === 1 ? 'is' : 'are'} left this month. Edit the brief and untick AI images to use stock photos and branded cards, which are free.`;
+      return `Not enough AI credits: a round needs ${data.cost}, and ${data.balance} ${data.balance === 1 ? 'is' : 'are'} left this month. Edit the brief and untick AI images to use stock photos and branded cards, which are free.`;   // workspaces still on credits only
     }
     return (data && data.error) || `Request failed (HTTP ${status}).`;
   }
@@ -97,6 +98,7 @@
       state.briefs = Array.isArray(data.briefs) ? data.briefs : [];
       state.vocab = data.vocab || null;
       state.credits = data.credits ?? null;
+      state.unit = data.unit === 'tasks' ? 'tasks' : 'credits';
       state.aiAvailable = !!data.aiAvailable;
       state.aiVideoUnavailable = data.aiVideoUnavailable || null;
       state.defaultSources = Array.isArray(data.defaultSources) ? data.defaultSources : null;
@@ -224,13 +226,17 @@
     return b.rounds > 0 ? `Ask ${name()} for more options` : `Ask ${name()} for options`;
   }
 
-  /** What one round costs, stated before the click. */
+  /** What one round costs, stated before the click — in tasks under the single task allowance. */
   function roundCostLine(b) {
+    const tasks = state.unit === 'tasks';
+    const key = tasks ? 'tasks' : 'credits';
     const paid = b.sources.filter((k) => !sourceBlocked(k))
-      .map((k) => V().sources.find((s) => s.key === k)).filter((s) => s && s.credits);
-    const credits = paid.reduce((n, s) => n + s.credits, 0);
-    if (!credits) return 'Each round is free — stock and branded options only.';
-    return `Each round uses ${credits} AI credit${credits === 1 ? '' : 's'}, for the ${paid.map((s) => s.label).join(' and ')}. Stock photos and branded cards are free.`;
+      .map((k) => V().sources.find((s) => s.key === k)).filter((s) => s && s[key]);
+    const n = paid.reduce((sum, s) => sum + s[key], 0);
+    if (!n) return tasks ? 'Each round uses no extra tasks — stock and branded options only.' : 'Each round is free — stock and branded options only.';
+    return tasks
+      ? `Each round uses ${n} task${n === 1 ? '' : 's'}, for the ${paid.map((s) => s.label).join(' and ')}. Stock photos and branded cards use none.`
+      : `Each round uses ${n} AI credit${n === 1 ? '' : 's'}, for the ${paid.map((s) => s.label).join(' and ')}. Stock photos and branded cards are free.`;
   }
 
   function optionTile(b, o) {
@@ -349,7 +355,7 @@
         <button type="button" data-brief-add-video="${b.id}" data-kind="stock_video"
           class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add stock video (free)</button>
         ${aiOk ? `<button type="button" data-brief-add-video="${b.id}" data-kind="ai_video"
-          class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add AI video (${esc(String(ai.credits))} credits a round)</button>` : ''}
+          class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add AI video (${esc(state.unit === 'tasks' ? `${ai.tasks} tasks` : `${ai.credits} credits`)} a round)</button>` : ''}
       </div>`;
   }
 
@@ -449,7 +455,9 @@
   }
 
   function toolbarHtml() {
-    const credits = state.credits == null ? '' : `<span class="text-xs text-gray-500">AI credits left this month: <span class="font-bold">${esc(state.credits)}</span></span>`;
+    // Tasks: 1,000,000 means an uncapped plan, so there is no "left" worth showing.
+    const credits = state.credits == null || (state.unit === 'tasks' && state.credits >= 1000000) ? ''
+      : `<span class="text-xs text-gray-500">${state.unit === 'tasks' ? 'Tasks left this month' : 'AI credits left this month'}: <span class="font-bold">${esc(state.credits)}</span></span>`;
     return `
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4" data-brief-toolbar>
         <div>

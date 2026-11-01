@@ -106,6 +106,11 @@
   const safeUrl = (u) => (/^(\/|https:\/\/)/.test(String(u || '')) ? String(u) : '');
   const check = '<svg class="w-5 h-5 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
 
+  // The plan line under "Get started". Every assistant is on every plan EXCEPT those a plan gates:
+  // the Video Producer makes videos, which only the plans in ai-credits.ts VIDEO_TIERS can. Keep in
+  // step with scripts/seo/ai-readability.mjs PLAN_NOTES (the crawler copy of this page).
+  const PLAN_NOTES = { video_producer: 'On the Busywork Buster plan' };
+
   // A role's swan character, shown in the hero. Kept here, not in the showcase
   // JSON, so adding one ships with the deploy and needs no SQL run.
   const ILLUSTRATIONS = {
@@ -117,6 +122,7 @@
     brand_designer: { src: '/images/assistants/brand_designer/swan.jpg', alt: 'A pink swan in a paint-splashed apron and colourful glasses holding a palette and stylus, surrounded by colour swatches, a colour wheel and type samples', width: 900, height: 900 },
     campaign_orchestrator: { src: '/images/assistants/campaign_orchestrator/swan.jpg', alt: 'A pink swan conductor in a tailcoat and bow tie waving a glowing baton, surrounded by a megaphone, emails, campaign plans and a rocket', width: 900, height: 900 },
     newsletter_editor: { src: '/images/assistants/newsletter_editor/swan.jpg', alt: 'A pink swan postie in a cap and satchel giving a thumbs up beside a glowing envelope, surrounded by paper planes and email reports', width: 900, height: 900 },
+    video_producer: { src: '/images/assistants/video_producer/swan.jpg', alt: 'A pink swan in a cap, glasses and headset holding a glowing video camera and a clipboard, surrounded by film strips, playback buttons, sound waves and a clapperboard', width: 900, height: 900 },
   };
 
   // A generated page (/ai-…) names its role in <meta name="bms-role">; this shell takes ?role=.
@@ -211,7 +217,7 @@
             ${cta(roleKey, c, true)}
             ${video ? '<a href="#sc-video" class="inline-flex items-center gap-2 px-5 py-3 font-bold text-gray-700 hover:text-emerald-700"><svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>Watch the overview</a>' : ''}
           </div>
-          ${c.comingSoon ? '' : '<p class="text-xs text-gray-400 mt-4">Included in every plan · You approve its work before anything goes out</p>'}
+          ${c.comingSoon ? '' : `<p class="text-xs text-gray-400 mt-4">${esc(PLAN_NOTES[roleKey] || 'Included in every plan')} · You approve its work before anything goes out</p>`}
         </div>
         <div>
           ${heroArt

@@ -210,7 +210,7 @@ async function askAboutVideo(db: Db, o: OrderCtx & { targetAssistantId: number }
             body: 'This brief makes pictures only. Would you like video options as well?',
             question: { key: 'brief_video', ref: brief.id, choices: [
                 { value: 'stock_video', label: 'Yes — stock video (free)' },
-                { value: 'ai_video', label: 'Yes — AI video (uses AI credits)' },
+                { value: 'ai_video', label: 'Yes — AI video (uses tasks)' },
                 { value: 'none', label: 'No, pictures only' },
             ] },
         });

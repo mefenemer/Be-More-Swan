@@ -160,4 +160,14 @@ check('Ask Your Team names it only when it is on the team', () => {
     assert.match(cmd, /never name an assistant that is not in the list/);
 });
 
+check('its website page has its swan, and does not say "Included in every plan"', () => {
+    const page = read('assistant.html');
+    assert.match(page, /video_producer: \{ src: '\/images\/assistants\/video_producer\/swan\.jpg'/);
+    assert.ok(existsSync(join(root, 'images/assistants/video_producer/swan.jpg')));
+    const note = "PLAN_NOTES = { video_producer: 'On the Busywork Buster plan' }";
+    assert.ok(page.includes(note), 'assistant.html');
+    assert.ok(read('scripts/seo/ai-readability.mjs').includes(note), 'the crawler copy says the same');
+    assert.match(read('src/utils/ai-credits.ts'), /VIDEO_TIERS = \['buster', 'employee'\]/);
+});
+
 console.log(`\n${passed} checks passed`);
