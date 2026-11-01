@@ -228,7 +228,10 @@ export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
     let t = 0;
     scenes.forEach((s, i) => {
         const d = durations[i] ?? s.targetS;
-        if (s.onScreenText) {
+        // A branded card already carries these words as its headline (sourceScene 'brand_card') —
+        // overlaid as well, the first sample render showed "Pop in this week" three times at once
+        // (card, overlay, captions). The card says it; the overlay stays off.
+        if (s.onScreenText && s.source !== 'brand_card') {
             out.push({
                 id: `vp_${s.id}`, text: s.onScreenText,
                 // Upper third: the captions own the lower part of the frame.

@@ -108,6 +108,9 @@ check('on-screen text is timed to its scene and sits clear of the captions', () 
     assert.deepStrictEqual([ov[0].startS, ov[0].endS], [0, 3]);
     // Captions are drawn upward from bottomPct; overlays sit in the upper third.
     assert.ok(ov[0].y < 1 - captionLayout(1920).bottomPct / 100 - 0.2);
+    // A branded card shows its words as the card's headline — never overlaid a second time.
+    const card = { ...storyboard.scenes[0], id: 'c1', source: 'brand_card' as const, onScreenText: 'Pop in this week' };
+    assert.strictEqual(sceneOverlays([card], [3]).length, 0);
 });
 
 check('a build holds the task weights it will record: AI clip 20, AI image 1, voiceover 1', () => {
