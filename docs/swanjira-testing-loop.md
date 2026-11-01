@@ -11,6 +11,13 @@ Agreed 2026-11-01. Google Antigravity tests Be More Swan and raises bugs in Swan
 | **Claude Code** (fixer) | Triages, fixes, writes the regression test, commits to `staging`, confirms the deploy, hands back, opens the staging→main promote PR | Merges to `main`, runs SQL on prod, pushes `staging:main` |
 | **Owner** | Applies prod SQL, merges the promote PR | — |
 
+## Test personas
+
+Antigravity tests from one expert persona per session: customer, sceptical buyer, billing
+auditor, security, content editor, chat/screen parity, accessibility, chaos, privacy. Briefs,
+rotation, the shared priority scale and the `[P3 Billing]` title tag are in
+`docs/test-personas.md`.
+
 ## The ticket lifecycle
 
 | Status | Owner of the step | What happens |
