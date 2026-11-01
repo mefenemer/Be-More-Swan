@@ -47,12 +47,28 @@ const SENTENCE_END = /[.!?…]$|[,;:]$/;
 
 const bare = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
 
+/** Edit distance, capped: true when a and b are within `max` single-letter edits. Pure. */
+function near(a: string, b: string, max: number): boolean {
+    if (Math.abs(a.length - b.length) > max) return false;
+    let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+    for (let i = 1; i <= a.length; i++) {
+        const cur = [i];
+        for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        prev = cur;
+    }
+    return prev[b.length] <= max;
+}
+
+/** The same word, allowing a spelling difference in a longer word ("Harbor" for the script's "Harbour"). */
+const sameWord = (heard: string, written: string) => heard === written || (heard.length >= 5 && near(heard, written, 1));
+
 /**
  * Put the script's punctuation back on the transcribed words. Whisper's word timings come back bare
  * ("breakdowns", not "breakdowns."), so the sentence-end break above never fired and a caption ran
  * across two sentences ("breakdowns Brightside", the first sample render, 2026-11-01). The script is
  * what was spoken, so each word takes the matching script token's spelling — matched in order, and
- * only when the letters agree, so a word the speaker said differently keeps its own text. Pure.
+ * only when the letters agree or differ by one in a word of 5+ letters (whisper wrote "Harbor" for
+ * "Harbour Yoga"), so a word the speaker said differently keeps its own text. Pure.
  */
 export function withScriptPunctuation<W extends { word: string }>(words: W[], script: string | null | undefined): W[] {
     const tokens = String(script ?? '').split(/\s+/).filter(Boolean);
@@ -63,7 +79,7 @@ export function withScriptPunctuation<W extends { word: string }>(words: W[], sc
         if (!want) return w;
         // Look a few tokens ahead: the transcript can drop or merge a word.
         for (let k = j; k < Math.min(tokens.length, j + 4); k++) {
-            if (bare(tokens[k]) === want) { j = k + 1; return { ...w, word: tokens[k] }; }
+            if (sameWord(want, bare(tokens[k]))) { j = k + 1; return { ...w, word: tokens[k] }; }
         }
         return w;
     });

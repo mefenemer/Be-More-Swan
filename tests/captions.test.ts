@@ -134,6 +134,9 @@ check('the script puts punctuation back on bare transcribed words, so phrases br
     assert.ok(!cues.some((c) => c.words.map((w) => w.text).join(' ').includes('breakdowns. Brightside')), 'a sentence end breaks the phrase');
     // A word the speaker said differently keeps its own text; no script leaves the words as they are.
     assert.strictEqual(withScriptPunctuation([{ word: 'gonna', start: 0, end: 1 }], 'going to.')[0].word, 'gonna');
+    // The script's spelling wins a one-letter difference in a longer word — never in a short one.
+    assert.strictEqual(withScriptPunctuation([{ word: 'Harbor', start: 0, end: 1 }], 'Harbour Yoga.')[0].word, 'Harbour');
+    assert.strictEqual(withScriptPunctuation([{ word: 'cat', start: 0, end: 1 }], 'can.')[0].word, 'cat');
     assert.deepStrictEqual(withScriptPunctuation(words, ''), words);
 });
 
