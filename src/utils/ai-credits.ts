@@ -281,12 +281,14 @@ export async function settleHold(db: Db, params: {
     isAutonomous?: boolean;
     /** Single task allowance: credit the work to this assistant in the task ledger. */
     assistantId?: number | null;
+    /** Single task allowance: the tasks this work costs, when not the flat weight (an AI clip priced by its length — aiVideoTasks). */
+    tasks?: number;
 }): Promise<void> {
     if (await isUnifiedTaskMetering(params.orgId)) {
         // A hold reserved nothing, so a failure has nothing to give back; success records the work.
         if (params.success && params.amount > 0) {
             await recordCompletedWork(db, params.orgId, workKindForMedia(params.mediaType, params.amount), {
-                units: tasksForCredits(params.mediaType, params.amount),
+                units: params.tasks ?? tasksForCredits(params.mediaType, params.amount),
                 ref: params.jobId ?? undefined,
                 assistantId: params.assistantId ?? null,
             });

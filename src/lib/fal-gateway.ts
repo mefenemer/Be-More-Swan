@@ -304,6 +304,12 @@ export function imageToVideoEnabled(model: string = I2V_MODEL): boolean {
  *             off: the soundtrack is ours, from the music library / voiceover, never a model's guess)
  * `billedSeconds` is the clip length actually asked for, for the cost log.
  */
+/** The length Fal will bill for a clip asked for at `durationSeconds`, on the model in use. */
+export function billedSecondsFor(durationSeconds: number, model: string = I2V_MODEL): number {
+    if (!imageToVideoEnabled(model)) return durationSeconds > 6 ? 10 : 6;
+    return imageToVideoInput(model, { imageUrl: '', prompt: '', durationSeconds }).billedSeconds;
+}
+
 /** Kling v3/o3 take any whole length from 3 to 15 s; the v2.x family only 5 or 10. */
 export function takesAnyLength(model: string): boolean {
     return /\/(v3|o3)\//.test(model);

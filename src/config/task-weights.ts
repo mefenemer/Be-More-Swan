@@ -37,6 +37,34 @@ export const TASK_WEIGHTS = {
     mentor_review: 1,
 } as const;
 
+/**
+ * AI video by length (owner, 2026-11-01): 4 tasks a second, because the models bill by the second
+ * and a 10 s Kling 3.0 Pro clip costs us about twice a 5 s one (docs/ai-video-bakeoff-2026-11-01.md).
+ *
+ * ⚠️ OFF until the notice the terms require has run (clause 5.2: weights change on at least 30 days'
+ * notice). Netlify env AI_VIDEO_PRICED_BY_SECOND=on switches it on — staging only until then; with it
+ * unset every clip is TASK_WEIGHTS.ai_video, as the terms and pricing page say today. Switching it on
+ * for production goes with the copy in docs/ai-video-per-second-pricing.md.
+ */
+export const AI_VIDEO_TASKS_PER_SECOND = 4;
+
+export function videoPricedBySecond(): boolean {
+    return process.env.AI_VIDEO_PRICED_BY_SECOND === 'on';
+}
+
+/** Tasks for one AI clip of `seconds` (the BILLED length). Flat TASK_WEIGHTS.ai_video while per-second pricing is off. */
+export function aiVideoTasks(seconds: number | null | undefined): number {
+    if (!videoPricedBySecond() || !seconds || !(seconds > 0)) return TASK_WEIGHTS.ai_video;
+    return Math.ceil(seconds) * AI_VIDEO_TASKS_PER_SECOND;
+}
+
+/** How a model-facing or generated line states the AI clip price, matching aiVideoTasks. */
+export function aiVideoPriceText(): string {
+    return videoPricedBySecond()
+        ? `${AI_VIDEO_TASKS_PER_SECOND} tasks a second of clip (${aiVideoTasks(5)} for 5 seconds, ${aiVideoTasks(10)} for 10)`
+        : `${TASK_WEIGHTS.ai_video} tasks each`;
+}
+
 /** What one charge bought — logged on every task_ledger row so a disputed count can be explained. */
 export type WorkKind = keyof typeof TASK_WEIGHTS;
 

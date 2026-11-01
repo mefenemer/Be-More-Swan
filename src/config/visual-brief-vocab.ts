@@ -8,7 +8,8 @@
 // these lists: brand-briefs.ts sends them with every `list` response.
 
 import { IMAGE_CREDIT_COST, VIDEO_CREDIT_COST } from '../utils/ai-credits';
-import { TASK_WEIGHTS } from './task-weights';
+import { TASK_WEIGHTS, aiVideoTasks } from './task-weights';
+import { billedSecondsFor } from '../lib/fal-gateway';
 
 export const BRIEF_PURPOSES = ['social_post', 'blog_header', 'ad', 'email_header', 'story', 'other'] as const;
 export type BriefPurpose = typeof BRIEF_PURPOSES[number];
@@ -56,7 +57,7 @@ export const SOURCE_SPECS: Record<BriefSource, { label: string; cost: string; op
     stock_video: { label: 'Stock videos', cost: 'Free (Pexels)',                                         optionsPerRound: 2, credits: 0, tasks: 0 },
     // One clip per round: four clips would be 80 tasks for one brief. Busywork Buster (and Digital Employee) only
     // (tierCanGenerateVideo) — the same lock as AI video everywhere else.
-    ai_video:   { label: 'AI video',      cost: `${TASK_WEIGHTS.ai_video} tasks for one 6-second clip (Busywork Buster plan)`, optionsPerRound: 1, credits: VIDEO_CREDIT_COST, tasks: TASK_WEIGHTS.ai_video },
+    ai_video:   { label: 'AI video',      cost: `${aiVideoTasks(billedSecondsFor(6))} tasks for one 6-second clip (Busywork Buster plan)`, optionsPerRound: 1, credits: VIDEO_CREDIT_COST, tasks: aiVideoTasks(billedSecondsFor(6)) },
 };
 
 /** The sources whose options are VIDEOS. */

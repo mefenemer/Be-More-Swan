@@ -22,7 +22,7 @@ import { masterPlans, plans } from '../../db/schema';
 import { effectiveLimit, type FeatureOverrides } from './plan-features';
 import { isUnifiedTaskMetering } from './task-metering-flag';
 import { nextResetAt, readTaskUsage, tasksRemaining } from './task-balance';
-import { TASK_WEIGHTS } from '../config/task-weights';
+import { TASK_WEIGHTS, aiVideoPriceText } from '../config/task-weights';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -54,7 +54,7 @@ export function formatPlanBlock(f: {
             : `- Tasks this month: ${f.taskCount} used of ${f.monthlyTaskLimit}${f.bonusTasks ? `, plus ${f.bonusTasks} bonus task${f.bonusTasks === 1 ? '' : 's'} that never expire` : ''}${f.tasksInFlight ? ` (${f.tasksInFlight} held for AI media still being made)` : ''}. ${left} left.`,
         `- The allowance resets on ${fmtDate(nextResetAt(f.now))}. When it runs out, work stops until then — nothing is ever charged extra, and there is no top-up to buy.`,
         f.unified
-            ? `- What costs a task: each post, article, email, email flow, lead search, outreach email, website check that re-scores, website draft or website copy rewrite is 1; an AI image is ${TASK_WEIGHTS.ai_image}, an AI video ${TASK_WEIGHTS.ai_video}, AI music ${TASK_WEIGHTS.ai_music}; an X post with a link ${TASK_WEIGHTS.x_link_post}. Chatting with you costs none (there is a fair daily limit).`
+            ? `- What costs a task: each post, article, email, email flow, lead search, outreach email, website check that re-scores, website draft or website copy rewrite is 1; an AI image is ${TASK_WEIGHTS.ai_image}, an AI video ${aiVideoPriceText()}, AI music ${TASK_WEIGHTS.ai_music}; an X post with a link ${TASK_WEIGHTS.x_link_post}. Chatting with you costs none (there is a fair daily limit).`
             : '- Each chat message, and each piece of work an assistant does, uses 1 task.',
     ];
     return `${head}\n${lines.join('\n')}`;

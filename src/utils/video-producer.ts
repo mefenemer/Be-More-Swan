@@ -30,10 +30,10 @@ import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { loadOrgProducts, renderProductFacts } from './org-products';
 import { normalizeBrandKit } from './brand-kit';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, type MediaKind } from './ai-credits';
-import { TASK_WEIGHTS } from '../config/task-weights';
+import { TASK_WEIGHTS, aiVideoTasks } from '../config/task-weights';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
-import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, I2V_MODEL } from '../lib/fal-gateway';
+import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, I2V_MODEL } from '../lib/fal-gateway';
 import { logMediaCost } from './ai-usage';
 import { makeVoiceoverAsset } from './voiceover-asset';
 import { DEFAULT_VOICE, isVoiceId, cleanScript } from '../lib/tts';
@@ -246,7 +246,7 @@ export function buildTasks(storyboard: Storyboard, brief: VideoBrief): number {
     let n = 0;
     for (const s of storyboard.scenes) {
         if (s.source === 'ai_image') n += TASK_WEIGHTS.ai_image;
-        if (s.source === 'ai_video') n += TASK_WEIGHTS.ai_video;
+        if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)));
     }
     if (brief.voiceover && scriptOf(storyboard)) n += TASK_WEIGHTS.ai_voiceover;
     return n;
@@ -316,7 +316,7 @@ export function sceneClips(scenes: Scene[], assetIds: Record<string, number>, du
 async function sourceScene(db: Db, args: {
     scene: Scene; orgId: number; userId: number; assistantId: number | null; brandName: string; exclude: string[];
     kit: ReturnType<typeof normalizeBrandKit>; seed: number;
-}): Promise<{ assetId: number; mediaKind?: MediaKind; cost?: number; asStill?: boolean } | null> {
+}): Promise<{ assetId: number; mediaKind?: MediaKind; cost?: number; tasks?: number; asStill?: boolean } | null> {
     const { scene, orgId, userId } = args;
     const context = scene.keywords || scene.prompt || scene.voiceover;
     switch (scene.source) {
@@ -392,7 +392,7 @@ async function sourceScene(db: Db, args: {
                 assetType: 'video', mimeType: 'video/mp4', fileSize: stored.fileSize, storageKey: stored.storageKey,
                 durationS: sub.billedSeconds, provider: 'fal', prompt: scene.prompt || context, aspectRatio: '9:16', status: 'pending',
             }).returning({ id: contentAssets.id });
-            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST };
+            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: aiVideoTasks(sub.billedSeconds) };
         }
     }
     return null;
@@ -409,8 +409,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
     let spent = p.creditsSpent;
     const done: Record<string, number> = { ...(p.sceneAssets as Record<string, number>) };
 
-    const settle = async (mediaType: MediaKind, cost: number, success: boolean) => {
-        await settleHold(db, { orgId, amount: cost, success, mediaType, userId, assistantId: p.aiAssistantId ?? null });
+    const settle = async (mediaType: MediaKind, cost: number, success: boolean, tasks?: number) => {
+        await settleHold(db, { orgId, amount: cost, success, mediaType, userId, assistantId: p.aiAssistantId ?? null, tasks });
         held = Math.max(0, held - cost);
         if (success) spent += cost;
     };
@@ -469,7 +469,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             } catch (err) {
                 console.error(`[video-producer] build ${projectId} scene ${scene.id} failed:`, err);
             }
-            if (paid) await settle(scene.source === 'ai_video' ? 'video' : 'image', paid, !!made);
+            if (paid) await settle(scene.source === 'ai_video' ? 'video' : 'image', paid, !!made, made?.tasks);
             if (made?.asStill) {
                 // No stock clip was long enough: the scene is a moving still now, and the storyboard says
                 // so — the timeline holds it (sceneClips) and the Videos tab shows it as a stock photo.

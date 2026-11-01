@@ -9,7 +9,8 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TASK_WEIGHTS, WORK_KIND_LABELS, MEDIA_KINDS, taskWeight, type WorkKind } from '../src/config/task-weights';
+import { TASK_WEIGHTS, WORK_KIND_LABELS, MEDIA_KINDS, taskWeight, aiVideoTasks, AI_VIDEO_TASKS_PER_SECOND, type WorkKind } from '../src/config/task-weights';
+import { billedSecondsFor } from '../src/lib/fal-gateway';
 import { tasksForCredits, workKindForMedia, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, MUSIC_CREDIT_COST, MUSIC_SHARED_CREDIT_COST } from '../src/utils/ai-credits';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -65,6 +66,46 @@ check('the cutover script is NOT a migration the tracker would run early', () =>
     // scripts/db-migrate.mjs applies every pending db/*.sql — the cutover must live in db/ops/.
     assert.throws(() => read('db/z-task-credit-conversion.sql'));
     assert.match(read('scripts/db-migrate.mjs'), /readdirSync\(DB_DIR\)/);
+});
+
+check('AI video by the second: 4 a second when switched on, the flat weight until then (terms clause 5.2 notice)', () => {
+    const was = process.env.AI_VIDEO_PRICED_BY_SECOND;
+    try {
+        delete process.env.AI_VIDEO_PRICED_BY_SECOND;
+        assert.strictEqual(aiVideoTasks(10), TASK_WEIGHTS.ai_video, 'off: a 10 s clip is the flat weight the terms state');
+        assert.strictEqual(aiVideoTasks(5), TASK_WEIGHTS.ai_video);
+        process.env.AI_VIDEO_PRICED_BY_SECOND = 'on';
+        assert.strictEqual(AI_VIDEO_TASKS_PER_SECOND, 4);
+        assert.strictEqual(aiVideoTasks(5), 20, 'a 5 s clip costs what it does today');
+        assert.strictEqual(aiVideoTasks(6), 24);
+        assert.strictEqual(aiVideoTasks(10), 40);
+        assert.strictEqual(aiVideoTasks(3), 12);
+        assert.strictEqual(aiVideoTasks(4.2), 20, 'a part second counts as a second');
+        assert.strictEqual(aiVideoTasks(null), TASK_WEIGHTS.ai_video, 'unknown length → the flat weight');
+    } finally {
+        if (was === undefined) delete process.env.AI_VIDEO_PRICED_BY_SECOND; else process.env.AI_VIDEO_PRICED_BY_SECOND = was;
+    }
+});
+
+check('the length charged is the length the model bills', () => {
+    assert.strictEqual(billedSecondsFor(6, 'fal-ai/kling-video/v3/pro/image-to-video'), 6);
+    assert.strictEqual(billedSecondsFor(6, 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video'), 5, 'Kling 2.5 makes 5 or 10');
+    assert.strictEqual(billedSecondsFor(8, 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video'), 10);
+    assert.strictEqual(billedSecondsFor(5, 'off'), 6, 'Hailuo text-to-video makes 6 or 10');
+});
+
+check('every place an AI clip is charged passes its length', () => {
+    assert.match(read('src/utils/ai-credits.ts'), /units: params\.tasks \?\? tasksForCredits\(params\.mediaType, params\.amount\),/);
+    const vp = read('src/utils/video-producer.ts');
+    assert.match(vp, /tasks: aiVideoTasks\(sub\.billedSeconds\) \};/);
+    assert.match(vp, /await settle\(scene\.source === 'ai_video' \? 'video' : 'image', paid, !!made, made\?\.tasks\);/);
+    assert.match(vp, /n \+= aiVideoTasks\(billedSecondsFor\(aiClipSeconds\(s\.targetS\)\)\);/, 'the estimate and hold use the same rule');
+    const vb = read('src/utils/visual-briefs.ts');
+    assert.strictEqual((vb.match(/aiVideoTasks\(billedSecondsFor\(BRIEF_CLIP_SECONDS\)\)/g) || []).length, 2, 'Brand Designer hold and settle');
+    assert.match(read('netlify/functions/generate-ai-video.ts'), /tasks: aiVideoTasks\(billedSecondsFor\(durationSeconds\)\)/);
+    assert.match(read('netlify/functions/process-media-job-background.ts'), /tasks: aiVideoTasks\(job\.durationSeconds\)/);
+    assert.match(read('src/utils/work-metering.ts'), /CEIL\(COALESCE\(duration_seconds, 6\)\)::int \* \$\{AI_VIDEO_TASKS_PER_SECOND\}::int/);
+    assert.match(read('src/utils/task-balance.ts'), /SUM\(\$\{inFlightWeightSql\(\)\}\)/);
 });
 
 console.log(`\n${passed} checks passed.`);

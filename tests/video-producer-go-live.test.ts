@@ -109,7 +109,7 @@ check('no Video Producer surface quotes credits any more', () => {
     assert.match(vpSchema, new RegExp(`an AI clip ${TASK_WEIGHTS.ai_video}`));
     const chat = read('netlify/functions/chat-orchestrator.ts');
     const route = chat.slice(chat.indexOf('    video_producer: {'), chat.indexOf('    website_assistant: {'));
-    assert.match(route, /AI clips \(\$\{TASK_WEIGHTS\.ai_video\} each/);
+    assert.match(route, /AI clips \(\$\{aiVideoPriceText\(\)\}, at most/, 'the price line follows per-second pricing');
     assert.doesNotMatch(route.replace(/\/\/.*$/gm, ''), /\bcredits?\b/i);
     assert.doesNotMatch(read('src/config/campaign-vocab.ts').match(/commission_video: \{[\s\S]*?\n    \},/)![0], /credit/i);
     assert.doesNotMatch(read('src/utils/team-messages.ts').match(/case 'commission_video':[\s\S]*?label: 'Open the video'/)![0], /credit/i);
