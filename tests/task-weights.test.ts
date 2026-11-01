@@ -108,4 +108,21 @@ check('every place an AI clip is charged passes its length', () => {
     assert.match(read('src/utils/task-balance.ts'), /SUM\(\$\{inFlightWeightSql\(\)\}\)/);
 });
 
+check('the per-second notice quotes the numbers the rule charges', () => {
+    const cat = read('src/utils/notification-templates-catalog.ts');
+    const tpl = cat.slice(cat.indexOf("templateKey: 'ai_video_per_second_notice'"), cat.indexOf("templateKey: 'social_disconnected'"));
+    const was = process.env.AI_VIDEO_PRICED_BY_SECOND;
+    process.env.AI_VIDEO_PRICED_BY_SECOND = 'on';
+    try {
+        assert.ok(tpl.includes(`${AI_VIDEO_TASKS_PER_SECOND} tasks for each second`));
+        assert.ok(tpl.includes(`a 5-second clip stays ${aiVideoTasks(5)}`));
+        assert.ok(tpl.includes(`a 10-second clip becomes ${aiVideoTasks(10)}`));
+        assert.ok(tpl.includes(`instead of ${TASK_WEIGHTS.ai_video} for any clip`));
+        const email = read('docs/ai-video-per-second-notice.md');
+        for (const n of [3, 5, 6, 10]) assert.match(email, new RegExp(`\\| ${n} seconds \\| ${TASK_WEIGHTS.ai_video} tasks \\| ${aiVideoTasks(n)} tasks \\|`));
+    } finally {
+        if (was === undefined) delete process.env.AI_VIDEO_PRICED_BY_SECOND; else process.env.AI_VIDEO_PRICED_BY_SECOND = was;
+    }
+});
+
 console.log(`\n${passed} checks passed.`);
