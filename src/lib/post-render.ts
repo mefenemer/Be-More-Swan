@@ -744,3 +744,15 @@ export async function queuePostRender(db: Db, opts: {
 
     return { ok: true, jobId: job.id };
 }
+
+/** A whole render fits in what's left of the worker's poll window — the sample renders took 3–4 minutes. */
+export const RETRY_RENDER_NEEDS_MS = 5 * 60 * 1000;
+
+/**
+ * Retry a failed render once, and only for Remotion's intermittent "No frame found at position…",
+ * which hit two of six renders on 2026-11-01 on intact Pexels clips and passed on a second start.
+ * Any other error is real and goes straight to the reviewer. Pure.
+ */
+export function shouldRetryRender(error: string, alreadyRetried: boolean, msLeft: number): boolean {
+    return !alreadyRetried && /No frame found at position/.test(error) && msLeft >= RETRY_RENDER_NEEDS_MS;
+}

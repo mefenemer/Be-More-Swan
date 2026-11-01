@@ -20,13 +20,13 @@ import { getDb } from '../../db/client';
 import { contentAssets, postRenderJobs, scheduledPosts } from '../../db/schema';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
-import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, readPostVideoEdit, readStillMotion, renderPlanFor, renderableOverlays, resolveAudioTracks, resolveCaptionTrack, resolveEditClips, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, readPostVideoEdit, readStillMotion, renderPlanFor, renderableOverlays, resolveAudioTracks, resolveCaptionTrack, resolveEditClips, resolveOverlayVideoBase, shouldRetryRender } from '../../src/lib/post-render';
 import { editChangesMedia, editHasStills } from '../../src/lib/video-edit';
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../../src/lib/remotion-lambda';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const POLL_INTERVAL_MS = 3_000;
-const POLL_TIMEOUT_MS = 10 * 60 * 1000;   // 10 min, under the 15-min background ceiling
+const POLL_TIMEOUT_MS = 12 * 60 * 1000;   // under the 15-min background ceiling, room for one retry
 // The base clip is fetched by Lambda over the whole render, not once up front — a short-lived URL
 // expires mid-render and the job dies at 80%. An hour covers any clip this pipeline accepts.
 const SOURCE_URL_TTL_SEC = 3600;
@@ -174,7 +174,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
         // A still goes in as imageSrc, not videoSrc — the composition branches on which is set, and
         // its calculateMetadata takes the LENGTH from the audio when there is no video to measure.
-        const started: StartedRender = await startRender({
+        const renderProps = {
             // videoSrc + videoTrim describe the FIRST clip only. They are sent alongside `clips`
             // purely so props from this deploy still render on the previous site bundle, which a git
             // push does not update — an old bundle then produces clip one instead of nothing at all.
@@ -192,15 +192,30 @@ export default withLambda(async (event: HandlerEvent) => {
             // Absent unless there are words: an old site bundle ignores the field either way.
             ...(captions ? { captions } : {}),
             ...meta,
-        });
+        };
+        let started: StartedRender = await startRender(renderProps);
         await db.update(postRenderJobs)
             .set({ renderId: started.renderId, bucketName: started.bucketName, region: started.region, updatedAt: new Date() })
             .where(eq(postRenderJobs.id, jobId));
 
         const deadline = Date.now() + POLL_TIMEOUT_MS;
         let outputUrl: string | null = null;
+        let retried = false;
         while (true) {
             const progress = await renderProgress(started);
+            if (progress.error && shouldRetryRender(progress.error, retried, deadline - Date.now())) {
+                // Remotion's "No frame found at position…" hit two of six renders on 2026-11-01, on
+                // intact Pexels clips (all frames present, probed locally), and both passed when the
+                // same render was started again. One automatic retry, only for that error, only with
+                // time left for a whole render.
+                retried = true;
+                console.warn(`[render-post-video-background] job ${jobId}: retrying once after: ${progress.error.slice(0, 160)}`);
+                started = await startRender(renderProps);
+                await db.update(postRenderJobs)
+                    .set({ renderId: started.renderId, bucketName: started.bucketName, region: started.region, updatedAt: new Date() })
+                    .where(eq(postRenderJobs.id, jobId));
+                continue;
+            }
             if (progress.error) { await fail(progress.error); return { statusCode: 200, body: 'Render failed' }; }
             if (progress.done) {
                 if (!progress.outputUrl) { await fail('The render finished but produced no file.'); return { statusCode: 200, body: 'No output' }; }
