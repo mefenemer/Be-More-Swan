@@ -108,7 +108,7 @@ export function buildDunningEmail(firstName: string, amount: string, nextRetryLi
             <p>The Be More Swan Team</p>`;
 }
 
-export const sendMagicLinkEmail = async ({ to, subject, html }: SendEmailParams) => {
+export const sendMagicLinkEmail = async ({ to, subject, html, text, replyTo }: SendEmailParams) => {
     if (!resend) {
         console.warn(`[DEV MODE] RESEND_API_KEY missing. Simulated email to ${to}`);
         return null;
@@ -119,7 +119,16 @@ export const sendMagicLinkEmail = async ({ to, subject, html }: SendEmailParams)
     // reason is always logged verbatim instead of a generic "Failed to send email."
     const { data, error } = await resend.emails
         // IMPORTANT: the `from` domain must be verified in the Resend dashboard.
-        .send({ from: 'Be More Swan <noreply@bemoreswan.com>', to, subject, html })
+        // A plain-text part and a real reply-to both count against the spam score of an
+        // HTML-only email from a noreply address (login links were landing in Gmail spam).
+        .send({
+            from: 'Be More Swan <noreply@bemoreswan.com>',
+            to,
+            subject,
+            html,
+            ...(text ? { text } : {}),
+            replyTo: replyTo || 'hello@bemoreswan.com',
+        })
         .catch((err: any) => ({ data: null, error: { name: 'ResendException', message: err?.message ?? String(err) } }));
 
     if (error) {
