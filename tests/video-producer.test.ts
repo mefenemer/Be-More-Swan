@@ -17,7 +17,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitiseVideoEdit, editHasStills, editChangesMedia, MAX_STILL_HOLD_S } from '../src/lib/video-edit';
 import { renderFingerprint } from '../src/lib/post-render';
-import { readBrief, sceneClips, sceneOverlays, buildTasks, onScreenFontPct, scriptOverBudget, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
+import { readBrief, sceneClips, sceneOverlays, buildTasks, onScreenFontPct, scriptOverBudget, aiClipSeconds, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
 import { enforceStoryboard, type VideoBrief } from '../src/lib/storyboard';
 import { captionLayout } from '../src/lib/captions';
 
@@ -181,6 +181,14 @@ check('a script more than a fifth over its length is planned once more, told how
     const vp = readFileSync(join(root, 'src/utils/video-producer.ts'), 'utf8');
     assert.match(vp, /const over = scriptOverBudget\(storyboard, brief\);\s*if \(over\) \{/);
     assert.match(vp, /\(scriptOverBudget\(again\.storyboard, brief\)\?\.words \?\? 0\) < over\.words/, 'only a shorter retry replaces it');
+});
+
+check('an AI clip covers the scene\'s spoken length, with the stock margin', () => {
+    assert.strictEqual(aiClipSeconds(3), 6);
+    assert.strictEqual(aiClipSeconds(5.7), 6);
+    assert.strictEqual(aiClipSeconds(5.8), 10, '5.8 + 0.3 is past a 6 s clip');
+    assert.strictEqual(aiClipSeconds(6.4), 10, 'the plumbing sample\'s noise scene');
+    assert.match(read('src/utils/video-producer.ts'), /durationSeconds: aiClipSeconds\(scene\.targetS\),/);
 });
 
 console.log(`\n${passed} checks passed`);

@@ -279,6 +279,16 @@ export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
     return out;
 }
 
+/**
+ * How long an AI clip to ask for: 6 or 10 seconds, the lengths the model makes. `targetS` is the
+ * scene's SPOKEN length here, and the clip must cover it with the same 0.3 s margin stock gets — a
+ * 6.4 s line got a 6 s clip under the old "over 7 → 10" rule (plumbing sample, 2026-11-01), and the
+ * render clamps a short clip, which pulls every later scene ahead of its voiceover.
+ */
+export function aiClipSeconds(targetS: number): 6 | 10 {
+    return targetS + 0.3 > 6 ? 10 : 6;
+}
+
 /** The timeline for a storyboard whose scenes have assets. Pure. */
 export function sceneClips(scenes: Scene[], assetIds: Record<string, number>, durations: number[]): VideoClip[] {
     return scenes.flatMap((s, i): VideoClip[] => {
@@ -342,7 +352,7 @@ async function sourceScene(db: Db, args: {
             const sub = await submitFramedVideo({
                 prompt: `${scene.prompt || context}. Slow, steady camera movement; one continuous shot.`,
                 imagePrompt: scene.prompt || context, aspectRatio: '9:16',
-                durationSeconds: scene.targetS > 7 ? 10 : 6,
+                durationSeconds: aiClipSeconds(scene.targetS),
                 usage: { workspaceId: orgId, userId, assistantId: args.assistantId },
             });
             const deadline = Date.now() + AI_CLIP_DEADLINE_MS;
