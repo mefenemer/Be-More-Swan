@@ -17,7 +17,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitiseVideoEdit, editHasStills, editChangesMedia, MAX_STILL_HOLD_S } from '../src/lib/video-edit';
 import { renderFingerprint } from '../src/lib/post-render';
-import { readBrief, sceneClips, sceneOverlays, buildTasks, onScreenFontPct, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
+import { readBrief, sceneClips, sceneOverlays, buildTasks, onScreenFontPct, scriptOverBudget, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
 import { enforceStoryboard, type VideoBrief } from '../src/lib/storyboard';
 import { captionLayout } from '../src/lib/captions';
 
@@ -169,6 +169,18 @@ check('a stock clip is only used when it covers its scene; otherwise the scene b
     const px = readFileSync(join(root, 'src/utils/pexels.ts'), 'utf8');
     assert.match(px, /Number\(v\?\.duration\) > 0 \? \{ duration: Number\(v\.duration\) \}/);
     assert.match(px, /durationS: candidate\.duration/);
+});
+
+check('a script more than a fifth over its length is planned once more, told how many words to cut', () => {
+    const words = (n: number) => Array.from({ length: n }, () => 'word').join(' ');
+    const sb = (n: number) => ({ ...storyboard, scenes: [{ ...storyboard.scenes[0], voiceover: words(n) }] });
+    const b30 = { ...brief, lengthS: 30 as const, voiceover: true };
+    assert.strictEqual(scriptOverBudget(sb(80) as any, b30), null, '75-word budget, 80 is within a fifth');
+    assert.deepStrictEqual(scriptOverBudget(sb(100) as any, b30), { words: 100, budget: 75 });
+    assert.strictEqual(scriptOverBudget(sb(100) as any, { ...b30, voiceover: false }), null, 'no voiceover, no budget');
+    const vp = readFileSync(join(root, 'src/utils/video-producer.ts'), 'utf8');
+    assert.match(vp, /const over = scriptOverBudget\(storyboard, brief\);\s*if \(over\) \{/);
+    assert.match(vp, /\(scriptOverBudget\(again\.storyboard, brief\)\?\.words \?\? 0\) < over\.words/, 'only a shorter retry replaces it');
 });
 
 console.log(`\n${passed} checks passed`);

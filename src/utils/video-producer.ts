@@ -41,7 +41,7 @@ import { presignR2Get } from './social-publish';
 import { resolveBaseUrl } from './base-url';
 import { isUnifiedTaskMetering } from './task-metering-flag';
 import {
-    enforceStoryboard, estimateCredits, parseStoryboardJson, sceneTimingsFromWords, scriptOf, isStillSource,
+    enforceStoryboard, estimateCredits, parseStoryboardJson, sceneTimingsFromWords, scriptOf, isStillSource, WORDS_PER_SECOND,
     storyboardSystemPrompt, storyboardUserPrompt, isVideoLength,
     type LibraryPicture, type Scene, type Storyboard, type VideoBrief,
 } from '../lib/storyboard';
@@ -184,19 +184,30 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
         const rules = p.aiAssistantId
             ? await loadAssistantRulesBlock(db, { assistantId: p.aiAssistantId, organisationId: p.organisationId })
             : null;
-        const res = await gatewayGenerate({
-            system: storyboardSystemPrompt() + (rules ? `\n\n${rules}` : ''),
-            messages: [{ role: 'user', content: storyboardUserPrompt({
-                brief, businessName: org?.name ?? '', businessFacts: facts, library,
-                today: new Date().toISOString().slice(0, 10), feedback: opts.feedback,
-            }) }],
-            maxTokens: 2500,
-            deadlineMs: 120_000,
-            usage: { workspaceId: p.organisationId, assistantId: p.aiAssistantId ?? null },
-            ...(await gatewayRoleModel(db, 'video_producer')),
-        });
-        const raw = parseStoryboardJson(res.text);
-        const { storyboard, changes } = enforceStoryboard(raw, brief, library);
+        const model = await gatewayRoleModel(db, 'video_producer');
+        const ask = async (feedback: string | null | undefined) => {
+            const res = await gatewayGenerate({
+                system: storyboardSystemPrompt() + (rules ? `\n\n${rules}` : ''),
+                messages: [{ role: 'user', content: storyboardUserPrompt({
+                    brief, businessName: org?.name ?? '', businessFacts: facts, library,
+                    today: new Date().toISOString().slice(0, 10), feedback,
+                }) }],
+                maxTokens: 2500,
+                deadlineMs: 120_000,
+                usage: { workspaceId: p.organisationId, assistantId: p.aiAssistantId ?? null },
+                ...model,
+            });
+            return enforceStoryboard(parseStoryboardJson(res.text), brief, library);
+        };
+        let { storyboard, changes } = await ask(opts.feedback);
+        // The voiceover sets the video's length, so a long script makes a long video: a "30-second"
+        // sample came out at 45 s and outran the render Lambdas (2026-11-01). Over budget by more than
+        // a fifth → plan once more, told how many words to lose. Still free; never a third attempt.
+        const over = scriptOverBudget(storyboard, brief);
+        if (over) {
+            const again = await ask([opts.feedback, `The voiceover is ${over.words} words; a ${brief.lengthS}-second video has room for about ${over.budget}. Cut it to ${over.budget} words or fewer — shorter lines, not fewer facts that matter.`].filter(Boolean).join(' '));
+            if (again.storyboard.scenes.length >= 3 && (scriptOverBudget(again.storyboard, brief)?.words ?? 0) < over.words) ({ storyboard, changes } = again);
+        }
         if (storyboard.scenes.length < 3) throw new Error('The plan came back too short to make a video from. Try again, or add more detail to the brief.');
         await db.update(videoProjects).set({
             status: 'planned', storyboard, changes, title: storyboard.title, note: null, updatedAt: new Date(),
@@ -207,6 +218,17 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
             status: 'failed', note: err instanceof Error ? err.message.slice(0, 400) : 'The storyboard could not be written.', updatedAt: new Date(),
         }).where(eq(videoProjects.id, projectId));
     }
+}
+
+/**
+ * Is the script too long for the brief's length? The budget is WORDS_PER_SECOND × length (the rate
+ * the prompt asks for); more than 20% over returns the count and the budget, otherwise null. Pure.
+ */
+export function scriptOverBudget(storyboard: Storyboard, brief: VideoBrief): { words: number; budget: number } | null {
+    if (!brief.voiceover) return null;
+    const words = scriptOf(storyboard).split(/\s+/).filter(Boolean).length;
+    const budget = Math.round(brief.lengthS * WORDS_PER_SECOND);
+    return words > budget * 1.2 ? { words, budget } : null;
 }
 
 // ── Build ───────────────────────────────────────────────────────────────────────────────────────
