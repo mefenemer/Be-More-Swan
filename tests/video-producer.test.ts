@@ -183,12 +183,31 @@ check('a script more than a fifth over its length is planned once more, told how
     assert.match(vp, /\(scriptOverBudget\(again\.storyboard, brief\)\?\.words \?\? 0\) < over\.words/, 'only a shorter retry replaces it');
 });
 
-check('an AI clip covers the scene\'s spoken length, with the stock margin', () => {
-    assert.strictEqual(aiClipSeconds(3), 6);
-    assert.strictEqual(aiClipSeconds(5.7), 6);
-    assert.strictEqual(aiClipSeconds(5.8), 10, '5.8 + 0.3 is past a 6 s clip');
-    assert.strictEqual(aiClipSeconds(6.4), 10, 'the plumbing sample\'s noise scene');
+check('an AI clip covers the scene\'s spoken length, with the stock margin, in lengths the model makes', () => {
+    const v3 = 'fal-ai/kling-video/v3/pro/image-to-video';
+    const v25 = 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video';
+    // Kling v3: exactly what the line needs, rounded up, 3–15 s.
+    assert.strictEqual(aiClipSeconds(6.4, v3), 7, 'the plumbing sample\'s noise scene');
+    assert.strictEqual(aiClipSeconds(2, v3), 3);
+    assert.strictEqual(aiClipSeconds(4.7, v3), 5);
+    assert.strictEqual(aiClipSeconds(20, v3), 15);
+    // Kling v2.x makes 5 or 10 — a "6" request was a 5 s clip.
+    assert.strictEqual(aiClipSeconds(4.7, v25), 5);
+    assert.strictEqual(aiClipSeconds(4.8, v25), 10, '4.8 + 0.3 is past a 5 s clip');
+    // Hailuo text-to-video (image-to-video off): 6 or 10.
+    assert.strictEqual(aiClipSeconds(5.7, 'off'), 6);
+    assert.strictEqual(aiClipSeconds(5.8, 'off'), 10);
     assert.match(read('src/utils/video-producer.ts'), /durationSeconds: aiClipSeconds\(scene\.targetS\),/);
+});
+
+check('a build makes its AI clips at the same time, before the other scenes', () => {
+    const src = read('src/utils/video-producer.ts');
+    const build = src.slice(src.indexOf('export async function buildProject('), src.indexOf('export const STUCK_AFTER_MS'));
+    const parallel = build.indexOf(".filter((i) => storyboard.scenes[i].source === 'ai_video').map(makeScene))");
+    const rest = build.indexOf("if (storyboard.scenes[i].source !== 'ai_video') await makeScene(i);");
+    assert.ok(parallel > 0 && build.lastIndexOf('await Promise.all(', parallel) > 0, 'AI clips under one Promise.all');
+    assert.ok(rest > parallel, 'the other scenes after, one by one (they share exclude)');
+    assert.ok(build.slice(parallel, rest).includes('await save({});'), 'one save after the parallel batch');
 });
 
 console.log(`\n${passed} checks passed`);

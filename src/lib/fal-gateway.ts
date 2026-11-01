@@ -293,9 +293,13 @@ export function imageToVideoEnabled(model: string = I2V_MODEL): boolean {
  *             off: the soundtrack is ours, from the music library / voiceover, never a model's guess)
  * `billedSeconds` is the clip length actually asked for, for the cost log.
  */
+/** Kling v3/o3 take any whole length from 3 to 15 s; the v2.x family only 5 or 10. */
+export function takesAnyLength(model: string): boolean {
+    return /\/(v3|o3)\//.test(model);
+}
+
 export function imageToVideoInput(model: string, opts: { imageUrl: string; prompt: string; durationSeconds: number }): { input: Record<string, unknown>; billedSeconds: number } {
-    const isV3 = /\/(v3|o3)\//.test(model);
-    if (isV3) {
+    if (takesAnyLength(model)) {
         const d = Math.min(Math.max(Math.round(opts.durationSeconds), 3), 15);
         return { input: { prompt: opts.prompt, start_image_url: opts.imageUrl, duration: String(d), generate_audio: false }, billedSeconds: d };
     }
@@ -322,12 +326,14 @@ export async function submitFramedVideo(opts: {
     imagePrompt?: string;
     startImageUrl?: string | null;
     aspectRatio: AspectRatio;
-    durationSeconds: VideoDurationSeconds;
+    /** Seconds wanted. Each model makes the nearest length it can (imageToVideoInput, submitVideo). */
+    durationSeconds: number;
     usage?: { workspaceId?: number | null; userId?: number | null; assistantId?: number | null };
 }): Promise<FramedVideoSubmit> {
     if (!imageToVideoEnabled()) {
-        const sub = await submitVideo({ prompt: opts.prompt, durationSeconds: opts.durationSeconds });
-        return { ...sub, model: VIDEO_MODEL, billedSeconds: opts.durationSeconds, frameUrl: null };
+        const d: VideoDurationSeconds = opts.durationSeconds > 6 ? 10 : 6;
+        const sub = await submitVideo({ prompt: opts.prompt, durationSeconds: d });
+        return { ...sub, model: VIDEO_MODEL, billedSeconds: d, frameUrl: null };
     }
     const frameUrl = opts.startImageUrl
         || (await generateImages({ prompt: opts.imagePrompt || opts.prompt, aspectRatio: opts.aspectRatio, numImages: 1, usage: opts.usage }))[0].url;

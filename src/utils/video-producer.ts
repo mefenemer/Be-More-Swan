@@ -33,7 +33,7 @@ import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVE
 import { TASK_WEIGHTS } from '../config/task-weights';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
-import { submitFramedVideo, status as falStatus, result as falResult, extractVideo, falConfigured } from '../lib/fal-gateway';
+import { submitFramedVideo, status as falStatus, result as falResult, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, I2V_MODEL } from '../lib/fal-gateway';
 import { logMediaCost } from './ai-usage';
 import { makeVoiceoverAsset } from './voiceover-asset';
 import { DEFAULT_VOICE, isVoiceId, cleanScript } from '../lib/tts';
@@ -280,13 +280,17 @@ export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
 }
 
 /**
- * How long an AI clip to ask for: 6 or 10 seconds, the lengths the model makes. `targetS` is the
- * scene's SPOKEN length here, and the clip must cover it with the same 0.3 s margin stock gets — a
- * 6.4 s line got a 6 s clip under the old "over 7 → 10" rule (plumbing sample, 2026-11-01), and the
- * render clamps a short clip, which pulls every later scene ahead of its voiceover.
+ * How long an AI clip to ask for. `targetS` is the scene's SPOKEN length here, and the clip must
+ * cover it with the same 0.3 s margin stock gets: the render clamps a short clip, which pulls every
+ * later scene ahead of its voiceover. A 6.4 s line got a 6 s request under the old "over 7 → 10"
+ * rule (plumbing sample, 2026-11-01) — and Kling v2.x makes 5 or 10 s, so a "6" was really 5.
+ * Kling v3 makes any whole length 3–15 s, so it gets exactly what the line needs, no more.
  */
-export function aiClipSeconds(targetS: number): 6 | 10 {
-    return targetS + 0.3 > 6 ? 10 : 6;
+export function aiClipSeconds(targetS: number, model: string = I2V_MODEL): number {
+    const need = targetS + 0.3;
+    if (!imageToVideoEnabled(model)) return need > 6 ? 10 : 6;   // Hailuo text-to-video: 6 or 10
+    if (takesAnyLength(model)) return Math.min(15, Math.max(3, Math.ceil(need)));
+    return need > 5 ? 10 : 5;
 }
 
 /** The timeline for a storyboard whose scenes have assets. Pure. */
@@ -430,11 +434,14 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         const durations = sceneTimingsFromWords(storyboard, words) ?? storyboard.scenes.map((s) => s.targetS);
 
         // 2. Every scene's picture or clip. Already-made scenes are kept (a re-build after a failure).
+        // AI clips go first and all at once: each spends minutes at the model (Kling 3 averaged 3 m 48 s
+        // in the 2026-11-01 bake-off), and made one after another, three of them plus the voiceover
+        // ran into this worker's 15-minute ceiling. The rest follow in order — stock scenes share
+        // `exclude`, so the same clip isn't picked twice.
         const exclude: string[] = [];
-        const missing: string[] = [];
-        for (let i = 0; i < storyboard.scenes.length; i++) {
+        const failed = new Set<number>();
+        const makeScene = async (i: number) => {
             const scene = storyboard.scenes[i];
-            if (done[scene.id]) continue;
             let made: Awaited<ReturnType<typeof sourceScene>> = null;
             const paid = scene.source === 'ai_image' ? IMAGE_CREDIT_COST : scene.source === 'ai_video' ? VIDEO_CREDIT_COST : 0;
             try {
@@ -449,9 +456,15 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                 storyboard.scenes[i] = { ...scene, source: 'stock_photo', motion: scene.motion && scene.motion !== 'none' ? scene.motion : 'push_in' };
                 await save({ storyboard });
             }
-            if (made) done[scene.id] = made.assetId; else missing.push(`scene ${i + 1}`);
+            if (made) done[scene.id] = made.assetId; else failed.add(i);
             await save({});
-        }
+        };
+        const todo = storyboard.scenes.map((_, i) => i).filter((i) => !done[storyboard.scenes[i].id]);
+        await Promise.all(todo.filter((i) => storyboard.scenes[i].source === 'ai_video').map(makeScene));
+        // The parallel saves can land out of order; this one writes every clip made so far.
+        await save({});
+        for (const i of todo) if (storyboard.scenes[i].source !== 'ai_video') await makeScene(i);
+        const missing = [...failed].sort((a, b) => a - b).map((i) => `scene ${i + 1}`);
         if (missing.length) throw new Error(`Couldn't find pictures for ${missing.join(', ')}. Change those scenes or try again — the finished scenes are kept.`);
 
         // 3. The post — one row per platform, one cross-post group.
