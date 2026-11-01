@@ -46,6 +46,10 @@ export type AdminAction =
     | 'notification_template_edit'
     | 'notification_template_restore'
     | 'notification_sent'
+    // Comms → Broadcast: a test copy to the admin, the send started, and the worker's final counts.
+    | 'broadcast_test'
+    | 'broadcast_started'
+    | 'broadcast_finished'
     | 'session_timeout_config_update'
     // Admin ▸ Inbox: a support request moved between the helpdesk and the fix pipeline (support-inbox.ts).
     | 'support_request_reroute'

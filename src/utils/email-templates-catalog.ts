@@ -569,6 +569,25 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             p('Your data export is ready to download. For security, the link below will expire after a short time.') +
             button('Download export', 'link.action_url') + signoff,
     },
+    {
+        // The 30 days' notice for AI video priced by the second (terms 5.2 / 20.2). Sent once to
+        // every customer by Comms → Broadcast (src/utils/broadcast.ts); the in-app twin shares the
+        // key. Transactional: a notice of a change to the terms is not marketing.
+        triggerKey: 'ai_video_per_second_notice',
+        name: 'Notice: AI video counts by length',
+        category: 'Compliance',
+        transactional: true,
+        subject: 'From 3 December, AI video clips count by their length',
+        preheader: 'An AI clip will count as 4 tasks for each second of video, instead of 20 for any clip.',
+        bodyHtml: greet +
+            p('From <strong>3 December 2026</strong>, an AI video clip will count as <strong>4 tasks for each second</strong> of video, instead of 20 tasks for any clip.') +
+            `<table style="border-collapse:collapse;margin:0 0 16px;font-size:14px;"><tr><th style="padding:6px 12px;border:1px solid #e5e7eb;text-align:left;">Clip length</th><th style="padding:6px 12px;border:1px solid #e5e7eb;text-align:left;">Today</th><th style="padding:6px 12px;border:1px solid #e5e7eb;text-align:left;">From 3 December</th></tr><tr><td style="padding:6px 12px;border:1px solid #e5e7eb;">3 seconds</td><td style="padding:6px 12px;border:1px solid #e5e7eb;">20 tasks</td><td style="padding:6px 12px;border:1px solid #e5e7eb;">12 tasks</td></tr><tr><td style="padding:6px 12px;border:1px solid #e5e7eb;">5 seconds</td><td style="padding:6px 12px;border:1px solid #e5e7eb;">20 tasks</td><td style="padding:6px 12px;border:1px solid #e5e7eb;">20 tasks</td></tr><tr><td style="padding:6px 12px;border:1px solid #e5e7eb;">6 seconds</td><td style="padding:6px 12px;border:1px solid #e5e7eb;">20 tasks</td><td style="padding:6px 12px;border:1px solid #e5e7eb;">24 tasks</td></tr><tr><td style="padding:6px 12px;border:1px solid #e5e7eb;">10 seconds</td><td style="padding:6px 12px;border:1px solid #e5e7eb;">20 tasks</td><td style="padding:6px 12px;border:1px solid #e5e7eb;">40 tasks</td></tr></table>` +
+            p('<strong>Why we are changing it.</strong> The AI video models we use charge by the second. From 3 December your Video Producer also moves to a newer model that makes noticeably more lifelike clips. Counting by length means short clips use fewer tasks, and longer clips reflect what they cost to make.') +
+            p('<strong>What stays the same.</strong> Posts, articles, emails and lead searches are still 1 task each. An AI image is still 1, and an AI music track 20. Stock footage, stock photos, your own pictures and branded cards still use no tasks. Planning a video is free, and your assistants show what a video will use before you make it. If your tasks run out, work pauses &mdash; you are never charged extra.') +
+            p('If your plan does not include AI video, nothing changes for you.') +
+            p('We have updated clause 5.2 of our Terms of Service to match. The new version takes effect on 3 December. If you would rather not continue under it, you can cancel at any time from Billing.') +
+            p('Any questions, just reply to this email.') + signoff,
+    },
 ];
 
 /** Look up a default by trigger key (used as the send-time fallback). */
