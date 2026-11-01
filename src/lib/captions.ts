@@ -45,6 +45,30 @@ export const CAPTION_FALLBACK_ACCENT = '#FFD400';
 
 const SENTENCE_END = /[.!?…]$|[,;:]$/;
 
+const bare = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+
+/**
+ * Put the script's punctuation back on the transcribed words. Whisper's word timings come back bare
+ * ("breakdowns", not "breakdowns."), so the sentence-end break above never fired and a caption ran
+ * across two sentences ("breakdowns Brightside", the first sample render, 2026-11-01). The script is
+ * what was spoken, so each word takes the matching script token's spelling — matched in order, and
+ * only when the letters agree, so a word the speaker said differently keeps its own text. Pure.
+ */
+export function withScriptPunctuation<W extends { word: string }>(words: W[], script: string | null | undefined): W[] {
+    const tokens = String(script ?? '').split(/\s+/).filter(Boolean);
+    if (!tokens.length) return words;
+    let j = 0;
+    return words.map((w) => {
+        const want = bare(w.word);
+        if (!want) return w;
+        // Look a few tokens ahead: the transcript can drop or merge a word.
+        for (let k = j; k < Math.min(tokens.length, j + 4); k++) {
+            if (bare(tokens[k]) === want) { j = k + 1; return { ...w, word: tokens[k] }; }
+        }
+        return w;
+    });
+}
+
 /** Words placed on the timeline, cut at each voiceover's own end. Pure. */
 export function timelineWords(sources: CaptionSource[]): CaptionWord[] {
     const out: CaptionWord[] = [];

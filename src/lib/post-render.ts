@@ -17,7 +17,7 @@ import { contentAssets, organisations, postRenderJobs, scheduledPosts, scheduled
 import type { Overlay } from './overlay-geometry';
 import { renderableAudio } from './audio-overlays';
 import { isStillMotion, type StillMotion } from './still-motion';
-import { buildCaptionCues, captionAccent, type CaptionSource, type CaptionTrack, type SpokenWordLike } from './captions';
+import { buildCaptionCues, captionAccent, withScriptPunctuation, type CaptionSource, type CaptionTrack, type SpokenWordLike } from './captions';
 import { DEFAULT_TARGET_RATIO, editHasStills, readVideoEdit, renderableClips, resolveClipGain, resolveTrim } from './video-edit';
 import { reframeRatioFor } from '../utils/format-router';
 
@@ -259,9 +259,10 @@ export async function resolveCaptionTrack(db: Db, raw: unknown, orgId: number): 
         .where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
     const wordsById = new Map<number, SpokenWordLike[]>();
     for (const r of rows) {
-        const p = r.renderParams as { kind?: unknown; words?: unknown } | null;
+        const p = r.renderParams as { kind?: unknown; words?: unknown; script?: unknown } | null;
         if ((r.assetType ?? '').toLowerCase() !== 'audio' || p?.kind !== 'voiceover' || !Array.isArray(p.words)) continue;
-        wordsById.set(r.id, p.words as SpokenWordLike[]);
+        // The script's punctuation, so phrases break at sentence ends (captions.ts withScriptPunctuation).
+        wordsById.set(r.id, withScriptPunctuation(p.words as SpokenWordLike[], typeof p.script === 'string' ? p.script : null));
     }
     const sources: CaptionSource[] = overlays
         .filter(a => wordsById.has(a.assetId))

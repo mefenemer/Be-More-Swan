@@ -17,6 +17,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { withScriptPunctuation } from '../src/lib/captions';
 import {
     timelineWords, buildCaptionCues, cueAt, captionAccent, captionLayout,
     CAPTION_MAX_WORDS, CAPTION_MAX_CHARS, CAPTION_HOLD_S, CAPTION_FALLBACK_ACCENT,
@@ -120,6 +121,20 @@ check('the composition treats captions as optional and loads the caption face', 
     assert.ok(tsx.includes('captions.cues.length ? captions : null'), 'an empty track draws nothing');
     assert.ok(tsx.includes('...(captionTrack ? [CAPTION_FONT_ID] : [])'), 'the caption font must load before the first frame');
     assert.ok(!/from ['"](node:|fs|path|drizzle)/.test(readFileSync(join(root, 'src/lib/captions.ts'), 'utf8')), 'captions.ts is bundled into Remotion — no Node imports');
+});
+
+check('the script puts punctuation back on bare transcribed words, so phrases break at sentence ends', () => {
+    const words = [
+        { word: 'before', start: 0, end: 0.3 }, { word: 'they', start: 0.3, end: 0.5 }, { word: 'become', start: 0.5, end: 0.8 },
+        { word: 'breakdowns', start: 0.8, end: 1.3 }, { word: 'Brightside', start: 1.5, end: 2.0 }, { word: 'Plumbing', start: 2.0, end: 2.4 },
+    ];
+    const fixed = withScriptPunctuation(words, 'before they become breakdowns. Brightside Plumbing and Heating.');
+    assert.strictEqual(fixed[3].word, 'breakdowns.');
+    const cues = buildCaptionCues([{ words: fixed }]);
+    assert.ok(!cues.some((c) => c.words.map((w) => w.text).join(' ').includes('breakdowns. Brightside')), 'a sentence end breaks the phrase');
+    // A word the speaker said differently keeps its own text; no script leaves the words as they are.
+    assert.strictEqual(withScriptPunctuation([{ word: 'gonna', start: 0, end: 1 }], 'going to.')[0].word, 'gonna');
+    assert.deepStrictEqual(withScriptPunctuation(words, ''), words);
 });
 
 console.log(`\n${passed} checks passed`);

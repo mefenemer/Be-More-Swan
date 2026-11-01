@@ -17,7 +17,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitiseVideoEdit, editHasStills, editChangesMedia, MAX_STILL_HOLD_S } from '../src/lib/video-edit';
 import { renderFingerprint } from '../src/lib/post-render';
-import { readBrief, sceneClips, sceneOverlays, buildTasks, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
+import { readBrief, sceneClips, sceneOverlays, buildTasks, onScreenFontPct, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
 import { enforceStoryboard, type VideoBrief } from '../src/lib/storyboard';
 import { captionLayout } from '../src/lib/captions';
 
@@ -139,6 +139,26 @@ check('the SQL file and the Drizzle mirror agree on the table', () => {
         assert.ok(sql.includes(col) && schema.includes(`"${col}"`), col);
     }
     assert.ok(sql.includes("CHECK (status IN ('draft', 'planning', 'planned', 'building', 'built', 'failed', 'cancelled'))"));
+});
+
+check('stock is searched portrait first (9:16 video), any shape only when portrait finds nothing', () => {
+    const vp = readFileSync(join(root, 'src/utils/video-producer.ts'), 'utf8');
+    assert.match(vp, /searchUniqueVideos\(db, orgId, context, \{ \.\.\.opts, orientation: 'portrait' \}\)/);
+    assert.match(vp, /r\.candidates\[0\] \?\? \(await searchUniqueVideos\(db, orgId, context, opts\)\)\.candidates\[0\]/);
+    assert.match(vp, /searchUniqueImages\(db, orgId, context, \{ \.\.\.opts, orientation: 'portrait' \}\)/);
+    const px = readFileSync(join(root, 'src/utils/pexels.ts'), 'utf8');
+    assert.match(px, /\.\.\.\(orientation \? \{ orientation \} : \{\}\)/, 'sent to Pexels');
+    assert.match(px, /\$\{orientation \? `\|\$\{orientation\}` : ''\}/, 'part of the cache key');
+});
+
+check('on-screen text shrinks to fit one line of a 9:16 frame', () => {
+    assert.strictEqual(onScreenFontPct('New this autumn'), 0.05);
+    const long = 'Yellow flame? Get it checked';
+    const pct = onScreenFontPct(long);
+    assert.ok(pct < 0.05);
+    assert.ok(long.length * 0.5 * pct <= 0.9 * 9 / 16 + 1e-9, 'fits ~90% of the frame width');
+    assert.strictEqual(onScreenFontPct('x'.repeat(200)), 0.028, 'never unreadably small');
+    assert.strictEqual(sceneOverlays([{ ...storyboard.scenes[0], id: 'l', source: 'stock_video' as const, onScreenText: long }], [3])[0].fontSizePct, pct);
 });
 
 console.log(`\n${passed} checks passed`);

@@ -76,7 +76,10 @@ export async function generateImageKeywords(context: string): Promise<string> {
 }
 
 // US1 AC1.3/1.4: GET the Pexels search endpoint with safe_search forced on.
-export async function pexelsSearch(query: string, page = 1, perPage = 15): Promise<PexelsCandidate[]> {
+/** Pexels' own orientation filter. Absent = any shape (the original behaviour). */
+export type PexelsOrientation = 'portrait' | 'landscape' | 'square';
+
+export async function pexelsSearch(query: string, page = 1, perPage = 15, orientation?: PexelsOrientation): Promise<PexelsCandidate[]> {
     const apiKey = process.env.PEXELS_API_KEY;
     if (!apiKey) throw new Error('PEXELS_API_KEY is not configured.');
     if (!query.trim()) return [];
@@ -86,6 +89,7 @@ export async function pexelsSearch(query: string, page = 1, perPage = 15): Promi
         per_page: String(perPage),
         page: String(page),
         safe_search: 'true',   // US1 AC1.4 — never pull explicit content
+        ...(orientation ? { orientation } : {}),
     });
 
     const res = await fetch(`${PEXELS_SEARCH_URL}?${params}`, {
@@ -110,7 +114,7 @@ export async function pexelsSearch(query: string, page = 1, perPage = 15): Promi
 
 // US1 AC1.3/1.4: GET the Pexels video search endpoint with safe_search forced on. Picks the most
 // usable progressive .mp4 file per result (prefers an HD-ish rendition, falls back to the largest).
-export async function pexelsVideoSearch(query: string, page = 1, perPage = 15): Promise<PexelsVideoCandidate[]> {
+export async function pexelsVideoSearch(query: string, page = 1, perPage = 15, orientation?: PexelsOrientation): Promise<PexelsVideoCandidate[]> {
     const apiKey = process.env.PEXELS_API_KEY;
     if (!apiKey) throw new Error('PEXELS_API_KEY is not configured.');
     if (!query.trim()) return [];
@@ -120,6 +124,7 @@ export async function pexelsVideoSearch(query: string, page = 1, perPage = 15): 
         per_page: String(perPage),
         page: String(page),
         safe_search: 'true',   // US1 AC1.4 — never pull explicit content
+        ...(orientation ? { orientation } : {}),
     });
 
     const res = await fetch(`${PEXELS_VIDEO_SEARCH_URL}?${params}`, {
@@ -134,9 +139,10 @@ export async function pexelsVideoSearch(query: string, page = 1, perPage = 15): 
     return videos.map(v => {
         const files: any[] = Array.isArray(v?.video_files) ? v.video_files : [];
         const mp4s = files.filter(f => (f?.file_type === 'video/mp4' || /\.mp4/i.test(f?.link || '')) && f?.link);
-        // Prefer an HD rendition ≤1080p, else the largest available.
+        // Prefer an HD rendition ≤1080p on its SHORT side, else the largest available. The short side,
+        // not the height: a portrait 1080x1920 is HD, and "height ≤ 1080" picked its 540x960 version.
         const sized = mp4s.map(f => ({ link: f.link as string, h: Number(f?.height) || 0, w: Number(f?.width) || 0 }));
-        const hd = sized.filter(f => f.h && f.h <= 1080).sort((a, b) => b.h - a.h)[0];
+        const hd = sized.filter(f => f.h && Math.min(f.w || f.h, f.h) <= 1080).sort((a, b) => b.h - a.h)[0];
         const best = hd || sized.sort((a, b) => b.h - a.h)[0];
         return {
             providerAssetId: `v${v?.id}`,
@@ -153,8 +159,9 @@ export async function pexelsVideoSearch(query: string, page = 1, perPage = 15): 
 // Cache wrapper (technical note): look up a normalized "kind|query|page" key, return fresh-enough
 // rows, else fetch + upsert. Dedup (filterUnique) runs on the RESULT, so the cache never violates
 // the never-reuse rule. All cache errors are swallowed — the live API is always the source of truth.
-async function cachedSearch<T>(db: Db, kind: 'photo' | 'video', query: string, page: number): Promise<T[]> {
-    const key = `${kind}|${query.toLowerCase().trim()}|${page}`;
+async function cachedSearch<T>(db: Db, kind: 'photo' | 'video', query: string, page: number, orientation?: PexelsOrientation): Promise<T[]> {
+    // The orientation is part of the key: a portrait search must never be answered from a cached any-shape one.
+    const key = `${kind}|${query.toLowerCase().trim()}|${page}${orientation ? `|${orientation}` : ''}`;
     try {
         const [row] = await db.select().from(pexelsSearchCache)
             .where(eq(pexelsSearchCache.queryKey, key)).limit(1);
@@ -164,8 +171,8 @@ async function cachedSearch<T>(db: Db, kind: 'photo' | 'video', query: string, p
     } catch { /* cache table may be unmigrated — fall through to a live fetch */ }
 
     const fresh = (kind === 'video'
-        ? await pexelsVideoSearch(query, page)
-        : await pexelsSearch(query, page)) as unknown as T[];
+        ? await pexelsVideoSearch(query, page, 15, orientation)
+        : await pexelsSearch(query, page, 15, orientation)) as unknown as T[];
 
     try {
         await db.insert(pexelsSearchCache)
@@ -212,6 +219,12 @@ export interface SearchOptions {
      * searching again returned the identical set.
      */
     exclude?: string[];
+    /**
+     * Only this shape (Pexels' orientation filter). The Video Producer asks for 'portrait': its videos
+     * are 9:16, and a landscape clip centre-cropped to vertical cut people's heads off in the first
+     * sample renders (2026-11-01). Absent = any shape, as before.
+     */
+    orientation?: PexelsOrientation;
 }
 
 /** How deep "Show different photos" may page (15 results a page) before saying there are no more. */
@@ -223,13 +236,13 @@ const MAX_MORE_PAGES = 5;
  */
 async function collectCandidates<T extends { providerAssetId: string }>(
     db: Db, orgId: number, kind: 'photo' | 'video', keywords: string,
-    { limit, dedup, exclude }: { limit: number; dedup: boolean; exclude: string[] },
+    { limit, dedup, exclude, orientation }: { limit: number; dedup: boolean; exclude: string[]; orientation?: PexelsOrientation },
 ): Promise<T[]> {
     const skip = new Set(exclude);
     const out: T[] = [];
     const maxPages = skip.size ? MAX_MORE_PAGES : (dedup ? 2 : 1);
     for (let page = 1; page <= maxPages && out.length < limit; page++) {
-        const raw = await cachedSearch<T>(db, kind, keywords, page);
+        const raw = await cachedSearch<T>(db, kind, keywords, page, orientation);
         if (raw.length === 0) break;   // past the last page
         const seen = new Set(out.map(c => c.providerAssetId));
         let fresh = raw.filter(c => !skip.has(c.providerAssetId) && !seen.has(c.providerAssetId));
@@ -249,14 +262,14 @@ export async function searchUniqueImages(
     db: Db,
     orgId: number,
     context: string,
-    { limit = 5, dedup = true, keywords: given, exclude = [] }: SearchOptions = {},
+    { limit = 5, dedup = true, keywords: given, exclude = [], orientation }: SearchOptions = {},
 ): Promise<SearchResult> {
     const keywords = given?.trim() || await generateImageKeywords(context);
     if (!keywords) return { keywords, candidates: [] };
     // The never-reuse rule is a social-feed guarantee (posted_assets). Callers that don't share
     // that feed — e.g. blog hero images — opt out (dedup:false) and draw from the full stock pool.
     // US2 AC2.4 (page 2 when page 1 is all duplicates) lives in collectCandidates.
-    const candidates = await collectCandidates<PexelsCandidate>(db, orgId, 'photo', keywords, { limit, dedup, exclude });
+    const candidates = await collectCandidates<PexelsCandidate>(db, orgId, 'photo', keywords, { limit, dedup, exclude, orientation });
     return { keywords, candidates };
 }
 
@@ -265,11 +278,11 @@ export async function searchUniqueVideos(
     db: Db,
     orgId: number,
     context: string,
-    { limit = 5, dedup = true, keywords: given, exclude = [] }: SearchOptions = {},
+    { limit = 5, dedup = true, keywords: given, exclude = [], orientation }: SearchOptions = {},
 ): Promise<VideoSearchResult> {
     const keywords = given?.trim() || await generateImageKeywords(context);
     if (!keywords) return { keywords, candidates: [] };
-    const candidates = await collectCandidates<PexelsVideoCandidate>(db, orgId, 'video', keywords, { limit, dedup, exclude });
+    const candidates = await collectCandidates<PexelsVideoCandidate>(db, orgId, 'video', keywords, { limit, dedup, exclude, orientation });
     return { keywords, candidates };
 }
 

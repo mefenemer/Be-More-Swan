@@ -223,6 +223,18 @@ export function buildTasks(storyboard: Storyboard, brief: VideoBrief): number {
 }
 
 /** The text overlays for a storyboard, timed to the scenes. Pure. */
+/**
+ * The on-screen text size, as a fraction of the frame HEIGHT, so one line fits a 9:16 frame. The box
+ * is a single line (overlay-geometry.ts whiteSpace: 'pre'), and at a fixed 5% "Yellow flame? Get it
+ * checked" ran off both edges in the first sample render (2026-11-01). Anton (the Impact stand-in) is
+ * about 0.5 of its height wide per character with the box padding; the line may use ~90% of a width
+ * that is 9/16 of the height. Never larger than 5%, never smaller than 2.8%. Pure.
+ */
+export function onScreenFontPct(text: string): number {
+    const n = Math.max(1, text.trim().length);
+    return Math.round(Math.max(0.028, Math.min(0.05, (0.9 * 9 / 16) / (0.5 * n))) * 1000) / 1000;
+}
+
 export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
     const out: Overlay[] = [];
     let t = 0;
@@ -235,7 +247,7 @@ export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
             out.push({
                 id: `vp_${s.id}`, text: s.onScreenText,
                 // Upper third: the captions own the lower part of the frame.
-                x: 0.5, y: 0.2, fontFamily: 'Impact', fontSizePct: 0.05,
+                x: 0.5, y: 0.2, fontFamily: 'Impact', fontSizePct: onScreenFontPct(s.onScreenText),
                 color: '#FFFFFF', boxStroke: null, boxFill: '#000000', boxOpacity: 0.55,
                 startS: Math.round(t * 10) / 10, endS: Math.round((t + d) * 10) / 10, anim: 'rise',
             });
@@ -267,15 +279,19 @@ async function sourceScene(db: Db, args: {
         case 'product_photo':
             return scene.assetId ? { assetId: scene.assetId } : null;
         case 'stock_video': {
-            const r = await searchUniqueVideos(db, orgId, context, { limit: 3, keywords: scene.keywords, exclude: args.exclude });
-            const c = r.candidates[0];
+            // Portrait first: the video is 9:16, and a centre-cropped landscape clip cuts people's heads
+            // off. Any shape only when portrait finds nothing — a cropped clip beats an empty scene.
+            const opts = { limit: 3, keywords: scene.keywords, exclude: args.exclude };
+            const r = await searchUniqueVideos(db, orgId, context, { ...opts, orientation: 'portrait' });
+            const c = r.candidates[0] ?? (await searchUniqueVideos(db, orgId, context, opts)).candidates[0];
             if (!c) return null;
             args.exclude.push(c.providerAssetId);
             return { assetId: await createPexelsAsset(db, { userId, orgId, candidate: c, assetType: 'video' }) };
         }
         case 'stock_photo': {
-            const r = await searchUniqueImages(db, orgId, context, { limit: 3, keywords: scene.keywords, exclude: args.exclude });
-            const c = r.candidates[0];
+            const opts = { limit: 3, keywords: scene.keywords, exclude: args.exclude };
+            const r = await searchUniqueImages(db, orgId, context, { ...opts, orientation: 'portrait' });
+            const c = r.candidates[0] ?? (await searchUniqueImages(db, orgId, context, opts)).candidates[0];
             if (!c) return null;
             args.exclude.push(c.providerAssetId);
             return { assetId: await createPexelsAsset(db, { userId, orgId, candidate: c, assetType: 'image' }) };
