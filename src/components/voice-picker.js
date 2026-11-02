@@ -66,7 +66,8 @@
     if (playingId === id) { stop(); return; }
     stop();
     const v = voiceOf(id);
-    if (!v || v.legacy) return;
+    if (!v) return;
+    if (v.legacy) { window.showToast?.('This is one of the older voices, with no sample. Press Change to hear and choose one of the new voices.'); return; }
     if (!audio) {
       audio = new Audio();
       audio.addEventListener('ended', stop);
