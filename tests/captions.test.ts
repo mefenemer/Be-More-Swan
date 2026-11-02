@@ -137,6 +137,12 @@ check('the script puts punctuation back on bare transcribed words, so phrases br
     // The script's spelling wins a one-letter difference in a longer word — never in a short one.
     assert.strictEqual(withScriptPunctuation([{ word: 'Harbor', start: 0, end: 1 }], 'Harbour Yoga.')[0].word, 'Harbour');
     assert.strictEqual(withScriptPunctuation([{ word: 'cat', start: 0, end: 1 }], 'can.')[0].word, 'cat');
+    // A short word misheard between two that match takes the script's word ("See views", 2026-11-02);
+    // a gap that isn't one-for-one keeps what was heard.
+    const heard = (s: string) => s.split(' ').map((word, i) => ({ word, start: i, end: i + 1 }));
+    assert.deepStrictEqual(withScriptPunctuation(heard('See views from every'), 'Sea views from every single mat.').map((w) => w.word), ['See', 'views', 'from', 'every']);
+    assert.deepStrictEqual(withScriptPunctuation(heard('Mats provided. See views from every'), 'Mats provided. Sea views from every mat.').map((w) => w.word), ['Mats', 'provided.', 'Sea', 'views', 'from', 'every']);
+    assert.deepStrictEqual(withScriptPunctuation(heard('Mats are kindly provided'), 'Mats are provided.').map((w) => w.word), ['Mats', 'are', 'kindly', 'provided.']);
     assert.deepStrictEqual(withScriptPunctuation(words, ''), words);
 });
 

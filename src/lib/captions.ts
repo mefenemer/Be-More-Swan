@@ -68,19 +68,30 @@ const sameWord = (heard: string, written: string) => heard === written || (heard
  * across two sentences ("breakdowns Brightside", the first sample render, 2026-11-01). The script is
  * what was spoken, so each word takes the matching script token's spelling — matched in order, and
  * only when the letters agree or differ by one in a word of 5+ letters (whisper wrote "Harbor" for
- * "Harbour Yoga"), so a word the speaker said differently keeps its own text. Pure.
+ * "Harbour Yoga"), so a word the speaker said differently keeps its own text.
+ *
+ * A short misheard word is caught by its neighbours instead: one unmatched word between two matched
+ * ones, with exactly one script token between theirs, is that token misheard ("Sea views" came back
+ * "See views" on the Harbour Yoga sample, 2026-11-02), so it takes the script's spelling. Pure.
  */
 export function withScriptPunctuation<W extends { word: string }>(words: W[], script: string | null | undefined): W[] {
     const tokens = String(script ?? '').split(/\s+/).filter(Boolean);
     if (!tokens.length) return words;
+    const at: number[] = [];   // the script token each word matched, or -1
     let j = 0;
-    return words.map((w) => {
+    for (const w of words) {
         const want = bare(w.word);
-        if (!want) return w;
+        let hit = -1;
         // Look a few tokens ahead: the transcript can drop or merge a word.
-        for (let k = j; k < Math.min(tokens.length, j + 4); k++) {
-            if (sameWord(want, bare(tokens[k]))) { j = k + 1; return { ...w, word: tokens[k] }; }
+        if (want) for (let k = j; k < Math.min(tokens.length, j + 4); k++) {
+            if (sameWord(want, bare(tokens[k]))) { hit = k; j = k + 1; break; }
         }
+        at.push(hit);
+    }
+    return words.map((w, i) => {
+        if (at[i] >= 0) return { ...w, word: tokens[at[i]] };
+        const before = at[i - 1] ?? -1, after = at[i + 1] ?? -1;
+        if (bare(w.word) && before >= 0 && after === before + 2) return { ...w, word: tokens[before + 1] };
         return w;
     });
 }
