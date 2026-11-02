@@ -19,7 +19,7 @@ import {
     assessProviders, classifyAnthropicError, readFalBalance, probeAnthropic, FAL_LOCK_PATTERN,
     readStabilityBalance, STABILITY_TRACK_CREDITS, DEFAULT_STABILITY_LOW_BALANCE_CREDITS,
     assessMediaFailures, type FalLockEvidence, type MediaFailureEvidence,
-    classifyOpenAiFailure, probeOpenAi,
+    classifyOpenAiFailure, probeOpenAi, readElevenLabsBalance,
 } from '../src/utils/provider-balance';
 import { dueForAlert } from '../netlify/functions/check-provider-balances';
 
@@ -238,6 +238,34 @@ async function main() {
         assert.deepStrictEqual(assessProviders(base), []);
         const fn = readFileSync(join(root, 'netlify/functions/check-provider-balances.ts'), 'utf8');
         assert.ok(fn.includes('probeOpenAi()') && fn.includes('mediaFailures, openai'), 'the OpenAI probe never reaches the rules');
+    });
+
+    await check('ElevenLabs balance: read, never throws, not_configured without a key', async () => {
+        const saved = process.env.ELEVENLABS_API_KEY;
+        delete process.env.ELEVENLABS_API_KEY;
+        assert.deepStrictEqual(await readElevenLabsBalance(), { status: 'not_configured' });
+        process.env.ELEVENLABS_API_KEY = 'el-test';
+        const boom = await readElevenLabsBalance((async () => { throw new Error('ECONNRESET'); }) as unknown as typeof fetch);
+        assert.strictEqual(boom.status, 'error');
+        const ok = await readElevenLabsBalance((async () => new Response(JSON.stringify({ character_count: 39000, character_limit: 40000, next_character_count_reset_unix: 1765000000 }))) as unknown as typeof fetch);
+        assert.deepStrictEqual(ok, { status: 'ok', remaining: 1000, limit: 40000, resetsAt: new Date(1765000000 * 1000).toISOString() });
+        const rejected = await readElevenLabsBalance((async () => new Response('', { status: 401 })) as unknown as typeof fetch);
+        assert.deepStrictEqual(rejected, { status: 'key_rejected', httpStatus: 401 });
+        if (saved === undefined) delete process.env.ELEVENLABS_API_KEY; else process.env.ELEVENLABS_API_KEY = saved;
+    });
+
+    await check('ElevenLabs empty/rejected is down, low is low, healthy/error/absent is quiet', () => {
+        const base = { fal: { status: 'ok', balance: 100, currency: 'USD' } as const, falEvidence: noEvidence, anthropic: { status: 'ok' } as const };
+        const el = (remaining: number) => ({ status: 'ok', remaining, limit: 40000, resetsAt: null } as const);
+        const sev = (p: ReturnType<typeof assessProviders>) => p.map(x => `${x.provider}:${x.severity}`);
+        assert.deepStrictEqual(sev(assessProviders({ ...base, elevenlabs: el(500) })), ['elevenlabs:down']);
+        assert.deepStrictEqual(sev(assessProviders({ ...base, elevenlabs: { status: 'key_rejected', httpStatus: 401 } })), ['elevenlabs:down']);
+        assert.deepStrictEqual(sev(assessProviders({ ...base, elevenlabs: el(5000) })), ['elevenlabs:low']);
+        assert.deepStrictEqual(assessProviders({ ...base, elevenlabs: el(30000) }), []);
+        assert.deepStrictEqual(assessProviders({ ...base, elevenlabs: { status: 'error', detail: 'x' } }), []);
+        assert.deepStrictEqual(assessProviders(base), []);
+        const fn = readFileSync(join(root, 'netlify/functions/check-provider-balances.ts'), 'utf8');
+        assert.ok(fn.includes('readElevenLabsBalance()') && fn.includes('elevenlabs, elevenLabsLowBalanceChars'), 'the ElevenLabs read never reaches the rules');
     });
 
     console.log(`\n${passed} checks passed`);

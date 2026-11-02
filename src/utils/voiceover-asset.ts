@@ -13,7 +13,7 @@ import { mediaGenerationJobs, contentAssets } from '../../db/schema';
 import { persistBufferToR2 } from '../lib/media-persist';
 import { logAiUsage } from './ai-usage';
 import { VOICEOVER_CREDIT_COST } from './ai-credits';
-import { TTS_MODEL, synthesizeSpeech, transcribeWords, voiceoverCostUsd, type SpokenWord, type VoiceId } from '../lib/tts';
+import { speakVoiceover, transcribeWords, voiceoverCostUsd, type SpokenWord, type VoiceId } from '../lib/tts';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -28,7 +28,7 @@ export interface VoiceoverAsset {
 export async function makeVoiceoverAsset(db: Db, args: {
     orgId: number; userId: number; script: string; voice: VoiceId; name: string; assistantId?: number | null;
 }): Promise<VoiceoverAsset> {
-    const mp3 = await synthesizeSpeech(args.script, args.voice);
+    const { mp3, provider, model } = await speakVoiceover(args.script, args.voice);
     let words: SpokenWord[] = [];
     let durationS: number | null = null;
     try {
@@ -40,18 +40,18 @@ export async function makeVoiceoverAsset(db: Db, args: {
     // media_type 'audio' + aspect 'none', as music — the table's CHECKs already allow both.
     const [job] = await db.insert(mediaGenerationJobs).values({
         organisationId: args.orgId, userId: args.userId, assistantId: args.assistantId ?? null, mediaType: 'audio',
-        prompt: args.script.slice(0, 1000), aspectRatio: 'none', model: TTS_MODEL, creditCost: VOICEOVER_CREDIT_COST, status: 'completed',
+        prompt: args.script.slice(0, 1000), aspectRatio: 'none', model, creditCost: VOICEOVER_CREDIT_COST, status: 'completed',
     }).returning({ id: mediaGenerationJobs.id });
     const [asset] = await db.insert(contentAssets).values({
         userId: args.userId, organisationId: args.orgId, name: args.name,
         assetType: 'audio', mimeType: 'audio/mpeg',
         fileSize: stored.fileSize, storageKey: stored.storageKey,
-        durationS, provider: 'openai', prompt: args.script,
+        durationS, provider, prompt: args.script,
         renderParams: { kind: 'voiceover', voice: args.voice, script: args.script, words },
         generationJobId: job.id, status: 'pending',
     }).returning({ id: contentAssets.id });
     await db.update(mediaGenerationJobs).set({ resultAssetIds: [asset.id], updatedAt: new Date() })
         .where(eq(mediaGenerationJobs.id, job.id)).catch(() => {});
-    void logAiUsage({ workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId ?? null, model: TTS_MODEL, inputTokens: 0, outputTokens: 0, costUsdOverride: voiceoverCostUsd(durationS), sessionId: 'voiceover' });
+    void logAiUsage({ workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId ?? null, model, inputTokens: 0, outputTokens: 0, costUsdOverride: voiceoverCostUsd(durationS, { provider, chars: args.script.length }), sessionId: 'voiceover' });
     return { assetId: asset.id, jobId: job.id, storageKey: stored.storageKey, durationS, words };
 }

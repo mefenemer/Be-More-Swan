@@ -26,6 +26,9 @@
 //           quota. So the probe is the call customers make: a one-character voiceover (a fraction of
 //           a cent). 429 `insufficient_quota` = out of money; any other 429 is rate limiting. Since
 //           2026-10-31 customer voiceovers (Video Producer plan, Phase 2) depend on it, not only the tour.
+// ElevenLabs — GET /v1/user/subscription: free, read-only, needs the key's "User" permission. Speaks
+//           the British woman since 2026-11-02. Empty or rejected, voiceovers fall back to OpenAI and
+//           still work — but the British voice comes out American, which is why it is still alerted.
 //
 // Every probe NEVER throws: a monitoring call that crashes is a monitor that reports "fine".
 
@@ -217,8 +220,41 @@ export async function probeOpenAi(fetchImpl: typeof fetch = fetch): Promise<Open
     }
 }
 
+export const ELEVENLABS_SUBSCRIPTION_URL = 'https://api.elevenlabs.io/v1/user/subscription';
+/** One full-length voiceover (VOICEOVER_MAX_CHARS). Below this, the next one may not fit. */
+export const ELEVENLABS_VOICEOVER_CHARS = 1200;
+/** Warn below this many characters left this month: ~20 thirty-second voiceovers. ELEVENLABS_LOW_BALANCE_CHARS overrides. */
+export const DEFAULT_ELEVENLABS_LOW_BALANCE_CHARS = 10_000;
+
+export type ElevenLabsBalance =
+    | { status: 'ok'; remaining: number; limit: number; resetsAt: string | null }
+    | { status: 'key_rejected'; httpStatus: number }
+    | { status: 'not_configured' }
+    | { status: 'error'; detail: string };
+
+export async function readElevenLabsBalance(fetchImpl: typeof fetch = fetch): Promise<ElevenLabsBalance> {
+    const key = process.env.ELEVENLABS_API_KEY;
+    if (!key) return { status: 'not_configured' };
+    try {
+        const res = await fetchImpl(ELEVENLABS_SUBSCRIPTION_URL, {
+            headers: { 'xi-api-key': key },
+            signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        });
+        if (res.status === 401 || res.status === 403) return { status: 'key_rejected', httpStatus: res.status };
+        if (!res.ok) return { status: 'error', detail: `HTTP ${res.status}` };
+        const data: any = await res.json().catch(() => null);
+        const used = Number(data?.character_count);
+        const limit = Number(data?.character_limit);
+        if (!Number.isFinite(used) || !Number.isFinite(limit)) return { status: 'error', detail: 'no character_count/character_limit in the response' };
+        const reset = Number(data?.next_character_count_reset_unix);
+        return { status: 'ok', remaining: Math.max(limit - used, 0), limit, resetsAt: Number.isFinite(reset) && reset > 0 ? new Date(reset * 1000).toISOString() : null };
+    } catch (err) {
+        return { status: 'error', detail: err instanceof Error ? err.message : String(err) };
+    }
+}
+
 export interface ProviderProblem {
-    provider: 'fal' | 'fal_media' | 'anthropic' | 'stability' | 'openai';
+    provider: 'fal' | 'fal_media' | 'anthropic' | 'stability' | 'openai' | 'elevenlabs';
     /** 'down' = customers are affected now; 'low' = they will be soon. */
     severity: 'down' | 'low';
     headline: string;
@@ -242,6 +278,9 @@ export function assessProviders(input: {
     mediaFailures?: MediaFailureEvidence[];
     /** Optional so existing callers and tests that predate voiceover are unchanged. */
     openai?: OpenAiProbe;
+    /** Optional so existing callers and tests that predate it are unchanged. */
+    elevenlabs?: ElevenLabsBalance;
+    elevenLabsLowBalanceChars?: number;
 }): ProviderProblem[] {
     const problems: ProviderProblem[] = [];
     const low = input.falLowBalanceUsd ?? DEFAULT_FAL_LOW_BALANCE_USD;
@@ -302,6 +341,21 @@ export function assessProviders(input: {
     } else if (input.openai?.status === 'key_rejected') {
         problems.push({ provider: 'openai', severity: 'down', headline: 'OpenAI rejected our API key — voiceovers are failing',
             lines: [`Speech endpoint answered HTTP ${input.openai.httpStatus}.`, 'Check OPENAI_API_KEY in the Netlify environment (every context).'] });
+    }
+    // ── ElevenLabs (the British woman's voice) ──────────────────────────────────────────────────
+    const el = input.elevenlabs;
+    const elLow = input.elevenLabsLowBalanceChars ?? DEFAULT_ELEVENLABS_LOW_BALANCE_CHARS;
+    const elFallback = 'Voiceovers in the British woman\'s voice fall back to OpenAI: they still work, but sound American.';
+    const elTopUp = 'Upgrade the plan or wait for the monthly reset at https://elevenlabs.io/app/subscription.';
+    if (el?.status === 'ok' && el.remaining < ELEVENLABS_VOICEOVER_CHARS) {
+        problems.push({ provider: 'elevenlabs', severity: 'down', headline: 'ElevenLabs characters are used up — the British voice is falling back to OpenAI',
+            lines: [`${el.remaining} of ${el.limit} characters left${el.resetsAt ? `; resets ${el.resetsAt}` : ''}.`, elFallback, elTopUp] });
+    } else if (el?.status === 'key_rejected') {
+        problems.push({ provider: 'elevenlabs', severity: 'down', headline: 'ElevenLabs rejected our API key — the British voice is falling back to OpenAI',
+            lines: [`Subscription endpoint answered HTTP ${el.httpStatus}.`, elFallback, 'Check ELEVENLABS_API_KEY in the Netlify environment (every context) and that the key has the "User" permission.'] });
+    } else if (el?.status === 'ok' && el.remaining < elLow) {
+        problems.push({ provider: 'elevenlabs', severity: 'low', headline: `ElevenLabs characters are low — ${el.remaining} left (~${Math.floor(el.remaining / 450)} voiceovers)`,
+            lines: [`Below the ${elLow}-character warning line${el.resetsAt ? `; resets ${el.resetsAt}` : ''}. A 30-second voiceover is about 450 characters.`, elFallback, elTopUp] });
     }
     problems.push(...assessMediaFailures(input.mediaFailures ?? []));
     return problems;

@@ -12,6 +12,11 @@
 //
 // The owner chose OpenAI over ElevenLabs on 2026-10-31: the key is already in use (guided tour), so
 // no new bill or balance. check-provider-balances probes it (provider-balance.ts probeOpenAi).
+// 2026-11-02: OpenAI could not sound like a British woman however the accent was described, so a
+// voice with an `elevenlabs` id is spoken by ElevenLabs (ELEVENLABS_API_KEY; ~3–6p a voiceover, the
+// owner kept it inside the 1-task weight). Any ElevenLabs failure falls back to the OpenAI speaker
+// and accent, so a voiceover is never lost — only its accent. Word timings stay with whisper for
+// both providers: one timing path, and it times the words that were actually spoken.
 //
 // Pure helpers are exported for tests; the two network calls never retry and throw TtsError.
 
@@ -19,6 +24,10 @@ export const TTS_MODEL = process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts';
 export const TRANSCRIBE_MODEL = 'whisper-1';
 const SPEECH_URL = 'https://api.openai.com/v1/audio/speech';
 const TRANSCRIBE_URL = 'https://api.openai.com/v1/audio/transcriptions';
+export const ELEVENLABS_MODEL = process.env.ELEVENLABS_TTS_MODEL ?? 'eleven_multilingual_v2';
+const ELEVENLABS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
+/** USD per 1,000 characters: Starter is $6 for 40,000. Recheck when the plan changes. */
+const ELEVENLABS_USD_PER_1K_CHARS = 0.15;
 
 /** ~80 seconds of speech at a natural pace — longer than any short-form video needs. */
 export const VOICEOVER_MAX_CHARS = 1200;
@@ -38,17 +47,14 @@ export const VOICES = [
     { id: 'alloy',   label: 'Neutral and steady' },
     { id: 'onyx',    label: 'Deep and confident' },
     { id: 'shimmer', label: 'Light and lively' },
-    { id: 'british_woman', label: 'British, warm (woman)', speaker: 'coral',
+    // ElevenLabs "Pepper", picked by ear (2026-11-02) after ten OpenAI women all came back American:
+    // a real British speaker, not an accent asked for. coral + accent is only the fallback.
+    { id: 'british_woman', label: 'British, warm (woman)', speaker: 'coral', elevenlabs: '6vIP9mPY4dr6w8krUg01',
       accent: 'Speak with a natural British English accent, as a woman from the south of England: warm and friendly, not posh.' },
     // Ballad, picked by ear from four trials (2026-11-02): the accent needs spelling out — a one-line
     // "London accent" note came back American.
     { id: 'london_man', label: 'London, laid-back (man)', speaker: 'ballad',
       accent: 'Accent: a strong, authentic London accent, Estuary English / modern working-class London, like a friendly young bloke from South or East London. Drop the H at the start of words ("\'arbour"), use glottal stops for T in the middle and end of words ("ge\'", "wha\'", "le\'s"), TH-fronting where it sounds natural ("fings", "wiv"), and London vowels ("toDAI" for today, "noime" for name). Relaxed, streetwise, cheeky and warm. Not posh, not BBC English, not American, never a cartoon Cockney.' },
-    // TEMPORARY (staging only): British woman trials, round 2. A `persona` replaces the delivery note.
-    ...(['marin', 'coral', 'nova', 'shimmer', 'alloy'] as const).map((s) => ({ id: `trial_w2_${s}` as const, label: `Trial British ${s}`, speaker: s,
-      persona: 'Voice: a woman in her thirties from the south of England, speaking natural modern British English, like a friendly presenter on BBC Radio 2. Not posh, but never American. Accent: British throughout. Non-rhotic, so no R sound at the end of words ("our" sounds like "ah", "here" like "hee-uh", "yourself" like "yaw-self"). British vowels: "latte" is "LAT-tay", "autumn" is "AW-tum", "pop" has a short rounded O, "roast" has the British "oh". Crisp T sounds. Tone: warm and upbeat, like recommending your favourite café to a friend. Delivery: a short promotional voiceover, conversational pace, a little energy on the first line.' })),
-    { id: 'trial_w2_marin_rp' as const, label: 'Trial British marin RP', speaker: 'marin',
-      persona: 'Voice: a warm, friendly English woman with a Received Pronunciation accent, like a BBC continuity announcer: polished but relaxed, smiling as she speaks. Strictly British English pronunciation, never American; non-rhotic, British vowels. Delivery: a short promotional voiceover for a neighbourhood café, conversational pace, a little energy on the first line.' },
 ] as const;
 export type VoiceId = typeof VOICES[number]['id'];
 export const DEFAULT_VOICE: VoiceId = 'coral';
@@ -108,9 +114,56 @@ export function spokenDuration(payload: unknown, words: SpokenWord[]): number | 
  * List-price cost of one voiceover in USD: speech ~$0.015/min of audio + transcription $0.006/min
  * (OpenAI's published per-minute estimates as last read; recheck when the bill disagrees). Pure.
  */
-export function voiceoverCostUsd(durationS: number | null): string {
+export function voiceoverCostUsd(durationS: number | null, spoken?: { provider: TtsProvider; chars: number }): string {
     const minutes = Math.max((durationS ?? 30) / 60, 1 / 60);
+    if (spoken?.provider === 'elevenlabs') return (spoken.chars / 1000 * ELEVENLABS_USD_PER_1K_CHARS + minutes * 0.006).toFixed(6);
     return (minutes * (0.015 + 0.006)).toFixed(6);
+}
+
+export type TtsProvider = 'openai' | 'elevenlabs';
+
+/** The ElevenLabs voice id for one of our voices, or null when OpenAI speaks it. Pure. */
+export function elevenLabsVoice(voice: VoiceId): string | null {
+    const v = VOICES.find((x) => x.id === voice) as { elevenlabs?: string } | undefined;
+    return v?.elevenlabs ?? null;
+}
+
+function classifyElevenLabs(status: number, body: string): TtsError {
+    if (status === 401 || status === 403) return new TtsError(`ElevenLabs rejected the key (HTTP ${status})`, 'key');
+    if (/quota_exceeded|insufficient|credits/i.test(body)) return new TtsError('ElevenLabs credits exhausted', 'quota');
+    return new TtsError(`ElevenLabs HTTP ${status}: ${body.slice(0, 200)}`);
+}
+
+/** Speak `text` with an ElevenLabs voice. Returns mp3 bytes. */
+export async function synthesizeElevenLabs(text: string, voiceId: string, fetchImpl: typeof fetch = fetch): Promise<Buffer> {
+    const key = process.env.ELEVENLABS_API_KEY;
+    if (!key) throw new TtsError('ElevenLabs is not configured.', 'not_configured');
+    const res = await fetchImpl(`${ELEVENLABS_URL}/${voiceId}?output_format=mp3_44100_128`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'xi-api-key': key },
+        // Settings the owner heard in the trials: a little expressive, true to the speaker.
+        body: JSON.stringify({ text, model_id: ELEVENLABS_MODEL, voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2 } }),
+        // Short enough that the OpenAI fallback still fits inside the request.
+        signal: AbortSignal.timeout(12_000),
+    });
+    if (!res.ok) throw classifyElevenLabs(res.status, await res.text().catch(() => ''));
+    return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Speak a voiceover with whichever provider owns the voice, falling back to OpenAI when ElevenLabs
+ * is missing or fails. Returns the audio and who made it, for the job row and the cost line.
+ */
+export async function speakVoiceover(text: string, voice: VoiceId, fetchImpl: typeof fetch = fetch): Promise<{ mp3: Buffer; provider: TtsProvider; model: string }> {
+    const eleven = elevenLabsVoice(voice);
+    if (eleven && process.env.ELEVENLABS_API_KEY) {
+        try {
+            return { mp3: await synthesizeElevenLabs(text, eleven, fetchImpl), provider: 'elevenlabs', model: ELEVENLABS_MODEL };
+        } catch (err) {
+            console.warn('[tts] ElevenLabs failed — speaking with OpenAI instead:', err instanceof Error ? err.message : err);
+        }
+    }
+    return { mp3: await synthesizeSpeech(text, voice, fetchImpl), provider: 'openai', model: TTS_MODEL };
 }
 
 function classify(status: number, body: string): TtsError {
@@ -122,10 +175,10 @@ function classify(status: number, body: string): TtsError {
 
 /** The OpenAI voice and delivery note for one of our voices. Pure. */
 export function voiceRequest(voice: VoiceId): { speaker: string; instructions: string } {
-    const v = VOICES.find((x) => x.id === voice) as { id: string; speaker?: string; accent?: string; persona?: string } | undefined;
+    const v = VOICES.find((x) => x.id === voice) as { id: string; speaker?: string; accent?: string } | undefined;
     return {
         speaker: v?.speaker ?? voice,
-        instructions: v?.persona ?? (v?.accent ? `${VOICEOVER_INSTRUCTIONS} ${v.accent}` : VOICEOVER_INSTRUCTIONS),
+        instructions: v?.accent ? `${VOICEOVER_INSTRUCTIONS} ${v.accent}` : VOICEOVER_INSTRUCTIONS,
     };
 }
 
