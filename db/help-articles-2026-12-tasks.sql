@@ -57,7 +57,7 @@ The pricing page lists everything else each plan includes — app connections, A
 
 ## One task allowance
 
-Since **17 October 2026** there is just one allowance. A task is **one finished piece of work** — a social post, a blog article, a lead search, an email or email flow, an outreach email, or a website audit or draft. A post that goes out to several platforms counts once. Work is counted only once it's delivered, so a failure or a retry never costs you a task.
+Since **17 October 2026** there is just one allowance. A task is **one finished piece of work** — a social post, a blog article, a lead search, an email or email flow, an outreach email, a website audit or draft, or the words for a printable flyer. A post that goes out to several platforms counts once. Work is counted only once it's delivered, so a failure or a retry never costs you a task.
 
 AI media comes out of the same allowance. An AI image is 1 task, an AI video or music track is 20, and a post to X with a link is 10. See [What Counts as a Task](#what-counts-as-a-task) for the full list.
 
