@@ -645,7 +645,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                     triggerKey: 'mentor_weekly_review', to: p.email,
                     vars: {
                         user: { first_name: p.firstName ?? '' }, assistant: { name }, workspace: { name: org?.name ?? '' },
-                        review: { summary, proposals: proposalsLine },
+                        review: { summary, proposals: proposalsLine, proposals_sentence: reviewProposalsSentence(recorded.length) },
                         // "Open my review" lands on the Mentor with this person's review chat open (workspace.html
                         // ?view=assistant-detail&chatSessionId=…) — not the bare dashboard it once went to.
                         link: { action_url: mentorReviewLink(base, mentor.id, sessions.get(p.userId) ?? null) },
@@ -661,6 +661,13 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
     }
 }
 
+
+/** Pure: the weekly review email's sentence about its suggestions — "There's one", never "There are 1". */
+export function reviewProposalsSentence(count: number): string {
+    if (count <= 0) return 'There are no suggestions this week.';
+    if (count === 1) return 'There’s one suggestion to look at, under Notifications ▸ Needs you.';
+    return `There are ${count} suggestions to look at, under Notifications ▸ Needs you.`;
+}
 
 /** Pure: where the weekly review email's "Open my review" button goes. */
 export function mentorReviewLink(base: string, mentorId: number, chatSessionId: number | null): string {

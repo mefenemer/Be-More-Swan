@@ -399,7 +399,8 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         bodyHtml: greet +
             p('{{assistant.name | "Your Business Mentor"}} has looked at your week in {{workspace.name | "your workspace"}} and compared it with your plan.') +
             p('<strong>{{review.summary}}</strong>') +
-            p('There are {{review.proposals | "no suggestions"}}. Nothing changes until you choose — the full review is in your chat with {{assistant.name | "your Mentor"}}, and its suggestions are under Notifications ▸ Needs you.') +
+            // review.proposals_sentence carries its own verb and plural (reviewProposalsSentence in mentor-review.ts).
+            p('{{review.proposals_sentence | "There are no suggestions this week."}} Nothing changes until you choose. The full review is in your chat with {{assistant.name | "your Mentor"}}.') +
             button('Open my review', 'link.action_url') + signoff,
     },
     {
