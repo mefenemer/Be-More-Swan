@@ -10,7 +10,7 @@
 // Run:  npx tsx tests/post-render.test.ts
 
 import assert from 'node:assert';
-import { frameMeta, frameMetaFromJson, renderableOverlays, MAX_RENDER_SECONDS, RENDER_FPS } from '../src/lib/post-render';
+import { frameMeta, frameMetaFromJson, renderableOverlays, MAX_RENDER_SECONDS, RENDER_FPS, shouldRetryRender, RETRY_RENDER_NEEDS_MS } from '../src/lib/post-render';
 import type { VideoBase } from '../src/lib/post-render';
 
 let passed = 0;
@@ -102,4 +102,12 @@ check('frameMetaFromJson rejects a partial or junk row so the caller recomputes'
     assert.equal(frameMetaFromJson({ width: 'wide', height: 1920, fps: 30, durationInFrames: 90 }), null);
 });
 
-console.log(`\n${passed}/10 passed`);
+check('a render is retried once, only for Remotion\'s missing-frame error, only with time for a whole render', () => {
+    const err = 'Compositor error: No frame found at position 5600 for source /tmp/x.mp4';
+    assert.strictEqual(shouldRetryRender(err, false, RETRY_RENDER_NEEDS_MS), true);
+    assert.strictEqual(shouldRetryRender(err, true, 10 * 60 * 1000), false, 'once');
+    assert.strictEqual(shouldRetryRender(err, false, RETRY_RENDER_NEEDS_MS - 1), false, 'no time left');
+    assert.strictEqual(shouldRetryRender('Out of memory', false, 10 * 60 * 1000), false, 'other errors are real');
+});
+
+console.log(`\n${passed}/11 passed`);

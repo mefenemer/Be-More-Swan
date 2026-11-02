@@ -17,7 +17,7 @@ import { contentAssets, organisations, postRenderJobs, scheduledPosts, scheduled
 import type { Overlay } from './overlay-geometry';
 import { renderableAudio } from './audio-overlays';
 import { isStillMotion, type StillMotion } from './still-motion';
-import { buildCaptionCues, captionAccent, type CaptionSource, type CaptionTrack, type SpokenWordLike } from './captions';
+import { buildCaptionCues, captionAccent, withScriptPunctuation, type CaptionSource, type CaptionTrack, type SpokenWordLike } from './captions';
 import { DEFAULT_TARGET_RATIO, editHasStills, readVideoEdit, renderableClips, resolveClipGain, resolveTrim } from './video-edit';
 import { reframeRatioFor } from '../utils/format-router';
 
@@ -259,9 +259,10 @@ export async function resolveCaptionTrack(db: Db, raw: unknown, orgId: number): 
         .where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
     const wordsById = new Map<number, SpokenWordLike[]>();
     for (const r of rows) {
-        const p = r.renderParams as { kind?: unknown; words?: unknown } | null;
+        const p = r.renderParams as { kind?: unknown; words?: unknown; script?: unknown } | null;
         if ((r.assetType ?? '').toLowerCase() !== 'audio' || p?.kind !== 'voiceover' || !Array.isArray(p.words)) continue;
-        wordsById.set(r.id, p.words as SpokenWordLike[]);
+        // The script's punctuation, so phrases break at sentence ends (captions.ts withScriptPunctuation).
+        wordsById.set(r.id, withScriptPunctuation(p.words as SpokenWordLike[], typeof p.script === 'string' ? p.script : null));
     }
     const sources: CaptionSource[] = overlays
         .filter(a => wordsById.has(a.assetId))
@@ -742,4 +743,16 @@ export async function queuePostRender(db: Db, opts: {
     }
 
     return { ok: true, jobId: job.id };
+}
+
+/** A whole render fits in what's left of the worker's poll window — the sample renders took 3–4 minutes. */
+export const RETRY_RENDER_NEEDS_MS = 5 * 60 * 1000;
+
+/**
+ * Retry a failed render once, and only for Remotion's intermittent "No frame found at position…",
+ * which hit two of six renders on 2026-11-01 on intact Pexels clips and passed on a second start.
+ * Any other error is real and goes straight to the reviewer. Pure.
+ */
+export function shouldRetryRender(error: string, alreadyRetried: boolean, msLeft: number): boolean {
+    return !alreadyRetried && /No frame found at position/.test(error) && msLeft >= RETRY_RENDER_NEEDS_MS;
 }

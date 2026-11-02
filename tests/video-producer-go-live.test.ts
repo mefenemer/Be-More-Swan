@@ -109,7 +109,7 @@ check('no Video Producer surface quotes credits any more', () => {
     assert.match(vpSchema, new RegExp(`an AI clip ${TASK_WEIGHTS.ai_video}`));
     const chat = read('netlify/functions/chat-orchestrator.ts');
     const route = chat.slice(chat.indexOf('    video_producer: {'), chat.indexOf('    website_assistant: {'));
-    assert.match(route, /AI clips \(\$\{TASK_WEIGHTS\.ai_video\} each/);
+    assert.match(route, /AI clips \(\$\{aiVideoPriceText\(\)\}, at most/, 'the price line follows per-second pricing');
     assert.doesNotMatch(route.replace(/\/\/.*$/gm, ''), /\bcredits?\b/i);
     assert.doesNotMatch(read('src/config/campaign-vocab.ts').match(/commission_video: \{[\s\S]*?\n    \},/)![0], /credit/i);
     assert.doesNotMatch(read('src/utils/team-messages.ts').match(/case 'commission_video':[\s\S]*?label: 'Open the video'/)![0], /credit/i);
@@ -168,6 +168,16 @@ check('its website page has its swan, and does not say "Included in every plan"'
     assert.ok(page.includes(note), 'assistant.html');
     assert.ok(read('scripts/seo/ai-readability.mjs').includes(note), 'the crawler copy says the same');
     assert.match(read('src/utils/ai-credits.ts'), /VIDEO_TIERS = \['buster', 'employee'\]/);
+});
+
+check('its sample videos are real files, for made-up businesses, with a poster each', () => {
+    const page = read('assistant.html');
+    const block = page.slice(page.indexOf('const SAMPLE_VIDEOS = {'), page.indexOf('function render('));
+    const files = [...block.matchAll(/(?:src|poster): '(\/videos\/samples\/video_producer\/[\w-]+\.(?:mp4|jpg))'/g)].map((m) => m[1]);
+    assert.ok(files.length >= 4, 'at least two videos, each with a poster');
+    for (const f of files) assert.ok(existsSync(join(root, f)), f);
+    assert.doesNotMatch(block, /__\w+_META__/, 'every card has its real length and voice');
+    assert.doesNotMatch(block, /Marmalade/, 'never the staging workspace the samples were made in');
 });
 
 console.log(`\n${passed} checks passed`);

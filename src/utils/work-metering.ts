@@ -31,7 +31,7 @@
 
 import { sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { TASK_WEIGHTS, type WorkKind } from '../config/task-weights';
+import { TASK_WEIGHTS, AI_VIDEO_TASKS_PER_SECOND, videoPricedBySecond, type WorkKind } from '../config/task-weights';
 import { getPeriodStart } from './atomic-cap-check';
 import { resolveTaskLimit } from './task-credit';
 
@@ -45,7 +45,14 @@ export const TASK_LIMIT_MESSAGE = 'Your monthly task allowance is used up, so th
 /** Tasks a running media job will cost once it finishes, by media_generation_jobs.media_type.
  *  ⚠️ Every weight is CAST: a bound parameter inside SUM(CASE …) has no type of its own, Postgres
  *  reads it as text, and SUM(text) does not exist (42883) — which made every capacity read throw. */
-const IN_FLIGHT_WEIGHT_SQL = sql`CASE media_type WHEN 'video' THEN ${TASK_WEIGHTS.ai_video}::int WHEN 'audio' THEN ${TASK_WEIGHTS.ai_music}::int ELSE ${TASK_WEIGHTS.ai_image}::int END`;
+export const inFlightWeightSql = () => sql`CASE media_type WHEN 'video' THEN ${inFlightVideoSql()} WHEN 'audio' THEN ${TASK_WEIGHTS.ai_music}::int ELSE ${TASK_WEIGHTS.ai_image}::int END`;
+
+/** A running clip's tasks: by its billed length when AI video is priced by the second (aiVideoTasks). */
+function inFlightVideoSql() {
+    return videoPricedBySecond()
+        ? sql`(CEIL(COALESCE(duration_seconds, 6))::int * ${AI_VIDEO_TASKS_PER_SECOND}::int)`
+        : sql`${TASK_WEIGHTS.ai_video}::int`;
+}
 
 export interface TaskUsage {
     hasPlan: boolean;
@@ -73,7 +80,7 @@ export async function getTaskUsage(db: Db, organisationId: number): Promise<Task
           COALESCE((SELECT task_count FROM usage_counters
                      WHERE organisation_id = ${organisationId} AND period_start = ${period} LIMIT 1), 0) AS used,
           COALESCE((SELECT bonus_tasks FROM task_bonus WHERE organisation_id = ${organisationId}), 0) AS bonus,
-          COALESCE((SELECT SUM(${IN_FLIGHT_WEIGHT_SQL}) FROM media_generation_jobs
+          COALESCE((SELECT SUM(${inFlightWeightSql()}) FROM media_generation_jobs
                      WHERE organisation_id = ${organisationId}
                        AND status IN ('queued', 'processing')
                        -- A job stuck for hours is dead, not in flight; don't let it block the org.

@@ -31,6 +31,8 @@
     planned: 'Storyboard ready. Check the scenes, then press “Make the video”.',
     building: 'Making the video — a few minutes. You can leave this page.',
     built: 'Made. It’s in the Review Queue waiting for your approval.',
+    // Not a project status: a built project whose post then failed its final render (postRenderStatus).
+    render_failed: 'Made, but the final render failed. Open it in the Review Queue to try the render again.',
     failed: 'Stopped.',
     cancelled: 'Cancelled.',
   };
@@ -201,7 +203,7 @@
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <p class="text-sm font-bold text-gray-900 break-words">${esc(v.title)}</p>
-            <p class="text-xs text-gray-600 mt-0.5">${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status] || v.status)}</p>
+            <p class="text-xs text-gray-600 mt-0.5">${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'render_failed' : v.status] || v.status)}</p>
             ${v.note ? `<p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mt-1.5">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>

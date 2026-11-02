@@ -493,6 +493,14 @@ let _loadToken = 0;
 // Which assistants have dated work of their own for the sidebar Calendar, and what kind — from the
 // same dashboard registry the assistant Calendar tab reads (assistant-calendar.js), so the two
 // calendars can never disagree about what a role puts on a date.
+// The assistants a person can pick or see in the legend: not archived. _assistants keeps every one,
+// archived included, so a post an archived assistant already published still has its name and colour
+// — but "Lux" and "Misty" were listed beside the live team in the legend and the filter, for
+// assistants My Assistants no longer shows (SWAN-10). Same rule as _globalExtraTargets below.
+function _liveAssistants() {
+    return _assistants.filter((a) => a.lifecycleStatus !== 'archived' && a.status !== 'cancelled');
+}
+
 function _globalExtraTargets(list) {
     const reg = window.AssistantDashboardRegistry;
     if (!reg || !Array.isArray(list)) return [];
@@ -811,7 +819,7 @@ function _paintAssistantPicker() {
             ${on ? '<svg class="w-4 h-4 text-gray-700 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' : ''}
           </button>`;
     };
-    const sorted = [..._assistants].sort((x, y) => String(x.name || '').localeCompare(String(y.name || '')));
+    const sorted = _liveAssistants().sort((x, y) => String(x.name || '').localeCompare(String(y.name || '')));
     list.innerHTML = row(null) + sorted.map(row).join('');
 
     if (!btn.dataset.bound) {
@@ -871,11 +879,12 @@ function _renderAssistantControls() {
 
     const legend = document.getElementById('cal-legend');
     if (legend) {
-        legend.innerHTML = _assistants.map(a =>
+        const live = _liveAssistants();
+        legend.innerHTML = live.map(a =>
             `<span class="inline-flex items-center gap-1.5 text-xs text-gray-500">
                 <span class="w-2.5 h-2.5 rounded-full" style="background:${_assistantColor(a.id)}"></span>${_escHtml(a.name || ('Assistant #' + a.id))}
             </span>`).join('');
-        legend.classList.toggle('hidden', _lockedAssistant || _assistants.length === 0);
+        legend.classList.toggle('hidden', _lockedAssistant || live.length === 0);
     }
 
     _renderStatusLegend();
@@ -1481,14 +1490,17 @@ function _awaitingChip(group, viewType) {
             aria-label="${time} · ${_escHtml(platLabel)} · ${label}: ${_escHtml(caption.substring(0, 80))}">
             ${multi ? _multiAvatar(36) : _platAvatar(post.platform, 36)}
             <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
+                <!-- The pill sits in the header row, not in a column of its own: at 375px that column
+                     squeezed the post text to ~110px ("It's 11pm and …") and wrapped the hint over four
+                     lines while the rest of the card stood empty (SWAN-12). -->
+                <div class="flex flex-wrap items-center gap-2 mb-1">
                     <span class="text-sm font-extrabold text-gray-900">${_escHtml(multi ? 'Multiple' : platLabel)}</span>
                     <span class="text-xs font-bold text-gray-500">${time}</span>
+                    <span class="ml-auto text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-800 border-amber-300 shrink-0">${label}</span>
                 </div>
                 <p class="text-sm text-gray-600 truncate">${_escHtml(caption.substring(0, 120) || '(No caption)')}</p>
                 <p class="text-xs text-gray-600 mt-1">Not booked yet — open it to approve it for this time.</p>
             </div>
-            <span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-50 text-amber-800 border-amber-300 shrink-0 mt-1">${label}</span>
         </div>`;
     }
     return `<div role="button" tabindex="0" data-cal-activate

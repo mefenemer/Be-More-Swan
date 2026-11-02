@@ -25,10 +25,11 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import {
-    submitVideo, submitFramedVideo, imageToVideoEnabled, imageToVideoInput, I2V_MODEL, falConfigured, ASPECT_RATIOS, VIDEO_DURATIONS,
+    submitVideo, submitFramedVideo, imageToVideoEnabled, imageToVideoInput, billedSecondsFor, I2V_MODEL, falConfigured, ASPECT_RATIOS, VIDEO_DURATIONS,
     FalContentPolicyError, FalError, type AspectRatio, type VideoDurationSeconds,
 } from '../../src/lib/fal-gateway';
 import { holdCredits, settleHold, tierCanGenerateVideo, VIDEO_CREDIT_COST } from '../../src/utils/ai-credits';
+import { aiVideoTasks } from '../../src/config/task-weights';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const PROMPT_MAX = 1000;
@@ -146,7 +147,7 @@ export default withLambda(async (event) => {
     }
 
     // Hold 5 credits; insufficient → 402 with upgrade CTA payload.
-    const hold = await holdCredits(db, { orgId, amount: VIDEO_CREDIT_COST, mediaType: 'video' });
+    const hold = await holdCredits(db, { orgId, amount: VIDEO_CREDIT_COST, mediaType: 'video', tasks: aiVideoTasks(billedSecondsFor(durationSeconds)) });
     if (!hold.ok) {
         return { statusCode: 402, body: JSON.stringify({ error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit }) };
     }

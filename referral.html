@@ -147,7 +147,7 @@
     <div class="max-w-2xl mx-auto">
         <h2 class="text-3xl md:text-4xl font-extrabold mb-4 tracking-tight">Ready to share the calm?</h2>
         <p class="opacity-90 leading-relaxed mb-8 text-lg">
-            Log in to grab your unique link, or join Be More Swan today — your referral dashboard is waiting inside your workspace.
+            <a href="/login.html?redirect=%2Fworkspace.html%3Fview%3Dreferral" class="underline font-semibold">Log in</a> to grab your unique link, or join Be More Swan today — your referral dashboard is waiting inside your workspace.
         </p>
         <a href="register.html" onclick="refStart(event)" class="btn-assistant inline-block px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">
             Generate My Referral Link
@@ -175,12 +175,15 @@
             return payload.exp && payload.exp * 1000 > Date.now();
         } catch { return false; }
     }
+    // Members land ON the referral dashboard, not the workspace's front page, and a login keeps that
+    // destination through the magic link (SWAN-13). verify.ts honours a same-site `redirect`.
+    const REFERRAL_VIEW = '/workspace.html?view=referral';
     function refStart(ev) {
         if (ev && ev.preventDefault) ev.preventDefault();
-        if (isLoggedIn()) { window.location.href = 'workspace.html'; return; }
+        if (isLoggedIn()) { window.location.href = REFERRAL_VIEW; return; }
         let known = false;
         try { known = localStorage.getItem('bms_known_user') === '1'; } catch (e) {}
-        window.location.href = known ? 'login.html' : 'register.html';
+        window.location.href = known ? `/login.html?redirect=${encodeURIComponent(REFERRAL_VIEW)}` : 'register.html';
     }
 
     async function loadComponent(id, path) {

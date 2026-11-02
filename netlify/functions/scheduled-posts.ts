@@ -25,6 +25,7 @@ import { PLATFORM_FORMATS } from '../../src/config/platform-formats';
 import { keepDisclosureOnCaption } from '../../src/utils/post-disclosure';
 import { requesterNamesForJobIds, requesterNamesForVideoPosts } from '../../src/utils/requested-by';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { notFromArchivedAssistant } from '../../src/utils/archived-assistant-drafts';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -139,7 +140,8 @@ export default withLambda(async (event) => {
                         status: scheduledPosts.status, publishDate: scheduledPosts.publishDate,
                         assistantId: scheduledPosts.assistantId, crosspostGroupId: scheduledPosts.crosspostGroupId,
                     }).from(scheduledPosts)
-                        .where(and(inRange, inArray(scheduledPosts.status, [...AWAITING_REVIEW_STATUSES])))
+                        // Not an archived assistant's leftovers (src/utils/archived-assistant-drafts.ts).
+                        .where(and(inRange, inArray(scheduledPosts.status, [...AWAITING_REVIEW_STATUSES]), notFromArchivedAssistant()))
                     : Promise.resolve([]),
             ]);
             // A failed post carries its plain-English cause, so the chip can say WHY without the

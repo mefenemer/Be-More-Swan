@@ -1163,6 +1163,18 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        // The 30 days' notice (terms 5.2 / 20.2) for AI video priced by the second
+        // (docs/ai-video-per-second-notice.md). Nothing sends it automatically; the date is in the
+        // copy because the notice is the record of when the change was announced.
+        templateKey: 'ai_video_per_second_notice',
+        name: 'AI video will count by length',
+        category: 'Billing',
+        type: 'ai_video_per_second_notice',
+        title: 'From 3 December, AI video clips count by their length',
+        message: 'From 3 December 2026, an AI video clip counts as 4 tasks for each second of video instead of 20 for any clip: a 5-second clip stays 20, a 10-second clip becomes 40, and shorter clips use fewer. Stock footage, your own pictures and branded cards still use none, and your assistants always show what a video will use first. If your plan doesn\'t include AI video, nothing changes. The updated terms take effect the same day.',
+        variables: [],
+    },
+    {
         templateKey: 'social_disconnected',
         name: 'Connection disconnected',
         category: 'Connections',

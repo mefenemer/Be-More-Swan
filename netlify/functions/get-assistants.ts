@@ -12,6 +12,7 @@ import { summariseGoals, pickHeadlineGoal, type GoalSummary } from '../../src/ut
 import { getGoalMetric } from '../../src/config/goal-metrics';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { ensureMentor } from '../../src/utils/mentor-provision';
+import { awaitingReview, reviewCardKey } from '../../src/utils/awaiting-review';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -68,7 +69,7 @@ export default withLambda(async (event) => {
         const periodStart = roiPeriodStart(period);
 
         // Run goals + post metrics + hourly rate in parallel
-        const [goalRows, postRows, recordRows, blogRows, newsletterRows, activeJobRows, profileRow, mult, roiByAssistant] = await Promise.all([
+        const [goalRows, postRows, recordRows, blogRows, newsletterRows, activeJobRows, profileRow, mult, roiByAssistant, awaitingCardRows] = await Promise.all([
             // SMART Goals AC2.1.1 — the goal block on the dashboard / My Assistants card.
             //
             // Selects the ROWS rather than a GROUP BY tally. The card shows one headline goal with a
@@ -224,6 +225,22 @@ export default withLambda(async (event) => {
                 assistantIds,
                 windowStart: periodStart,
             }),
+            // Social posts waiting for review, per assistant, counted as the Review Queue counts them:
+            // one per CARD, over the same statuses (src/utils/awaiting-review.ts). Was pending_approval
+            // ROWS from postRows above, which put "62" on the Dashboard beside 83 in Review (SWAN-4).
+            assistantIds.length > 0
+                ? db.select({
+                    assistantId: scheduledPosts.assistantId,
+                    c: sql<number>`count(DISTINCT ${reviewCardKey})::int`,
+                  })
+                  .from(scheduledPosts)
+                  .where(and(
+                      eq(scheduledPosts.organisationId, orgId),
+                      inArray(scheduledPosts.assistantId, assistantIds),
+                      awaitingReview(),
+                  ))
+                  .groupBy(scheduledPosts.assistantId)
+                : Promise.resolve([] as { assistantId: number | null; c: number }[]),
         ]);
 
         // --- Goals summary + headline goal ---
@@ -304,9 +321,9 @@ export default withLambda(async (event) => {
                 m.totalPublished += r.c;
                 m.byPlatform[p].published += r.c;
             }
-            if (r.status === 'pending_approval') {
-                pendingReviewCount.set(aId, (pendingReviewCount.get(aId) || 0) + r.c);
-            }
+        }
+        for (const r of awaitingCardRows) {
+            if (r.assistantId != null && r.c) pendingReviewCount.set(r.assistantId, (pendingReviewCount.get(r.assistantId) || 0) + Number(r.c));
         }
 
         // --- Record metrics per assistant (data-hub roles) ---
@@ -364,6 +381,10 @@ export default withLambda(async (event) => {
         // mid-publish state ('publishing' / 'sending'). Those are transient — a card that dropped
         // them would show a post as neither waiting nor out.
         const LONGFORM_IN_FLIGHT = new Set([...SCHEDULED_STATUSES, 'publishing', 'sending']);
+        const LONGFORM_AWAITING = {
+            blog: new Set(['draft', 'pending_approval', 'in_review']),
+            newsletter: new Set(['pending_approval', 'in_review']),
+        };
         type LongformMetric = { kind: 'blog' | 'newsletter'; total: number; inFlight: number; delivered: number };
         const longformMetrics = new Map<number, LongformMetric>();
 
@@ -390,8 +411,10 @@ export default withLambda(async (event) => {
 
                 // Same fix the records loop above applies: the status pill's "Awaiting Human
                 // Review" sub-state read pending_approval POSTS only, so a Blog Writer with a
-                // dozen drafts waiting on a human said "Idle".
-                if (r.status === 'pending_approval') {
+                // dozen drafts waiting on a human said "Idle". The statuses are the ones the Review
+                // Queue lists under To approve (RQ_BLOG_STATUSES / RQ_EMAIL_STATUSES in
+                // workspace.html), so "32 Mira · Blogs" no longer sits beside 39 in Review (SWAN-4).
+                if ((kind === 'blog' ? LONGFORM_AWAITING.blog : LONGFORM_AWAITING.newsletter).has(r.status)) {
                     pendingReviewCount.set(r.assistantId, (pendingReviewCount.get(r.assistantId) || 0) + r.c);
                 }
             }

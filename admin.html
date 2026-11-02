@@ -2311,6 +2311,17 @@
         </div>
       </section>
 
+      <!-- ── Broadcast (a reviewed notice to every customer, once each) ──────── -->
+      <section id="view-broadcast" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="mb-6">
+          <h2 class="text-lg font-extrabold text-gray-900">Broadcast</h2>
+          <p class="text-sm text-gray-500 mt-0.5">Send a notice to every customer: an in-app notification and an email, once each. Only notices written and reviewed in code can be sent (src/utils/broadcast.ts). Anyone who already has a notice is skipped, so sending again only reaches people who missed it.</p>
+        </div>
+        <div id="bc-status" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
+        <div id="bc-mode" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
+        <div id="bc-list" class="space-y-6"><p class="text-sm text-gray-400">Loading&hellip;</p></div>
+      </section>
+
       <!-- ── What's New Emails (Comms) ───────────────────────────────────────
            The weekly product-update email (docs/weekly-product-update.md). A Claude task on the
            founder's Mac uploads a draft each week; nothing reaches customers until an admin presses
@@ -3352,6 +3363,7 @@ const VIEW_LABELS = {
   'blueprint-inspector': 'Blueprint Inspector', sandbox: 'Sandbox Environment',
   'email-templates': 'Manage Emails', 'notification-templates': 'Notification Templates',
   'send-notification': 'Send a Message',
+  broadcast: 'Broadcast',
   'product-updates': "What's New Emails",
   systems: 'Systems & Connections',
   'issue-reports': 'Fix pipeline', 'feature-roadmap': 'Feature Requests',
@@ -3454,6 +3466,7 @@ const ADMIN_CATS = {
     { view: 'email-templates',        icon: '✉️', label: 'Manage Emails',          perm: 'manage_comms_templates' },
     { view: 'notification-templates', icon: '🔔', label: 'Notification Templates', perm: 'manage_comms_templates' },
     { view: 'send-notification',      icon: '📨', label: 'Send a Message',         perm: 'manage_comms_templates' },
+    { view: 'broadcast',              icon: '📣', label: 'Broadcast',              perm: 'manage_comms_templates' },
     { view: 'product-updates',        icon: '🆕', label: "What's New Emails",      perm: 'manage_comms_templates' },
   ]},
   // Security and Compliance were two rail entries holding five pages between them,
@@ -3799,6 +3812,7 @@ function adminNav(view) {
   if (view === 'email-templates')     loadEmailTemplates();
   if (view === 'notification-templates') loadNotificationTemplates();
   if (view === 'send-notification')   resetSendNotification();
+  if (view === 'broadcast')           loadBroadcasts();
   if (view === 'issue-reports')       loadIssueReports();
   if (view === 'feature-roadmap')     loadFeatureRoadmap();
   if (view === 'swan-queue')          loadSwanQueue();
@@ -4300,6 +4314,101 @@ function showNtStatus(kind, msg) {
   el.classList.remove('hidden');
 }
 function hideNtStatus() { document.getElementById('nt-status').classList.add('hidden'); }
+
+// ── Broadcast (a reviewed notice to every customer, once each) ───────────────
+// admin-broadcast.ts does the checking; this page shows the copy, the counts, a test send to
+// yourself, and a send that only fires when you type the number waiting (the server re-checks it).
+const BC_API = '/.netlify/functions/admin-broadcast';
+const bcEsc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function showBcStatus(kind, msg) {
+  const el = document.getElementById('bc-status');
+  el.textContent = msg;
+  el.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' + (kind === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700');
+  el.classList.remove('hidden'); el.style.display = 'block';
+}
+
+async function loadBroadcasts() {
+  const list = document.getElementById('bc-list');
+  if (!list) return;
+  list.innerHTML = '<p class="text-sm text-gray-400">Loading&hellip;</p>';
+  let d;
+  try {
+    const res = await fetch(`${BC_API}?resource=list`);
+    d = await res.json();
+    if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+  } catch (err) {
+    list.innerHTML = `<p class="text-sm text-rose-600">${bcEsc(err.message || 'Could not load the notices.')}</p>`;
+    return;
+  }
+  const mode = document.getElementById('bc-mode');
+  mode.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' + (d.emailsGoToCustomers ? 'bg-amber-50 text-amber-800' : 'bg-sky-50 text-sky-800');
+  mode.textContent = d.emailsGoToCustomers
+    ? 'This is the live site: sending emails every customer listed below.'
+    : `This is not the live site: in-app notices are written to this database, but no customer is emailed. "Send a test to me" emails ${d.you} only.`;
+  mode.classList.remove('hidden'); mode.style.display = 'block';
+
+  list.innerHTML = d.broadcasts.map((b) => `
+    <div class="border border-gray-200 rounded-xl p-5 bg-white" data-bc="${bcEsc(b.key)}">
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+        <div class="min-w-0">
+          <p class="font-extrabold text-gray-900">${bcEsc(b.label)}</p>
+          <p class="text-xs text-gray-500 mt-0.5">${bcEsc(b.purpose)}</p>
+        </div>
+        <div class="text-right text-sm shrink-0">
+          <p><strong>${b.waiting}</strong> waiting</p>
+          <p class="text-xs text-gray-500">${b.alreadySent} already have it</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div>
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">In-app</p>
+          ${b.inApp ? `<div class="bg-gray-50 border border-gray-200 rounded-lg p-3"><p class="text-sm font-bold text-gray-900">${bcEsc(b.inApp.title)}</p><p class="text-sm text-gray-600 mt-1">${bcEsc(b.inApp.message)}</p></div>` : '<p class="text-sm text-rose-600">No in-app template with this key.</p>'}
+        </div>
+        <div>
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Email${b.email ? ': ' + bcEsc(b.email.subject) : ''}</p>
+          ${b.email ? '<iframe class="bc-email w-full h-80 border border-gray-200 rounded-lg bg-white" title="Email preview"></iframe>' : '<p class="text-sm text-rose-600">No email template with this key.</p>'}
+        </div>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 mt-4">
+        <button type="button" class="bc-test btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Send a test to me</button>
+        <input type="text" inputmode="numeric" class="bc-confirm w-28 border border-gray-300 rounded-lg px-2 py-2 text-sm" placeholder="Type ${b.waiting}" aria-label="Type the number waiting to confirm" ${b.waiting ? '' : 'disabled'}>
+        <button type="button" class="bc-send btn-golive px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled>Send to ${b.waiting} ${b.waiting === 1 ? 'person' : 'people'}</button>
+      </div>
+    </div>`).join('') || '<p class="text-sm text-gray-400">No notices are set up for broadcast.</p>';
+
+  // Set srcdoc as a property after render: an attribute would need the whole email HTML escaped,
+  // and a sandboxed srcdoc frame renders blank in Edge.
+  d.broadcasts.forEach((b) => {
+    const card = list.querySelector(`[data-bc="${CSS.escape(b.key)}"]`);
+    if (!card) return;
+    const frame = card.querySelector('.bc-email');
+    if (frame && b.email) frame.srcdoc = b.email.html;
+    const input = card.querySelector('.bc-confirm');
+    const send = card.querySelector('.bc-send');
+    input.addEventListener('input', () => { send.disabled = input.value.trim() !== String(b.waiting) || b.waiting === 0; });
+    card.querySelector('.bc-test').addEventListener('click', (e) => runBroadcast(e.currentTarget, 'test', { key: b.key }));
+    send.addEventListener('click', (e) => runBroadcast(e.currentTarget, 'send', { key: b.key, expected: b.waiting }));
+  });
+}
+
+async function runBroadcast(btn, resource, payload) {
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${BC_API}?resource=${resource}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) { showBcStatus('error', d.error || `That didn't work (HTTP ${res.status}).`); if (res.status === 409) loadBroadcasts(); return; }
+    if (resource === 'test') showBcStatus('success', `Test sent to you: in-app ${d.inApp ? 'added' : 'not added'}, email ${d.emailed ? 'sent to ' + d.to : 'not sent'}.`);
+    else showBcStatus('success', d.emailsGoToCustomers
+      ? `Sending to ${d.waiting} people. It runs in the background; refresh this page to watch the count fall.`
+      : `Writing in-app notices for ${d.waiting} people on this database. No customer emails are sent from here.`);
+    setTimeout(loadBroadcasts, 4000);
+  } catch (err) {
+    showBcStatus('error', err.message || 'That didn\'t work.');
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 // ── Send a Message (ad-hoc admin → user in-app notification) ─────────────────
 // The section next door edits the COPY of automated notifications; this one actually inserts

@@ -17,7 +17,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitiseVideoEdit, editHasStills, editChangesMedia, MAX_STILL_HOLD_S } from '../src/lib/video-edit';
 import { renderFingerprint } from '../src/lib/post-render';
-import { readBrief, sceneClips, sceneOverlays, buildTasks, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
+import { readBrief, sceneClips, sceneOverlays, buildTasks, onScreenFontPct, scriptOverBudget, aiClipSeconds, AI_CLIP_ATTEMPTS, AI_CLIP_ATTEMPT_MS, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
 import { enforceStoryboard, type VideoBrief } from '../src/lib/storyboard';
 import { captionLayout } from '../src/lib/captions';
 
@@ -108,6 +108,9 @@ check('on-screen text is timed to its scene and sits clear of the captions', () 
     assert.deepStrictEqual([ov[0].startS, ov[0].endS], [0, 3]);
     // Captions are drawn upward from bottomPct; overlays sit in the upper third.
     assert.ok(ov[0].y < 1 - captionLayout(1920).bottomPct / 100 - 0.2);
+    // A branded card shows its words as the card's headline — never overlaid a second time.
+    const card = { ...storyboard.scenes[0], id: 'c1', source: 'brand_card' as const, onScreenText: 'Pop in this week' };
+    assert.strictEqual(sceneOverlays([card], [3]).length, 0);
 });
 
 check('a build holds the task weights it will record: AI clip 20, AI image 1, voiceover 1', () => {
@@ -136,6 +139,87 @@ check('the SQL file and the Drizzle mirror agree on the table', () => {
         assert.ok(sql.includes(col) && schema.includes(`"${col}"`), col);
     }
     assert.ok(sql.includes("CHECK (status IN ('draft', 'planning', 'planned', 'building', 'built', 'failed', 'cancelled'))"));
+});
+
+check('stock is searched portrait first (9:16 video), any shape only when portrait finds nothing', () => {
+    const vp = readFileSync(join(root, 'src/utils/video-producer.ts'), 'utf8');
+    assert.match(vp, /searchUniqueVideos\(db, orgId, context, \{ \.\.\.opts, orientation: 'portrait' \}\)\)\.candidates\)\s*\?\? longEnough\(\(await searchUniqueVideos\(db, orgId, context, opts\)\)\.candidates\)/);
+    assert.match(vp, /searchUniqueImages\(db, orgId, context, \{ \.\.\.opts, orientation: 'portrait' \}\)/);
+    const px = readFileSync(join(root, 'src/utils/pexels.ts'), 'utf8');
+    assert.match(px, /\.\.\.\(orientation \? \{ orientation \} : \{\}\)/, 'sent to Pexels');
+    assert.match(px, /\$\{orientation \? `\|\$\{orientation\}` : ''\}/, 'part of the cache key');
+});
+
+check('on-screen text shrinks to fit one line of a 9:16 frame', () => {
+    assert.strictEqual(onScreenFontPct('New this autumn'), 0.05);
+    const long = 'Yellow flame? Get it checked';
+    const pct = onScreenFontPct(long);
+    assert.ok(pct < 0.05);
+    assert.ok(long.length * 0.5 * pct <= 0.9 * 9 / 16 + 1e-9, 'fits ~90% of the frame width');
+    assert.strictEqual(onScreenFontPct('x'.repeat(200)), 0.028, 'never unreadably small');
+    assert.strictEqual(sceneOverlays([{ ...storyboard.scenes[0], id: 'l', source: 'stock_video' as const, onScreenText: long }], [3])[0].fontSizePct, pct);
+});
+
+check('a stock clip is only used when it covers its scene; otherwise the scene becomes a moving still', () => {
+    const vp = readFileSync(join(root, 'src/utils/video-producer.ts'), 'utf8');
+    assert.match(vp, /const need = scene\.targetS \+ 0\.3;/);
+    assert.match(vp, /cs\.find\(\(x\) => \(x\.duration \?\? 0\) >= need\)/, 'unknown length counts as too short');
+    assert.match(vp, /return photo \? \{ \.\.\.photo, asStill: true \} : null;/);
+    assert.match(vp, /storyboard\.scenes\[i\] = \{ \.\.\.scene, source: 'stock_photo'/, 'the storyboard says what it became, so the timeline holds it');
+    const px = readFileSync(join(root, 'src/utils/pexels.ts'), 'utf8');
+    assert.match(px, /Number\(v\?\.duration\) > 0 \? \{ duration: Number\(v\.duration\) \}/);
+    assert.match(px, /durationS: candidate\.duration/);
+});
+
+check('a script more than a fifth over its length is planned once more, told how many words to cut', () => {
+    const words = (n: number) => Array.from({ length: n }, () => 'word').join(' ');
+    const sb = (n: number) => ({ ...storyboard, scenes: [{ ...storyboard.scenes[0], voiceover: words(n) }] });
+    const b30 = { ...brief, lengthS: 30 as const, voiceover: true };
+    assert.strictEqual(scriptOverBudget(sb(80) as any, b30), null, '75-word budget, 80 is within a fifth');
+    assert.deepStrictEqual(scriptOverBudget(sb(100) as any, b30), { words: 100, budget: 75 });
+    assert.strictEqual(scriptOverBudget(sb(100) as any, { ...b30, voiceover: false }), null, 'no voiceover, no budget');
+    const vp = readFileSync(join(root, 'src/utils/video-producer.ts'), 'utf8');
+    assert.match(vp, /const over = scriptOverBudget\(storyboard, brief\);\s*if \(over\) \{/);
+    assert.match(vp, /\(scriptOverBudget\(again\.storyboard, brief\)\?\.words \?\? 0\) < over\.words/, 'only a shorter retry replaces it');
+});
+
+check('an AI clip covers the scene\'s spoken length, with the stock margin, in lengths the model makes', () => {
+    const v3 = 'fal-ai/kling-video/v3/pro/image-to-video';
+    const v25 = 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video';
+    // Kling v3: exactly what the line needs, rounded up, 3–15 s.
+    assert.strictEqual(aiClipSeconds(6.4, v3), 7, 'the plumbing sample\'s noise scene');
+    assert.strictEqual(aiClipSeconds(2, v3), 3);
+    assert.strictEqual(aiClipSeconds(4.7, v3), 5);
+    assert.strictEqual(aiClipSeconds(20, v3), 15);
+    // Kling v2.x makes 5 or 10 — a "6" request was a 5 s clip.
+    assert.strictEqual(aiClipSeconds(4.7, v25), 5);
+    assert.strictEqual(aiClipSeconds(4.8, v25), 10, '4.8 + 0.3 is past a 5 s clip');
+    // Hailuo text-to-video (image-to-video off): 6 or 10.
+    assert.strictEqual(aiClipSeconds(5.7, 'off'), 6);
+    assert.strictEqual(aiClipSeconds(5.8, 'off'), 10);
+    assert.match(read('src/utils/video-producer.ts'), /durationSeconds: aiClipSeconds\(scene\.targetS\),/);
+});
+
+check('a build makes its AI clips at the same time, with the other scenes alongside', () => {
+    const src = read('src/utils/video-producer.ts');
+    const build = src.slice(src.indexOf('export async function buildProject('), src.indexOf('export const STUCK_AFTER_MS'));
+    assert.match(build, /const others = \(async \(\) => \{ for \(const i of todo\) if \(storyboard\.scenes\[i\]\.source !== 'ai_video'\) await makeScene\(i\); \}\)\(\);/,
+        'the other scenes one by one (they share exclude)');
+    assert.match(build, /await Promise\.all\(\[\.\.\.todo\.filter\(\(i\) => storyboard\.scenes\[i\]\.source === 'ai_video'\)\.map\(makeScene\), others\]\);/);
+    const after = build.slice(build.indexOf('map(makeScene), others]);'));
+    assert.ok(after.indexOf('await save({});') < after.indexOf('const missing'), 'one save after the parallel batch');
+});
+
+check('a stuck AI clip is cancelled at Fal and tried once more from the same picture, inside the worker ceiling', () => {
+    const src = read('src/utils/video-producer.ts');
+    assert.strictEqual(AI_CLIP_ATTEMPTS, 2);
+    assert.ok(AI_CLIP_ATTEMPTS * AI_CLIP_ATTEMPT_MS + 90_000 < 15 * 60 * 1000, 'two attempts + the voiceover fit 15 minutes');
+    assert.ok(AI_CLIP_ATTEMPT_MS > 4.5 * 60 * 1000, 'longer than the slowest bake-off clip (4 m 25 s)');
+    const clip = src.slice(src.indexOf("case 'ai_video': {"), src.indexOf('export async function buildProject('));
+    assert.match(clip, /await falCancel\(tried\.statusUrl\);/);
+    assert.match(clip, /startImageUrl: frameUrl/);
+    assert.match(clip, /frameUrl \?\?= tried\.frameUrl;/);
+    assert.match(read('src/lib/fal-gateway.ts'), /statusUrl\.replace\(\/\\\/status\$\/, '\/cancel'\), \{ method: 'PUT'/);
 });
 
 console.log(`\n${passed} checks passed`);

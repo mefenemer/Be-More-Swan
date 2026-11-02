@@ -27,13 +27,14 @@ import { ART_DIRECTION_CRAFT } from '../constants/art-direction-craft';
 import { logMediaCost } from './ai-usage';
 import {
     FalContentPolicyError, FalError, extractVideo, falConfigured, generateImages, result as falResult, status as falStatus,
-    submitFramedVideo, imageToVideoEnabled, I2V_MODEL, type AspectRatio,
+    submitFramedVideo, imageToVideoEnabled, billedSecondsFor, I2V_MODEL, type AspectRatio,
 } from '../lib/fal-gateway';
 import { renderBrandCard, type CardVariant } from '../lib/brand-card';
 import { deleteR2Object, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
 import { normalizeBrandKit, type BrandKit } from './brand-kit';
 import { guidelinesPromptLines, hasGuidelines, normaliseGuidelines, readBrandGuidelines, type BrandGuidelines } from './brand-guidelines';
 import { holdCredits, settleHold, getBalance, tasksForCredits, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, tierCanGenerateVideo } from './ai-credits';
+import { aiVideoTasks } from '../config/task-weights';
 import { getActiveTierKeyByOrg } from './plan-features';
 import { orgHasAssistantFeature } from './assistant-capabilities';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
@@ -71,6 +72,9 @@ const MOCK_VIDEO_URL = 'https://storage.googleapis.com/gtv-videos-bucket/sample/
  * down. A stock option is a Pexels link; an "own" option IS a library picture the user already had.
  */
 const GENERATED_SOURCES = new Set(['ai_image', 'brand_card', 'ai_video']);
+
+/** The Brand Designer's AI clip length — what its round holds and is charged for (aiVideoTasks). */
+const BRIEF_CLIP_SECONDS = 6;
 /** A source label for display, including "Your own". */
 export function sourceLabel(source: string): string {
     return source === OWN_SOURCE ? OWN_SOURCE_LABEL : (SOURCE_SPECS[source as keyof typeof SOURCE_SPECS]?.label ?? source);
@@ -339,7 +343,7 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
         const hold = await holdCredits(db, {
             orgId, amount: credits,
             // Single task allowance: an image round is 1 task, a video 20 (tasksForCredits).
-            tasks: (aiIncluded ? tasksForCredits('image', IMAGE_CREDIT_COST) : 0) + (videoIncluded ? tasksForCredits('video', VIDEO_CREDIT_COST) : 0),
+            tasks: (aiIncluded ? tasksForCredits('image', IMAGE_CREDIT_COST) : 0) + (videoIncluded ? aiVideoTasks(billedSecondsFor(BRIEF_CLIP_SECONDS)) : 0),
         });
         if (!hold.ok) return { ok: false, status: 402, error: 'insufficient_credits', code: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit };
     }
@@ -414,7 +418,7 @@ export async function endRound(db: Db, briefId: number, outcome: {
         await settleHold(db, { orgId: row.organisation_id, amount: heldImage, success: outcome.chargeAi, mediaType: 'image', userId: outcome.userId ?? null });
     }
     if (heldVideo > 0) {
-        await settleHold(db, { orgId: row.organisation_id, amount: heldVideo, success: outcome.chargeVideo === true, mediaType: 'video', userId: outcome.userId ?? null });
+        await settleHold(db, { orgId: row.organisation_id, amount: heldVideo, success: outcome.chargeVideo === true, mediaType: 'video', userId: outcome.userId ?? null, tasks: aiVideoTasks(billedSecondsFor(BRIEF_CLIP_SECONDS)) });
     }
     return true;
 }
@@ -605,7 +609,7 @@ async function aiVideoOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId:
     const usage = { workspaceId: brief.organisationId, userId, assistantId: brief.aiAssistantId };
     const job = {
         organisationId: brief.organisationId, userId, assistantId: brief.aiAssistantId, mediaType: 'video',
-        prompt, aspectRatio: brief.aspectRatio, durationSeconds: 6,
+        prompt, aspectRatio: brief.aspectRatio, durationSeconds: BRIEF_CLIP_SECONDS,
         model: imageToVideoEnabled() ? I2V_MODEL : VIDEO_MODEL, creditCost: VIDEO_CREDIT_COST,
     };
     let url: string;
@@ -615,7 +619,7 @@ async function aiVideoOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId:
             url = MOCK_VIDEO_URL;
         } else {
             const sub = await submitFramedVideo({
-                prompt, imagePrompt: ad.imagePrompt, aspectRatio: brief.aspectRatio as AspectRatio, durationSeconds: 6, usage,
+                prompt, imagePrompt: ad.imagePrompt, aspectRatio: brief.aspectRatio as AspectRatio, durationSeconds: BRIEF_CLIP_SECONDS, usage,
             });
             const deadline = Date.now() + VIDEO_POLL_DEADLINE_MS;
             while ((await falStatus(sub.statusUrl)) !== 'COMPLETED') {

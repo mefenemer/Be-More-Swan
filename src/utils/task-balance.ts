@@ -12,7 +12,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { usageCounters } from '../../db/schema';
 import { getPeriodStart } from './atomic-cap-check';
-import { TASK_WEIGHTS } from '../config/task-weights';
+import { inFlightWeightSql } from './work-metering';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -38,7 +38,7 @@ export async function readTaskUsage(db: Db, organisationId: number, periodStart:
     // The weights are cast to int: an untyped parameter in SUM(CASE …) is text → 42883.
     const [extra] = await db.execute<{ bonus: number; in_flight: number }>(sql`
         SELECT COALESCE((SELECT bonus_tasks FROM task_bonus WHERE organisation_id = ${organisationId}), 0) AS bonus,
-               COALESCE((SELECT SUM(CASE media_type WHEN 'video' THEN ${TASK_WEIGHTS.ai_video}::int WHEN 'audio' THEN ${TASK_WEIGHTS.ai_music}::int ELSE ${TASK_WEIGHTS.ai_image}::int END)
+               COALESCE((SELECT SUM(${inFlightWeightSql()})
                            FROM media_generation_jobs
                           WHERE organisation_id = ${organisationId} AND status IN ('queued', 'processing')
                             AND created_at > now() - interval '2 hours'), 0) AS in_flight`) as unknown as Array<{ bonus: number; in_flight: number }>;

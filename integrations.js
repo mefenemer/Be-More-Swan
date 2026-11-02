@@ -191,6 +191,9 @@ const PLATFORMS = [
         // because every drafter produces still images rather than video.
         note: 'YouTube posts need a video file — attach one in the composer. Your assistant will not draft YouTube posts on its own.',
         preConnect: {
+            // The modal's heading defaults to "Set this up in Meta first" — right for the three Meta
+            // platforms, wrong here (SWAN-5). Every non-Meta checklist names its own.
+            heading: 'Check these before you go to Google',
             intro: 'You\'ll be sent to Google to approve the connection. Check these first:',
             steps: [
                 { text: 'Sign in with the Google account that <strong>owns the channel</strong> — an account with only viewing access cannot upload.' },
@@ -2138,6 +2141,8 @@ window._intOpenPreConnect = function (platformId) {
     if (titleEl) titleEl.textContent = `Connect ${platform.label}`;
     const introEl = document.getElementById('preconnect-intro');
     if (introEl) introEl.textContent = pc.intro || '';
+    const headingEl = document.getElementById('preconnect-heading');
+    if (headingEl) headingEl.textContent = pc.heading || 'Set this up in Meta first';
 
     const stepsEl = document.getElementById('preconnect-steps');
     if (stepsEl) {

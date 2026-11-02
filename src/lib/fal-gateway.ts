@@ -177,6 +177,17 @@ export async function status(statusUrl: string): Promise<FalJobStatus> {
     return (data?.status as FalJobStatus) ?? 'IN_PROGRESS';
 }
 
+/**
+ * Ask Fal to stop a queued or running job. A job we have stopped waiting for keeps running (and
+ * billing) at the model unless it is cancelled. Best effort: a job that has already finished, or a
+ * network fault, is not an error here.
+ */
+export async function cancel(statusUrl: string): Promise<void> {
+    try {
+        await fetch(statusUrl.replace(/\/status$/, '/cancel'), { method: 'PUT', headers: { Authorization: `Key ${FAL_KEY}` } });
+    } catch { /* best effort */ }
+}
+
 /** Fetch the final result payload of a COMPLETED job. */
 export async function result(responseUrl: string): Promise<any> {
     return getJson(responseUrl);
@@ -293,9 +304,19 @@ export function imageToVideoEnabled(model: string = I2V_MODEL): boolean {
  *             off: the soundtrack is ours, from the music library / voiceover, never a model's guess)
  * `billedSeconds` is the clip length actually asked for, for the cost log.
  */
+/** The length Fal will bill for a clip asked for at `durationSeconds`, on the model in use. */
+export function billedSecondsFor(durationSeconds: number, model: string = I2V_MODEL): number {
+    if (!imageToVideoEnabled(model)) return durationSeconds > 6 ? 10 : 6;
+    return imageToVideoInput(model, { imageUrl: '', prompt: '', durationSeconds }).billedSeconds;
+}
+
+/** Kling v3/o3 take any whole length from 3 to 15 s; the v2.x family only 5 or 10. */
+export function takesAnyLength(model: string): boolean {
+    return /\/(v3|o3)\//.test(model);
+}
+
 export function imageToVideoInput(model: string, opts: { imageUrl: string; prompt: string; durationSeconds: number }): { input: Record<string, unknown>; billedSeconds: number } {
-    const isV3 = /\/(v3|o3)\//.test(model);
-    if (isV3) {
+    if (takesAnyLength(model)) {
         const d = Math.min(Math.max(Math.round(opts.durationSeconds), 3), 15);
         return { input: { prompt: opts.prompt, start_image_url: opts.imageUrl, duration: String(d), generate_audio: false }, billedSeconds: d };
     }
@@ -322,12 +343,14 @@ export async function submitFramedVideo(opts: {
     imagePrompt?: string;
     startImageUrl?: string | null;
     aspectRatio: AspectRatio;
-    durationSeconds: VideoDurationSeconds;
+    /** Seconds wanted. Each model makes the nearest length it can (imageToVideoInput, submitVideo). */
+    durationSeconds: number;
     usage?: { workspaceId?: number | null; userId?: number | null; assistantId?: number | null };
 }): Promise<FramedVideoSubmit> {
     if (!imageToVideoEnabled()) {
-        const sub = await submitVideo({ prompt: opts.prompt, durationSeconds: opts.durationSeconds });
-        return { ...sub, model: VIDEO_MODEL, billedSeconds: opts.durationSeconds, frameUrl: null };
+        const d: VideoDurationSeconds = opts.durationSeconds > 6 ? 10 : 6;
+        const sub = await submitVideo({ prompt: opts.prompt, durationSeconds: d });
+        return { ...sub, model: VIDEO_MODEL, billedSeconds: d, frameUrl: null };
     }
     const frameUrl = opts.startImageUrl
         || (await generateImages({ prompt: opts.imagePrompt || opts.prompt, aspectRatio: opts.aspectRatio, numImages: 1, usage: opts.usage }))[0].url;

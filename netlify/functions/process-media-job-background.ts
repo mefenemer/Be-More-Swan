@@ -19,6 +19,7 @@ import {
 } from '../../src/lib/fal-gateway';
 import { logMediaCost } from '../../src/utils/ai-usage';
 import { settleHold } from '../../src/utils/ai-credits';
+import { aiVideoTasks } from '../../src/config/task-weights';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -122,7 +123,8 @@ export default withLambda(async (event: HandlerEvent) => {
         }).returning({ id: contentAssets.id });
 
         // Settle the hold as a successful debit, mark job complete.
-        await settleHold(db, { orgId, amount: cost, success: true, mediaType: 'video', userId: ownerId, jobId: job.id, isAutonomous: job.isAutonomous, assistantId: job.assistantId ?? null });
+        // job.durationSeconds is the BILLED length (generate-ai-video stores sub.billedSeconds).
+        await settleHold(db, { orgId, amount: cost, success: true, mediaType: 'video', userId: ownerId, jobId: job.id, isAutonomous: job.isAutonomous, assistantId: job.assistantId ?? null, tasks: aiVideoTasks(job.durationSeconds) });
         await db.update(mediaGenerationJobs)
             .set({ status: 'completed', resultAssetIds: [asset.id], updatedAt: new Date() })
             .where(eq(mediaGenerationJobs.id, jobId));

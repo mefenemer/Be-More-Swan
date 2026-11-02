@@ -30,10 +30,10 @@ import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { loadOrgProducts, renderProductFacts } from './org-products';
 import { normalizeBrandKit } from './brand-kit';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, type MediaKind } from './ai-credits';
-import { TASK_WEIGHTS } from '../config/task-weights';
-import { createPexelsAsset, searchUniqueImages, searchUniqueVideos } from './pexels';
+import { TASK_WEIGHTS, aiVideoTasks } from '../config/task-weights';
+import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
-import { submitFramedVideo, status as falStatus, result as falResult, extractVideo, falConfigured } from '../lib/fal-gateway';
+import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, I2V_MODEL } from '../lib/fal-gateway';
 import { logMediaCost } from './ai-usage';
 import { makeVoiceoverAsset } from './voiceover-asset';
 import { DEFAULT_VOICE, isVoiceId, cleanScript } from '../lib/tts';
@@ -41,7 +41,7 @@ import { presignR2Get } from './social-publish';
 import { resolveBaseUrl } from './base-url';
 import { isUnifiedTaskMetering } from './task-metering-flag';
 import {
-    enforceStoryboard, estimateCredits, parseStoryboardJson, sceneTimingsFromWords, scriptOf, isStillSource,
+    enforceStoryboard, estimateCredits, parseStoryboardJson, sceneTimingsFromWords, scriptOf, isStillSource, WORDS_PER_SECOND,
     storyboardSystemPrompt, storyboardUserPrompt, isVideoLength,
     type LibraryPicture, type Scene, type Storyboard, type VideoBrief,
 } from '../lib/storyboard';
@@ -54,7 +54,15 @@ type Db = ReturnType<typeof getDb>;
 /** The platforms a Video Producer video can go to today, and the vertical format on each. */
 export const VIDEO_DESTINATIONS: Record<string, string> = { instagram: 'ig_reel', youtube: 'yt_short', facebook: 'fb_reel' };
 
-const AI_CLIP_DEADLINE_MS = 9 * 60 * 1000;
+/**
+ * One attempt at an AI clip. Kling 3's slowest bake-off clip took 4 m 25 s (2026-11-01); a staging
+ * build that day had one job report IN_PROGRESS for 9 minutes and never finish. An attempt past this
+ * is cancelled at Fal and tried once more from the same first frame. Two attempts plus the
+ * voiceover stay inside the 15-minute background-function ceiling, because stock scenes are made
+ * while the AI clips generate (buildProject).
+ */
+export const AI_CLIP_ATTEMPT_MS = 6 * 60 * 1000;
+export const AI_CLIP_ATTEMPTS = 2;
 const AI_CLIP_POLL_MS = 5000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -184,19 +192,30 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
         const rules = p.aiAssistantId
             ? await loadAssistantRulesBlock(db, { assistantId: p.aiAssistantId, organisationId: p.organisationId })
             : null;
-        const res = await gatewayGenerate({
-            system: storyboardSystemPrompt() + (rules ? `\n\n${rules}` : ''),
-            messages: [{ role: 'user', content: storyboardUserPrompt({
-                brief, businessName: org?.name ?? '', businessFacts: facts, library,
-                today: new Date().toISOString().slice(0, 10), feedback: opts.feedback,
-            }) }],
-            maxTokens: 2500,
-            deadlineMs: 120_000,
-            usage: { workspaceId: p.organisationId, assistantId: p.aiAssistantId ?? null },
-            ...(await gatewayRoleModel(db, 'video_producer')),
-        });
-        const raw = parseStoryboardJson(res.text);
-        const { storyboard, changes } = enforceStoryboard(raw, brief, library);
+        const model = await gatewayRoleModel(db, 'video_producer');
+        const ask = async (feedback: string | null | undefined) => {
+            const res = await gatewayGenerate({
+                system: storyboardSystemPrompt() + (rules ? `\n\n${rules}` : ''),
+                messages: [{ role: 'user', content: storyboardUserPrompt({
+                    brief, businessName: org?.name ?? '', businessFacts: facts, library,
+                    today: new Date().toISOString().slice(0, 10), feedback,
+                }) }],
+                maxTokens: 2500,
+                deadlineMs: 120_000,
+                usage: { workspaceId: p.organisationId, assistantId: p.aiAssistantId ?? null },
+                ...model,
+            });
+            return enforceStoryboard(parseStoryboardJson(res.text), brief, library);
+        };
+        let { storyboard, changes } = await ask(opts.feedback);
+        // The voiceover sets the video's length, so a long script makes a long video: a "30-second"
+        // sample came out at 45 s and outran the render Lambdas (2026-11-01). Over budget by more than
+        // a fifth → plan once more, told how many words to lose. Still free; never a third attempt.
+        const over = scriptOverBudget(storyboard, brief);
+        if (over) {
+            const again = await ask([opts.feedback, `The voiceover is ${over.words} words; a ${brief.lengthS}-second video has room for about ${over.budget}. Cut it to ${over.budget} words or fewer — shorter lines, not fewer facts that matter.`].filter(Boolean).join(' '));
+            if (again.storyboard.scenes.length >= 3 && (scriptOverBudget(again.storyboard, brief)?.words ?? 0) < over.words) ({ storyboard, changes } = again);
+        }
         if (storyboard.scenes.length < 3) throw new Error('The plan came back too short to make a video from. Try again, or add more detail to the brief.');
         await db.update(videoProjects).set({
             status: 'planned', storyboard, changes, title: storyboard.title, note: null, updatedAt: new Date(),
@@ -209,6 +228,17 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
     }
 }
 
+/**
+ * Is the script too long for the brief's length? The budget is WORDS_PER_SECOND × length (the rate
+ * the prompt asks for); more than 20% over returns the count and the budget, otherwise null. Pure.
+ */
+export function scriptOverBudget(storyboard: Storyboard, brief: VideoBrief): { words: number; budget: number } | null {
+    if (!brief.voiceover) return null;
+    const words = scriptOf(storyboard).split(/\s+/).filter(Boolean).length;
+    const budget = Math.round(brief.lengthS * WORDS_PER_SECOND);
+    return words > budget * 1.2 ? { words, budget } : null;
+}
+
 // ── Build ───────────────────────────────────────────────────────────────────────────────────────
 
 /** Tasks a build holds under the single task allowance — the same weights the ledger records. Pure. */
@@ -216,23 +246,38 @@ export function buildTasks(storyboard: Storyboard, brief: VideoBrief): number {
     let n = 0;
     for (const s of storyboard.scenes) {
         if (s.source === 'ai_image') n += TASK_WEIGHTS.ai_image;
-        if (s.source === 'ai_video') n += TASK_WEIGHTS.ai_video;
+        if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)));
     }
     if (brief.voiceover && scriptOf(storyboard)) n += TASK_WEIGHTS.ai_voiceover;
     return n;
 }
 
 /** The text overlays for a storyboard, timed to the scenes. Pure. */
+/**
+ * The on-screen text size, as a fraction of the frame HEIGHT, so one line fits a 9:16 frame. The box
+ * is a single line (overlay-geometry.ts whiteSpace: 'pre'), and at a fixed 5% "Yellow flame? Get it
+ * checked" ran off both edges in the first sample render (2026-11-01). Anton (the Impact stand-in) is
+ * about 0.5 of its height wide per character with the box padding; the line may use ~90% of a width
+ * that is 9/16 of the height. Never larger than 5%, never smaller than 2.8%. Pure.
+ */
+export function onScreenFontPct(text: string): number {
+    const n = Math.max(1, text.trim().length);
+    return Math.round(Math.max(0.028, Math.min(0.05, (0.9 * 9 / 16) / (0.5 * n))) * 1000) / 1000;
+}
+
 export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
     const out: Overlay[] = [];
     let t = 0;
     scenes.forEach((s, i) => {
         const d = durations[i] ?? s.targetS;
-        if (s.onScreenText) {
+        // A branded card already carries these words as its headline (sourceScene 'brand_card') —
+        // overlaid as well, the first sample render showed "Pop in this week" three times at once
+        // (card, overlay, captions). The card says it; the overlay stays off.
+        if (s.onScreenText && s.source !== 'brand_card') {
             out.push({
                 id: `vp_${s.id}`, text: s.onScreenText,
                 // Upper third: the captions own the lower part of the frame.
-                x: 0.5, y: 0.2, fontFamily: 'Impact', fontSizePct: 0.05,
+                x: 0.5, y: 0.2, fontFamily: 'Impact', fontSizePct: onScreenFontPct(s.onScreenText),
                 color: '#FFFFFF', boxStroke: null, boxFill: '#000000', boxOpacity: 0.55,
                 startS: Math.round(t * 10) / 10, endS: Math.round((t + d) * 10) / 10, anim: 'rise',
             });
@@ -240,6 +285,20 @@ export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
         t += d;
     });
     return out;
+}
+
+/**
+ * How long an AI clip to ask for. `targetS` is the scene's SPOKEN length here, and the clip must
+ * cover it with the same 0.3 s margin stock gets: the render clamps a short clip, which pulls every
+ * later scene ahead of its voiceover. A 6.4 s line got a 6 s request under the old "over 7 → 10"
+ * rule (plumbing sample, 2026-11-01) — and Kling v2.x makes 5 or 10 s, so a "6" was really 5.
+ * Kling v3 makes any whole length 3–15 s, so it gets exactly what the line needs, no more.
+ */
+export function aiClipSeconds(targetS: number, model: string = I2V_MODEL): number {
+    const need = targetS + 0.3;
+    if (!imageToVideoEnabled(model)) return need > 6 ? 10 : 6;   // Hailuo text-to-video: 6 or 10
+    if (takesAnyLength(model)) return Math.min(15, Math.max(3, Math.ceil(need)));
+    return need > 5 ? 10 : 5;
 }
 
 /** The timeline for a storyboard whose scenes have assets. Pure. */
@@ -257,22 +316,36 @@ export function sceneClips(scenes: Scene[], assetIds: Record<string, number>, du
 async function sourceScene(db: Db, args: {
     scene: Scene; orgId: number; userId: number; assistantId: number | null; brandName: string; exclude: string[];
     kit: ReturnType<typeof normalizeBrandKit>; seed: number;
-}): Promise<{ assetId: number; mediaKind?: MediaKind; cost?: number } | null> {
+}): Promise<{ assetId: number; mediaKind?: MediaKind; cost?: number; tasks?: number; asStill?: boolean } | null> {
     const { scene, orgId, userId } = args;
     const context = scene.keywords || scene.prompt || scene.voiceover;
     switch (scene.source) {
         case 'product_photo':
             return scene.assetId ? { assetId: scene.assetId } : null;
         case 'stock_video': {
-            const r = await searchUniqueVideos(db, orgId, context, { limit: 3, keywords: scene.keywords, exclude: args.exclude });
-            const c = r.candidates[0];
-            if (!c) return null;
-            args.exclude.push(c.providerAssetId);
-            return { assetId: await createPexelsAsset(db, { userId, orgId, candidate: c, assetType: 'video' }) };
+            // Portrait first: the video is 9:16, and a centre-cropped landscape clip cuts people's heads
+            // off. Any shape only when portrait finds nothing — a cropped clip beats an empty scene.
+            //
+            // Long enough, too: a clip shorter than its scene made Remotion ask for a frame past its end
+            // ("No frame found at position…") and the WHOLE render failed (sample videos, 2026-11-01).
+            // Only a clip whose Pexels duration covers the scene (+0.3 s) is used; with none, the scene
+            // becomes a moving stock photo, which can be held for any length.
+            const need = scene.targetS + 0.3;
+            const longEnough = (cs: PexelsVideoCandidate[]) => cs.find((x) => (x.duration ?? 0) >= need);
+            const opts = { limit: 8, keywords: scene.keywords, exclude: args.exclude };
+            const c = longEnough((await searchUniqueVideos(db, orgId, context, { ...opts, orientation: 'portrait' })).candidates)
+                ?? longEnough((await searchUniqueVideos(db, orgId, context, opts)).candidates);
+            if (c) {
+                args.exclude.push(c.providerAssetId);
+                return { assetId: await createPexelsAsset(db, { userId, orgId, candidate: c, assetType: 'video' }) };
+            }
+            const photo = await sourceScene(db, { ...args, scene: { ...scene, source: 'stock_photo' } });
+            return photo ? { ...photo, asStill: true } : null;
         }
         case 'stock_photo': {
-            const r = await searchUniqueImages(db, orgId, context, { limit: 3, keywords: scene.keywords, exclude: args.exclude });
-            const c = r.candidates[0];
+            const opts = { limit: 3, keywords: scene.keywords, exclude: args.exclude };
+            const r = await searchUniqueImages(db, orgId, context, { ...opts, orientation: 'portrait' });
+            const c = r.candidates[0] ?? (await searchUniqueImages(db, orgId, context, opts)).candidates[0];
             if (!c) return null;
             args.exclude.push(c.providerAssetId);
             return { assetId: await createPexelsAsset(db, { userId, orgId, candidate: c, assetType: 'image' }) };
@@ -288,17 +361,29 @@ async function sourceScene(db: Db, args: {
             };
         case 'ai_video': {
             if (!falConfigured()) return null;
-            const sub = await submitFramedVideo({
-                prompt: `${scene.prompt || context}. Slow, steady camera movement; one continuous shot.`,
-                imagePrompt: scene.prompt || context, aspectRatio: '9:16',
-                durationSeconds: scene.targetS > 7 ? 10 : 6,
-                usage: { workspaceId: orgId, userId, assistantId: args.assistantId },
-            });
-            const deadline = Date.now() + AI_CLIP_DEADLINE_MS;
-            while ((await falStatus(sub.statusUrl)) !== 'COMPLETED') {
-                if (Date.now() > deadline) throw new Error('An AI clip took too long and was abandoned.');
-                await sleep(AI_CLIP_POLL_MS);
+            let frameUrl: string | null = null;
+            let sub: Awaited<ReturnType<typeof submitFramedVideo>> | null = null;
+            for (let attempt = 1; attempt <= AI_CLIP_ATTEMPTS && !sub; attempt++) {
+                const tried = await submitFramedVideo({
+                    prompt: `${scene.prompt || context}. Slow, steady camera movement; one continuous shot.`,
+                    imagePrompt: scene.prompt || context, startImageUrl: frameUrl, aspectRatio: '9:16',
+                    durationSeconds: aiClipSeconds(scene.targetS),
+                    usage: { workspaceId: orgId, userId, assistantId: args.assistantId },
+                });
+                frameUrl ??= tried.frameUrl;   // a retry animates the same picture, not a new one
+                const deadline = Date.now() + AI_CLIP_ATTEMPT_MS;
+                let finished = false;
+                while (Date.now() < deadline) {
+                    if ((await falStatus(tried.statusUrl)) === 'COMPLETED') { finished = true; break; }
+                    await sleep(AI_CLIP_POLL_MS);
+                }
+                if (finished) sub = tried;
+                else {
+                    await falCancel(tried.statusUrl);
+                    console.warn(`[video-producer] AI clip attempt ${attempt} timed out and was cancelled (${tried.model})`);
+                }
             }
+            if (!sub) throw new Error('An AI clip took too long and was abandoned.');
             const v = extractVideo(await falResult(sub.responseUrl));
             logMediaCost(sub.model, { durationSeconds: sub.billedSeconds }, { workspaceId: orgId, userId, assistantId: args.assistantId, sessionId: 'fal-video' });
             const stored = await persistRemoteMediaToR2({ orgId, url: v.url, contentType: v.contentType || 'video/mp4', folder: 'video-producer', label: 'AI scene' });
@@ -307,7 +392,7 @@ async function sourceScene(db: Db, args: {
                 assetType: 'video', mimeType: 'video/mp4', fileSize: stored.fileSize, storageKey: stored.storageKey,
                 durationS: sub.billedSeconds, provider: 'fal', prompt: scene.prompt || context, aspectRatio: '9:16', status: 'pending',
             }).returning({ id: contentAssets.id });
-            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST };
+            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: aiVideoTasks(sub.billedSeconds) };
         }
     }
     return null;
@@ -324,8 +409,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
     let spent = p.creditsSpent;
     const done: Record<string, number> = { ...(p.sceneAssets as Record<string, number>) };
 
-    const settle = async (mediaType: MediaKind, cost: number, success: boolean) => {
-        await settleHold(db, { orgId, amount: cost, success, mediaType, userId, assistantId: p.aiAssistantId ?? null });
+    const settle = async (mediaType: MediaKind, cost: number, success: boolean, tasks?: number) => {
+        await settleHold(db, { orgId, amount: cost, success, mediaType, userId, assistantId: p.aiAssistantId ?? null, tasks });
         held = Math.max(0, held - cost);
         if (success) spent += cost;
     };
@@ -369,11 +454,14 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         const durations = sceneTimingsFromWords(storyboard, words) ?? storyboard.scenes.map((s) => s.targetS);
 
         // 2. Every scene's picture or clip. Already-made scenes are kept (a re-build after a failure).
+        // AI clips all at once: each spends minutes at the model (Kling 3 averaged 3 m 48 s in the
+        // 2026-11-01 bake-off), and made one after another, three of them plus the voiceover ran into
+        // this worker's 15-minute ceiling. The other scenes go one by one alongside them — stock
+        // scenes share `exclude`, so the same clip isn't picked twice.
         const exclude: string[] = [];
-        const missing: string[] = [];
-        for (let i = 0; i < storyboard.scenes.length; i++) {
+        const failed = new Set<number>();
+        const makeScene = async (i: number) => {
             const scene = storyboard.scenes[i];
-            if (done[scene.id]) continue;
             let made: Awaited<ReturnType<typeof sourceScene>> = null;
             const paid = scene.source === 'ai_image' ? IMAGE_CREDIT_COST : scene.source === 'ai_video' ? VIDEO_CREDIT_COST : 0;
             try {
@@ -381,10 +469,24 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             } catch (err) {
                 console.error(`[video-producer] build ${projectId} scene ${scene.id} failed:`, err);
             }
-            if (paid) await settle(scene.source === 'ai_video' ? 'video' : 'image', paid, !!made);
-            if (made) done[scene.id] = made.assetId; else missing.push(`scene ${i + 1}`);
+            if (paid) await settle(scene.source === 'ai_video' ? 'video' : 'image', paid, !!made, made?.tasks);
+            if (made?.asStill) {
+                // No stock clip was long enough: the scene is a moving still now, and the storyboard says
+                // so — the timeline holds it (sceneClips) and the Videos tab shows it as a stock photo.
+                storyboard.scenes[i] = { ...scene, source: 'stock_photo', motion: scene.motion && scene.motion !== 'none' ? scene.motion : 'push_in' };
+                await save({ storyboard });
+            }
+            if (made) done[scene.id] = made.assetId; else failed.add(i);
             await save({});
-        }
+        };
+        const todo = storyboard.scenes.map((_, i) => i).filter((i) => !done[storyboard.scenes[i].id]);
+        // The other scenes are made in order meanwhile (stock took ~5 minutes on its own in the same
+        // staging build), so a retried AI clip still fits the worker's ceiling.
+        const others = (async () => { for (const i of todo) if (storyboard.scenes[i].source !== 'ai_video') await makeScene(i); })();
+        await Promise.all([...todo.filter((i) => storyboard.scenes[i].source === 'ai_video').map(makeScene), others]);
+        // The parallel saves can land out of order; this one writes every scene made.
+        await save({});
+        const missing = [...failed].sort((a, b) => a - b).map((i) => `scene ${i + 1}`);
         if (missing.length) throw new Error(`Couldn't find pictures for ${missing.join(', ')}. Change those scenes or try again — the finished scenes are kept.`);
 
         // 3. The post — one row per platform, one cross-post group.
@@ -482,9 +584,18 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         for (const a of assets) thumbs[a.id] = a.storageKey ? await presignR2Get(a.storageKey).catch(() => null) : a.externalUrl;
     }
     const sb = row.storyboard as Storyboard | null;
+    // A 'built' project's post can still fail its final render (the text burn-in), and until that is
+    // retried the post can never publish. The Videos tab said "Made. It's in the Review Queue" over a
+    // post the Review Queue was showing as failed (SWAN-6), so it reads the post's render state too.
+    let postRenderStatus: string | null = null;
+    if (row.status === 'built' && row.scheduledPostId) {
+        const [p] = await db.select({ renderStatus: scheduledPosts.renderStatus }).from(scheduledPosts)
+            .where(and(eq(scheduledPosts.id, row.scheduledPostId), eq(scheduledPosts.organisationId, orgId))).limit(1);
+        postRenderStatus = p?.renderStatus ?? null;
+    }
     return {
         id: row.id, aiAssistantId: row.aiAssistantId, title: row.title, status: row.status, brief: row.brief, storyboard: sb, changes: row.changes, note: row.note,
-        scheduledPostId: row.scheduledPostId, creditsSpent: row.creditsSpent,
+        scheduledPostId: row.scheduledPostId, postRenderStatus, creditsSpent: row.creditsSpent,
         origin: row.origin, sourcePostId: row.sourcePostId, campaignId: row.campaignId,
         ...(sb ? await buildEstimate(orgId, sb, row.brief as VideoBrief) : { estimate: null, unit: null }),
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),
