@@ -53,7 +53,7 @@ async function main() {
 
         let jo = 0;
         await check('an application without an account creates no user and is stored for review', async () => {
-            const r = await recordApplication(db, app(), null);
+            const r = await recordApplication(db, app());
             assert.strictEqual(r.outcome, 'created');
             jo = r.partnerId!;
             const [row] = await sql.unsafe(`SELECT status, user_id, applicant_email, application FROM partners WHERE id = ${jo}`);
@@ -63,17 +63,26 @@ async function main() {
         });
 
         await check('one application per email, whatever the capitals', async () => {
-            const r = await recordApplication(db, app({ email: 'JO@example.com'.toLowerCase(), name: 'Jo Again' }), null);
+            const r = await recordApplication(db, app({ email: 'JO@example.com'.toLowerCase(), name: 'Jo Again' }));
             assert.strictEqual(r.outcome, 'duplicate');
             await sql.unsafe(`INSERT INTO partners (status, applicant_email) VALUES ('applied', 'Mixed@Example.com')`);
             await assert.rejects(sql.unsafe(`INSERT INTO partners (status, applicant_email) VALUES ('applied', 'mixed@example.com')`), /partners_applicant_email_uq|duplicate key/);
         });
 
         await check("an applicant who already has an account is linked to it straight away", async () => {
-            const r = await recordApplication(db, app({ email: 'customer@example.com', name: 'Cass' }), null);
+            const r = await recordApplication(db, app({ email: 'customer@example.com', name: 'Cass' }));
             const [row] = await sql.unsafe(`SELECT user_id FROM partners WHERE id = ${r.partnerId}`);
             assert.strictEqual(row.user_id, 50);
-            assert.strictEqual((await recordApplication(db, app({ email: 'other@example.com' }), 50)).outcome, 'duplicate', 'a signed-in partner cannot apply twice');
+            assert.strictEqual((await recordApplication(db, app({ email: 'customer@example.com' }))).outcome, 'duplicate', 'a partner cannot apply twice');
+        });
+
+        await check('SWAN-14: a different email is a different applicant, whoever is signed in', async () => {
+            // A different address is a different applicant: stored on its own, linked to no account,
+            // never folded into the signed-in partner's row as a 'duplicate'.
+            const r = await recordApplication(db, app({ email: 'agency@example.com', name: 'Cass Agency' }));
+            assert.strictEqual(r.outcome, 'created');
+            const [row] = await sql.unsafe(`SELECT user_id, applicant_email FROM partners WHERE id = ${r.partnerId}`);
+            assert.deepStrictEqual([row.user_id, row.applicant_email], [null, 'agency@example.com']);
         });
 
         let token = '';

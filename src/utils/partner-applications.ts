@@ -81,15 +81,18 @@ export type ApplyOutcome = 'created' | 'duplicate';
 /**
  * Record an application. One per email (unique index); a repeat changes nothing and reports
  * 'duplicate' — the caller shows the same thank-you either way, so the form never reveals whether
- * an address is already a partner. Links to an existing account with the same email, or to the
- * signed-in user.
+ * an address is already a partner. Links to the account with the SAME email as the application.
+ *
+ * ⚠️ Being signed in does not make the application yours. This used to take the signed-in user
+ * whatever email was typed, so a customer applying for a colleague or an agency address had that
+ * application tied to their own account (the approval went to THEIR inbox) — or, if they were
+ * already a partner, the new application was reported as 'duplicate' and silently dropped behind
+ * the same thank-you (SWAN-14, 2026-11-01). The email decides, so the session is not consulted.
  */
-export async function recordApplication(db: Db, v: ApplicationInput, signedInUserId: number | null): Promise<{ outcome: ApplyOutcome; partnerId: number | null }> {
-    let userId = signedInUserId;
-    if (!userId) {
-        const [u] = await db.select({ id: users.id }).from(users).where(sql`lower(${users.email}) = ${v.email}`).limit(1);
-        userId = u?.id ?? null;
-    }
+export async function recordApplication(db: Db, v: ApplicationInput): Promise<{ outcome: ApplyOutcome; partnerId: number | null }> {
+    const [u] = await db.select({ id: users.id }).from(users).where(sql`lower(${users.email}) = ${v.email}`).limit(1);
+    // The account the email belongs to. If that is the signed-in user, this finds them anyway.
+    const userId = u?.id ?? null;
     if (userId) {
         const [existing] = await db.select({ id: partners.id }).from(partners).where(eq(partners.userId, userId)).limit(1);
         if (existing) return { outcome: 'duplicate', partnerId: existing.id };

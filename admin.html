@@ -2,15 +2,18 @@
 <html lang="en">
 <head>
   <script>
-    // Guard: check admin role before rendering — redirect immediately if not admin
+    // Guard: check admin role before rendering — redirect immediately if not admin.
+    // To the plain workspace: `?error=access_denied` is what an OAuth provider sends when someone
+    // declines its consent screen, so the workspace greeted a customer who had opened this page with
+    // "Connection cancelled — you declined the permission request" (SWAN-16).
     (async () => {
       try {
         const r = await fetch('/.netlify/functions/admin-api?resource=dashboard');
         if (r.status === 403 || r.status === 401) {
-          window.location.replace('/workspace.html?error=access_denied');
+          window.location.replace('/workspace.html');
         }
       } catch {
-        window.location.replace('/workspace.html?error=access_denied');
+        window.location.replace('/workspace.html');
       }
     })();
   </script>

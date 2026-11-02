@@ -12,24 +12,12 @@
 // Abuse: a honeypot field and a minimum fill time (a bot gets the success reply and nothing is
 // stored), then per-IP and per-email limits — the same shape as site-audit-public.ts.
 
-import jwt from 'jsonwebtoken';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { APPLY_LIMITS, recordApplication, sendApplicationEmails, validateApplication } from '../../src/utils/partner-applications';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-
-/** The signed-in user, if any. Impersonation sessions never apply on someone's behalf. */
-function signedInUserId(cookieHeader: string | undefined): number | null {
-    const secret = process.env.JWT_SECRET;
-    const m = (cookieHeader || '').match(/aura_session=([^;]+)/);
-    if (!secret || !m) return null;
-    try {
-        const tok = jwt.verify(m[1], secret) as { userId: number; scope?: string };
-        return tok.scope === 'impersonate' ? null : tok.userId;
-    } catch { return null; }
-}
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed.' });
@@ -56,7 +44,7 @@ export default withLambda(async (event) => {
         return json(429, { error: 'We’ve had a few applications from you already — we’ll be in touch. If something went wrong, email hello@bemoreswan.com.' });
     }
 
-    const { outcome, partnerId } = await recordApplication(db, v, signedInUserId(event.headers.cookie));
+    const { outcome, partnerId } = await recordApplication(db, v);
     if (outcome === 'created' && partnerId) await sendApplicationEmails(v, partnerId);
     return json(200, { ok: true });
 });

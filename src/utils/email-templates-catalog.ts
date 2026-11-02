@@ -479,8 +479,11 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         preheader: 'We’ll be in touch once we’ve had a look.',
         bodyHtml: greet +
             p('Thanks for applying to become a Be More Swan partner. We read every application ourselves and will get back to you soon.') +
-            p('If we approve it, we’ll email you a link to set up your partner account, where you’ll find your personal invite link and can track what you earn.') +
-            p('<span style="color:#6b7280;font-size:14px;">You are getting this one email because this address was used to apply on bemoreswan.com. We have not added you to any mailing list.</span>') +
+            // Approval sends an account-set-up link only to someone with no account; an existing
+            // customer is pointed at the Partner page in their workspace (sendApprovalEmail), so say both.
+            p('If we approve it, we’ll email you. If you already use Be More Swan, your Partner page will be waiting in your workspace; if not, the email will have a link to set up your partner account. Either way, that’s where you’ll find your personal invite link and can track what you earn.') +
+            // A real https link: as bare text, Gmail auto-linked "bemoreswan.com" to http:// (SWAN-15).
+            p('<span style="color:#6b7280;font-size:14px;">You are getting this one email because this address was used to apply on <a href="https://bemoreswan.com" style="color:#6b7280;">bemoreswan.com</a>. We have not added you to any mailing list.</span>') +
             signoff,
     },
     {
