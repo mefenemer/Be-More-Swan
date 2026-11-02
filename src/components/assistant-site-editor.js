@@ -30,7 +30,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list', gallery: 'Gallery', reviews: 'Reviews', social_feed: 'Latest social posts' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list', gallery: 'Gallery', reviews: 'Reviews', social_feed: 'Latest social posts', blog_posts: 'Latest blog posts' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -89,6 +89,11 @@
       { k: 'platforms', kind: 'platformPick', label: 'Which platforms' },
       { k: 'count', kind: 'select', label: 'How many posts', options: [[3, '3 posts'], [4, '4 posts'], [6, '6 posts'], [8, '8 posts'], [9, '9 posts'], [12, '12 posts']] },
       { k: '_page', kind: 'pagePick', label: 'Show it on' }],
+    // Latest blog posts: the Blog Assistant's newest, read when the page is drawn; each links to /blog/<post>.
+    blog_posts: [{ k: 'enabled', kind: 'checkbox', label: 'Show this on my website (untick to switch it off without losing it)' },
+      { k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'count', kind: 'select', label: 'How many posts', options: [[2, '2 posts'], [3, '3 posts'], [4, '4 posts'], [6, '6 posts'], [9, '9 posts'], [12, '12 posts']] },
+      { k: '_page', kind: 'pagePick', label: 'Show it on' }],
     // Gallery: the owner's own pictures, each with what it shows (needed) and an optional caption.
     gallery: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'layout', kind: 'select', label: 'Layout', options: [['square', 'Even squares (pictures are cropped to fit)'], ['natural', 'Each picture at its own shape']] },
@@ -117,6 +122,7 @@
     hours: { heading: 'Opening hours', intro: '', showHours: true, showAddress: true, showContact: true },
     reviews: { heading: 'What our customers say', intro: '', reviewIds: [], limit: 6, showSummary: true },
     social_feed: { enabled: true, heading: 'Latest from us', intro: '', platforms: [], count: 6 },
+    blog_posts: { enabled: true, heading: 'From our blog', intro: '', count: 3 },
     gallery: { heading: 'Gallery', intro: '', layout: 'square', images: [] },
     menu: { heading: 'Prices', intro: '', groups: [{ title: '', productIds: [] }], showDescriptions: true, showDurations: false, note: '' },
   };
@@ -334,6 +340,7 @@
 
   function sectionSummary(s) {
     const p = s.props;
+    if (s.type === 'blog_posts') return `${p.enabled === false ? 'Switched off · ' : ''}${p.heading || 'Latest blog posts'} · ${p.count} post${p.count === 1 ? '' : 's'}`;
     if (s.type === 'social_feed') return `${p.enabled === false ? 'Switched off · ' : ''}${p.heading || 'Latest posts'} · ${p.count} post${p.count === 1 ? '' : 's'}`;
     return p.headline || p.heading || (p.items && p.items[0] && (p.items[0].title || p.items[0].q || p.items[0].name)) || (p.body || '').slice(0, 60) || '';
   }
@@ -603,7 +610,7 @@
 
   // ── How a section looks (site-definition.ts SectionLook — a closed set of choices) ──────────
   const LOOK_DEFAULT = { background: 'auto', columns: 'auto', menuLabel: null };
-  const GRID_TYPES = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed'];
+  const GRID_TYPES = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts'];
   function lookHtml(e) {
     const l = e.look || LOOK_DEFAULT;
     const onePage = def().structure === 'one_page';
@@ -708,6 +715,7 @@
     gallery: ['🖼️', 'Your own pictures and videos in a grid'],
     reviews: ['⭐', 'Quotes from your customer reviews'],
     social_feed: ['📣', 'Your latest posts published through Be More Swan'],
+    blog_posts: ['📰', 'Your newest posts from your Blog Assistant'],
   };
   function addPickerHtml(here) {
     const types = state.data.vocab.sectionTypes.filter((t) => typeAllowed(t) && FORMS[t]);
@@ -1037,10 +1045,23 @@
       <div class="mt-3">${btn('data-site-features-save', first ? 'Use these' : 'Save', true)}</div>`, first ? 'border-emerald-200' : '');
   }
 
+  /** The Blog Assistant's posts on the site (site-blog.ts): a switch and the menu label — the posts are written there. */
+  function blogCard() {
+    const b = def().settings.blog || { enabled: false, menuLabel: 'Blog' };
+    const n = (state.data.blog || {}).published || 0;
+    return card(`
+      <p class="text-sm font-black text-gray-900">Blog</p>
+      <p class="text-xs text-gray-500 mt-1">Show the posts your Blog Assistant publishes on this website, at <strong>/blog</strong>, with a menu entry. Each post gets its own page in your site's design. New posts appear on their own — there's no code to paste. ${n ? `Published so far: ${n} post${n === 1 ? '' : 's'}.` : 'Nothing published by your Blog Assistant yet.'}</p>
+      <label class="flex items-center gap-2 text-xs text-gray-800 mt-3"><input type="checkbox" data-site-blog-on ${b.enabled ? 'checked' : ''}> Show my blog on this website</label>
+      <label class="block text-xs font-bold text-gray-700 mt-3">Menu label</label><input data-site-blog-label class="${inputCls}" maxlength="30" value="${esc(b.menuLabel || 'Blog')}">
+      <p class="text-xs text-gray-500 mt-2">To show your newest posts on another page too, add a "Latest blog posts" section to it.</p>
+      <div class="mt-3">${btn('data-site-blog-save', 'Save blog', true)}</div>`);
+  }
+
   function detailsPanel() {
     const s = def().settings;
     const f = (k, label, v) => `<div><label class="block text-xs font-bold text-gray-700">${esc(label)}</label><input data-setting="${k}" class="${inputCls}" value="${esc(v || '')}"></div>`;
-    return featuresCard(false) + card(`
+    return featuresCard(false) + blogCard() + card(`
       <p class="text-sm font-black text-gray-900 mb-3">Business details</p>
       <p class="text-xs text-gray-500 mb-3">Shown in your footer and given to search engines and AI assistants so they know who you are and where you work.</p>
       <div class="grid gap-3 md:grid-cols-2">${f('siteName', 'Business name', s.siteName)}${f('locality', 'Town or city', s.locality)}${f('email', 'Email', s.email)}${f('phone', 'Phone', s.phone)}
@@ -2211,6 +2232,11 @@
       if (theme.logoUrl) theme.logoAssetId = null; else delete theme.logoUrl;
       if (hostOf(e).querySelector('[data-theme-accent-off]')?.checked) theme.accentColor = null;
       await apply([{ op: 'set_theme', theme }]);
+      return;
+    }
+    if (t('[data-site-blog-save]')) {
+      const host = hostOf(e);
+      await apply([{ op: 'set_settings', settings: { blog: { enabled: host.querySelector('[data-site-blog-on]').checked, menuLabel: host.querySelector('[data-site-blog-label]').value.trim() || 'Blog' } } }]);
       return;
     }
     if (t('[data-site-details-save]')) {

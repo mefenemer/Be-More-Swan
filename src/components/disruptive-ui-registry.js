@@ -1865,7 +1865,7 @@
   // change and refuses the whole batch if any one would break a rule.
 
   // Plain words for each change — never the internal page or section ids the operations carry.
-  const SITE_SECTION_WORDS = { hero: 'top (hero)', features: 'features', steps: 'steps', text: 'text', faq: 'questions', testimonials: 'testimonials', cta: 'call-to-action', social_feed: 'latest social posts' };
+  const SITE_SECTION_WORDS = { hero: 'top (hero)', features: 'features', steps: 'steps', text: 'text', faq: 'questions', testimonials: 'testimonials', cta: 'call-to-action', social_feed: 'latest social posts', blog_posts: 'latest blog posts' };
   const SITE_PROP_WORDS = { headline: 'headline', subheadline: 'line under the headline', eyebrow: 'small label', primaryCta: 'main button', secondaryCta: 'second button',
     image: 'picture', heading: 'heading', intro: 'introduction', items: 'items', body: 'text', button: 'button', layout: 'layout',
     platforms: 'platforms shown', count: 'number of posts', enabled: 'on/off' };
@@ -1893,6 +1893,8 @@
     set_theme: () => 'Change the design (colours, lettering or corners)',
     set_settings: (o) => {
       const f = o.settings && Array.isArray(o.settings.features) ? o.settings.features : null;
+      const blog = o.settings && o.settings.blog && typeof o.settings.blog === 'object' ? o.settings.blog : null;
+      if (!f && blog) return blog.enabled === false ? 'Take your blog off the website' : `Show your Blog Assistant's posts at /blog${blog.menuLabel ? ` ("${blog.menuLabel}" in the menu)` : ''}`;
       if (!f) return 'Update the business details';
       const WORDS = { shop: 'selling', bookings: 'bookings', menu: 'a menu', hours: 'opening hours', gallery: 'a gallery', reviews: 'reviews', signup: 'email sign-up', faq: 'questions & answers' };
       const on = f.map((k) => WORDS[k]).filter(Boolean);

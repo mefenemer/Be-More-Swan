@@ -88,6 +88,7 @@ async function purgeSitePages(slug: string | null | undefined): Promise<void> {
 }
 import { reviewSummary } from '../../src/utils/reviews';
 import { socialFeedSummary } from '../../src/utils/site-social-feed';
+import { siteBlogSummary } from '../../src/utils/site-blog';
 import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
 import { platformLabel } from '../../src/utils/crosspost-view';
 import { depositNote, refundDeposit } from '../../src/utils/booking-deposits';
@@ -196,6 +197,8 @@ export default withLambda(async (event) => {
                 platforms: SOCIAL_PLATFORMS.map((p) => ({ key: p, label: platformLabel(p) })),
                 published: await socialFeedSummary(db, orgId).catch(() => []),
             },
+            // The Blog card: how many posts the Blog Assistant has published (the only posts /blog shows).
+            blog: await siteBlogSummary(db, orgId).catch(() => ({ published: 0 })),
             payments: await (async () => {
                 const acct = await connectAccountFor(db, orgId);
                 return { connected: !!acct, chargesEnabled: !!acct?.chargesEnabled, detailsSubmitted: !!acct?.detailsSubmitted, canConnect: role === 'owner' || role === 'admin' };

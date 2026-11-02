@@ -69,7 +69,21 @@ export interface SiteSettings {
     /** The template this site was started from (src/config/site-templates.ts) — the AI draft then
      *  writes the words INTO that layout rather than a new one. Null = none. */
     template?: string | null;
+    /**
+     * The Blog Assistant's posts on this site (site-blog.ts): /blog lists them and /blog/<slug> shows
+     * each one, drawn by our renderer in the site's own look — no embed, no script. The posts live in
+     * the Blog Assistant (blog_posts); the site holds only this switch and the menu label. Absent = off.
+     */
+    blog?: SiteBlogSettings;
 }
+
+export interface SiteBlogSettings { enabled: boolean; menuLabel: string; }
+/** Where a site's blog lives. A page may not take this address while the blog is on. */
+export const BLOG_PATH = '/blog';
+export const BLOG_SLUG = 'blog';
+export const DEFAULT_BLOG_LABEL = 'Blog';
+/** Whether this site shows the Blog Assistant's posts at /blog. */
+export const blogOn = (def: Pick<SiteDefinition, 'settings'>): boolean => def.settings.blog?.enabled === true;
 
 export const SITE_FEATURES = ['shop', 'bookings', 'menu', 'hours', 'gallery', 'reviews', 'signup', 'faq'] as const;
 export type SiteFeature = typeof SITE_FEATURES[number];
@@ -194,6 +208,12 @@ export interface ReviewsProps { heading: string | null; intro: string | null; re
  * off the live site — "turn the feed off for now" without losing where it was.
  */
 export interface SocialFeedProps { heading: string | null; intro: string | null; platforms: SocialPlatform[]; count: number; enabled: boolean; }
+/**
+ * The newest posts from the Blog Assistant (site-blog.ts) — read when the page is drawn, so the section
+ * holds no posts: only how many and whether it is on. Each card links to /blog/<slug>, so adding one
+ * switches the site's blog on (applyOperation).
+ */
+export interface BlogPostsProps { heading: string | null; intro: string | null; count: number; enabled: boolean; }
 export interface HoursProps { heading: string | null; intro: string | null; showHours: boolean; showContact: boolean; showAddress: boolean; }
 /** 'class': classes and events — dated sessions with places (class-sessions.ts), not times from opening hours. */
 export type BookingSectionKind = 'appointment' | 'consultation' | 'table' | 'class';
@@ -227,9 +247,10 @@ export type SectionBody =
     | { id: string; type: 'menu'; props: MenuProps }
     | { id: string; type: 'gallery'; props: GalleryProps }
     | { id: string; type: 'reviews'; props: ReviewsProps }
-    | { id: string; type: 'social_feed'; props: SocialFeedProps };
+    | { id: string; type: 'social_feed'; props: SocialFeedProps }
+    | { id: string; type: 'blog_posts'; props: BlogPostsProps };
 export type SectionType = SectionBody['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery', 'reviews', 'social_feed'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts'];
 
 export interface SitePageDef {
     id: string;
@@ -268,7 +289,7 @@ export const LIMITS = {
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
     features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
     buttonLabel: 40, products: 12, productName: 80, productDescription: 400,
-    menuGroups: 12, menuItems: 100, menuNote: 300, galleryImages: 24, caption: 150, reviewsShown: 12, socialPosts: 12,
+    menuGroups: 12, menuItems: 100, menuNote: 300, galleryImages: 24, caption: 150, reviewsShown: 12, socialPosts: 12, blogPosts: 12,
     /** Pence. Stripe's GBP minimum is 30p; the ceiling is a sanity bound for a small-business shop. */
     minPrice: 30, maxPrice: 1_000_000,
 } as const;
@@ -502,6 +523,14 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 enabled: p.enabled !== false,
             } };
         }
+        case 'blog_posts': {
+            const count = Number(p.count);
+            return { type: 'blog_posts', props: {
+                heading: textOrNull(p.heading, LIMITS.headline) ?? 'From our blog', intro: textOrNull(p.intro, LIMITS.intro, true),
+                count: Number.isInteger(count) && count >= 1 && count <= LIMITS.blogPosts ? count : 3,
+                enabled: p.enabled !== false,
+            } };
+        }
         case 'gallery': {
             const raw = Array.isArray(p.images) ? p.images : [];
             const images = raw.map((x) => {
@@ -571,7 +600,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
 }
 
 /** A section's look: a closed set of choices, so nothing here can become CSS. */
-export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed'];
+export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts'];
 export function cleanLook(raw: unknown, type: SectionType): SectionLook {
     const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' ? o.background : 'auto';
@@ -703,7 +732,18 @@ function cleanSettings(raw: unknown, base?: SiteSettings): SiteSettings {
         phone: has('phone') ? (/^\+?[0-9 ()-]{5,30}$/.test(phone) ? phone : null) : base?.phone ?? null,
         features: has('features') ? cleanFeatures(s.features) : base?.features ?? null,
         template: has('template') ? (templateById(s.template) ? String(s.template) : null) : base?.template ?? null,
+        ...blogSetting(has('blog') ? s.blog : undefined, base?.blog),
     };
+}
+
+/** `blog` only when it has ever been set, so a site that never touched it keeps the shape it had. */
+function blogSetting(raw: unknown, base: SiteBlogSettings | undefined): { blog?: SiteBlogSettings } {
+    if (raw === undefined) return base ? { blog: base } : {};
+    const o = (raw && typeof raw === 'object' ? raw : { enabled: raw === true }) as Record<string, unknown>;
+    return { blog: {
+        enabled: o.enabled === undefined ? base?.enabled === true : o.enabled === true,
+        menuLabel: cleanText(o.menuLabel, LIMITS.navLabel) || base?.menuLabel || DEFAULT_BLOG_LABEL,
+    } };
 }
 
 // ── The gate ────────────────────────────────────────────────────────────────────────────────
@@ -752,6 +792,8 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
         if (!title) { warn('A page without a title was left out.'); continue; }
         let slug = p.slug === '' || p.slug === '/' ? '' : slugify(p.slug ?? title);
         if (slug && RESERVED_SLUGS.has(slug)) slug = `${slug}-page`;
+        // /blog belongs to the Blog Assistant's posts while the blog is on.
+        if (slug === BLOG_SLUG && settings.blog?.enabled) { slug = `${BLOG_SLUG}-page`; warn(`Your blog uses /${BLOG_SLUG}, so the page "${title}" moved to /${BLOG_SLUG}-page.`); }
         if (slug === '' && usedSlugs.has('')) slug = slugify(title) || 'page';   // a second "home" becomes a normal page
         let unique = slug; let n = 2;
         while (usedSlugs.has(unique)) unique = `${slug}-${n++}`;
@@ -792,6 +834,7 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
 
     // Internal links must point at a page that exists.
     const pagePaths = new Set(pages.map((p) => (p.slug ? `/${p.slug}` : '/')));
+    if (settings.blog?.enabled) pagePaths.add(BLOG_PATH);
     const checkLink = (l: Link | null): Link | null => {
         if (!l || !l.href.startsWith('/')) return l;
         if (pagePaths.has(l.href)) return l;
@@ -832,19 +875,25 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
  * One page: the home page's sections that have a menu label (links down the page), then any other
  * page not hidden. `pageId` is the page the entry belongs to; `sectionId` when it is a jump.
  */
+/** The menu entry the blog adds (pageId is not a page's — no page has it). */
+export const BLOG_MENU_ID = '_blog';
+
 export function menuOf(def: SiteDefinition): Array<{ label: string; path: string; pageId: string; sectionId?: string }> {
     const toPage = (p: SitePageDef, label?: string) => ({ label: clampText(label || p.title, LIMITS.navLabel), path: p.slug ? `/${p.slug}` : '/', pageId: p.id });
+    // The blog is always last in the menu, and always fits: it takes the last place if the menu is full.
+    const blog = blogOn(def) ? [{ label: def.settings.blog!.menuLabel || DEFAULT_BLOG_LABEL, path: BLOG_PATH, pageId: BLOG_MENU_ID }] : [];
+    const room = LIMITS.navItems - blog.length;
     if (def.structure === 'one_page') {
         const home = def.pages[0];
         const jumps = home ? home.sections.filter((s) => s.look?.menuLabel).map((s) => ({ label: s.look!.menuLabel!, path: `#${s.id}`, pageId: home.id, sectionId: s.id })) : [];
         const others = def.pages.slice(1).filter((p) => !p.hideFromMenu).map((p) => toPage(p));
-        return [...jumps, ...others].slice(0, LIMITS.navItems);
+        return [...[...jumps, ...others].slice(0, room), ...blog];
     }
     const entries = def.nav.length ? def.nav : def.pages.filter((p) => !p.hideFromMenu).slice(0, LIMITS.navItems).map((p) => ({ label: clampText(p.title, LIMITS.navLabel), pageId: p.id }));
-    return entries.flatMap((n) => {
+    return [...entries.flatMap((n) => {
         const page = def.pages.find((p) => p.id === n.pageId);
         return page ? [toPage(page, n.label)] : [];
-    });
+    }).slice(0, room), ...blog];
 }
 
 // ── Operations (what the editor and the chat cards both send) ──────────────────────────────
@@ -975,6 +1024,8 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
                 return { ok: false, error: `"${FEATURE_LABELS[f]}" is switched off for this website. Switch it on under Website ▸ Details ▸ What your website does, then add it.` };
             }
             if (!cleaned) return { ok: false, error: refusalFrom(why[0], 'That section isn\'t complete yet.') };
+            // Latest blog posts link to /blog/<slug> — those pages exist only while the blog is on.
+            if (cleaned.type === 'blog_posts' && !blogOn(next)) next.settings.blog = { enabled: true, menuLabel: next.settings.blog?.menuLabel || DEFAULT_BLOG_LABEL };
             const at = Number.isInteger(op.index) ? Math.max(0, Math.min(op.index!, page!.sections.length)) : page!.sections.length;
             page!.sections.splice(at, 0, { id: '', ...cleaned, look: cleanLook(op.section?.look, cleaned.type) } as Section);
             break;

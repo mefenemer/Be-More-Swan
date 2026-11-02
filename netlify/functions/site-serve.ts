@@ -21,11 +21,13 @@ import { eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { sites } from '../../db/schema';
-import { renderRobots, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH } from '../../src/utils/site-render';
+import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH } from '../../src/utils/site-render';
 import { reviewPage, reviewSubmit } from '../../src/utils/site-review';
 import { bookStep, bookSubmit } from '../../src/utils/site-booking';
 import { loadSiteReviews } from '../../src/utils/reviews';
 import { loadSiteSocialFeed } from '../../src/utils/site-social-feed';
+import { loadSiteBlogIndex, loadSiteBlogLatest, loadSiteBlogPost, siteBlogRoute, siteBlogSlugs } from '../../src/utils/site-blog';
+import { BLOG_PATH, blogOn } from '../../src/utils/site-definition';
 import { bookableSessions } from '../../src/utils/class-sessions';
 import { bookingSummary, businessSummary } from '../../src/utils/bookings';
 import { canSell, loadSiteProducts, startCheckout } from '../../src/utils/site-shop';
@@ -213,7 +215,33 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
     }
 
     if (path === '/robots.txt') return { statusCode: 200, headers: headers('text/plain; charset=utf-8', 'public, max-age=300'), body: renderRobots(origin, false) };
-    if (path === '/sitemap.xml') return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin) };
+    // Every address this site answers at — a post canonical at any of them is this site's.
+    const origins = [origin, siteOrigin(slug), ...(resolved?.redirectTo ? [resolved.redirectTo] : [])];
+    if (path === '/sitemap.xml') {
+        const blog = blogOn(definition) ? await siteBlogSlugs(db, site.organisationId, origin, origins) : [];
+        return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin, blog) };
+    }
+
+    // ── The Blog Assistant's posts (site-blog.ts): /blog and /blog/<slug>, while the blog is on ──
+    const blogRoute = blogOn(definition) ? siteBlogRoute(path) : null;
+    // The address a Blog Studio embed page usually had (/blogs) — kept working after a move here.
+    if (blogOn(definition) && (path === '/blogs' || path === '/blogs/') && !definition.pages.some((p) => p.slug === 'blogs')) {
+        return { statusCode: 301, headers: { Location: BLOG_PATH, 'Cache-Control': 'public, max-age=3600' } as Record<string, string>, body: '' };
+    }
+    if (blogRoute) {
+        const blogCtx = { ...ctx, business: await businessSummary(db, site.organisationId) };
+        // Under the 600 s life of the picture links inside (blog-media-resolve), like blog-page.ts.
+        const cache = 'public, max-age=120';
+        if (blogRoute.kind === 'index') {
+            const q = new URLSearchParams(String(event.queryStringParameters?.q || ''));
+            const data = await loadSiteBlogIndex(db, site.organisationId, q.get('cursor'));
+            if (data.cursor && !data.posts.length) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
+            return { statusCode: 200, headers: headers('text/html; charset=utf-8', cache), body: event.httpMethod === 'HEAD' ? '' : renderSiteBlogIndex(definition, blogCtx, data) };
+        }
+        const post = await loadSiteBlogPost(db, site.organisationId, blogRoute.slug, origin, origins);
+        if (!post) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
+        return { statusCode: 200, headers: headers('text/html; charset=utf-8', cache), body: event.httpMethod === 'HEAD' ? '' : renderSiteBlogPost(definition, blogCtx, post) };
+    }
 
     const hasShop = definition.pages.some((p) => p.sections.some((s) => s.type === 'products'));
     const hasBooking = definition.pages.some((p) => p.sections.some((s) => s.type === 'booking'));
@@ -226,6 +254,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         business: await businessSummary(db, site.organisationId),
         reviews: await loadSiteReviews(db, site.organisationId, definition),
         socialFeed: await loadSiteSocialFeed(db, site.organisationId, definition),
+        blog: await loadSiteBlogLatest(db, site.organisationId, definition),
     });
     return { statusCode: page.status, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : page.html };
 }
