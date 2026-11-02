@@ -16,6 +16,9 @@ import { REVIEW_QUEUE_STATUS_FAMILIES } from '../../src/config/post-status';
 import { readVideoEdit, renderableClips } from '../../src/lib/video-edit';
 import { masterRatioFor } from '../../src/lib/post-render';
 import { reframeRatioFor } from '../../src/utils/format-router';
+import { customerRenderError } from '../../src/utils/render-error-message';
+import { notFromArchivedAssistant } from '../../src/utils/archived-assistant-drafts';
+import { contentfulDraft } from '../../src/utils/awaiting-review';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -96,24 +99,21 @@ export default withLambda(async (event) => {
         // read side is widened too: a 'draft' with a caption or media is shown as awaiting review,
         // which is what it is. A blank one stays hidden, and archive-cleanup still sweeps it at
         // seven days — that sweep already requires no media, so nothing with work in it is at risk.
-        const contentfulDraft = and(
-            eq(scheduledPosts.status, 'draft'),
-            or(
-                sql`btrim(coalesce(${scheduledPosts.caption}, '')) <> ''`,
-                sql`EXISTS (SELECT 1 FROM scheduled_post_assets spa WHERE spa.scheduled_post_id = ${scheduledPosts.id})`,
-                sql`jsonb_typeof(${scheduledPosts.contentAssetIds}) = 'array' AND jsonb_array_length(${scheduledPosts.contentAssetIds}) > 0`,
-            ),
-        );
+        // The definition lives in src/utils/awaiting-review.ts so get-assistants' per-assistant count
+        // is the same set (SWAN-4).
         const awaitingReview = statusFilter === 'pending_approval';
 
         const baseWhere = and(
             eq(scheduledPosts.organisationId, organisationId),
             family
                 ? (awaitingReview
-                    ? or(inArray(scheduledPosts.status, family as unknown as string[]), contentfulDraft)
+                    ? or(inArray(scheduledPosts.status, family as unknown as string[]), contentfulDraft())
                     : inArray(scheduledPosts.status, family as unknown as string[]))
                 : eq(scheduledPosts.status, statusFilter),
             ...(assistantIdFilter ? [eq(scheduledPosts.assistantId, assistantIdFilter)] : []),
+            // An archived assistant's drafts are waiting on nobody (src/utils/archived-assistant-drafts.ts).
+            // Except on that assistant's own page, which is where a reinstate decision is made.
+            ...(awaitingReview && !assistantIdFilter ? [notFromArchivedAssistant()] : []),
         );
 
         // Which post ids make up this page. Two narrow columns, no joins and no presigned URLs —
@@ -511,8 +511,9 @@ export default withLambda(async (event) => {
                 // canvas went on showing that picture. Derived from the same id list resolvePostMedia
                 // reads, so the two can never disagree about what is attached.
                 hasMedia: Array.isArray(contentAssetIds) && contentAssetIds.length > 0,
-                // Why the video render failed, when it did — null in every other state.
-                renderError: d.renderStatus === 'failed' ? (renderErrors.get(d.id) ?? null) : null,
+                // Why the video render failed, when it did — null in every other state. In the
+                // customer's words: the stored message is Remotion's, AWS console links and all.
+                renderError: d.renderStatus === 'failed' ? customerRenderError(renderErrors.get(d.id)) : null,
                 brandCard: brandCards.get(d.id) ?? null,
                 // Name of the assistant whose post triggered this hand-off — orchestration drafts only.
                 handoffFrom: handoffFrom.get(d.id) ?? null,

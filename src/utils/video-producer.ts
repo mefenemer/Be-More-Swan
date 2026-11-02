@@ -584,9 +584,18 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         for (const a of assets) thumbs[a.id] = a.storageKey ? await presignR2Get(a.storageKey).catch(() => null) : a.externalUrl;
     }
     const sb = row.storyboard as Storyboard | null;
+    // A 'built' project's post can still fail its final render (the text burn-in), and until that is
+    // retried the post can never publish. The Videos tab said "Made. It's in the Review Queue" over a
+    // post the Review Queue was showing as failed (SWAN-6), so it reads the post's render state too.
+    let postRenderStatus: string | null = null;
+    if (row.status === 'built' && row.scheduledPostId) {
+        const [p] = await db.select({ renderStatus: scheduledPosts.renderStatus }).from(scheduledPosts)
+            .where(and(eq(scheduledPosts.id, row.scheduledPostId), eq(scheduledPosts.organisationId, orgId))).limit(1);
+        postRenderStatus = p?.renderStatus ?? null;
+    }
     return {
         id: row.id, aiAssistantId: row.aiAssistantId, title: row.title, status: row.status, brief: row.brief, storyboard: sb, changes: row.changes, note: row.note,
-        scheduledPostId: row.scheduledPostId, creditsSpent: row.creditsSpent,
+        scheduledPostId: row.scheduledPostId, postRenderStatus, creditsSpent: row.creditsSpent,
         origin: row.origin, sourcePostId: row.sourcePostId, campaignId: row.campaignId,
         ...(sb ? await buildEstimate(orgId, sb, row.brief as VideoBrief) : { estimate: null, unit: null }),
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),

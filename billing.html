@@ -444,7 +444,7 @@
     <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 z-10 max-h-[90vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-5">
         <h3 class="text-base font-extrabold text-gray-900">Change Plan</h3>
-        <button onclick="window._closeChangePlanModal()" class="text-gray-400 hover:text-gray-600 transition">
+        <button type="button" aria-label="Close" onclick="window._closeChangePlanModal()" class="text-gray-400 hover:text-gray-600 transition">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
@@ -634,6 +634,16 @@
     }
   };
 
+  // "3 assistants · 2,750 tasks/mo". A null limit is unlimited and says what is unlimited — the line
+  // used to read "Unlimited · 2750 tasks/mo", and "1 assistants" on the entry plan (SWAN-11).
+  const _n = (v) => Number(v).toLocaleString('en-GB');
+  const _gbp = (v) => `£${Number(v).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  function _planLimits(assistants, tasks, per) {
+    const a = assistants ? `${_n(assistants)} assistant${Number(assistants) === 1 ? '' : 's'}` : 'Unlimited assistants';
+    const k = tasks ? `${_n(tasks)} tasks/${per}` : 'Unlimited tasks';
+    return `${a} · ${k}`;
+  }
+
   function _tierRadio(t, direction) {
     const badge = direction === 'upgrade'
       ? `<span class="text-xs text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full">Upgrade</span>`
@@ -648,10 +658,10 @@
               <p class="font-bold text-gray-900 text-sm">${t.name}</p>
               ${badge}
             </div>
-            <p class="text-xs text-gray-500">${t.assistantLimit ? t.assistantLimit + ' assistants' : 'Unlimited'} · ${t.monthlyTaskLimit || t.taskLimit ? (t.monthlyTaskLimit || t.taskLimit) + ' tasks/mo' : 'Unlimited tasks'}</p>
+            <p class="text-xs text-gray-500">${_planLimits(t.assistantLimit, t.monthlyTaskLimit || t.taskLimit, 'mo')}</p>
           </div>
         </div>
-        <span class="text-sm font-extrabold text-gray-900 shrink-0">£${parseFloat(t.monthlyPriceGbp).toFixed(2)}<span class="text-xs text-gray-400 font-normal">/mo</span></span>
+        <span class="text-sm font-extrabold text-gray-900 shrink-0">${_gbp(t.monthlyPriceGbp)}<span class="text-xs text-gray-400 font-normal">/mo</span></span>
       </label>`;
   }
 
@@ -675,9 +685,9 @@
         if (!res.ok) throw new Error(data.error || 'Preview failed');
         const p = data.preview;
         document.getElementById('cpp-plan-name').textContent = `Upgrade to ${p.targetPlanName}`;
-        document.getElementById('cpp-prorated').textContent  = `Due today (prorated): £${parseFloat(p.proratedAmountGbp).toFixed(2)}`;
-        document.getElementById('cpp-renewal').textContent   = `New monthly amount: £${parseFloat(p.newMonthlyAmount).toFixed(2)}/month`;
-        document.getElementById('cpp-features').textContent  = `${p.features.assistantLimit ? p.features.assistantLimit + ' assistants' : 'Unlimited'} · ${p.features.taskLimit ? p.features.taskLimit + ' tasks/month' : 'Unlimited tasks'}`;
+        document.getElementById('cpp-prorated').textContent  = `Due today (prorated): ${_gbp(p.proratedAmountGbp)}`;
+        document.getElementById('cpp-renewal').textContent   = `New monthly amount: ${_gbp(p.newMonthlyAmount)}/month`;
+        document.getElementById('cpp-features').textContent  = _planLimits(p.features.assistantLimit, p.features.taskLimit, 'month');
         document.getElementById('btn-confirm-plan-change').textContent = 'Confirm Upgrade';
         _show('change-plan-actions');
       } catch (e) {
@@ -700,13 +710,15 @@
         if (imp.assistantsToPause?.length > 0) {
           assistantEl.innerHTML = `<strong>Assistants that will be paused</strong> at period end: ${imp.assistantsToPause.map(a => `<em>${a.name}</em>`).join(', ')}`;
         } else {
-          assistantEl.textContent = `✓ All your assistants fit within the ${imp.newAssistantLimit ?? 'unlimited'}-assistant limit.`;
+          assistantEl.textContent = imp.newAssistantLimit == null
+            ? '✓ That plan has no assistant limit, so all your assistants carry on.'
+            : `✓ All your assistants fit within the ${_n(imp.newAssistantLimit)}-assistant limit.`;
         }
 
         // SC3: task limit side-by-side
         const taskEl = document.getElementById('cpp-task-impact');
         if (imp.currentTaskLimit || imp.newTaskLimit) {
-          taskEl.textContent = `Monthly tasks: ${imp.currentTaskLimit ?? 'Unlimited'} → ${imp.newTaskLimit ?? 'Unlimited'}`;
+          taskEl.textContent = `Monthly tasks: ${imp.currentTaskLimit == null ? 'Unlimited' : _n(imp.currentTaskLimit)} → ${imp.newTaskLimit == null ? 'Unlimited' : _n(imp.newTaskLimit)}`;
         } else {
           taskEl.textContent = '';
         }

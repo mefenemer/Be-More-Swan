@@ -457,7 +457,7 @@
   function toolbarHtml() {
     // Tasks: 1,000,000 means an uncapped plan, so there is no "left" worth showing.
     const credits = state.credits == null || (state.unit === 'tasks' && state.credits >= 1000000) ? ''
-      : `<span class="text-xs text-gray-500">${state.unit === 'tasks' ? 'Tasks left this month' : 'AI credits left this month'}: <span class="font-bold">${esc(state.credits)}</span></span>`;
+      : `<span class="text-xs text-gray-500">${state.unit === 'tasks' ? 'Tasks left this month' : 'AI credits left this month'}: <span class="font-bold">${esc(Number(state.credits).toLocaleString('en-GB'))}</span></span>`;
     return `
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4" data-brief-toolbar>
         <div>

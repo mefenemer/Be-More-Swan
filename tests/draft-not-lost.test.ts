@@ -45,9 +45,12 @@ console.log('\nrecovering what is already stranded');
 check('the queue shows a draft that has content', () => {
     // A promotion on write fixes the NEXT one and none of the ones already lost, so the read side
     // has to be widened too.
-    assert.ok(drafts.includes('const contentfulDraft ='), 'the queue must recognise a built draft');
-    const at = drafts.indexOf('const contentfulDraft =');
-    const scope = drafts.slice(at, at + 900);
+    // The rule moved to src/utils/awaiting-review.ts (SWAN-4) so the per-assistant counts share it.
+    assert.ok(drafts.includes('contentfulDraft()'), 'the queue must recognise a built draft');
+    const shared = readFileSync(join(root, 'src/utils/awaiting-review.ts'), 'utf8');
+    const at = shared.indexOf('export function contentfulDraft()');
+    assert.ok(at !== -1, 'the shared rule is missing');
+    const scope = shared.slice(at, at + 900);
     assert.ok(scope.includes('caption'), 'a caption counts as content');
     assert.ok(scope.includes('scheduled_post_assets'), 'so does attached media');
     assert.ok(scope.includes('content_asset_ids') || scope.includes('contentAssetIds'), 'and the legacy array');

@@ -4285,6 +4285,9 @@ const _RQ_BLOG_STATUS_LABEL = {
 function _rqBlogExcerpt(src) {
     const text = String(src || '')
         .replace(/^#{1,6}\s.*$/gm, ' ')            // headings (the H1 repeats the title)
+        // Blog Studio's container directives — ::::columns{cols=2}, :::column, the closing ::: and
+        // :::: — are layout, not words; the card used to print them (SWAN-2).
+        .replace(/:{3,}[\w-]*(\{[^}\n]*\})?/g, ' ')
         .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')       // images
         .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')     // links → their words
         .replace(/[*_`>~|]/g, '')
@@ -5082,7 +5085,12 @@ window._renderStatusPill = function(data) {
     if (!statusEl || !data) return;
     const toggleBtn = document.getElementById('btn-toggle-status');
 
-    const p = window._resolveAssistantBadge(data, window._detailOpSignals);
+    // The Brand Designer's waiting work is its briefs, which reach this page through
+    // _setNeedsYouCount rather than the review-queue signal — so the pill read "Idle" directly above
+    // "Needs you: 2 waiting in Briefs" (SWAN-8). One count for the pill and the strip.
+    const sig = window._detailOpSignals || {};
+    const waiting = Math.max(Number(sig.pendingReview) || 0, Number(window._detailNeedsYouOverride) || 0);
+    const p = window._resolveAssistantBadge(data, { ...sig, pendingReview: waiting });
 
     statusEl.className = `inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md text-xs font-bold border ${p.cls}`;
     statusEl.innerHTML = `<span class="w-2 h-2 rounded-full ${p.dot}"></span> ${p.label}`;
@@ -5105,6 +5113,7 @@ window._updateOpSignals = function(patch) {
 // _applyDashboardRegistry.
 window._setNeedsYouCount = function(n) {
     window._detailNeedsYouOverride = Number(n) || 0;
+    window._renderStatusPill?.();
     window._renderNeedsYou();
 };
 window._setNextUp = function(text) {
@@ -9401,8 +9410,12 @@ async function _renderAssistantTaskShare(assistantId) {
         document.getElementById('task-share-mine').style.width = `${minePct}%`;
         document.getElementById('task-share-others').style.width = `${othersPct}%`;
         document.getElementById('task-share-bar').setAttribute('aria-label', `${name} used ${minePct}% of the monthly task allowance; all assistants together ${Math.min(100, pct(total))}%`);
+        // Bonus tasks sit on top of the allowance, and other screens count them in "tasks left" —
+        // so a Briefs tab said 11,252 left under a strip that said "of 10,500" (SWAN-8).
+        const bonus = Number(cap.bonusTasks) || 0;
         document.getElementById('task-share-note').textContent =
-            `${name}: ${n(mine)} task${mine === 1 ? '' : 's'} · all assistants: ${n(total)} of ${n(limit)} (${label(total)})`;
+            `${name}: ${n(mine)} task${mine === 1 ? '' : 's'} · all assistants: ${n(total)} of ${n(limit)} (${label(total)})`
+            + (bonus > 0 ? ` · plus ${n(bonus)} bonus task${bonus === 1 ? '' : 's'}` : '');
         strip.classList.remove('hidden');
     } catch { /* the strip just stays hidden */ }
 }

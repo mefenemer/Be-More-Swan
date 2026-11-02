@@ -39,7 +39,10 @@
           <h2 class="font-bold text-gray-900 text-lg">Your free months</h2>
           <p class="text-sm text-gray-500">One free month for every friend who becomes a paying customer.</p>
         </div>
-        <div class="text-right">
+        <!-- Left-aligned, not text-right: on a phone this block wraps onto its own line under the
+             heading, and right-aligned text in a narrow block put the "0" over the middle of its
+             label instead of its start (SWAN-12). -->
+        <div>
           <p id="vault-token-count" class="text-3xl font-extrabold text-emerald-600">0</p>
           <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Ready to claim</p>
         </div>

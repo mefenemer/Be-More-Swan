@@ -85,6 +85,11 @@
   #post-review-modal.pr-page { top: 64px; left: 0; padding: 0; background: #f9fafb;
     backdrop-filter: none; -webkit-backdrop-filter: none; align-items: stretch; justify-content: stretch; }
   @media (min-width: 768px) { #post-review-modal.pr-page { left: var(--sidebar-w, 16rem); } }
+  /* Below lg the rail and the post stack, and the rail comes first in the markup (it is the left
+     column on a wide screen) — so on a phone the seven setup steps filled the screen and the post you
+     were asked to approve started below the fold, under a sticky Approve button (SWAN-12). The post
+     goes first; the steps follow it. */
+  @media (max-width: 1023px) { #pce-stage-wrap > #pce-stage-main { order: -1; } }
   #post-review-modal.pr-page #post-review-panel { max-width: none !important; max-height: none !important;
     height: 100%; border-radius: 0; box-shadow: none; }
   /* More room as a page: the post card, its platform tabs and the timeline under it go up to 600px
@@ -995,7 +1000,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         <!-- Back to the "Where should this go?" picker that opened this post — same picker, pre-filled
              with what the post has (rqReviewAddDestination). It already existed as "+ Destination"
              on the tab strip, which nobody could find; this is where you look for "go back". -->
-        <button type="button" id="pce-change-dest" onclick="rqReviewAddDestination()" class="hidden btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer whitespace-nowrap">Change platform &amp; format</button>
+        <button type="button" id="pce-change-dest" onclick="rqReviewAddDestination()" class="hidden btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer whitespace-nowrap" aria-label="Change platform and format"><span class="sm:hidden">Platform</span><span class="hidden sm:inline">Change platform &amp; format</span></button>
         <button onclick="closePostReview()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -2400,13 +2405,15 @@ window.showComplianceModals = function showComplianceModals(force) {
 <nav id="app-header" class="fixed top-0 left-0 right-0 z-50 h-16 w-full bg-white border-b border-gray-200 shadow-sm flex items-center justify-between px-4 sm:px-6 lg:px-8">
 
   <div class="flex items-center gap-3 sm:gap-4">
-    <button id="mobile-menu-btn" class="md:hidden text-gray-500 hover:text-gray-900 focus:outline-none">
+    <button id="mobile-menu-btn" type="button" aria-label="Open menu" class="md:hidden text-gray-500 hover:text-gray-900 focus:outline-none">
       <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
     </button>
     <a href="#" class="flex items-center">
-      <span class="font-extrabold text-xl sm:text-2xl text-emerald-700 tracking-tight">Be More Swan</span>
+      <span class="font-extrabold text-xl sm:text-2xl text-emerald-700 tracking-tight whitespace-nowrap">Be More Swan</span>
     </a>
-    <span id="header-title" class="text-sm sm:text-base font-medium text-gray-400 ml-1 sm:ml-2">| My Workspace</span>
+    <!-- Not on a phone: beside the brand and the header icons, "| Refer a Friend" and "Be More Swan"
+         each wrapped onto two lines at 375px (SWAN-12). The page's own heading names it there. -->
+    <span id="header-title" class="hidden sm:inline whitespace-nowrap text-sm sm:text-base font-medium text-gray-400 ml-1 sm:ml-2">| My Workspace</span>
   </div>
 
   <div class="flex items-center gap-3">
@@ -6585,8 +6592,7 @@ async function rqRenderGroups(statusKey, opts = {}) {
         // One all-clear with a next step, instead of a collapsible heading and a grey sentence per
         // group — three "nothing here"s read as three things to check.
         ? rqAllClear(statusKey)
-        : groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey, totalByGroup[g.key])).join('')
-            + rqMoreButton(statusKey);
+        : groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey, totalByGroup[g.key])).join('');
     if (refocusSel) container.querySelector(refocusSel)?.focus({ preventScroll: true });
     // One short sentence instead of the whole list — and only when the person asked for this view,
     // never on the quiet refresh.
@@ -6696,14 +6702,11 @@ function rqRepaintPostsGroup(statusKey) {
     const body = document.querySelector('.rq-group-body-posts');
     const groups = rqGroupSocialDrafts(_rqLoadedPosts, { sort: (RQ_COLUMNS[statusKey] || {}).sort });
     if (body) {
-        body.innerHTML = groups.length
-            ? `<div class="divide-y divide-gray-100">${groups.map(rqRenderSocialCard).join('')}</div>`
-            : body.innerHTML;
+        // The More button is part of this group's body (rqGroupSection), so it is repainted with it.
+        if (groups.length) body.innerHTML = `<div class="divide-y divide-gray-100">${groups.map(rqRenderSocialCard).join('')}</div>` + rqMoreButton(statusKey);
         const count = body.closest('section')?.querySelector('.rq-group-count');
         if (count) count.textContent = rqGroupCountLabel(groups.length, _rqPostsTotal);
     }
-    const more = document.getElementById('rq-more-btn')?.closest('div');
-    if (more) more.outerHTML = rqMoreButton(statusKey);
 }
 
 // A blog post row in the Review Queue. The row opens the post in Blog Studio, which is where it is
@@ -6779,9 +6782,12 @@ function rqGroupCountLabel(shown, total) {
 function rqGroupSection(g, items, render, statusKey, total) {
     const open = _rqGroupOpen[g.key] !== false;
     const emptyMsg = statusKey === 'review' ? g.emptyReview : g.empty;
-    const body = items.length
+    // "Show more" pages the social posts, so it lives INSIDE that group: appended after every group
+    // it sat under all the blog posts, and stayed on screen with Social media posts collapsed (SWAN-3).
+    const body = (items.length
         ? `<div class="divide-y divide-gray-100">${items.map(render).join('')}</div>`
-        : `<p class="text-sm text-gray-500 py-6 text-center">${emptyMsg}</p>`;
+        : `<p class="text-sm text-gray-500 py-6 text-center">${emptyMsg}</p>`)
+        + (g.key === 'posts' ? rqMoreButton(statusKey) : '');
     return `<section class="border-b border-gray-100 last:border-0">
       <button type="button" onclick="rqToggleGroup('${g.key}')" aria-expanded="${open}" aria-controls="rq-group-body-${g.key}"
         class="rq-group-toggle-${g.key} focus-ring w-full flex items-center gap-2 py-3 text-left cursor-pointer group">
@@ -8053,7 +8059,10 @@ function _rqTimelineParts(post) {
         } else {
             sub = `${fmt(src(start))} → ${fmt(src(end))} of clip ${sp.i + 1} · ${fmt(start)} → ${fmt(end)} of the whole cut`;
         }
-        return row('text', ov.id || String(i), (ov.text || 'Text').split('\n')[0].slice(0, 22), ov,
+        // The WHOLE first line. This is an editable field, not a label: it used to hold the first 22
+        // characters, so changing one letter and leaving the box saved "True stories. Real fil" over
+        // the real text (SWAN-7). A box's later lines are kept by _rqTimelineTextEdit.
+        return row('text', ov.id || String(i), (ov.text || 'Text').split('\n')[0], ov,
             !!(ov.id && ov.id === _pceSelectedOverlayId), sub, ax);
     };
 
@@ -10616,6 +10625,14 @@ function _rqTimelineItem(kind, key) {
     return overlays.find((o) => o && o.id === key) || overlays[Number(key)] || null;
 }
 
+// A timeline text row edits the box's FIRST LINE only — a one-line field cannot hold the rest — so
+// an edit replaces that line and keeps every line after it. Writing the field's value over the
+// whole text dropped them (SWAN-7).
+function _rqTimelineTextEdit(previous, firstLine) {
+    const rest = String(previous == null ? '' : previous).split('\n').slice(1);
+    return [String(firstLine == null ? '' : firstLine), ...rest].join('\n');
+}
+
 /** Which clip a moment of the finished cut falls in, or null when there is no cut to speak of. */
 function _rqClipIndexAt(t) {
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
@@ -10868,7 +10885,7 @@ function _rqBindTimeline() {
             const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
             const ov = post && _rqTimelineItem('text', el.getAttribute('data-tl-text'));
             if (!ov) return;
-            ov.text = el.value;
+            ov.text = _rqTimelineTextEdit(ov.text, el.value);
             // The panel is mounted once per selection and holds its own textarea; without this it
             // would keep showing the wording as it was before the row was edited.
             _pceStyleMountedFor = null;
@@ -10884,7 +10901,7 @@ function _rqBindTimeline() {
         const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
         const ov = post && _rqTimelineItem('text', el.getAttribute('data-tl-text'));
         if (!ov) return;
-        ov.text = el.value;
+        ov.text = _rqTimelineTextEdit(ov.text, el.value);
         // ⚠️ NOT _rqRenderCanvasOverlays. That comment said "the list waits for the caret" and was
         // true of the intent and false of the call: _rqRenderCanvasOverlays ends by calling
         // _pceRenderClips, so every keystroke rebuilt the row the caret was in. One letter, then the
@@ -10931,7 +10948,8 @@ function _rqRenderPostCrumbs(post) {
     if (!nav) return;
     const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const sep = '<svg class="w-3.5 h-3.5 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>';
-    const crumb = (label, act) => `<button type="button" data-pr-crumb="${act}" class="font-semibold text-gray-500 hover:text-gray-900 hover:underline cursor-pointer">${esc(label)}</button>${sep}`;
+    // whitespace-nowrap: at 375px "Content Calendar" broke into a centred two-line block (SWAN-12).
+    const crumb = (label, act) => `<button type="button" data-pr-crumb="${act}" class="font-semibold text-gray-500 hover:text-gray-900 hover:underline cursor-pointer whitespace-nowrap">${esc(label)}</button>${sep}`;
     const view = window._currentViewKey || 'dashboard';
     let trail;
     if (view === 'assistant-detail') {
@@ -18646,7 +18664,15 @@ function rqReviewToggle(which) {
     }
     // 'amend' and 'media' were retired in Phase 2 — the caption and the picture are edited in the
     // inspector now. Guarded rather than assumed: this list outlived two of its own entries once.
-    ['changes', 'reject', 'reschedule', 'approved'].forEach(k => document.getElementById('post-review-' + k)?.classList.add('hidden'));
+    ['changes', 'reject', 'reschedule', 'approved'].forEach(k => {
+        const el = document.getElementById('post-review-' + k);
+        // The no-argument reset runs at the end of every _rqReviewRenderActive. When the rail holds
+        // the reschedule block it IS step 7's panel, so hiding it left "Schedule & publish" open and
+        // empty after anything that re-renders the post — the disclosure-footer checkbox, for one
+        // (SWAN-9). A fresh open only looked fine because _railOpenDecisionForDraft re-mounts it.
+        if (!which && k === 'reschedule' && el?.closest('#pce-rail')) return;
+        el?.classList.add('hidden');
+    });
     const buttons = document.getElementById('post-review-buttons');
     if (which) {
         if (which === 'reschedule') {
