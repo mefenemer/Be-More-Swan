@@ -18,7 +18,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 // 2.2 (2026-10-17): clauses 5 and 6.5 — one monthly task allowance replaces AI media and X credits
 // (docs/task-metering.md). Bumping this asks every signed-in user to accept again (workspace
 // check-tos modal) — update the modal's "What changed" copy in workspace.html with every bump.
-export const CURRENT_TOS_VERSION = '2.2';
+export const CURRENT_TOS_VERSION = '2.3';
 
 const jwtSecret = process.env.JWT_SECRET;
 

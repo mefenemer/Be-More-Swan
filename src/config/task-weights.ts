@@ -13,6 +13,8 @@
 // Changing a weight changes what customers are charged — update pricing.html, faq.html, the terms
 // and the "What Counts as a Task" help article in the same change.
 
+import { switchedOn } from './dated-switch';
+
 export const TASK_WEIGHTS = {
     social_post: 1,
     blog_article: 1,
@@ -41,15 +43,14 @@ export const TASK_WEIGHTS = {
  * AI video by length (owner, 2026-11-01): 4 tasks a second, because the models bill by the second
  * and a 10 s Kling 3.0 Pro clip costs us about twice a 5 s one (docs/ai-video-bakeoff-2026-11-01.md).
  *
- * ⚠️ OFF until the notice the terms require has run (clause 5.2: weights change on at least 30 days'
- * notice). Netlify env AI_VIDEO_PRICED_BY_SECOND=on switches it on — staging only until then; with it
- * unset every clip is TASK_WEIGHTS.ai_video, as the terms and pricing page say today. Switching it on
- * for production goes with the copy in docs/ai-video-per-second-pricing.md.
+ * Netlify env AI_VIDEO_PRICED_BY_SECOND: 'on', or the date it starts (src/config/dated-switch.ts).
+ * Production is set to 2026-12-03, the date in the 30 days' notice sent 2026-11-02 (terms 5.2 /
+ * 20.2); staging is 'on'. Unset, or before the date, every clip is TASK_WEIGHTS.ai_video.
  */
 export const AI_VIDEO_TASKS_PER_SECOND = 4;
 
-export function videoPricedBySecond(): boolean {
-    return process.env.AI_VIDEO_PRICED_BY_SECOND === 'on';
+export function videoPricedBySecond(now: Date = new Date()): boolean {
+    return switchedOn(process.env.AI_VIDEO_PRICED_BY_SECOND, now);
 }
 
 /** Tasks for one AI clip of `seconds` (the BILLED length). Flat TASK_WEIGHTS.ai_video while per-second pricing is off. */

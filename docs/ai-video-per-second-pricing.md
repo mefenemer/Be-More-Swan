@@ -36,6 +36,9 @@ So production keeps the flat 20 until the notice has run.
 
 ## Switching it on in production
 
+Status 2026-11-02: step 1 done (Broadcast, 8 users), terms and env done (step 3). Step 2's copy
+(pricing, FAQ, help articles, plan features, showcases) is still to do on 3 December.
+
 1. **Send the notice** (clause 20.2) at least 30 days before the effective date. Use email and the
    in-app notice, the same route as the 17 October task-allowance notice
    (`notification-templates-catalog.ts`). Suggested wording:
@@ -46,8 +49,7 @@ So production keeps the flat 20 until the notice has run.
    > Nothing else changes.
 
 2. **On the effective date,** in one release:
-   - Terms 5.2: "an AI-generated video as 4 tasks for each second of video". Bump the terms version
-     and update the "What changed" modal (see the terms-version rule: the login prompt).
+   - ~~Terms 5.2~~ done in v2.3 on 2026-11-02, with the start date in the clause.
    - `pricing.html`: lines 246, 404 and 536 ("An AI video — 4 tasks a second").
    - `faq.html`: lines 174 and 369.
    - `billing.html` 69, `checkout.html` 135, `assistant-detail.html` 1459, `my-content.js` 157,
@@ -59,10 +61,10 @@ So production keeps the flat 20 until the notice has run.
      line in "What Counts as a Task", the Brand Designer cost line, and the "Each AI clip" row in
      "Making a Video: From Storyboard to Finished Post". Never the retired seed.
    - `TASK_WEIGHTS.ai_video` stays 20. It's the price of a clip whose length is unknown.
-3. **Set `AI_VIDEO_PRICED_BY_SECOND=on` for production,** then redeploy. Env changes only reach
-   functions on a new deploy.
-4. **Then** set `FAL_I2V_MODEL=fal-ai/kling-video/v3/pro/image-to-video` for production (or with
-   step 3), and redeploy.
+3. **Production env, set 2026-11-02 (the switches take a start date, `src/config/dated-switch.ts`):**
+   `AI_VIDEO_PRICED_BY_SECOND=2026-12-03`, `FAL_I2V_MODEL=fal-ai/kling-video/v3/pro/image-to-video`
+   and `FAL_I2V_MODEL_FROM=2026-12-03`. Both turn on at 00:00 UTC on 3 December with no deploy.
+   Terms v2.3 (clause 5.2 with that start date) was published the same day.
 
 Until step 3, switching production to Kling 3 alone keeps the flat 20. A 10 s Kling 3 clip
 ($1.12 + frame) would then cost more than the 20 tasks bring in.
