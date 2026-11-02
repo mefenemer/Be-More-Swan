@@ -17,11 +17,10 @@ import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { planImage, wordsToOverlays } from '../../src/lib/image-prompt';
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { presignR2Get } from '../../src/utils/social-publish';
-import { FalContentPolicyError, FalError, FalServiceError } from '../../src/lib/fal-gateway';
+import { FalContentPolicyError, FalError, FalServiceError, IMAGE_MODEL } from '../../src/lib/fal-gateway';
 import { mediaTargetPostIds } from '../../src/utils/crosspost-media';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
-const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };

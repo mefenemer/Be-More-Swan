@@ -37,7 +37,7 @@ import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { generateAndPersistImage, renderAndPersistBrandCard, r2IsConfigured } from '../../src/lib/media-persist';
 import { headlineFromCaption, MAX_HEADLINE_CHARS } from '../../src/lib/brand-card';
 import { resolveBrandKitForOrg } from '../../src/lib/brand-extract-fetch';
-import { FalContentPolicyError } from '../../src/lib/fal-gateway';
+import { FalContentPolicyError, IMAGE_MODEL as AI_IMAGE_MODEL } from '../../src/lib/fal-gateway';
 import { resolveDisclosureFooter } from '../../src/utils/disclosure-footer';
 import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils/platform-caption';
 import { fireOrchestrations } from '../../src/utils/orchestration';
@@ -76,7 +76,6 @@ import { recordPlatformIncident } from '../../src/utils/platform-incident';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Fal image model for inline AI generation (matches the autonomous suggestions path).
-const AI_IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
 const BACKOFF_SECS = [10, 30, 90];
 /**

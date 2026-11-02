@@ -51,6 +51,10 @@ export const VOICES = [
     // a real British speaker, not an accent asked for. coral + accent is only the fallback.
     { id: 'british_woman', label: 'British, warm (woman)', speaker: 'coral', elevenlabs: '6vIP9mPY4dr6w8krUg01',
       accent: 'Speak with a natural British English accent, as a woman from the south of England: warm and friendly, not posh.' },
+    // ElevenLabs "Beth - British female, playful & witty", the owner's pick for the Harbour Yoga sample
+    // (2026-11-02). Same coral + accent fallback as Pepper.
+    { id: 'british_woman_playful', label: 'British, playful (woman)', speaker: 'coral', elevenlabs: 'zH7TN9vEZAsEway9xWev',
+      accent: 'Speak with a natural British English accent, as a young woman from the south of England: playful, witty and warm, not posh.' },
     // Ballad, picked by ear from four trials (2026-11-02): the accent needs spelling out — a one-line
     // "London accent" note came back American.
     { id: 'london_man', label: 'London, laid-back (man)', speaker: 'ballad',

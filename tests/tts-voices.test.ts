@@ -52,9 +52,10 @@ async function withKeys<T>(keys: Record<string, string | undefined>, fn: () => P
     try { return await fn(); } finally { for (const k of Object.keys(was)) { if (was[k] === undefined) delete process.env[k]; else process.env[k] = was[k]; } }
 }
 
-await check('the British woman is ElevenLabs Pepper; every other voice stays OpenAI', () => {
+await check('the British women are ElevenLabs Pepper and Beth; every other voice stays OpenAI', () => {
     assert.strictEqual(elevenLabsVoice('british_woman'), '6vIP9mPY4dr6w8krUg01');
-    for (const v of VOICES) if (v.id !== 'british_woman') assert.strictEqual(elevenLabsVoice(v.id), null, v.id);
+    assert.strictEqual(elevenLabsVoice('british_woman_playful'), 'zH7TN9vEZAsEway9xWev');
+    for (const v of VOICES) if (!v.id.startsWith('british_woman')) assert.strictEqual(elevenLabsVoice(v.id), null, v.id);
 });
 
 await check('ElevenLabs speaks the British woman when its key is set', async () => {
