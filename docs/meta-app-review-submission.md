@@ -96,11 +96,14 @@ Do P2 again first, so the grant appears.
 
 ### In the submission form (both permissions)
 
-- Paste the new "How the app uses it" text above. Upload the SAME video to both permissions:
-  `meta-review-videos/be-more-swan-publish-pages_manage_posts-instagram_content_publish.mp4`
-  (recorded 2026-11-02, 6m24s, captioned; not committed). One Facebook Login grants both
-  permissions, and the post goes to the Page and Instagram in one Post it now. Its captions name
-  each permission at the grant screen (step 7) and at each live post (steps 17–18).
+- Paste the new "How the app uses it" text above. Videos (recorded 2026-11-02, captioned, in
+  `meta-review-videos/`, not committed):
+  - `pages_manage_posts`: `be-more-swan-publish-pages_manage_posts-instagram_content_publish.mp4`
+    (6m24s): Facebook Reconnect → grant → Post it now → live on the Page (and Instagram).
+  - `instagram_content_publish`: `be-more-swan-instagram_content_publish.mp4` (5m11s):
+    Instagram Reconnect → grant → account picker → Post it now (Instagram only) → live.
+  Facebook and Instagram are separate Connect buttons in Be More Swan (`meta-oauth.ts` stores only
+  the platform being connected), so each permission needs its own Connect shown on camera.
 - Add to the notes: *"Be More Swan is a web app using Facebook Login with the user's own access
   token. It is not a server-to-server app and does not use system user tokens. The screencast
   shows the full Facebook login, both permissions being granted, and one post being published and
@@ -174,17 +177,18 @@ _Code: `meta-oauth.ts`, `src/utils/meta-accounts.ts` (picker), `src/utils/follow
 **How the app uses it (resubmission wording, 2026-11-02 — matches the screencast step for step):**
 Be More Swan is a web app that helps small businesses run their social media. A business owner
 logs in to Be More Swan and opens their Social Media Assistant (Marvin). Under Assistant Profile →
-Connections they click Connect (or Reconnect) on Facebook, which opens Facebook Login for
-Business. They log in, choose their Facebook Page, their business and their Instagram professional
-account, and grant "Upload media and create posts for the Instagram account". Back in Be More
-Swan, the owner clicks Create a Post, picks Instagram Feed post, and the assistant drafts the
-caption and image. The owner reviews it, opens Schedule & publish, clicks **Post it now** and
-confirms "Yes, publish now". Be More Swan then publishes it to their Instagram account with the
-content publishing API: it creates a media container with `POST /{ig-user-id}/media` and publishes
-it with `POST /{ig-user-id}/media_publish`. The post moves to the Posted tab, marked "Posted" with
-a "View live post →" link to the post on Instagram. Owners can instead choose **Pick the time
-myself**, and the same publishing call runs at that time. Be More Swan never publishes a post the
-owner has not approved. It uses Facebook Login with the user's own access token. It is not a
+Connections they click Connect (or Reconnect) on Instagram, which opens Facebook Login for
+Business. They log in, review their Pages, business and Instagram professional account, and grant
+"Upload media and create posts for the Instagram account". Back in Be More Swan they pick which
+Instagram account the workspace posts to and click Connect this account. The owner then clicks
+Create a Post, picks Instagram Feed post, and the assistant drafts the caption and image. The
+owner reviews it, opens Schedule & publish, clicks **Post it now** and confirms "Yes, publish now".
+Be More Swan then publishes it to their Instagram account with the content publishing API: it
+creates a media container with `POST /{ig-user-id}/media` and publishes it with
+`POST /{ig-user-id}/media_publish`. The post moves to the Posted tab, marked "Posted" with a "View
+live post →" link to the post on Instagram. Owners can instead choose **Pick the time myself**,
+and the same publishing call runs at that time. Be More Swan never publishes a post the owner has
+not approved. It uses Facebook Login with the user's own access token. It is not a
 server-to-server app and does not use a system user token.
 _Code: `publish-instagram.ts`, `approve-post.ts` (`publish_now`), `publish-now-background.ts`._
 
