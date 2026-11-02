@@ -119,6 +119,8 @@ jobs:
           # check day is caught early in the day rather than waiting for a once-daily tick to land.
           # `run-mentor-review-dispatch` (6h) queues the Business Mentor's weekly reviews. Idempotent within a
           # week (one scheduled review per workspace per week), so the 6h interval only catches a review day early.
+          # `run-mentor-morning-dispatch` (1h) sends the Business Mentor's morning summaries. Idempotent per
+          # workspace per local day (mentor_mornings latch); only 07:00–11:59 local is a sending window.
           # `run-discussion-scan-dispatch` (6h) starts the Lead Generator's daily Discussions scans. Idempotent
           # within 18h (a watch scanned since is skipped), so the 6h interval only catches a new watch early.
           # `run-site-directory-dispatch` (24h) starts the site page directory's weekly refreshes. Idempotent:
@@ -151,6 +153,7 @@ jobs:
           run-site-directory-dispatch 86400 120
           run-video-autopilot       21600   120
           run-mentor-review-dispatch 21600  120
+          run-mentor-morning-dispatch 3600  120
           run-discussion-scan-dispatch 21600 120
           run-paid-optimiser        43200   300
           run-campaign-agent        86400   300

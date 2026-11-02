@@ -8,6 +8,7 @@ import { getDb } from '../../db/client';
 import { pendingActions, users } from '../../db/schema';
 import { Resend } from 'resend';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { emailedMorningUserIds } from '../../src/utils/mentor-morning';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
 const FROM   = process.env.EMAIL_FROM || 'noreply@bemoreswan.com';
@@ -33,8 +34,13 @@ const handler = async () => {
         ))
         .groupBy(pendingActions.userId, users.email, users.firstName);
 
+    // Someone emailed the Business Mentor's morning summary today already heard what's waiting for them
+    // (its "Waiting for you" line) — one morning email, not two (docs/morning-summary-plan.md D3).
+    const hadMorning = await emailedMorningUserIds(db, new Date(Date.now() - 20 * 60 * 60 * 1000));
+
     let sent = 0;
     for (const row of rows) {
+        if (row.userId != null && hadMorning.has(Number(row.userId))) continue;
         const name = row.firstName || 'there';
         await resend.emails.send({
             from: FROM,

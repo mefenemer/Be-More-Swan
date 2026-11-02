@@ -403,6 +403,24 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('Open my review', 'link.action_url') + signoff,
     },
     {
+        // The Business Mentor's morning summary (src/utils/mentor-morning.ts), to owners and admins whose
+        // "Business Mentor morning summary" email preference is on (off by default). Built by rules.
+        triggerKey: 'mentor_morning_summary',
+        name: 'Business Mentor Morning Summary',
+        category: 'Engagement',
+        subject: 'Your morning summary: {{morning.headline}}',
+        preheader: '{{morning.headline}}',
+        bodyHtml: greet +
+            p('Here’s your morning in {{workspace.name | "your workspace"}}, from {{assistant.name | "your Business Mentor"}}.') +
+            // One plain-text line per section (merge values are HTML-escaped); an empty section is ''.
+            p('<strong>{{morning.money}}</strong>') +
+            p('{{morning.today}}') +
+            p('{{morning.enquiries}}') +
+            p('{{morning.needs_you}}') +
+            p('{{morning.next}}') +
+            button('Open my summary', 'link.action_url') + signoff,
+    },
+    {
         triggerKey: 'post_due',
         name: 'Post Approval Due',
         category: 'Engagement',

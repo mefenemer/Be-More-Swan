@@ -315,7 +315,8 @@ export function isStillWaiting(d: { kind: string; fields: string[] }, waiting: A
 
 // ── Recipients and delivery ───────────────────────────────────────────────────────────────────────
 
-async function recipients(db: Db, orgId: number): Promise<Array<{ userId: number; email: string; firstName: string | null; emailPrefs: Record<string, boolean> | null }>> {
+/** Owners and admins who receive the review — and the morning summary (mentor-morning.ts). */
+export async function recipients(db: Db, orgId: number): Promise<Array<{ userId: number; email: string; firstName: string | null; emailPrefs: Record<string, boolean> | null }>> {
     const rows = await db.select({ userId: users.id, email: users.email, firstName: users.firstName, emailPrefs: userProfiles.emailPreferences })
         .from(userOrganisations)
         .innerJoin(users, eq(users.id, userOrganisations.userId))
@@ -325,7 +326,7 @@ async function recipients(db: Db, orgId: number): Promise<Array<{ userId: number
 }
 
 /** This user's latest chat with the Mentor, or a new one: the review always lands in their chat (§2.4). */
-async function mentorChatFor(db: Db, orgId: number, userId: number, mentorId: number): Promise<number> {
+export async function mentorChatFor(db: Db, orgId: number, userId: number, mentorId: number): Promise<number> {
     const [s] = await db.select({ id: chatSessions.id }).from(chatSessions)
         .where(and(eq(chatSessions.organisationId, orgId), eq(chatSessions.userId, userId), eq(chatSessions.aiAssistantId, mentorId), eq(chatSessions.status, 'active')))
         .orderBy(desc(chatSessions.updatedAt)).limit(1);

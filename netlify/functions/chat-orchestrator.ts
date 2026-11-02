@@ -124,6 +124,7 @@ import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
 import { closeCommitmentCard } from '../../src/utils/mentor-commitments';
 import { cardOutcomeLine } from '../../src/utils/mentor-card-outcome';
 import { renderReviewSettingsForMentor } from '../../src/utils/mentor-review';
+import { latestMorningForMentor, renderMorningSettingsForMentor } from '../../src/utils/mentor-morning';
 import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-inventory';
 import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-plan-cards';
 import { loadStrategyDocs } from '../../src/utils/strategy-documents';
@@ -3075,8 +3076,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             return null;
         })
         : null;
-    // Phase 3: its own weekly-review settings ride with the snapshot (mentor-review.ts).
-    const mentorSnapshot = mentorParts ? `${mentorParts.text}\n${renderReviewSettingsForMentor(session.aiAssistantId, assistantRow.onboardingContext)}` : null;
+    // Phase 3: its own weekly-review settings ride with the snapshot (mentor-review.ts), and so do its
+    // morning-summary settings and the latest summary sent (mentor-morning.ts).
+    const latestMorning = mentorParts ? await latestMorningForMentor(db, orgId) : '';
+    const mentorSnapshot = mentorParts
+        ? [mentorParts.text, renderReviewSettingsForMentor(session.aiAssistantId, assistantRow.onboardingContext),
+            renderMorningSettingsForMentor(session.aiAssistantId, assistantRow.onboardingContext), latestMorning].filter(Boolean).join('\n')
+        : null;
 
     // Per turn, like the leads snapshot: something approved on the Posts / Blogs / Emails tab a
     // moment ago must already be in "Scheduled" when the user asks what is coming up. Never throws.

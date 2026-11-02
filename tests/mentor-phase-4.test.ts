@@ -118,6 +118,7 @@ test('every incident kind is labelled, and every call site is deterministic', ()
         ['netlify/functions/mentor.ts', "kind: 'mentor_action'"],
         ['src/utils/mentor-jobs.ts', "kind: 'mentor_job'"],
         ['src/utils/mentor-review.ts', "kind: 'mentor_review'"],
+        ['src/utils/mentor-morning.ts', "kind: 'mentor_morning'"],
     ];
     for (const [file, marker] of sites) assert.ok(read(file).includes(marker), `${file} records ${marker}`);
     for (const k of Object.keys(INCIDENT_KINDS)) assert.ok(sites.some(([, m]) => m === `kind: '${k}'`), `${k} has a call site`);

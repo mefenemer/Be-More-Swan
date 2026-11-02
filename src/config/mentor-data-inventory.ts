@@ -46,6 +46,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('always', 'Its own research answers and drafting jobs, with their links (§4.5)', ['mentor_jobs'], 'What it has looked up for you, with the links'),
     ...group('always', 'Its own suggestions and what the user did with them: the weekly cap and what not to suggest again (§3.13)', ['mentor_proposals'], 'Its own suggestions and the ones you dismissed'),
     ...group('always', 'Its own weekly reviews (§5)', ['mentor_reviews'], 'Its weekly reviews'),
+    ...group('always', 'Its morning summaries (docs/morning-summary-plan.md): the newest sent in the last two days', ['mentor_mornings'], 'Its morning summaries'),
     ...group('always', 'Commitments and why a missed one was missed (§5.1), with each owner\'s name', ['mentor_commitments'], 'What you and your team committed to each week, and why any were missed'),
     ...group('always', 'Its track record: accepted suggestions and what happened since (§5.3)', ['mentor_outcomes'], 'What changed since you accepted its suggestions'),
     ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus']),

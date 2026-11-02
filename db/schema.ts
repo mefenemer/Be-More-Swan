@@ -6361,6 +6361,24 @@ export const mentorReviews = pgTable("mentor_reviews", {
   index("mentor_reviews_org_created_idx").on(t.organisationId, t.createdAt),
 ]);
 
+// The morning summary (db/z-mentor-morning.sql, src/utils/mentor-morning.ts): one row per workspace per
+// local day — the latch against a second send, what it said, and who was emailed.
+export const mentorMornings = pgTable("mentor_mornings", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+  // The workspace's local date the summary is for (it describes the day before).
+  day: date("day").notNull(),
+  // 'sent' | 'empty' (nothing to say) | 'failed'
+  status: text("status").notNull().default("sent"),
+  summary: jsonb("summary"),
+  emailedUserIds: integer("emailed_user_ids").array().notNull().default(sql`'{}'::integer[]`),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("mentor_mornings_org_day_uq").on(t.organisationId, t.day),
+  index("mentor_mornings_created_idx").on(t.createdAt),
+]);
+
 // §5.1: 1–3 things a person will do this week, and why a missed one was missed (a closed list).
 export const mentorCommitments = pgTable("mentor_commitments", {
   id: serial("id").primaryKey(),
