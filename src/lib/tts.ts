@@ -25,7 +25,11 @@ export const VOICEOVER_MAX_CHARS = 1200;
 
 /**
  * The voices offered. A short, labelled list on purpose: eleven unnamed voices is a choice nobody
- * can make. Keys are OpenAI voice ids; labels describe the sound, never a person.
+ * can make. Labels describe the sound, never a person. The first six ids ARE OpenAI voice ids; an
+ * accented voice is an OpenAI voice (`speaker`) plus an accent line added to the delivery note —
+ * gpt-4o-mini-tts takes accent from its instructions. The owner asked for British voices for the
+ * website samples (2026-11-02): OpenAI's voices are American-sounding without one.
+ * src/components/assistant-videos.js and the onboarding schema list the same ids (tests/tts-voices.test.ts).
  */
 export const VOICES = [
     { id: 'coral',   label: 'Warm and friendly' },
@@ -34,6 +38,10 @@ export const VOICES = [
     { id: 'alloy',   label: 'Neutral and steady' },
     { id: 'onyx',    label: 'Deep and confident' },
     { id: 'shimmer', label: 'Light and lively' },
+    { id: 'british_woman', label: 'British, warm (woman)', speaker: 'coral',
+      accent: 'Speak with a natural British English accent, as a woman from the south of England: warm and friendly, not posh.' },
+    { id: 'london_man', label: 'London, laid-back (man)', speaker: 'ash',
+      accent: 'Speak with a London accent, as a young man from the city: relaxed and streetwise, everyday London speech. Not posh, not BBC English, and never a caricature.' },
 ] as const;
 export type VoiceId = typeof VOICES[number]['id'];
 export const DEFAULT_VOICE: VoiceId = 'coral';
@@ -105,14 +113,24 @@ function classify(status: number, body: string): TtsError {
     return new TtsError(`OpenAI HTTP ${status}: ${body.slice(0, 200)}`);
 }
 
+/** The OpenAI voice and delivery note for one of our voices. Pure. */
+export function voiceRequest(voice: VoiceId): { speaker: string; instructions: string } {
+    const v = VOICES.find((x) => x.id === voice) as { id: string; speaker?: string; accent?: string } | undefined;
+    return {
+        speaker: v?.speaker ?? voice,
+        instructions: v?.accent ? `${VOICEOVER_INSTRUCTIONS} ${v.accent}` : VOICEOVER_INSTRUCTIONS,
+    };
+}
+
 /** Speak `text` in `voice`. Returns mp3 bytes. */
 export async function synthesizeSpeech(text: string, voice: VoiceId, fetchImpl: typeof fetch = fetch): Promise<Buffer> {
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new TtsError('Voiceovers are not configured.', 'not_configured');
+    const { speaker, instructions } = voiceRequest(voice);
     const res = await fetchImpl(SPEECH_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify({ model: TTS_MODEL, voice, input: text, instructions: VOICEOVER_INSTRUCTIONS, response_format: 'mp3' }),
+        body: JSON.stringify({ model: TTS_MODEL, voice: speaker, input: text, instructions, response_format: 'mp3' }),
         signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) throw classify(res.status, await res.text().catch(() => ''));

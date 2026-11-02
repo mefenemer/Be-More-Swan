@@ -141,6 +141,8 @@ export function overlayBoxStyle(ov: Partial<Overlay>, refHeightPx: number): Reco
         transform: 'translate(-50%, -50%)',
         boxSizing: 'border-box',
         whiteSpace: 'pre',
+        // Lines of a two-line box centre on each other, as the box centres on x.
+        textAlign: 'center',
         overflow: 'visible',
         lineHeight: LINE_HEIGHT,
         // A STACK, not the bare stored name. Lambda has none of the OS fonts the picker offers and

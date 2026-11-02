@@ -25,6 +25,7 @@
   const VOICES = [
     ['coral', 'Warm and friendly'], ['sage', 'Calm and clear'], ['verse', 'Bright and upbeat'],
     ['alloy', 'Neutral and steady'], ['onyx', 'Deep and confident'], ['shimmer', 'Light and lively'],
+    ['british_woman', 'British, warm (woman)'], ['london_man', 'London, laid-back (man)'],
   ];
   const WAITING = {
     planning: 'Writing the storyboard — about a minute.',

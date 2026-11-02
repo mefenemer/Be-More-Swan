@@ -206,6 +206,8 @@ export async function renderAndPersistBrandCard(db: Db, params: {
     seed?: number;
     variant?: CardVariant;
     orgName?: string | null;
+    /** Where the headline, wordmark and website sit (normalizeCardLayout); the default when absent. */
+    layout?: unknown;
 }): Promise<number> {
     if (!r2Configured) throw new Error('brand_card_requires_r2');
 
@@ -216,6 +218,7 @@ export async function renderAndPersistBrandCard(db: Db, params: {
         variant: params.variant,
         seed: params.seed,
         orgName: params.orgName,
+        layout: params.layout,
     });
 
     const { storageKey, fileSize } = await persistBufferToR2({

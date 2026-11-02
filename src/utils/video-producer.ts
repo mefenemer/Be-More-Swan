@@ -47,7 +47,7 @@ import {
 } from '../lib/storyboard';
 import type { VideoClip, VideoEdit } from '../lib/video-edit';
 import type { AudioOverlay } from '../lib/audio-overlays';
-import type { Overlay } from '../lib/overlay-geometry';
+import { PAD_RATIO, type Overlay } from '../lib/overlay-geometry';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -252,18 +252,53 @@ export function buildTasks(storyboard: Storyboard, brief: VideoBrief): number {
     return n;
 }
 
-/** The text overlays for a storyboard, timed to the scenes. Pure. */
 /**
- * The on-screen text size, as a fraction of the frame HEIGHT, so one line fits a 9:16 frame. The box
- * is a single line (overlay-geometry.ts whiteSpace: 'pre'), and at a fixed 5% "Yellow flame? Get it
- * checked" ran off both edges in the first sample render (2026-11-01). Anton (the Impact stand-in) is
- * about 0.5 of its height wide per character with the box padding; the line may use ~90% of a width
- * that is 9/16 of the height. Never larger than 5%, never smaller than 2.8%. Pure.
+ * The on-screen text size, as a fraction of the frame HEIGHT, so its longest line fits a 9:16 frame.
+ * The box keeps line breaks and never wraps by itself (overlay-geometry.ts whiteSpace: 'pre'), and at
+ * a fixed 5% "Yellow flame? Get it checked" ran off both edges in the first sample render
+ * (2026-11-01). Anton (the Impact stand-in) is about 0.5 of its height wide per character, plus the
+ * box padding either side; the line may use ~90% of a width that is 9/16 of the height. Never larger
+ * than 5%, never smaller than 2.8%. Pure.
  */
 export function onScreenFontPct(text: string): number {
-    const n = Math.max(1, text.trim().length);
-    return Math.round(Math.max(0.028, Math.min(0.05, (0.9 * 9 / 16) / (0.5 * n))) * 1000) / 1000;
+    const n = Math.max(1, ...text.trim().split('\n').map((l) => l.trim().length));
+    // Rounded DOWN: rounding to nearest could tip a line that just fits over the edge.
+    return Math.floor(Math.max(0.028, Math.min(0.05, (0.9 * 9 / 16) / (0.5 * n + 2 * PAD_RATIO))) * 1000) / 1000;
 }
+
+/** Past this many characters one line gets too small to read on a phone, so it becomes two. */
+export const ONE_LINE_MAX = 28;
+
+/**
+ * Long on-screen text as two balanced lines, broken at the space nearest the middle. A long line hit
+ * the 2.8% floor and still ran off both edges (Harbour Yoga sample, 2026-11-02, owner: "some of the
+ * text overlay is off the screen"). Pure.
+ */
+export function onScreenLines(text: string): string {
+    const t = text.trim().replace(/\s+/g, ' ');
+    if (t.length <= ONE_LINE_MAX) return t;
+    const mid = t.length / 2;
+    let best = -1;
+    for (let i = 0; i < t.length; i++) if (t[i] === ' ' && (best < 0 || Math.abs(i - mid) < Math.abs(best - mid))) best = i;
+    return best < 0 ? t : `${t.slice(0, best)}\n${t.slice(best + 1)}`;
+}
+
+/** The text overlays for a storyboard, timed to the scenes. Pure. */
+
+/**
+ * How a branded card is drawn inside a video. Centred, because a video card is an end screen seen
+ * full-frame, not a feed post; and the dark ('bold') polarity, because the captions are white — on a
+ * light card the spoken words vanished (Harbour Yoga sample, 2026-11-02, owner: "text at the end is
+ * off the screen"; "Pop in this week text is not centred").
+ */
+export const VIDEO_CARD = {
+    variant: 'bold' as const,
+    layout: {
+        headline: { show: true, align: 'center' as const, y: 0.42, x: null },
+        wordmark: { show: true, align: 'center' as const, y: 0, x: null },
+        website: { show: true, align: 'center' as const, y: 1, x: null },
+    },
+};
 
 export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
     const out: Overlay[] = [];
@@ -274,10 +309,11 @@ export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
         // overlaid as well, the first sample render showed "Pop in this week" three times at once
         // (card, overlay, captions). The card says it; the overlay stays off.
         if (s.onScreenText && s.source !== 'brand_card') {
+            const text = onScreenLines(s.onScreenText);
             out.push({
-                id: `vp_${s.id}`, text: s.onScreenText,
+                id: `vp_${s.id}`, text,
                 // Upper third: the captions own the lower part of the frame.
-                x: 0.5, y: 0.2, fontFamily: 'Impact', fontSizePct: onScreenFontPct(s.onScreenText),
+                x: 0.5, y: 0.2, fontFamily: 'Impact', fontSizePct: onScreenFontPct(text),
                 color: '#FFFFFF', boxStroke: null, boxFill: '#000000', boxOpacity: 0.55,
                 startS: Math.round(t * 10) / 10, endS: Math.round((t + d) * 10) / 10, anim: 'rise',
             });
@@ -352,7 +388,7 @@ async function sourceScene(db: Db, args: {
         }
         case 'brand_card': {
             const headline = scene.onScreenText || scene.voiceover.split(/[.!?]/)[0] || args.brandName;
-            return { assetId: await renderAndPersistBrandCard(db, { orgId, userId, headline: headline.slice(0, 80), kit: args.kit, aspectRatio: '9:16', seed: args.seed, orgName: args.brandName }) };
+            return { assetId: await renderAndPersistBrandCard(db, { orgId, userId, headline: headline.slice(0, 80), kit: args.kit, aspectRatio: '9:16', orgName: args.brandName, ...VIDEO_CARD }) };
         }
         case 'ai_image':
             return {
