@@ -121,3 +121,106 @@ export async function visualisePrompt(
         return request;
     }
 }
+
+// ── Picture first, words second (owner, 2026-11-02) ──────────────────────────
+// When a request asks for words ON the picture — a headline, a "Before / After" label, a quote — FLUX
+// cannot spell them, and NO_TEXT_RULE forbids them anyway, so those words used to vanish. planImage()
+// splits the request in two: a scene for FLUX to draw, and the exact words the person asked to see,
+// which become editable text layers (save-post-overlays shape) drawn by us and baked on approve.
+
+/** The most words-on-a-picture a request may turn into; more than this is a caption, not a graphic. */
+export const MAX_IMAGE_WORDS = 4;
+const MAX_WORD_LEN = 90;
+/** The overlay editor never wraps on its own (it splits on \n only), so we wrap here. */
+const WRAP_AT = 26;
+
+const SYSTEM_PLAN = `You plan an image for an image-generation model (FLUX) that cannot draw readable text. You are given what a person asked for.
+Return JSON only: {"scene": string, "words": string[]}.
+"scene": 50-90 words describing a single image to draw: subject, action, setting, composition and camera angle, lighting and mood, style (photographic unless they asked for illustration). If the request is an idea, a quote or a sentence, depict what it MEANS. Never ask for text, words, letters, captions, signs or logos in the scene. Leave clear space where the words will sit when there are any.
+"words": ONLY the exact words the request explicitly asks to appear ON the image (a headline, a label, a quote, "text overlay reading ...", a before/after label), copied character for character, at most ${MAX_IMAGE_WORDS} short items in reading order. A post caption, hashtags or a description of the scene are NOT words for the image. If the request does not explicitly ask for words on the image, or asks for text without saying what it says, return [].`;
+
+export interface ImagePlan { scene: string; words: string[] }
+
+const norm = (s: string) => s.toLowerCase().replace(/[“”"'‘’]/g, '').replace(/\s+/g, ' ').trim();
+
+/**
+ * Pure: the model's reply as a plan, or null when it isn't usable. A "word" is kept only if it really
+ * is in the request — the model must copy, never write copy (that is the editor's "Suggest wording").
+ */
+export function parseImagePlan(raw: string, request: string): ImagePlan | null {
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    let obj: unknown;
+    try { obj = JSON.parse(m[0]); } catch { return null; }
+    const o = obj as { scene?: unknown; words?: unknown };
+    const scene = typeof o.scene === 'string' ? o.scene.trim().replace(/^["“]|["”]$/g, '').slice(0, 1500) : '';
+    if (scene.length < 20) return null;
+    const haystack = norm(request);
+    const words = (Array.isArray(o.words) ? o.words : [])
+        .filter((w): w is string => typeof w === 'string')
+        .map((w) => w.trim().slice(0, MAX_WORD_LEN))
+        .filter((w) => w && haystack.includes(norm(w)))
+        .slice(0, MAX_IMAGE_WORDS);
+    return { scene, words };
+}
+
+/** A scene to draw plus the words to lay over it. Never throws; fails open to { request, [] }. */
+export async function planImage(
+    request: string,
+    usage?: { workspaceId?: number | null; userId?: number | null; assistantId?: number | null },
+): Promise<ImagePlan> {
+    if (!process.env.ANTHROPIC_API_KEY) return { scene: request, words: [] };
+    try {
+        const resp = await anthropic.messages.create(
+            { model: MODEL, max_tokens: 450, system: SYSTEM_PLAN, messages: [{ role: 'user', content: request.slice(0, 1000) }] },
+            { timeout: TIMEOUT_MS, maxRetries: 0 },
+        );
+        void logAiUsage({
+            workspaceId: usage?.workspaceId ?? null, userId: usage?.userId ?? null, assistantId: usage?.assistantId ?? null,
+            model: MODEL, inputTokens: resp.usage.input_tokens, outputTokens: resp.usage.output_tokens,
+            sessionId: 'image-prompt', dataCategories: ['business_context'],
+        });
+        const text = resp.content.filter((b): b is Anthropic.TextBlock => b.type === 'text').map((b) => b.text).join(' ');
+        return parseImagePlan(text, request) ?? { scene: request, words: [] };
+    } catch (err) {
+        console.warn('[image-prompt] plan unavailable — using the request as written:', err instanceof Error ? err.message : err);
+        return { scene: request, words: [] };
+    }
+}
+
+/** Pure: break a line at word boundaries so no row runs past `width` characters. */
+export function wrapWords(text: string, width = WRAP_AT): string {
+    const rows: string[] = [];
+    for (const para of text.split('\n')) {
+        let row = '';
+        for (const word of para.split(/\s+/).filter(Boolean)) {
+            if (row && (row + ' ' + word).length > width) { rows.push(row); row = word; }
+            else row = row ? `${row} ${word}` : word;
+        }
+        rows.push(row);
+    }
+    return rows.join('\n');
+}
+
+/**
+ * Pure: the words as text layers in the overlay editor's shape — centred, the first near the top
+ * as a headline, the rest stacked down the picture. The person moves or restyles them in the editor.
+ */
+export function wordsToOverlays(words: string[]): Array<Record<string, unknown>> {
+    const n = Math.min(words.length, MAX_IMAGE_WORDS);
+    if (!n) return [];
+    // One item sits high; several share the band from 15% to 85% of the height.
+    const ys = n === 1 ? [0.15] : Array.from({ length: n }, (_, i) => 0.15 + (0.7 * i) / (n - 1));
+    return words.slice(0, n).map((w, i) => ({
+        id: `ov_plan${i + 1}`,
+        text: wrapWords(w),
+        x: 0.5,
+        y: Number(ys[i].toFixed(3)),
+        fontFamily: 'Arial',
+        fontSizePct: i === 0 ? 0.065 : 0.05,
+        color: '#ffffff',
+        boxStroke: null,
+        boxFill: '#000000',
+        boxOpacity: 0.5,
+    }));
+}
