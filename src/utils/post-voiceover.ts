@@ -111,7 +111,7 @@ export async function timePostTextToVoice(db: Db, args: { orgId: number; postId:
     if (!voice) return { error: 'That post has no voiceover to time the text to. Add one first.', status: 409 };
     const boxes = (Array.isArray(post.imageOverlays) ? post.imageOverlays : []) as Array<Record<string, unknown>>;
     const texts = boxes.filter((b) => b && typeof b.id === 'string' && String(b.text || '').trim())
-        .map((b) => ({ id: String(b.id), text: String(b.text) }));
+        .map((b) => ({ id: String(b.id), text: String(b.text), startS: typeof b.startS === 'number' ? b.startS : null }));
     if (!texts.length) return { error: 'That post has no text on it to time. Add some text first.', status: 409 };
     const { timings, unmatched } = alignTextToWords(texts, voice.words, voice.clip.startS ?? 0);
     if (Object.keys(timings).length) {

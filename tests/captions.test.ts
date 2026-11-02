@@ -176,6 +176,12 @@ check('text boxes are timed to the words that say them, in order, never overlapp
     assert.strictEqual(r.timings.a.startS, Math.round((2 + 2 * 0.4) * 10) / 10);   // "your boiler"
     assert.ok(r.timings.b.startS > r.timings.a.startS && r.timings.d.startS > r.timings.b.startS);
     assert.ok(r.timings.a.endS <= r.timings.b.startS);
+    // A box already near its moment stays near it, even when a later sentence shares more of its words
+    // (Brightside, 2026-11-02: "Is your boiler ready?" jumped to "…your boiler is never normal").
+    const said2 = 'Three signs your boiler needs a service. Banging from your boiler is never normal.';
+    const w2 = said2.split(' ').map((word, i) => ({ word, start: i * 0.5, end: i * 0.5 + 0.4 }));
+    assert.strictEqual(alignTextToWords([{ id: 'a', text: 'Is your boiler ready?', startS: 0 }], w2).timings.a.startS, 1);
+    assert.ok(alignTextToWords([{ id: 'a', text: 'Is your boiler ready?' }], w2).timings.a.startS === 1, 'no hint: the first place after the last box');
 });
 
 console.log(`\n${passed} checks passed`);

@@ -256,15 +256,16 @@ export function styleAccent(style: CaptionStyle, brandHex: string | null | undef
 /**
  * "Time text to the voice" (post editor): each text box is shown while its words are spoken.
  *
- * A box's words are looked for in the spoken words, in order — the first box from the start, each
- * later box after the one before it (falling back to anywhere, for a box placed out of order). The
- * window that holds the most of the box's words wins; at least half of them must be heard (all of
- * them for a one- or two-word box), else the box keeps its own timing and is reported unmatched.
- * A matched box runs from its first heard word to its last + a short hold, never past the next box's
- * start. Times are on the post's timeline: `offsetS` is where the voiceover starts. Pure.
+ * A box's words are looked for in the spoken words. A place counts when it holds at least half of
+ * the box's words (all of them for a one- or two-word box); a box with no such place keeps its own
+ * timing and is reported unmatched. Of the places that count, the one nearest the box's current
+ * start wins (a box is usually already near its moment — a Video Producer scene's text is), else the
+ * first one after the previous box's; more of the box's words breaks a tie. A matched box runs from
+ * its first heard word to its last + a short hold, never past the next box's start. Times are on the
+ * post's timeline: `offsetS` is where the voiceover starts. Pure.
  */
 export function alignTextToWords(
-    boxes: Array<{ id: string; text: string }>,
+    boxes: Array<{ id: string; text: string; startS?: number | null }>,
     words: SpokenWordLike[],
     offsetS = 0,
 ): { timings: Record<string, { startS: number; endS: number }>; unmatched: string[] } {
@@ -272,10 +273,11 @@ export function alignTextToWords(
     const timings: Record<string, { startS: number; endS: number }> = {};
     const unmatched: string[] = [];
     let cursor = 0;
-    const best = (want: string[], from: number) => {
-        let top: { first: number; last: number; hits: number } | null = null;
+    /** Every place a window of the box's words starts, with how many of them it holds. */
+    const places = (want: string[]) => {
+        const out: Array<{ first: number; last: number; hits: number }> = [];
         const span = want.length + 3;   // room for a few spoken words the box leaves out
-        for (let i = from; i < heard.length; i++) {
+        for (let i = 0; i < heard.length; i++) {
             if (!want.includes(heard[i])) continue;   // a window starts on a word of the box
             const left = [...want];
             let hits = 0, last = i;
@@ -283,20 +285,25 @@ export function alignTextToWords(
                 const k = left.indexOf(heard[j]);
                 if (k >= 0) { left.splice(k, 1); hits++; last = j; }
             }
-            if (!top || hits > top.hits) top = { first: i, last, hits };
-            if (hits === want.length) break;
+            out.push({ first: i, last, hits });
         }
-        return top;
+        return out;
     };
     for (const box of boxes) {
         const want = String(box.text || '').split(/\s+/).map(bare).filter(Boolean);
         if (!want.length) { unmatched.push(box.id); continue; }
         const need = want.length <= 2 ? want.length : Math.ceil(want.length / 2);
-        let hit = best(want, cursor);
-        if (!hit || hit.hits < need) hit = best(want, 0);
-        if (!hit || hit.hits < need) { unmatched.push(box.id); continue; }
+        const ok = places(want).filter((p) => p.hits >= need);
+        if (!ok.length) { unmatched.push(box.id); continue; }
+        const hint = typeof box.startS === 'number' && Number.isFinite(box.startS) ? box.startS : null;
+        const at = (p: { first: number }) => offsetS + words[p.first].start;
+        const score = (p: { first: number; hits: number }) => hint != null
+            ? Math.abs(at(p) - hint)
+            : (p.first >= cursor ? 0 : 1e6) + p.first;   // the first one after the previous box
+        ok.sort((x, y) => score(x) - score(y) || y.hits - x.hits);
+        const hit = ok[0];
         timings[box.id] = {
-            startS: Math.round((offsetS + words[hit.first].start) * 10) / 10,
+            startS: Math.round(at(hit) * 10) / 10,
             endS: Math.round((offsetS + words[hit.last].end + CAPTION_HOLD_S + 0.4) * 10) / 10,
         };
         cursor = hit.last + 1;
