@@ -144,6 +144,8 @@ export async function generateAndPersistImage(db: Db, params: {
     prompt: string;
     aspectRatio: AspectRatio;
     generationJobId?: number | null;
+    /** The image call's own deadline, for callers that spend part of their budget first. */
+    timeoutMs?: number;
 }): Promise<number> {
     let prompt = params.prompt;
     try {
@@ -152,7 +154,7 @@ export async function generateAndPersistImage(db: Db, params: {
         console.error('[media-persist] picture guidelines unreadable — prompt used as written:', err instanceof Error ? err.message : err);
     }
     const image = falConfigured()
-        ? (await generateImages({ prompt, aspectRatio: params.aspectRatio, numImages: 1, usage: { workspaceId: params.orgId, userId: params.userId } }))[0]
+        ? (await generateImages({ prompt, aspectRatio: params.aspectRatio, numImages: 1, usage: { workspaceId: params.orgId, userId: params.userId }, ...(params.timeoutMs ? { timeoutMs: params.timeoutMs } : {}) }))[0]
         : { url: `https://picsum.photos/seed/aura-auto-${Date.now()}/1024/1024`, width: 1024, height: 1024, contentType: 'image/jpeg' };
 
     const mimeType = image.contentType || 'image/png';
