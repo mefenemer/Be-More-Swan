@@ -10,6 +10,8 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseImagePlan, wordsToOverlays, wrapWords, MAX_IMAGE_WORDS } from '../src/lib/image-prompt';
+import { bakeWordsOnImage, canBakeOnto, type WordLayer } from '../src/lib/bake-words';
+import { Resvg } from '@resvg/resvg-js';
 
 let passed = 0, total = 0;
 function test(name: string, fn: () => void) {
@@ -100,5 +102,62 @@ test('editor puts the returned layers in the cache after the swap emptied it', (
     assert.match(win, /_gpOverlayCountByPost\[id\] = planned\.length/);
 });
 
-console.log(`\n${passed}/${total} passed`);
-if (passed !== total) process.exit(1);
+test('rows fit the picture: a tall 9:16 wraps shorter than a wide 16:9', () => {
+    const long = 'Made by hand, one stab at a time, every single day';
+    const rows = (a: number) => String(wordsToOverlays([long], a)[0].text).split('\n');
+    assert.ok(rows(9 / 16).length > rows(16 / 9).length);
+    for (const a of [9 / 16, 0.8, 1, 16 / 9]) {
+        const o = wordsToOverlays([long], a)[0];
+        const longest = Math.max(...rows(a).map((r) => r.length));
+        assert.ok(longest * 0.56 * (o.fontSizePct as number) <= 0.85 * a + 1e-9, `fits at aspect ${a}`);
+    }
+});
+
+console.log('Create with AI: words drawn on at save');
+const gen = read('netlify/functions/generate-ai-image.ts');
+
+test('plans words alongside the four scenes, in parallel (no extra wait)', () => {
+    assert.match(gen, /await Promise\.all\(\[\s*falConfigured\(\) \? visualisePrompts\(prompt, 4, usage\)[\s\S]{0,80}planImage\(prompt, usage\)/);
+    assert.match(gen, /contentType: i\.contentType, words \}/);
+    assert.match(gen, /\n\s+words,\n\s+balance: balance\.balance/);
+});
+
+test('select draws the words on, can be told not to, and says whether it did', () => {
+    assert.match(gen, /handleSelect\(db, orgId, userId, body\.jobId, body\.index, body\.words !== false\)/);
+    assert.match(gen, /bytes = await bakeWordsOnImage\(/);
+    assert.match(gen, /wordsAdded, url: wordsAdded && storageKey/);
+});
+
+test('every Create with AI page shows the words and previews what was saved', () => {
+    const mc = read('my-content.js');
+    assert.match(mc, /_mcAiShowWords\(resultsEl, words\)/);
+    assert.match(mc, /words: document\.getElementById\('ai-words-on'\)\?\.checked !== false/);
+    const mp = read('src/components/media-picker.js');
+    assert.match(mp, /showWords\(res\.body\.words\)/);
+    assert.match(mp, /url: res\.body\.url \|\| b\.dataset\.url/);
+    const bs = read('src/components/blog-studio-modal.js');
+    assert.match(bs, /var words = \(res\.body\.words \|\| \[\]\)/);
+    assert.match(bs, /url: sel\.body\.url \|\| im\.url/);
+});
+
+test('only JPEG and PNG are drawn on', () => {
+    assert.ok(canBakeOnto('image/jpeg') && canBakeOnto('image/png; charset=binary'));
+    assert.ok(!canBakeOnto('image/webp') && !canBakeOnto(null));
+});
+
+(async () => {
+    total++;
+    try {
+        // A plain 400x500 PNG to draw on — made by resvg itself, so the test needs no network.
+        const base = Buffer.from(new Resvg('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="500"><rect width="400" height="500" fill="#3a6"/></svg>').render().asPng());
+        const png = await bakeWordsOnImage({ bytes: base, mimeType: 'image/png', width: 400, height: 500,
+            layers: wordsToOverlays(['Before', 'After'], 0.8) as unknown as WordLayer[] });
+        assert.strictEqual(png.subarray(1, 4).toString(), 'PNG');
+        assert.strictEqual(png.readUInt32BE(16), 400, 'keeps the width');
+        assert.strictEqual(png.readUInt32BE(20), 500, 'keeps the height');
+        assert.ok(png.length > base.length, 'something was drawn on');
+        passed++; console.log('  ✓ draws words onto a real picture at its own size');
+    } catch (err) { console.error(`  ✗ draws words onto a real picture\n    ${(err as Error).message}`); }
+    console.log(`\n${passed}/${total} passed`);
+    if (passed !== total) process.exit(1);
+})();

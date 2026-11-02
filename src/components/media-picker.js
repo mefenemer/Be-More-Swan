@@ -303,12 +303,29 @@
         else await createImage(prompt);
       } finally { if (!closed) { go.disabled = false; paintAi(); } }
     });
+    // Picture first, words second (generate-ai-image.ts): words the prompt asked to see on the
+    // picture are drawn on when it's saved, spelt exactly. The tick keeps them off.
+    function showWords(words) {
+      let box = back.querySelector('[data-mp-ai-words]');
+      const list = Array.isArray(words) ? words.filter(Boolean) : [];
+      if (!list.length) { if (box) box.remove(); return; }
+      if (!box) {
+        box = document.createElement('label');
+        box.setAttribute('data-mp-ai-words', '');
+        box.style.cssText = 'display:flex;gap:8px;align-items:flex-start;margin:8px 0;font-size:12px;color:#4b5563;cursor:pointer';
+        aiGrid.parentNode.insertBefore(box, aiGrid);
+      }
+      box.innerHTML = `<input type="checkbox" data-mp-ai-words-on checked style="margin-top:2px">
+        <span>Add your words to the picture you choose, spelt exactly: ${list.map((w) => `<strong>“${esc(w)}”</strong>`).join(' · ')}. The pictures are drawn without words, because AI can't spell them reliably.</span>`;
+    }
     async function createImage(prompt) {
+      showWords([]);
       say(`${who} is creating four for you to choose from…`);
       const res = await api('generate-ai-image', { method: 'POST', body: JSON.stringify({ prompt, aspectRatio: $('[data-mp-ai-shape]').value }) });
       if (closed) return;
       if (!res.ok) { say(res.body && res.body.error === 'insufficient_credits' ? creditMessage(res.body) : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be created. Please try again.', true); return; }
       say('Choose the one you like — it\'s saved to your library.');
+      showWords(res.body.words);
       const jobId = res.body.jobId;
       // Each tile has an enlarge button (image-lightbox.js): four 120px thumbnails are not enough to choose by.
       const zoom = window.ImageLightbox ? window.ImageLightbox.ZOOM_BUTTON_STYLE : '';
@@ -330,10 +347,12 @@
       const b = e.target.closest('[data-mp-ai-pick]');
       if (!b) return;
       say('Saving it to your library…');
-      const res = await api('generate-ai-image', { method: 'POST', body: JSON.stringify({ action: 'select', jobId: Number(b.dataset.job), index: Number(b.dataset.mpAiPick) }) });
+      const wordsOn = back.querySelector('[data-mp-ai-words-on]');
+      const res = await api('generate-ai-image', { method: 'POST', body: JSON.stringify({ action: 'select', jobId: Number(b.dataset.job), index: Number(b.dataset.mpAiPick), words: !wordsOn || wordsOn.checked }) });
       if (closed) return;
       if (!res.ok || !res.body.assetId) { say((res.body && res.body.error) || 'It couldn\'t be saved. Please try again.', true); return; }
-      pick({ id: res.body.assetId, url: b.dataset.url, name: $('[data-mp-ai-prompt]').value.trim().slice(0, 80), video: false });
+      // With words drawn on, the saved picture differs from the tile — preview what was saved.
+      pick({ id: res.body.assetId, url: res.body.url || b.dataset.url, name: $('[data-mp-ai-prompt]').value.trim().slice(0, 80), video: false });
     });
     async function createVideo(prompt) {
       say(`${who} has started your video — this takes a few minutes. You can keep this open.`);

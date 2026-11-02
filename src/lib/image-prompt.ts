@@ -133,6 +133,8 @@ export const MAX_IMAGE_WORDS = 4;
 const MAX_WORD_LEN = 90;
 /** The overlay editor never wraps on its own (it splits on \n only), so we wrap here. */
 const WRAP_AT = 26;
+/** Average glyph width as a fraction of font size — generous, so a wrapped row never overruns. */
+const GLYPH_W = 0.56;
 
 const SYSTEM_PLAN = `You plan an image for an image-generation model (FLUX) that cannot draw readable text. You are given what a person asked for.
 Return JSON only: {"scene": string, "words": string[]}.
@@ -206,21 +208,26 @@ export function wrapWords(text: string, width = WRAP_AT): string {
  * Pure: the words as text layers in the overlay editor's shape — centred, the first near the top
  * as a headline, the rest stacked down the picture. The person moves or restyles them in the editor.
  */
-export function wordsToOverlays(words: string[]): Array<Record<string, unknown>> {
+export function wordsToOverlays(words: string[], aspect = 0.8): Array<Record<string, unknown>> {
     const n = Math.min(words.length, MAX_IMAGE_WORDS);
     if (!n) return [];
     // One item sits high; several share the band from 15% to 85% of the height.
     const ys = n === 1 ? [0.15] : Array.from({ length: n }, (_, i) => 0.15 + (0.7 * i) / (n - 1));
-    return words.slice(0, n).map((w, i) => ({
+    return words.slice(0, n).map((w, i) => {
+        const fontSizePct = i === 0 ? 0.055 : 0.045;
+        // Rows as long as fit in 85% of the width at this size (aspect = width / height).
+        const width = Math.max(8, Math.floor((0.85 * aspect) / (GLYPH_W * fontSizePct)));
+        return {
         id: `ov_plan${i + 1}`,
-        text: wrapWords(w),
+        text: wrapWords(w, width),
         x: 0.5,
         y: Number(ys[i].toFixed(3)),
         fontFamily: 'Arial',
-        fontSizePct: i === 0 ? 0.065 : 0.05,
+        fontSizePct,
         color: '#ffffff',
         boxStroke: null,
         boxFill: '#000000',
-        boxOpacity: 0.5,
-    }));
+        boxOpacity: 0.6,
+        };
+    });
 }

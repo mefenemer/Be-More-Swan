@@ -780,6 +780,7 @@ function _openUploadModal() {
     document.getElementById('link-name') && (document.getElementById('link-name').value = '');
     // Reset the Generate AI panel
     _mcAiJobId = null;
+    document.getElementById('ai-words')?.remove();
     _mcAiSelected = new Set();
     _mcAiRefreshSaveBtn();
     const aiPrompt = document.getElementById('ai-prompt');
@@ -969,8 +970,9 @@ window._mcGenerateAI = async function () {
             return;
         }
 
-        const { jobId, images, balance } = await res.json();
+        const { jobId, images, balance, words } = await res.json();
         _mcAiJobId = jobId;
+        _mcAiShowWords(resultsEl, words);
         if (typeof balance === 'number') {
             document.getElementById('ai-balance').textContent = _mcAmount(balance);
             _mcSetAiAffordable(balance >= 1);
@@ -999,6 +1001,25 @@ window._mcGenerateAI = async function () {
         btn.disabled = false;
     }
 };
+
+// Picture first, words second (generate-ai-image.ts): words the prompt asked to see on the picture
+// are drawn on by us when it's saved, spelt exactly — the AI draws the scene without them. A tick
+// lets the person keep them off. No words asked for → no note.
+function _mcAiShowWords(resultsEl, words) {
+    let box = document.getElementById('ai-words');
+    const list = Array.isArray(words) ? words.filter(Boolean) : [];
+    if (!list.length) { box?.remove(); return; }
+    if (!box) {
+        box = document.createElement('label');
+        box.id = 'ai-words';
+        box.className = 'flex items-start gap-2 mb-3 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg p-2.5 cursor-pointer';
+        resultsEl.parentNode.insertBefore(box, resultsEl);
+    }
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    box.innerHTML = `<input type="checkbox" id="ai-words-on" checked class="mt-0.5">
+        <span>Add your words to the picture you choose, spelt exactly: ${list.map((w) => `<strong>“${esc(w)}”</strong>`).join(' · ')}.
+        The pictures are drawn without words, because AI can't spell them reliably.</span>`;
+}
 
 // Enlarge one option; "Use this" in the preview ticks it exactly as clicking its tile does.
 window._mcZoomAI = function (i) {
@@ -1058,7 +1079,7 @@ window._mcSaveAiSelection = async function () {
             const res = await fetch('/.netlify/functions/generate-ai-image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'select', jobId: _mcAiJobId, index: picks[i] }),
+                body: JSON.stringify({ action: 'select', jobId: _mcAiJobId, index: picks[i], words: document.getElementById('ai-words-on')?.checked !== false }),
             });
             if (res.ok) { saved++; } else { failed.push(picks[i]); }
         } catch {

@@ -5,8 +5,13 @@
 //   POST { prompt, aspectRatio }              → moderate → hold 1 credit → Flux (4 different interpretations)
 //                                               → on success debit credit, return { jobId, images[] }
 //                                               → on policy flag / failure, REFUND the hold (US4 AC)
-//   POST { action:'select', jobId, index }    → persist the chosen variation as a content_asset
+//   POST { action:'select', jobId, index, words? }
+//                                             → persist the chosen variation as a content_asset
 //                                               (download Fal bytes → R2 storageKey; mock → externalUrl)
+//
+// Picture first, words second (owner, 2026-11-02): words the prompt asks to see ON the picture
+// (planImage) come back as `words`, are kept on each candidate, and are drawn onto the chosen picture
+// at select (bake-words.ts) — spelt exactly, since FLUX can't. `words: false` saves it without them.
 //
 // Credits: 1 credit per generation (a generation yields up to 4 variations). Selection is free.
 
@@ -24,7 +29,9 @@ import {
     FalContentPolicyError, FalServiceError, FalError, type AspectRatio, type GeneratedImage,
 } from '../../src/lib/fal-gateway';
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
-import { visualisePrompts } from '../../src/lib/image-prompt';
+import { visualisePrompts, planImage, wordsToOverlays } from '../../src/lib/image-prompt';
+import { presignR2Get } from '../../src/utils/social-publish';
+import { bakeWordsOnImage, canBakeOnto, type WordLayer } from '../../src/lib/bake-words';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const PROMPT_MAX = 1000;
@@ -66,13 +73,13 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const { userId, organisationId: orgId } = ctx;
 
-    let body: { action?: string; prompt?: string; aspectRatio?: string; jobId?: number; index?: number };
+    let body: { action?: string; prompt?: string; aspectRatio?: string; jobId?: number; index?: number; words?: boolean };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
 
     // ── SELECT: persist a chosen variation as a content_asset ────────────────────
     if (body.action === 'select') {
-        return handleSelect(db, orgId, userId, body.jobId, body.index);
+        return handleSelect(db, orgId, userId, body.jobId, body.index, body.words !== false);
     }
 
     // ── GENERATE: produce a grid of variations ───────────────────────────────────
@@ -106,11 +113,18 @@ export default withLambda(async (event) => {
     }
 
     try {
+        // What the person typed becomes FOUR different scenes to draw (src/lib/image-prompt.ts) — a
+        // sentence passed straight through was painted on as misspelt text, and one scene drawn four
+        // times came back as four near-copies. The job keeps their own words. The words they asked to
+        // see ON the picture are planned alongside, in parallel, so they cost no extra wait.
+        const usage = { workspaceId: orgId, userId };
+        const [prompts, plan] = await Promise.all([
+            falConfigured() ? visualisePrompts(prompt, 4, usage) : Promise.resolve([] as string[]),
+            planImage(prompt, usage),
+        ]);
+        const words = plan.words;
         const images = falConfigured()
-            // What the person typed becomes FOUR different scenes to draw (src/lib/image-prompt.ts) — a
-            // sentence passed straight through was painted on as misspelt text, and one scene drawn four
-            // times came back as four near-copies. The job keeps their own words.
-            ? await generateImageVariants({ prompts: await visualisePrompts(prompt, 4, { workspaceId: orgId, userId }), aspectRatio, usage: { workspaceId: orgId, userId }, timeoutMs: 18_000 })
+            ? await generateImageVariants({ prompts, aspectRatio, usage, timeoutMs: 18_000 })
             : mockImages(aspectRatio);
 
         // Success → debit the held credit and record the completed job with its candidate URLs.
@@ -118,7 +132,7 @@ export default withLambda(async (event) => {
         const [job] = await db.insert(mediaGenerationJobs).values({
             organisationId: orgId, userId, mediaType: 'image', prompt, aspectRatio,
             model: IMAGE_MODEL, creditCost: IMAGE_CREDIT_COST, status: 'completed',
-            candidates: images.map(i => ({ url: i.url, width: i.width, height: i.height, contentType: i.contentType })),
+            candidates: images.map(i => ({ url: i.url, width: i.width, height: i.height, contentType: i.contentType, words })),
         }).returning({ id: mediaGenerationJobs.id });
 
         const balance = await getBalance(db, orgId);
@@ -128,6 +142,7 @@ export default withLambda(async (event) => {
             body: JSON.stringify({
                 jobId: job.id,
                 images: images.map((i, index) => ({ index, url: i.url, width: i.width, height: i.height })),
+                words,
                 balance: balance.balance,
             }),
         };
@@ -171,7 +186,7 @@ export default withLambda(async (event) => {
     }
 });
 
-async function handleSelect(db: ReturnType<typeof getDb>, orgId: number, userId: number, jobId?: number, index?: number) {
+async function handleSelect(db: ReturnType<typeof getDb>, orgId: number, userId: number, jobId?: number, index?: number, withWords = true) {
     if (!jobId || index == null || index < 0) {
         return { statusCode: 400, body: JSON.stringify({ error: 'jobId and a valid index are required.' }) };
     }
@@ -189,11 +204,16 @@ async function handleSelect(db: ReturnType<typeof getDb>, orgId: number, userId:
         .limit(1);
     if (!job) return { statusCode: 404, body: JSON.stringify({ error: 'Generation job not found.' }) };
 
-    const candidates = (job.candidates as Array<{ url: string; contentType?: string }>) || [];
+    const candidates = (job.candidates as Array<{ url: string; contentType?: string; width?: number; height?: number; words?: string[] }>) || [];
     const chosen = candidates[index];
     if (!chosen?.url) return { statusCode: 400, body: JSON.stringify({ error: 'Invalid variation index.' }) };
 
-    const mimeType = chosen.contentType || 'image/png';
+    let mimeType = chosen.contentType || 'image/png';
+    // Words the prompt asked to see on the picture, drawn on by us (bake-words.ts). Only when the
+    // bytes are in hand (R2) and of a kind satori embeds; otherwise saved clean, and `wordsAdded`
+    // tells the page so it never claims words that aren't there.
+    const words = withWords && Array.isArray(chosen.words) ? chosen.words.filter((w) => typeof w === 'string' && w.trim()) : [];
+    let wordsAdded = false;
     const name = `AI image — ${job.prompt.slice(0, 60)}`;
 
     let storageKey: string | null = null;
@@ -204,7 +224,21 @@ async function handleSelect(db: ReturnType<typeof getDb>, orgId: number, userId:
         // Download the ephemeral Fal bytes and persist them durably to R2 (Fal URLs expire).
         const res = await fetch(chosen.url);
         if (!res.ok) return { statusCode: 502, body: JSON.stringify({ error: 'Could not retrieve the generated image.' }) };
-        const bytes = Buffer.from(await res.arrayBuffer());
+        let bytes: Buffer = Buffer.from(await res.arrayBuffer());
+        const fetchedType = (res.headers.get('content-type') || '').split(';')[0].trim();
+        if (words.length && chosen.width && chosen.height && canBakeOnto(fetchedType || mimeType)) {
+            try {
+                bytes = await bakeWordsOnImage({
+                    bytes, mimeType: fetchedType || mimeType, width: chosen.width, height: chosen.height,
+                    layers: wordsToOverlays(words, chosen.width / chosen.height) as unknown as WordLayer[],
+                });
+                mimeType = 'image/png';
+                wordsAdded = true;
+            } catch (err) {
+                // A clean picture is still worth saving; the words just aren't on it.
+                console.warn('[generate-ai-image] could not draw the words on — saving without them:', err instanceof Error ? err.message : err);
+            }
+        }
         fileSize = bytes.byteLength;
         storageKey = `content/org-${orgId}/generated/${crypto.randomUUID()}.${extFromMime(mimeType)}`;
         const s3 = new S3Client({
@@ -237,6 +271,8 @@ async function handleSelect(db: ReturnType<typeof getDb>, orgId: number, userId:
     return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetId: asset.id }),
+        // With words drawn on, the saved picture is no longer the candidate the page is showing — hand
+        // back its own address so the page previews what was actually saved.
+        body: JSON.stringify({ assetId: asset.id, wordsAdded, url: wordsAdded && storageKey ? await presignR2Get(storageKey).catch(() => null) : null }),
     };
 }

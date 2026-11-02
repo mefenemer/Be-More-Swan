@@ -2644,7 +2644,12 @@
             setStatus('bs-media-status', (res.body && res.body.error) || 'Generation failed');
             return;
           }
-          setStatus('bs-media-status', 'Pick a variation');
+          // Picture first, words second: words the prompt asked to see on the picture are drawn on
+          // when the chosen one is saved (generate-ai-image.ts), spelt exactly — the AI can't.
+          var words = (res.body.words || []).filter(Boolean);
+          setStatus('bs-media-status', words.length
+            ? 'Pick a variation — your words (“' + words.join('”, “') + '”) are added to the one you pick, spelt exactly.'
+            : 'Pick a variation');
           var jobId = res.body.jobId;
           mediaEls.picker.innerHTML = '';
           var allImages = res.body.images || [];
@@ -2662,7 +2667,7 @@
                   }
                   // The variation URL is already in hand, so the tile can be built without a
                   // library round-trip — no waiting to find out where the image can go.
-                  renderTiles([{ type: 'image', url: im.url, name: prompt, title: prompt,
+                  renderTiles([{ type: 'image', url: sel.body.url || im.url, name: prompt, title: prompt,
                     source: 'ai', body: { assetId: sel.body.assetId } }]);
                   setStatus('bs-media-status', 'Saved — click it to add it to your post, or press Feature.');
                 });
