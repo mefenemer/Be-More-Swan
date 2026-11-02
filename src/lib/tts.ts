@@ -42,6 +42,11 @@ export const VOICES = [
       accent: 'Speak with a natural British English accent, as a woman from the south of England: warm and friendly, not posh.' },
     { id: 'london_man', label: 'London, laid-back (man)', speaker: 'ash',
       accent: 'Speak with a London accent, as a young man from the city: relaxed and streetwise, everyday London speech. Not posh, not BBC English, and never a caricature.' },
+    // TEMPORARY (staging only): accent trials for the owner to judge by ear. Reverted next commit.
+    ...(['coral', 'shimmer', 'nova', 'sage'] as const).map((s) => ({ id: `trial_w_${s}` as const, label: `Trial British ${s}`, speaker: s,
+      accent: 'Accent: a clear, unmistakably British English accent from the south of England. Non-rhotic: never pronounce the R at the end of words like "our", "here", "roast" or "treat yourself". British vowels throughout: "latte" as "LAT-ay", "autumn" with a short British O, "pop" and "Monday" the British way. Warm, friendly woman, everyday British, not posh and not American in any way.' })),
+    ...(['ash', 'ballad', 'echo', 'fable'] as const).map((s) => ({ id: `trial_m_${s}` as const, label: `Trial London ${s}`, speaker: s,
+      accent: 'Accent: a strong, authentic London accent, Estuary English / modern working-class London, like a friendly young bloke from South or East London. Drop the H at the start of words ("\'arbour"), use glottal stops for T in the middle and end of words ("ge\'", "wha\'", "le\'s"), TH-fronting where it sounds natural ("fings", "wiv"), and London vowels ("toDAI" for today, "noime" for name). Relaxed, streetwise, cheeky and warm. Not posh, not BBC English, not American, never a cartoon Cockney.' })),
 ] as const;
 export type VoiceId = typeof VOICES[number]['id'];
 export const DEFAULT_VOICE: VoiceId = 'coral';
