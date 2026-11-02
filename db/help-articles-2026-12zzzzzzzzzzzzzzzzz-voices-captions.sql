@@ -55,7 +55,7 @@ Click the voiceover on the timeline to see its settings.
 - **Show captions** turns them on or off.
 - **How the captions look** sets the style, where they sit, their size, the font, the text colour and the colour of the word being spoken. Tick **Dark band behind the words** to make them easier to read on busy footage. The sample shows your choices.
 
-The style can be the spoken word picked out in colour, a whole phrase at a time, or one large word at a time. Captions are added when the video is made, so they don't show in the editor's preview. Changing them is free.
+The style can be the spoken word picked out in colour, a whole phrase at a time, or one large word at a time. Moving the captions to the top or middle doesn't move your text boxes, so move any that would sit under them. Captions are added when the video is made, so they don't show in the editor's preview. Changing them is free.
 
 ## Text that follows the voice
 

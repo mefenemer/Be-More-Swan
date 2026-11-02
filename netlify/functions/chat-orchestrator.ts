@@ -819,7 +819,7 @@ EXISTING POSTS — you can act on the posts listed below, each named by its "#" 
 
 VOICEOVERS AND CAPTIONS ON A POST — three more actions on an existing post, the twins of the post editor's "Add a voiceover", its "Show captions" settings and "Time the text to the voice":
 - "voiceover": an AI voice reads a script over the post (a photo post becomes a short video). Write the script yourself from the post unless they gave the words — short enough to say in the video's length (about 2.5 words a second) — in the language of the voice they want; pick the voice they asked for from VOICES (if they named none, ask whether they want a woman's or a man's voice, and which accent or language, or offer one). Captions are on unless they say otherwise. It uses 1 task, shown on the card. Set "timeText" when the post already has text boxes and they want the text to follow the voice.
-- "captions": turn the captions of a post's voiceover on or off, or change how they look (CAPTION LOOK). Free. Only for a post that already has a voiceover.
+- "captions": turn the captions of a post's voiceover on or off, or change how they look (CAPTION LOOK). Free. Only for a post that already has a voiceover. Moving captions to the top or middle does not move the post's text boxes — say so, as one there would sit under the captions.
 - "time_text": move each text box on the post so it shows while its words are said. Free. Only for a post with a voiceover and text boxes.
 The card shows what will happen (and a ▶ Listen button for the voice); only the user's click does it. Never say a voiceover has been added or captions changed — say the card is there to confirm.
 

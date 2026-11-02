@@ -269,7 +269,7 @@ export async function resolveCaptionTrack(db: Db, raw: unknown, orgId: number): 
         .map(a => ({ startS: a.startS, endS: a.endS, words: wordsById.get(a.assetId)! }));
     // One look for the whole video: the first captioned voiceover's style (captions.ts CaptionStyle).
     const style = normalizeCaptionStyle(overlays.find(a => wordsById.has(a.assetId) && a.captionStyle)?.captionStyle);
-    const cues = buildCaptionCues(sources, style.mode);
+    const cues = buildCaptionCues(sources, style.mode, style.size);
     if (!cues.length) return null;
     const [org] = await db.select({ brandKit: organisations.brandKit }).from(organisations)
         .where(eq(organisations.id, orgId)).limit(1).catch(() => [] as Array<{ brandKit: unknown }>);

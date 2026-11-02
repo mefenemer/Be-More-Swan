@@ -86,11 +86,15 @@ export function normalizeCaptionStyle(raw: unknown): CaptionStyle {
     };
 }
 
-/** Words and characters a phrase may hold, by mode. Pure. */
-export function captionLimits(mode: CaptionMode): { words: number; chars: number } {
+/**
+ * Words and characters a phrase may hold, by mode and size: bigger letters, shorter phrases, so a
+ * phrase stays on two lines (a large whole phrase ran to four on the first styled render, 2026-11-02). Pure.
+ */
+export function captionLimits(mode: CaptionMode, size: CaptionSize = 'medium'): { words: number; chars: number } {
     if (mode === 'word') return { words: 1, chars: 40 };
-    if (mode === 'phrase') return { words: 7, chars: 42 };
-    return { words: CAPTION_MAX_WORDS, chars: CAPTION_MAX_CHARS };
+    const scale = size === 'large' ? 0.7 : size === 'small' ? 1.2 : 1;
+    if (mode === 'phrase') return { words: size === 'large' ? 5 : 7, chars: Math.round(42 * scale) };
+    return { words: CAPTION_MAX_WORDS, chars: Math.round(CAPTION_MAX_CHARS * scale) };
 }
 
 const SENTENCE_END = /[.!?…]$|[,;:]$/;
@@ -168,9 +172,9 @@ export function timelineWords(sources: CaptionSource[]): CaptionWord[] {
 }
 
 /** Group words into on-screen phrases, as long as the caption mode allows. Pure. */
-export function buildCaptionCues(sources: CaptionSource[], mode: CaptionMode = 'highlight'): CaptionCue[] {
+export function buildCaptionCues(sources: CaptionSource[], mode: CaptionMode = 'highlight', size: CaptionSize = 'medium'): CaptionCue[] {
     const words = timelineWords(sources);
-    const limit = captionLimits(mode);
+    const limit = captionLimits(mode, size);
     const cues: CaptionCue[] = [];
     let cur: CaptionWord[] = [];
     let chars = 0;

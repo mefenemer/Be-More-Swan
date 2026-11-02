@@ -83,7 +83,8 @@
       </div>
       <label class="mt-2 flex items-center gap-2 text-[11px] text-gray-700 cursor-pointer">
         <input data-cs="box" type="checkbox" class="cursor-pointer"> Dark band behind the words (easier to read on busy footage)
-      </label>`;
+      </label>
+      <p data-cs-where-note class="hidden mt-1.5 text-[11px] text-amber-700"></p>`;
     function paint() {
       field('textColor').value = s.textColor.toLowerCase();
       field('box').checked = s.box;
@@ -93,6 +94,11 @@
       else if (!HEX.test(field('highlight').value || '')) field('highlight').value = '#ffd400';
       field('highlight').style.visibility = s.highlight === 'brand' || s.mode !== 'highlight' ? 'hidden' : 'visible';
       host.querySelector('[data-cs-sample]').innerHTML = sampleHtml(s);
+      // Text boxes are not moved for the captions — say so where they might now overlap.
+      const note = host.querySelector('[data-cs-where-note]');
+      note.textContent = s.position === 'top' ? 'Text boxes near the top of the video will sit under the captions. Move them lower in the post editor.'
+        : s.position === 'middle' ? 'Text boxes in the middle of the video will sit under the captions. Move them up or down in the post editor.' : '';
+      note.classList.toggle('hidden', !note.textContent);
     }
     function read() {
       return normalise({
