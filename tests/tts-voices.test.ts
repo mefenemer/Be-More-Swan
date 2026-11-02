@@ -31,7 +31,7 @@ await check('the British voices carry their accent; the plain ones the plain del
     assert.strictEqual(voiceRequest('coral').instructions, VOICEOVER_INSTRUCTIONS);
     assert.match(voiceRequest('british_woman').instructions, /British English accent/);
     assert.match(voiceRequest('london_man').instructions, /London accent/);
-    assert.strictEqual(voiceRequest('london_man').speaker, 'ash');
+    assert.strictEqual(voiceRequest('london_man').speaker, 'ballad');
 });
 
 await check('the request body sends the OpenAI voice and the accent', async () => {
@@ -41,7 +41,7 @@ await check('the request body sends the OpenAI voice and the accent', async () =
     try {
         await synthesizeSpeech('Hello', 'london_man', (async (_u: any, init: any) => { body = JSON.parse(init.body); return new Response(new Uint8Array([1])); }) as typeof fetch);
     } finally { if (was === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = was; }
-    assert.strictEqual(body.voice, 'ash');
+    assert.strictEqual(body.voice, 'ballad');
     assert.match(body.instructions, /London accent/);
 });
 

@@ -40,13 +40,15 @@ export const VOICES = [
     { id: 'shimmer', label: 'Light and lively' },
     { id: 'british_woman', label: 'British, warm (woman)', speaker: 'coral',
       accent: 'Speak with a natural British English accent, as a woman from the south of England: warm and friendly, not posh.' },
-    { id: 'london_man', label: 'London, laid-back (man)', speaker: 'ash',
-      accent: 'Speak with a London accent, as a young man from the city: relaxed and streetwise, everyday London speech. Not posh, not BBC English, and never a caricature.' },
-    // TEMPORARY (staging only): accent trials for the owner to judge by ear. Reverted next commit.
-    ...(['coral', 'shimmer', 'nova', 'sage'] as const).map((s) => ({ id: `trial_w_${s}` as const, label: `Trial British ${s}`, speaker: s,
-      accent: 'Accent: a clear, unmistakably British English accent from the south of England. Non-rhotic: never pronounce the R at the end of words like "our", "here", "roast" or "treat yourself". British vowels throughout: "latte" as "LAT-ay", "autumn" with a short British O, "pop" and "Monday" the British way. Warm, friendly woman, everyday British, not posh and not American in any way.' })),
-    ...(['ash', 'ballad', 'echo', 'fable'] as const).map((s) => ({ id: `trial_m_${s}` as const, label: `Trial London ${s}`, speaker: s,
-      accent: 'Accent: a strong, authentic London accent, Estuary English / modern working-class London, like a friendly young bloke from South or East London. Drop the H at the start of words ("\'arbour"), use glottal stops for T in the middle and end of words ("ge\'", "wha\'", "le\'s"), TH-fronting where it sounds natural ("fings", "wiv"), and London vowels ("toDAI" for today, "noime" for name). Relaxed, streetwise, cheeky and warm. Not posh, not BBC English, not American, never a cartoon Cockney.' })),
+    // Ballad, picked by ear from four trials (2026-11-02): the accent needs spelling out — a one-line
+    // "London accent" note came back American.
+    { id: 'london_man', label: 'London, laid-back (man)', speaker: 'ballad',
+      accent: 'Accent: a strong, authentic London accent, Estuary English / modern working-class London, like a friendly young bloke from South or East London. Drop the H at the start of words ("\'arbour"), use glottal stops for T in the middle and end of words ("ge\'", "wha\'", "le\'s"), TH-fronting where it sounds natural ("fings", "wiv"), and London vowels ("toDAI" for today, "noime" for name). Relaxed, streetwise, cheeky and warm. Not posh, not BBC English, not American, never a cartoon Cockney.' },
+    // TEMPORARY (staging only): British woman trials, round 2. A `persona` replaces the delivery note.
+    ...(['marin', 'coral', 'nova', 'shimmer', 'alloy'] as const).map((s) => ({ id: `trial_w2_${s}` as const, label: `Trial British ${s}`, speaker: s,
+      persona: 'Voice: a woman in her thirties from the south of England, speaking natural modern British English, like a friendly presenter on BBC Radio 2. Not posh, but never American. Accent: British throughout. Non-rhotic, so no R sound at the end of words ("our" sounds like "ah", "here" like "hee-uh", "yourself" like "yaw-self"). British vowels: "latte" is "LAT-tay", "autumn" is "AW-tum", "pop" has a short rounded O, "roast" has the British "oh". Crisp T sounds. Tone: warm and upbeat, like recommending your favourite café to a friend. Delivery: a short promotional voiceover, conversational pace, a little energy on the first line.' })),
+    { id: 'trial_w2_marin_rp' as const, label: 'Trial British marin RP', speaker: 'marin',
+      persona: 'Voice: a warm, friendly English woman with a Received Pronunciation accent, like a BBC continuity announcer: polished but relaxed, smiling as she speaks. Strictly British English pronunciation, never American; non-rhotic, British vowels. Delivery: a short promotional voiceover for a neighbourhood café, conversational pace, a little energy on the first line.' },
 ] as const;
 export type VoiceId = typeof VOICES[number]['id'];
 export const DEFAULT_VOICE: VoiceId = 'coral';
@@ -120,10 +122,10 @@ function classify(status: number, body: string): TtsError {
 
 /** The OpenAI voice and delivery note for one of our voices. Pure. */
 export function voiceRequest(voice: VoiceId): { speaker: string; instructions: string } {
-    const v = VOICES.find((x) => x.id === voice) as { id: string; speaker?: string; accent?: string } | undefined;
+    const v = VOICES.find((x) => x.id === voice) as { id: string; speaker?: string; accent?: string; persona?: string } | undefined;
     return {
         speaker: v?.speaker ?? voice,
-        instructions: v?.accent ? `${VOICEOVER_INSTRUCTIONS} ${v.accent}` : VOICEOVER_INSTRUCTIONS,
+        instructions: v?.persona ?? (v?.accent ? `${VOICEOVER_INSTRUCTIONS} ${v.accent}` : VOICEOVER_INSTRUCTIONS),
     };
 }
 
