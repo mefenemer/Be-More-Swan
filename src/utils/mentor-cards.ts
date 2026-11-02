@@ -35,6 +35,7 @@ import { isStrategyKind, type StrategyKind } from './strategy-documents';
 import { cleanQuestion, mentorPlanCardsPromptLines } from './mentor-plan-cards';
 import { cleanCommitmentTexts, MAX_PER_WEEK } from './mentor-commitments';
 import { draftRequestPromptLine } from './mentor-draft-request';
+import { takeMeTherePromptLine } from '../config/take-me-there';
 
 export const MENTOR_CARD_TYPES = [
     'mentor_business_profile', 'mentor_products', 'mentor_products_remove', 'mentor_products_update', 'mentor_quiet_mode', 'mentor_support_request',
@@ -347,6 +348,8 @@ ${mentorPlanCardsPromptLines()}
 ${mentorCommitmentsPromptLines()}
 
 ${draftRequestPromptLine()}
+
+9. ${takeMeTherePromptLine()}
 
 Cards 1, 2, 6 and 7 and the post request are suggestions when you volunteer them ("asked": false) and count towards the 3 a week. At most one card per reply, and at most one suggestion card unless they asked for more. Never say a card has been applied — the user decides.`;
 }

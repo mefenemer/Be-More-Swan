@@ -180,6 +180,26 @@ export function validateSetupValue(def: SetupFieldDef, raw: unknown): { ok: true
 const isBlank = (v: unknown) => v === null || v === undefined || (typeof v === 'string' && !v.trim()) || (Array.isArray(v) && !v.length);
 
 /**
+ * Pure: the answers the card does NOT change (SOCIAL_WIZARD_EXCLUDED / SETUP_FIELD_EXCLUDED), read-only,
+ * with where each is changed — so a reader sees EVERY answer the assistant has, not only the ones it may
+ * propose. Blank ones are left out. Values are clipped at TEXTAREA_MAX like a changeable text answer.
+ */
+export function renderExcludedSetupAnswers(roleKey: string, ctx: Record<string, unknown> | null): string[] {
+    if (!ctx) return [];
+    // The exclusion lists, not the question lists: the Social wizard's schedule and platform answers
+    // are excluded by key without being one of its listed questions.
+    const excluded = SMM_ROLE_KEYS.includes(roleKey) ? SOCIAL_WIZARD_EXCLUDED : (SETUP_FIELD_EXCLUDED[roleKey] ?? {});
+    return Object.entries(excluded).flatMap(([key, why]) => {
+        const v = ctx[key];
+        if (isBlank(v)) return [];
+        const f = allSetupFields(roleKey).find((x) => x.key === key);
+        const text = typeof v === 'object' && v !== null && !Array.isArray(v) ? JSON.stringify(v)
+            : f ? displaySetupValue(toDef(f), v) : Array.isArray(v) ? v.join(', ') : String(v);
+        return [`  - ${key}${f ? ` — "${f.label}"` : ''} (read-only here: ${why}): ${JSON.stringify(text.slice(0, TEXTAREA_MAX))}`];
+    });
+}
+
+/**
  * Pure: an answer as the card shows it — an option's label, not its stored value. A blank answer that
  * already behaves as an option says so, or the model reads "Not answered" as "off".
  */
@@ -209,8 +229,11 @@ export function sameSetupValue(a: unknown, b: unknown, def?: SetupFieldDef): boo
  */
 export function renderSetupFields(roleKey: string, ctx: Record<string, unknown> | null): string[] {
     return changeableSetupFields(roleKey).map((d) => {
-        const cur = displaySetupValue(d, ctx?.[d.key]);
-        const shown = cur.length > 100 ? `${cur.slice(0, 100)}…` : cur;
+        // IN FULL. The card replaces the whole answer, so a reader shown only the first 100 characters
+        // could not add one content pillar without losing the rest — the Mentor (2026-11-02, Love Cat
+        // Studio) rightly refused, and handed the owner text to paste instead. A text answer is at most
+        // TEXTAREA_MAX characters (validateSetupValue), so in full is bounded.
+        const shown = displaySetupValue(d, ctx?.[d.key]);
         const kind = d.options ? `one of ${d.options.map((o) => `"${o.value}" (${o.label})`).join(', ')}`
             : d.type === 'number' ? `a number${d.min !== null ? `, at least ${d.min}` : ''}${d.max !== null ? `, at most ${d.max}` : ''}`
                 // The limit is stated so a draft fits first time: unstated, the Mentor wrote a 260-character

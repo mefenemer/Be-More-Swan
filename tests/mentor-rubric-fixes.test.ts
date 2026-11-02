@@ -36,14 +36,15 @@ check('W8: only a Mentor turn passes the no-plan paywall, never a Team note, and
     assert.match(ORCH, /console\.warn\(`\[chat-orchestrator\] paywall hit \(foreground\)/, 'everyone else still gets the paywall');
 });
 
-check('W8: help-only mode reads the Help Centre and draws nothing but the support card', () => {
+check('W8: help-only mode reads the Help Centre and draws nothing but the support card and Take Me There', () => {
     assert.match(ORCH, /const mentorNoPlanBlock = mentorNoPlan \?/);
     assert.match(ORCH, /loadHelpKnowledge\(db\)/);
     assert.match(ORCH, /myAccountBlock, mentorPointerBlock, mentorNoPlanBlock\]\.filter\(Boolean\)/);
-    assert.match(ORCH, /if \(mentorNoPlan && \(uiElement as \{ type\?: unknown \} \| null\)\?\.type !== 'mentor_support_request'\) uiElement = null;/);
+    // Take Me There (2026-11-02) only opens a page and changes nothing, so it is allowed without a plan too.
+    assert.match(ORCH, /if \(mentorNoPlan && !\['mentor_support_request', 'mentor_take_me_there'\]\.includes\(String\(\(uiElement as \{ type\?: unknown \} \| null\)\?\.type\)\)\) uiElement = null;/);
     assert.match(ORCH, /if \(!uiElement && !mentorNoPlan\) uiElement = cardTheUserAskedFor\(typed\);/);
     // The filter runs before any Mentor card is checked or recorded as a proposal.
-    assert.ok(ORCH.indexOf("!== 'mentor_support_request') uiElement = null;") < ORCH.indexOf('recordMentorProposal(db, {'));
+    assert.ok(ORCH.indexOf("'mentor_take_me_there'].includes(") < ORCH.indexOf('recordMentorProposal(db, {'));
 });
 
 check('W6: the verbatim staging reply gets the note when no card came with it', () => {

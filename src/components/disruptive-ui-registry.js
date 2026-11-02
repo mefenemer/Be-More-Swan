@@ -2498,6 +2498,29 @@
     });
   });
 
+  // "Take Me There" (src/config/take-me-there.ts): where the user asked about, one click away. The
+  // server built the destination from a closed list; this only follows it. Changes nothing.
+  register('mentor_take_me_there', (ui, esc) => {
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-200 rounded-xl shadow-sm p-4 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(String(ui.label || 'Where to find it'))}</p>
+      ${ui.summary ? `<p class="text-sm text-gray-800 mt-1">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <button type="button" data-take-me-there class="btn-primary mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">Take Me There</button>`;
+    el.querySelector('[data-take-me-there]').addEventListener('click', () => {
+      // A chat opened over the page (the pop-up) is closed first, so the page is what they see.
+      window.closeAssistantChatModal?.();
+      if (ui.assistantId && typeof window.routeToAssistantDetail === 'function') {
+        if (ui.assistantTab) window._assistantDetailInitialTab = ui.assistantTab;
+        window.routeToAssistantDetail(ui.assistantId);
+        return;
+      }
+      if (ui.bizTab) window._bizinfoInitialTab = ui.bizTab;
+      if (ui.view && window.loadView) window.loadView(ui.view, ui.notificationsTab ? { tab: ui.notificationsTab } : null);
+    });
+    return el;
+  });
+
   register('mentor_quiet_mode', (ui, esc) => mentorCard(esc, {
     eyebrow: 'Quiet mode', summary: ui.summary, why: null,
     bodyHtml: `<p class="mt-2 text-xs text-gray-700">${ui.on ? 'Your Mentor will answer your questions but stop making suggestions until you ask.' : 'Your Mentor will point out what to fix and suggest next steps again.'}</p>`,
@@ -2687,7 +2710,7 @@
   // Overview tab and the catalogue's "Recommended" badge). Hires nothing: each pick opens the catalogue.
   function openCatalogue(roleKey) {
     try { sessionStorage.setItem('intended_role', roleKey); } catch (e) { /* the badge still marks it */ }
-    window.closeAssistantChat?.();
+    window.closeAssistantChatModal?.();
     if (typeof window.loadView === 'function') window.loadView('catalog');
     else window.location.href = '/workspace.html';
   }

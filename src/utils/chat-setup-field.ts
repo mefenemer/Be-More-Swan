@@ -131,7 +131,8 @@ const CARD_SHAPE = `{"type":"setup_field_proposal","assistantId":<id>,"key":"<ke
 
 /** The Business Mentor's card instructions (its <workspace> block lists each active assistant's answers). */
 export function mentorSetupFieldPromptLine(): string {
-    return `Change one set-up answer on an ACTIVE assistant listed under SET-UP ANSWERS. One answer per card; only a key listed there; for a choice, one of its listed values. Never for a paused, unhired or archived assistant. Name the assistant in the summary:
+    return `Change one set-up answer on an ACTIVE assistant listed under SET-UP ANSWERS. One answer per card; only a key listed there; for a choice, one of its listed values. Never for a paused, unhired or archived assistant. Name the assistant in the summary.
+The value REPLACES the whole answer. Every answer is shown to you IN FULL, so to add to a text answer (a new content pillar, another objection, an extra audience) write the complete new text: the current answer exactly as shown, plus the addition — never only the new part. Never hand the user text to copy and paste into a set-up answer you can propose with this card:
 ${CARD_SHAPE}`;
 }
 
@@ -141,7 +142,7 @@ export function assistantSetupFieldBlock(roleKey: string | null | undefined, ass
     if (!lines.length) return null;
     return `YOUR SET-UP ANSWERS (what the user told you when they set you up; also on your Assistant Profile):
 ${lines.join('\n')}
-To change ONE of these when the user asks (or agrees to your suggestion), put this card in "uiElement" — nothing changes until they click "Save this":
+To change ONE of these when the user asks (or agrees to your suggestion), put this card in "uiElement" — nothing changes until they click "Save this". The value replaces the whole answer (shown in full above): to add to one, write the current text plus the addition:
 ${CARD_SHAPE.replace('<id>', String(assistantId))}
 Never say an answer has been changed — the user decides on the card.`;
 }

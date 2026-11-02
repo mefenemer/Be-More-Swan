@@ -118,6 +118,7 @@ import { asksForACall, callbackOfferElement } from '../../src/utils/callback-req
 import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
+import { buildTakeMeThereCard } from '../../src/config/take-me-there';
 import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal, resolveProductRemoval, resolveProductUpdate } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields, supersedeSetupFieldProposals } from '../../src/utils/mentor-proposals';
 import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
@@ -3431,7 +3432,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         let uiElement = parsed.uiElement;
         let content = parsed.content;
         // §2.7 help-only mode: the support card is the only one drawn, so nothing else is recorded or offered.
-        if (mentorNoPlan && (uiElement as { type?: unknown } | null)?.type !== 'mentor_support_request') uiElement = null;
+        if (mentorNoPlan && !['mentor_support_request', 'mentor_take_me_there'].includes(String((uiElement as { type?: unknown } | null)?.type))) uiElement = null;
         // The Business Mentor's own cards (src/utils/mentor-cards.ts): checked first, drawn by
         // disruptive-ui-registry.js, applied by the user's click through the screens' own endpoints.
         // A change to one set-up answer (src/utils/chat-setup-field.ts): the Mentor may target any
@@ -3460,8 +3461,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         } else if (route === ROUTES.business_mentor) {
             // Asked who to hire, or to review everything, and no card drawn: the server-filled card anyway.
             if (!uiElement && !mentorNoPlan) uiElement = cardTheUserAskedFor(typed);
+            // "Take Me There" (src/config/take-me-there.ts): the place is checked against the closed list and
+            // the card carries where to go, built here — the browser never navigates where the model wrote.
+            if ((uiElement as { type?: unknown } | null)?.type === 'mentor_take_me_there') {
+                const team = [...(mentorParts?.data.team ?? []).filter((t) => t.state !== 'archived').map((t) => ({ id: t.id, name: t.name })),
+                    { id: session.aiAssistantId, name: assistantRow.name || 'Business Mentor' }];
+                const card = buildTakeMeThereCard(uiElement as Record<string, unknown>, team);
+                if ('error' in card) { uiElement = null; content = `${content}\n\n(${card.error})`; }
+                else uiElement = card;
+            }
             // Phase 3: a post asked of an ACTIVE Social Media assistant (mentor-draft-request.ts), rebuilt from its row.
-            const draftReq = await resolveDraftRequest(db, orgId, uiElement);
+            const draftReq = (uiElement as { type?: unknown } | null)?.type === 'mentor_take_me_there' ? null : await resolveDraftRequest(db, orgId, uiElement);
             const m = draftReq ? null : mentorCardFromUiElement(uiElement, session.aiAssistantId);
             if (draftReq && 'error' in draftReq) {
                 uiElement = null;
@@ -3565,6 +3575,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                         uiElement = { ...filled, proposalId };
                     }
                 }
+            } else if ((uiElement as { type?: unknown } | null)?.type === 'mentor_take_me_there') {
+                // Built and checked above (buildTakeMeThereCard). Not a suggestion: no cap, no proposal row.
             } else if (!goalProposalFromUiElement(uiElement)) {
                 // Never another route's card shape — except a goal card, which the goal block below checks
                 // (resolveTeamGoalProposal). Dropping it here is why "here it is" came with no card.

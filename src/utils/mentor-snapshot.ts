@@ -17,7 +17,7 @@ import { SEAT_OCCUPYING_STATUSES, takesASeat } from './assistant-capacity';
 import { resolveAssistantLimit } from './release-paused-limit';
 import { loadProposalState, renderProposalState } from './mentor-proposals';
 import { recommendHires, renderHireRecommendation } from './mentor-hire';
-import { renderSetupFields } from './setup-field';
+import { renderExcludedSetupAnswers, renderSetupFields } from './setup-field';
 import { CTA_ROLES } from '../config/call-to-action';
 import { getGoalMetric } from '../config/goal-metrics';
 import { statusOf, type AssistantStatus } from './assistant-go-live';
@@ -30,6 +30,8 @@ import { loadCustomers, renderCustomersForMentor } from './mentor-customers';
 import { TEAM_FEATURES } from '../config/team-features';
 import { isDiscussionSource, sourceInfo } from '../config/discussion-sites';
 import { loadSiteDirectoryGaps } from './site-directory-store';
+import { normalizeBrandKit } from './brand-kit';
+import { guidelinesPromptLines, hasGuidelines, normaliseGuidelines } from './brand-guidelines';
 
 type Db = any;
 
@@ -38,7 +40,9 @@ const MAX_GOALS = 12;
 const MAX_RESEARCH = 5;
 
 export interface MentorSnapshotData {
-    business: { description: string | null; industry: string | null; website: string | null; targetAudience?: string | null };
+    business: { description: string | null; industry: string | null; website: string | null; targetAudience?: string | null;
+        /** Brand colours and font (brand_kit) and the picture guidelines, as saved — shown so the Mentor never says they're missing. */
+        brand?: string[] };
     /** id = the org_products row, so a removal card can name it (fixtures may leave it out). */
     products: Array<{ id?: number; name: string; hasPrice: boolean }>;
     productCount: number;
@@ -216,6 +220,16 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
         ? 'STARTING POINT: an established workspace. Open with a short health check from the figures below — never re-ask what is already filled in.'
         : 'STARTING POINT: a new or nearly empty workspace. Introduce yourself, ask whether this is an established business or a new idea (unless the set-up answer above says), then help fill the gaps.');
 
+    // What IS saved, not only what is missing: the target audience was read but never shown, so the
+    // Mentor told owners it couldn't see who they sell to.
+    const saved = [
+        d.business.industry ? `Industry: ${d.business.industry}` : '',
+        d.business.website ? `Website: ${d.business.website}` : '',
+        d.business.targetAudience ? `Target audience: ${d.business.targetAudience}` : '',
+        ...(d.business.brand ?? []),
+    ].filter(Boolean);
+    if (saved.length) lines.push('', 'BUSINESS INFORMATION (as saved — the description is above):', ...saved.map((s) => `- ${s}`));
+
     lines.push('', 'BUSINESS INFORMATION GAPS:');
     lines.push(...(gaps.length ? gaps.map((g) => `- ${g}`) : ['- None: Business Information is filled in.']));
 
@@ -236,8 +250,11 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
         lines.push('', 'SET-UP ANSWERS OF ACTIVE ASSISTANTS (what each was told at set-up; you may propose changing one with a card):');
         for (const t of active) {
             const fields = t.roleKey ? renderSetupFields(t.roleKey, t.setup ?? null) : [];
+            // The rest of its answers too, read-only, so "what does my Social assistant post?" is never
+            // answered from half the picture (schedule, platforms, call to action, content source).
+            const readOnly = t.roleKey ? renderExcludedSetupAnswers(t.roleKey, t.setup ?? null) : [];
             lines.push(`- ${t.name} (${t.role}, assistantId ${t.id})${fields.length ? ':' : ': no set-up answers you can change from chat.'}`);
-            lines.push(...fields);
+            lines.push(...fields, ...readOnly);
         }
     }
 
@@ -266,6 +283,18 @@ export function renderMentorSnapshot(d: MentorSnapshotData): string {
 
     lines.push('</workspace>');
     return lines.join('\n');
+}
+
+/** Pure: the brand kit and picture guidelines as the Mentor reads them (Business Information ▸ Brand Assets). */
+export function brandLines(kitRaw: unknown, guidelinesRaw: unknown): string[] {
+    const out: string[] = [];
+    const kit = normalizeBrandKit(kitRaw);
+    if (kit.source !== 'default') {
+        out.push(`Brand colours: accent ${kit.primaryColor}, text ${kit.textColor}, background ${kit.backgroundColor}${kit.fontFamily ? `; font ${kit.fontFamily}` : ''}${kit.logoUrl ? '; a logo is saved' : ''} (Brand Assets)`);
+    }
+    const g = normaliseGuidelines(guidelinesRaw);
+    if (hasGuidelines(g)) out.push(...guidelinesPromptLines(g).map((l) => `Picture guidelines — ${l}`));
+    return out;
 }
 
 /** Reads the workspace (org-scoped throughout) and renders the block. Throws on a DB error; the caller catches. */
@@ -326,7 +355,7 @@ export async function buildMentorSnapshotParts(db: Db, orgId: number, userId: nu
 export async function loadMentorSnapshotData(db: Db, orgId: number, userId: number): Promise<MentorSnapshotData> {
     const [org] = await db.select({
         description: organisations.businessDescription, industry: organisations.industry, website: organisations.websiteUrl,
-        targetAudience: organisations.targetAudience,
+        targetAudience: organisations.targetAudience, brandKit: organisations.brandKit, guidelines: organisations.brandGuidelines,
     }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
 
     // Optional tables (applied by their own SQL files): a missing one reads as "not answered".
@@ -444,7 +473,10 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
             roleKey: c.roleKey, name: c.name, description: c.description ?? null,
             status: statusOf({ isActive: !!c.isActive, comingSoon: !!c.comingSoon, lifecycleState: c.lifecycleState ?? '' }),
         })),
-        business: { description: org?.description ?? null, industry: org?.industry ?? null, website: org?.website ?? null, targetAudience: org?.targetAudience ?? null },
+        business: {
+            description: org?.description ?? null, industry: org?.industry ?? null, website: org?.website ?? null, targetAudience: org?.targetAudience ?? null,
+            brand: brandLines(org?.brandKit, org?.guidelines),
+        },
         products: products.slice(0, MAX_PRODUCTS).map((p) => ({ id: p.id, name: p.name, hasPrice: !!p.price?.trim() })),
         productCount: products.length,
         offerKinds: offer ? (offer.offers ?? []) : null,
