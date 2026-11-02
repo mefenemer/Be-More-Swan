@@ -49,8 +49,10 @@
     .sc-samples { display: grid; gap: 1.5rem; }
     @media (min-width: 768px) { .sc-samples { grid-template-columns: repeat(auto-fit, minmax(0, 320px)); justify-content: center; } }
     /* Five short clips: two to a row on a phone, all five across on a wide screen. */
-    .sc-samples-ai { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
-    @media (min-width: 768px) { .sc-samples-ai { grid-template-columns: repeat(auto-fit, minmax(0, 210px)); } }
+    /* A centred wrap, not a grid: a leftover clip on the last row sits in the middle, not alone on the left. */
+    .sc-samples-ai { display: flex; flex-wrap: wrap; justify-content: center; gap: 1rem; }
+    .sc-samples-ai > .sc-sample { flex: 0 0 calc(50% - 0.5rem); }
+    @media (min-width: 768px) { .sc-samples-ai > .sc-sample { flex-basis: 200px; } }
     .sc-sample video { display: block; width: 100%; aspect-ratio: 9 / 16; object-fit: cover; background: #111; border-radius: 0.875rem; }
     .sc-steps { display: grid; gap: 1rem; }
     @media (min-width: 768px) { .sc-steps { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
