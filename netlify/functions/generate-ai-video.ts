@@ -25,7 +25,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import {
-    submitVideo, submitFramedVideo, imageToVideoEnabled, imageToVideoInput, billedSecondsFor, I2V_MODEL, falConfigured, ASPECT_RATIOS, VIDEO_DURATIONS,
+    submitVideo, submitFramedVideo, imageToVideoEnabled, imageToVideoInput, billedSecondsFor, i2vModel, falConfigured, ASPECT_RATIOS, VIDEO_DURATIONS,
     FalContentPolicyError, FalError, type AspectRatio, type VideoDurationSeconds,
 } from '../../src/lib/fal-gateway';
 import { holdCredits, settleHold, tierCanGenerateVideo, VIDEO_CREDIT_COST } from '../../src/utils/ai-credits';
@@ -166,10 +166,11 @@ export default withLambda(async (event) => {
     // No picture to start from: the worker draws the frame and submits (see the header). The job's
     // durationSeconds is the length that will be BILLED, so the cost log prices the real clip.
     if (imageToVideoEnabled() && !startImageUrl) {
-        const billed = imageToVideoInput(I2V_MODEL, { imageUrl: '', prompt, durationSeconds }).billedSeconds;
+        const model = i2vModel();
+        const billed = imageToVideoInput(model, { imageUrl: '', prompt, durationSeconds }).billedSeconds;
         const [job] = await db.insert(mediaGenerationJobs).values({
             organisationId: orgId, userId, mediaType: 'video', prompt, aspectRatio, durationSeconds: billed,
-            model: I2V_MODEL, creditCost: VIDEO_CREDIT_COST, status: 'processing',
+            model, creditCost: VIDEO_CREDIT_COST, status: 'processing',
         }).returning({ id: mediaGenerationJobs.id });
         await triggerWorker(event.headers as any, job.id);
         return { statusCode: 202, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job.id }) };

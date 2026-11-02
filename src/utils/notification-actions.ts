@@ -189,6 +189,8 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     mentor_research_ready: 'state_change', mentor_draft_ready: 'state_change',
     // The Mentor's weekly review is written (mentor-review.ts). Its suggestions wait in Needs you on their own.
     mentor_weekly_review: 'state_change',
+    // The Mentor's morning summary (mentor-morning.ts): yesterday's sales, today's bookings. News, not a task.
+    mentor_morning_summary: 'state_change',
     // Someone paid for something on the website (site-shop.ts, from the Connect webhook). The money
     // is already in their Stripe account; the card is the news, not a task.
     site_order_received: 'state_change',

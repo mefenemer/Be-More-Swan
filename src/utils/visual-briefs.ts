@@ -27,7 +27,7 @@ import { ART_DIRECTION_CRAFT } from '../constants/art-direction-craft';
 import { logMediaCost } from './ai-usage';
 import {
     FalContentPolicyError, FalError, extractVideo, falConfigured, generateImages, result as falResult, status as falStatus,
-    submitFramedVideo, imageToVideoEnabled, billedSecondsFor, I2V_MODEL, type AspectRatio,
+    submitFramedVideo, imageToVideoEnabled, billedSecondsFor, i2vModel, type AspectRatio,
 } from '../lib/fal-gateway';
 import { renderBrandCard, type CardVariant } from '../lib/brand-card';
 import { deleteR2Object, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
@@ -610,7 +610,7 @@ async function aiVideoOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId:
     const job = {
         organisationId: brief.organisationId, userId, assistantId: brief.aiAssistantId, mediaType: 'video',
         prompt, aspectRatio: brief.aspectRatio, durationSeconds: BRIEF_CLIP_SECONDS,
-        model: imageToVideoEnabled() ? I2V_MODEL : VIDEO_MODEL, creditCost: VIDEO_CREDIT_COST,
+        model: imageToVideoEnabled() ? i2vModel() : VIDEO_MODEL, creditCost: VIDEO_CREDIT_COST,
     };
     let url: string;
     let contentType = 'video/mp4';

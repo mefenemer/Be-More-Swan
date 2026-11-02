@@ -315,7 +315,8 @@ export function isStillWaiting(d: { kind: string; fields: string[] }, waiting: A
 
 // ── Recipients and delivery ───────────────────────────────────────────────────────────────────────
 
-async function recipients(db: Db, orgId: number): Promise<Array<{ userId: number; email: string; firstName: string | null; emailPrefs: Record<string, boolean> | null }>> {
+/** Owners and admins who receive the review — and the morning summary (mentor-morning.ts). */
+export async function recipients(db: Db, orgId: number): Promise<Array<{ userId: number; email: string; firstName: string | null; emailPrefs: Record<string, boolean> | null }>> {
     const rows = await db.select({ userId: users.id, email: users.email, firstName: users.firstName, emailPrefs: userProfiles.emailPreferences })
         .from(userOrganisations)
         .innerJoin(users, eq(users.id, userOrganisations.userId))
@@ -325,7 +326,7 @@ async function recipients(db: Db, orgId: number): Promise<Array<{ userId: number
 }
 
 /** This user's latest chat with the Mentor, or a new one: the review always lands in their chat (§2.4). */
-async function mentorChatFor(db: Db, orgId: number, userId: number, mentorId: number): Promise<number> {
+export async function mentorChatFor(db: Db, orgId: number, userId: number, mentorId: number): Promise<number> {
     const [s] = await db.select({ id: chatSessions.id }).from(chatSessions)
         .where(and(eq(chatSessions.organisationId, orgId), eq(chatSessions.userId, userId), eq(chatSessions.aiAssistantId, mentorId), eq(chatSessions.status, 'active')))
         .orderBy(desc(chatSessions.updatedAt)).limit(1);
@@ -644,7 +645,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                     triggerKey: 'mentor_weekly_review', to: p.email,
                     vars: {
                         user: { first_name: p.firstName ?? '' }, assistant: { name }, workspace: { name: org?.name ?? '' },
-                        review: { summary, proposals: proposalsLine },
+                        review: { summary, proposals: proposalsLine, proposals_sentence: reviewProposalsSentence(recorded.length) },
                         // "Open my review" lands on the Mentor with this person's review chat open (workspace.html
                         // ?view=assistant-detail&chatSessionId=…) — not the bare dashboard it once went to.
                         link: { action_url: mentorReviewLink(base, mentor.id, sessions.get(p.userId) ?? null) },
@@ -660,6 +661,13 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
     }
 }
 
+
+/** Pure: the weekly review email's sentence about its suggestions — "There's one", never "There are 1". */
+export function reviewProposalsSentence(count: number): string {
+    if (count <= 0) return 'There are no suggestions this week.';
+    if (count === 1) return 'There’s one suggestion to look at, under Notifications ▸ Needs you.';
+    return `There are ${count} suggestions to look at, under Notifications ▸ Needs you.`;
+}
 
 /** Pure: where the weekly review email's "Open my review" button goes. */
 export function mentorReviewLink(base: string, mentorId: number, chatSessionId: number | null): string {

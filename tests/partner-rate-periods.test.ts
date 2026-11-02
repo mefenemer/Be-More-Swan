@@ -224,8 +224,9 @@ check('the Partner Terms state the same worked example the code computes', () =>
     const terms = readFileSync(join(root, 'partner-terms.html'), 'utf8');
     assert.ok(terms.includes('Commission is worked out after costs.'));
     assert.ok(terms.includes('The cost deduction is currently 20%.'));
-    assert.ok(terms.includes('at a 25% rate you earn £15.80'));
-    assert.strictEqual(commissionPence(7900, 2500, 2000), 1580);
+    // £69 since SWAN-15 (2026-11-02): the example used the retired £79 price.
+    assert.ok(terms.includes('pays £69 excluding VAT') && terms.includes('at a 25% rate you earn £13.80'));
+    assert.strictEqual(commissionPence(6900, 2500, 2000), 1380);
 });
 
 console.log(`\n${passed} passed`);

@@ -10,7 +10,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mergeTemplateParts, renderMasterTemplate } from '../src/utils/email-template';
 import { TEMPLATE_DEFAULTS, getTemplateDefault } from '../src/utils/email-templates-catalog';
-import { mentorReviewLink } from '../src/utils/mentor-review';
+import { mentorReviewLink, reviewProposalsSentence } from '../src/utils/mentor-review';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 let passed = 0;
@@ -56,6 +56,16 @@ check('"Open my review" opens the Mentor with its review chat, not the bare dash
     assert.strictEqual(mentorReviewLink('https://bms.test', 7, null), 'https://bms.test/workspace.html?view=assistant-detail&assistantId=7');
     const ws = readFileSync(join(root, 'workspace.html'), 'utf8');
     assert.ok(ws.includes("qs.get('chatSessionId')"), 'workspace.html no longer reads ?chatSessionId= on the assistant-detail deep link');
+});
+
+check('mentor weekly review: one suggestion reads "There’s one", never "There are 1"', () => {
+    const t = getTemplateDefault('mentor_weekly_review')!;
+    for (const [n, want] of [[0, 'There are no suggestions this week.'], [1, 'There’s one suggestion to look at'], [3, 'There are 3 suggestions to look at']] as const) {
+        const { body } = mergeTemplateParts(t, { review: { proposals_sentence: reviewProposalsSentence(n) } });
+        assert.ok(body.includes(want), `${n} suggestion(s): body lacks "${want}"`);
+        assert.ok(!/There are 1 /.test(body), `${n}: body says "There are 1"`);
+    }
+    assert.ok(mergeTemplateParts(t, {}).body.includes('There are no suggestions this week.'), 'no sentence given: default missing');
 });
 
 console.log(`\n${passed} passed`);

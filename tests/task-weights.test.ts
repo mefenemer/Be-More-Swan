@@ -10,7 +10,9 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TASK_WEIGHTS, WORK_KIND_LABELS, MEDIA_KINDS, taskWeight, aiVideoTasks, AI_VIDEO_TASKS_PER_SECOND, type WorkKind } from '../src/config/task-weights';
-import { billedSecondsFor } from '../src/lib/fal-gateway';
+import { billedSecondsFor, i2vModel } from '../src/lib/fal-gateway';
+import { switchedOn } from '../src/config/dated-switch';
+import { videoPricedBySecond } from '../src/config/task-weights';
 import { tasksForCredits, workKindForMedia, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, MUSIC_CREDIT_COST, MUSIC_SHARED_CREDIT_COST } from '../src/utils/ai-credits';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -123,6 +125,39 @@ check('the per-second notice quotes the numbers the rule charges', () => {
     } finally {
         if (was === undefined) delete process.env.AI_VIDEO_PRICED_BY_SECOND; else process.env.AI_VIDEO_PRICED_BY_SECOND = was;
     }
+});
+
+check('the switches can be set ahead of the notice date and start on it, never before', () => {
+    const before = new Date('2026-12-02T23:59:59Z'), on = new Date('2026-12-03T00:00:00Z');
+    assert.strictEqual(switchedOn('on', before), true);
+    assert.strictEqual(switchedOn('2026-12-03', before), false, 'the day before the notice date: off');
+    assert.strictEqual(switchedOn('2026-12-03', on), true);
+    for (const v of [undefined, '', 'off', 'true', '3 December', '2026-12-3']) assert.strictEqual(switchedOn(v, on), false, String(v));
+    const was = { p: process.env.AI_VIDEO_PRICED_BY_SECOND, m: process.env.FAL_I2V_MODEL, f: process.env.FAL_I2V_MODEL_FROM };
+    try {
+        process.env.AI_VIDEO_PRICED_BY_SECOND = '2026-12-03';
+        assert.strictEqual(videoPricedBySecond(before), false);
+        assert.strictEqual(videoPricedBySecond(on), true);
+        process.env.FAL_I2V_MODEL = 'fal-ai/kling-video/v3/pro/image-to-video';
+        process.env.FAL_I2V_MODEL_FROM = '2026-12-03';
+        assert.match(i2vModel(before), /v2\.5-turbo/, 'Kling 2.5 until the date');
+        assert.match(i2vModel(on), /\/v3\//, 'Kling 3 from it');
+        delete process.env.FAL_I2V_MODEL_FROM;
+        assert.match(i2vModel(before), /\/v3\//, 'no date: the chosen model at once (staging)');
+        delete process.env.FAL_I2V_MODEL;
+        assert.match(i2vModel(on), /v2\.5-turbo/, 'unset: the default');
+    } finally {
+        for (const [k, v] of [['AI_VIDEO_PRICED_BY_SECOND', was.p], ['FAL_I2V_MODEL', was.m], ['FAL_I2V_MODEL_FROM', was.f]] as const) {
+            if (v === undefined) delete process.env[k]; else process.env[k] = v;
+        }
+    }
+});
+
+check('terms 5.2 states the per-second rule with its start date', () => {
+    const tos = read('terms_of_service.html');
+    assert.ok(tos.includes('an AI-generated video as 4 tasks for each second of video'));
+    assert.ok(tos.includes('before 3 December 2026, 20 tasks for any clip'));
+    assert.ok(tos.includes('The change to clause 5.2 takes effect on 3 December 2026'));
 });
 
 console.log(`\n${passed} checks passed.`);

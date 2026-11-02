@@ -399,8 +399,27 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         bodyHtml: greet +
             p('{{assistant.name | "Your Business Mentor"}} has looked at your week in {{workspace.name | "your workspace"}} and compared it with your plan.') +
             p('<strong>{{review.summary}}</strong>') +
-            p('There are {{review.proposals | "no suggestions"}}. Nothing changes until you choose — the full review is in your chat with {{assistant.name | "your Mentor"}}, and its suggestions are under Notifications ▸ Needs you.') +
+            // review.proposals_sentence carries its own verb and plural (reviewProposalsSentence in mentor-review.ts).
+            p('{{review.proposals_sentence | "There are no suggestions this week."}} Nothing changes until you choose. The full review is in your chat with {{assistant.name | "your Mentor"}}.') +
             button('Open my review', 'link.action_url') + signoff,
+    },
+    {
+        // The Business Mentor's morning summary (src/utils/mentor-morning.ts), to owners and admins whose
+        // "Business Mentor morning summary" email preference is on (off by default). Built by rules.
+        triggerKey: 'mentor_morning_summary',
+        name: 'Business Mentor Morning Summary',
+        category: 'Engagement',
+        subject: 'Your morning summary: {{morning.headline}}',
+        preheader: '{{morning.headline}}',
+        bodyHtml: greet +
+            p('Here’s your morning in {{workspace.name | "your workspace"}}, from {{assistant.name | "your Business Mentor"}}.') +
+            // One plain-text line per section (merge values are HTML-escaped); an empty section is ''.
+            p('<strong>{{morning.money}}</strong>') +
+            p('{{morning.today}}') +
+            p('{{morning.enquiries}}') +
+            p('{{morning.needs_you}}') +
+            p('{{morning.next}}') +
+            button('Open my summary', 'link.action_url') + signoff,
     },
     {
         triggerKey: 'post_due',
@@ -479,8 +498,11 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
         preheader: 'We’ll be in touch once we’ve had a look.',
         bodyHtml: greet +
             p('Thanks for applying to become a Be More Swan partner. We read every application ourselves and will get back to you soon.') +
-            p('If we approve it, we’ll email you a link to set up your partner account, where you’ll find your personal invite link and can track what you earn.') +
-            p('<span style="color:#6b7280;font-size:14px;">You are getting this one email because this address was used to apply on bemoreswan.com. We have not added you to any mailing list.</span>') +
+            // Approval sends an account-set-up link only to someone with no account; an existing
+            // customer is pointed at the Partner page in their workspace (sendApprovalEmail), so say both.
+            p('If we approve it, we’ll email you. If you already use Be More Swan, your Partner page will be waiting in your workspace; if not, the email will have a link to set up your partner account. Either way, that’s where you’ll find your personal invite link and can track what you earn.') +
+            // A real https link: as bare text, Gmail auto-linked "bemoreswan.com" to http:// (SWAN-15).
+            p('<span style="color:#6b7280;font-size:14px;">You are getting this one email because this address was used to apply on <a href="https://bemoreswan.com" style="color:#6b7280;">bemoreswan.com</a>. We have not added you to any mailing list.</span>') +
             signoff,
     },
     {

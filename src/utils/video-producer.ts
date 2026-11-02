@@ -33,7 +33,7 @@ import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVE
 import { TASK_WEIGHTS, aiVideoTasks } from '../config/task-weights';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
-import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, I2V_MODEL } from '../lib/fal-gateway';
+import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, i2vModel } from '../lib/fal-gateway';
 import { logMediaCost } from './ai-usage';
 import { makeVoiceoverAsset } from './voiceover-asset';
 import { DEFAULT_VOICE, isVoiceId, cleanScript } from '../lib/tts';
@@ -294,7 +294,7 @@ export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
  * rule (plumbing sample, 2026-11-01) — and Kling v2.x makes 5 or 10 s, so a "6" was really 5.
  * Kling v3 makes any whole length 3–15 s, so it gets exactly what the line needs, no more.
  */
-export function aiClipSeconds(targetS: number, model: string = I2V_MODEL): number {
+export function aiClipSeconds(targetS: number, model: string = i2vModel()): number {
     const need = targetS + 0.3;
     if (!imageToVideoEnabled(model)) return need > 6 ? 10 : 6;   // Hailuo text-to-video: 6 or 10
     if (takesAnyLength(model)) return Math.min(15, Math.max(3, Math.ceil(need)));

@@ -242,6 +242,20 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        // The Business Mentor's morning summary (src/utils/mentor-morning.ts), built by rules — no model.
+        // The full summary is in the owner's or admin's chat with the Mentor.
+        templateKey: 'mentor_morning_summary',
+        name: 'Business Mentor morning summary',
+        category: 'Assistants',
+        type: 'mentor_morning_summary',
+        title: 'Your morning summary from {{assistant.name}}',
+        message: '{{morning.headline}}',
+        variables: [
+            ASSISTANT_NAME,
+            v('morning.headline', 'One line: the summary’s main points', '2 sales (£85) · 3 bookings today · 1 new enquiry'),
+        ],
+    },
+    {
         // The Business Mentor drafted a strategy document (src/utils/mentor-jobs.ts). Nothing is saved
         // until the user chooses "Use this draft".
         templateKey: 'mentor_draft_ready',

@@ -790,6 +790,18 @@
               { value: 'Sunday', label: 'Sunday' },
             ],
           },
+          {
+            // The morning summary (docs/morning-summary-plan.md; src/utils/mentor-morning.ts morningSettings).
+            // Quiet mode also stops it. Built by rules, so it never uses a task.
+            key: 'morningSummary',
+            label: 'Morning summary',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: 'on', label: 'Send me a morning summary', description: "At 7am: yesterday's sales, today's bookings, new enquiries and what's waiting for you. Nothing is sent on a day with nothing to say. Uses no tasks." },
+              { value: 'off', label: 'No morning summary', description: 'You can still ask your Mentor how yesterday went.' },
+            ],
+          },
         ],
       },
     ],

@@ -304,6 +304,14 @@ window.NotifKit = (function () {
                 else { window._assistantDetailInitialTab = 'mentor'; window.routeToAssistantDetail?.(meta.assistantId); }
             } };
         }
+        // The Mentor's morning summary (src/utils/mentor-morning.ts) is a message in THIS person's chat
+        // with the Mentor, the same as the weekly review.
+        if (notif.type === 'mentor_morning_summary' && meta.assistantId) {
+            return { label: 'Open my summary', run: () => {
+                if (meta.chatSessionId && window.openAssistantChat) window.openAssistantChat({ assistantId: meta.assistantId, sessionId: meta.chatSessionId });
+                else window.routeToAssistantDetail?.(meta.assistantId);
+            } };
+        }
         if (notif.type === 'campaign_decision_pending' && meta.assistantId) {
             return { label: 'Review decision', run: () => {
                 window._assistantDetailInitialTab = 'review-queue';

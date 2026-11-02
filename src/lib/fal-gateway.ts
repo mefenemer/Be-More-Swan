@@ -20,7 +20,10 @@
 //                           (Kling, $0.07/s on fal's pricing page 2026-10-31). The clip is framed by
 //                           its start image, so a 9:16 FLUX frame gives a 9:16 clip — the thing Hailuo
 //                           text-to-video can never do. Set to 'off' to fall back to FAL_VIDEO_MODEL.
-//                           Kling v3 ('fal-ai/kling-video/v3/pro/image-to-video', $0.14/s) also works.
+//                           Kling v3 ('fal-ai/kling-video/v3/pro/image-to-video', $0.112/s) also works.
+//   FAL_I2V_MODEL_FROM    — optional date (YYYY-MM-DD, src/config/dated-switch.ts): FAL_I2V_MODEL is
+//                           used from that day, the default before it. Production: Kling 3 from
+//                           2026-12-03, the date in the notice, alongside per-second pricing.
 //   FAL_SAFETY_TOLERANCE  — FLUX safety level 1 (strictest) … 6 (most permissive); default 2
 //   FAL_OUTPUT_FORMAT     — 'png' (default, lossless — best for crisp text overlays) or 'jpeg'
 
@@ -28,9 +31,18 @@ const FAL_KEY     = process.env.FAL_KEY;
 import { logMediaCost } from '../utils/ai-usage';
 
 import { NO_TEXT_RULE } from './image-prompt';
+import { switchedOn } from '../config/dated-switch';
 const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 export const VIDEO_MODEL = process.env.FAL_VIDEO_MODEL ?? 'fal-ai/minimax/hailuo-2.3/standard/text-to-video';
-export const I2V_MODEL = process.env.FAL_I2V_MODEL ?? 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video';
+const DEFAULT_I2V_MODEL = 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video';
+
+/** The image-to-video model in use now. Read per call, so a dated switch takes effect on its day. */
+export function i2vModel(now: Date = new Date()): string {
+    const chosen = process.env.FAL_I2V_MODEL;
+    if (!chosen) return DEFAULT_I2V_MODEL;
+    const from = process.env.FAL_I2V_MODEL_FROM;
+    return !from || switchedOn(from, now) ? chosen : DEFAULT_I2V_MODEL;
+}
 
 // FLUX 1.1 Pro safety_tolerance: 1 (strictest) … 6 (most permissive). We run our own prompt
 // moderation upstream, so the model-level gate is a backstop — keep Fal's default of 2.
@@ -293,7 +305,7 @@ export async function submitVideo(opts: {
 // ── Image-to-video (Video Producer plan, Phase 1) ─────────────────────────────────────────────
 
 /** Is image-to-video switched on? 'off' (or empty) keeps the old Hailuo text-to-video path. */
-export function imageToVideoEnabled(model: string = I2V_MODEL): boolean {
+export function imageToVideoEnabled(model: string = i2vModel()): boolean {
     return !!model && model !== 'off';
 }
 
@@ -305,7 +317,7 @@ export function imageToVideoEnabled(model: string = I2V_MODEL): boolean {
  * `billedSeconds` is the clip length actually asked for, for the cost log.
  */
 /** The length Fal will bill for a clip asked for at `durationSeconds`, on the model in use. */
-export function billedSecondsFor(durationSeconds: number, model: string = I2V_MODEL): number {
+export function billedSecondsFor(durationSeconds: number, model: string = i2vModel()): number {
     if (!imageToVideoEnabled(model)) return durationSeconds > 6 ? 10 : 6;
     return imageToVideoInput(model, { imageUrl: '', prompt: '', durationSeconds }).billedSeconds;
 }
@@ -354,9 +366,10 @@ export async function submitFramedVideo(opts: {
     }
     const frameUrl = opts.startImageUrl
         || (await generateImages({ prompt: opts.imagePrompt || opts.prompt, aspectRatio: opts.aspectRatio, numImages: 1, usage: opts.usage }))[0].url;
-    const { input, billedSeconds } = imageToVideoInput(I2V_MODEL, { imageUrl: frameUrl, prompt: opts.prompt, durationSeconds: opts.durationSeconds });
-    const sub = await submit(I2V_MODEL, input);
-    return { ...sub, model: I2V_MODEL, billedSeconds, frameUrl };
+    const model = i2vModel();
+    const { input, billedSeconds } = imageToVideoInput(model, { imageUrl: frameUrl, prompt: opts.prompt, durationSeconds: opts.durationSeconds });
+    const sub = await submit(model, input);
+    return { ...sub, model, billedSeconds, frameUrl };
 }
 
 /** Extract the mp4 video URL from a COMPLETED Hailuo job result payload. */

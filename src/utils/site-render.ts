@@ -18,10 +18,11 @@ import { directionsUrl, openingHoursSpecification, openStatus, upcomingClosures,
 import { formatDate } from './booking-time';
 import type { SiteRenderReview, SiteRenderReviews } from './reviews';
 import type { SiteRenderSocialFeed, SiteRenderSocialPost } from './site-social-feed';
+import type { SiteBlogCard, SiteBlogIndex, SiteBlogPost, SiteRenderBlog } from './site-blog';
 import type { SessionView } from './class-sessions';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
 import type { WeeklyHours } from './booking-availability';
-import { buttonInk, menuOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
+import { BLOG_MENU_ID, BLOG_PATH, blogOn, buttonInk, menuOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
 
 /** What a sign-up section needs to draw one Form Builder form (form-definition.ts publicDefinition). */
 export interface SiteSignupForm {
@@ -123,6 +124,8 @@ export interface RenderContext {
     reviews?: SiteRenderReviews | null;
     /** Posts published through Be More Swan (site-social-feed.ts loadSiteSocialFeed); null = no social section. */
     socialFeed?: SiteRenderSocialFeed | null;
+    /** The Blog Assistant's newest posts (site-blog.ts loadSiteBlogLatest); null = no blog_posts section on. */
+    blog?: SiteRenderBlog | null;
     /** "Now", for the Open-now badge (tests pass a fixed time). */
     now?: Date;
     /**
@@ -219,6 +222,8 @@ section{padding:var(--sp) 0}.alt{background:${tint ?? 'rgba(0,0,0,.035)'}}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
 .stars{color:#f59e0b;letter-spacing:1px}.stars .off{color:rgba(0,0,0,.15)}.rv{margin:0}.rv blockquote{margin:8px 0}.rv figcaption{font-size:.95rem}.rsum{margin:8px 0 0}
 .sp{margin:0;padding:0;overflow:hidden;display:flex;flex-direction:column}.sp img,.sp video{width:100%;aspect-ratio:1/1;object-fit:cover;margin:0;border-radius:0}.sp .spb{padding:18px 20px 20px;display:flex;flex-direction:column;gap:8px;flex:1}.sp .spt{margin:0;white-space:normal}.sp .spt p{margin:0 0 .5em}.sp .spl{margin-top:auto;font-size:.9rem;display:flex;flex-wrap:wrap;gap:4px 12px}
+.bp{margin:0;padding:0;overflow:hidden;display:flex;flex-direction:column}.bp img{width:100%;aspect-ratio:16/9;object-fit:cover;margin:0;border-radius:0}.bp .bpb{padding:18px 20px 20px;display:flex;flex-direction:column;gap:6px;flex:1}.bp h2,.bp h3{margin:0;font-size:1.2rem}.bp h2 a,.bp h3 a{color:var(--t);text-decoration:none}.bp h2 a:hover,.bp h3 a:hover{color:var(--p)}.bp p{margin:0}.bp .more{margin-top:auto;font-weight:700}
+.art{max-width:760px}.art .meta{opacity:.75;font-size:.9rem}.art .hero-img{border-radius:var(--r);margin:20px 0 28px}.art .body img{border-radius:var(--r);margin:1em 0}.art .body h2{margin-top:1.4em}.art .body h3{margin-top:1.2em}.art .body blockquote{border-left:4px solid var(--p);margin:1em 0;padding:.2em 0 .2em 1em;opacity:.9}.art .body pre{overflow:auto;padding:12px;background:rgba(0,0,0,.05);border-radius:var(--r)}.art .body table{border-collapse:collapse;width:100%;display:block;overflow-x:auto}.art .body td,.art .body th{border:1px solid rgba(0,0,0,.12);padding:6px 10px}.art .tags{display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0;margin:24px 0 0}.art .tags li{background:rgba(0,0,0,.05);border-radius:999px;padding:4px 12px;font-size:.85rem}.pager{display:flex;justify-content:space-between;gap:12px;margin-top:32px}
 .gal{gap:12px}@media(max-width:699px){.gal{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(min-width:700px){.gal{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}}.gi{margin:0}.gi a{display:block}.gi img{display:block;width:100%;border-radius:var(--r)}.gal.sq img{aspect-ratio:1/1;object-fit:cover}.gal.nat{align-items:start}.gi figcaption{font-size:.85rem;margin-top:6px;opacity:.8}
 .dm{font-size:.75rem;font-weight:700;letter-spacing:.02em;opacity:.75;white-space:nowrap}.al{font-style:italic}
 .menu{list-style:none;padding:0;margin:8px 0 0}.menu li{padding:10px 0;border-bottom:1px solid rgba(0,0,0,.08)}.mi{display:flex;align-items:baseline;gap:8px}.mn{font-weight:600}.mt{font-weight:400;font-size:.85rem;opacity:.7;white-space:nowrap}.ml{flex:1;min-width:16px;border-bottom:1px dotted currentColor;opacity:.35}.mp{font-weight:700;white-space:nowrap}.md{margin:4px 0 0;font-size:.92rem;opacity:.8}.mnote{margin-top:20px}.tt+h3{margin-top:24px}
@@ -265,6 +270,8 @@ function logoSrc(theme: SiteTheme): string {
 let reviewsData: SiteRenderReviews | null = null;
 /** Set per render call — the social posts a social_feed section may show. */
 let socialFeedData: SiteRenderSocialFeed | null = null;
+/** Set per render call — the blog posts a blog_posts section may show, and whether the blog is on. */
+let blogData: { latest: SiteRenderBlog | null; on: boolean } = { latest: null, on: false };
 /** Which posts a social_feed section shows: those that went to one of its platforms (none ticked = all), newest first. */
 export function feedPostsFor(feed: SiteRenderSocialFeed | null | undefined, platforms: string[], count: number): SiteRenderSocialPost[] {
     const all = feed?.posts ?? [];
@@ -312,6 +319,13 @@ const href = (h: string) => (h.startsWith('/') ? mapPath(h) : h);
 
 function linkHtml(l: Link, secondary = false): string {
     return `<a class="btn${secondary ? ' s' : ''}" href="${esc(href(l.href))}">${esc(l.label)}</a>`;
+}
+
+/** One post as a card — the blog_posts section and the /blog list. */
+function blogCardHtml(post: SiteBlogCard, tag: 'h2' | 'h3' = 'h3'): string {
+    const link = href(`${BLOG_PATH}/${encodeURIComponent(post.slug)}`);
+    const img = post.imageUrl ? `<a href="${esc(link)}" tabindex="-1" aria-hidden="true"><img src="${esc(post.imageUrl)}" alt="" loading="lazy"></a>` : '';
+    return `<article class="card bp">${img}<div class="bpb">${post.publishedAt ? `<p class="fine">${esc(shortDate(post.publishedAt))}</p>` : ''}<${tag}><a href="${esc(link)}">${esc(post.title)}</a></${tag}>${post.excerpt ? `<p>${esc(post.excerpt)}</p>` : ''}<a class="more" href="${esc(link)}" aria-label="Read ${esc(post.title)}">Read more</a></div></article>`;
 }
 
 /** One section. `h1` is true for the single section that carries the page's main heading. */
@@ -430,6 +444,16 @@ ${formButton(p.buttonLabel)}
                 return `<article class="card sp">${media}<div class="spb"><p class="fine">${esc(shortDate(post.publishedAt))}</p>${post.caption ? `<div class="spt">${paragraphs(post.caption)}</div>` : ''}<p class="spl">${links}</p></div></article>`;
             };
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid">${posts.map(card).join('')}</div></div></section>`;
+        }
+        case 'blog_posts': {
+            // The Blog Assistant's newest posts, read when the page is drawn — never typed into the site.
+            const p = s.props;
+            const note = (why: string) => (formState.preview ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Latest blog posts: ${why} Until then it doesn't appear on your live site.</p></div></section>` : '');
+            if (!p.enabled) return note('switched off. Edit it to switch it back on.');
+            if (!blogData.on) return note('your blog is switched off (Website ▸ Details ▸ Blog).');
+            const posts = (blogData.latest?.posts ?? []).slice(0, p.count);
+            if (!posts.length) return note('nothing published by your Blog Assistant yet.');
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid">${posts.map((x) => blogCardHtml(x, h1 ? 'h2' : 'h3')).join('')}</div><p><a class="btn s" href="${esc(href(BLOG_PATH))}">See all posts</a></p></div></section>`;
         }
         case 'gallery': {
             const p = s.props;
@@ -597,15 +621,22 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
     return out;
 }
 
-function documentHtml(def: SiteDefinition, page: SitePageDef | null, ctx: RenderContext, body: string): string {
+/** A page that is not one of the site's own pages (the blog) but is indexed like one. */
+interface DocHead { title: string; description: string | null; canonical: string; pageUrl: string; robots: string | null; ogType: 'website' | 'article'; image: string | null; ld: unknown[]; menuId: string; }
+
+function documentHtml(def: SiteDefinition, page: SitePageDef | null, ctx: RenderContext, body: string, head?: DocHead): string {
     const s = def.settings;
     const path = page ? (page.slug ? `/${page.slug}` : '/') : null;
-    const title = page ? (page.seo.title || (page.slug === '' ? s.siteName : `${page.title} | ${s.siteName}`)) : `Page not found | ${s.siteName}`;
-    const description = page ? (page.seo.description || (page.slug === '' ? s.description : null)) : null;
-    const canonical = path ? `${ctx.origin}${path}` : null;
+    const title = head ? head.title : page ? (page.seo.title || (page.slug === '' ? s.siteName : `${page.title} | ${s.siteName}`)) : `Page not found | ${s.siteName}`;
+    const description = head ? head.description : page ? (page.seo.description || (page.slug === '' ? s.description : null)) : null;
+    const canonical = head ? head.canonical : path ? `${ctx.origin}${path}` : null;
+    const pageUrl = head ? head.pageUrl : canonical;
+    const indexable = !!(page || head);
+    const robots = ctx.preview || !indexable ? 'noindex, nofollow' : head?.robots ?? null;
+    const current = head ? head.menuId : page?.id;
     const menu = menuOf(def);
     const year = ctx.year ?? new Date().getUTCFullYear();
-    const ld = page ? structuredData(def, page, ctx.origin) : [];
+    const ld = head ? head.ld : page ? structuredData(def, page, ctx.origin) : [];
     return `<!doctype html>
 <html lang="en-GB">
 <head>
@@ -613,13 +644,14 @@ function documentHtml(def: SiteDefinition, page: SitePageDef | null, ctx: Render
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
 ${description ? `<meta name="description" content="${esc(description)}">` : ''}
-${ctx.preview || !page ? '<meta name="robots" content="noindex, nofollow">' : ''}
+${robots ? `<meta name="robots" content="${esc(robots)}">` : ''}
 ${canonical && !ctx.preview ? `<link rel="canonical" href="${esc(canonical)}">` : ''}
-<meta property="og:type" content="website">
+<meta property="og:type" content="${head?.ogType ?? 'website'}">
 <meta property="og:site_name" content="${esc(s.siteName)}">
 <meta property="og:title" content="${esc(title)}">
 ${description ? `<meta property="og:description" content="${esc(description)}">` : ''}
-${canonical ? `<meta property="og:url" content="${esc(canonical)}">` : ''}
+${pageUrl ? `<meta property="og:url" content="${esc(pageUrl)}">` : ''}
+${head?.image ? `<meta property="og:image" content="${esc(head.image)}">` : ''}
 <meta name="theme-color" content="${esc(def.theme.primaryColor)}">
 <style>${themeCss(def.theme)}</style>
 ${ld.map((x) => `<script type="application/ld+json">${jsonLd(x)}</script>`).join('\n')}
@@ -628,7 +660,7 @@ ${ld.map((x) => `<script type="application/ld+json">${jsonLd(x)}</script>`).join
 ${ctx.preview ? '<div class="pv">Preview — this version is not live yet.</div>' : ''}
 <header class="hd${def.theme.header === 'centered' ? ' ctr' : ''}"><div class="w">
 <a class="brand" href="${esc(href('/'))}">${logoSrc(def.theme) ? `<img src="${esc(logoSrc(def.theme))}" alt="${esc(s.siteName)}">` : esc(s.siteName)}</a>
-${menu.length > (def.structure === 'one_page' ? 0 : 1) ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li><a href="${esc(m.sectionId && page && page.slug !== '' ? `${href('/')}${m.path}` : href(m.path))}"${page && m.pageId === page.id && !m.sectionId ? ' aria-current="page"' : ''}>${esc(m.label)}</a></li>`).join('')}</ul></nav>` : ''}
+${menu.length > (def.structure === 'one_page' ? 0 : 1) ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li><a href="${esc(m.sectionId && page && page.slug !== '' ? `${href('/')}${m.path}` : href(m.path))}"${current && m.pageId === current && !m.sectionId ? ' aria-current="page"' : ''}>${esc(m.label)}</a></li>`).join('')}</ul></nav>` : ''}
 </div></header>
 <main>
 ${body}
@@ -648,6 +680,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
     const page = findPage(def, path);
     reviewsData = ctx.reviews ?? null;
     socialFeedData = ctx.socialFeed ?? null;
+    blogData = { latest: ctx.blog ?? null, on: blogOn(def) };
     business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
     formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/', canSell: ctx.canSell === true, products: ctx.products ?? {}, booking: ctx.booking ?? null };
     if (!page) {
@@ -686,10 +719,78 @@ export function renderSiteShell(def: SiteDefinition, ctx: RenderContext, title: 
     return documentHtml(def, null, { ...ctx }, bodyHtml).replace('<title>Page not found |', `<title>${esc(title)} |`);
 }
 
-export function renderSitemap(def: SiteDefinition, origin: string): string {
+function startRender(def: SiteDefinition, ctx: RenderContext): void {
+    mapPath = ctx.pagePath ?? ((p) => p);
+    assetUrlOf = ctx.assetUrl ?? (() => null);
+    business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
+}
+
+/** /blog — the Blog Assistant's posts, newest first, in the site's own look. Page 1 is the indexed list. */
+export function renderSiteBlogIndex(def: SiteDefinition, ctx: RenderContext, data: SiteBlogIndex): string {
+    startRender(def, ctx);
+    const label = def.settings.blog?.menuLabel || 'Blog';
+    const first = `${ctx.origin}${BLOG_PATH}`;
+    const pageUrl = data.cursor ? `${first}?cursor=${data.cursor}` : first;
+    const list = data.posts.length
+        ? `<div class="grid c3">${data.posts.map((p) => blogCardHtml(p, 'h2')).join('')}</div>`
+        : '<p>No posts yet — check back soon.</p>';
+    const pager = data.olderCursor || data.cursor
+        ? `<nav class="pager" aria-label="More posts">${data.cursor ? `<a href="${esc(href(BLOG_PATH))}">Newest posts</a>` : '<span></span>'}${data.olderCursor ? `<a href="${esc(href(`${BLOG_PATH}?cursor=${encodeURIComponent(data.olderCursor)}`))}">Older posts</a>` : ''}</nav>` : '';
+    const body = `<section><div class="w"><h1>${esc(label)}</h1>${list}${pager}</div></section>`;
+    return documentHtml(def, null, ctx, body, {
+        title: `${label} | ${def.settings.siteName}`,
+        description: `The latest from ${def.settings.siteName}.`,
+        // An "Older posts" page shifts with every new post: self-canonical, followed but not indexed.
+        canonical: pageUrl, pageUrl, robots: data.cursor ? 'noindex, follow' : null,
+        ogType: 'website', image: null, menuId: BLOG_MENU_ID,
+        ld: [{ '@context': 'https://schema.org', '@type': 'Blog', name: `${def.settings.siteName} ${label}`, url: first,
+            publisher: { '@type': 'Organization', name: def.settings.siteName } }],
+    });
+}
+
+/**
+ * /blog/<slug> — one post. Its body is the Blog Assistant's published HTML (the same that blog-page.ts
+ * serves on bemoreswan.com); the site's CSP forbids scripts and frames, so nothing in it can run.
+ */
+export function renderSiteBlogPost(def: SiteDefinition, ctx: RenderContext, post: SiteBlogPost): string {
+    startRender(def, ctx);
+    const s = def.settings;
+    const pageUrl = `${ctx.origin}${BLOG_PATH}/${encodeURIComponent(post.slug)}`;
+    const date = post.publishedAt ? `<time datetime="${esc(post.publishedAt)}">${esc(shortDate(post.publishedAt))}</time>` : '';
+    const body = `<article><section><div class="w art">
+<p class="meta"><a href="${esc(href(BLOG_PATH))}">← ${esc(s.blog?.menuLabel || 'Blog')}</a>${date ? ` · ${date}` : ''}</p>
+<h1>${esc(post.title)}</h1>
+${post.imageUrl ? `<img class="hero-img" src="${esc(post.imageUrl)}" alt="${esc(post.imageAlt)}">` : ''}
+<div class="body">${post.bodyHtml}</div>
+${post.tags.length ? `<ul class="tags">${post.tags.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+</div></section></article>`;
+    return documentHtml(def, null, ctx, body, {
+        title: `${post.metaTitle || post.title} | ${s.siteName}`,
+        description: post.description || null,
+        canonical: post.canonicalUrl, pageUrl,
+        robots: /noindex/i.test(post.robots) ? 'noindex, follow' : null,
+        ogType: 'article', image: post.imageUrl, menuId: BLOG_MENU_ID,
+        ld: [{
+            '@context': 'https://schema.org', '@type': 'BlogPosting', headline: post.title, url: post.canonicalUrl, mainEntityOfPage: post.canonicalUrl,
+            ...(post.description ? { description: post.description } : {}),
+            ...(post.imageUrl ? { image: post.imageUrl } : {}),
+            ...(post.publishedAt ? { datePublished: post.publishedAt } : {}),
+            ...(post.modifiedAt ? { dateModified: post.modifiedAt } : {}),
+            ...(post.tags.length ? { keywords: post.tags.join(', ') } : {}),
+            author: { '@type': 'Organization', name: s.siteName },
+            publisher: { '@type': 'Organization', name: s.siteName, ...(logoSrc(def.theme) ? { logo: { '@type': 'ImageObject', url: logoSrc(def.theme) } } : {}) },
+        }],
+    });
+}
+
+/** `blog`: the blog's own addresses when it is on — only posts whose canonical is this site belong here. */
+export function renderSitemap(def: SiteDefinition, origin: string, blog: Array<{ slug: string; lastmod: string | null }> = []): string {
+    const blogUrls = blogOn(def)
+        ? [`  <url><loc>${esc(`${origin}${BLOG_PATH}`)}</loc></url>`, ...blog.map((b) => `  <url><loc>${esc(`${origin}${BLOG_PATH}/${encodeURIComponent(b.slug)}`)}</loc>${b.lastmod ? `<lastmod>${esc(b.lastmod.slice(0, 10))}</lastmod>` : ''}</url>`)]
+        : [];
     return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${def.pages.map((p) => `  <url><loc>${esc(`${origin}${p.slug ? `/${p.slug}` : '/'}`)}</loc></url>`).join('\n')}
+${[...def.pages.map((p) => `  <url><loc>${esc(`${origin}${p.slug ? `/${p.slug}` : '/'}`)}</loc></url>`), ...blogUrls].join('\n')}
 </urlset>
 `;
 }

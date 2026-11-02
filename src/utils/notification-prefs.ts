@@ -315,6 +315,19 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         types: ['mentor_weekly_review'],
     },
     {
+        // The Business Mentor's morning summary (src/utils/mentor-morning.ts; docs/morning-summary-plan.md).
+        // In-app on, email OFF by default (owner decision D2, 2026-11-02): one email a day is opt-in. The
+        // summary itself always lands in their chat with the Mentor. Whoever is emailed it is skipped by
+        // the 09:00 "actions waiting" email that day (D3).
+        key: 'mentor_morning_summary',
+        label: 'Business Mentor morning summary',
+        description: "Each morning: yesterday's sales, today's bookings, new enquiries and what's waiting for you.",
+        scope: 'account',
+        push: PUSH_OFF,
+        inApp: ON, email: OFF,
+        types: ['mentor_morning_summary'],
+    },
+    {
         key: 'onboarding_reminders',
         label: 'Onboarding',
         description: 'Setup reminders and your welcome / setup-complete milestones.',

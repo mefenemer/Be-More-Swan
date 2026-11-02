@@ -170,10 +170,12 @@ export function siteFromDraftReply(raw: unknown, current: SiteDefinition, maxPag
     settings.phone = current.settings.phone;
     // What the website does is the owner's choice (Details ▸ What your website does), never the draft's.
     settings.features = current.settings.features;
+    // So is whether the Blog Assistant's posts are on the site.
+    if (current.settings.blog) settings.blog = current.settings.blog; else delete settings.blog;
     // Prices are the owner's alone: a draft never puts things up for sale (step 3c), nor lists them;
     // and the pictures in a gallery, or the reviews quoted, are the owner's choice, never a draft's.
-    // A social feed is added when they ask for one (editor or chat), not slipped into a draft.
-    const DRAFT_NEVER = ['products', 'menu', 'gallery', 'reviews', 'social_feed'];
+    // A social feed or the latest blog posts are added when they ask (editor or chat), not slipped into a draft.
+    const DRAFT_NEVER = ['products', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts'];
     const pages = (r.pages as unknown[]).map((pg) => {
         if (!pg || typeof pg !== 'object') return pg;
         const o = pg as { sections?: unknown };

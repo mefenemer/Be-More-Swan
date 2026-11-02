@@ -13,8 +13,9 @@ import { getDb } from '../../db/client';
 import { aiAssistants, sites } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { renderSitePage } from '../../src/utils/site-render';
-import { applySiteOperation } from '../../src/utils/site-definition';
+import { renderSiteBlogIndex, renderSiteBlogPost, renderSitePage } from '../../src/utils/site-render';
+import { loadSiteBlogIndex, loadSiteBlogLatest, loadSiteBlogPost, siteBlogRoute } from '../../src/utils/site-blog';
+import { applySiteOperation, blogOn } from '../../src/utils/site-definition';
 import { definitionOf, maxPagesFor } from '../../src/utils/site-store';
 import { importedDefinition } from '../../src/utils/site-import-store';
 import { loadSiteForms } from '../../src/utils/site-forms';
@@ -71,7 +72,7 @@ export default withLambda(async (event) => {
     }
     const path = typeof q.path === 'string' && q.path.startsWith('/') ? q.path : '/';
     const self = (p: string) => `/.netlify/functions/site-preview?assistantId=${id}${fromImport ? '&import=1' : ''}${templateId ? `&template=${encodeURIComponent(templateId)}${q.mode === 'design' ? '&mode=design' : ''}${q.keepColours === '1' ? '&keepColours=1' : ''}` : ''}&path=${encodeURIComponent(p)}`;
-    const rendered = renderSitePage(definition, path, {
+    const renderCtx = {
         origin: 'https://preview.invalid',
         preview: true,
         reportUrl: '#',
@@ -85,6 +86,17 @@ export default withLambda(async (event) => {
         business: await businessSummary(db, ctx.organisationId),
         reviews: await loadSiteReviews(db, ctx.organisationId, definition),
         socialFeed: await loadSiteSocialFeed(db, ctx.organisationId, definition),
-    });
+        blog: await loadSiteBlogLatest(db, ctx.organisationId, definition),
+    };
+    // The blog's pages, so the preview's Blog menu entry and post links lead somewhere (site-blog.ts).
+    const blogRoute = blogOn(definition) ? siteBlogRoute(path) : null;
+    if (blogRoute?.kind === 'index') {
+        return page(200, renderSiteBlogIndex(definition, renderCtx, await loadSiteBlogIndex(db, ctx.organisationId, null)));
+    }
+    if (blogRoute?.kind === 'post') {
+        const post = await loadSiteBlogPost(db, ctx.organisationId, blogRoute.slug, renderCtx.origin);
+        if (post) return page(200, renderSiteBlogPost(definition, renderCtx, post));
+    }
+    const rendered = renderSitePage(definition, path, renderCtx);
     return page(rendered.status, rendered.html);
 });
