@@ -96,12 +96,19 @@ Do P2 again first, so the grant appears.
 
 ### In the submission form (both permissions)
 
-- Paste the new "How the app uses it" text above. Upload Recording 1 for `pages_manage_posts`
-  and Recording 2 for `instagram_content_publish`.
+- Paste the new "How the app uses it" text above. Upload the SAME video to both permissions:
+  `meta-review-videos/be-more-swan-publish-pages_manage_posts-instagram_content_publish.mp4`
+  (recorded 2026-11-02, 6m24s, captioned; not committed). One Facebook Login grants both
+  permissions, and the post goes to the Page and Instagram in one Post it now. Its captions name
+  each permission at the grant screen (step 7) and at each live post (steps 17–18).
 - Add to the notes: *"Be More Swan is a web app using Facebook Login with the user's own access
   token. It is not a server-to-server app and does not use system user tokens. The screencast
-  shows the full Facebook login, the permission being granted, and the post being published and
-  shown live on Facebook/Instagram in one continuous recording."*
+  shows the full Facebook login, both permissions being granted, and one post being published and
+  shown live on the Facebook Page (pages_manage_posts) and on Instagram (instagram_content_publish)
+  in one recording. Two waits are sped up and labelled; nothing is cut between granting the
+  permissions and the live posts."*
+- Recorded with Mark's Facebook login (app Tester since 2026-11-02, given full control of the Be
+  More Swan Page + Instagram). The Be More Swan workspace's FB/IG connection now uses his token.
 - Check the reviewer login (`review-login.html`, `META_REVIEW_LOGIN_*`) still works and hasn't
   expired. Leave fresh Facebook and Instagram drafts in the reviewer workspace's Review list.
 
@@ -166,16 +173,18 @@ _Code: `meta-oauth.ts`, `src/utils/meta-accounts.ts` (picker), `src/utils/follow
 ### instagram_content_publish
 **How the app uses it (resubmission wording, 2026-11-02 — matches the screencast step for step):**
 Be More Swan is a web app that helps small businesses run their social media. A business owner
-logs in to Be More Swan, opens Integrations and clicks Connect on the Instagram card. They log in
-with Facebook and grant Be More Swan access to the Instagram Business account linked to their
-Facebook Page, including permission to publish content. Be More Swan's AI assistant drafts a post
-(an image and a caption). The owner opens the draft in the Review panel, reads it, and clicks
-**Post Now**. Be More Swan then publishes it to their Instagram Business account using the content
-publishing API: it creates a media container with `POST /{ig-user-id}/media` and publishes it with
-`POST /{ig-user-id}/media_publish`. The post is marked Published in Be More Swan, with a "View
-live post" link to the post on Instagram. Owners can also click **Schedule for Later**, and the
-same publishing call runs at the time they choose. Be More Swan never publishes a post the owner
-has not approved. It uses Facebook Login with the user's own access token. It is not a
+logs in to Be More Swan and opens their Social Media Assistant (Marvin). Under Assistant Profile →
+Connections they click Connect (or Reconnect) on Facebook, which opens Facebook Login for
+Business. They log in, choose their Facebook Page, their business and their Instagram professional
+account, and grant "Upload media and create posts for the Instagram account". Back in Be More
+Swan, the owner clicks Create a Post, picks Instagram Feed post, and the assistant drafts the
+caption and image. The owner reviews it, opens Schedule & publish, clicks **Post it now** and
+confirms "Yes, publish now". Be More Swan then publishes it to their Instagram account with the
+content publishing API: it creates a media container with `POST /{ig-user-id}/media` and publishes
+it with `POST /{ig-user-id}/media_publish`. The post moves to the Posted tab, marked "Posted" with
+a "View live post →" link to the post on Instagram. Owners can instead choose **Pick the time
+myself**, and the same publishing call runs at that time. Be More Swan never publishes a post the
+owner has not approved. It uses Facebook Login with the user's own access token. It is not a
 server-to-server app and does not use a system user token.
 _Code: `publish-instagram.ts`, `approve-post.ts` (`publish_now`), `publish-now-background.ts`._
 
@@ -205,16 +214,18 @@ _Code: `ingest-facebook-insights.ts` (post `reactions`/`comments`/`shares` summa
 ### pages_manage_posts
 **How the app uses it (resubmission wording, 2026-11-02 — matches the screencast step for step):**
 Be More Swan is a web app that helps small businesses run their social media. A business owner
-logs in to Be More Swan, opens Integrations and clicks Connect on the Facebook card. They log in
-with Facebook, choose the Facebook Page they want to connect, and grant Be More Swan permission to
-create and manage content on that Page. Be More Swan's AI assistant drafts a post (an image and a
-caption). The owner opens the draft in the Review panel, reads it, and clicks **Post Now**. Be More
-Swan then publishes it to the connected Page with `POST /{page-id}/photos`, or
-`POST /{page-id}/feed` for a text-only post, using that Page's access token. The post is marked
-Published in Be More Swan, with a "View live post" link to the post on the Facebook Page. Owners
-can also click **Schedule for Later**, and the same call runs at the time they choose. Be More
-Swan never publishes a post the owner has not approved. It uses Facebook Login with the user's own
-access token. It is not a server-to-server app and does not use a system user token.
+logs in to Be More Swan and opens their Social Media Assistant (Marvin). Under Assistant Profile →
+Connections they click Connect (or Reconnect) on Facebook, which opens Facebook Login for
+Business. They log in, choose the Facebook Page they want to connect, and grant "Create and manage
+content on your Page". Back in Be More Swan, the owner clicks Create a Post, picks Facebook Feed
+post, and the assistant drafts the caption and image. The owner reviews it, opens Schedule &
+publish, clicks **Post it now** and confirms "Yes, publish now". Be More Swan then publishes it to
+the connected Page with `POST /{page-id}/photos`, or `POST /{page-id}/feed` for a text-only post,
+using that Page's access token. The post moves to the Posted tab, marked "Posted" with a "View live
+post →" link to the post on the Facebook Page. Owners can instead choose **Pick the time myself**,
+and the same call runs at that time. Be More Swan never publishes a post the owner has not
+approved. It uses Facebook Login with the user's own access token. It is not a server-to-server
+app and does not use a system user token.
 _Code: `publish-facebook.ts`, `approve-post.ts` (`publish_now`), `publish-now-background.ts`._
 
 ---
