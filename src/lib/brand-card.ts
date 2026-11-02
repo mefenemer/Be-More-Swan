@@ -272,7 +272,7 @@ export function estimateWrappedLines(text: string, perLine: number): number {
 
 /** Fetch a logo and inline it as a data URI. Returns null on any failure — the card falls back to
  *  the wordmark rather than failing, and a slow host must never hold a generation job open. */
-async function inlineLogo(url: string): Promise<string | null> {
+export async function inlineLogo(url: string): Promise<string | null> {
     try {
         const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
         if (!res.ok) return null;

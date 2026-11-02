@@ -91,12 +91,16 @@ check('the migration\'s CHECKs accept exactly the vocabulary', () => {
         assert.ok(m, `No CHECK found for ${col}.`);
         return m![1].split(',').map((x) => x.trim().replace(/'/g, ''));
     };
-    assert.deepStrictEqual(list('purpose'), [...BRIEF_PURPOSES]);
+    // The first migration's purposes are every purpose but 'flyer', which the flyers migration added.
+    assert.deepStrictEqual(list('purpose'), BRIEF_PURPOSES.filter((p) => p !== 'flyer'));
     assert.deepStrictEqual(list('aspect_ratio'), [...BRIEF_ASPECT_RATIOS]);
-    // The option source CHECK was widened by the Phase 4 migration — the LATEST definition must
-    // accept every option source the code can write (round sources + "own").
-    const p4 = read('db/z-brand-designer-sources.sql').match(/CHECK \(source IN \(([^)]*)\)\)/)![1].split(',').map((x) => x.trim().replace(/'/g, ''));
-    assert.deepStrictEqual(p4, [...OPTION_SOURCES]);
+    const checkList = (file: string, col: string) => read(file).match(new RegExp(`CHECK \\(${col} IN \\(([^)]*)\\)\\)`))![1].split(',').map((x) => x.trim().replace(/'/g, ''));
+    // The option source CHECK was widened by Phase 4, then by flyers — the LATEST definition must
+    // accept every option source the code can write (round sources + "own" + a drawn flyer page).
+    const p4 = checkList('db/z-brand-designer-sources.sql', 'source');
+    assert.deepStrictEqual(p4, OPTION_SOURCES.filter((x) => x !== 'flyer_layout'));
+    assert.deepStrictEqual(checkList('db/z-brand-designer-flyers.sql', 'source'), [...OPTION_SOURCES]);
+    assert.deepStrictEqual(checkList('db/z-brand-designer-flyers.sql', 'purpose'), [...BRIEF_PURPOSES]);
     assert.ok(BRIEF_SOURCES.every((x) => (OPTION_SOURCES as readonly string[]).includes(x)));
 });
 
@@ -161,7 +165,7 @@ check('an option is decided once; approving puts it in the library; a card is ke
         'without libraryKeptAt the 30-day unused-card sweep deletes an approved card from the library');
     assert.match(fn, /if \(opt\.storageKey && GENERATED_SOURCES\.has\(opt\.source\)\) await deleteR2Object/,
         'only files WE generated are deleted — a stock option is a Pexels link, an "own" option is the user\'s library picture');
-    assert.match(engine, /const GENERATED_SOURCES = new Set\(\['ai_image', 'brand_card', 'ai_video'\]\)/);
+    assert.match(engine, /const GENERATED_SOURCES = new Set\(\['ai_image', 'brand_card', 'ai_video', FLYER_SOURCE\]\)/);
     assert.match(fn, /status: 'proposed', decidedAt: null/, 'a failed approve gives the option back');
 });
 
@@ -190,7 +194,10 @@ check('a chat card can never start a round that spends', () => {
     const reg = read('src/components/disruptive-ui-registry.js');
     const card = span(reg, 'function renderVisualBriefProposalCard', "register('visual_brief_proposal'", 'the brief card');
     assert.match(card, /const free = !brief\.sources\.some\(\(x\) => x === 'ai_image' \|\| x === 'ai_video'\)/, 'AI video is paid too');
-    assert.match(card, /\$\{free \? `<button type="button" data-vbp-save="generate"/);
+    // A flyer may also need its words first — but "make" is never offered unless the sources are free.
+    assert.match(card, /const canMake = free && /);
+    assert.match(card, /\$\{canMake \? `<button type="button" data-vbp-save="generate"/);
+    assert.match(card, /const generate = save\.dataset\.vbpSave === 'generate' && canMake;/);
     const session = code(read('src/components/chat-session.js'));
     assert.match(session, /const generate = d\.generate === true && !\(Array\.isArray\(b\.sources\) && b\.sources\.some\(\(x\) => x === 'ai_image' \|\| x === 'ai_video'\)\)/,
         'enforced again where the request is made, not only where the button is drawn');

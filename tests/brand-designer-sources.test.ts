@@ -132,7 +132,7 @@ check('own options point at the user\'s library asset: org-scoped, never rejecte
     const decide = span(engine, 'export async function decideOption', '\n}\n', 'decideOption');
     assert.match(decide, /if \(opt\.source === OWN_SOURCE && opt\.contentAssetId\) \{/);
     assert.ok(decide.indexOf('opt.source === OWN_SOURCE') < decide.indexOf('insert(contentAssets)'), 'approving "own" makes no second library row');
-    assert.match(engine, /const GENERATED_SOURCES = new Set\(\['ai_image', 'brand_card', 'ai_video'\]\)/);
+    assert.match(engine, /const GENERATED_SOURCES = new Set\(\['ai_image', 'brand_card', 'ai_video', FLYER_SOURCE\]\)/);
 });
 
 check('uploads go through My Content\'s own upload and safety check', () => {

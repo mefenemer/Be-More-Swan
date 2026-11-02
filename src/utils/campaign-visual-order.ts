@@ -23,7 +23,7 @@ import { and, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, campaignAssets, campaigns, visualBriefOptions, visualBriefs } from '../../db/schema';
 import { MAX_CAMPAIGN_ASSETS } from '../config/campaign-creative';
-import { BRIEF_ASPECT_RATIOS, BRIEF_PURPOSES, normaliseBrief, sourcesAreFree } from '../config/visual-brief-vocab';
+import { BRIEF_ASPECT_RATIOS, PICTURE_PURPOSES, normaliseBrief, sourcesAreFree } from '../config/visual-brief-vocab';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -64,7 +64,8 @@ export async function createBriefForOrder(db: Db, ctx: {
         headline: b.headline,
         mood: campaign.tone,
         mustAvoid: b.mustAvoid,
-        purpose: b.purpose,
+        // A campaign commissions pictures for its posts, never a printed flyer (flyers plan §3.6).
+        purpose: b.purpose === 'flyer' ? undefined : b.purpose,
         aspectRatio: b.aspectRatio,
         sources: Array.isArray(b.sources) && b.sources.length ? b.sources : defaultSources(designer?.onboardingContext),
         dueDate: b.dueDate,
@@ -172,4 +173,4 @@ export async function settleVisualOrder(
 }
 
 /** Brief fields a plan may carry for this order (campaign-plan.ts reads these). */
-export const VISUAL_BRIEF_ENUMS = { purpose: BRIEF_PURPOSES, aspectRatio: BRIEF_ASPECT_RATIOS } as const;
+export const VISUAL_BRIEF_ENUMS = { purpose: PICTURE_PURPOSES, aspectRatio: BRIEF_ASPECT_RATIOS } as const;

@@ -41,6 +41,7 @@ export function extFromMime(mime: string): string {
     if (mime.includes('quicktime')) return 'mov';
     if (mime.includes('webm')) return 'webm';
     if (mime.includes('gif')) return 'gif';
+    if (mime.includes('pdf')) return 'pdf';
     return 'png';
 }
 

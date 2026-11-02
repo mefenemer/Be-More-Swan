@@ -84,7 +84,8 @@ check('7. the round button names the assistant; the cost is its own line', () =>
     assert.ok(briefs.includes('`Ask ${name()} for options`') && briefs.includes('`Ask ${name()} for more options`'), 'button not renamed');
     const label = briefs.slice(briefs.indexOf('function roundButtonLabel('), briefs.indexOf('function roundCostLine('));
     assert.ok(!/credit/i.test(label), 'the button label still carries the cost');
-    assert.ok(briefs.includes('${esc(roundCostLine(b))}'), 'the cost is not shown anywhere');
+    // A flyer states its own cost line (flyerCostLine); every other brief, roundCostLine.
+    assert.ok(briefs.includes('roundCostLine(b))}'), 'the cost is not shown anywhere');
 });
 
 check('8. each brief can be talked through with the Brand Designer', () => {

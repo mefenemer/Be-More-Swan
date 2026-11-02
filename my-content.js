@@ -54,6 +54,8 @@ const MEDIA_TYPES = {
     image: 'Image',
     video: 'Video',
     card:  'Branded card',
+    // A printed flyer is stored as a PDF document, but nobody looks for "my flyers" under Document.
+    flyer: 'Flyer',
     audio: 'Sound',
     document: 'Document',
     link:  'Link',
@@ -76,6 +78,7 @@ let _hostAssistantName = '';
 /** Which of MEDIA_TYPES this asset is. */
 function _mediaTypeKey(asset) {
     if (asset.provider === 'brand_card') return 'card';
+    if (asset.provider === 'flyer') return 'flyer';
     const t = asset.assetType;
     return Object.prototype.hasOwnProperty.call(MEDIA_TYPES, t) ? t : 'link';
 }
@@ -90,7 +93,7 @@ function _mediaTypeKey(asset) {
  */
 function _sourceKey(asset) {
     if (asset.provider === 'canva') return 'canva';
-    if (asset.provider === 'fal' || asset.provider === 'remotion' || asset.provider === 'brand_card') return 'generated';
+    if (asset.provider === 'fal' || asset.provider === 'remotion' || asset.provider === 'brand_card' || asset.provider === 'flyer') return 'generated';
     if (asset.provider) return 'sourced';
     return 'upload';
 }
@@ -586,7 +589,10 @@ function _assetRow(asset, sec) {
     // A visual asset (image/video) with a resolved URL can be opened in the viewer
     // lightbox. The backend (content-assets.ts GET) presigns storageUrl for both images
     // and videos, or falls back to externalUrl — so AI-generated videos are viewable here.
-    const viewUrl = (asset.assetType === 'image' || asset.assetType === 'video') && !asset.purgedAt
+    // A flyer's tile and viewer show its preview picture; the PDF itself is what Print and Download fetch.
+    const isFlyer = asset.provider === 'flyer';
+    const viewUrl = isFlyer && !asset.purgedAt ? (asset.previewUrl || asset.storageUrl || '')
+        : (asset.assetType === 'image' || asset.assetType === 'video') && !asset.purgedAt
         ? (asset.storageUrl || asset.externalUrl || '')
         : '';
     const canView = !!viewUrl;
@@ -606,7 +612,9 @@ function _assetRow(asset, sec) {
         : '';
     // Lazy: a library holds hundreds of rows (772 in one workspace), and without it the browser
     // downloaded every thumbnail on the page the moment it rendered.
-    const thumbInner = (asset.assetType === 'image' && asset.storageUrl)
+    const thumbInner = (isFlyer && asset.previewUrl)
+        ? `<img src="${_mcThumbUrl(asset.previewUrl)}" alt="" loading="lazy" decoding="async" class="w-full h-full object-cover object-top rounded-lg">${sourceChip}`
+        : (asset.assetType === 'image' && asset.storageUrl)
         ? `<img src="${_mcThumbUrl(asset.storageUrl)}" alt="" loading="lazy" decoding="async" class="w-full h-full object-cover rounded-lg">${playOverlay}${sourceChip}`
         : (asset.assetType === 'video' && asset.storageUrl)
             ? `<video src="${asset.storageUrl}" class="w-full h-full object-cover rounded-lg" preload="metadata" muted playsinline></video>${playOverlay}${sourceChip}`
@@ -633,7 +641,7 @@ function _assetRow(asset, sec) {
           ${source ? `<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${source.badgeClass}">${source.label}</span>` : ''}
           ${scheduledBadge}
         </div>
-        <p class="text-xs text-gray-400 mt-0.5">${_typeLabel(asset.assetType)}${fileSize ? ' · ' + fileSize : ''} · ${date}</p>
+        <p class="text-xs text-gray-400 mt-0.5">${isFlyer ? `Flyer${asset.prompt ? ' · ' + _escHtml(asset.prompt) : ''}` : _typeLabel(asset.assetType)}${fileSize ? ' · ' + fileSize : ''} · ${date}</p>
         ${expiryNotice}
         ${rejectionBadge}
       </div>
@@ -647,7 +655,8 @@ function _assetRow(asset, sec) {
 window._mcViewAsset = function (id) {
     const asset = Object.values(_assets).flat().find(a => a.id === id);
     if (!asset) return;
-    const url = asset.storageUrl || asset.externalUrl || '';
+    const isFlyer = asset.provider === 'flyer';
+    const url = isFlyer ? (asset.previewUrl || '') : (asset.storageUrl || asset.externalUrl || '');
     const modal = document.getElementById('modal-view-asset');
     const vid = document.getElementById('view-asset-video');
     const img = document.getElementById('view-asset-image');
@@ -662,7 +671,7 @@ window._mcViewAsset = function (id) {
 
     if (url && asset.assetType === 'video') {
         vid.src = url; vid.classList.remove('hidden');
-    } else if (url && asset.assetType === 'image') {
+    } else if (url && (asset.assetType === 'image' || isFlyer)) {
         img.src = url; img.classList.remove('hidden');
     } else {
         empty.classList.remove('hidden');
@@ -677,8 +686,16 @@ window._mcViewAsset = function (id) {
     // Toggled via style.display, not the `hidden` class: `hidden` and `inline-flex` are both plain
     // display rules of equal specificity and `.inline-flex` is defined later in style.css, so it
     // wins — classList.add('hidden') here left a dead button on screen with a stale href.
-    if (url) {
-        dl.href = `/.netlify/functions/content-asset-download?assetId=${asset.id}`;
+    // A flyer: Print (the PDF inline, in its own tab) and the print-shop PDF beside Download.
+    const dlBase = `/.netlify/functions/content-asset-download?assetId=${asset.id}`;
+    const print = document.getElementById('view-asset-print');
+    const shop = document.getElementById('view-asset-download-print-shop');
+    const dlLabel = document.getElementById('view-asset-download-label');
+    if (print) { print.href = isFlyer ? `${dlBase}&inline=1` : '#'; print.style.display = isFlyer ? '' : 'none'; }
+    if (shop) { shop.href = isFlyer ? `${dlBase}&variant=print_shop` : '#'; shop.style.display = isFlyer && asset.renderParams && asset.renderParams.printShopKey ? '' : 'none'; }
+    if (dlLabel) dlLabel.textContent = isFlyer ? 'PDF for home printing' : 'Download';
+    if (url || isFlyer) {
+        dl.href = dlBase;
         dl.style.display = '';
         dl.classList.remove('hidden');
     } else {
@@ -690,7 +707,7 @@ window._mcViewAsset = function (id) {
     // "Animate this picture" (image-to-video, 2026-10-31). style.display, not `hidden` — same
     // inline-flex trap as the download button above.
     const animate = document.getElementById('view-asset-animate');
-    if (animate) animate.style.display = url && asset.assetType === 'image' ? '' : 'none';
+    if (animate) animate.style.display = url && asset.assetType === 'image' && !isFlyer ? '' : 'none';
     _mcViewedId = asset.id;
 
     modal.classList.remove('hidden');
