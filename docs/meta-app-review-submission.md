@@ -13,6 +13,100 @@ developers.facebook.com/requests, and then they can connect. `request-meta-teste
 
 ---
 
+## Resubmission 2026-11-02: `pages_manage_posts` + `instagram_content_publish`
+
+**Result of the first review:** approved `instagram_manage_insights`, `instagram_basic`,
+`business_management`, `pages_read_engagement`, `pages_show_list`. Rejected `pages_manage_posts`
+and `instagram_content_publish`, both for *"Screencast Not Aligned with Use Case Details"*. Meta
+says the use case **is allowed**. Only the video was the problem: it must show (1) the complete
+Meta login, (2) the user granting the permission, (3) the end-to-end use, (4) English UI with
+captions explaining buttons, and (5) state whether the app is server-to-server (it is not).
+
+**What most likely failed the old video** (it followed the old script in this doc):
+- **No visible grant.** If the Facebook login had already approved Be More Swan, Meta shows only
+  "Continue as …" and skips the permission list. The reviewer never sees the permission granted.
+  You must remove the app from Facebook first (step P2 below).
+- **A cut between approving and the post going live.** The old script used Approve & Schedule and
+  "cut the wait" (the publisher runs every 10 minutes). The reviewer can't tell the post on
+  Facebook came from Be More Swan. **Post Now** publishes in seconds, so the whole thing fits in
+  one continuous take.
+- **The use-case text said "at the scheduled time"** while the video showed something else. The
+  answers above now describe exactly what the new video shows: Post Now, and Schedule for Later as
+  the alternative.
+
+### Before recording
+
+- **P1. Record in the workspace that already owns the Page/IG** (bemoreswan's own workspace, prod
+  org 37), or in a workspace whose Page isn't connected anywhere else. The one-workspace-per-account
+  block (`ENFORCE_TENANT_COLLISION`, armed on prod) refuses a Page that is live in another workspace.
+  So the `meta-review@` reviewer workspace **cannot** connect @bemoreswan. In that workspace,
+  disconnect Facebook and Instagram on Integrations first.
+- **P2. Remove Be More Swan from the Facebook login:** facebook.com → Settings & privacy →
+  Settings → **Business integrations** → Be More Swan → Remove. This is the only way Meta shows
+  the full permission screen again. ⚠️ It cuts every connection made with that login, including
+  Love Cat Studio (org 38). Reconnect both afterwards, ticking **all** businesses, Pages and IG
+  accounts. Do it when no posts are due. Repeat P2 before the second recording.
+- **P3. Set the language to English (US or UK)** on Facebook (Settings → Language and region) and
+  Instagram, and in the browser. Close other tabs and bookmarks that show personal things. Use a
+  window ≤ 1440 px wide and turn notifications off.
+- **P4. A fresh draft waits in Review** for each platform, with an image (JPEG) and a short,
+  obviously-new caption, e.g. "Testing Be More Swan publishing — 2 Nov". Use a new draft per take,
+  because a published post can't be posted again.
+- **P5. Dry run once, off camera,** on prod: Post Now on a throwaway draft for each platform →
+  Published → "View live post" opens it. Delete the test post on Facebook/Instagram afterwards.
+  If it fails, fix it before recording. Don't find out on camera.
+- **P6. Log out of Be More Swan and Facebook** (and Instagram on the web) before pressing record.
+
+### Recording 1 — `pages_manage_posts` (Facebook card, ~3 min, one unbroken take)
+
+Captions go on screen as text boxes (iMovie titles, ScreenFlow or Camtasia callouts), held ~4 s
+each. No audio needed. Zoom in on the permission screen and the published post.
+
+| # | On screen | Caption |
+|---|---|---|
+| 1 | bemoreswan.com → Log in → sign in | "Be More Swan: social media assistant for small businesses. The business owner logs in." |
+| 2 | Sidebar → **Integrations** → Facebook card | "Integrations: where the owner connects their social accounts." |
+| 3 | Click **Connect** on Facebook → pre-connect checklist → continue | "'Connect' starts Facebook Login so Be More Swan can publish to the owner's Page." |
+| 4 | facebook.com login page → type email + password → Log in | "Meta login: the owner logs in to Facebook." |
+| 5 | Meta dialog → businesses → **Pages** (tick the Page) → IG if asked | "The owner chooses which Facebook Page Be More Swan can use." |
+| 6 | Permission review screen, **zoomed**, with "Create and manage content on your Page" visible and on → **Save / Continue** | "Granting pages_manage_posts: lets Be More Swan publish posts the owner approves to this Page." |
+| 7 | Back in Be More Swan → picker (if shown) → Facebook card shows **Connected** | "The Facebook Page is now connected." |
+| 8 | Open the Social Media Manager assistant → **Review** → open the Facebook draft | "The AI assistant drafted this post. Nothing is published until the owner approves it." |
+| 9 | Hover **Post Now** (show Schedule for Later and Reject too) | "'Post Now' publishes immediately. 'Schedule for Later' publishes at a chosen time. 'Reject' discards it." |
+| 10 | Click **Post Now** → confirmation | "Be More Swan calls POST /{page-id}/photos with the Page token (pages_manage_posts)." |
+| 11 | Reopen the post (Content Calendar) → green **Posted** box → click **View live post →** | "Published. 'View live post' opens it on Facebook." |
+| 12 | Facebook Page shows the post (same image + caption), **zoomed** | "The post is live on the business's Facebook Page, published by Be More Swan." |
+
+### Recording 2 — `instagram_content_publish` (Instagram card, ~3 min, one unbroken take)
+
+Do P2 again first, so the grant appears.
+
+| # | On screen | Caption |
+|---|---|---|
+| 1–2 | Same as Recording 1 | (same) |
+| 3 | Click **Connect** on Instagram → "Connecting Instagram" → **Continue to Facebook** | "Instagram Business accounts connect through Facebook Login." |
+| 4 | Facebook login → email + password | "Meta login: the owner logs in with the Facebook account that manages their Instagram." |
+| 5 | Meta dialog → business → Page → **Instagram account** ticked | "The owner chooses the Instagram Business account Be More Swan can use." |
+| 6 | Permission review screen, **zoomed**, with the Instagram content-publishing permission visible and on → Continue | "Granting instagram_content_publish: lets Be More Swan publish posts the owner approves to this Instagram account." |
+| 7 | Picker shows **@username** → select → Instagram card **Connected** | "The Instagram Business account is now connected." |
+| 8–9 | Assistant → **Review** → Instagram draft → hover the buttons | (as Recording 1, with "Instagram") |
+| 10 | **Post Now** | "Be More Swan creates a media container (POST /{ig-user-id}/media) and publishes it (POST /{ig-user-id}/media_publish)." |
+| 11 | Reopen the post → green **Posted** box → **View live post →** | "Published. 'View live post' opens it on Instagram." |
+| 12 | instagram.com profile → the post, **zoomed** | "The post is live on the business's Instagram account, published by Be More Swan." |
+
+### In the submission form (both permissions)
+
+- Paste the new "How the app uses it" text above. Upload Recording 1 for `pages_manage_posts`
+  and Recording 2 for `instagram_content_publish`.
+- Add to the notes: *"Be More Swan is a web app using Facebook Login with the user's own access
+  token. It is not a server-to-server app and does not use system user tokens. The screencast
+  shows the full Facebook login, the permission being granted, and the post being published and
+  shown live on Facebook/Instagram in one continuous recording."*
+- Check the reviewer login (`review-login.html`, `META_REVIEW_LOGIN_*`) still works and hasn't
+  expired. Leave fresh Facebook and Instagram drafts in the reviewer workspace's Review list.
+
+---
+
 ## Not submitted: `pages_messaging`
 
 Removed from this submission and from `SCOPES` in `netlify/functions/meta-oauth.ts`. Why:
@@ -70,12 +164,20 @@ business owner can track audience growth alongside their marketing goals.
 _Code: `meta-oauth.ts`, `src/utils/meta-accounts.ts` (picker), `src/utils/follower-counts.ts`._
 
 ### instagram_content_publish
-**How the app uses it:** Be More Swan is a social media planning assistant. The business owner
-creates or approves a post (image or video with a caption) in their Be More Swan content calendar
-and schedules it. At the scheduled time, the app publishes it to their connected Instagram
-Business account using the content publishing API (`/{ig-user-id}/media`, then `/media_publish`).
-Nothing is published unless the user has created or approved that post.
-_Code: `publish-instagram.ts`._
+**How the app uses it (resubmission wording, 2026-11-02 — matches the screencast step for step):**
+Be More Swan is a web app that helps small businesses run their social media. A business owner
+logs in to Be More Swan, opens Integrations and clicks Connect on the Instagram card. They log in
+with Facebook and grant Be More Swan access to the Instagram Business account linked to their
+Facebook Page, including permission to publish content. Be More Swan's AI assistant drafts a post
+(an image and a caption). The owner opens the draft in the Review panel, reads it, and clicks
+**Post Now**. Be More Swan then publishes it to their Instagram Business account using the content
+publishing API: it creates a media container with `POST /{ig-user-id}/media` and publishes it with
+`POST /{ig-user-id}/media_publish`. The post is marked Published in Be More Swan, with a "View
+live post" link to the post on Instagram. Owners can also click **Schedule for Later**, and the
+same publishing call runs at the time they choose. Be More Swan never publishes a post the owner
+has not approved. It uses Facebook Login with the user's own access token. It is not a
+server-to-server app and does not use a system user token.
+_Code: `publish-instagram.ts`, `approve-post.ts` (`publish_now`), `publish-now-background.ts`._
 
 ### instagram_manage_insights
 **How the app uses it:** After a post is published through Be More Swan, the app periodically
@@ -101,11 +203,19 @@ _Code: `ingest-facebook-insights.ts` (post `reactions`/`comments`/`shares` summa
 > them to this answer only if `read_insights` is added to `SCOPES` and to the submission.
 
 ### pages_manage_posts
-**How the app uses it:** The business owner creates or approves posts in their Be More Swan
-content calendar. At the scheduled time, the app publishes each post to their connected Facebook
-Page (`/{page-id}/feed`, or `/{page-id}/photos` when an image is attached). Posts are only
-published when the user has created or approved them.
-_Code: `publish-facebook.ts`._
+**How the app uses it (resubmission wording, 2026-11-02 — matches the screencast step for step):**
+Be More Swan is a web app that helps small businesses run their social media. A business owner
+logs in to Be More Swan, opens Integrations and clicks Connect on the Facebook card. They log in
+with Facebook, choose the Facebook Page they want to connect, and grant Be More Swan permission to
+create and manage content on that Page. Be More Swan's AI assistant drafts a post (an image and a
+caption). The owner opens the draft in the Review panel, reads it, and clicks **Post Now**. Be More
+Swan then publishes it to the connected Page with `POST /{page-id}/photos`, or
+`POST /{page-id}/feed` for a text-only post, using that Page's access token. The post is marked
+Published in Be More Swan, with a "View live post" link to the post on the Facebook Page. Owners
+can also click **Schedule for Later**, and the same call runs at the time they choose. Be More
+Swan never publishes a post the owner has not approved. It uses Facebook Login with the user's own
+access token. It is not a server-to-server app and does not use a system user token.
+_Code: `publish-facebook.ts`, `approve-post.ts` (`publish_now`), `publish-now-background.ts`._
 
 ---
 
@@ -160,14 +270,8 @@ A–C, showing the **business selection** step in the dialog, then:
 2. Select it → connected.
 
 
-### pages_manage_posts (Facebook card, ~2 min)
-A–C → select the Page, then:
-1. Open the Social Media Manager assistant → **Review** → open a Facebook post draft with an image
-   → **Approve & Schedule** for 2–3 minutes ahead. The Facebook publisher runs every 10 minutes,
-   so cut the wait.
-2. Optionally show it in the Content Calendar.
-3. Wait (cut is fine here, but not during login) → open the Facebook Page → show the post live.
-   *Annotation: "Published via /{page-id}/photos using pages_manage_posts"*
+### pages_manage_posts
+**Superseded:** rejected 2026-11-02. Use the script in "Resubmission 2026-11-02" above.
 
 ### pages_read_engagement (Facebook card, ~2 min)
 A–C → select the Page, then:
@@ -188,12 +292,8 @@ A–C, then:
    read via instagram_basic"*
 4. Open the Instagram profile → same handle and follower count.
 
-### instagram_content_publish (Instagram card, ~2 min)
-A–C → select the account, then:
-1. Assistant → **Review** → open an Instagram post draft with an image → **Approve & Schedule** for
-   1–2 minutes ahead.
-2. Wait → open the Instagram profile → show the post live. *Annotation: "Published via
-   /{ig-user-id}/media + /media_publish using instagram_content_publish"*
+### instagram_content_publish
+**Superseded:** rejected 2026-11-02. Use the script in "Resubmission 2026-11-02" above.
 
 ### instagram_manage_insights (Instagram card, ~2 min)
 A–C → select the account, then:
@@ -246,14 +346,14 @@ posts or insights at first. The instructions point them to the screencasts for t
 > 2. Select a Page, ideally one owned by a Business portfolio. Be More Swan's picker lists your
 >    Pages (shown when you manage two or more). Select one.
 > 3. Open the Social Media Manager assistant → Review, open the Facebook draft and click
->    Approve & Schedule for a few minutes ahead. The Facebook publisher runs every 10 minutes,
->    after which the post appears on your Page.
+>    Post Now. Within about a minute the post shows as Published, with a "View live post" link
+>    that opens it on your Page.
 >
 > **Instagram (instagram_basic, instagram_content_publish, instagram_manage_insights)**
 > 4. Go to Integrations → Instagram card → Connect, and select your Page's Instagram Business
 >    account. The picker shows it as @username.
-> 5. Approve & Schedule the Instagram draft the same way. It appears on the Instagram profile
->    within a couple of minutes.
+> 5. Open the Instagram draft and click Post Now. It appears on the Instagram profile within
+>    about a minute, and "View live post" opens it.
 >
 > **Insights and engagement (instagram_manage_insights, pages_read_engagement, instagram_basic)**
 > 6. In the assistant, the Performance Metrics cards (Engagement Rate, Organic Reach Growth,
