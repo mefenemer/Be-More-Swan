@@ -783,7 +783,9 @@
       }).then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (res.ok) return data;
-        const why = data.error || data.message
+        const why = (data.error === 'insufficient_credits'
+          ? (data.unit === 'tasks' ? 'Your monthly tasks are used up — they reset on the 1st.' : 'You don’t have enough credits for that.')
+          : null) || data.error || data.message
           || (data.pastSchedule ? 'Its posting time has already passed — open the post to pick a new one.' : `That didn’t work (HTTP ${res.status}).`);
         const needsPost = res.status === 409 || res.status === 422;
         throw new Error(needsPost ? `${why} Open the post to sort that out.` : why);
@@ -847,6 +849,30 @@
           message = over.length === ids.length
             ? 'The new version ran past the platform’s limit, so nothing was changed. Open the post to edit it by hand.'
             : `${what} — saved.${over.length ? ` ${over.length} platform${over.length === 1 ? '' : 's'} kept the old wording: the new one ran past that platform’s limit.` : ''} Open the post to read it.`;
+        } else if (d.action === 'voiceover' || d.action === 'captions' || d.action === 'time_text') {
+          // The post editor's voiceover controls — generate-voiceover.ts, one voiceover for every
+          // platform row (one task); captions and timing are free and per row.
+          if (d.action === 'voiceover') {
+            await postActionCall('generate-voiceover', {
+              text: d.script, voice: d.voice, postIds: ids,
+              ...(typeof d.captions === 'boolean' ? { captions: d.captions } : {}), ...(d.captionStyle ? { captionStyle: d.captionStyle } : {}),
+            });
+          } else if (d.action === 'captions') {
+            for (const id of ids) {
+              await postActionCall('generate-voiceover', {
+                action: 'captions', postId: id,
+                ...(typeof d.captions === 'boolean' ? { captions: d.captions } : {}), ...(d.captionStyle ? { captionStyle: d.captionStyle } : {}),
+              });
+            }
+          }
+          let timed = null;
+          if (d.action === 'time_text' || d.timeText) {
+            for (const id of ids) timed = await postActionCall('generate-voiceover', { action: 'align', postId: id });
+          }
+          const timedLine = timed ? ` ${Object.keys(timed.timings || {}).length} of ${timed.total} text boxes now follow the voice.` : '';
+          message = d.action === 'voiceover' ? `Voiceover added.${timedLine} Open the post to hear it.`
+            : d.action === 'captions' ? `Captions saved.${timedLine}`
+            : `Done.${timedLine}`;
         } else if (d.action === 'video_version') {
           // The Review Queue's "Make a video version" — video-projects.ts `from_post`. Free: it plans
           // a storyboard on the Video Producer's Videos tab; making the video is a click there.

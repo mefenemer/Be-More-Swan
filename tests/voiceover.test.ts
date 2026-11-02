@@ -50,8 +50,8 @@ async function main() {
         assert.strictEqual(spokenDuration({}, []), null);
     });
 
-    await check('nine labelled voices (six plain, three British), no person names in the labels', () => {
-        assert.strictEqual(VOICES.length, 9);
+    await check('labelled voices from the catalogue, no person names in the labels', () => {
+        assert.ok(VOICES.length >= 9);
         assert.ok(isVoiceId('coral') && !isVoiceId('nope') && !isVoiceId(undefined));
         for (const v of VOICES) assert.ok(!/[A-Z][a-z]+ [A-Z]/.test(v.label), `label reads like a name: ${v.label}`);
     });

@@ -17,7 +17,7 @@ import { contentAssets, organisations, postRenderJobs, scheduledPosts, scheduled
 import type { Overlay } from './overlay-geometry';
 import { renderableAudio } from './audio-overlays';
 import { isStillMotion, type StillMotion } from './still-motion';
-import { buildCaptionCues, captionAccent, withScriptPunctuation, type CaptionSource, type CaptionTrack, type SpokenWordLike } from './captions';
+import { buildCaptionCues, normalizeCaptionStyle, styleAccent, withScriptPunctuation, type CaptionSource, type CaptionTrack, type SpokenWordLike } from './captions';
 import { DEFAULT_TARGET_RATIO, editHasStills, readVideoEdit, renderableClips, resolveClipGain, resolveTrim } from './video-edit';
 import { reframeRatioFor } from '../utils/format-router';
 
@@ -267,12 +267,14 @@ export async function resolveCaptionTrack(db: Db, raw: unknown, orgId: number): 
     const sources: CaptionSource[] = overlays
         .filter(a => wordsById.has(a.assetId))
         .map(a => ({ startS: a.startS, endS: a.endS, words: wordsById.get(a.assetId)! }));
-    const cues = buildCaptionCues(sources);
+    // One look for the whole video: the first captioned voiceover's style (captions.ts CaptionStyle).
+    const style = normalizeCaptionStyle(overlays.find(a => wordsById.has(a.assetId) && a.captionStyle)?.captionStyle);
+    const cues = buildCaptionCues(sources, style.mode);
     if (!cues.length) return null;
     const [org] = await db.select({ brandKit: organisations.brandKit }).from(organisations)
         .where(eq(organisations.id, orgId)).limit(1).catch(() => [] as Array<{ brandKit: unknown }>);
     const kit = (org?.brandKit ?? null) as { primaryColor?: string } | null;
-    return { cues, accent: captionAccent(kit?.primaryColor) };
+    return { cues, accent: styleAccent(style, kit?.primaryColor), style };
 }
 
 /** One clip of the timeline, resolved to something Lambda can fetch. */
@@ -526,7 +528,7 @@ export function renderFingerprint(identity: RenderIdentity): string {
         : `base:${identity.baseAssetId}`;
 
     const audioKey = renderableAudio(identity.audioOverlays)
-        .map(a => [a.assetId, a.startS ?? '', a.endS ?? '', a.volume, a.fadeInS ?? '', a.fadeOutS ?? '', a.captions === false ? 'nocap' : ''].join(','))
+        .map(a => [a.assetId, a.startS ?? '', a.endS ?? '', a.volume, a.fadeInS ?? '', a.fadeOutS ?? '', a.captions === false ? 'nocap' : '', a.captionStyle ? JSON.stringify(a.captionStyle) : ''].join(','))
         .join('|');
 
     const frame = identity.framePosition

@@ -109,7 +109,8 @@ check('the preview can rewrite the owner\'s own words, and refuses invented clai
     assert.match(a, /text: document\.getElementById\('vb-try-text'\)\?\.value \|\| undefined/);
     assert.match(a, /neverSay: \[\], sample: '' \};/);
     assert.match(a, /data-vb-suggest-never=/);
-    assert.match(a, /new SpeechSynthesisUtterance\(/);
+    // Read aloud is a real voice the owner picks (read-aloud.ts), not the browser's robotic speech.
+    assert.match(a, /fetch\('\/\.netlify\/functions\/read-aloud'/);
     // Writing voice lives in the builder now, not twice.
     assert.match(a, /\.filter\(\(f\) => !\(f\.key === 'tone_of_voice' && _VB_ROLES\.includes\(data\.roleKey\)\)\)/);
 });

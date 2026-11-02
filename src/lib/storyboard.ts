@@ -14,6 +14,7 @@
 //
 // PURE: no database, no network. Tested in tests/storyboard.test.ts.
 
+import type { CaptionStyle } from './captions';
 import { isStillMotion, type StillMotion } from './still-motion';
 
 export const SCENE_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_image', 'brand_card', 'product_photo'] as const;
@@ -43,6 +44,11 @@ export interface VideoBrief {
     voice?: string | null;
     allowAi: AiAllowance;
     musicMood?: string | null;
+    /** Language the script is written in (voice-catalogue.json code); absent = the voice's own. */
+    language?: string | null;
+    /** Burn the spoken words in as captions (default on), and how they look (captions.ts). */
+    captions?: boolean;
+    captionStyle?: CaptionStyle | null;
 }
 
 export interface Scene {
@@ -275,6 +281,8 @@ export function storyboardUserPrompt(args: {
     library: LibraryPicture[];
     today: string;
     feedback?: string | null;
+    /** The script's language by name ("French"); absent or English = no instruction. */
+    language?: string | null;
 }): string {
     const { brief } = args;
     const allow = brief.allowAi === 'stock_only' ? 'Do NOT use ai_image or ai_video.'
@@ -288,6 +296,9 @@ export function storyboardUserPrompt(args: {
         `WHAT IT MUST SAY: ${clip(brief.message, 600)}`,
         brief.cta ? `CALL TO ACTION (use these words in the last scene): ${clip(brief.cta, 200)}` : '',
         brief.voiceover ? 'It has a voiceover — every scene needs a voiceover line.' : 'No voiceover — leave voiceover empty and use onScreenText to carry the message.',
+        args.language && args.language !== 'English'
+            ? `LANGUAGE: write every voiceover line, every onScreenText and the caption in ${args.language}. Keep search keywords and AI prompts in English.`
+            : '',
         allow,
         args.library.length
             ? `LIBRARY PICTURES you may use as product_photo (id: name):\n${args.library.slice(0, 30).map((p) => `${p.id}: ${clip(p.name, 80)}`).join('\n')}`

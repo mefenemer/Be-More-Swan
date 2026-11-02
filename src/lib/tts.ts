@@ -32,36 +32,39 @@ const ELEVENLABS_USD_PER_1K_CHARS = 0.15;
 /** ~80 seconds of speech at a natural pace — longer than any short-form video needs. */
 export const VOICEOVER_MAX_CHARS = 1200;
 
+import CATALOGUE from '../public/voice-catalogue.json';
+
 /**
- * The voices offered. A short, labelled list on purpose: eleven unnamed voices is a choice nobody
- * can make. Labels describe the sound, never a person. The first six ids ARE OpenAI voice ids; an
- * accented voice is an OpenAI voice (`speaker`) plus an accent line added to the delivery note —
- * gpt-4o-mini-tts takes accent from its instructions. The owner asked for British voices for the
- * website samples (2026-11-02): OpenAI's voices are American-sounding without one.
- * src/components/assistant-videos.js and the onboarding schema list the same ids (tests/tts-voices.test.ts).
+ * The voices offered: src/public/voice-catalogue.json, the ONE list the server and the voice picker
+ * (src/components/voice-picker.js) both read. Labels describe the sound, never a person. A voice with
+ * an `elevenlabs` id is spoken by ElevenLabs; `speaker` (+ `accent`, an accent line for the delivery
+ * note — gpt-4o-mini-tts takes accent from its instructions) is the OpenAI voice used if it fails, or
+ * the only speaker when there is no ElevenLabs id. `legacy` voices (the original six OpenAI voices,
+ * American-sounding) stay valid for saved settings but are no longer offered (owner, 2026-11-02:
+ * "robotic … not human like at all"). Each voice speaks its own `lang`; the script decides the language.
  */
-export const VOICES = [
-    { id: 'coral',   label: 'Warm and friendly' },
-    { id: 'sage',    label: 'Calm and clear' },
-    { id: 'verse',   label: 'Bright and upbeat' },
-    { id: 'alloy',   label: 'Neutral and steady' },
-    { id: 'onyx',    label: 'Deep and confident' },
-    { id: 'shimmer', label: 'Light and lively' },
-    // ElevenLabs "Pepper", picked by ear (2026-11-02) after ten OpenAI women all came back American:
-    // a real British speaker, not an accent asked for. coral + accent is only the fallback.
-    { id: 'british_woman', label: 'British, warm (woman)', speaker: 'coral', elevenlabs: '6vIP9mPY4dr6w8krUg01',
-      accent: 'Speak with a natural British English accent, as a woman from the south of England: warm and friendly, not posh.' },
-    // ElevenLabs "Beth - British female, playful & witty", the owner's pick for the Harbour Yoga sample
-    // (2026-11-02). Same coral + accent fallback as Pepper.
-    { id: 'british_woman_playful', label: 'British, playful (woman)', speaker: 'coral', elevenlabs: 'zH7TN9vEZAsEway9xWev',
-      accent: 'Speak with a natural British English accent, as a young woman from the south of England: playful, witty and warm, not posh.' },
-    // Ballad, picked by ear from four trials (2026-11-02): the accent needs spelling out — a one-line
-    // "London accent" note came back American.
-    { id: 'london_man', label: 'London, laid-back (man)', speaker: 'ballad',
-      accent: 'Accent: a strong, authentic London accent, Estuary English / modern working-class London, like a friendly young bloke from South or East London. Drop the H at the start of words ("\'arbour"), use glottal stops for T in the middle and end of words ("ge\'", "wha\'", "le\'s"), TH-fronting where it sounds natural ("fings", "wiv"), and London vowels ("toDAI" for today, "noime" for name). Relaxed, streetwise, cheeky and warm. Not posh, not BBC English, not American, never a cartoon Cockney.' },
-] as const;
-export type VoiceId = typeof VOICES[number]['id'];
-export const DEFAULT_VOICE: VoiceId = 'coral';
+export interface Voice {
+    id: string; name: string; label: string; gender: 'female' | 'male'; lang: string; region: string;
+    elevenlabs?: string; speaker: string; accent?: string; legacy?: boolean;
+}
+export const VOICES: readonly Voice[] = (CATALOGUE as { voices: Voice[] }).voices;
+export const VOICE_LANGUAGES: ReadonlyArray<{ code: string; label: string }> = (CATALOGUE as { languages: Array<{ code: string; label: string }> }).languages;
+export type VoiceId = string;
+/** Pepper: the owner's pick for a British business's default (2026-11-02). */
+export const DEFAULT_VOICE: VoiceId = 'british_woman';
+
+/** The voices a customer can choose from (not legacy). */
+export const OFFERED_VOICES: readonly Voice[] = VOICES.filter((v) => !v.legacy);
+
+/** The language a voice speaks, by code ('en' when unknown). Pure. */
+export function voiceLanguage(voice: VoiceId): string {
+    return VOICES.find((v) => v.id === voice)?.lang ?? 'en';
+}
+
+/** The language's English name ("French"), or null. Pure. */
+export function languageLabel(code: unknown): string | null {
+    return VOICE_LANGUAGES.find((l) => l.code === code)?.label ?? null;
+}
 
 export function isVoiceId(v: unknown): v is VoiceId {
     return typeof v === 'string' && VOICES.some((x) => x.id === v);

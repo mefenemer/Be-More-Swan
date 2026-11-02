@@ -77,6 +77,7 @@ import { buildSiteDirectoryChatBlock, resolveSiteDirectoryCard, SITE_DIRECTORY_C
 import { buildTeamActivityBlock } from '../../src/utils/team-activity';
 import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../../src/utils/content-snapshot';
 import { postActionFromUiElement, resolvePostActionProposal, type PostActionCard } from '../../src/utils/chat-post-action';
+import { voiceOptionsBlock } from '../../src/utils/chat-voice-options';
 import { blogActionFromUiElement, resolveBlogActionProposal, type BlogActionCard } from '../../src/utils/chat-blog-action';
 import { emailActionFromUiElement, resolveEmailActionProposal, type EmailActionCard } from '../../src/utils/chat-email-action';
 import {
@@ -815,6 +816,12 @@ function socialSurfaces(): string {
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
 EXISTING POSTS — you can act on the posts listed below, each named by its "#" number, in six ways: approve one waiting in "Review" (it is booked into a posting slot), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), try again one in "Needs attention" (it goes back in the queue and publishes on the next run — or at a time they name, given as "when"), move one in "Review" or "Scheduled" to another time, remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), or make one shorter or longer (action "shorter" or "longer" — every platform's caption is rewritten to the new length and saved; it keeps its place in the queue), or hand one to the Video Producer for a video version (action "video_version" — only if a Video Producer is ACTIVE on their team; it plans a free storyboard from the post on the Video Producer's "Videos" tab, where the user checks it and presses "Make the video", which is when credits are used; the post itself is unchanged — any post that was not rejected or removed, a published one too). To do any of them, emit a post_action_proposal naming the post's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say a post HAS been approved, rejected, retried, moved, removed, shortened, lengthened or made into a video — say the card is there to confirm. One post per reply. If you cannot tell which post they mean, ask, quoting the candidates. If a post has open compliance warnings ("↳" under it), name them before offering to approve it: the card cannot accept warnings for the user, so its click will be refused and they will need to open the post in the "Posts" tab and settle or accept the warnings there. Apart from shorter or longer, you cannot edit an existing post's words, and you cannot publish one immediately: for those, tell them which column of the "Posts" tab it is in so they can open it there. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN write a new version as a fresh draft if they want one.
+
+VOICEOVERS AND CAPTIONS ON A POST — three more actions on an existing post, the twins of the post editor's "Add a voiceover", its "Show captions" settings and "Time the text to the voice":
+- "voiceover": an AI voice reads a script over the post (a photo post becomes a short video). Write the script yourself from the post unless they gave the words — short enough to say in the video's length (about 2.5 words a second) — in the language of the voice they want; pick the voice they asked for from VOICES (if they named none, ask whether they want a woman's or a man's voice, and which accent or language, or offer one). Captions are on unless they say otherwise. It uses 1 task, shown on the card. Set "timeText" when the post already has text boxes and they want the text to follow the voice.
+- "captions": turn the captions of a post's voiceover on or off, or change how they look (CAPTION LOOK). Free. Only for a post that already has a voiceover.
+- "time_text": move each text box on the post so it shows while its words are said. Free. Only for a post with a voiceover and text boxes.
+The card shows what will happen (and a ▶ Listen button for the voice); only the user's click does it. Never say a voiceover has been added or captions changed — say the card is there to confirm.
 
 UPCOMING DRAFTS AFTER A CHANGE — you draft weeks ahead, so a change to your content pillars, core message, audience or objective only reaches posts drafted after it. When the user changes one of those (on "What I post about" or with a set-up answer card), or asks to refresh, redo or redraft the upcoming posts so they use it, emit a redraft_upcoming_proposal. Its button shows how many upcoming drafts would be rewritten, their dates and the tasks it uses (1 per post), and only the user's "Redraft" click does it. Posts they approved, ones they wrote or asked for, and any going out in the next 2 hours are never redrafted. The same offer also appears by itself a few seconds after they change "What I post about".`;
 }
@@ -1729,10 +1736,17 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of
     "lengthS": 15 | 30 | 60,
     "cta": "<the call to action — omit unless known>",
     "voiceover": true | false,
+    "voice": "<a voice id from VOICES — only if they chose one; otherwise leave it out and their set-up voice is used>",
+    "captions": true | false,    // the spoken words as captions (default true)
+    "captionStyle": { … },        // only what they asked for — see CAPTION LOOK
     "allowAi": "stock_and_ai" | "stock_only" | "ai_first",
     "platforms": ["instagram", "youtube", "facebook"]   // any of these
   }
 }
+
+${voiceOptionsBlock()}
+
+VOICE AND LANGUAGE. The voice decides the language: a French voice gets a script written in French, and so on. If they want a video in another language, pick a voice in that language. They can hear every voice with "▶ Listen" in the voice picker on the "Videos" tab's "New video" form, or on your card.
 
 or, to plan an existing video again:
 {
@@ -2683,11 +2697,18 @@ NEVER say a post has been drafted, written, saved, scheduled or queued for revie
 OR, to act on a post that already exists (see EXISTING POSTS), uiElement is instead:
 {
   "type": "post_action_proposal",
-  "action": "approve" | "reject" | "retry" | "reschedule" | "remove" | "shorter" | "longer" | "video_version",
+  "action": "approve" | "reject" | "retry" | "reschedule" | "remove" | "shorter" | "longer" | "video_version" | "voiceover" | "captions" | "time_text",
   "postId": <the number after # in YOUR POSTS RIGHT NOW>,
   "reason": "<reject only: what is wrong with it, in the user's words>" | null,
-  "when": "<reschedule: the new time exactly as the user said it, e.g. 'next Friday at 3pm'; retry: the time to try again, only if they named one>" | null
+  "when": "<reschedule: the new time exactly as the user said it, e.g. 'next Friday at 3pm'; retry: the time to try again, only if they named one>" | null,
+  "script": "<voiceover only: every word the voice will say, ready to read aloud>",
+  "voice": "<voiceover only: a voice id from VOICES>",
+  "captions": true | false,      // voiceover / captions: show the spoken words as captions (default true)
+  "captionStyle": { … },          // voiceover / captions: only what the user asked for — see CAPTION LOOK
+  "timeText": true | false       // voiceover / captions: also time the post's text boxes to the voice
 }
+
+${voiceOptionsBlock()}
 
 OR, to offer redrafting the upcoming drafts after a change to what you post about (see UPCOMING DRAFTS AFTER A CHANGE), uiElement is instead:
 { "type": "redraft_upcoming_proposal", "summary": "<one sentence: which change, and that the upcoming drafts don't use it yet>" }`,
@@ -3951,7 +3972,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // The words beside a profile or review card never say the change happened — only the click
         // does that, and a refused card's reply says it was refused (src/utils/confirm-card-reply.ts).
-        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard)) {
+        // The voiceover actions on a post too: "I've added a voiceover" over a card nobody pressed.
+        const voicePostCard = !!postAction && uiElement === postAction && ['voiceover', 'captions', 'time_text'].includes(postAction.action);
+        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || voicePostCard)) {
             content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
         }
 

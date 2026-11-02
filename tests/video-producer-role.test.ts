@@ -56,7 +56,9 @@ check('onboarding offers exactly the voices the speech endpoint has, and one ope
     const schema = read('src/public/assistant-onboarding-schemas.js');
     const at = schema.indexOf('    video_producer: [');
     const block = schema.slice(at, schema.indexOf('\n    ],\n', at));
-    for (const v of VOICES) assert.ok(block.includes(`value: '${v.id}', label: '${v.label}'`), v.id);
+    // The voice is chosen by ear from the one catalogue (voice-picker.js), never a list of its own.
+    assert.ok(/key: 'defaultVoice',[\s\S]{0,400}picker: 'voice'/.test(block), 'defaultVoice uses the voice picker');
+    assert.ok(VOICES.length > 0);
     assert.strictEqual((block.match(/operational: true/g) || []).length, 1);
     // The chat route reads these keys.
     const chat = read('netlify/functions/chat-orchestrator.ts');

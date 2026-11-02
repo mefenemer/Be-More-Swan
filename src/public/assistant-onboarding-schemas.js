@@ -451,19 +451,32 @@
           {
             key: 'defaultVoice',
             label: 'Which voice should read your voiceovers?',
+            // Chosen by ear in the voice picker (src/components/voice-picker.js) from
+            // src/public/voice-catalogue.json — the list the server speaks from.
             type: 'dropdown',
+            picker: 'voice',
             required: true,
+            helpText: 'Press Listen to hear it. Your scripts are written in the voice\u2019s language.',
+          },
+          {
+            // video-producer.ts withSetupDefaults → brief.captions ('off' turns them off; unanswered = on).
+            key: 'defaultCaptions',
+            label: 'Should your videos show captions that follow the voice?',
+            type: 'radio',
+            required: false,
             options: [
-              { value: 'coral', label: 'Warm and friendly' },
-              { value: 'sage', label: 'Calm and clear' },
-              { value: 'verse', label: 'Bright and upbeat' },
-              { value: 'alloy', label: 'Neutral and steady' },
-              { value: 'onyx', label: 'Deep and confident' },
-              { value: 'shimmer', label: 'Light and lively' },
-              { value: 'british_woman', label: 'British, warm (woman)' },
-              { value: 'british_woman_playful', label: 'British, playful (woman)' },
-              { value: 'london_man', label: 'London, laid-back (man)' },
+              { value: 'on', label: 'Yes, show captions', description: 'Most people watch with the sound off \u2014 the words appear as they\u2019re spoken.' },
+              { value: 'off', label: 'No captions', description: 'The voice only. On-screen text still shows.' },
             ],
+          },
+          {
+            // video-producer.ts withSetupDefaults → brief.captionStyle (src/lib/captions.ts CaptionStyle).
+            key: 'captionStyle',
+            label: 'How should the captions look?',
+            type: 'text',
+            picker: 'captionStyle',
+            required: false,
+            helpText: 'Optional. Style, position, size, font and colours \u2014 every video can change it.',
           },
           {
             key: 'defaultLength',

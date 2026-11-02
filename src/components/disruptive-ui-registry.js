@@ -1611,6 +1611,11 @@
       lengthS: [15, 30, 60].includes(Number(ui.lengthS)) ? Number(ui.lengthS) : 30,
       cta: clean(ui.cta, 200),
       voiceover: ui.voiceover !== false,
+      // The server checks the voice and normalises the look (video-producer.ts readBrief); a voice it
+      // doesn't know becomes the set-up voice.
+      ...(ui.voiceover !== false && typeof ui.voice === 'string' && ui.voice ? { voice: clean(ui.voice, 40) } : {}),
+      captions: ui.captions !== false,
+      ...(ui.captionStyle && typeof ui.captionStyle === 'object' ? { captionStyle: ui.captionStyle } : {}),
       allowAi: ALLOW[ui.allowAi] ? ui.allowAi : 'stock_and_ai',
       platforms: (Array.isArray(ui.platforms) ? ui.platforms : ['instagram']).filter((p) => PLATFORMS[p]),
     };
@@ -1625,7 +1630,9 @@
       ${row('Length', `${brief.lengthS} seconds`)}
       ${row('Kind', brief.purpose)}
       ${row('Ends with', brief.cta)}
-      ${row('Voiceover', brief.voiceover ? 'Yes, with captions' : 'No — on-screen text only')}
+      ${row('Voiceover', brief.voiceover ? (brief.voice ? (window.VoicePicker?.describe(brief.voice) || brief.voice) : 'Yes, in your set-up voice') : 'No — on-screen text only')}
+      ${brief.voiceover && brief.voice && window.VoicePicker ? '<button type="button" data-vdp-listen class="text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer mt-1" aria-pressed="false">&#9654; Listen to the voice</button>' : ''}
+      ${brief.voiceover ? row('Captions', brief.captions ? `On${brief.captionStyle && window.CaptionStyle ? ` — ${window.CaptionStyle.describe(brief.captionStyle).toLowerCase()}` : ''}` : 'Off') : ''}
       ${row('Pictures from', ALLOW[brief.allowAi])}
       ${row('For', brief.platforms.map((p) => PLATFORMS[p]).join(', '))}
       <p class="text-xs text-gray-600 mt-2">Planning the storyboard is free. You check it on the Videos tab before anything is made — the cost of making it is shown there first.</p>
@@ -1638,6 +1645,8 @@
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
     const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
     el.addEventListener('click', (e) => {
+      const listen = e.target.closest('[data-vdp-listen]');
+      if (listen) { window.VoicePicker.load().then(() => window.VoicePicker.play(brief.voice, listen)).catch(() => {}); return; }
       if (e.target.closest('[data-vdp-cancel]')) { setBusy(true); say('Not planned.'); return; }
       if (!e.target.closest('[data-vdp-save]')) return;
       setBusy(true);
@@ -3758,8 +3767,9 @@
   register('social_post_draft', renderSocialPostDraftCard);
 
   // ── Built-in: Post Action Proposal Card (Social Media chat) ────────────────
-  // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove'|'shorter'|'longer'|'video_version', postId,
-  //   postIds, platforms, status, publishDate, timezone, text, reason, when, blocked }
+  // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove'|'shorter'|'longer'|'video_version'
+  //   |'voiceover'|'captions'|'time_text', postId, postIds, platforms, status, publishDate, timezone, text, reason, when, blocked,
+  //   script?, voice?, voiceName?, captions?, captionStyle?, timeText? }
   //
   // The chat's hands on a post that already exists — the twin of the Posts tab's Approve, Reject,
   // "Try again" and Reschedule. Every fact on it was read from the database by the orchestrator
@@ -3781,6 +3791,10 @@
     longer: { head: 'Make this post longer', button: 'Make it longer', busy: 'Rewriting…' },
     // The Review Queue's "Make a video version" (Video Producer, Phase 7) — a free storyboard.
     video_version: { head: 'Make a video version', button: 'Plan the video', busy: 'Starting the storyboard…' },
+    // The post editor's "Add a voiceover", its captions settings and "Time the text to the voice".
+    voiceover: { head: 'Add a voiceover', button: 'Make the voiceover', busy: 'Recording the voiceover…' },
+    captions: { head: 'Change the captions', button: 'Save the captions', busy: 'Saving…' },
+    time_text: { head: 'Time the text to the voice', button: 'Time the text', busy: 'Listening for the words…' },
   };
 
   function renderPostActionProposalCard(ui, esc) {
@@ -3819,6 +3833,18 @@
         <textarea id="bap-instruction-${postId}" data-bap-instruction rows="3" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
         <p class="text-xs text-gray-600 mt-2">The article is rewritten and saved in place, using your Business Knowledge for anything new — no invented facts. Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
+      ${!blocked && ui.action === 'voiceover' ? `
+        <p class="text-xs font-bold text-gray-700 mt-3">What it says</p>
+        <p class="text-sm text-gray-900 mt-0.5 break-words">“${esc(ui.script || '')}”</p>
+        <div class="flex items-center gap-2 mt-2 text-sm text-gray-700"><span class="font-bold">Voice:</span><span class="flex-1 min-w-0 truncate">${esc(ui.voiceName || ui.voice || '')}</span>
+          ${window.VoicePicker && ui.voice ? '<button type="button" data-pap-listen class="text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer" aria-pressed="false">&#9654; Listen</button>' : ''}</div>
+        <p class="text-sm text-gray-700 mt-1"><span class="font-bold">Captions:</span> ${ui.captions === false ? 'off' : esc(`on — ${window.CaptionStyle ? window.CaptionStyle.describe(ui.captionStyle).toLowerCase() : 'following the voice'}`)}</p>
+        ${ui.timeText ? '<p class="text-sm text-gray-700 mt-1"><span class="font-bold">Text:</span> each text box is timed to when its words are said</p>' : ''}
+        <p class="text-xs text-gray-600 mt-2">Uses 1 task${ids.length > 1 ? `, for all ${ids.length} platforms` : ''}. Any music on the post is turned down under the voice. Open the post to change any of it.</p>` : ''}
+      ${!blocked && ui.action === 'captions' ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Captions:</span> ${ui.captions === false ? 'off' : esc(`on${ui.captionStyle && window.CaptionStyle ? ` — ${window.CaptionStyle.describe(ui.captionStyle).toLowerCase()}` : ''}`)}</p>
+        ${ui.timeText ? '<p class="text-sm text-gray-700 mt-1"><span class="font-bold">Text:</span> each text box is timed to when its words are said</p>' : ''}
+        <p class="text-xs text-gray-600 mt-2">Free. Captions are added when the video is made.</p>` : ''}
+      ${!blocked && ui.action === 'time_text' ? '<p class="text-xs text-gray-600 mt-3">Each text box on the post shows while its words are being said. A box whose words are never said keeps its timing. Free.</p>' : ''}
       ${!blocked && ui.action === 'video_version' ? '<p class="text-xs text-gray-600 mt-3">Your Video Producer plans a short video saying what this post says — free. You check the storyboard on its Videos tab before anything is made; the cost of making it is shown there first. This post stays as it is.</p>' : ''}
       ${!blocked && (ui.action === 'shorter' || ui.action === 'longer') ? `<p class="text-xs text-gray-600 mt-3">${ui.action === 'shorter' ? 'About half the length — same message, nothing new added.' : 'About half as long again — it develops what the post already says, with no invented facts.'} Each platform’s caption is rewritten and saved. It stays where it is in your queue.</p>` : ''}
       ${!blocked && ui.action === 'retry' && ui.when ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Try again at:</span> ${esc(ui.when)}</p>
@@ -3835,6 +3861,8 @@
     const setBusy = (b) => el.querySelectorAll('[data-pap-go], [data-pap-cancel], [data-pap-reason], [data-pap-rule]').forEach((x) => { x.disabled = b; });
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-pap-open]')) { window.openPostReview?.(postId); return; }
+      const listen = e.target.closest('[data-pap-listen]');
+      if (listen) { window.VoicePicker?.load().then(() => window.VoicePicker.play(ui.voice, listen)).catch(() => {}); return; }
       if (e.target.closest('[data-pap-cancel]')) { setBusy(true); say('Left as it is.'); return; }
       if (!e.target.closest('[data-pap-go]')) return;
       const reason = el.querySelector('[data-pap-reason]')?.value.trim() || '';
@@ -3846,6 +3874,8 @@
         detail: {
           action: ui.action, postId, postIds: ids.length ? ids : [postId], when: ui.when || null,
           reason, applyAsRule: !!el.querySelector('[data-pap-rule]')?.checked,
+          script: ui.script || null, voice: ui.voice || null, captions: typeof ui.captions === 'boolean' ? ui.captions : null,
+          captionStyle: ui.captionStyle || null, timeText: !!ui.timeText,
           respond({ ok, message, error }) {
             if (ok) { say(message || 'Done.'); return; }
             setBusy(false);

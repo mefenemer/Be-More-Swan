@@ -1283,6 +1283,17 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <input id="insp-audio-captions" type="checkbox" class="mt-0.5 cursor-pointer">
                   <span class="text-[11px] text-gray-700"><span class="font-bold">Show captions</span> — the words appear on the video as they're spoken. They're added when the video is made, so they don't show in this preview.</span>
                 </label>
+                <!-- How the captions look (src/lib/captions.ts CaptionStyle) — saved on this voiceover
+                     clip, applied by the render. The sample below is drawn with the same choices. -->
+                <div id="insp-audio-capstyle" class="hidden mt-2 rounded-lg border border-gray-200 bg-white p-2">
+                  <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">How the captions look</p>
+                  <div id="insp-capstyle-host"></div>
+                </div>
+                <!-- Text boxes follow the voice: each shows while its words are spoken (post-voiceover.ts). -->
+                <div id="insp-audio-align-row" class="hidden mt-2">
+                  <button type="button" id="insp-audio-align" class="w-full py-1.5 rounded-lg border border-emerald-600 text-emerald-700 text-[11px] font-bold hover:bg-emerald-50 cursor-pointer disabled:opacity-50">Time the text to the voice</button>
+                  <p id="insp-audio-align-msg" class="mt-1 text-[10px] text-gray-500">Each text box on the post shows while its words are being said.</p>
+                </div>
                 <p class="text-[10px] text-gray-400 mt-1.5">Leave both times blank to play across the whole post. Or drag the clip on the track above.</p>
               </div>
 
@@ -1781,7 +1792,8 @@ window.showComplianceModals = function showComplianceModals(force) {
 
               <!-- ── Voiceover ──────────────────────────────────────────────────────────────────
                    Inline, like Generate music. The script is the customer's words (or the
-                   assistant's, pasted in); the voice is one of six described by how it sounds.
+                   assistant's, pasted in); the voice is chosen by ear in the voice picker
+                   (src/components/voice-picker.js), in any language the voices speak.
                    It plays its full length — the video is extended to fit, never the voice cut. -->
               <div id="insp-voice" class="hidden mt-3 rounded-xl border border-gray-200 bg-gray-50 p-2.5">
                 <div class="flex items-center justify-between mb-2">
@@ -1796,8 +1808,14 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <p id="insp-voice-length" class="text-[10px] text-gray-500"></p>
                   <p id="insp-voice-count" class="text-[10px] text-gray-400">0 / 1200</p>
                 </div>
-                <label class="block mt-2 text-[10px] font-bold uppercase tracking-wider text-gray-400" for="insp-voice-voice">Voice</label>
-                <select id="insp-voice-voice" class="w-full mt-1 text-xs border border-gray-300 rounded-lg px-2 py-1.5"></select>
+                <p class="mt-2 text-[10px] font-bold uppercase tracking-wider text-gray-400">Voice</p>
+                <input type="hidden" id="insp-voice-voice">
+                <div class="mt-1 flex items-center gap-1.5 border border-gray-300 rounded-lg bg-white px-2 py-1.5">
+                  <span id="insp-voice-voice-name" class="flex-1 min-w-0 text-xs text-gray-800 truncate">Loading voices…</span>
+                  <button type="button" data-voice-act="listen" class="shrink-0 text-[11px] font-bold text-gray-600 hover:text-gray-900 cursor-pointer" aria-pressed="false">&#9654; Listen</button>
+                  <button type="button" data-voice-act="choose" class="shrink-0 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 cursor-pointer">Change</button>
+                </div>
+                <p class="mt-1 text-[10px] text-gray-400">Write the words in any language your voice speaks — it reads them as written.</p>
                 <p id="insp-voice-meta" class="mt-1.5 text-[10px] text-gray-500"></p>
                 <button type="button" id="insp-voice-go" data-voice-act="generate"
                   class="btn-assistant mt-2 w-full py-2 rounded-lg text-xs font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-default">Make the voiceover</button>
@@ -6112,6 +6130,8 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/assistant-campaigns.js"></script>
 <!-- Briefs tab (brand_designer) — briefs, a grid of options, approve into the library (brand-briefs.ts). -->
 <script src="/src/components/assistant-briefs.js"></script>
+<script src="/src/components/voice-picker.js"></script>
+<script src="/src/components/caption-style.js"></script>
 <script src="/src/components/assistant-videos.js"></script>
 <script src="/src/components/assistant-mentor-overview.js"></script>
 <script src="/src/components/assistant-mentor-plan.js"></script>
@@ -16158,6 +16178,8 @@ function _pceRefreshAudioTiming() {
     const isVoice = typeof clip.captions === 'boolean';
     if (capRow) { capRow.classList.toggle('hidden', !isVoice); capRow.style.display = isVoice ? 'flex' : 'none'; }
     if (capEl) capEl.checked = clip.captions !== false;
+    _pceEl('insp-audio-align-row')?.classList.toggle('hidden', !isVoice);
+    _pcePaintCaptionStyle(isVoice && clip.captions !== false ? clip : null);
 
     if (!_pceAudioTimingBound) {
         _pceAudioTimingBound = true;
@@ -16186,12 +16208,77 @@ function _pceRefreshAudioTiming() {
             const cur = _pceAudioClips().find((a) => a.id && a.id === _pceSelectedAudioId);
             if (!cur || typeof cur.captions !== 'boolean') return;
             cur.captions = !!ev.target.checked;
+            _pcePaintCaptionStyle(cur.captions ? cur : null);
             _pcePersistAudio(_rqReviewPostId);
         });
+        _pceEl('insp-audio-align')?.addEventListener('click', () => _pceTimeTextToVoice());
         for (const id of ['insp-audio-start', 'insp-audio-end', 'insp-audio-volume']) {
             _pceEl(id)?.addEventListener('input', () => commit(false));
             _pceEl(id)?.addEventListener('change', () => commit(true));
         }
+    }
+}
+
+// ── Caption look + text timed to the voice ──────────────────────────────────────────────────────
+// The look is edited by src/components/caption-style.js (the same editor the Video Producer uses),
+// mounted once and pointed at whichever voiceover clip is selected. Saved on the clip as captionStyle.
+let _pceCapEditor = null;
+function _pcePaintCaptionStyle(clip) {
+    const box = _pceEl('insp-audio-capstyle');
+    if (!box) return;
+    box.classList.toggle('hidden', !clip);
+    if (!clip || !window.CaptionStyle) return;
+    if (!_pceCapEditor) {
+        _pceCapEditor = window.CaptionStyle.mount(_pceEl('insp-capstyle-host'), {
+            value: clip.captionStyle,
+            onChange: (style) => {
+                const cur = _pceAudioClips().find((a) => a.id && a.id === _pceSelectedAudioId);
+                if (!cur || typeof cur.captions !== 'boolean') return;
+                cur.captionStyle = style;
+                _pcePersistAudio(_rqReviewPostId);
+            },
+        });
+    } else {
+        _pceCapEditor.set(clip.captionStyle);
+    }
+}
+
+async function _pceTimeTextToVoice() {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    const btn = _pceEl('insp-audio-align');
+    const msg = _pceEl('insp-audio-align-msg');
+    if (!post || !btn) return;
+    if (!(post.overlays || []).some((o) => o && String(o.text || '').trim())) {
+        if (msg) msg.textContent = 'There is no text on this post yet. Add a text box first.';
+        return;
+    }
+    btn.disabled = true;
+    if (msg) msg.textContent = 'Listening for each text box\u2019s words\u2026';
+    try {
+        await _rqPersistOverlays(postId);   // the server reads the saved text, so save the latest first
+        const res = await fetch('/.netlify/functions/generate-voiceover', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'align', postId }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(body.error || 'The text could not be timed.');
+        for (const o of post.overlays || []) {
+            const t = o && o.id ? body.timings[o.id] : null;
+            if (t) { o.startS = t.startS; o.endS = t.endS; }
+        }
+        _rqRenderTimeline(post);
+        _pceRenderLayers();
+        await _rqPersistOverlays(postId);   // the same timings, to the cross-posted copies the tick-box covers
+        const matched = Object.keys(body.timings || {}).length;
+        const missed = (body.unmatched || []).map((id) => (post.overlays || []).find((o) => o && o.id === id)).filter(Boolean);
+        if (msg) msg.textContent = matched
+            ? `Timed ${matched} of ${body.total} text box${body.total === 1 ? '' : 'es'} to the voice.${missed.length ? ` Not said aloud, so left as they were: ${missed.map((o) => `\u201c${String(o.text).slice(0, 30)}\u201d`).join(', ')}.` : ''}`
+            : 'None of the text is said in the voiceover, so nothing was moved. Change the text or the script so they share words.';
+    } catch (err) {
+        if (msg) msg.textContent = err.message || 'The text could not be timed.';
+    } finally {
+        btn.disabled = false;
     }
 }
 
@@ -16574,6 +16661,14 @@ let _pceVoice = { open: false, busy: false, voices: null, cost: null, unit: 'cre
         if (act === 'open') _pceOpenVoice();
         else if (act === 'close') _pceCloseVoice();
         else if (act === 'generate') _pceGenerateVoice();
+        else if (act === 'listen') window.VoicePicker?.play(document.getElementById('insp-voice-voice')?.value, el);
+        else if (act === 'choose') {
+            window.VoicePicker?.open({
+                value: document.getElementById('insp-voice-voice')?.value,
+                title: 'Choose the voice for this voiceover',
+                onSelect: (id) => { _pceSetVoiceChoice(id); },
+            });
+        }
     }, true);
     document.addEventListener('input', (ev) => {
         if (ev.target && ev.target.id === 'insp-voice-text') _pceRenderVoice();
@@ -16610,11 +16705,26 @@ function _pceSetVoiceMsg(text, kind) {
         + (kind === 'error' ? 'text-red-600' : kind === 'ok' ? 'text-gray-700' : 'text-gray-500');
 }
 
+// The voice last chosen here is remembered on this browser (a convenience, never a setting).
+const _PCE_VOICE_KEY = 'bms.voiceover.voice';
+function _pceSetVoiceChoice(id) {
+    const input = document.getElementById('insp-voice-voice');
+    if (!input || !id) return;
+    input.value = id;
+    try { localStorage.setItem(_PCE_VOICE_KEY, id); } catch { /* private window */ }
+    _pceRenderVoice();
+}
+
 function _pceRenderVoice() {
-    const sel = document.getElementById('insp-voice-voice');
-    if (sel && _pceVoice.voices && !sel.options.length) {
-        sel.innerHTML = _pceVoice.voices.map((v) => `<option value="${v.id}">${v.label}</option>`).join('');
-        if (_pceVoice.defaultVoice) sel.value = _pceVoice.defaultVoice;
+    const input = document.getElementById('insp-voice-voice');
+    if (input && !input.value && _pceVoice.voices) {
+        let saved = null;
+        try { saved = localStorage.getItem(_PCE_VOICE_KEY); } catch { /* private window */ }
+        input.value = (saved && _pceVoice.voices.some((v) => v.id === saved)) ? saved : (_pceVoice.defaultVoice || '');
+    }
+    const nameEl = document.getElementById('insp-voice-voice-name');
+    if (nameEl && input?.value) {
+        window.VoicePicker?.load().then(() => { nameEl.textContent = window.VoicePicker.describe(input.value); }).catch(() => { nameEl.textContent = input.value; });
     }
     const text = document.getElementById('insp-voice-text')?.value || '';
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;

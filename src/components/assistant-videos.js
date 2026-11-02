@@ -22,11 +22,9 @@
     brand_card: 'Branded card', ai_image: 'AI picture', ai_video: 'AI clip',
   };
   const BEAT = { hook: 'Hook', problem: 'Problem', value: 'Value', proof: 'Proof', cta: 'Call to action' };
-  const VOICES = [
-    ['coral', 'Warm and friendly'], ['sage', 'Calm and clear'], ['verse', 'Bright and upbeat'],
-    ['alloy', 'Neutral and steady'], ['onyx', 'Deep and confident'], ['shimmer', 'Light and lively'],
-    ['british_woman', 'British, warm (woman)'], ['british_woman_playful', 'British, playful (woman)'], ['london_man', 'London, laid-back (man)'],
-  ];
+  // Voices come from src/public/voice-catalogue.json through voice-picker.js — the list the server
+  // speaks from — and are chosen by ear there. This is the default when setup named none.
+  const DEFAULT_VOICE = 'british_woman';
   const WAITING = {
     planning: 'Writing the storyboard — about a minute.',
     planned: 'Storyboard ready. Check the scenes, then press “Make the video”.',
@@ -109,7 +107,13 @@
     const s = state.setup || {};
     return {
       lengthS: ['15', '30', '60'].includes(String(s.defaultLength)) ? String(s.defaultLength) : '30',
-      voice: VOICES.some(([id]) => id === s.defaultVoice) ? s.defaultVoice : VOICES[0][0],
+      voice: typeof s.defaultVoice === 'string' && s.defaultVoice ? s.defaultVoice : DEFAULT_VOICE,
+      captions: s.defaultCaptions !== 'off' && s.defaultCaptions !== false,
+      captionStyle: (() => {
+        let c = s.captionStyle;
+        if (typeof c === 'string') { try { c = JSON.parse(c); } catch { c = null; } }
+        return c && typeof c === 'object' ? c : null;
+      })(),
       allowAi: ['stock_and_ai', 'stock_only', 'ai_first'].includes(s.defaultAllowAi) ? s.defaultAllowAi : 'stock_and_ai',
       cta: typeof s.defaultCta === 'string' ? s.defaultCta : '',
     };
@@ -129,10 +133,23 @@
             <select name="lengthS" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${['15', '30', '60'].map((n) => `<option value="${n}"${sel(d.lengthS === n)}>${n} seconds</option>`).join('')}</select></label>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Call to action (optional)</span>
             <input name="cta" maxlength="200" value="${esc(d.cta)}" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Pop in this week"></label>
-          <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Voice</span>
-            <select name="voice" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${VOICES.map(([id, l]) => `<option value="${id}"${sel(d.voice === id)}>${esc(l)}</option>`).join('')}<option value="">No voiceover — on-screen text only</option></select></label>
+          <div class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Voice</span>
+            <input type="hidden" name="voice" value="${esc(d.voice)}">
+            <div class="flex items-center gap-2 border border-gray-300 rounded-lg px-2 py-2">
+              <span data-vid-voice-name class="flex-1 min-w-0 text-sm text-gray-800 truncate">${esc(window.VoicePicker?.describe(d.voice) || d.voice)}</span>
+              <button type="button" data-vid-act="voice-listen" class="shrink-0 text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer" aria-pressed="false">&#9654; Listen</button>
+              <button type="button" data-vid-act="voice-choose" class="shrink-0 text-xs font-bold text-indigo-700 hover:underline cursor-pointer">Change</button>
+            </div>
+            <label class="mt-1 inline-flex items-center gap-1.5 text-xs text-gray-600"><input type="checkbox" name="noVoice"> No voiceover — on-screen text only</label>
+            <p class="text-[11px] text-gray-500 mt-0.5">The script is written in your voice's language.</p></div>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Pictures from</span>
             <select name="allowAi" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="stock_and_ai"${sel(d.allowAi === 'stock_and_ai')}>Stock first, AI where it fits</option><option value="stock_only"${sel(d.allowAi === 'stock_only')}>Stock and my own pictures only</option><option value="ai_first"${sel(d.allowAi === 'ai_first')}>Lean on AI</option></select></label>
+        </div>
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <label class="inline-flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" name="captions"${d.captions ? ' checked' : ''}> Captions that follow the voice</label>
+          <span data-vid-cap-desc class="text-xs text-gray-500">${esc(window.CaptionStyle?.describe(d.captionStyle) || '')}</span>
+          <button type="button" data-vid-act="caption-style" class="text-xs font-bold text-indigo-700 hover:underline cursor-pointer">Change the look</button>
+          <input type="hidden" name="captionStyle" value="${esc(d.captionStyle ? JSON.stringify(d.captionStyle) : '')}">
         </div>
         <fieldset><legend class="text-xs font-bold text-gray-600 mb-1">Post it as</legend>
           <div class="flex flex-wrap gap-3 text-sm text-gray-700">
@@ -230,6 +247,13 @@
       </article>`;
   }
 
+  /** The form's voice row, once the catalogue has loaded (its names come from there). */
+  function paintFormVoice() {
+    const f = host()?.querySelector('[data-vid-form]');
+    const name = f?.querySelector('[data-vid-voice-name]');
+    if (name && window.VoicePicker) name.textContent = window.VoicePicker.describe(f.elements.voice.value);
+  }
+
   function render() {
     const el = host();
     if (!el) return;
@@ -266,7 +290,25 @@
     if (!b || !host() || !host().contains(b)) return;
     const id = Number(b.dataset.id);
     switch (b.dataset.vidAct) {
-      case 'new': state.form = true; render(); break;
+      case 'new': state.form = true; render(); window.VoicePicker?.load().then(paintFormVoice).catch(() => {}); break;
+      case 'voice-listen': window.VoicePicker?.play(b.closest('form')?.elements.voice?.value, b); break;
+      case 'voice-choose': {
+        const f = b.closest('form');
+        window.VoicePicker?.open({ value: f?.elements.voice?.value, title: 'Choose the voice for this video', onSelect: (vid) => { if (f) { f.elements.voice.value = vid; f.elements.noVoice.checked = false; paintFormVoice(); } } });
+        break;
+      }
+      case 'caption-style': {
+        const f = b.closest('form');
+        let cur = null;
+        try { cur = JSON.parse(f?.elements.captionStyle?.value || 'null'); } catch { cur = null; }
+        window.CaptionStyle?.open({ value: cur, onSave: (style) => {
+          if (!f) return;
+          f.elements.captionStyle.value = JSON.stringify(style);
+          f.elements.captions.checked = true;
+          const d = f.querySelector('[data-vid-cap-desc]'); if (d) d.textContent = window.CaptionStyle.describe(style);
+        } });
+        break;
+      }
       case 'close-form': state.form = false; render(); break;
       case 'edit-scene': state.editing = { id, sceneId: b.dataset.scene }; render(); break;
       case 'cancel-edit': state.editing = null; render(); break;
@@ -284,10 +326,13 @@
     if (f.matches('[data-vid-form]')) {
       e.preventDefault();
       const fd = new FormData(f);
-      const voice = String(fd.get('voice') || '');
+      const voice = fd.get('noVoice') ? '' : String(fd.get('voice') || '');
+      let captionStyle;
+      try { captionStyle = JSON.parse(String(fd.get('captionStyle') || 'null')) || undefined; } catch { captionStyle = undefined; }
       const brief = {
         message: String(fd.get('message') || ''), lengthS: Number(fd.get('lengthS')), cta: String(fd.get('cta') || ''),
         voiceover: !!voice, voice: voice || undefined, allowAi: String(fd.get('allowAi') || 'stock_and_ai'),
+        captions: !!fd.get('captions'), ...(captionStyle ? { captionStyle } : {}),
         platforms: fd.getAll('platforms').map(String),
       };
       const msg = f.querySelector('[data-vid-form-msg]');

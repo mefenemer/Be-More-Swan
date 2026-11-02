@@ -19,7 +19,7 @@ import { overlayAnimAt, overlayBoxStyle, overlayFrameRange, type Overlay } from 
 import { audioGainAt } from '../src/lib/audio-overlays';
 import { googleFamiliesFor, googleFontsHref, overlayFontStack } from '../src/lib/overlay-fonts';
 import { stillMotionTransform, type StillMotion } from '../src/lib/still-motion';
-import { CAPTION_FALLBACK_ACCENT, CAPTION_FONT_ID, captionLayout, cueAt, type CaptionTrack } from '../src/lib/captions';
+import { CAPTION_FALLBACK_ACCENT, CAPTION_FONT_ID, DEFAULT_CAPTION_STYLE, captionLayout, cueAt, type CaptionTrack } from '../src/lib/captions';
 
 /**
  * One clip of the timeline.
@@ -212,23 +212,34 @@ const CaptionLayer: React.FC<{ track: CaptionTrack; height: number; fps: number 
     const frame = useCurrentFrame();
     const hit = cueAt(track.cues, frame / fps);
     if (!hit) return null;
-    const { fontSizePx, bottomPct, sidePct, strokePx } = captionLayout(height);
+    // A track queued before caption styles existed has none: the default IS the original look.
+    const style = track.style || DEFAULT_CAPTION_STYLE;
+    const { fontSizePx, bottomPct, topPct, centre, sidePct, strokePx } = captionLayout(height, style);
     const accent = track.accent || CAPTION_FALLBACK_ACCENT;
+    const text = style.textColor || '#FFFFFF';
     return (
         <div style={{
-            position: 'absolute', left: `${sidePct}%`, right: `${sidePct}%`, bottom: `${bottomPct}%`,
-            textAlign: 'center', fontFamily: overlayFontStack(CAPTION_FONT_ID), fontSize: fontSizePx,
-            lineHeight: 1.15, color: '#FFFFFF', letterSpacing: '0.01em',
-            // A stroke AND a shadow: the stroke holds the letter shapes over white footage, the
-            // shadow lifts them off busy backgrounds. Either alone fails on one of the two.
-            WebkitTextStroke: `${strokePx}px rgba(0,0,0,0.85)`, paintOrder: 'stroke fill',
-            textShadow: `0 ${strokePx}px ${strokePx * 3}px rgba(0,0,0,0.55)`,
+            position: 'absolute', left: `${sidePct}%`, right: `${sidePct}%`,
+            ...(bottomPct != null ? { bottom: `${bottomPct}%` } : { top: `${topPct}%` }),
+            ...(centre ? { transform: 'translateY(-50%)' } : {}),
+            textAlign: 'center',
         }}>
-            {hit.cue.words.map((w, i) => (
-                <span key={i} style={{ color: i === hit.wordIndex ? accent : '#FFFFFF' }}>
-                    {i ? ' ' : ''}{w.text}
-                </span>
-            ))}
+            <span style={{
+                display: 'inline', fontFamily: overlayFontStack(style.font || CAPTION_FONT_ID), fontSize: fontSizePx,
+                lineHeight: 1.15, color: text, letterSpacing: '0.01em',
+                // A stroke AND a shadow: the stroke holds the letter shapes over white footage, the
+                // shadow lifts them off busy backgrounds. Either alone fails on one of the two.
+                // With a box behind the words, neither is needed.
+                ...(style.box
+                    ? { background: 'rgba(0,0,0,0.6)', padding: `${Math.round(fontSizePx * 0.12)}px ${Math.round(fontSizePx * 0.3)}px`, borderRadius: Math.round(fontSizePx * 0.2), boxDecorationBreak: 'clone', WebkitBoxDecorationBreak: 'clone' }
+                    : { WebkitTextStroke: `${strokePx}px rgba(0,0,0,0.85)`, paintOrder: 'stroke fill', textShadow: `0 ${strokePx}px ${strokePx * 3}px rgba(0,0,0,0.55)` }),
+            } as React.CSSProperties}>
+                {hit.cue.words.map((w, i) => (
+                    <span key={i} style={{ color: style.mode === 'highlight' && i === hit.wordIndex ? accent : text }}>
+                        {i ? ' ' : ''}{w.text}
+                    </span>
+                ))}
+            </span>
         </div>
     );
 };
@@ -259,7 +270,7 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
     const captionTrack = captions && Array.isArray(captions.cues) && captions.cues.length ? captions : null;
     // Only the families these boxes actually name — a render with two overlays should not wait on
     // eight downloads, and a render with none should not wait at all. Captions add their one face.
-    useOverlayFonts(googleFamiliesFor([...boxes.map((b) => b.fontFamily), ...(captionTrack ? [CAPTION_FONT_ID] : [])]));
+    useOverlayFonts(googleFamiliesFor([...boxes.map((b) => b.fontFamily), ...(captionTrack ? [captionTrack.style?.font || CAPTION_FONT_ID] : [])]));
     // Only reached when calculateMetadata could not measure the files (the Studio preview, or every
     // source unreadable). Splitting the composition evenly is not accurate, but it keeps every clip
     // visible for the same share of the piece instead of collapsing them all onto frame 0.
