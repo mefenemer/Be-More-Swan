@@ -37,6 +37,8 @@ export const TASK_WEIGHTS = {
     mentor_research: 1,
     mentor_strategy: 1,
     mentor_review: 1,
+    // "Draft the words" for a printed flyer (docs/brand-designer-flyers-plan.md §3.7). Drawing the pages is free.
+    flyer_words: 1,
 } as const;
 
 /**
@@ -96,4 +98,5 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     mentor_research: 'Business Mentor research',
     mentor_strategy: 'Business Mentor plan drafts',
     mentor_review: 'Business Mentor weekly reviews',
+    flyer_words: 'Flyer words',
 };

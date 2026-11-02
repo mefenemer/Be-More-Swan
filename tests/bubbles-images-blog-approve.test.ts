@@ -73,7 +73,7 @@ test('there are always four prompts, and never four identical ones', () => {
 
 test('generate-ai-image draws one image per interpretation, inside the function budget', () => {
     const fn = read('netlify/functions/generate-ai-image.ts');
-    assert.match(fn, /generateImageVariants\(\{ prompts: await visualisePrompts\(prompt, 4,/);
+    assert.match(fn, /visualisePrompts\(prompt, 4, usage\)/); assert.match(fn, /generateImageVariants\(\{ prompts, aspectRatio/);
     assert.match(fn, /timeoutMs: 18_000/);
     assert.ok(VARIANTS_TIMEOUT_MS + 18_000 <= 26_000, 'rewrite + images under the 26s function timeout');
     const fal = read('src/lib/fal-gateway.ts');

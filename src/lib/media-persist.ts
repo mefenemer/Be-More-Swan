@@ -41,6 +41,7 @@ export function extFromMime(mime: string): string {
     if (mime.includes('quicktime')) return 'mov';
     if (mime.includes('webm')) return 'webm';
     if (mime.includes('gif')) return 'gif';
+    if (mime.includes('pdf')) return 'pdf';
     return 'png';
 }
 
@@ -143,6 +144,8 @@ export async function generateAndPersistImage(db: Db, params: {
     prompt: string;
     aspectRatio: AspectRatio;
     generationJobId?: number | null;
+    /** The image call's own deadline, for callers that spend part of their budget first. */
+    timeoutMs?: number;
 }): Promise<number> {
     let prompt = params.prompt;
     try {
@@ -151,7 +154,7 @@ export async function generateAndPersistImage(db: Db, params: {
         console.error('[media-persist] picture guidelines unreadable — prompt used as written:', err instanceof Error ? err.message : err);
     }
     const image = falConfigured()
-        ? (await generateImages({ prompt, aspectRatio: params.aspectRatio, numImages: 1, usage: { workspaceId: params.orgId, userId: params.userId } }))[0]
+        ? (await generateImages({ prompt, aspectRatio: params.aspectRatio, numImages: 1, usage: { workspaceId: params.orgId, userId: params.userId }, ...(params.timeoutMs ? { timeoutMs: params.timeoutMs } : {}) }))[0]
         : { url: `https://picsum.photos/seed/aura-auto-${Date.now()}/1024/1024`, width: 1024, height: 1024, contentType: 'image/jpeg' };
 
     const mimeType = image.contentType || 'image/png';
@@ -206,6 +209,8 @@ export async function renderAndPersistBrandCard(db: Db, params: {
     seed?: number;
     variant?: CardVariant;
     orgName?: string | null;
+    /** Where the headline, wordmark and website sit (normalizeCardLayout); the default when absent. */
+    layout?: unknown;
 }): Promise<number> {
     if (!r2Configured) throw new Error('brand_card_requires_r2');
 
@@ -216,6 +221,7 @@ export async function renderAndPersistBrandCard(db: Db, params: {
         variant: params.variant,
         seed: params.seed,
         orgName: params.orgName,
+        layout: params.layout,
     });
 
     const { storageKey, fileSize } = await persistBufferToR2({

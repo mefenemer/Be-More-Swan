@@ -42,11 +42,14 @@ import { PexelsRateLimitError, searchUniqueImages, searchUniqueVideos } from './
 import { BRAND_CARD_PROVIDER } from './brand-card-lifecycle';
 import { resolveAssetDisplayUrl } from './social-publish';
 import { POST_ATTACH_NOTES, attachApprovedToPost, placeOnCampaignPost } from './brief-post-media';
+import { approveFlyerOption, flyerRoundOptions, type FlyerRenderParams } from './flyer-briefs';
+import { normaliseFlyerContent } from '../config/flyer-vocab';
 
 /** Brief purposes whose pictures belong on social posts (blog and email headers have their own briefs). */
 const SOCIAL_PURPOSES = new Set(['social_post', 'story', 'ad', 'other']);
 import { triggerBriefRound } from './trigger-brief-round';
 import {
+    FLYER_PURPOSE, FLYER_SOURCE, FLYER_SOURCE_LABEL,
     GENERATION_TIMEOUT_MS, MAX_ROUNDS, OWN_SOURCE, OWN_SOURCE_LABEL, PURPOSE_SPECS, REJECT_REASON_LABELS, SOURCE_SPECS,
     normaliseBrief, sourcesAreFree,
     type BriefPurpose, type RejectReason,
@@ -71,12 +74,13 @@ const MOCK_VIDEO_URL = 'https://storage.googleapis.com/gtv-videos-bucket/sample/
  * Options whose bytes are OURS (in R2 under content/org-N/briefs) — the only ones deleted when turned
  * down. A stock option is a Pexels link; an "own" option IS a library picture the user already had.
  */
-const GENERATED_SOURCES = new Set(['ai_image', 'brand_card', 'ai_video']);
+const GENERATED_SOURCES = new Set(['ai_image', 'brand_card', 'ai_video', FLYER_SOURCE]);
 
 /** The Brand Designer's AI clip length — what its round holds and is charged for (aiVideoTasks). */
 const BRIEF_CLIP_SECONDS = 6;
 /** A source label for display, including "Your own". */
 export function sourceLabel(source: string): string {
+    if (source === FLYER_SOURCE) return FLYER_SOURCE_LABEL;
     return source === OWN_SOURCE ? OWN_SOURCE_LABEL : (SOURCE_SPECS[source as keyof typeof SOURCE_SPECS]?.label ?? source);
 }
 
@@ -318,6 +322,11 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
         return { ok: false, status: 409, error: 'This brief already has every picture it needs — no more options are required.' };
     }
 
+    const isFlyer = brief.purpose === FLYER_PURPOSE;
+    // A flyer round draws the brief's saved words — with none saved there is nothing to draw.
+    if (isFlyer && !normaliseFlyerContent(brief.flyerContent).ok) {
+        return { ok: false, status: 409, error: 'Write the flyer\'s words first (or ask for them to be drafted) — a round draws exactly those words.', code: 'flyer_needs_words' };
+    }
     const sources = Array.isArray(brief.sources) ? (brief.sources as string[]) : [];
     const notes: string[] = [];
     let aiIncluded = sources.includes('ai_image');
@@ -331,7 +340,8 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
         const why = await videoUnavailableReason(db, orgId);
         if (why) { videoIncluded = false; notes.push(`${why} This round has no AI video.`); }
     }
-    const free = sources.some((s) => s === 'stock' || s === 'brand_card' || s === 'stock_video');
+    // A flyer always has its words-only page, so it always has something free to make.
+    const free = isFlyer || sources.some((s) => s === 'stock' || s === 'brand_card' || s === 'stock_video');
     if (!aiIncluded && !videoIncluded && !free) {
         return { ok: false, status: 403, error: `${notes.join(' ')} This brief asks for nothing else — edit it to include stock or branded cards.`.trim(), code: 'feature_unavailable' };
     }
@@ -462,7 +472,8 @@ async function pastRejections(db: Db, briefId: number): Promise<{ rejections: Pa
     }
     // Photos and videos share Pexels' id space only through the 'v' prefix on video ids (pexels.ts),
     // so one exclude list serves both searches.
-    const shownStockIds = rows.filter((r) => (r.source === 'stock' || r.source === 'stock_video') && r.providerAssetId).map((r) => r.providerAssetId!);
+    // A flyer page on a stock photo carries that photo's id, so a flyer's next round finds a new one.
+    const shownStockIds = rows.filter((r) => (r.source === 'stock' || r.source === 'stock_video' || r.source === FLYER_SOURCE) && r.providerAssetId).map((r) => r.providerAssetId!);
     return { rejections, shownStockIds };
 }
 
@@ -478,9 +489,29 @@ export async function runRound(db: Db, briefId: number, userId: number | null): 
     try {
         const ctx = await readBriefContext(db, brief.organisationId, brief.aiAssistantId);
         const { rejections, shownStockIds } = await pastRejections(db, brief.id);
-        artDirection = await writeArtDirection(db, brief, ctx, rejections);
         const sources = Array.isArray(brief.sources) ? (brief.sources as string[]) : [];
         const base = { organisationId: brief.organisationId, briefId: brief.id, round: brief.rounds };
+
+        if (brief.purpose === FLYER_PURPOSE) {
+            // The photo is art-directed from what the flyer says when the brief itself says little.
+            const words = normaliseFlyerContent(brief.flyerContent);
+            const forArt = words.ok && !brief.message
+                ? { ...brief, message: [words.content.headline, words.content.subheading].filter(Boolean).join('. ') }
+                : brief;
+            const wantPhoto = sources.includes('stock') || sources.includes('ai_image');
+            artDirection = wantPhoto ? await writeArtDirection(db, forArt, ctx, rejections) : fallbackArtDirection(forArt, ctx.kit, ctx.guidelines);
+            const imageHeld = brief.creditHold - brief.creditHoldVideo;
+            const r = await flyerRoundOptions(db, {
+                brief, ad: artDirection, ctx, userId, shownStockIds,
+                wantStock: sources.includes('stock'), wantAi: sources.includes('ai_image') && imageHeld >= IMAGE_CREDIT_COST,
+            });
+            notes.push(...r.notes);
+            aiProduced = r.aiUsed;
+            if (r.options.length) await db.insert(visualBriefOptions).values(r.options.map((o) => ({ ...base, ...o })));
+            return;
+        }
+
+        artDirection = await writeArtDirection(db, brief, ctx, rejections);
         const ad = artDirection;
 
         // The video part of the hold is the authority for AI video, and the rest for AI images — a
@@ -784,6 +815,13 @@ export async function decideOption(db: Db, args: {
     }
 
     try {
+        // A flyer becomes its print PDFs (flyer-briefs.ts), not a copy of the preview picture.
+        if (opt.source === FLYER_SOURCE) {
+            const assetId = await approveFlyerOption(db, { orgId, userId, title: clip(brief.title, 120) || 'Flyer', option: opt });
+            await db.update(visualBriefOptions).set({ contentAssetId: assetId }).where(eq(visualBriefOptions.id, optionId));
+            await settleBriefStatus(db, brief.id);
+            return { ok: true, contentAssetId: assetId, postNote: 'The flyer is in My Content, ready to print or download as a PDF.', ...await progressOf(db, brief) };
+        }
         const isVideo = (opt.mimeType || '').startsWith('video/');
         const name = clip(`${brief.title} — ${sourceLabel(opt.source).replace(/s$/, '')}`, 120);
         const common = {
@@ -806,7 +844,12 @@ export async function decideOption(db: Db, args: {
         // Give the option back rather than leave it "approved" with nothing in the library.
         await db.update(visualBriefOptions).set({ status: 'proposed', decidedAt: null }).where(eq(visualBriefOptions.id, optionId));
         console.error('[visual-briefs] approve failed:', optionId, err instanceof Error ? err.message : err);
-        return { ok: false, status: 500, error: 'Could not add that to your library — please try again.' };
+        return {
+            ok: false, status: 500,
+            error: err instanceof Error && err.message === 'flyer_photo_unavailable'
+                ? 'The photo on that flyer could not be fetched just now, so the PDF was not made — please try again.'
+                : 'Could not add that to your library — please try again.',
+        };
     }
 }
 
@@ -982,6 +1025,9 @@ export interface BriefView {
     picturesNeeded: number; maxRounds: number;
     /** The social draft this brief is finding a picture for (Phase 5), or null. */
     scheduledPostId: number | null;
+    /** A flyer's paper and words (null for every other purpose). */
+    paperSize: string | null;
+    flyerContent: unknown;
     /** The campaign that commissioned this brief (Phase 3), or null. Its picture joins that campaign. */
     campaign: { id: number; objective: string } | null;
     /** The assistant that ASKED for it — the Campaign Assistant, or the assistant whose post needs the
@@ -990,6 +1036,8 @@ export interface BriefView {
     options: Array<{
         id: number; round: number; source: string; status: string; url: string | null; width: number | null; height: number | null; mimeType: string | null;
         prompt: string | null; attributionName: string | null; attributionUrl: string | null; rejectReason: string | null; contentAssetId: number | null;
+        /** A flyer page: its layout and whether its photo prints soft. */
+        flyer: { layout: string; paperSize: string; lowResPhoto: boolean; photoDpi: number | null } | null;
     }>;
 }
 
@@ -1045,6 +1093,9 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
         list.push({
             id: o.id, round: o.round, source: o.source, status: o.status, url, width: o.width, height: o.height, mimeType: o.mimeType, prompt: o.prompt,
             attributionName: o.attributionName, attributionUrl: o.attributionUrl, rejectReason: o.rejectReason, contentAssetId: o.contentAssetId,
+            flyer: o.source === FLYER_SOURCE && o.renderParams
+                ? (({ layout, paperSize, lowResPhoto, photoDpi }: FlyerRenderParams) => ({ layout, paperSize, lowResPhoto: !!lowResPhoto, photoDpi: photoDpi ?? null }))(o.renderParams as FlyerRenderParams)
+                : null,
         });
         byBrief.set(o.briefId, list);
     }
@@ -1060,6 +1111,8 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
             roundCredits: (sources.includes('ai_image') ? IMAGE_CREDIT_COST : 0) + (sources.includes('ai_video') ? VIDEO_CREDIT_COST : 0),
             waitingOn: b.waitingOn,
             scheduledPostId: b.scheduledPostId,
+            paperSize: b.paperSize,
+            flyerContent: b.flyerContent,
             campaign: b.campaignId && objectives.has(b.campaignId) ? { id: b.campaignId, objective: objectives.get(b.campaignId)! } : null,
             requestedBy: (b.campaignId ? campaignRequester.get(b.campaignId) : undefined)
                 ?? (b.scheduledPostId ? postRequester.get(b.scheduledPostId) : undefined) ?? null,
@@ -1089,7 +1142,7 @@ export async function buildBriefsSnapshot(db: Db, orgId: number, assistantId: nu
     const lines = briefs.map((b) => {
         const waiting = b.options.filter((o) => o.status === 'proposed');
         const approved = b.options.filter((o) => o.status === 'approved').length;
-        const head = `- Brief ${b.id} "${b.title}"${b.campaign ? ` (commissioned by the campaign "${clip(b.campaign.objective, 80)}" — the picture approved joins that campaign)` : ''}${b.scheduledPostId ? ' (raised for a social post with no picture — the picture approved goes onto that post if it still has none)' : ''} — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}${b.waitingOn ? `; waiting on ${clip(b.waitingOn, 60)} to add their own` : ''}.`;
+        const head = `- Brief ${b.id} "${b.title}"${b.campaign ? ` (commissioned by the campaign "${clip(b.campaign.objective, 80)}" — the picture approved joins that campaign)` : ''}${b.scheduledPostId ? ' (raised for a social post with no picture — the picture approved goes onto that post if it still has none)' : ''}${b.purpose === FLYER_PURPOSE ? ` (a printed ${b.paperSize ?? 'A5'} flyer — ${b.flyerContent ? `headline "${clip((b.flyerContent as { headline?: string }).headline, 80)}"` : 'no words saved yet'}; approving one makes its print PDFs in My Content)` : ''} — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}${b.waitingOn ? `; waiting on ${clip(b.waitingOn, 60)} to add their own` : ''}.`;
         const rows = waiting.map((o, i) => `    • option ${o.id} (#${i + 1} waiting) — ${sourceLabel(o.source).replace(/s$/, '').toLowerCase()}${o.prompt ? `: ${clip(o.prompt, 90)}` : ''}`);
         return [head, ...rows].join('\n');
     });

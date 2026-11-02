@@ -20,6 +20,7 @@ import { sendEmail } from '../../src/utils/email';
 import {
     readFalBalance, probeAnthropic, assessProviders, FAL_LOCK_PATTERN, DEFAULT_FAL_LOW_BALANCE_USD,
     readStabilityBalance, DEFAULT_STABILITY_LOW_BALANCE_CREDITS, probeOpenAi,
+    readElevenLabsBalance, DEFAULT_ELEVENLABS_LOW_BALANCE_CHARS,
     type FalLockEvidence, type MediaFailureEvidence, type ProviderProblem,
 } from '../../src/utils/provider-balance';
 import { recordHeartbeat } from '../../src/utils/monitor-heartbeat';
@@ -135,11 +136,13 @@ async function evaluateProviderBalances() {
     const now = new Date();
     const lowLine = Number(process.env.FAL_LOW_BALANCE_USD) || DEFAULT_FAL_LOW_BALANCE_USD;
     const stabilityLow = Number(process.env.STABILITY_LOW_BALANCE_CREDITS) || DEFAULT_STABILITY_LOW_BALANCE_CREDITS;
-    const [fal, anthropic, stability, openai, falEvidence, mediaFailures] = await Promise.all([
+    const elevenLabsLow = Number(process.env.ELEVENLABS_LOW_BALANCE_CHARS) || DEFAULT_ELEVENLABS_LOW_BALANCE_CHARS;
+    const [fal, anthropic, stability, openai, elevenlabs, falEvidence, mediaFailures] = await Promise.all([
         readFalBalance(),
         probeAnthropic(),
         readStabilityBalance(),
         probeOpenAi(),
+        readElevenLabsBalance(),
         readFalEvidence().catch((err): FalLockEvidence => {
             console.error('[check-provider-balances] fal evidence query failed:', err);
             return { failures: 0, organisations: 0, latestAt: null, sample: null, lastSuccessAt: null };
@@ -153,8 +156,9 @@ async function evaluateProviderBalances() {
     ]);
     const problems = assessProviders({
         fal, falEvidence, anthropic, falLowBalanceUsd: lowLine, stability, stabilityLowBalanceCredits: stabilityLow, mediaFailures, openai,
+        elevenlabs, elevenLabsLowBalanceChars: elevenLabsLow,
     });
-    const summary = { fal, anthropic, stability, openai, falEvidence, mediaFailures, problems: problems.map(p => p.headline) };
+    const summary = { fal, anthropic, stability, openai, elevenlabs, falEvidence, mediaFailures, problems: problems.map(p => p.headline) };
     // Always logged: with no alert, this line is the only record that the check ran and what it saw.
     console.log('[check-provider-balances]', JSON.stringify(summary));
 

@@ -10,9 +10,19 @@
 import { IMAGE_CREDIT_COST, VIDEO_CREDIT_COST } from '../utils/ai-credits';
 import { TASK_WEIGHTS, aiVideoTasks } from './task-weights';
 import { billedSecondsFor } from '../lib/fal-gateway';
+import { DEFAULT_PAPER_SIZE, flyerVocabForClient, normaliseFlyerContent, paperSizeOf, type FlyerContent, type PaperSize } from './flyer-vocab';
 
-export const BRIEF_PURPOSES = ['social_post', 'blog_header', 'ad', 'email_header', 'story', 'other'] as const;
+export const BRIEF_PURPOSES = ['social_post', 'blog_header', 'ad', 'email_header', 'story', 'other', 'flyer'] as const;
 export type BriefPurpose = typeof BRIEF_PURPOSES[number];
+/** A printed flyer (docs/brand-designer-flyers-plan.md): words on paper, drawn — not a picture for a post. */
+export const FLYER_PURPOSE = 'flyer' as const;
+/** What a campaign may commission: pictures for its posts. Flyers are briefed by hand (plan §3.6). */
+export const PICTURE_PURPOSES = BRIEF_PURPOSES.filter((p) => p !== FLYER_PURPOSE);
+/** The photo sources a flyer may draw on. The words are always drawn (FLYER_SOURCE), so none is fine. */
+export const FLYER_PHOTO_SOURCES = ['stock', 'ai_image'] as const;
+/** The option source of a drawn flyer page. Not ticked by anyone — every flyer round makes them. */
+export const FLYER_SOURCE = 'flyer_layout' as const;
+export const FLYER_SOURCE_LABEL = 'Flyer';
 
 export const BRIEF_ASPECT_RATIOS = ['1:1', '4:5', '16:9', '9:16'] as const;
 export type BriefAspectRatio = typeof BRIEF_ASPECT_RATIOS[number];
@@ -25,6 +35,8 @@ export const PURPOSE_SPECS: Record<BriefPurpose, { label: string; aspectRatio: B
     email_header: { label: 'Email header',             aspectRatio: '16:9' },
     story:        { label: 'Story / Reel cover',       aspectRatio: '9:16' },
     other:        { label: 'Something else',           aspectRatio: '1:1' },
+    // The PHOTO's shape: the nearest portrait the photo sources understand. The paper is paperSize.
+    flyer:        { label: 'Printed flyer',            aspectRatio: '4:5' },
 };
 
 export const ASPECT_LABELS: Record<BriefAspectRatio, string> = {
@@ -68,7 +80,7 @@ export const VIDEO_SOURCES: readonly BriefSource[] = ['stock_video', 'ai_video']
  * round source — nothing generates it — so it is not in BRIEF_SOURCES, but it is a legal option source.
  */
 export const OWN_SOURCE = 'own' as const;
-export const OPTION_SOURCES = [...BRIEF_SOURCES, OWN_SOURCE] as const;
+export const OPTION_SOURCES = [...BRIEF_SOURCES, OWN_SOURCE, 'flyer_layout'] as const;
 export const OWN_SOURCE_LABEL = 'Your own';
 
 /** The sources that spend AI credits. A round without any of these is free. */
@@ -119,6 +131,10 @@ export interface NormalisedBrief {
     dueDate: string | null;
     /** "Someone on my team is making it" — who, in the user's words. Nothing is sent to them. */
     waitingOn: string | null;
+    /** A flyer's paper; null for every other purpose. */
+    paperSize: PaperSize | null;
+    /** A flyer's words; null until they are drafted or typed (and for every other purpose). */
+    flyerContent: FlyerContent | null;
 }
 
 function text(v: unknown, max: number): string | null {
@@ -140,17 +156,29 @@ export function normaliseBrief(raw: Record<string, unknown>): { ok: true; brief:
     const title = text(raw.title, 120);
     const message = text(raw.message, 1000);
     const headline = text(raw.headline, 120);
-    if (!title) return { ok: false, error: 'Give the brief a short name.' };
-    if (!message && !headline) return { ok: false, error: 'Say what the picture should show, or the words it should carry.' };
-
     const purpose = (BRIEF_PURPOSES as readonly string[]).includes(String(raw.purpose)) ? raw.purpose as BriefPurpose : 'social_post';
-    const aspectRatio = (BRIEF_ASPECT_RATIOS as readonly string[]).includes(String(raw.aspectRatio))
-        ? raw.aspectRatio as BriefAspectRatio
-        : PURPOSE_SPECS[purpose].aspectRatio;
+    const isFlyer = purpose === FLYER_PURPOSE;
+    // A flyer's words: kept only when they have a headline. Words without one are not refused here —
+    // they are simply not words yet, and "Draft the words" (or the form) supplies them.
+    const flyer = isFlyer && raw.flyerContent ? normaliseFlyerContent(raw.flyerContent) : null;
+    const flyerContent = flyer && flyer.ok ? flyer.content : null;
+    if (!title) return { ok: false, error: 'Give the brief a short name.' };
+    if (!message && !headline && !flyerContent) {
+        return { ok: false, error: isFlyer ? 'Say what the flyer is for, or write its headline.' : 'Say what the picture should show, or the words it should carry.' };
+    }
+
+    // A flyer's photo is always fetched portrait; the paper decides the page.
+    const aspectRatio = isFlyer ? PURPOSE_SPECS.flyer.aspectRatio
+        : (BRIEF_ASPECT_RATIOS as readonly string[]).includes(String(raw.aspectRatio))
+            ? raw.aspectRatio as BriefAspectRatio
+            : PURPOSE_SPECS[purpose].aspectRatio;
 
     const asked = Array.isArray(raw.sources) ? raw.sources.map(String) : [...BRIEF_SOURCES];
-    const sources = BRIEF_SOURCES.filter((s) => asked.includes(s));
-    if (!sources.length) return { ok: false, error: 'Choose at least one place for the options to come from.' };
+    // A flyer may only take a photo from stock or AI — and may take none (the words-only layout).
+    const sources = isFlyer
+        ? BRIEF_SOURCES.filter((s) => (FLYER_PHOTO_SOURCES as readonly string[]).includes(s) && asked.includes(s))
+        : BRIEF_SOURCES.filter((s) => asked.includes(s));
+    if (!sources.length && !isFlyer) return { ok: false, error: 'Choose at least one place for the options to come from.' };
 
     const due = typeof raw.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.dueDate.trim()) ? raw.dueDate.trim() : null;
 
@@ -164,6 +192,8 @@ export function normaliseBrief(raw: Record<string, unknown>): { ok: true; brief:
             sources,
             dueDate: due,
             waitingOn: text(raw.waitingOn, 120),
+            paperSize: isFlyer ? paperSizeOf(raw.paperSize) ?? DEFAULT_PAPER_SIZE : null,
+            flyerContent,
         },
     };
 }
@@ -177,5 +207,6 @@ export function briefVocabForClient() {
         ownLabel: OWN_SOURCE_LABEL,
         rejectReasons: REJECT_REASONS.map((k) => ({ key: k, label: REJECT_REASON_LABELS[k] })),
         maxRounds: MAX_ROUNDS,
+        flyer: { ...flyerVocabForClient(), photoSources: FLYER_PHOTO_SOURCES, sourceLabel: FLYER_SOURCE_LABEL },
     };
 }

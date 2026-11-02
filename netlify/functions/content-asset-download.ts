@@ -42,6 +42,7 @@ const EXT_BY_MIME: Record<string, string> = {
     'image/webp': 'webp', 'image/avif': 'avif',
     'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm',
     'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/wav': 'wav', 'audio/webm': 'weba',
+    'application/pdf': 'pdf',
 };
 
 /**
@@ -100,6 +101,8 @@ export default withLambda(async (event) => {
             storageUrl: contentAssets.storageUrl,
             externalUrl: contentAssets.externalUrl,
             purgedAt: contentAssets.purgedAt,
+            provider: contentAssets.provider,
+            renderParams: contentAssets.renderParams,
         })
         .from(contentAssets)
         .where(eq(contentAssets.id, assetId))
@@ -114,7 +117,15 @@ export default withLambda(async (event) => {
     // Retention already removed the bytes; the row survives as a tombstone.
     if (asset.purgedAt) return { statusCode: 410, body: 'This asset has been removed.' };
 
-    const filename = downloadFilename(asset);
+    // A printed flyer (docs/brand-designer-flyers-plan.md §3.5) has two PDFs: the exact page (the
+    // asset's own key) and ?variant=print_shop, with 3 mm bleed and the trim marked. ?inline=1 opens
+    // the PDF in the browser instead of saving it — My Content's Print button.
+    const flyer = asset.provider === 'flyer';
+    const params = (asset.renderParams && typeof asset.renderParams === 'object' ? asset.renderParams : {}) as { printShopKey?: unknown };
+    const printShop = flyer && event.queryStringParameters?.variant === 'print_shop' && typeof params.printShopKey === 'string';
+    const inline = flyer && event.queryStringParameters?.inline === '1';
+    if (printShop) asset.storageKey = params.printShopKey as string;
+    const filename = downloadFilename(printShop ? { ...asset, name: `${asset.name} (print shop, 3mm bleed)` } : asset);
 
     // ── Stored with us: let the presigner carry the instruction ─────────────────────────────────
     // response-content-disposition is signed into the URL, so R2 returns it as a real header on the
@@ -133,7 +144,7 @@ export default withLambda(async (event) => {
         const url = await getSignedUrl(s3, new GetObjectCommand({
             Bucket: process.env.R2_BUCKET_NAME,
             Key: asset.storageKey,
-            ResponseContentDisposition: `attachment; filename="${filename}"`,
+            ResponseContentDisposition: `${inline ? 'inline' : 'attachment'}; filename="${filename}"`,
             ...(asset.mimeType ? { ResponseContentType: asset.mimeType } : {}),
         }), { expiresIn: 300 });
 

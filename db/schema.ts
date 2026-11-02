@@ -5444,13 +5444,17 @@ export const visualBriefs = pgTable("visual_briefs", {
   campaignOrderId: integer("campaign_order_id").references(() => campaignOrders.id, { onDelete: "set null" }),
   // The draft post this brief is finding a picture for (db/z-brand-designer-post-briefs.sql).
   scheduledPostId: integer("scheduled_post_id").references(() => scheduledPosts.id, { onDelete: "set null" }),
+  // A printed flyer (db/z-brand-designer-flyers.sql): its paper, and the words a round draws.
+  paperSize: text("paper_size"),
+  flyerContent: jsonb("flyer_content"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   index("visual_briefs_campaign_order_idx").on(t.campaignOrderId),
   index("visual_briefs_scheduled_post_idx").on(t.scheduledPostId),
   index("visual_briefs_assistant_status_idx").on(t.organisationId, t.aiAssistantId, t.status),
-  check("visual_briefs_purpose_check", sql`${t.purpose} IN ('social_post','blog_header','ad','email_header','story','other')`),
+  check("visual_briefs_purpose_check", sql`${t.purpose} IN ('social_post','blog_header','ad','email_header','story','other','flyer')`),
+  check("visual_briefs_paper_size_check", sql`${t.paperSize} IS NULL OR ${t.paperSize} IN ('A5','A4','A6','DL')`),
   check("visual_briefs_aspect_ratio_check", sql`${t.aspectRatio} IN ('1:1','4:5','16:9','9:16')`),
   check("visual_briefs_media_type_check", sql`${t.mediaType} IN ('image','video')`),
   check("visual_briefs_status_check", sql`${t.status} IN ('open','generating','in_review','approved','cancelled')`),
@@ -5480,7 +5484,7 @@ export const visualBriefOptions = pgTable("visual_brief_options", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("visual_brief_options_brief_idx").on(t.briefId, t.round),
-  check("visual_brief_options_source_check", sql`${t.source} IN ('stock','ai_image','brand_card','stock_video','ai_video','own')`),
+  check("visual_brief_options_source_check", sql`${t.source} IN ('stock','ai_image','brand_card','stock_video','ai_video','own','flyer_layout')`),
   check("visual_brief_options_status_check", sql`${t.status} IN ('proposed','approved','rejected')`),
 ]);
 

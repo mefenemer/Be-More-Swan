@@ -294,7 +294,13 @@ export default withLambda(async (event) => {
             // Resolve a displayable URL for visual assets (thumbnails in My Content).
             const enrichedP = Promise.all(rows.map(async r => {
                 if (r.purgedAt) return r;
-                return { ...r, storageUrl: await resolveAssetDisplayUrl(r) };
+                // A printed flyer is a PDF; its tile shows the preview picture drawn with it.
+                const previewKey = r.provider === 'flyer' && r.renderParams && typeof (r.renderParams as { previewKey?: unknown }).previewKey === 'string'
+                    ? (r.renderParams as { previewKey: string }).previewKey : null;
+                return {
+                    ...r, storageUrl: await resolveAssetDisplayUrl(r),
+                    ...(previewKey ? { previewUrl: await resolveAssetDisplayUrl({ assetType: 'image', storageKey: previewKey }) } : {}),
+                };
             }));
 
             // One read covering drafts AND committed posts: the delete warning wants the drafts,

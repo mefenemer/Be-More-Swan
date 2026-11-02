@@ -41,10 +41,13 @@
     defaultSources: null,
     /** The workspace's picture guidelines; undefined until loaded, null if unreadable. */
     guidelines: undefined,
+    /** What a flyer's empty contact, QR and offer fields start from (brand-briefs.ts list). */
+    flyerDefaults: null,
     loaded: false,
     loadError: null,
     rendered: false,
-    /** null | { mode: 'create' } | { mode: 'edit', id } */
+    /** null | { mode: 'create', flyer? } | { mode: 'edit', id, flyer? }. `gen` changes when a flyer's
+     *  words are redrafted, so render() does not carry the OLD typed words over the new ones. */
     form: null,
     /** Option id whose "Not this" reason picker is open. */
     rejecting: null,
@@ -63,7 +66,12 @@
   }
 
   const V = () => state.vocab || { purposes: [], aspectRatios: [], sources: [], rejectReasons: [], maxRounds: 6 };
-  const sourceLabel = (k) => (k === 'own' ? (V().ownLabel || 'Your own') : (V().sources.find((s) => s.key === k) || { label: k }).label);
+  const sourceLabel = (k) => (k === 'own' ? (V().ownLabel || 'Your own')
+    : k === 'flyer_layout' ? ((V().flyer && V().flyer.sourceLabel) || 'Flyer')
+    : (V().sources.find((s) => s.key === k) || { label: k }).label);
+  /** A printed flyer (docs/brand-designer-flyers-plan.md) — its own form, words and tiles. */
+  const isFlyer = (b) => !!b && b.purpose === 'flyer';
+  const paperLabel = (k) => ((V().flyer && V().flyer.paperSizes.find((p) => p.key === k)) || { label: k || 'A5' }).label.split(' — ')[0];
   const purposeLabel = (k) => (V().purposes.find((p) => p.key === k) || { label: k }).label;
 
   // ── Server ─────────────────────────────────────────────────────────────────
@@ -103,6 +111,7 @@
       state.aiVideoUnavailable = data.aiVideoUnavailable || null;
       state.defaultSources = Array.isArray(data.defaultSources) ? data.defaultSources : null;
       state.guidelines = data.guidelines === undefined ? undefined : data.guidelines;
+      state.flyerDefaults = data.flyerDefaults || null;
       state.loadError = null;
     } catch (err) {
       console.error('[AssistantBriefs] load failed:', err);
@@ -240,21 +249,22 @@
   }
 
   function optionTile(b, o) {
-    const ratio = String(b.aspectRatio || '1:1').replace(':', ' / ');
+    // A flyer page is the paper's shape, not the brief's photo shape.
+    const ratio = o.flyer && o.width && o.height ? `${o.width} / ${o.height}` : String(b.aspectRatio || '1:1').replace(':', ' / ');
     const isVideo = String(o.mimeType || '').startsWith('video/');
     const img = o.url && isVideo
       ? `<video src="${esc(o.url)}" controls muted playsinline preload="metadata" class="w-full h-full object-cover"></video>`
       : o.url
       ? `<img src="${esc(o.url)}" alt="${esc(`${sourceLabel(o.source)} option for “${b.title || 'this brief'}”`)}" loading="lazy" class="w-full h-full object-cover">`
       : '<div class="w-full h-full flex items-center justify-center text-xs text-gray-500">No preview</div>';
-    const credit = (o.source === 'stock' || o.source === 'stock_video') && o.attributionName
+    const credit = (o.source === 'stock' || o.source === 'stock_video' || o.source === 'flyer_layout') && o.attributionName
       ? `<p class="text-[11px] text-gray-500 mt-1 truncate">Photo by ${o.attributionUrl ? `<a href="${esc(o.attributionUrl)}" target="_blank" rel="noopener" class="underline">${esc(o.attributionName)}</a>` : esc(o.attributionName)} on Pexels</p>`
       : '';
     let actions = '';
     if (o.status === 'approved') {
       // Approved pictures go to My Content, which this page has no tab for — so say where, and link
       // it (review, 2026-10-22).
-      actions = '<p class="text-xs font-bold text-emerald-800 mt-2">✓ In your library · <button type="button" data-brief-library class="btn-swan-link text-xs font-bold">See it in My Content</button></p>';
+      actions = `<p class="text-xs font-bold text-emerald-800 mt-2">✓ ${o.flyer ? 'Print-ready PDF in' : 'In'} your library · <button type="button" data-brief-library class="btn-swan-link text-xs font-bold">${o.flyer ? 'Print it from My Content' : 'See it in My Content'}</button></p>`;
     } else if (state.rejecting === o.id) {
       actions = `
         <div class="mt-2 space-y-1" data-brief-reject-panel="${o.id}">
@@ -270,14 +280,15 @@
     } else if (o.status === 'proposed' && b.status !== 'cancelled' && !progress(b).done) {
       actions = `
         <div class="flex gap-1 mt-2">
-          <button type="button" data-brief-approve="${o.id}" class="btn-golive min-h-[44px] sm:min-h-0 flex-1 px-2 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Use this</button>
+          <button type="button" data-brief-approve="${o.id}" class="btn-golive min-h-[44px] sm:min-h-0 flex-1 px-2 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">${o.flyer ? 'Use this flyer' : 'Use this'}</button>
           <button type="button" data-brief-reject="${o.id}" class="btn-secondary min-h-[44px] sm:min-h-0 flex-1 px-2 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Not this</button>
         </div>`;
     }
     return `
       <div class="bg-white border ${o.status === 'approved' ? 'border-emerald-700' : 'border-gray-200'} rounded-xl p-2">
         <div class="relative rounded-lg overflow-hidden bg-gray-100" style="aspect-ratio:${esc(ratio)}">${img}</div>
-        <p class="text-[11px] font-bold text-gray-600 mt-1">${esc(sourceLabel(o.source).replace(/s$/, ''))} · round ${o.round}</p>
+        <p class="text-[11px] font-bold text-gray-600 mt-1">${o.flyer ? esc(o.prompt || 'Flyer') : esc(sourceLabel(o.source).replace(/s$/, ''))} · round ${o.round}</p>
+        ${o.flyer && o.flyer.lowResPhoto ? '<p class="text-[11px] text-amber-700 mt-1">This photo may look soft when printed — try a smaller paper size or another round.</p>' : ''}
         ${credit}
         ${actions}
       </div>`;
@@ -363,7 +374,10 @@
     const visible = b.options.filter((o) => o.status !== 'rejected');
     const rejected = b.options.length - visible.length;
     const note = state.notes[b.id];
-    const meta = [purposeLabel(b.purpose), (Number(b.picturesNeeded) || 1) > 1 ? `${b.picturesNeeded} pictures` : '', b.aspectRatio, b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '', b.origin === 'campaign' && !b.requestedBy ? 'from a campaign' : '', b.origin === 'assistant' && !b.requestedBy ? 'raised by your Social Media Assistant' : '']
+    const flyer = isFlyer(b);
+    const words = flyer && b.flyerContent && b.flyerContent.headline ? b.flyerContent : null;
+    const meta = [purposeLabel(b.purpose), (Number(b.picturesNeeded) || 1) > 1 ? `${b.picturesNeeded} pictures` : '', flyer ? paperLabel(b.paperSize) : b.aspectRatio,
+      flyer ? (b.sources.length ? `photo from ${b.sources.map(sourceLabel).join(' or ')}` : 'words only') : b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '', b.origin === 'campaign' && !b.requestedBy ? 'from a campaign' : '', b.origin === 'assistant' && !b.requestedBy ? 'raised by your Social Media Assistant' : '']
       .filter(Boolean).map(esc).join(' · ');
     const live = b.status !== 'cancelled';
     return `
@@ -379,7 +393,10 @@
         ${b.scheduledPostId ? '<p class="text-xs text-gray-700 mt-1">For a social post that found no picture — the one you approve goes onto that post if it still has none.</p>' : ''}
         ${b.campaign ? `<p class="text-xs text-gray-700 mt-1 break-words">For the campaign “${esc(b.campaign.objective)}” — the picture you approve joins that campaign's pictures.</p>` : ''}
         ${b.message ? `<p class="text-sm text-gray-700 mt-2 break-words">${esc(b.message)}</p>` : ''}
-        ${b.headline ? `<p class="text-xs text-gray-600 mt-1">Words on the card: <span class="font-bold">${esc(b.headline)}</span></p>` : ''}
+        ${b.headline && !flyer ? `<p class="text-xs text-gray-600 mt-1">Words on the card: <span class="font-bold">${esc(b.headline)}</span></p>` : ''}
+        ${flyer ? (words
+          ? `<p class="text-xs text-gray-600 mt-1">Headline: <span class="font-bold">${esc(words.headline)}</span> · <button type="button" data-brief-edit="${b.id}" class="btn-swan-link text-xs font-bold">Edit the words</button></p>`
+          : `<p class="text-xs text-amber-800 mt-1 font-semibold">No words yet — <button type="button" data-brief-edit="${b.id}" class="btn-swan-link text-xs font-bold">write or draft them</button> before asking for options.</p>`) : ''}
         <p class="text-xs text-gray-600 mt-2 flex items-center gap-2">${b.status === 'generating' && window.bmsSpinnerHtml ? window.bmsSpinnerHtml(14) : ''}<span>${esc(activityLine(b))}</span></p>
         ${b.generationNote ? `<p class="text-xs text-amber-700 mt-1">${esc(b.generationNote)}</p>` : ''}
         ${note ? `<p class="text-xs mt-1 ${note.tone === 'error' ? 'text-red-600' : 'text-emerald-800'} font-semibold">${esc(note.text)}</p>` : ''}
@@ -389,25 +406,115 @@
         ${live ? ownPanelHtml(b) : ''}
         ${live ? `
           <div class="flex flex-wrap items-center gap-2 mt-4">
-            ${progress(b).done ? '' : `<button type="button" data-brief-generate="${b.id}" ${b.status === 'generating' || b.rounds >= (b.maxRounds || V().maxRounds) ? 'disabled' : ''}
+            ${progress(b).done ? '' : `<button type="button" data-brief-generate="${b.id}" ${b.status === 'generating' || b.rounds >= (b.maxRounds || V().maxRounds) || (flyer && !words) ? 'disabled' : ''}
               class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(roundButtonLabel(b))}</button>`}
-            <button type="button" data-brief-own-open="${b.id}"
-              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add your own</button>
+            ${flyer ? '' : `<button type="button" data-brief-own-open="${b.id}"
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add your own</button>`}
             <button type="button" data-brief-edit="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
-              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Edit brief</button>
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">${flyer ? 'Edit flyer' : 'Edit brief'}</button>
             <button type="button" data-brief-chat="${b.id}"
               class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1.5 text-xs font-bold">Talk it through with ${esc(name())}</button>
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Cancel brief</button>
           </div>
-          ${progress(b).done ? '' : `<p class="text-[11px] text-gray-500 mt-1">${esc(roundCostLine(b))}</p>
-          ${videoOfferHtml(b)}`}` : ''}
+          ${progress(b).done ? '' : `<p class="text-[11px] text-gray-500 mt-1">${esc(flyer ? flyerCostLine(b) : roundCostLine(b))}</p>
+          ${flyer ? '' : videoOfferHtml(b)}`}` : ''}
       </div>`;
+  }
+
+  /** A flyer round: the pages are drawn free; only an AI photo costs. Said before the click. */
+  function flyerCostLine(b) {
+    const ai = (b.sources || []).includes('ai_image') && !sourceBlocked('ai_image') ? V().sources.find((s) => s.key === 'ai_image') : null;
+    const unit = state.unit === 'tasks' ? 'tasks' : 'credits';
+    const n = ai ? ai[unit] : 0;
+    return n
+      ? `Each round draws up to three pages and uses ${n} ${unit === 'tasks' ? 'task' : 'AI credit'}${n === 1 ? '' : 's'}, for the AI photo. The pages themselves are free.`
+      : 'Each round draws up to three pages and uses no extra tasks.';
+  }
+
+  function flyerFormHtml(editing) {
+    const F = V().flyer || { paperSizes: [], limits: {}, defaultPaperSize: 'A5', photoSources: ['stock', 'ai_image'] };
+    const L = F.limits || {};
+    const v = editing || { title: '', message: '', paperSize: F.defaultPaperSize, sources: (state.defaultSources || ['stock']).filter((k) => F.photoSources.includes(k)), flyerContent: null };
+    // A flyer with no words yet starts from the business's recorded details (last flyer, website, offer).
+    const d = state.flyerDefaults || {};
+    const c = v.flyerContent || { offer: d.offer || '' };
+    const contact = c.contact || d.contact || {};
+    const qr = c.qr || (v.flyerContent ? {} : d.qr) || {};
+    const points = (c.points || []).concat(['', '', '']).slice(0, L.points || 3);
+    // A new key per redraft, so the words just drafted are not overwritten by the old typed ones.
+    const k = (name) => `flyer-${state.form.gen || 0}-${name}`;
+    const field = (label, inner, hint) => `
+      <label class="block">
+        <span class="text-xs font-bold text-gray-700">${label}</span>
+        ${inner}
+        ${hint ? `<span class="block text-[11px] text-gray-500 mt-0.5">${hint}</span>` : ''}
+      </label>`;
+    const input = (name, val, ph, max, extra = '') => `<input type="text" data-keep="${k(name)}" name="${name}" value="${esc(val || '')}" maxlength="${max || 200}" placeholder="${esc(ph)}" ${extra} class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">`;
+    const words = !!(c.headline);
+    const draftCost = state.unit === 'tasks' ? ' (1 task)' : '';
+    return `
+      <form data-flyer-form class="bg-white rounded-2xl border-2 border-emerald-200 shadow-sm p-5 mb-4 space-y-3">
+        <p class="text-sm font-bold text-gray-900">${editing ? 'Edit flyer' : 'New printed flyer'}</p>
+        <p class="text-xs text-gray-500">${esc(name())} draws the pages in your brand. When you approve one, a print-ready PDF goes into My Content — print it at home, or send it to a print shop.</p>
+        ${field('Name', input('title', v.title, 'e.g. November open day flyer', 120))}
+        ${field('What is the flyer for?', `<textarea data-keep="${k('message')}" name="message" maxlength="1000" rows="2" placeholder="e.g. Bring new local customers in for our first-visit offer — hand out at the farmers' market" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">${esc(v.message || '')}</textarea>`)}
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          ${field('Paper', `<select data-keep="${k('paperSize')}" name="paperSize" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">
+            ${F.paperSizes.map((p) => `<option value="${esc(p.key)}" ${p.key === (v.paperSize || F.defaultPaperSize) ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}
+          <fieldset>
+            <legend class="text-xs font-bold text-gray-700">Photo</legend>
+            <div class="mt-1 space-y-1">
+              ${F.photoSources.map((key) => {
+                const s = V().sources.find((x) => x.key === key) || { label: key, cost: '' };
+                const off = sourceBlocked(key);
+                return `<label class="flex items-start gap-2 text-sm ${off ? 'text-gray-500' : 'text-gray-700'}">
+                  <input type="checkbox" data-keep="${k(`src-${key}`)}" name="source" value="${esc(key)}" ${(v.sources || []).includes(key) && !off ? 'checked' : ''} ${off ? 'disabled' : ''} class="mt-1">
+                  <span>${key === 'stock' ? 'A stock photo' : 'An AI photo'} <span class="text-xs text-gray-500">— ${esc(off || s.cost)}</span></span>
+                </label>`;
+              }).join('')}
+              <p class="text-[11px] text-gray-500">Untick both for a words-only flyer.</p>
+            </div>
+          </fieldset>
+        </div>
+        ${editing ? `
+        <div class="border-t border-gray-200 pt-3 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <p class="text-xs font-bold text-gray-700">The words on the flyer</p>
+            <button type="submit" data-brief-submit="draft" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">${words ? 'Redraft the words' : 'Draft the words for me'}${draftCost}</button>
+          </div>
+          ${words ? '' : '<p class="text-xs text-gray-600">Type them below, or have them drafted from what your business has recorded. Contact details are never made up — check them before you print.</p>'}
+          ${field('Headline', input('headline', c.headline, 'e.g. Calm grooming for nervous cats', L.headline, 'required'))}
+          ${field('Subheading (optional)', input('subheading', c.subheading, 'One sentence of detail', L.subheading))}
+          ${points.map((p, i) => field(i === 0 ? 'Points (optional, up to three)' : '', input(`point${i}`, p, i === 0 ? 'e.g. Fear-free handling' : '', L.point))).join('')}
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            ${field('Offer (optional)', input('offer', c.offer, 'e.g. 20% off your first visit', L.offer), 'Only an offer you really run.')}
+            ${field('Call to action (optional)', input('callToAction', c.callToAction, 'e.g. Book online or call us', L.callToAction))}
+            ${field('Date or opening times (optional)', input('dateLine', c.dateLine, 'e.g. Saturday 15 November, 10am–2pm', L.dateLine))}
+            ${field('Phone (optional)', input('phone', contact.phone, '', L.phone))}
+            ${field('Email (optional)', input('email', contact.email, '', L.email))}
+            ${field('Website (optional)', input('website', contact.website, '', L.website))}
+            ${field('Address (optional)', input('address', contact.address, '', L.address))}
+            ${field('QR code link (optional)', input('qrUrl', qr.url, 'e.g. your booking page', L.qrUrl), 'Leave empty for no QR code.')}
+            ${field('Words beside the QR code (optional)', input('qrLabel', qr.label, 'e.g. Scan to book', L.qrLabel))}
+          </div>
+        </div>` : ''}
+        <p class="text-xs text-red-600 font-semibold hidden" data-brief-form-error></p>
+        <div class="flex flex-wrap gap-2">
+          ${editing
+            ? `<button type="submit" data-brief-submit="generate" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save and ask ${esc(name())} for pages</button>
+               <button type="submit" data-brief-submit="save" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Just save</button>`
+            : `<button type="submit" data-brief-submit="draft" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Next: draft the words for me${draftCost}</button>
+               <button type="submit" data-brief-submit="save" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Next: I'll write the words</button>`}
+          <button type="button" data-brief-form-close class="btn-utility px-4 py-2 text-sm font-bold rounded-lg">Cancel</button>
+        </div>
+      </form>`;
   }
 
   function formHtml() {
     if (!state.form) return '';
     const editing = state.form.mode === 'edit' ? state.briefs.find((b) => b.id === state.form.id) : null;
+    if (state.form.flyer || isFlyer(editing)) return flyerFormHtml(editing);
     const v = editing || { purpose: 'social_post', aspectRatio: '', sources: state.defaultSources || V().sources.map((s) => s.key) };
     const field = (label, inner, explain) => `
       <label class="block">
@@ -428,7 +535,7 @@
           ${field('Must avoid (optional)', input('mustAvoid', v.mustAvoid, 'e.g. handshakes, suits', 500))}
           ${field('Someone on my team is making it (optional)', input('waitingOn', v.waitingOn, 'e.g. Sam (designer)', 120), 'brand-brief-own')}
           ${field('What is it for?', `<select data-keep="brief-purpose" name="purpose" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">
-            ${V().purposes.map((p) => `<option value="${esc(p.key)}" ${p.key === v.purpose ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}
+            ${V().purposes.filter((p) => p.key !== 'flyer').map((p) => `<option value="${esc(p.key)}" ${p.key === v.purpose ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}
           ${field('Shape', `<select data-keep="brief-aspectRatio" name="aspectRatio" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">
             <option value="">Best for what it is for</option>
             ${V().aspectRatios.map((a) => `<option value="${esc(a.key)}" ${editing && a.key === v.aspectRatio ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}</select>`)}
@@ -466,7 +573,8 @@
         </div>
         <div class="flex items-center gap-3">
           ${credits}
-          ${state.form ? '' : '<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>'}
+          ${state.form ? '' : `${V().flyer ? '<button type="button" data-brief-new-flyer class="btn-secondary border min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New flyer</button>' : ''}
+          <button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
         </div>
       </div>`;
   }
@@ -625,6 +733,7 @@
     const t = (sel) => e.target.closest(sel);
 
     if (t('[data-brief-new]')) { state.form = { mode: 'create' }; render(); return; }
+    if (t('[data-brief-new-flyer]')) { state.form = { mode: 'create', flyer: true, gen: Date.now() }; render(); return; }
     if (t('[data-brief-edit-guidelines]')) {
       e.preventDefault();
       // Business Information opens on its profile tab; this hint (read once by assets.html) opens it
@@ -661,7 +770,11 @@
     }
 
     const edit = t('[data-brief-edit]');
-    if (edit) { state.form = { mode: 'edit', id: Number(edit.dataset.briefEdit) }; render(); window.scrollTo?.({ top: 0, behavior: 'smooth' }); return; }
+    if (edit) {
+      const id = Number(edit.dataset.briefEdit);
+      state.form = { mode: 'edit', id, flyer: isFlyer(state.briefs.find((b) => b.id === id)), gen: Date.now() };
+      render(); window.scrollTo?.({ top: 0, behavior: 'smooth' }); return;
+    }
 
     const gen = t('[data-brief-generate]');
     if (gen) { gen.disabled = true; await generateRound(Number(gen.dataset.briefGenerate)); return; }
@@ -713,7 +826,7 @@
         const tally = chosen >= needed
           ? (needed > 1 ? `All ${needed} chosen — no more are needed.` : 'That is all this brief needed, so you are done here.')
           : `${chosen} of ${needed} chosen — ${needed - chosen} more needed.`;
-        const where = brief && brief.campaign ? 'Added to the campaign and your library.' : 'Added to your library — every assistant can use it now.';
+        const where = brief && isFlyer(brief) ? 'Made the print-ready PDF.' : brief && brief.campaign ? 'Added to the campaign and your library.' : 'Added to your library — every assistant can use it now.';
         // Where it went (a post it was for, or one of the campaign's posts) is the server's sentence.
         if (brief) say(brief.id, `${where} ${tally}${res.postNote ? ` ${res.postNote}` : ''}`);
         window.showToast?.(chosen >= needed ? 'Done — no more pictures needed for this brief.' : `${chosen} of ${needed} chosen.`, 'success');
@@ -801,6 +914,57 @@
       state.own.status = '';
       state.own.error = err.message;
       render();
+    }
+  });
+
+  /** The flyer form's words, in the shape normaliseFlyerContent reads. */
+  function flyerContentFrom(fd) {
+    const g = (n) => String(fd.get(n) || '').trim();
+    if (!g('headline')) return null;
+    return {
+      headline: g('headline'), subheading: g('subheading'),
+      points: [0, 1, 2].map((i) => g(`point${i}`)).filter(Boolean),
+      offer: g('offer'), callToAction: g('callToAction'), dateLine: g('dateLine'),
+      contact: { phone: g('phone'), email: g('email'), website: g('website'), address: g('address') },
+      qr: g('qrUrl') ? { url: g('qrUrl'), label: g('qrLabel') } : null,
+    };
+  }
+
+  document.addEventListener('submit', async (e) => {
+    const form = e.target.closest && e.target.closest('[data-flyer-form]');
+    if (!form || !state.assistantId) return;
+    e.preventDefault();
+    const submitter = e.submitter && e.submitter.dataset ? e.submitter.dataset.briefSubmit : 'save';
+    const errEl = form.querySelector('[data-brief-form-error]');
+    const fd = new FormData(form);
+    const editing = state.form && state.form.mode === 'edit';
+    const brief = {
+      purpose: 'flyer', title: fd.get('title'), message: fd.get('message'), paperSize: fd.get('paperSize'),
+      sources: fd.getAll('source'),
+      // Only an edit carries words; an empty headline leaves the saved words as they were.
+      ...(editing && flyerContentFrom(fd) ? { flyerContent: flyerContentFrom(fd) } : {}),
+    };
+    if (editing && submitter === 'generate' && !brief.flyerContent) {
+      if (errEl) { errEl.textContent = 'Write a headline first — a page draws exactly the words you save.'; errEl.classList.remove('hidden'); }
+      return;
+    }
+    form.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+    try {
+      let id = editing ? state.form.id : null;
+      if (editing) await post({ action: 'edit', briefId: id, ...brief });
+      else id = (await post({ action: 'create', assistantId: state.assistantId, ...brief })).briefId;
+      if (submitter === 'draft') {
+        if (errEl) { errEl.textContent = 'Drafting the words…'; errEl.classList.remove('hidden', 'text-red-600'); }
+        try { await post({ action: 'draft_flyer_words', briefId: id }); }
+        catch (err) { state.notes[id] = { text: err.message, tone: 'error' }; }
+      }
+      // Draft or "I'll write them": stay in the form, now editing, with the words to check.
+      state.form = submitter === 'generate' ? null : { mode: 'edit', id, flyer: true, gen: Date.now() };
+      await load();
+      if (submitter === 'generate') await generateRound(id);
+    } catch (err) {
+      form.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+      if (errEl) { errEl.textContent = err.message; errEl.classList.add('text-red-600'); errEl.classList.remove('hidden'); }
     }
   });
 

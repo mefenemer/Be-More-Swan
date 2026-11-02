@@ -24,7 +24,7 @@
 
 import { CAMPAIGN_TYPES } from './newsletter-campaign-chat-draft';
 import { EMAIL_TRIGGERS } from './campaign-email-order';
-import { BRIEF_ASPECT_RATIOS, BRIEF_PURPOSES, BRIEF_SOURCES } from '../config/visual-brief-vocab';
+import { BRIEF_ASPECT_RATIOS, PICTURE_PURPOSES, BRIEF_SOURCES } from '../config/visual-brief-vocab';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { aiAssistants, campaignAssets, campaignBudgets, campaignDecisions, campaignOrders, campaigns, contentAssets, discoveryCampaigns } from '../../db/schema';
 import { hiredRoleKeys, persistProposal, type LiveCampaign, type ProposedDecision } from './campaign-proposer';
@@ -105,7 +105,7 @@ const BRIEF_ENUM_FIELDS: Record<string, readonly string[]> = {
     // project it remembered. Filing failing never fails the task.
     fileIn: ['jira', 'asana'],
     // commission_visuals: what the picture is for, and its shape (visual-brief-vocab.ts).
-    purpose: BRIEF_PURPOSES,
+    purpose: PICTURE_PURPOSES,
     aspectRatio: BRIEF_ASPECT_RATIOS,
     // commission_video: 15, 30 or 60 seconds; absent = the Video Producer's own setup.
     videoLength: VIDEO_ORDER_LENGTHS,

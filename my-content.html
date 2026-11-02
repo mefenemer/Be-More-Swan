@@ -334,7 +334,20 @@
       <img id="view-asset-image" alt="" class="hidden max-w-full max-h-[70vh] rounded-xl object-contain">
       <p id="view-asset-empty" class="hidden text-sm text-gray-500">This asset has no previewable media.</p>
     </div>
-    <div class="px-5 py-3 border-t border-gray-100 flex justify-end gap-2">
+    <div class="px-5 py-3 border-t border-gray-100 flex flex-wrap justify-end gap-2">
+      <!-- A printed flyer (docs/brand-designer-flyers-plan.md §3.5): Print opens the PDF in its own
+           tab, where the browser's PDF viewer prints it — a cross-origin PDF cannot be printed from
+           an iframe on this page. The print-shop file adds 3 mm bleed and marks the cut line. -->
+      <a id="view-asset-print" href="#" target="_blank" rel="noopener" style="display:none"
+        class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition inline-flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+        Print
+      </a>
+      <a id="view-asset-download-print-shop" href="#" download style="display:none"
+        class="btn-utility px-4 py-2 text-sm font-bold rounded-lg transition inline-flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+        PDF for a print shop
+      </a>
       <!-- Shown for pictures only; the video tab and generate-ai-video are the real gates. -->
       <button id="view-asset-animate" type="button" onclick="window._mcAnimateViewed()" style="display:none"
         class="btn-utility px-4 py-2 text-sm font-bold rounded-lg transition inline-flex items-center gap-2 cursor-pointer">
@@ -348,7 +361,7 @@
       <a id="view-asset-download" href="#" download
         class="btn-utility px-4 py-2 text-sm font-bold rounded-lg transition inline-flex items-center gap-2">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-        Download
+        <span id="view-asset-download-label">Download</span>
       </a>
     </div>
   </div>

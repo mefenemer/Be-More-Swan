@@ -54,7 +54,7 @@ import { campaignDirectiveForJob } from '../../src/utils/campaign-job-directive'
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { resolvePostingSchedule } from '../../src/config/posting-cadence';
 import {
-    buildVarietyBlock, VARIETY_LOOKBACK, findNearDuplicate, nearDuplicateRetryPrompt,
+    buildVarietyBlock, VARIETY_LOOKBACK, findNearDuplicate, nearDuplicateRetryPrompt, pickPillarForSlot,
     type PriorPost,
 } from '../../src/utils/draft-variety';
 import { decideAutoPublish, describeDecision, resolveConnectedDraftPlatforms } from '../../src/utils/auto-publish-runtime';
@@ -484,7 +484,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         let rotatedPillar: string | null = null;
         if (pillarList.length && job.target_publish_date && !inspoTopic) {
             const dayIndex = Math.floor(new Date(job.target_publish_date).getTime() / 86_400_000);
-            let candidates = pillarList;
+            let counts: number[] | null = null;
             try {
                 const used = await db
                     .select({ pillar: scheduledPosts.pillar, n: sql<number>`count(*)::int` })
@@ -495,11 +495,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                         sql`${scheduledPosts.createdAt} > now() - interval '60 days'`,
                     ))
                     .groupBy(scheduledPosts.pillar);
-                const count = (p: string) => used.find((u) => u.pillar === p)?.n ?? 0;
-                const least = Math.min(...pillarList.map(count));
-                candidates = pillarList.filter((p) => count(p) === least);
+                counts = pillarList.map((p) => used.find((u) => u.pillar === p)?.n ?? 0);
             } catch { /* fall back to plain rotation */ }
-            rotatedPillar = candidates[dayIndex % candidates.length];
+            rotatedPillar = pickPillarForSlot(pillarList, counts, dayIndex);
         }
         const pillarLine = rotatedPillar
             ? `Content Pillar for THIS post — write it under this pillar and return it verbatim in the "pillar" field: "${rotatedPillar}". Do NOT drift to another pillar; rotating pillars across the calendar is what keeps the feed varied.`
@@ -814,6 +812,18 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // Fail-open throughout: any error here leaves the original caption exactly as generated.
         let dupTokensIn = 0;
         let dupTokensOut = 0;
+        // Re-read just before the check (owner, 2026-11-02: Love Cat Studio's Saturday and Sunday posts
+        // were near twins). Jobs drain two at a time, and next-door slots are usually a pair: `recent`
+        // was read before either saved, so neither could see the other. A sibling that finished first
+        // is in this fresh read. One small query; the earlier read stays if it fails.
+        try {
+            const fresh: PriorPost[] = await db.select({ caption: scheduledPosts.caption, media: scheduledPosts.suggestedMediaDescription })
+                .from(scheduledPosts)
+                .where(and(eq(scheduledPosts.assistantId, job.assistant_id), isNotNull(scheduledPosts.caption)))
+                .orderBy(sql`coalesce(${scheduledPosts.generatedAt}, ${scheduledPosts.createdAt}) desc`)
+                .limit(VARIETY_LOOKBACK);
+            if (fresh.length) recent = fresh;
+        } catch { /* keep the earlier read */ }
         try {
             const dup = findNearDuplicate(String(generated.caption ?? ''), recent);
             if (dup) {

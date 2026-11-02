@@ -460,6 +460,8 @@
               { value: 'alloy', label: 'Neutral and steady' },
               { value: 'onyx', label: 'Deep and confident' },
               { value: 'shimmer', label: 'Light and lively' },
+              { value: 'british_woman', label: 'British, warm (woman)' },
+              { value: 'london_man', label: 'London, laid-back (man)' },
             ],
           },
           {

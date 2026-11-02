@@ -118,6 +118,7 @@ import { asksForACall, callbackOfferElement } from '../../src/utils/callback-req
 import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
+import { buildTakeMeThereCard } from '../../src/config/take-me-there';
 import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal, resolveProductRemoval, resolveProductUpdate } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields, supersedeSetupFieldProposals } from '../../src/utils/mentor-proposals';
 import { resolveDraftRequest } from '../../src/utils/mentor-draft-request';
@@ -718,8 +719,8 @@ PROPOSING A CAMPAIGN — when the user gives you an objective, emit the campaign
 
 function brandDesignerSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
-- "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Ask <your name> for options" / "Ask <your name> for more options" (the cost of a round costs), "Edit brief" and "Cancel brief". "New brief" at the top writes one without chatting. Everything you can do here, the user can also do there by hand.
-- Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles.`;
+- "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Ask <your name> for options" / "Ask <your name> for more options" (the cost of a round costs), "Edit brief" and "Cancel brief". "New brief" at the top writes one without chatting, and "New flyer" starts a printed flyer. Everything you can do here, the user can also do there by hand.
+- Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles. An approved flyer is there too, with "Print", "PDF for home printing" and "PDF for a print shop".`;
 }
 
 // ⚠️ The tab and button names below are copied from assistant-dashboard-registry.js (siteAuditTab
@@ -813,7 +814,9 @@ function socialSurfaces(): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING POSTS — you can act on the posts listed below, each named by its "#" number, in six ways: approve one waiting in "Review" (it is booked into a posting slot), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), try again one in "Needs attention" (it goes back in the queue and publishes on the next run — or at a time they name, given as "when"), move one in "Review" or "Scheduled" to another time, remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), or make one shorter or longer (action "shorter" or "longer" — every platform's caption is rewritten to the new length and saved; it keeps its place in the queue), or hand one to the Video Producer for a video version (action "video_version" — only if a Video Producer is ACTIVE on their team; it plans a free storyboard from the post on the Video Producer's "Videos" tab, where the user checks it and presses "Make the video", which is when credits are used; the post itself is unchanged — any post that was not rejected or removed, a published one too). To do any of them, emit a post_action_proposal naming the post's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say a post HAS been approved, rejected, retried, moved, removed, shortened, lengthened or made into a video — say the card is there to confirm. One post per reply. If you cannot tell which post they mean, ask, quoting the candidates. If a post has open compliance warnings ("↳" under it), name them before offering to approve it: the card cannot accept warnings for the user, so its click will be refused and they will need to open the post in the "Posts" tab and settle or accept the warnings there. Apart from shorter or longer, you cannot edit an existing post's words, and you cannot publish one immediately: for those, tell them which column of the "Posts" tab it is in so they can open it there. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN write a new version as a fresh draft if they want one.`;
+EXISTING POSTS — you can act on the posts listed below, each named by its "#" number, in six ways: approve one waiting in "Review" (it is booked into a posting slot), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), try again one in "Needs attention" (it goes back in the queue and publishes on the next run — or at a time they name, given as "when"), move one in "Review" or "Scheduled" to another time, remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), or make one shorter or longer (action "shorter" or "longer" — every platform's caption is rewritten to the new length and saved; it keeps its place in the queue), or hand one to the Video Producer for a video version (action "video_version" — only if a Video Producer is ACTIVE on their team; it plans a free storyboard from the post on the Video Producer's "Videos" tab, where the user checks it and presses "Make the video", which is when credits are used; the post itself is unchanged — any post that was not rejected or removed, a published one too). To do any of them, emit a post_action_proposal naming the post's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say a post HAS been approved, rejected, retried, moved, removed, shortened, lengthened or made into a video — say the card is there to confirm. One post per reply. If you cannot tell which post they mean, ask, quoting the candidates. If a post has open compliance warnings ("↳" under it), name them before offering to approve it: the card cannot accept warnings for the user, so its click will be refused and they will need to open the post in the "Posts" tab and settle or accept the warnings there. Apart from shorter or longer, you cannot edit an existing post's words, and you cannot publish one immediately: for those, tell them which column of the "Posts" tab it is in so they can open it there. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN write a new version as a fresh draft if they want one.
+
+UPCOMING DRAFTS AFTER A CHANGE — you draft weeks ahead, so a change to your content pillars, core message, audience or objective only reaches posts drafted after it. When the user changes one of those (on "What I post about" or with a set-up answer card), or asks to refresh, redo or redraft the upcoming posts so they use it, emit a redraft_upcoming_proposal. Its button shows how many upcoming drafts would be rewritten, their dates and the tasks it uses (1 per post), and only the user's "Redraft" click does it. Posts they approved, ones they wrote or asked for, and any going out in the next 2 hours are never redrafted. The same offer also appears by itself a few seconds after they change "What I post about".`;
 }
 
 // ── Blog Writer and Email Marketing: their own dashboard surfaces ─────────────
@@ -1625,6 +1628,8 @@ CHOOSING. When the user says which options they want or do not want, emit a visu
 
 PICTURE GUIDELINES. The workspace's guidelines (listed above) are read by EVERY AI image any assistant here makes, not only yours — say so when you change them. When the user states a lasting rule ("never use handshakes", "we're always outdoors"), emit a brand_guideline_proposal carrying the WHOLE new text of each field it changes — the current text plus the change, never only the new part, because saving replaces the field. Stock photo search cannot filter by these: say so if they ask. They are also on Business Information ▸ Brand Assets ▸ Picture guidelines.
 
+PRINTED FLYERS. You make printable flyers too (A5, A4, A6 postcard or DL leaflet, portrait, one side). Emit a visual_brief_proposal with "purpose": "flyer", a "paperSize", and "flyerContent" with the words: "headline" (max 80 characters), "subheading", up to three short "points", a "callToAction", and a "dateLine" only for a date or opening times the user gave you. NEVER put a phone number, email, street address, web address, QR link or offer in flyerContent — those are filled in from what the business recorded, and the user checks them on the "Edit flyer" form before printing. A flyer's photo comes from "stock" or "ai_image" only (or none, for a words-only flyer). A round draws up to three pages from exactly those words (photo at the top, full-page photo, words only) and the pages themselves are free. Approving one makes a print-ready PDF in My Content, which they can print at home or send to a print shop (that file has a 3 mm bleed). You cannot print or post it for them. If the words are too long for the paper, the round says which field to shorten.
+
 MORE OPTIONS. If none fit, say they can press "Ask <your name> for more options" on the brief, or set "remake": true on the review card so the user can start the next round with one click. A round with AI images uses ${SOURCE_SPECS.ai_image.tasks} task from their monthly allowance, and AI video ${SOURCE_SPECS.ai_video.tasks} more; stock photos, stock videos and branded cards use none. Say so before they click.
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the two shapes below, or null:
@@ -1640,9 +1645,11 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of
     "mustAvoid": "<omit if not said>",
     "purpose": ${BRIEF_PURPOSES.map((p) => `"${p}"`).join(' | ')},
     "aspectRatio": ${BRIEF_ASPECT_RATIOS.map((a) => `"${a}"`).join(' | ')},
-    "sources": ["stock", "ai_image", "brand_card", "stock_video", "ai_video"],   // any of these; videos only if they asked for video
+    "sources": ["stock", "ai_image", "brand_card", "stock_video", "ai_video"],   // any of these; videos only if they asked for video. A flyer: "stock" and/or "ai_image" only
     "waitingOn": "<who on their team is making it — omit unless the user said>",
-    "dueDate": "<YYYY-MM-DD, only if the user gave one>"
+    "dueDate": "<YYYY-MM-DD, only if the user gave one>",
+    "paperSize": "A5" | "A4" | "A6" | "DL",   // flyer only
+    "flyerContent": { "headline": "...", "subheading": "...", "points": ["..."], "callToAction": "...", "dateLine": "..." }   // flyer only — never contact details or an offer
   }
 }
 
@@ -2680,7 +2687,10 @@ OR, to act on a post that already exists (see EXISTING POSTS), uiElement is inst
   "postId": <the number after # in YOUR POSTS RIGHT NOW>,
   "reason": "<reject only: what is wrong with it, in the user's words>" | null,
   "when": "<reschedule: the new time exactly as the user said it, e.g. 'next Friday at 3pm'; retry: the time to try again, only if they named one>" | null
-}`,
+}
+
+OR, to offer redrafting the upcoming drafts after a change to what you post about (see UPCOMING DRAFTS AFTER A CHANGE), uiElement is instead:
+{ "type": "redraft_upcoming_proposal", "summary": "<one sentence: which change, and that the upcoming drafts don't use it yet>" }`,
             ].filter(Boolean).join('\n\n');
         },
         parseResponse: parseStructuredReply,
@@ -3427,7 +3437,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         let uiElement = parsed.uiElement;
         let content = parsed.content;
         // §2.7 help-only mode: the support card is the only one drawn, so nothing else is recorded or offered.
-        if (mentorNoPlan && (uiElement as { type?: unknown } | null)?.type !== 'mentor_support_request') uiElement = null;
+        if (mentorNoPlan && !['mentor_support_request', 'mentor_take_me_there'].includes(String((uiElement as { type?: unknown } | null)?.type))) uiElement = null;
+        // "Redraft upcoming posts" (src/utils/redraft-upcoming.ts): the Social Media route's own card. The
+        // server names the assistant (this one); the click previews, and a second click redrafts.
+        if ((uiElement as { type?: unknown } | null)?.type === 'redraft_upcoming_proposal') {
+            uiElement = route === ROUTES.social_media_manager
+                ? { type: 'redraft_upcoming_proposal', summary: String((uiElement as { summary?: unknown }).summary ?? '').slice(0, 300), assistantId: session.aiAssistantId }
+                : null;
+        }
         // The Business Mentor's own cards (src/utils/mentor-cards.ts): checked first, drawn by
         // disruptive-ui-registry.js, applied by the user's click through the screens' own endpoints.
         // A change to one set-up answer (src/utils/chat-setup-field.ts): the Mentor may target any
@@ -3456,8 +3473,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         } else if (route === ROUTES.business_mentor) {
             // Asked who to hire, or to review everything, and no card drawn: the server-filled card anyway.
             if (!uiElement && !mentorNoPlan) uiElement = cardTheUserAskedFor(typed);
+            // "Take Me There" (src/config/take-me-there.ts): the place is checked against the closed list and
+            // the card carries where to go, built here — the browser never navigates where the model wrote.
+            if ((uiElement as { type?: unknown } | null)?.type === 'mentor_take_me_there') {
+                const team = [...(mentorParts?.data.team ?? []).filter((t) => t.state !== 'archived').map((t) => ({ id: t.id, name: t.name })),
+                    { id: session.aiAssistantId, name: assistantRow.name || 'Business Mentor' }];
+                const card = buildTakeMeThereCard(uiElement as Record<string, unknown>, team);
+                if ('error' in card) { uiElement = null; content = `${content}\n\n(${card.error})`; }
+                else uiElement = card;
+            }
             // Phase 3: a post asked of an ACTIVE Social Media assistant (mentor-draft-request.ts), rebuilt from its row.
-            const draftReq = await resolveDraftRequest(db, orgId, uiElement);
+            const draftReq = (uiElement as { type?: unknown } | null)?.type === 'mentor_take_me_there' ? null : await resolveDraftRequest(db, orgId, uiElement);
             const m = draftReq ? null : mentorCardFromUiElement(uiElement, session.aiAssistantId);
             if (draftReq && 'error' in draftReq) {
                 uiElement = null;
@@ -3561,6 +3587,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                         uiElement = { ...filled, proposalId };
                     }
                 }
+            } else if ((uiElement as { type?: unknown } | null)?.type === 'mentor_take_me_there') {
+                // Built and checked above (buildTakeMeThereCard). Not a suggestion: no cap, no proposal row.
             } else if (!goalProposalFromUiElement(uiElement)) {
                 // Never another route's card shape — except a goal card, which the goal block below checks
                 // (resolveTeamGoalProposal). Dropping it here is why "here it is" came with no card.

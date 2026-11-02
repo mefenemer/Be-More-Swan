@@ -1518,32 +1518,51 @@
       waitingOn: clean(ui.waitingOn, 120),
       dueDate: /^\d{4}-\d{2}-\d{2}$/.test(String(ui.dueDate || '')) ? String(ui.dueDate) : '',
     };
-    if (!brief.sources.length) brief.sources = ['stock', 'brand_card'];
+    // A printed flyer (docs/brand-designer-flyers-plan.md §3.6). Only the words the model may write
+    // are carried — contact details, the QR link and the offer are filled from the business's own
+    // records on the server, never from a chat turn.
+    const flyer = brief.purpose === 'flyer';
+    if (flyer) {
+      const fc = ui.flyerContent && typeof ui.flyerContent === 'object' ? ui.flyerContent : {};
+      brief.paperSize = ['A5', 'A4', 'A6', 'DL'].includes(ui.paperSize) ? ui.paperSize : 'A5';
+      brief.flyerContent = clean(fc.headline, 80) ? {
+        headline: clean(fc.headline, 80), subheading: clean(fc.subheading, 160),
+        points: (Array.isArray(fc.points) ? fc.points : []).map((p) => clean(p, 110)).filter(Boolean).slice(0, 3),
+        callToAction: clean(fc.callToAction, 80), dateLine: clean(fc.dateLine, 80),
+      } : null;
+      brief.sources = brief.sources.filter((x) => x === 'stock' || x === 'ai_image');
+      delete brief.aspectRatio;
+    } else if (!brief.sources.length) brief.sources = ['stock', 'brand_card'];
     // Free = no AI image AND no AI video (PAID_SOURCES in visual-brief-vocab.ts).
     const free = !brief.sources.some((x) => x === 'ai_image' || x === 'ai_video');
     const SOURCE = { stock: 'Stock photos', ai_image: 'AI images', brand_card: 'Branded cards', stock_video: 'Stock videos', ai_video: 'AI video' };
     const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
-    const runnable = !!brief.title && !!(brief.message || brief.headline);
+    const runnable = !!brief.title && !!(brief.message || brief.headline || (flyer && brief.flyerContent));
+    // A flyer round needs its words saved; without them the card only saves the brief.
+    const canMake = free && (!flyer || !!brief.flyerContent);
+    const fw = flyer && brief.flyerContent;
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
-      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">New brief · Approval needed</p>
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${flyer ? `New ${esc(brief.paperSize)} flyer` : 'New brief'} · Approval needed</p>
       <p class="text-sm font-bold text-gray-900 mt-2 break-words">${brief.title ? esc(brief.title) : '<span class="text-amber-700">No name was given.</span>'}</p>
-      ${row('Shows', brief.message)}
-      ${row('Words on the card', brief.headline)}
+      ${row(flyer ? 'For' : 'Shows', brief.message)}
+      ${row('Words on the card', flyer ? '' : brief.headline)}
+      ${fw ? row('Headline', fw.headline) + row('Subheading', fw.subheading) + (fw.points.length ? `<ul class="text-xs text-gray-700 mt-1 list-disc pl-5">${fw.points.map((p) => `<li>${esc(p)}</li>`).join('')}</ul>` : '') + row('Call to action', fw.callToAction) + row('Date', fw.dateLine) : ''}
+      ${flyer ? `<p class="text-xs text-gray-600 mt-1">${fw ? 'Your contact details and offer are added from what your business has recorded — check them on “Edit flyer” before you print.' : 'No words yet — write or draft them on the Briefs tab.'}</p>` : ''}
       ${row('Mood', brief.mood)}
       ${row('Must include', brief.mustInclude)}
       ${row('Must avoid', brief.mustAvoid)}
-      ${row('Shape', brief.aspectRatio)}
+      ${row('Shape', flyer ? '' : brief.aspectRatio)}
       ${row('Due', brief.dueDate)}
       ${row('Someone on your team is making it', brief.waitingOn)}
-      <p class="text-xs text-gray-700 mt-1"><span class="font-bold">Options from:</span> ${brief.sources.map((x) => esc(SOURCE[x])).join(', ')}</p>
+      <p class="text-xs text-gray-700 mt-1"><span class="font-bold">${flyer ? 'Photo' : 'Options from'}:</span> ${flyer && !brief.sources.length ? 'none — words only' : brief.sources.map((x) => esc(SOURCE[x])).join(flyer ? ' or ' : ', ')}</p>
       <p class="text-xs text-gray-600 mt-2">${free
         ? 'Stock and branded cards are free. Nothing is used anywhere until you approve it.'
         : 'Saved to your Briefs tab. Ask for options there — the cost of any AI images or video is shown before anything is spent.'}</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        ${free ? `<button type="button" data-vbp-save="generate" ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save and make options</button>` : ''}
-        <button type="button" data-vbp-save="save" ${runnable ? '' : 'disabled'} class="${free ? 'btn-secondary border' : 'btn-primary'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save brief</button>
+        ${canMake ? `<button type="button" data-vbp-save="generate" ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${flyer ? 'Save and draw the pages' : 'Save and make options'}</button>` : ''}
+        <button type="button" data-vbp-save="save" ${runnable ? '' : 'disabled'} class="${canMake ? 'btn-secondary border' : 'btn-primary'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${flyer ? 'Save flyer' : 'Save brief'}</button>
         <button type="button" data-vbp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
       </div>
       <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vbp-status></p>`;
@@ -1555,7 +1574,7 @@
       if (e.target.closest('[data-vbp-cancel]')) { setBusy(true); say('Not saved.'); return; }
       if (!save) return;
       setBusy(true);
-      const generate = save.dataset.vbpSave === 'generate' && free;
+      const generate = save.dataset.vbpSave === 'generate' && canMake;
       say(generate ? 'Saving and starting…' : 'Saving…');
       el.dispatchEvent(new CustomEvent('brief:create', {
         bubbles: true,
@@ -2479,6 +2498,29 @@
     });
   });
 
+  // "Take Me There" (src/config/take-me-there.ts): where the user asked about, one click away. The
+  // server built the destination from a closed list; this only follows it. Changes nothing.
+  register('mentor_take_me_there', (ui, esc) => {
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-200 rounded-xl shadow-sm p-4 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(String(ui.label || 'Where to find it'))}</p>
+      ${ui.summary ? `<p class="text-sm text-gray-800 mt-1">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <button type="button" data-take-me-there class="btn-primary mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">Take Me There</button>`;
+    el.querySelector('[data-take-me-there]').addEventListener('click', () => {
+      // A chat opened over the page (the pop-up) is closed first, so the page is what they see.
+      window.closeAssistantChatModal?.();
+      if (ui.assistantId && typeof window.routeToAssistantDetail === 'function') {
+        if (ui.assistantTab) window._assistantDetailInitialTab = ui.assistantTab;
+        window.routeToAssistantDetail(ui.assistantId);
+        return;
+      }
+      if (ui.bizTab) window._bizinfoInitialTab = ui.bizTab;
+      if (ui.view && window.loadView) window.loadView(ui.view, ui.notificationsTab ? { tab: ui.notificationsTab } : null);
+    });
+    return el;
+  });
+
   register('mentor_quiet_mode', (ui, esc) => mentorCard(esc, {
     eyebrow: 'Quiet mode', summary: ui.summary, why: null,
     bodyHtml: `<p class="mt-2 text-xs text-gray-700">${ui.on ? 'Your Mentor will answer your questions but stop making suggestions until you ask.' : 'Your Mentor will point out what to fix and suggest next steps again.'}</p>`,
@@ -2668,7 +2710,7 @@
   // Overview tab and the catalogue's "Recommended" badge). Hires nothing: each pick opens the catalogue.
   function openCatalogue(roleKey) {
     try { sessionStorage.setItem('intended_role', roleKey); } catch (e) { /* the badge still marks it */ }
-    window.closeAssistantChat?.();
+    window.closeAssistantChatModal?.();
     if (typeof window.loadView === 'function') window.loadView('catalog');
     else window.location.href = '/workspace.html';
   }
@@ -3816,6 +3858,21 @@
   }
 
   register('post_action_proposal', renderPostActionProposalCard);
+
+  // "Redraft upcoming posts" (src/utils/redraft-upcoming.ts) — the Social Media chat's card. Its button
+  // asks the server what would be redrafted; the panel that opens (src/components/redraft-upcoming.js)
+  // states the count, dates and tasks, and only its "Redraft" click spends.
+  register('redraft_upcoming_proposal', (ui, esc) => {
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-200 rounded-xl shadow-sm p-4 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Upcoming drafts</p>
+      ${ui.summary ? `<p class="text-sm text-gray-800 mt-1">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <button type="button" data-redraft-preview class="btn-primary mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">See which posts would be redrafted</button>
+      <p class="text-[11px] text-gray-500 mt-2">Nothing changes until you press Redraft.</p>`;
+    el.querySelector('[data-redraft-preview]').addEventListener('click', () => window.offerRedraftUpcoming?.(ui.assistantId, { now: true }));
+    return el;
+  });
 
   // ── Built-in: Blog Action Proposal Card (Blog Writer chat) ─────────────────
   // { type: 'blog_action_proposal', action: 'approve'|'schedule'|'unschedule'|'reject', postId,

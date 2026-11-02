@@ -17,9 +17,10 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitiseVideoEdit, editHasStills, editChangesMedia, MAX_STILL_HOLD_S } from '../src/lib/video-edit';
 import { renderFingerprint } from '../src/lib/post-render';
-import { readBrief, sceneClips, sceneOverlays, buildTasks, onScreenFontPct, scriptOverBudget, aiClipSeconds, AI_CLIP_ATTEMPTS, AI_CLIP_ATTEMPT_MS, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
+import { readBrief, sceneClips, sceneOverlays, buildTasks, onScreenFontPct, onScreenLines, VIDEO_CARD, scriptOverBudget, aiClipSeconds, AI_CLIP_ATTEMPTS, AI_CLIP_ATTEMPT_MS, VIDEO_DESTINATIONS } from '../src/utils/video-producer';
 import { enforceStoryboard, type VideoBrief } from '../src/lib/storyboard';
 import { captionLayout } from '../src/lib/captions';
+import { overlayBoxStyle } from '../src/lib/overlay-geometry';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -155,9 +156,26 @@ check('on-screen text shrinks to fit one line of a 9:16 frame', () => {
     const long = 'Yellow flame? Get it checked';
     const pct = onScreenFontPct(long);
     assert.ok(pct < 0.05);
-    assert.ok(long.length * 0.5 * pct <= 0.9 * 9 / 16 + 1e-9, 'fits ~90% of the frame width');
+    assert.ok((long.length * 0.5 + 0.6) * pct <= 0.9 * 9 / 16 + 1e-9, 'fits ~90% of the frame width, padding included');
     assert.strictEqual(onScreenFontPct('x'.repeat(200)), 0.028, 'never unreadably small');
     assert.strictEqual(sceneOverlays([{ ...storyboard.scenes[0], id: 'l', source: 'stock_video' as const, onScreenText: long }], [3])[0].fontSizePct, pct);
+});
+
+check('a video end card is centred and dark, so it is centred on screen and the white captions stay readable', () => {
+    assert.strictEqual(VIDEO_CARD.variant, 'bold');
+    for (const k of ['headline', 'wordmark', 'website'] as const) assert.strictEqual(VIDEO_CARD.layout[k].align, 'center', k);
+    assert.match(read('src/utils/video-producer.ts'), /renderAndPersistBrandCard\(db, \{[^}]*\.\.\.VIDEO_CARD \}/);
+});
+
+check('long on-screen text becomes two balanced lines, sized by the longer one, so it stays on screen', () => {
+    assert.strictEqual(onScreenLines('Yellow flame? Get it checked'), 'Yellow flame? Get it checked', 'short text stays one line');
+    const two = onScreenLines('Sunrise flow by the harbour, every Saturday at seven');
+    assert.strictEqual(two, 'Sunrise flow by the harbour,\nevery Saturday at seven');
+    const ov = sceneOverlays([{ ...storyboard.scenes[0], id: 'w', source: 'stock_video' as const, onScreenText: 'Sunrise flow by the harbour, every Saturday at seven' }], [3])[0];
+    assert.strictEqual(ov.text, two);
+    assert.strictEqual(ov.fontSizePct, onScreenFontPct(two));
+    for (const line of two.split('\n')) assert.ok((line.length * 0.5 + 0.6) * ov.fontSizePct <= 0.9 * 9 / 16 + 1e-9, line);
+    assert.strictEqual(overlayBoxStyle(ov, 1280).textAlign, 'center', 'the two lines centre on each other');
 });
 
 check('a stock clip is only used when it covers its scene; otherwise the scene becomes a moving still', () => {

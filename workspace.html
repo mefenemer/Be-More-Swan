@@ -6067,6 +6067,7 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/disruptive-ui-registry.js"></script>
 <!-- Business Mentor cards' clicks, and "Review all" (chat, the Mentor's Overview tab, Inbox "Needs you"). -->
 <script src="/src/components/mentor-apply.js"></script>
+<script src="/src/components/redraft-upcoming.js"></script>
 <script src="/src/components/mentor-review-all.js"></script>
 <!-- Chat modal (workspace "💬 Chat" card action) — same mountable widget assistant-chat.html
      uses, embedded in-page instead of navigating to a separate page. -->
@@ -22011,6 +22012,22 @@ async function _gpAiGenerateAfterIntent() {
         if (!res.ok) { gpAiMediaStatus(d.error || 'Could not generate an image.', 'error'); gpAiMediaBusy(false); return; }
         gpAiMirrorToSiblings(d.postIds, d.thumbnailUrl, 'image');
         gpAiShowThumb(d.thumbnailUrl, 'image');
+        // Picture first, words second: words the request asked to see ON the picture come back as
+        // text layers the server already saved (planImage in image-prompt.ts) — FLUX can't spell them.
+        // The two calls above emptied the cache's overlays; put the new ones in and repaint.
+        const planned = Array.isArray(d.overlays) ? d.overlays : [];
+        if (planned.length) {
+            (d.postIds || [_gpCurrentPostId]).forEach(id => {
+                if (_rqPostCache[id]) _rqPostCache[id].overlays = planned.map(o => ({ ...o }));
+                _gpOverlayCountByPost[id] = planned.length;
+            });
+            if (_rqReviewPostId != null && _gpCurrentPostId === _rqReviewPostId && _rqPostCache[_rqReviewPostId]) {
+                _rqReviewRenderActive();
+                _pceSelect('overlays');
+            }
+            gpAiMediaStatus(`${gpAiAttachedMsg(d.postIds, 'New AI image')} The words are on it as text you can move and edit.`);
+            return;
+        }
         gpAiMediaStatus(gpAiAttachedMsg(d.postIds, 'New AI image'));
     } catch {
         gpAiMediaStatus('Network error — please try again.', 'error');

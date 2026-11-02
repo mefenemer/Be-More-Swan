@@ -2,7 +2,7 @@
 // Epic 3 US7: "Regenerate Media" on an AI-review-queue draft. Generates a fresh AI image for the
 // post (charging 1 credit) and swaps it in for the currently-attached asset.
 //
-// POST { postId, prompt? }  → { assetId, thumbnailUrl, balance }
+// POST { postId, prompt? }  → { assetId, thumbnailUrl, balance, postIds, overlays }
 //   Auth: aura_session. The post must belong to the caller's org. Charges only on success.
 //
 // Image only. Video regeneration runs through the async composer flow (generate-ai-video).
@@ -14,6 +14,7 @@ import { scheduledPosts, scheduledPostAssets, contentAssets, mediaGenerationJobs
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { generateAndPersistImage } from '../../src/lib/media-persist';
+import { planImage, wordsToOverlays } from '../../src/lib/image-prompt';
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { FalContentPolicyError, FalError, FalServiceError } from '../../src/lib/fal-gateway';
@@ -38,23 +39,39 @@ export default withLambda(async (event) => {
     if (!Number.isInteger(postId)) return { statusCode: 400, body: JSON.stringify({ error: 'postId required.' }) };
 
     const [post] = await db
-        .select({ id: scheduledPosts.id, caption: scheduledPosts.caption })
+        .select({ id: scheduledPosts.id, caption: scheduledPosts.caption, mediaDescription: scheduledPosts.suggestedMediaDescription })
         .from(scheduledPosts)
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, orgId)))
         .limit(1);
     if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Post not found.' }) };
 
-    // Prompt: caller-supplied, else derive from the caption.
-    const prompt = (body.prompt || post.caption || 'On-brand social media image').trim().slice(0, 1000);
-    const blocked = await enforcePromptModeration({ text: prompt, userId, organisationId: orgId, source: 'regenerate-post-media' });
+    // What the picture should show: the caller's words, else the scene the drafter described for this
+    // post, and only then the caption. ⚠️ The caption used to be sent to FLUX as it was (owner,
+    // 2026-11-02: a "Before: … After: …" caption came back as a picture of that list, misspelt and
+    // garbled) — a model asked to draw a page of text draws letters as shapes. Whatever the source, it
+    // is rewritten as a scene first (image-prompt.ts planImage); the no-text rule is still added to
+    // every prompt in fal-gateway.ts.
+    //
+    // Picture first, words second: when the request asks for words ON the picture (a drafter's "headline
+    // reading …", a "Before / After" label), planImage hands those back separately and they go on below
+    // as editable text layers — drawn by us, spelt right — instead of being lost to the no-text rule.
+    const request = (body.prompt || post.mediaDescription || post.caption || 'On-brand social media image').trim().slice(0, 1000);
+    const blocked = await enforcePromptModeration({ text: request, userId, organisationId: orgId, source: 'regenerate-post-media' });
     if (blocked) return blocked;
+    const { scene: prompt, words } = await planImage(request, { workspaceId: orgId, userId });
+    // A caption is what the post SAYS, not a request for words on its picture — and the editor sends
+    // the caption as `prompt` when the drafter left no media description. Only a real request
+    // (typed, or the drafter's media description) puts words on the image.
+    const fromCaption = request === (post.caption || '').trim().slice(0, 1000);
+    const overlays = fromCaption ? [] : wordsToOverlays(words);
 
     const hold = await holdCredits(db, { orgId, amount: IMAGE_CREDIT_COST });
     if (!hold.ok) return { statusCode: 402, body: JSON.stringify({ error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit }) };
 
     let assetId: number;
     try {
-        assetId = await generateAndPersistImage(db, { orgId, userId, prompt, aspectRatio: '4:5' });
+        // 18 s: the rewrite above may have used up to 4 s of the function's 26 s.
+        assetId = await generateAndPersistImage(db, { orgId, userId, prompt, aspectRatio: '4:5', timeoutMs: 18_000 });
         await settleHold(db, { orgId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId });
     } catch (err) {
         await settleHold(db, { orgId, amount: IMAGE_CREDIT_COST, success: false, mediaType: 'image', userId });
@@ -96,8 +113,16 @@ export default withLambda(async (event) => {
         .values(targetIds.map(id => ({ scheduledPostId: id, contentAssetId: assetId, position: 0 })))
         .onConflictDoNothing();
     // Issue #55: regenerating media resolves any "media deleted" flag from the Review Queue.
+    // Text layers were placed on the old picture, so they go with it — the same as any other swap
+    // (attach-draft-media). ⚠️ They used to be left behind with overlay_base_asset_id still naming the
+    // OLD asset, so the approve bake (get-post-image reads that base first) published the old picture
+    // under them. Now the post carries only the words planned for this picture, based on it.
     await db.update(scheduledPosts)
-        .set({ contentAssetIds: [assetId], mediaMissing: false, mediaMissingNote: null })
+        .set({
+            contentAssetIds: [assetId], mediaMissing: false, mediaMissingNote: null,
+            imageOverlays: overlays.length ? overlays : null,
+            overlayBaseAssetId: overlays.length ? assetId : null,
+        })
         .where(inArray(scheduledPosts.id, targetIds));
 
     const [asset] = await db.select({ storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl })
@@ -110,6 +135,6 @@ export default withLambda(async (event) => {
     return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetId, thumbnailUrl, balance: balance.balance, postIds: targetIds }),
+        body: JSON.stringify({ assetId, thumbnailUrl, balance: balance.balance, postIds: targetIds, overlays }),
     };
 });

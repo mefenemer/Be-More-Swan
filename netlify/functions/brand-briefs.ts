@@ -17,6 +17,7 @@
 //                                                     picture — which is where a Canva import lands
 //   list_library {}                                 → the library, for that picker
 //   calendar     { assistantId, from, to }          → brief due dates, for the Calendar tab
+//   draft_flyer_words { briefId }                   → a flyer's words drafted and saved (1 task; flyers plan §3.2)
 //   post_brief   { postId }                         → is there a Brand Designer, and a brief for this post? (Phase 5)
 //   brief_for_post { postId, context? }             → "Ask the Brand Designer" from the post editor
 
@@ -36,14 +37,20 @@ import {
 } from '../../src/utils/visual-briefs';
 import { readBrandGuidelines } from '../../src/utils/brand-guidelines';
 import { triggerBriefRound } from '../../src/utils/trigger-brief-round';
+import { contactDefaults, draftFlyerWords, offerLine } from '../../src/utils/flyer-words';
+import { loadIntroOffer } from '../../src/utils/intro-offer';
+import { normaliseFlyerContent } from '../../src/config/flyer-vocab';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
 /** The words a round is made from — moderated before a credit is held or a provider is called. */
-function briefText(b: Pick<BriefRow, 'title' | 'message' | 'headline' | 'mood' | 'mustInclude'>): string {
-    return [b.title, b.message, b.headline, b.mood, b.mustInclude].filter(Boolean).join('\n');
+function briefText(b: Pick<BriefRow, 'title' | 'message' | 'headline' | 'mood' | 'mustInclude' | 'flyerContent'>): string {
+    // A flyer's own words are what gets printed, so they are checked too.
+    const f = b.flyerContent ? normaliseFlyerContent(b.flyerContent) : null;
+    const flyer = f && f.ok ? [f.content.headline, f.content.subheading, ...f.content.points, f.content.offer, f.content.callToAction, f.content.dateLine] : [];
+    return [b.title, b.message, b.headline, b.mood, b.mustInclude, ...flyer].filter(Boolean).join('\n');
 }
 
 export default withLambda(async (event) => {
@@ -101,12 +108,17 @@ export default withLambda(async (event) => {
         const designer = await requireDesigner(body.assistantId);
         if (!designer) return json(404, { error: 'Assistant not found.' });
         await sweepStuckRounds(db, orgId);
-        const [briefs, balance, aiAvailable, guidelines, videoBlocked] = await Promise.all([
+        const [briefs, balance, aiAvailable, guidelines, videoBlocked, flyerDefaults] = await Promise.all([
             listBriefs(db, orgId, designer.id),
             getBalance(db, orgId).catch(() => null),
             orgHasAssistantFeature(db, orgId, 'ai_image_generation').catch(() => false),
             readBrandGuidelines(db, orgId).catch(() => null),
             videoUnavailableReason(db, orgId).catch(() => 'AI video could not be checked just now.'),
+            // What a flyer's empty contact fields start from: the last flyer's, else the website, and
+            // the recorded offer. From data only — never a model.
+            loadIntroOffer(db, orgId).catch(() => null)
+                .then(async (intro) => ({ ...await contactDefaults(db, orgId, intro), offer: offerLine(intro) }))
+                .catch(() => null),
         ]);
         return json(200, {
             briefs,
@@ -125,6 +137,7 @@ export default withLambda(async (event) => {
             // The workspace's picture guidelines — shown on the tab so the user can see what every
             // round is told. null = could not be read (said as such), not "none set".
             guidelines,
+            flyerDefaults,
         });
     }
 
@@ -184,6 +197,13 @@ export default withLambda(async (event) => {
         if (!designer) return json(404, { error: 'Assistant not found.' });
         const n = normaliseBrief(body);
         if (!n.ok) return json(400, { error: n.error });
+        // A flyer whose words arrived without contact details (a chat card never carries them): fill
+        // them, the QR link and the offer from what the business recorded — never from the model.
+        if (n.brief.flyerContent && !Object.values(n.brief.flyerContent.contact).some(Boolean) && !n.brief.flyerContent.qr) {
+            const intro = await loadIntroOffer(db, orgId).catch(() => null);
+            const d = await contactDefaults(db, orgId, intro);
+            n.brief.flyerContent = { ...n.brief.flyerContent, contact: d.contact, qr: d.qr, offer: n.brief.flyerContent.offer ?? offerLine(intro) };
+        }
         const [brief] = await db.insert(visualBriefs).values({
             organisationId: orgId, aiAssistantId: designer.id, createdBy: userId,
             ...n.brief,
@@ -212,6 +232,7 @@ export default withLambda(async (event) => {
             title: brief.title, purpose: brief.purpose, aspectRatio: brief.aspectRatio, message: brief.message,
             headline: brief.headline, mood: brief.mood, mustInclude: brief.mustInclude, mustAvoid: brief.mustAvoid,
             sources: brief.sources, dueDate: brief.dueDate, waitingOn: brief.waitingOn,
+            paperSize: brief.paperSize, flyerContent: brief.flyerContent,
             ...Object.fromEntries(Object.entries(body).filter(([k]) => k !== 'action' && k !== 'briefId')),
         };
         const n = normaliseBrief(merged);
@@ -219,6 +240,21 @@ export default withLambda(async (event) => {
         await db.update(visualBriefs).set({ ...n.brief, updatedAt: new Date() })
             .where(and(eq(visualBriefs.id, brief.id), eq(visualBriefs.organisationId, orgId)));
         return json(200, { ok: true });
+    }
+
+    // A flyer's words, drafted from the brief and what the business has recorded, and saved on the
+    // brief for the user to edit before any round runs. Contact details are filled from data only.
+    if (action === 'draft_flyer_words') {
+        const brief = await requireBrief(body.briefId);
+        if (!brief) return json(404, { error: 'Brief not found.' });
+        if (brief.purpose !== 'flyer') return json(400, { error: 'That brief is not a flyer.' });
+        if (brief.status === 'generating') return json(409, { error: 'Options are being made right now — try again when they arrive.' });
+        if (brief.status === 'cancelled') return json(409, { error: 'This brief was cancelled.' });
+        const blocked = await enforcePromptModeration({ text: briefText(brief), userId, organisationId: orgId, source: 'brand-briefs' });
+        if (blocked) return blocked;
+        const r = await draftFlyerWords(db, { orgId, brief });
+        if (!r.ok) return json(r.status, { error: r.error, code: r.code });
+        return json(200, { ok: true, flyerContent: r.content });
     }
 
     if (action === 'generate') {
