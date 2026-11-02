@@ -9,6 +9,7 @@
 // Run:  npx tsx tests/voice-and-shapes.test.ts
 
 import assert from 'node:assert';
+import { pickPillarForSlot } from '../src/utils/draft-variety';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -138,8 +139,20 @@ check('the profile setting is saved under the keys the generators read, and surv
 check('pillars are read live and balanced by actual use, so none can be starved', () => {
     const jobs = read('netlify/functions/process-content-jobs.ts');
     assert.match(jobs, /const rawPillars = brandCtx\.content_pillars \?\? answers\['content_pillars'\];/);
-    assert.match(jobs, /const least = Math\.min\(\.\.\.pillarList\.map\(count\)\);\s*candidates = pillarList\.filter\(\(p\) => count\(p\) === least\);/);
-    assert.match(jobs, /rotatedPillar = candidates\[dayIndex % candidates\.length\];/);
+    assert.match(jobs, /rotatedPillar = pickPillarForSlot\(pillarList, counts, dayIndex\);/);
+});
+
+check('the pillars behind come up most, and next-door days never share one (2026-11-02)', () => {
+    const pillars = ['Making', 'Customers', 'Team', 'Events'];
+    // "Team" is furthest behind; it used to take EVERY slot of a pair until it caught up.
+    const counts = [9, 6, 0, 7];
+    const sat = pickPillarForSlot(pillars, counts, 20392);
+    const sun = pickPillarForSlot(pillars, counts, 20393);
+    assert.notStrictEqual(sat, sun, 'next-door days got the same pillar');
+    assert.ok([sat, sun].includes('Team') && [sat, sun].includes('Customers'), 'the two least-used pillars are the ones rotated');
+    assert.strictEqual(pickPillarForSlot(['Only'], [3], 5), 'Only');
+    assert.strictEqual(pickPillarForSlot([], null, 5), null);
+    assert.ok(pillars.includes(pickPillarForSlot(pillars, null, -3)!), 'unknown counts still rotate');
 });
 
 console.log(`\n${passed} checks passed`);

@@ -178,3 +178,22 @@ export function nearDuplicateRetryPrompt(dup: NearDuplicate): string {
         + 'premise, and a different angle on the strategy above. Do not reword what you just wrote — '
         + 'the idea itself has to change. Return the same JSON shape as before.';
 }
+
+/**
+ * The pillar for one scheduled slot. Pure.
+ *
+ * Least-used first, as before (2026-10-06: a pillar that fell behind was never corrected) — but no
+ * longer ONLY the least-used. Jobs drain two at a time and can't see each other's pillar, so when one
+ * pillar was furthest behind, BOTH posts of a pair (usually next-door days) got it — and a newly added
+ * pillar, at 0, took every slot until it caught up (owner, 2026-11-02: Love Cat Studio's Saturday and
+ * Sunday posts were near twins). Now the pillars are ranked by use, and the slot's day walks the
+ * least-used HALF (at least two), so next-door days always differ when there are two or more pillars,
+ * and the pillars that are behind still come up most often. `counts` null = unknown: plain rotation.
+ */
+export function pickPillarForSlot(pillars: string[], counts: number[] | null, dayIndex: number): string | null {
+    if (!pillars.length) return null;
+    if (!counts || counts.length !== pillars.length) return pillars[((dayIndex % pillars.length) + pillars.length) % pillars.length];
+    const ranked = pillars.map((p, i) => ({ p, n: counts[i], i })).sort((a, b) => a.n - b.n || a.i - b.i).map((x) => x.p);
+    const window = Math.min(ranked.length, Math.max(2, Math.ceil(ranked.length / 2)));
+    return ranked[((dayIndex % window) + window) % window];
+}
