@@ -3859,6 +3859,21 @@
 
   register('post_action_proposal', renderPostActionProposalCard);
 
+  // "Redraft upcoming posts" (src/utils/redraft-upcoming.ts) — the Social Media chat's card. Its button
+  // asks the server what would be redrafted; the panel that opens (src/components/redraft-upcoming.js)
+  // states the count, dates and tasks, and only its "Redraft" click spends.
+  register('redraft_upcoming_proposal', (ui, esc) => {
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-200 rounded-xl shadow-sm p-4 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Upcoming drafts</p>
+      ${ui.summary ? `<p class="text-sm text-gray-800 mt-1">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <button type="button" data-redraft-preview class="btn-primary mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">See which posts would be redrafted</button>
+      <p class="text-[11px] text-gray-500 mt-2">Nothing changes until you press Redraft.</p>`;
+    el.querySelector('[data-redraft-preview]').addEventListener('click', () => window.offerRedraftUpcoming?.(ui.assistantId, { now: true }));
+    return el;
+  });
+
   // ── Built-in: Blog Action Proposal Card (Blog Writer chat) ─────────────────
   // { type: 'blog_action_proposal', action: 'approve'|'schedule'|'unschedule'|'reject', postId,
   //   title, status, publishDate, scheduleAt, timezone, reason, when, blocked, settled? }

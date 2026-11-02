@@ -23,6 +23,8 @@
     // Commas, semicolons, new lines, and the list characters people actually paste: · • | and a
     // spaced slash. Not a bare hyphen — "Restorative practice - conferencing" is one pillar.
     var SPLIT = /[,;\n\r·•|]|\s\/\s/;
+    /** A piece that starts mid-sentence: the tail of a pillar a comma split in two. */
+    var FRAGMENT = /^(with|and|or|but|plus|including|also|as well as|especially|like|such as)\b/i;
 
     function allParts(raw) {
         var seen = {};
@@ -51,6 +53,12 @@
             out.push(long.length === 1 && all.length === 1
                 ? 'This reads as one long pillar, so your assistant treats it as a single theme. Put each pillar on its own line or separate them with commas.'
                 : 'A pillar should be a short theme (a few words). ' + long.length + ' of yours ' + (long.length === 1 ? 'reads' : 'read') + ' like a sentence — shorten ' + (long.length === 1 ? 'it' : 'them') + ' so your assistant can rotate between them.');
+        }
+        // A comma inside one theme splits it, leaving a piece that starts mid-sentence (2026-11-02, a
+        // customer's "…workshops on Syros, with behind the scenes" became a pillar "with behind the scenes").
+        var pieces = all.slice(0, MAX_PILLARS).filter(function (p) { return FRAGMENT.test(p); });
+        if (pieces.length) {
+            out.push('"' + pieces[0] + '" looks like the end of the pillar before it — a comma splits pillars. Join ' + (pieces.length === 1 ? 'it' : 'them') + ' to the one before without a comma, or make ' + (pieces.length === 1 ? 'it a theme of its own' : 'each a theme of its own') + '.');
         }
         return out;
     }

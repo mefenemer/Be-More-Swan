@@ -8285,8 +8285,14 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 body: JSON.stringify(body),
             });
             if (res.ok) {
+                // A change to what the posts are ABOUT (pillars, core message, audience…) only reaches
+                // posts drafted after it, weeks out — offer to redraft the upcoming ones
+                // (src/components/redraft-upcoming.js). Compared before currentData is overwritten.
+                const before = currentData.context || {};
+                const topicChanged = (window.REDRAFT_TOPIC_KEYS || []).some((k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(newContext[k] ?? null));
                 currentData.context = newContext;
                 currentData.configuration = newConfiguration;
+                if (topicChanged) window.offerRedraftUpcoming?.(parseInt(assistantId));
                 // The Outreach tab's send-readiness (mailbox, chasers, signature) is read from these
                 // answers and cached per assistant — drop it so the next paint re-reads what was saved.
                 _rqReadinessFor = null;
