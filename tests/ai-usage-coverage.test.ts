@@ -116,10 +116,10 @@ console.log('\nAI media — images, video and music cost something too');
 
 check('every default media model has a price', () => {
     const defaults = [
-        ...read('src/lib/fal-gateway.ts').matchAll(/FAL_(?:IMAGE|VIDEO)_MODEL \?\? '([^']+)'/g),
+        ...read('src/lib/fal-gateway.ts').matchAll(/FAL_(?:IMAGE|FAST_IMAGE|VIDEO)_MODEL \?\? '([^']+)'/g),
         ...read('src/lib/stability-audio.ts').matchAll(/STABILITY_AUDIO_MODEL \|\| '([^']+)'/g),
     ].map((m) => m[1]);
-    assert.strictEqual(defaults.length, 3, `expected the image, video and music defaults, found ${defaults.join(', ')}`);
+    assert.strictEqual(defaults.length, 4, `expected the image, fast-image hedge, video and music defaults, found ${defaults.join(', ')}`);
     const unpriced = defaults.filter((m) => !MEDIA_LIST_PRICE_USD[m]);
     assert.deepStrictEqual(unpriced, [], `add these to MEDIA_LIST_PRICE_USD or they record $0: ${unpriced.join(', ')}`);
 });
@@ -127,6 +127,9 @@ check('every default media model has a price', () => {
 check('media cost follows the published prices', () => {
     // FLUX: $0.04/MP rounded UP per image — 1024×1024 is 1.05 MP, so 2 MP; 1280×720 is 0.92, so 1.
     assert.strictEqual(mediaCostUsd('fal-ai/flux-pro/v1.1', { images: [{ width: 1024, height: 1024 }, { width: 1280, height: 720 }] }), '0.120000');
+    // FLUX.2 Pro: $0.03 first MP + $0.015 per extra, 1 MP = 1024×1024 — 1024×1024 is 1 MP, 1024×1280 is 2.
+    assert.strictEqual(mediaCostUsd('fal-ai/flux-2-pro', { images: [{ width: 1024, height: 1024 }] }), '0.030000');
+    assert.strictEqual(mediaCostUsd('fal-ai/flux-2-pro', { images: [{ width: 1024, height: 1280 }, { width: 1280, height: 720 }] }), '0.075000');
     assert.strictEqual(mediaCostUsd('fal-ai/minimax/hailuo-2.3/standard/text-to-video', { durationSeconds: 6 }), '0.280000');
     assert.strictEqual(mediaCostUsd('fal-ai/minimax/hailuo-2.3/standard/text-to-video', { durationSeconds: 10 }), '0.560000');
     assert.strictEqual(mediaCostUsd('stable-audio-3', {}), '0.260000');
@@ -136,7 +139,8 @@ check('media cost follows the published prices', () => {
 check('every successful generation records its cost — once, where the provider charges', () => {
     const fal = read('src/lib/fal-gateway.ts');
     const gen = fal.slice(fal.indexOf('export async function generateImages('), fal.indexOf('export type VideoDurationSeconds'));
-    assert.ok(/logMediaCost\(IMAGE_MODEL, \{ images \}/.test(gen), 'generateImages no longer records image cost');
+    // Logged under the model that actually drew it — the FLUX 1.1 hedge is priced differently.
+    assert.ok(/logMediaCost\(s\.value\.model, \{ images: drawn \}/.test(gen), 'generateImages no longer records image cost (per drawing model)');
     assert.ok(/logMediaCost\(job\.model, \{ durationSeconds/.test(read('netlify/functions/process-media-job-background.ts')), 'a completed video job records nothing');
     // Since image-to-video (2026-10-31) the brief logs the model actually billed (Kling or Hailuo).
     assert.ok(/extractVideo\([\s\S]{0,120}\n\s*logMediaCost\(sub\.model, \{ durationSeconds: sub\.billedSeconds/.test(read('src/utils/visual-briefs.ts')), 'a brief video records nothing');

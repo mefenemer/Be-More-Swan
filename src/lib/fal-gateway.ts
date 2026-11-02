@@ -11,7 +11,12 @@
 //
 // Config:
 //   FAL_KEY               — API key (required; gateway is mock/disabled without it)
-//   FAL_IMAGE_MODEL       — defaults to 'fal-ai/flux-pro/v1.1'      (FLUX 1.1 Pro, 1 credit)
+//   FAL_IMAGE_MODEL       — defaults to 'fal-ai/flux-2-pro'         (FLUX.2 Pro, 1 credit). Chosen in the
+//                           2026-11-02 bake-off (scripts/ai-image-bakeoff.mjs): clearly better prompt
+//                           adherence than FLUX 1.1 Pro at about the same price, but 9–17 s against 5–9 s.
+//   FAL_FAST_IMAGE_MODEL  — defaults to 'fal-ai/flux-pro/v1.1' (FLUX 1.1 Pro). The hedge: when the main
+//                           model is still drawing HEDGE_HEADROOM_MS before the deadline, this one is
+//                           started alongside it and whichever finishes first is used.
 //   FAL_VIDEO_MODEL       — defaults to 'fal-ai/minimax/hailuo-2.3/standard/text-to-video'
 //                           (Hailuo 2.3 Standard, 768p, 5 credits). NOTE: the bare
 //                           'fal-ai/minimax/hailuo-2.3' is NOT a routable endpoint — it 404s on
@@ -32,7 +37,10 @@ import { logMediaCost } from '../utils/ai-usage';
 
 import { NO_TEXT_RULE } from './image-prompt';
 import { switchedOn } from '../config/dated-switch';
-const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
+export const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-2-pro';
+const FAST_IMAGE_MODEL = process.env.FAL_FAST_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
+// FLUX 1.1 Pro draws in 5–9 s, so it is started this long before the deadline to land inside it.
+const HEDGE_HEADROOM_MS = 8_000;
 export const VIDEO_MODEL = process.env.FAL_VIDEO_MODEL ?? 'fal-ai/minimax/hailuo-2.3/standard/text-to-video';
 const DEFAULT_I2V_MODEL = 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video';
 
@@ -44,7 +52,7 @@ export function i2vModel(now: Date = new Date()): string {
     return !from || switchedOn(from, now) ? chosen : DEFAULT_I2V_MODEL;
 }
 
-// FLUX 1.1 Pro safety_tolerance: 1 (strictest) … 6 (most permissive). We run our own prompt
+// FLUX safety_tolerance: 1 (strictest) … 5 (FLUX.2's most permissive; 1.1 Pro goes to 6). We run our own prompt
 // moderation upstream, so the model-level gate is a backstop — keep Fal's default of 2.
 const SAFETY_TOLERANCE = process.env.FAL_SAFETY_TOLERANCE ?? '2';
 // 'png' keeps text overlays crisp (lossless); 'jpeg' is smaller. Default to png.
@@ -113,7 +121,7 @@ export function falConfigured(): boolean {
 
 // ── Aspect-ratio mapping ───────────────────────────────────────────────────────
 
-// FLUX 1.1 Pro accepts a named `image_size` preset (e.g. 'landscape_4_3', 'square_hd',
+// FLUX 1.1 Pro and FLUX.2 Pro both accept a named `image_size` preset (e.g. 'landscape_4_3', 'square_hd',
 // 'portrait_16_9'). Map our UI aspect ratios onto the closest preset; 4:5 has no exact
 // preset so we pass explicit dimensions.
 function imageSizeForAspect(aspect: AspectRatio): string | { width: number; height: number } {
@@ -224,7 +232,36 @@ async function runSync(model: string, input: Record<string, unknown>, opts?: { t
 
 // ── Public generation helpers ─────────────────────────────────────────────────
 
-/** Generate up to `numImages` image variations with FLUX 1.1 Pro. Resolves to ephemeral Fal URLs. */
+/**
+ * Draw ONE image with IMAGE_MODEL, hedged: if it is still running HEDGE_HEADROOM_MS before the
+ * deadline, FAST_IMAGE_MODEL is started on the same input and the first to finish wins; the loser is
+ * cancelled. FLUX.2 Pro's slow tail (one in 16 took 65 s in the bake-off) would otherwise time out the
+ * 26 s editor functions. Costs one extra fast image only on the calls that run long.
+ */
+async function drawOneHedged(input: Record<string, unknown>, timeoutMs: number): Promise<{ model: string; out: any }> {
+    if (IMAGE_MODEL === FAST_IMAGE_MODEL) return { model: IMAGE_MODEL, out: await runSync(IMAGE_MODEL, input, { timeoutMs }) };
+    const deadline = Date.now() + timeoutMs;
+    const hedgeAt = deadline - HEDGE_HEADROOM_MS;
+    const main = await submit(IMAGE_MODEL, input);
+    let fast: FalSubmitResult | null = null;
+    while (Date.now() < deadline) {
+        if (await status(main.statusUrl) === 'COMPLETED') {
+            if (fast) void cancel(fast.statusUrl);
+            return { model: IMAGE_MODEL, out: await result(main.responseUrl) };
+        }
+        if (fast && await status(fast.statusUrl) === 'COMPLETED') {
+            void cancel(main.statusUrl);
+            return { model: FAST_IMAGE_MODEL, out: await result(fast.responseUrl) };
+        }
+        if (!fast && Date.now() >= hedgeAt) fast = await submit(FAST_IMAGE_MODEL, input);
+        await new Promise(r => setTimeout(r, 1_500));
+    }
+    void cancel(main.statusUrl);
+    if (fast) void cancel(fast.statusUrl);
+    throw new FalError('Fal job timed out before completion.', 504);
+}
+
+/** Generate up to `numImages` image variations, one hedged request each. Resolves to ephemeral Fal URLs. */
 export async function generateImages(opts: {
     prompt: string;
     aspectRatio: AspectRatio;
@@ -235,26 +272,36 @@ export async function generateImages(opts: {
     /** Leave lettering allowed. Off by default — see NO_TEXT_RULE. */
     allowText?: boolean;
 }): Promise<GeneratedImage[]> {
-    // FLUX 1.1 Pro auto-routes inference internally — we deliberately DON'T pass legacy SDXL
-    // knobs (scheduler / num_inference_steps / guidance_scale); forcing them degrades the model's
-    // text rendering. Only prompt, size, count, safety and output format are supplied.
+    // FLUX auto-routes inference internally — we deliberately DON'T pass legacy SDXL knobs
+    // (scheduler / num_inference_steps / guidance_scale); forcing them degrades the model's text
+    // rendering. Only prompt, size, safety and output format are supplied. No `num_images`: FLUX.2 Pro
+    // draws one image per request, so several are several requests (the same price per image).
     // Every image, from every assistant: no words in the picture (src/lib/image-prompt.ts says why —
     // FLUX paints text as shapes and misspells it). A caller that truly wants lettering opts out.
     const input: Record<string, unknown> = {
         prompt: opts.allowText ? opts.prompt : `${opts.prompt.trim()}\n\n${NO_TEXT_RULE}`,
         image_size: imageSizeForAspect(opts.aspectRatio),
-        num_images: Math.min(Math.max(opts.numImages ?? 4, 1), 4),
         safety_tolerance: SAFETY_TOLERANCE,
         output_format: OUTPUT_FORMAT,
     };
+    const count = Math.min(Math.max(opts.numImages ?? 4, 1), 4);
     // Default poll budget must stay UNDER the synchronous Netlify function timeout (26s — see
     // netlify.toml [functions.generate-ai-image]) so an overrun throws a clean FalError('timed
     // out') we can refund, rather than the platform killing the function and returning a raw 502.
-    const out = await runSync(IMAGE_MODEL, input, { timeoutMs: opts.timeoutMs ?? 22_000 });
-    const images: any[] = out?.images ?? [];
-    if (!images.length) throw new FalError('Fal returned no images.');
-    // Here, not in each caller: every image path (editor, briefs, autopilot) comes through this one.
-    logMediaCost(IMAGE_MODEL, { images }, { ...opts.usage, sessionId: 'fal-image' });
+    const timeoutMs = opts.timeoutMs ?? 22_000;
+    const settled = await Promise.allSettled(Array.from({ length: count }, () => drawOneHedged(input, timeoutMs)));
+    const images: any[] = [];
+    for (const s of settled) {
+        if (s.status !== 'fulfilled') continue;
+        const drawn: any[] = s.value.out?.images ?? [];
+        // Here, not in each caller: every image path (editor, briefs, autopilot) comes through this one.
+        if (drawn.length) logMediaCost(s.value.model, { images: drawn }, { ...opts.usage, sessionId: 'fal-image' });
+        images.push(...drawn);
+    }
+    if (!images.length) {
+        const first = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+        throw first?.reason instanceof Error ? first.reason : new FalError('Fal returned no images.');
+    }
     return images.map(img => ({
         url: img.url,
         width: img.width ?? null,

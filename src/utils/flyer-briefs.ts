@@ -15,7 +15,7 @@
 
 import { contentAssets, mediaGenerationJobs } from '../../db/schema';
 import type { getDb } from '../../db/client';
-import { FalContentPolicyError, falConfigured, generateImages } from '../lib/fal-gateway';
+import { FalContentPolicyError, falConfigured, generateImages, IMAGE_MODEL } from '../lib/fal-gateway';
 import { FlyerFitError, MIN_PHOTO_DPI, PREVIEW_DPI, renderFlyer, renderFlyerPdfs, type FlyerPhoto } from '../lib/flyer';
 import { persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
 import { normalizeBrandKit, type BrandKit } from './brand-kit';
@@ -31,7 +31,6 @@ import type { ArtDirection, BriefContext, BriefRow } from './visual-briefs';
 
 type Db = ReturnType<typeof getDb>;
 
-const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 export const FLYER_PROVIDER = 'flyer';
 /** Widest stock photo we ask Pexels for: an A4 page at 300 dpi is 2480 px across. */
 const STOCK_PRINT_WIDTH = 2480;

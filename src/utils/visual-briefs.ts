@@ -27,7 +27,7 @@ import { ART_DIRECTION_CRAFT } from '../constants/art-direction-craft';
 import { logMediaCost } from './ai-usage';
 import {
     FalContentPolicyError, FalError, extractVideo, falConfigured, generateImages, result as falResult, status as falStatus,
-    submitFramedVideo, imageToVideoEnabled, billedSecondsFor, i2vModel, type AspectRatio,
+    submitFramedVideo, imageToVideoEnabled, billedSecondsFor, i2vModel, IMAGE_MODEL, type AspectRatio,
 } from '../lib/fal-gateway';
 import { renderBrandCard, type CardVariant } from '../lib/brand-card';
 import { deleteR2Object, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
@@ -59,7 +59,6 @@ type Db = ReturnType<typeof getDb>;
 export type BriefRow = typeof visualBriefs.$inferSelect;
 type OptionInsert = typeof visualBriefOptions.$inferInsert;
 
-const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 const AI_OPTIONS = SOURCE_SPECS.ai_image.optionsPerRound;
 const STOCK_OPTIONS = SOURCE_SPECS.stock.optionsPerRound;
 const CARD_VARIANTS: CardVariant[] = ['light', 'bold'];

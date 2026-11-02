@@ -148,11 +148,14 @@ export function logMessageUsage(
 //   • fal FLUX 1.1 Pro: $0.04 per megapixel, ROUNDED UP per image (fal's own wording), so a
 //     1024×1024 image (1.05 MP) is billed as 2 MP. Rounded up here too: overstating a cost is the
 //     safe error in a margin view.
+//   • fal FLUX.2 Pro (fal model page 2026-11-02): $0.03 for the first output megapixel, $0.015 per
+//     additional one, rounded up, where 1 MP is 1024×1024 — so 1024×1024 is $0.03, 1024×1280 $0.045.
 //   • fal Hailuo 2.3 Standard text-to-video: $0.28 per 6 s, $0.56 per 10 s.
 //   • fal Kling image-to-video (fal pricing page 2026-10-31): v2.5 Turbo Pro $0.07/s, v3 Pro $0.14/s.
 //   • Stability Stable Audio 3.0: 26 credits per SUCCESSFUL track at $0.01 a credit.
-export const MEDIA_LIST_PRICE_USD: Record<string, { perMegapixel?: number; perDuration?: Record<number, number>; perItem?: number }> = {
+export const MEDIA_LIST_PRICE_USD: Record<string, { perMegapixel?: number; firstMegapixel?: { first: number; extra: number }; perDuration?: Record<number, number>; perItem?: number }> = {
     'fal-ai/flux-pro/v1.1': { perMegapixel: 0.04 },
+    'fal-ai/flux-2-pro': { firstMegapixel: { first: 0.03, extra: 0.015 } },
     // Priced per clip LENGTH, not per second: 10 s is not 10/6 of 6 s.
     'fal-ai/minimax/hailuo-2.3/standard/text-to-video': { perDuration: { 6: 0.28, 10: 0.56 } },
     'fal-ai/kling-video/v2.5-turbo/pro/image-to-video': { perDuration: { 5: 0.35, 10: 0.70 } },
@@ -169,6 +172,12 @@ export function mediaCostUsd(model: string, opts: { images?: Array<{ width?: num
         for (const img of opts.images ?? []) {
             const mp = img.width && img.height ? Math.ceil((img.width * img.height) / 1_000_000) : 1;
             usd += mp * p.perMegapixel;
+        }
+    }
+    if (p.firstMegapixel) {
+        for (const img of opts.images ?? []) {
+            const mp = img.width && img.height ? Math.max(1, Math.ceil((img.width * img.height) / (1024 * 1024))) : 1;
+            usd += p.firstMegapixel.first + (mp - 1) * p.firstMegapixel.extra;
         }
     }
     if (p.perDuration) {

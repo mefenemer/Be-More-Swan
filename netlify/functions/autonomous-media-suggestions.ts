@@ -26,7 +26,7 @@ import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { holdAutonomousCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
-import { FalContentPolicyError } from '../../src/lib/fal-gateway';
+import { FalContentPolicyError, IMAGE_MODEL } from '../../src/lib/fal-gateway';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { SMM_ROLE_KEYS } from '../../src/constants/roles';
@@ -41,7 +41,6 @@ import {
     pickAutonomousSlot, pickPillar, hasUsableBrief, buildAutonomousDraftSystem,
 } from '../../src/utils/autonomous-draft-brief';
 
-const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
 interface DraftCopy { caption: string; hashtags: string; imagePrompt: string; }
 
