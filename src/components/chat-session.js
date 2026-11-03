@@ -695,6 +695,27 @@
       }, respond, null);
     }
 
+    // "Restore to Review" on a campaign_decision_restore card — the same restore_decision as the
+    // button under Decisions ▸ Archived. Passes the server's sentence back to the card, and
+    // campaign:updated moves the card on the Decisions tab behind the modal (assistants.js).
+    function onCampaignRestoreDecision(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ action: 'restore_decision', decisionId: d.decisionId }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Restore failed (HTTP ${res.status}).`);
+          respond({ ok: true, message: data.message });
+          document.dispatchEvent(new CustomEvent('campaign:updated', { detail: { assistantId, campaignId: data.campaignId || null } }));
+        })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // "Keep this lesson" on a campaign_learning_proposal card (§9.8) — the same save_learning the
     // Summary panel's "Keep" calls. Reports how many assistants got the rule, from the server.
     function onCampaignSaveLearning(e) {
@@ -2100,6 +2121,7 @@
     container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
     container.addEventListener('campaign:edit', onCampaignEdit);
     container.addEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
+    container.addEventListener('campaign:restoreDecision', onCampaignRestoreDecision);
     container.addEventListener('campaign:saveLearning', onCampaignSaveLearning);
     container.addEventListener('brief:create', onBriefCreate);
     container.addEventListener('video:create', onVideoCreate);
@@ -2196,6 +2218,7 @@
         container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);
         container.removeEventListener('campaign:edit', onCampaignEdit);
         container.removeEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
+        container.removeEventListener('campaign:restoreDecision', onCampaignRestoreDecision);
         container.removeEventListener('campaign:saveLearning', onCampaignSaveLearning);
         container.removeEventListener('brief:create', onBriefCreate);
         container.removeEventListener('video:create', onVideoCreate);

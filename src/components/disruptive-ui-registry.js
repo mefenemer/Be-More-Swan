@@ -1436,6 +1436,58 @@
 
   register('campaign_task_update', renderCampaignTaskUpdateCard);
 
+  // ── Built-in: Campaign Decision Restore Card ────────────────────────────────
+  // { type: 'campaign_decision_restore', decisionId, title }
+  //
+  // The chat twin of "Restore to Review" under Decisions ▸ Archived. The click performs campaigns.ts
+  // restore_decision; the status line is the server's own sentence, which says whether the figures
+  // were counted again. Restoring approves nothing — the card says so, and so must the reply.
+  function renderCampaignDecisionRestoreCard(ui, esc) {
+    const decisionId = Number.isInteger(Number(ui.decisionId)) && Number(ui.decisionId) > 0 ? Number(ui.decisionId) : null;
+    const title = typeof ui.title === 'string' ? ui.title.trim().slice(0, 300) : '';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Archived decision · Confirm</p>
+      <p class="font-bold text-gray-900 mt-1 break-words">${esc(title || 'Restore this decision')}</p>
+      <p class="text-xs text-gray-600 mt-2">It goes back to Decisions ▸ Review with a fresh expiry. Nothing is approved and no one is briefed until you approve it there.</p>
+      <div class="flex items-center gap-2 mt-3">
+        <button type="button" data-cdr-confirm ${decisionId ? '' : 'disabled'}
+          class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Restore to Review</button>
+        <button type="button" data-cdr-cancel
+          class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Leave it archived</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-cdr-status></p>`;
+    const status = el.querySelector('[data-cdr-status]');
+    const say = (text, tone) => {
+      status.textContent = text;
+      status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`;
+    };
+    const setBusy = (b) => el.querySelectorAll('[data-cdr-confirm], [data-cdr-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      const confirm = e.target.closest('[data-cdr-confirm]');
+      const cancel = e.target.closest('[data-cdr-cancel]');
+      if (!confirm && !cancel) return;
+      setBusy(true);
+      if (cancel) { say('Left archived.'); return; }
+      say('Restoring…');
+      el.dispatchEvent(new CustomEvent('campaign:restoreDecision', {
+        bubbles: true,
+        detail: {
+          decisionId,
+          respond({ ok, error, message }) {
+            if (ok) { say(message || 'Back in Decisions ▸ Review.'); return; }
+            setBusy(false);
+            say(error || 'Could not restore that — please try again.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
+  register('campaign_decision_restore', renderCampaignDecisionRestoreCard);
+
   // ── Built-in: Campaign Learning Proposal Card ───────────────────────────────
   // { type: 'campaign_learning_proposal', campaignId?, text, applyToDrafting? }
   //

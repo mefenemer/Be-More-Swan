@@ -29,6 +29,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { aiAssistants, campaignAssets, campaignBudgets, campaignDecisions, campaignOrders, campaigns, contentAssets, discoveryCampaigns } from '../../db/schema';
 import { hiredRoleKeys, persistProposal, type LiveCampaign, type ProposedDecision } from './campaign-proposer';
 import { settleDecisionMirror } from './campaign-mirror';
+import { archivedDecisionsLine } from './campaign-decision-restore';
 import { campaignSpendTotals } from './campaign-ledger';
 import { audienceLine } from '../config/campaign-audience';
 import { countCampaignOutcome } from './campaign-outcomes';
@@ -598,7 +599,8 @@ export async function buildCampaignsSnapshot(
                 + await campaignPicturesLine(db, r.id)
                 + await openTasksLine(db, r.id)
                 + await testsLine(db, r.id, organisationId)
-                + (plan ? waitingPlanLines(plan.orders) : ''),
+                + (plan ? waitingPlanLines(plan.orders) : '')
+                + await archivedDecisionsLine(db, r.id),
             );
         }
         return `YOUR CAMPAIGNS RIGHT NOW — read at the moment this message was sent. These are FACT: answer questions about the user's campaigns from here, never guess, and use these campaignId values (never invent one) when the user wants to change or add work to an existing campaign.

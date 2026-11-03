@@ -35,6 +35,8 @@
 //   POST { action: 'approve_launch', campaignId, confirmDailyBudgetGbp }   ⚠️ starts real spend
 //   POST { action: 'list_decisions', assistantId }
 //   POST { action: 'decide',      decisionId, verdict: 'approve'|'reject', reason?, note? }
+//   POST { action: 'restore_decision', decisionId }       → an expired or turned-down decision back to
+//                                 pending, with a fresh expiry (Decisions ▸ Archived, or the chat's card)
 //
 // ── The invariants this file enforces ────────────────────────────────────────
 // 1. STARTING IS A HUMAN ACT. `create` with asDraft writes a campaign that commissions nothing.
@@ -59,6 +61,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { campaignSpendTotals, fitsBudget, readPlanTaskGate } from '../../src/utils/campaign-ledger';
 import { placeOrder, recompileCampaignTargets } from '../../src/utils/campaign-orders';
 import { settleDecisionMirror } from '../../src/utils/campaign-mirror';
+import { restoreDecision, restoredMessage } from '../../src/utils/campaign-decision-restore';
 import { BLOCKED_ORDER_FIELDS, pokeDrainsFor, releaseBlockedOrder, settleOrderNow } from '../../src/utils/campaign-reconciler';
 import { describeWork, nextStep } from '../../src/utils/campaign-work-state';
 import { hiredRoleKeys } from '../../src/utils/campaign-proposer';
@@ -1694,6 +1697,20 @@ export default withLambda(async (event) => {
             ))
             .orderBy(desc(campaignDecisions.createdAt));
         return json(200, { decisions: rows });
+    }
+
+    // ── restore_decision ──────────────────────────────────────────────────────
+    // Decisions ▸ Archived "Restore to Review", and the chat's campaign_decision_restore card. The
+    // rules — what may come back, the fresh expiry, a halt's figures counted again — live in
+    // campaign-decision-restore.ts. Restoring only re-queues: approving is still `decide`, below.
+    if (action === 'restore_decision') {
+        const r = await restoreDecision(db, orgId, Number(body.decisionId));
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, {
+            ok: true, decisionId: r.decisionId, campaignId: r.campaignId,
+            expiresAt: r.expiresAt.toISOString(), remeasured: r.remeasured, belowThreshold: r.belowThreshold,
+            message: restoredMessage(r),
+        });
     }
 
     // ── decide ────────────────────────────────────────────────────────────────
