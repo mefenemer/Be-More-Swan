@@ -20,7 +20,7 @@ import {
     MAX_OWN_FORUMS, normaliseForumAddress, sitesFromChat, sourceInfo,
 } from '../src/config/discussion-sites';
 import { discussionActionFromUiElement } from '../src/utils/chat-discussion-action';
-import { topicSuggestionsFromModel } from '../src/lib/discussion-triage';
+import { SITE_PAGES_IN_DISCUSSIONS, businessBlock, discussionAudienceBlock, topicSuggestionsFromModel } from '../src/lib/discussion-triage';
 import { renderMentorSnapshot, renderTeamFeatures } from '../src/utils/mentor-snapshot';
 
 let passed = 0;
@@ -233,6 +233,43 @@ check('one wording rule for the swan and the chat, written for site: searches', 
     assert.match(read('src/config/discussion-sites.ts'), /export const TOPIC_WORDING_RULES = `HOW A DISCUSSIONS TOPIC IS WORDED — each topic is searched on Google as "site:<forum> <topic>"/);
     assert.match(read('src/lib/discussion-triage.ts'), /\$\{TOPIC_WORDING_RULES\}\n\nRewrite EACH topic/);
     assert.match(read('src/utils/discussions.ts'), /from what this business sells — not the business's own name\.\n\$\{TOPIC_WORDING_RULES\}/);
+});
+// 2026-11-03: "Ask Zaphod to improve" told Be More Swan "You don't build websites" and swapped
+// "I need a website" for a blog topic — it saw only the description and catalogue, which named the
+// Blog Writer. Every Discussions prompt now sees the site's pages, Brand Knowledge, Rules and who
+// the business sells to, and the wording rule keeps the owner's subject.
+check('every Discussions prompt sees the site pages, Brand Knowledge, Rules and audience', () => {
+    const block = businessBlock({
+        businessName: 'Be More Swan', businessDescription: 'AI assistants that write your blog',
+        siteDirectoryBlock: "YOUR WEBSITE'S PAGES — …\n- /ai-website-assistant — Website Assistant: builds and hosts your website",
+        knowledgeBlock: 'BUSINESS KNOWLEDGE — …', rulesBlock: 'RULES FROM YOUR USER — …\n- never mention price',
+        audienceBlock: 'Who it sells to: start-ups.',
+    });
+    for (const part of ['Website Assistant: builds and hosts your website', SITE_PAGES_IN_DISCUSSIONS, 'BUSINESS KNOWLEDGE', 'RULES FROM YOUR USER', 'Who it sells to: start-ups.']) {
+        assert.ok(block.includes(part), `missing: ${part}`);
+    }
+    assert.match(block, /a service named anywhere in it \(its website's pages included\) is one it really provides/);
+    assert.ok(block.indexOf('RULES FROM YOUR USER') > block.indexOf('BUSINESS KNOWLEDGE'), 'Rules come last');
+    // Absent blocks print nothing — no empty headings.
+    assert.doesNotMatch(businessBlock({ businessName: 'X' }), /PAGES|KNOWLEDGE|RULES|Who it sells/);
+    const s = read('src/utils/discussions.ts');
+    assert.strictEqual((s.match(/loadDiscussionSender\(db, (orgId|organisationId), assistantId\)/g) ?? []).length, 3, 'scan, Redraft and improve all load it');
+    assert.strictEqual((s.match(/loadSenderIdentity\(/g) ?? []).length, 1, 'only loadDiscussionSender loads the bare sender');
+    const fn = s.slice(s.indexOf('export async function loadDiscussionSender'), s.indexOf('/** "Redraft"'));
+    for (const l of ['loadBusinessKnowledgeBlock(db, organisationId)', 'loadAssistantRulesBlock(db, { assistantId, organisationId })', 'getIcpSnapshot(db, { aiAssistantId: assistantId })']) assert.ok(fn.includes(l), l);
+});
+check('audience block: target industries and exclusions, null when unanswered', () => {
+    assert.strictEqual(discussionAudienceBlock({ targetIndustries: ['salons', ' ', 'cafés'], excludeProfile: 'agencies' }), 'Who it sells to: salons, cafés.\nNot its customers: agencies.');
+    assert.strictEqual(discussionAudienceBlock({ targetIndustries: 'trades' }), 'Who it sells to: trades.');
+    assert.strictEqual(discussionAudienceBlock({ targetIndustries: null, excludeProfile: null }), null);
+    assert.strictEqual(discussionAudienceBlock(null), null);
+});
+check('topic wording keeps the owner’s subject — never swaps it for another service', () => {
+    const rules = read('src/config/discussion-sites.ts');
+    assert.match(rules, /Keep the owner's subject: reword it, never swap it for a different product or service\./);
+    assert.match(rules, /say in "why" that it isn't in Products & Services yet/);
+    assert.doesNotMatch(rules, /never widen a topic into something it doesn't offer/);
+    assert.match(read('src/lib/discussion-triage.ts'), /wording most likely to find relevant threads about the SAME subject/);
 });
 check('the suggestion saves nothing, is metered as a helper, and uses the role’s model', () => {
     const s = read('src/utils/discussions.ts');

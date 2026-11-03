@@ -159,7 +159,8 @@ export const TOPIC_WORDING_RULES = `HOW A DISCUSSIONS TOPIC IS WORDED — each t
 - 2 to 6 words, the way people actually write in a forum post title or question: "recommend a bookkeeper", "best booking app for salon", "how to get more google reviews".
 - Plain everyday words a customer uses, not the trade's own jargon, product names or the business's own name. Prefer the common word over the precise one ("accountant" over "chartered management accountant").
 - One idea per topic. Drop filler ("small", "UK-based", "for my business", "please help") unless it is what makes the topic this business's — a place name only when the business is local.
-- Keep what the business really sells: never widen a topic into something it doesn't offer, and never invent a service.
+- Keep the owner's subject: reword it, never swap it for a different product or service. The owner typed it because they sell it — if nothing you were told about the business mentions it, still reword that same subject, and say in "why" that it isn't in Products & Services yet.
+- Never widen a topic beyond its subject ("website" must not become "marketing"), and never invent a service.
 - No quotes, no "site:", no OR/AND, no hashtags.`;
 
 /** Built-in sites in their fixed order, then up to MAX_OWN_FORUMS own forums (`forum:<address>`, cleaned and deduped). */
