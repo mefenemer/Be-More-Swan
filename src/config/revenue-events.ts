@@ -116,6 +116,7 @@ export const LOSS_REASONS = [
     'feature_gap',
     'went_silent',
     'against_ai',
+    'undeliverable',
     'other',
 ] as const;
 
@@ -144,6 +145,7 @@ export const LOSS_REASON_LABELS: Record<LossReason, string> = {
     feature_gap: 'We were missing something they needed',
     went_silent: 'Went quiet mid-conversation',
     against_ai: "Doesn't want to use AI",
+    undeliverable: "Couldn't reach them — their email address didn't work",
     other: 'Something else',
 };
 

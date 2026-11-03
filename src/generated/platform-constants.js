@@ -157,8 +157,8 @@
   // swallows its errors, which makes that failure invisible rather than loud.
   var OUTCOMES = ["won","lost","disqualified"];
   var OUTCOME_LABELS = {"won":"Won","lost":"Lost","disqualified":"Disqualified"};
-  var LOSS_REASONS = ["price","timing","no_budget","competitor","no_response","wrong_contact","not_icp","feature_gap","went_silent","against_ai","other"];
-  var LOSS_REASON_LABELS = {"price":"Too expensive","timing":"Bad timing — not now","no_budget":"No budget","competitor":"Went with a competitor","no_response":"Never replied","wrong_contact":"Wrong person — not the decision maker","not_icp":"Not a fit — we should not have targeted them","feature_gap":"We were missing something they needed","went_silent":"Went quiet mid-conversation","against_ai":"Doesn't want to use AI","other":"Something else"};
+  var LOSS_REASONS = ["price","timing","no_budget","competitor","no_response","wrong_contact","not_icp","feature_gap","went_silent","against_ai","undeliverable","other"];
+  var LOSS_REASON_LABELS = {"price":"Too expensive","timing":"Bad timing — not now","no_budget":"No budget","competitor":"Went with a competitor","no_response":"Never replied","wrong_contact":"Wrong person — not the decision maker","not_icp":"Not a fit — we should not have targeted them","feature_gap":"We were missing something they needed","went_silent":"Went quiet mid-conversation","against_ai":"Doesn't want to use AI","undeliverable":"Couldn't reach them — their email address didn't work","other":"Something else"};
   var NEEDS_LOSS_REASON = ["lost","disqualified"];
 
   // Why a reviewer changed a drafted message (plan §2.6), from src/config/template-feedback.ts.

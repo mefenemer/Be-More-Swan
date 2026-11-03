@@ -78,7 +78,7 @@ BEGIN
     ALTER TABLE revenue_events ADD CONSTRAINT revenue_events_loss_reason_check
       CHECK (loss_reason IS NULL OR loss_reason IN (
         'price','timing','no_budget','competitor','no_response',
-        'wrong_contact','not_icp','feature_gap','went_silent','against_ai','other'
+        'wrong_contact','not_icp','feature_gap','went_silent','against_ai','undeliverable','other'
       ));
   END IF;
 END $$;
