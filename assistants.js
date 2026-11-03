@@ -7093,7 +7093,7 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-discussions', !!discussionsTab);
     if (discussionsTab) {
         setText('discussions-tab-label', discussionsTab.label || 'Discussions');
-        window.AssistantDiscussions?.init({ assistantId: data.id });
+        window.AssistantDiscussions?.init({ assistantId: data.id, assistantName: data.name });
     }
 
     // Staged Outreach — lead roles only (reviewQueue.staged: lead_qualifier). The Outreach tab is

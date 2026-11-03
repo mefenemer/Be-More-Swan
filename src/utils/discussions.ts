@@ -24,16 +24,18 @@ import {
     DAILY_SCAN_MIN_GAP_MS, DEFAULT_DISCUSSION_SITES, DISCUSSION_FIT_LABELS,
     MAX_THREAD_AGE_DAYS, MAX_TRIAGE_PER_SCAN, MIN_RELEVANCE, RESULTS_PER_SEARCH, SCAN_STALE_MS,
     discussionQuery, isDiscussionSource, looksLikeThread, normaliseSites, normaliseThreadUrl,
-    normaliseTopics, plainForSite, postedAgeDays, siteForUrl, sourceInfo, withDisclosure,
+    normaliseTopics, plainForSite, postedAgeDays, siteForUrl, sourceInfo, withDisclosure, TOPIC_WORDING_RULES,
     type DiscussionFit, type DiscussionSource, type DiscussionStatus,
 } from '../config/discussion-sites';
 import { isSearchConfigured, search } from '../lib/discovery-search';
-import { THREAD_TEXT_CHARS, redraftReply, triageThreads, type TriageCandidate } from '../lib/discussion-triage';
+import { THREAD_TEXT_CHARS, improveTopicWording, redraftReply, triageThreads, type TopicSuggestion, type TriageCandidate } from '../lib/discussion-triage';
 import { robotsAllows, CRAWLERS } from '../lib/robots';
 import { safeFetchText } from './safe-fetch';
 import { loadSenderIdentity } from './sender-identity';
 import { loadRoleModel, roleKeyOfAssistant } from './assistant-model';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
+import { meterInteraction } from './task-credit';
+import { isGlobalAiDisabled } from './platform-config';
 import { resolveBaseUrl } from './base-url';
 
 type Db = ReturnType<typeof getDb>;
@@ -432,6 +434,31 @@ export async function redraftDiscussion(
     return { ok: true, discussion: discussionView(updated) };
 }
 
+/**
+ * "Ask … to improve" beside the Topics box, and the chat's improve_topics card: suggested wording
+ * for the topics as typed (saved or not). Saves NOTHING — the user applies a suggestion or keeps
+ * their own. Metered like the other editing helpers (fair use, no task): it is help with a form,
+ * not a piece of work. Omitted `topics` = the saved ones.
+ */
+export async function suggestTopicWording(
+    db: Db, organisationId: number, assistantId: number, topics: unknown,
+): Promise<{ ok: true; suggestions: TopicSuggestion[] } | { ok: false; status: number; error: string; code?: string }> {
+    const w = watchView(await loadWatch(db, organisationId, assistantId));
+    const list = topics !== undefined ? normaliseTopics(topics) : w.topics;
+    if (!list.length) return { ok: false, status: 422, error: 'Type a topic first, then I can suggest better wording.' };
+    if (await isGlobalAiDisabled()) return { ok: false, status: 503, error: 'AI services are temporarily unavailable. Please try again later.' };
+    const credit = await meterInteraction(db, organisationId, 'helpers');
+    if (!credit.allowed) {
+        if (credit.failed) return { ok: false, status: 503, error: credit.limitMessage ?? 'Please try again.' };
+        if (credit.fairUse) return { ok: false, status: 429, error: credit.limitMessage ?? 'Please try again later.', code: 'FAIR_USE_LIMIT' };
+        return { ok: false, status: 403, error: credit.limitMessage ?? 'You need a plan for this.', code: 'UPGRADE_REQUIRED' };
+    }
+    const [sender, roleKey] = await Promise.all([loadSenderIdentity(db, organisationId, assistantId), roleKeyOfAssistant(db, assistantId)]);
+    const modelChoice = await loadRoleModel(db, roleKey ?? 'lead_qualifier');
+    const suggestions = await improveTopicWording(list, sender, w.sites.map((s) => sourceInfo(s).label), modelChoice, { workspaceId: organisationId, assistantId });
+    return suggestions ? { ok: true, suggestions } : { ok: false, status: 502, error: 'I couldn’t suggest new wording just now — please try again.' };
+}
+
 // ── Chat ─────────────────────────────────────────────────────────────────────────────────────────
 
 /** How many new threads the chat sees by name. The block says when there are more. */
@@ -453,14 +480,16 @@ What it watches: topics ${watch.topics.length ? watch.topics.map((t) => `"${t}"`
 Threads: ${counts.new} new, ${counts.replied} replied, ${counts.dismissed} dismissed.${fresh.length ? `\nNew threads${counts.new > fresh.length ? ` (the ${fresh.length} most recent of ${counts.new})` : ''}:\n${lines.join('\n')}` : ''}
 
 To act on the Discussions tab, emit a discussion_action_proposal uiElement — the user confirms on the card, and only their click changes anything:
-{ "type": "discussion_action_proposal", "action": "set_watch" | "scan_now" | "redraft" | "mark_replied" | "dismiss",
-  "topics": ["<phrase someone would search or post, e.g. 'recommend a bookkeeper for a small cafe'>", ...],   // set_watch only, at most 5; the WHOLE list
+{ "type": "discussion_action_proposal", "action": "set_watch" | "improve_topics" | "scan_now" | "redraft" | "mark_replied" | "dismiss",
+  "topics": ["<phrase someone would search or post, e.g. 'recommend a bookkeeper'>", ...],   // set_watch: at most 5, the WHOLE list; improve_topics: the topics to reword, or omit for the saved ones
   "sites": ["reddit" | "ukbf" | "quora" | "linkedin" | "forum:<web address, e.g. forum:contractortalk.com>", ...],   // set_watch only; the WHOLE list (keep the ones already watched unless asked to drop them); omit to keep the current sites
   "enabled": true | false,                                   // set_watch only; the daily scan
   "discussionId": <the number after # above>,                 // redraft / mark_replied / dismiss
   "instruction": "<what to change, in the user's words>" | null }   // redraft only
 Own forums: the user can add up to 5 forums of their own by web address (a trade forum, a US community). Suggestions that are known to have recent threads: indiehackers.com (founders, mostly US), community.shopify.com (online shops), warriorforum.com (internet marketing), biggerpockets.com/forums (US property), contractortalk.com (US trades) — offer one only when it fits this business. Never invent a forum address; if they don't know one, suggest they find it and paste it.
-Suggest topics written the way a customer would ask for help, from what this business sells — not the business's own name. A scan costs one task. Never write a reply to a thread in your own message: the card shows the stored draft, and "redraft" rewrites it. Never say a reply HAS been posted — only the user posts. The card does nothing until the user presses its button, so your message must NOT say you are scanning, will scan now, have started a scan, have saved the topics, have marked, dismissed or rewritten anything, or are doing so — say the card is there for them to confirm (e.g. "Press Scan now on the card below and I'll look", "Press Mark replied on the card to file it").
+Suggest topics written the way a customer would ask for help, from what this business sells — not the business's own name.
+${TOPIC_WORDING_RULES}
+When the user asks you to improve, reword or check their topics (or why a scan finds little), send "improve_topics": its button asks for the same suggested wording as the swan button beside the Topics box ("Ask <your name> to improve"), shows it on the card, and the user picks "Use these topics" or keeps their own. Don't write the new wording in your own message. A scan costs one task. Never write a reply to a thread in your own message: the card shows the stored draft, and "redraft" rewrites it. Never say a reply HAS been posted — only the user posts. The card does nothing until the user presses its button, so your message must NOT say you are scanning, will scan now, have started a scan, have saved the topics, have marked, dismissed or rewritten anything, or are doing so — say the card is there for them to confirm (e.g. "Press Scan now on the card below and I'll look", "Press Mark replied on the card to file it").
 ONE card per message. When they ask for two things at once (e.g. mark one replied AND dismiss another), send the card for the first and say plainly that you'll do the second next — never say the second is done or happening.`;
     } catch (err) {
         console.error('[discussions] chat block failed', err instanceof Error ? err.message : err);

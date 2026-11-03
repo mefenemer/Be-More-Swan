@@ -8,6 +8,7 @@
 //   POST { action: 'set_status',  assistantId, id, status }              → { discussion }   (new | replied | dismissed)
 //   POST { action: 'save_draft',  assistantId, id, draft }               → { discussion }
 //   POST { action: 'redraft',     assistantId, id, instruction? }        → { discussion }
+//   POST { action: 'improve_topics', assistantId, topics? }              → { suggestions[{ from, to, why }] }  (saves nothing)
 //
 // Nothing here posts to any site. See src/config/discussion-sites.ts.
 
@@ -17,7 +18,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import {
-    listDiscussions, redraftDiscussion, saveDraft, saveWatch, setDiscussionStatus, startScan,
+    listDiscussions, redraftDiscussion, saveDraft, saveWatch, setDiscussionStatus, startScan, suggestTopicWording,
 } from '../../src/utils/discussions';
 import {
     DISCUSSION_SITES, DISCUSSION_SITE_KEYS, DISCUSSION_STATUSES, MAX_OWN_FORUMS, MAX_TOPICS, SUGGESTED_FORUMS,
@@ -95,6 +96,10 @@ export default withLambda(async (event) => {
         if (action === 'redraft') {
             const r = await redraftDiscussion(db, orgId, assistantId, id, typeof body.instruction === 'string' ? body.instruction : null);
             return r.ok ? json(200, { discussion: r.discussion }) : json(502, { error: r.error });
+        }
+        if (action === 'improve_topics') {
+            const r = await suggestTopicWording(db, orgId, assistantId, body.topics);
+            return r.ok ? json(200, { suggestions: r.suggestions }) : json(r.status, { error: r.error, code: r.code });
         }
         return json(400, { error: `Unknown action "${action}".` });
     } catch (err) {

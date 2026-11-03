@@ -1385,6 +1385,12 @@
           const p = d.proposed || {};
           await call({ action: 'save_watch', topics: p.topics, sites: p.sites, enabled: p.enabled });
           respond({ ok: true, message: 'Saved. The next scan looks for these on the Discussions tab.' });
+        } else if (d.action === 'improve_topics') {
+          // The same call as the swan beside the tab's Topics box. Saves nothing — the card shows the
+          // suggestions and its "Use these topics" comes back here as set_watch.
+          const r = await call({ action: 'improve_topics', topics: d.topics || undefined });
+          respond({ ok: true, suggestions: r.suggestions || [] });
+          return;
         } else if (d.action === 'scan_now') {
           await call({ action: 'scan_now' });
           respond({ ok: true, message: 'Scanning now. New threads appear on the Discussions tab in a minute or two.' });

@@ -4366,8 +4366,8 @@
   register('lead_action_proposal', renderLeadActionProposalCard);
 
   // ── Built-in: Discussion Action Proposal Card (Lead Generation chat) ───────
-  // { type: 'discussion_action_proposal', action: 'set_watch'|'scan_now'|'redraft'|'mark_replied'|'dismiss',
-  //   assistantId, current?, proposed?, discussionId?, title?, url?, siteLabel?, draftReply?, instruction?,
+  // { type: 'discussion_action_proposal', action: 'set_watch'|'improve_topics'|'scan_now'|'redraft'|'mark_replied'|'dismiss',
+  //   assistantId, current?, proposed?, topics?, discussionId?, title?, url?, siteLabel?, draftReply?, instruction?,
   //   blocked, settled? }
   //
   // The Discussions tab's buttons, from chat. Every fact comes from the rows
@@ -4375,6 +4375,7 @@
   // calls discussions.ts, the endpoint the tab uses. Nothing here posts to any site.
   const DISCUSSION_ACTION_COPY = {
     set_watch: { head: 'Change what Discussions watches', button: 'Save', busy: 'Saving…' },
+    improve_topics: { head: 'Better wording for your topics', button: 'Suggest wording', busy: 'Thinking…' },
     scan_now: { head: 'Scan for discussions now', button: 'Scan now', busy: 'Starting…' },
     redraft: { head: 'Rewrite this reply', button: 'Rewrite it', busy: 'Rewriting…' },
     mark_replied: { head: 'Mark this thread replied', button: 'Mark replied', busy: 'Saving…' },
@@ -4398,6 +4399,10 @@
           <div><dt class="font-bold text-gray-700">Daily scan</dt><dd class="text-gray-900">${p.enabled ? 'On' : 'Off'}</dd></div>
         </dl>
         <p class="text-xs text-gray-600 mt-3">Saving changes what the daily scan looks for. It posts nothing — you reply to threads yourself.</p>`;
+    } else if (ui.action === 'improve_topics') {
+      bodyHtml = `<p class="text-sm text-gray-800 mt-3 break-words">Rewords ${list(ui.topics)} the way people post in forums, so the scan finds more of the right threads.</p>
+        <p class="text-xs text-gray-600 mt-2">You see the suggestions here first — nothing changes unless you choose “Use these topics”.</p>
+        <div data-dap-suggestions></div>`;
     } else if (ui.action === 'scan_now') {
       const c = ui.current || {};
       bodyHtml = `<p class="text-sm text-gray-800 mt-3">Searches ${list(c.sites)} for the last week of threads about ${list(c.topics)}.</p>
@@ -4427,7 +4432,50 @@
     const status = el.querySelector('[data-dap-status]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
     const setBusy = (b) => el.querySelectorAll('[data-dap-go], [data-dap-cancel]').forEach((x) => { x.disabled = b; });
+    // improve_topics: the suggestions come back on the card, then "Use these topics" saves them through
+    // the set_watch action — the saved list with each reworded topic swapped in place.
+    let suggested = null;
+    function showSuggestions(list) {
+      const box = el.querySelector('[data-dap-suggestions]');
+      const same = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+      const changed = (list || []).filter((x) => !same(x.to, x.from));
+      if (!box) return;
+      if (!changed.length) { say('Your topics are already well worded — nothing to change.'); return; }
+      const saved = (ui.current && Array.isArray(ui.current.topics)) ? ui.current.topics.slice() : [];
+      const topics = saved.length ? saved : list.map((x) => x.from);
+      for (const x of changed) {
+        const at = topics.findIndex((t) => same(t, x.from));
+        if (at >= 0) topics[at] = x.to; else topics.push(x.to);
+      }
+      suggested = topics;
+      box.innerHTML = `<ul class="mt-3 space-y-2">${list.map((x) => same(x.to, x.from)
+        ? `<li class="text-sm text-gray-700 break-words">“${esc(x.from)}” — already well worded.</li>`
+        : `<li><p class="text-sm font-bold text-gray-900 break-words">${esc(x.to)}</p><p class="text-xs text-gray-600 break-words">Yours: “${esc(x.from)}”${x.why ? ` · ${esc(x.why)}` : ''}</p></li>`).join('')}</ul>
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+          <button type="button" data-dap-use class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Use these topics</button>
+          <button type="button" data-dap-keep class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Keep mine</button>
+        </div>`;
+      status.className = 'hidden';
+    }
     el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-dap-keep]')) { el.querySelectorAll('[data-dap-use], [data-dap-keep]').forEach((x) => { x.disabled = true; }); say('Kept your own wording.'); return; }
+      if (e.target.closest('[data-dap-use]') && suggested) {
+        const btns = el.querySelectorAll('[data-dap-use], [data-dap-keep]');
+        btns.forEach((x) => { x.disabled = true; });
+        say('Saving…');
+        el.dispatchEvent(new CustomEvent('discussion:action', {
+          bubbles: true,
+          detail: {
+            action: 'set_watch', assistantId: Number(ui.assistantId) || null, proposed: { topics: suggested },
+            respond({ ok, message, error }) {
+              if (ok) { say(message || 'Saved.'); return; }
+              btns.forEach((x) => { x.disabled = false; });
+              say(error || 'That didn’t work — please try again.', 'error');
+            },
+          },
+        }));
+        return;
+      }
       if (e.target.closest('[data-dap-cancel]')) { setBusy(true); say('Left as it is.'); return; }
       if (!e.target.closest('[data-dap-go]')) return;
       setBusy(true);
@@ -4437,8 +4485,9 @@
         detail: {
           action: ui.action, assistantId: Number(ui.assistantId) || null,
           discussionId: Number(ui.discussionId) || null, instruction: ui.instruction || null,
-          proposed: ui.proposed || null,
-          respond({ ok, message, error }) {
+          proposed: ui.proposed || null, topics: ui.topics || null,
+          respond({ ok, message, error, suggestions }) {
+            if (ok && Array.isArray(suggestions)) { showSuggestions(suggestions); return; }
             if (ok) { say(message || 'Done.'); return; }
             setBusy(false);
             say(error || 'That didn’t work — please try again.', 'error');

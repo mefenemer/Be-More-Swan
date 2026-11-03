@@ -149,6 +149,19 @@ export function normaliseTopics(raw: unknown): string[] {
     return out;
 }
 
+/**
+ * How a topic is worded so the scan finds threads — read by "Ask … to improve" beside the Topics box
+ * (src/lib/discussion-triage.ts improveTopicWording) AND by the chat's prompt, so both give the same
+ * advice. Each topic becomes `site:<forum> <topic>` on Google (discussionQuery): every word must
+ * appear in a post, so a long, careful sentence finds nothing.
+ */
+export const TOPIC_WORDING_RULES = `HOW A DISCUSSIONS TOPIC IS WORDED — each topic is searched on Google as "site:<forum> <topic>", over the last week, and Google only returns threads that contain (close to) all of its words:
+- 2 to 6 words, the way people actually write in a forum post title or question: "recommend a bookkeeper", "best booking app for salon", "how to get more google reviews".
+- Plain everyday words a customer uses, not the trade's own jargon, product names or the business's own name. Prefer the common word over the precise one ("accountant" over "chartered management accountant").
+- One idea per topic. Drop filler ("small", "UK-based", "for my business", "please help") unless it is what makes the topic this business's — a place name only when the business is local.
+- Keep what the business really sells: never widen a topic into something it doesn't offer, and never invent a service.
+- No quotes, no "site:", no OR/AND, no hashtags.`;
+
 /** Built-in sites in their fixed order, then up to MAX_OWN_FORUMS own forums (`forum:<address>`, cleaned and deduped). */
 export function normaliseSites(raw: unknown): DiscussionSource[] {
     const list = Array.isArray(raw) ? raw : [];

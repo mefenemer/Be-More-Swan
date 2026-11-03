@@ -18,7 +18,7 @@ import { withRoleModel, type RoleModelChoice } from '../utils/assistant-model';
 import { logMessageUsage } from '../utils/ai-usage';
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import type { SenderIdentity } from '../config/sender-identity';
-import { sourceInfo, type DiscussionFit, type DiscussionSource } from '../config/discussion-sites';
+import { MAX_TOPICS, TOPIC_MAX_CHARS, TOPIC_WORDING_RULES, normaliseTopics, sourceInfo, type DiscussionFit, type DiscussionSource } from '../config/discussion-sites';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -187,4 +187,58 @@ Return STRICT JSON only (no markdown): { "reply": "<the reply>" }`,
         console.error('[discussion-triage] redraft failed', err instanceof Error ? err.message : err);
         return null;
     }
+}
+
+/** One topic as the user wrote it and the wording suggested for it. `to === from` = already fine. */
+export interface TopicSuggestion { from: string; to: string; why: string }
+
+/**
+ * "Ask … to improve" beside the Topics box, and the chat's improve_topics card: reword each topic
+ * so the site: search finds the most relevant threads (TOPIC_WORDING_RULES). One suggestion per
+ * topic, in order — nothing is saved; the user applies it or keeps their own. Null on failure.
+ */
+export async function improveTopicWording(
+    topics: string[],
+    sender: SenderIdentity,
+    siteLabels: string[],
+    modelChoice: RoleModelChoice | null = null,
+    usage: TriageUsage | null = null,
+): Promise<TopicSuggestion[] | null> {
+    const from = normaliseTopics(topics);
+    if (!from.length) return null;
+    try {
+        const { resp, model: used } = await withRoleModel(modelChoice, TRIAGE_MODEL, async (model, thinking) => ({ model, resp: await anthropic.messages.create(adaptForModel({
+            model,
+            max_tokens: 1024,
+            system: `You help a small business choose the search topics that find public forum threads where someone is asking for what it sells.
+
+${businessBlock(sender)}
+
+The forums searched: ${siteLabels.join(', ') || 'Reddit, UK Business Forums, Quora'}.
+
+${TOPIC_WORDING_RULES}
+
+Rewrite EACH topic you are given into the wording most likely to find relevant threads. If one is already well worded, return it unchanged. Keep the same number of topics, in the same order.
+
+Return STRICT JSON only (no markdown): [{ "topic": "<the improved topic>", "why": "<under 15 words, for the business owner: what changed and why it finds more>" }]`,
+            messages: [{ role: 'user', content: JSON.stringify(from) }],
+        }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming, { timeout: 20_000, maxRetries: 0 }) }), { requestPath: true, label: 'discussion-topics' });
+        logMessageUsage(resp, used, { ...usage, sessionId: 'discussion-topics' });
+        return topicSuggestionsFromModel(from, parseModelJsonArray(replyText(resp.content)));
+    } catch (err) {
+        console.error('[discussion-triage] topic wording failed', err instanceof Error ? err.message : err);
+        return null;
+    }
+}
+
+/** Line the model's answer up with the user's topics, cleaned like a saved topic. Pure. Null = unusable. */
+export function topicSuggestionsFromModel(from: string[], parsed: unknown): TopicSuggestion[] | null {
+    if (!Array.isArray(parsed) || !parsed.length) return null;
+    const out: TopicSuggestion[] = from.slice(0, MAX_TOPICS).map((topic, i) => {
+        const r = (parsed[i] && typeof parsed[i] === 'object' ? parsed[i] : {}) as Record<string, unknown>;
+        const to = typeof r.topic === 'string' ? normaliseTopics([r.topic])[0] : undefined;
+        const why = typeof r.why === 'string' ? r.why.replace(/\s+/g, ' ').trim().slice(0, 160) : '';
+        return { from: topic, to: (to || topic).slice(0, TOPIC_MAX_CHARS), why: to && to !== topic ? why : '' };
+    });
+    return out;
 }

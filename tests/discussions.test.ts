@@ -20,6 +20,7 @@ import {
     MAX_OWN_FORUMS, normaliseForumAddress, sitesFromChat, sourceInfo,
 } from '../src/config/discussion-sites';
 import { discussionActionFromUiElement } from '../src/utils/chat-discussion-action';
+import { topicSuggestionsFromModel } from '../src/lib/discussion-triage';
 import { renderMentorSnapshot, renderTeamFeatures } from '../src/utils/mentor-snapshot';
 
 let passed = 0;
@@ -212,6 +213,66 @@ check('a forum the chat can’t watch, or a sixth own forum, reaches the card �
     assert.match(src, /You can watch up to \$\{MAX_OWN_FORUMS\} forums of your own/);
 });
 
+console.log('\n──── "Ask … to improve" topic wording ────');
+
+check('suggestions line up with the user’s topics, cleaned like a saved topic', () => {
+    const r = topicSuggestionsFromModel(['can anyone recommend a really good bookkeeper for my small cafe', 'google reviews'], [
+        { topic: 'site:reddit.com "recommend a bookkeeper"', why: 'Shorter — the words people post.' },
+        { topic: 'google reviews', why: 'unchanged' },
+    ]);
+    assert.deepStrictEqual(r, [
+        { from: 'can anyone recommend a really good bookkeeper for my small cafe', to: 'recommend a bookkeeper', why: 'Shorter — the words people post.' },
+        { from: 'google reviews', to: 'google reviews', why: '' },
+    ]);
+    // A missing or junk row keeps the user's own topic — never drops it.
+    assert.deepStrictEqual(topicSuggestionsFromModel(['a', 'b'], [{ topic: 'x' }])?.map((x) => x.to), ['x', 'b']);
+    assert.strictEqual(topicSuggestionsFromModel(['a'], null), null);
+    assert.strictEqual(topicSuggestionsFromModel(['a'], []), null);
+});
+check('one wording rule for the swan and the chat, written for site: searches', () => {
+    assert.match(read('src/config/discussion-sites.ts'), /export const TOPIC_WORDING_RULES = `HOW A DISCUSSIONS TOPIC IS WORDED — each topic is searched on Google as "site:<forum> <topic>"/);
+    assert.match(read('src/lib/discussion-triage.ts'), /\$\{TOPIC_WORDING_RULES\}\n\nRewrite EACH topic/);
+    assert.match(read('src/utils/discussions.ts'), /from what this business sells — not the business's own name\.\n\$\{TOPIC_WORDING_RULES\}/);
+});
+check('the suggestion saves nothing, is metered as a helper, and uses the role’s model', () => {
+    const s = read('src/utils/discussions.ts');
+    const fn = s.slice(s.indexOf('export async function suggestTopicWording'), s.indexOf('// ── Chat ──'));
+    assert.ok(fn.indexOf("meterInteraction(db, organisationId, 'helpers')") > -1 && fn.indexOf("meterInteraction(db, organisationId, 'helpers')") < fn.indexOf('improveTopicWording('));
+    assert.match(fn, /loadRoleModel\(db, roleKey \?\? 'lead_qualifier'\)/);
+    assert.doesNotMatch(fn, /saveWatch|db\.(update|insert)/, 'improving topics must not write the watch');
+    const tri = read('src/lib/discussion-triage.ts');
+    const call = tri.slice(tri.indexOf('export async function improveTopicWording'), tri.indexOf('export function topicSuggestionsFromModel'));
+    assert.match(call, /withRoleModel\(modelChoice, TRIAGE_MODEL/);
+    assert.match(call, /adaptForModel\(/);
+    assert.match(call, /replyText\(resp\.content\)/);
+    assert.match(read('netlify/functions/discussions.ts'), /if \(action === 'improve_topics'\) \{\n\s+const r = await suggestTopicWording\(db, orgId, assistantId, body\.topics\);/);
+});
+check('the swan sits beside Topics, names the assistant, and only fills the box on “Use”', () => {
+    const js = read('src/components/assistant-discussions.js');
+    assert.match(js, /const askLabel = \(\) => `Ask \$\{state\.assistantName \|\| 'your assistant'\} to improve`;/);
+    const topicsAt = js.indexOf('for="disc-topics">Topics</label>');
+    const swanAt = js.indexOf('data-disc-improve-topics title=');
+    assert.ok(topicsAt > -1 && swanAt > topicsAt && swanAt < js.indexOf('<textarea id="disc-topics"'), 'swan button between the Topics label and the box');
+    assert.match(js, /<img src="\$\{SWAN\}" alt=""/);
+    assert.match(js, /const SWAN = '\/images\/BeMoreSwan_SwanAI\.png';/);
+    const improve = js.slice(js.indexOf('async function improveTopics'), js.indexOf('function useSuggestions'));
+    assert.match(improve, /call\('improve_topics', \{ topics \}\)/);
+    assert.doesNotMatch(improve, /watchDraft =|save_watch/, 'asking must not touch the box or save');
+    const use = js.slice(js.indexOf('function useSuggestions'), js.indexOf('async function scanNow'));
+    assert.doesNotMatch(use, /call\(/, '"Use" fills the box; the user still presses Save');
+    assert.match(js, /data-disc-topic-keep/);
+});
+check('the chat proposes improve_topics; its card calls the same action and saves only on “Use these topics”', () => {
+    assert.strictEqual(discussionActionFromUiElement({ type: 'discussion_action_proposal', action: 'improve_topics' })?.action, 'improve_topics');
+    assert.match(read('src/utils/discussions.ts'), /When the user asks you to improve, reword or check their topics[\s\S]{0,300}send "improve_topics"/);
+    assert.match(read('src/utils/chat-discussion-action.ts'), /There are no topics to improve yet — add one first\./);
+    const cs = read('src/components/chat-session.js');
+    assert.match(cs, /await call\(\{ action: 'improve_topics', topics: d\.topics \|\| undefined \}\);\n\s+respond\(\{ ok: true, suggestions: r\.suggestions \|\| \[\] \}\);\n\s+return;/);
+    const reg = read('src/components/disruptive-ui-registry.js');
+    assert.match(reg, /improve_topics: \{ head: 'Better wording for your topics', button: 'Suggest wording', busy: 'Thinking…' \},/);
+    assert.match(reg, /action: 'set_watch', assistantId: Number\(ui\.assistantId\) \|\| null, proposed: \{ topics: suggested \},/);
+});
+
 console.log('\n──── Business Mentor ────');
 
 check('the Mentor is told about the Discussions tab and where it stands, as counts only', () => {
@@ -241,7 +302,7 @@ check('the tab is declared, placed and loaded', () => {
     assert.match(read('workspace.html'), /<script src="\/src\/components\/assistant-discussions\.js"><\/script>/);
     const js = read('assistants.js');
     assert.match(js, /if \(name === 'discussions'\) window\.AssistantDiscussions\?\.activate\(\);/);
-    assert.match(js, /window\.AssistantDiscussions\?\.init\(\{ assistantId: data\.id \}\);/);
+    assert.match(js, /window\.AssistantDiscussions\?\.init\(\{ assistantId: data\.id, assistantName: data\.name \}\);/);
 });
 check('the daily scan is scheduled, and staging pokes it', () => {
     assert.match(read('netlify.toml'), /\[functions\.dispatch-discussion-scans\]\n {2}schedule = "50 6 \* \* \*"/);
