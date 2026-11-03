@@ -243,17 +243,20 @@ export async function detectLeadQualityDrop(
 /**
  * Turn a quality drop into a halt proposal.
  *
- * ⚠️ `narrow_targeting` is proposed WITHOUT an `idea` rewrite, and that is deliberate rather than
- * unfinished. Rewriting the search brief is prose, which is the one thing this file has no business
- * generating — and campaign-orders.ts leaves the existing idea untouched when no replacement is
- * given, so approving this flags the search and records the decision without silently rewording
- * what the user wrote. The Lead Generator's own Strategy tab is where a reworded brief belongs.
+ * `narrow_targeting` carries the concrete new description (`idea`) and the one it replaces
+ * (`previousIdea`), both shown on the card under "If you approve". That wording is prose, so it is
+ * worked out OUTSIDE this file by halt-tightening.ts and passed in — this function stays a template.
  *
- * The angle on `adjust_messaging` IS set, because that one is a routing instruction rather than
+ * ⚠️ When no tightening could be worked out, the order carries `pauseSearch` instead, and the card
+ * says the search will be paused. Before 2026-11-03 it carried neither, and approving reported
+ * "Search targeting tightened" while changing nothing.
+ *
+ * The angle on `adjust_messaging` IS set here, because that one is a routing instruction rather than
  * copy: it reaches the drafter through blueprint section 13-campaign as a single sentence.
  */
 export function buildHaltProposal(
     hit: { discoveryCampaignId: number; searchName: string | null; total: number; cold: number; coldShare: number },
+    tightening: { idea: string | null; previousIdea: string } | null = null,
 ): ProposedDecision {
     const pct = Math.round(hit.coldShare * 100);
     const name = hit.searchName?.trim() || `search #${hit.discoveryCampaignId}`;
@@ -270,7 +273,7 @@ export function buildHaltProposal(
         orders: [
             {
                 action: 'narrow_targeting',
-                brief: { discoveryCampaignId: hit.discoveryCampaignId },
+                brief: narrowTargetingBrief(hit.discoveryCampaignId, tightening),
                 quantity: 1,
             },
             {
@@ -282,6 +285,15 @@ export function buildHaltProposal(
             },
         ],
     };
+}
+
+/** The halt's narrowing brief: the new wording when there is one, otherwise a pause. Pure. */
+export function narrowTargetingBrief(
+    discoveryCampaignId: number, tightening: { idea: string | null; previousIdea: string } | null,
+): Record<string, unknown> {
+    return tightening?.idea
+        ? { discoveryCampaignId, idea: tightening.idea, previousIdea: tightening.previousIdea }
+        : { discoveryCampaignId, pauseSearch: true };
 }
 
 // ── Persistence ──────────────────────────────────────────────────────────────

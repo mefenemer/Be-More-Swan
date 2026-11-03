@@ -163,8 +163,13 @@ export async function noteOrderIssued(db: Db, o: OrderCtx & { summary?: string |
         case 'draft_email_campaign':
             return postOncePerOrder(db, o.orderId, { ...base, toAssistantId: o.orchestratorAssistantId, kind: 'started',
                 body: 'On it — writing the emails now. They stay switched off in Email Studio until you review them.' });
-        case 'adjust_messaging':
         case 'narrow_targeting':
+            // The executor's own summary says what happened to the search — rewritten or paused.
+            // A generic "Done" here repeated the "tightened" claim the executor used to make.
+            return postOncePerOrder(db, o.orderId, { ...base, toAssistantId: o.orchestratorAssistantId, kind: 'done',
+                body: `${o.summary || 'Done'}.`,
+                link: { assistantId: o.targetAssistantId, tab: 'signals', label: 'Open the search' } });
+        case 'adjust_messaging':
             return postOncePerOrder(db, o.orderId, { ...base, toAssistantId: o.orchestratorAssistantId, kind: 'done',
                 body: 'Done — this applies to what I do from now on. Nothing already drafted is rewritten.' });
         case 'run_lead_search':

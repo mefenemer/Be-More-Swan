@@ -695,6 +695,27 @@
       }, respond, null);
     }
 
+    // "Restore to Review" on a campaign_decision_restore card — the same restore_decision as the
+    // button under Decisions ▸ Archived. Passes the server's sentence back to the card, and
+    // campaign:updated moves the card on the Decisions tab behind the modal (assistants.js).
+    function onCampaignRestoreDecision(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/campaigns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ action: 'restore_decision', decisionId: d.decisionId }),
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || `Restore failed (HTTP ${res.status}).`);
+          respond({ ok: true, message: data.message });
+          document.dispatchEvent(new CustomEvent('campaign:updated', { detail: { assistantId, campaignId: data.campaignId || null } }));
+        })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     // "Keep this lesson" on a campaign_learning_proposal card (§9.8) — the same save_learning the
     // Summary panel's "Keep" calls. Reports how many assistants got the rule, from the server.
     function onCampaignSaveLearning(e) {
@@ -1385,6 +1406,12 @@
           const p = d.proposed || {};
           await call({ action: 'save_watch', topics: p.topics, sites: p.sites, enabled: p.enabled });
           respond({ ok: true, message: 'Saved. The next scan looks for these on the Discussions tab.' });
+        } else if (d.action === 'improve_topics') {
+          // The same call as the swan beside the tab's Topics box. Saves nothing — the card shows the
+          // suggestions and its "Use these topics" comes back here as set_watch.
+          const r = await call({ action: 'improve_topics', topics: d.topics || undefined });
+          respond({ ok: true, suggestions: r.suggestions || [] });
+          return;
         } else if (d.action === 'scan_now') {
           await call({ action: 'scan_now' });
           respond({ ok: true, message: 'Scanning now. New threads appear on the Discussions tab in a minute or two.' });
@@ -2094,6 +2121,7 @@
     container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
     container.addEventListener('campaign:edit', onCampaignEdit);
     container.addEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
+    container.addEventListener('campaign:restoreDecision', onCampaignRestoreDecision);
     container.addEventListener('campaign:saveLearning', onCampaignSaveLearning);
     container.addEventListener('brief:create', onBriefCreate);
     container.addEventListener('video:create', onVideoCreate);
@@ -2190,6 +2218,7 @@
         container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);
         container.removeEventListener('campaign:edit', onCampaignEdit);
         container.removeEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
+        container.removeEventListener('campaign:restoreDecision', onCampaignRestoreDecision);
         container.removeEventListener('campaign:saveLearning', onCampaignSaveLearning);
         container.removeEventListener('brief:create', onBriefCreate);
         container.removeEventListener('video:create', onVideoCreate);

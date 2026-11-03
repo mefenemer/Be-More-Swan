@@ -36,7 +36,7 @@ export const MAX_QUIET = 10;
 
 export const LOSS_REASON_LABELS: Record<string, string> = {
     price: 'price', timing: 'timing', no_budget: 'no budget', competitor: 'went with a competitor', no_response: 'no response',
-    wrong_contact: 'wrong contact', not_icp: 'not a good fit', feature_gap: 'missing something they needed', went_silent: 'went silent', other: 'other',
+    wrong_contact: 'wrong contact', not_icp: 'not a good fit', feature_gap: 'missing something they needed', went_silent: 'went silent', against_ai: "doesn't want AI", undeliverable: 'email address did not work', other: 'other',
 };
 
 const ROLE = { leads: 'lead_qualifier', support: 'tier1_support_agent', ar: 'accounts_receivable_clerk' } as const;

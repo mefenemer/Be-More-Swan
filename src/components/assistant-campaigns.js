@@ -1174,7 +1174,7 @@
     draft_social_posts: { field: 'angle', label: 'Angle (optional)', placeholder: 'What these posts should argue', required: false },
     draft_blog_pillar: { field: 'angle', label: 'Angle (optional)', placeholder: 'What the article should argue', required: false },
     run_lead_search: { field: 'idea', label: 'Who to look for', placeholder: 'e.g. UK accountancy firms with 10–50 staff', required: true },
-    narrow_targeting: { field: 'idea', label: 'Tightened description (optional)', placeholder: 'Who the search should find instead', required: false },
+    narrow_targeting: { field: 'idea', label: 'New description of who to find', placeholder: 'e.g. UK design studios with 2–20 staff — not agencies that sell to studios', required: true },
     adjust_messaging: { field: 'angle', label: 'New angle', placeholder: 'The argument this campaign should make from now on', required: true },
     draft_email_campaign: { field: 'angle', label: 'What should the emails get people to do? (optional)', placeholder: 'Leave blank to use this campaign\'s objective', required: false },
     request_human_task: { field: 'task', label: 'What are you asking them to do?', placeholder: 'e.g. Record a 30-second product video for the launch posts', required: true },
@@ -2857,8 +2857,9 @@
       state.busy = true;
       awSubmit.disabled = true;
       say(id, 'Briefing…');
+      let placed = null;
       try {
-        await post({ action: 'place_order', campaignId: id, orderAction: spec.key, quantity, brief, waitFor: waitFor || undefined });
+        placed = await post({ action: 'place_order', campaignId: id, orderAction: spec.key, quantity, brief, waitFor: waitFor || undefined });
       } catch (err) {
         say(id, err.message || 'That did not work — please try again.', 'error');
         awSubmit.disabled = false;
@@ -2867,7 +2868,8 @@
       }
       state.busy = false;
       st.open = false;
-      window.showToast?.(`${spec.label} — briefed. It is listed in Briefs.`, 'success');
+      // Narrowing is done the moment it is placed, so say what it did to the search, not "briefed".
+      window.showToast?.(spec.key === 'narrow_targeting' && placed?.summary ? `${placed.summary}.` : `${spec.label} — briefed. It is listed in Briefs.`, 'success');
       await load();
     }
   });

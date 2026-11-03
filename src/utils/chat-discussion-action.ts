@@ -1,6 +1,6 @@
 // src/utils/chat-discussion-action.ts
-// The Lead Generator chat's hands on its Discussions tab: change what it watches, start a scan,
-// redraft a reply, mark a thread replied, or dismiss one. The discussions twin of
+// The Lead Generator chat's hands on its Discussions tab: change what it watches, suggest better
+// wording for its topics, start a scan, redraft a reply, mark a thread replied, or dismiss one. The discussions twin of
 // chat-lead-action.ts.
 //
 // The model never acts. It proposes a `discussion_action_proposal`; this module checks it against
@@ -22,7 +22,7 @@ import { discussionView, loadDiscussion, loadWatch, watchView } from './discussi
 type Db = ReturnType<typeof getDb>;
 
 export const DISCUSSION_ACTION_PROPOSAL_TYPE = 'discussion_action_proposal';
-export const DISCUSSION_ACTIONS = ['set_watch', 'scan_now', 'redraft', 'mark_replied', 'dismiss'] as const;
+export const DISCUSSION_ACTIONS = ['set_watch', 'improve_topics', 'scan_now', 'redraft', 'mark_replied', 'dismiss'] as const;
 export type DiscussionAction = typeof DISCUSSION_ACTIONS[number];
 
 export interface DiscussionActionRequest {
@@ -65,6 +65,8 @@ export interface DiscussionActionCard {
     /** set_watch: before and after, as the user reads them. */
     current?: { topics: string[]; sites: string[]; enabled: boolean };
     proposed?: { topics: string[]; sites: DiscussionSource[]; siteLabels: string[]; enabled: boolean };
+    /** improve_topics: the saved topics the click asks to reword. */
+    topics?: string[];
     /** redraft / mark_replied / dismiss: the thread, from its row. */
     discussionId?: number;
     title?: string;
@@ -83,9 +85,16 @@ export async function resolveDiscussionActionProposal(
     try {
         const base = { type: DISCUSSION_ACTION_PROPOSAL_TYPE, action: req.action, assistantId } as const;
 
-        if (req.action === 'set_watch' || req.action === 'scan_now') {
+        if (req.action === 'set_watch' || req.action === 'scan_now' || req.action === 'improve_topics') {
             const w = watchView(await loadWatch(db, organisationId, assistantId));
             const current = { topics: w.topics, sites: w.sites.map((s) => sourceInfo(s).label), enabled: w.enabled };
+            if (req.action === 'improve_topics') {
+                // The click calls the same improve_topics action as the swan beside the Topics box, on
+                // the SAVED topics — never the model's own list: "Use these topics" swaps each one in
+                // place, so a topic that isn't saved would have nothing to replace.
+                const topics = w.topics;
+                return { ...base, current, topics, blocked: topics.length ? null : 'There are no topics to improve yet — add one first.' };
+            }
             if (req.action === 'scan_now') {
                 const blocked = !w.topics.length ? 'There’s nothing to look for yet — add a topic first.'
                     : !w.sites.length ? 'No sites are being watched — choose at least one first.'

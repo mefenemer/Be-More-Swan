@@ -1452,6 +1452,17 @@ document.addEventListener('bms:notifications-arrived', () => {
     if ((window._detailReviewQueue || {}).kind === 'records') window._detailRqRefreshColumnCounts?.();
 });
 
+// A decision restored from the chat's campaign_decision_restore card (chat-session.js dispatches
+// campaign:updated) moves a card from Archived to Review on the Decisions tab behind the modal.
+document.addEventListener('campaign:updated', (e) => {
+    if ((window._detailReviewQueue || {}).recordType !== 'campaign_decision') return;
+    const id = e.detail && e.detail.assistantId;
+    if (id && Number(id) !== Number(window._currentAssistantId)) return;
+    const panel = document.getElementById('maintab-review-queue');
+    if (panel && !panel.classList.contains('hidden')) window.detailRqRefresh?.();
+    else window._detailRqRefreshColumnCounts?.();
+});
+
 /**
  * Every column's count on a RECORDS queue (Leads, Ledger, Tickets, Inbox), plus the tab's own
  * total.
@@ -2420,17 +2431,55 @@ async function _rqApproveCampaignDecision(card, record) {
         // the decision, so "approved" and "briefed" are not the same fact and must not be reported
         // as one. chat-claims-drafts-it-never-saved is the receipt for reporting intent as outcome.
         const placed = Array.isArray(data.orders) ? data.orders : [];
-        const issued = placed.filter((p) => p && p.orderId).length;
+        // A failed order still has a row (placeOrder writes it first), so count by status, not id.
+        const issued = placed.filter((p) => p && p.orderId && p.status !== 'failed').length;
         const refused = placed.length - issued;
+        // A halt's search change is said in the executor's own words — rewritten, paused, or not
+        // changed and why — because "briefs issued" is no answer to "what happened to my search?".
+        const search = placed.find((p) => p && p.action === 'narrow_targeting');
+        const searchSaid = search ? ` ${search.summary || search.message || ''}`.trimEnd() : '';
         window.showToast?.(
-            !placed.length ? 'Approved. No briefs were issued.'
+            (!placed.length ? 'Approved. No briefs were issued.'
                 : refused ? `Approved — ${issued} of ${placed.length} briefs issued. See the Briefs tab for the rest.`
-                    : `Approved — ${issued} ${issued === 1 ? 'brief' : 'briefs'} issued. Track them in the Briefs tab.`,
+                    : `Approved — ${issued} ${issued === 1 ? 'brief' : 'briefs'} issued. Track them in the Briefs tab.`)
+            + (searchSaid ? `${searchSaid.endsWith('.') ? searchSaid : `${searchSaid}.`}` : ''),
+            { icon: search && search.status === 'failed' ? '⚠️' : '✅' },
         );
         await _detailRqRenderGroups(_detailRqCurrentStatus);
     } catch (e) {
         buttons.forEach((b) => { b.disabled = false; });
         window.showToast?.(e.message || 'Could not approve that.', 'error');
+    }
+}
+
+/**
+ * Restoring an archived campaign decision — one that expired (a halt lasts two days) or was turned
+ * down. campaigns.ts `restore_decision` puts the same decision back to pending with a fresh expiry,
+ * and counts a halt's figures again; the toast is the server's own sentence, so it says which.
+ * No confirm: restoring commits nothing — approving it is still the Approve button in Review.
+ */
+async function _rqRestoreCampaignDecision(card, record) {
+    const decisionId = _rqDecisionId(record);
+    const errEl = card.querySelector('.rq-rec-err');
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); } };
+    if (!decisionId) { showErr('This card has lost its link to the decision — refresh and try again.'); return; }
+    const buttons = card.querySelectorAll('button');
+    buttons.forEach((b) => { b.disabled = true; });
+    try {
+        const res = await fetch('/.netlify/functions/campaigns', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ action: 'restore_decision', decisionId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not restore that.');
+        window.showToast?.(data.message || `Back in ${_rqColumnLabel('review')}.`);
+        await _detailRqRenderGroups(_detailRqCurrentStatus);
+        window._detailRqRefreshColumnCounts?.();
+    } catch (e) {
+        buttons.forEach((b) => { b.disabled = false; });
+        showErr(e.message || 'Could not restore that.');
     }
 }
 
@@ -2672,13 +2721,14 @@ function _rqRecordActions(r, statusKey) {
     // A line above the buttons, for the cards where the state is the point and there is little left
     // to do — a lead whose email has gone out, or one waiting on an inbox connection.
     let note = '';
-    // ⚠️ A campaign decision is approved or rejected — both routed to campaigns.ts `decide` — and
-    // nothing else. "Approve & Schedule", "Schedule", "Send back" and "Restore" are all generic
-    // PATCHes of the MIRROR: the card would read approved while no order was ever placed.
-    // assistant-records.ts now refuses them too (409).
+    // ⚠️ A campaign decision is approved or rejected — both routed to campaigns.ts `decide` — and,
+    // once archived, restored through campaigns.ts `restore_decision`. Nothing else. "Approve &
+    // Schedule", "Schedule" and "Send back" are generic PATCHes of the MIRROR: the card would read
+    // approved while no order was ever placed. assistant-records.ts refuses them too (409).
     if (r.recordType === 'campaign_decision') {
         return `<div class="flex flex-wrap items-center gap-2 mt-3">
         ${statusKey === 'review' ? btn('Approve', 'approve', primary) + reject : ''}
+        ${statusKey === 'archived' ? btn(`Restore to ${_rqEsc(_rqColumnLabel('review'))}`, 'restoreDecision', secondary) : ''}
         <p class="rq-rec-err hidden w-full text-xs font-semibold text-red-600 mt-1"></p>
     </div>`;
     }
@@ -3057,6 +3107,13 @@ const _RQ_BRIEF_LABELS = [
     ['videoMessage', 'Video says'], ['cta', 'Ends with'], ['videoLength', 'Length (seconds)'],
     ['assignee', 'Who'], ['task', 'Task'], ['dueDate', 'Due'], ['name', 'Name'],
 ];
+/**
+ * A halt's narrow_targeting shows the search's wording BEFORE and AFTER, or that it will be paused —
+ * the user is approving a rewrite of their own search and must read it first. Before 2026-11-03 the
+ * order carried neither, the card listed a bare "Narrow the targeting", and approving changed nothing.
+ */
+const _RQ_NARROW_LABELS = [['previousIdea', 'Search now'], ['idea', 'Changes to']];
+const _RQ_NARROW_PAUSE = 'Pauses this search. No narrower description could be worked out from its cold leads, so it stops running until you edit who it looks for on Find New Leads and resume it.';
 const _RQ_EMAIL_TRIGGER_LABELS = {
     form: 'A follow-up for people who sign up through a form — saved switched off',
     custom: 'Emails you send to a group yourself — saved as drafts',
@@ -3067,8 +3124,30 @@ function _rqDecisionDetail(r, statusKey) {
     const d = r.data || {};
     const evidence = Array.isArray(d.evidence) ? d.evidence : [];
     const decision = _rqCampaignDecisions.get(_rqDecisionId(r));
-    const orders = Array.isArray(decision?.proposed?.orders) ? decision.proposed.orders : [];
+    const allOrders = Array.isArray(decision?.proposed?.orders) ? decision.proposed.orders : [];
+    // ⚠️ Evidence and briefs line up by POSITION only on a strategy plan (campaign-plan.ts writes one
+    // evidence line per brief). A halt's evidence is three counts and its orders are two steering
+    // briefs, so pairing them numbered the counts and hung the messaging angle off "Rated cold" —
+    // seen 2026-11-03 on a restored halt. Every other kind lists its briefs on their own, below.
+    const paired = d.decisionKind === 'strategy';
+    const orders = paired ? allOrders : [];
     const line = (label, value) => `<p class="text-xs text-gray-700"><span class="font-semibold text-gray-900">${_rqEsc(label)}:</span> ${_rqEsc(value)}</p>`;
+    const actionLabel = (a) => ((window.CampaignConstants?.orderActions || []).find((o) => o.key === a) || {}).label || a;
+    const approving = paired ? '' : allOrders.map((o) => {
+        const brief = (o && o.brief) || {};
+        const narrow = o && o.action === 'narrow_targeting';
+        const fields = (narrow ? _RQ_NARROW_LABELS : _RQ_BRIEF_LABELS)
+            .filter(([k]) => typeof brief[k] === 'string' && brief[k].trim())
+            .map(([k, label]) => line(label, brief[k]));
+        if (narrow && !fields.length) {
+            fields.push(line('What happens', brief.pauseSearch === true ? _RQ_NARROW_PAUSE
+                : 'Nothing — this was raised before proposals carried a new description, so there is nothing to apply. Edit who the search looks for on Find New Leads instead.'));
+        }
+        return `<li class="rounded-lg border border-gray-200 bg-white px-3 py-2">
+            <p class="text-sm font-bold text-gray-900">${_rqEsc(actionLabel(o && o.action))}</p>
+            ${fields.length ? `<div class="mt-1.5 space-y-1">${fields.join('')}</div>` : ''}
+          </li>`;
+    }).join('');
 
     const items = evidence.map((e, i) => {
         if (!e || typeof e !== 'object') return '';
@@ -3090,6 +3169,7 @@ function _rqDecisionDetail(r, statusKey) {
     return `<div class="mt-1 space-y-2">
         ${d.campaign ? `<p class="text-xs text-gray-500"><span class="font-semibold text-gray-700">Campaign:</span> ${_rqEsc(d.campaign)}</p>` : ''}
         ${items ? `<ol class="space-y-2">${items}</ol>` : ''}
+        ${approving ? `<p class="text-xs font-semibold text-gray-900">If you approve:</p><ul class="space-y-2">${approving}</ul>` : ''}
         ${Number(d.workItems) > 0 ? `<p class="text-xs text-gray-700"><span class="font-semibold text-gray-900">Uses:</span> ${Number(d.workItems)} of this campaign’s tasks</p>` : ''}
         ${d.costOfInaction ? `<p class="text-xs text-gray-700"><span class="font-semibold text-gray-900">If you do nothing:</span> ${_rqEsc(d.costOfInaction)}</p>` : ''}
         ${days !== null && days > 0 ? `<p class="text-[11px] text-gray-500">Expires in ${days} day${days === 1 ? '' : 's'}.</p>` : ''}
@@ -3827,6 +3907,14 @@ window._detailRqRecordAct = async function (btn, action) {
     if (errEl) errEl.classList.add('hidden');
 
     if (action === 'showSchedule') { card.querySelector('.rq-sched-row')?.classList.remove('hidden'); return; }
+
+    // An archived campaign decision comes back through campaigns.ts, never the generic PATCH (which
+    // 409s on a mirror): the real row is campaign_decisions and it needs a fresh expiry too.
+    if (action === 'restoreDecision') {
+        const rec = _rqRecordsById.get(Number(card.getAttribute('data-rq-record')));
+        if (rec) await _rqRestoreCampaignDecision(card, rec);
+        return;
+    }
 
     // Notes. Handled before the PATCH machinery below because it is not an approval act at all —
     // it writes through lead-generation.ts `add_note`, which MERGES the note into the record's
@@ -7093,7 +7181,7 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-discussions', !!discussionsTab);
     if (discussionsTab) {
         setText('discussions-tab-label', discussionsTab.label || 'Discussions');
-        window.AssistantDiscussions?.init({ assistantId: data.id });
+        window.AssistantDiscussions?.init({ assistantId: data.id, assistantName: data.name });
     }
 
     // Staged Outreach — lead roles only (reviewQueue.staged: lead_qualifier). The Outreach tab is

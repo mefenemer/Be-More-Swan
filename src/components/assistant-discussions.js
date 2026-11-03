@@ -8,6 +8,10 @@
  * and opens the thread, and "Mark replied" files it. NOTHING here posts anywhere — see
  * src/config/discussion-sites.ts for why that is the design, not a missing feature.
  *
+ * "Ask <name> to improve" (the swan beside Topics) asks the assistant for better search wording;
+ * the suggestions are shown under the box and change nothing until the user presses "Use" — and
+ * even then only the form, which they still Save. The chat's improve_topics card is the same call.
+ *
  * Backed by netlify/functions/discussions.ts — the same endpoint the chat's
  * discussion_action_proposal card calls (chat-session.js onDiscussionAction), which dispatches
  * `discussions:changed` on `document` so this tab reloads behind the chat.
@@ -21,9 +25,11 @@
   const API = '/.netlify/functions/discussions';
   /** Re-read while a scan is running — it takes a minute or two. */
   const POLL_MS = 6000;
+  const SWAN = '/images/BeMoreSwan_SwanAI.png';
 
   const state = {
     assistantId: null,
+    assistantName: '',
     discussions: [],
     counts: { new: 0, replied: 0, dismissed: 0 },
     watch: null,
@@ -43,6 +49,8 @@
     busy: null,
     // The "What to watch" form, while it is being edited, so a re-render keeps what was typed.
     watchDraft: null,
+    // "Ask … to improve": [{ from, to, why }] still waiting for Use / Keep mine, or null.
+    topicSuggestions: null,
     pollTimer: null,
   };
 
@@ -142,8 +150,14 @@
           </div>
           <button type="button" data-disc-scan class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${w.scanning || state.busy === 'scan' || !d.topics.trim() ? 'disabled' : ''}>${w.scanning ? 'Scanning…' : 'Scan now'}</button>
         </div>
-        <label class="block text-xs font-bold text-gray-700 mt-4" for="disc-topics">Topics</label>
+        <div class="flex flex-wrap items-end justify-between gap-2 mt-4">
+          <label class="block text-xs font-bold text-gray-700" for="disc-topics">Topics</label>
+          <button type="button" data-disc-improve-topics title="${esc(askLabel())}" aria-label="${esc(askLabel())} these topics" class="btn-secondary border sb-tap px-2 py-1 rounded-lg inline-flex items-center gap-1.5 text-xs font-bold transition disabled:opacity-50" ${state.busy === 'topics' || !d.topics.trim() ? 'disabled' : ''}>
+            <img src="${SWAN}" alt="" style="width:18px;height:18px;object-fit:contain"><span>${state.busy === 'topics' ? 'Thinking…' : esc(askLabel())}</span>
+          </button>
+        </div>
         <textarea id="disc-topics" data-disc-topics rows="3" class="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm" placeholder="best social media scheduler for a small business&#10;how do I get more Google reviews">${esc(d.topics)}</textarea>
+        ${suggestionsHtml()}
         <p class="text-xs font-bold text-gray-700 mt-3">Sites</p>
         <div class="mt-1 flex flex-wrap gap-4">${siteBoxes}</div>
         ${ownForumsHtml(d)}
@@ -156,6 +170,35 @@
           <p class="text-xs text-gray-600">${lastScanLine(w)} A scan costs one task.</p>
         </div>
       </section>`;
+  }
+
+  const askLabel = () => `Ask ${state.assistantName || 'your assistant'} to improve`;
+  const sameTopic = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+
+  /** The suggested wording, under the box. Each row is the user's to take or leave. */
+  function suggestionsHtml() {
+    const list = state.topicSuggestions;
+    if (!list || !list.length) return '';
+    const changed = list.filter((x) => !sameTopic(x.to, x.from));
+    const rows = list.map((x, i) => sameTopic(x.to, x.from) ? `
+          <li class="py-2 text-sm text-gray-700 break-words">“${esc(x.from)}” — already well worded.</li>` : `
+          <li class="py-2 flex flex-wrap items-start justify-between gap-2">
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-bold text-gray-900 break-words">${esc(x.to)}</p>
+              <p class="text-xs text-gray-600 mt-0.5 break-words">Yours: “${esc(x.from)}”${x.why ? ` · ${esc(x.why)}` : ''}</p>
+            </div>
+            <button type="button" data-disc-topic-use="${i}" class="btn-secondary border sb-tap px-3 py-1 text-xs font-bold rounded-lg transition">Use</button>
+          </li>`).join('');
+    return `
+        <div class="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2" data-disc-suggestions role="region" aria-label="Suggested topic wording">
+          <p class="text-xs font-bold text-emerald-900">${esc(state.assistantName || 'Your assistant')} suggests — shorter phrases people actually post find more threads</p>
+          <ul class="divide-y divide-emerald-100">${rows}</ul>
+          <div class="flex flex-wrap items-center gap-2 mt-1 mb-1">
+            ${changed.length > 1 ? '<button type="button" data-disc-topic-use-all class="btn-primary sb-tap px-3 py-1.5 text-xs font-bold rounded-lg transition">Use all</button>' : ''}
+            <button type="button" data-disc-topic-keep class="btn-secondary border sb-tap px-3 py-1.5 text-xs font-bold rounded-lg transition">${changed.length ? 'Keep mine' : 'Close'}</button>
+            ${changed.length ? '<span class="text-xs text-gray-600">Using one changes the box above — press Save to keep it.</span>' : ''}
+          </div>
+        </div>`;
   }
 
   const ownOf = (sites) => (sites || []).filter((s) => String(s).startsWith('forum:'));
@@ -331,6 +374,38 @@
     });
   }
 
+  /** "Ask … to improve": suggestions for the topics as typed. Saves nothing. */
+  async function improveTopics() {
+    const d = state.watchDraft || readWatchForm();
+    const topics = d.topics.split('\n').map((t) => t.trim()).filter(Boolean);
+    if (!topics.length) return;
+    await withBusy('topics', async () => {
+      const r = await call('improve_topics', { topics });
+      state.topicSuggestions = Array.isArray(r.suggestions) ? r.suggestions : null;
+      if (state.topicSuggestions && state.topicSuggestions.every((x) => sameTopic(x.to, x.from))) toastOk('Your topics are already well worded.');
+    });
+  }
+
+  /** Put suggestion(s) into the box in place of the topic each was for. Never saves. */
+  function useSuggestions(indexes) {
+    const list = state.topicSuggestions || [];
+    const d = state.watchDraft || readWatchForm();
+    const lines = d.topics.split('\n');
+    let missed = 0;
+    for (const i of indexes) {
+      const x = list[i];
+      if (!x || sameTopic(x.to, x.from)) continue;
+      const at = lines.findIndex((l) => sameTopic(l, x.from));
+      if (at < 0) { missed++; continue; }
+      lines[at] = x.to;
+      list[i] = { ...x, from: x.to };
+    }
+    state.watchDraft = { ...d, topics: lines.join('\n') };
+    if (list.every((x) => sameTopic(x.to, x.from))) state.topicSuggestions = null;
+    if (missed) toastErr('One of those topics has changed in the box since — ask again for fresh suggestions.');
+    render();
+  }
+
   async function scanNow() {
     // Unsaved edits to the form are saved first — "Scan now" means scan for what is on screen.
     if (state.watchDraft) { await saveWatch(); if (state.watchDraft) return; }
@@ -396,6 +471,10 @@
     if (!b || b.disabled) return;
     if (b.dataset.discFilter) { state.filter = b.dataset.discFilter; render(); return; }
     if (b.hasAttribute('data-disc-scan')) { scanNow(); return; }
+    if (b.hasAttribute('data-disc-improve-topics')) { improveTopics(); return; }
+    if (b.dataset.discTopicUse) { useSuggestions([Number(b.dataset.discTopicUse)]); return; }
+    if (b.hasAttribute('data-disc-topic-use-all')) { useSuggestions((state.topicSuggestions || []).map((_, i) => i)); return; }
+    if (b.hasAttribute('data-disc-topic-keep')) { state.topicSuggestions = null; render(); return; }
     if (b.hasAttribute('data-disc-save-watch')) { saveWatch(); return; }
     if (b.dataset.discForumRemove) { removeForum(b.dataset.discForumRemove); return; }
     if (b.dataset.discForumSuggest) { addForum(b.dataset.discForumSuggest); return; }
@@ -423,7 +502,7 @@
     if (e.target.matches('[data-disc-topics]')) {
       const before = state.watchDraft;
       state.watchDraft = readWatchForm();
-      // Re-render only when Save or Scan now has to switch on or off.
+      // Re-render only when Save, Scan now or the swan has to switch on or off.
       if (!before || !before.topics.trim() !== !state.watchDraft.topics.trim()) render();
     }
   });
@@ -448,10 +527,11 @@
 
   window.AssistantDiscussions = {
     /** Loads eagerly — the tab badge is the count of new threads. Paints on activate(). */
-    init({ assistantId }) {
+    init({ assistantId, assistantName }) {
+      state.assistantName = assistantName || '';
       if (state.assistantId !== assistantId) {
         Object.assign(state, {
-          assistantId, discussions: [], counts: { new: 0, replied: 0, dismissed: 0 }, watch: null,
+          assistantId, topicSuggestions: null, discussions: [], counts: { new: 0, replied: 0, dismissed: 0 }, watch: null,
           filter: 'new', loaded: false, notSetUp: false, error: null, edits: {}, busy: null, watchDraft: null,
         });
         clearTimeout(state.pollTimer);

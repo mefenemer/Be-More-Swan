@@ -168,3 +168,35 @@ export async function createDiscoveryRun(input: CreateRunInput): Promise<CreateR
 
     return { campaignId: campaign.id, jobId };
 }
+
+/**
+ * Pause, archive or resume a saved search, keeping its schedule and queue in step.
+ *
+ * One copy, shared by the Searches tab (discovery-campaigns.ts pause/resume/archive) and a campaign
+ * halt that pauses the search it is about (campaign-orders.ts narrow_targeting) — two copies is how
+ * one of them comes to leave a schedule firing on a "paused" search.
+ */
+export async function setDiscoverySearchStatus(
+    db: Db, campaignId: number, action: 'pause' | 'resume' | 'archive',
+): Promise<'paused' | 'active' | 'archived'> {
+    const nextStatus = action === 'pause' ? 'paused' : action === 'archive' ? 'archived' : 'active';
+    await db.update(discoveryCampaigns)
+        .set({ status: nextStatus, updatedAt: new Date() })
+        .where(eq(discoveryCampaigns.id, campaignId));
+
+    // Paused/archived searches stop dispatching; resuming re-enables recurring cadences (one_off
+    // searches have no recurring schedule to run).
+    await db.update(discoverySchedules)
+        .set({
+            isEnabled: action === 'resume' ? sql`${discoverySchedules.cadence} <> 'one_off'` : sql`false`,
+            updatedAt: new Date(),
+        })
+        .where(eq(discoverySchedules.campaignId, campaignId));
+
+    // Pausing/archiving also drops any not-yet-finished run from the queue (see cancel_run).
+    if (action !== 'resume') {
+        await db.delete(discoveryJobs)
+            .where(and(eq(discoveryJobs.campaignId, campaignId), sql`${discoveryJobs.status} IN ('queued','processing')`));
+    }
+    return nextStatus;
+}
