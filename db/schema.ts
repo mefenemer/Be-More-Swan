@@ -3721,7 +3721,7 @@ export const revenueEvents = pgTable("revenue_events", {
   index("revenue_events_outcome_idx").on(t.organisationId, t.outcome, t.occurredAt).where(sql`outcome IS NOT NULL`),
   check("revenue_events_actor_check", sql`${t.actor} IN ('system','agent','user')`),
   check("revenue_events_outcome_check", sql`${t.outcome} IS NULL OR ${t.outcome} IN ('won','lost','disqualified')`),
-  check("revenue_events_loss_reason_check", sql`${t.lossReason} IS NULL OR ${t.lossReason} IN ('price','timing','no_budget','competitor','no_response','wrong_contact','not_icp','feature_gap','went_silent','other')`),
+  check("revenue_events_loss_reason_check", sql`${t.lossReason} IS NULL OR ${t.lossReason} IN ('price','timing','no_budget','competitor','no_response','wrong_contact','not_icp','feature_gap','went_silent','against_ai','other')`),
 ]);
 
 // ────────────────────────────────────────────────────────────────────────────

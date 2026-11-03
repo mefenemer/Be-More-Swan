@@ -115,6 +115,7 @@ export const LOSS_REASONS = [
     'not_icp',
     'feature_gap',
     'went_silent',
+    'against_ai',
     'other',
 ] as const;
 
@@ -142,6 +143,7 @@ export const LOSS_REASON_LABELS: Record<LossReason, string> = {
     not_icp: 'Not a fit — we should not have targeted them',
     feature_gap: 'We were missing something they needed',
     went_silent: 'Went quiet mid-conversation',
+    against_ai: "Doesn't want to use AI",
     other: 'Something else',
 };
 
