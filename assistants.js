@@ -8674,7 +8674,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         const archiveBtn = document.getElementById('btn-archive-assistant');
         if (archiveBtn) archiveBtn.onclick = async () => {
             const name = currentData.name || 'this assistant';
-            const message = `Archive "${name}"? This stops the assistant and removes it from your active workspace. You'll have 14 days to reinstate it (subject to your plan's assistant limit) before it and all of its data are permanently deleted.`;
+            const message = `Archive "${name}"? This stops the assistant and removes it from your active workspace. You'll have 14 days to reinstate it (subject to your plan's assistant limit) before it and all of its data are permanently deleted.`
+                // Its site goes offline with it (site-offline.ts); reinstating does not republish it.
+                + (currentData.roleKey === 'website_assistant' ? ' Its website is taken offline straight away; if you reinstate it, press Publish to put the site back.' : '');
             const doArchive = async () => {
                 archiveBtn.disabled = true;
                 try {

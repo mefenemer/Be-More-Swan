@@ -16,6 +16,7 @@ import { transitionAssistantStatus } from '../../src/utils/assistant-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { releasePausedLimit } from '../../src/utils/release-paused-limit';
 import { checkResumeCapacity, checkRoleSwap, isWorkspaceRole, takesASeat } from '../../src/utils/assistant-capacity';
+import { takeAssistantSitesOffline } from '../../src/utils/site-offline';
 
 // Issue #191: archiving starts a 14-day reinstate window before purge-archived-assistants.ts
 // (daily cron) permanently deletes the assistant and all of its associated data.
@@ -207,6 +208,11 @@ export default withLambda(async (event) => {
                 await db.update(aiAssistants)
                     .set({ provisioningStatus: 'cancelled', archivedAt: now, scheduledDeletionAt, updatedAt: now })
                     .where(eq(aiAssistants.id, id));
+
+                // Its website goes offline with it, as the owner's own "Take offline" would — an
+                // archived assistant's page (and its Publish card) is hidden, so a live site left
+                // behind had no way down (site-offline.ts). Never throws.
+                await takeAssistantSitesOffline(db, [id]);
 
                 // ── The seat this just freed ─────────────────────────────────────
                 // Archiving is the obvious way to get back under a plan limit, and until now it

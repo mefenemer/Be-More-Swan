@@ -308,5 +308,25 @@ const page = (over: Partial<DirectoryPage>): DirectoryPage => ({ url: `${SITE}/x
         assert.ok(read('db/schema.ts').includes('export const siteDirectories = pgTable("site_directories"'));
     });
 
+    // An archived Website Assistant's site stayed live and kept feeding the directory café pages
+    // (wordsworth-sitecheck, 2026-11-03): archiving now takes it offline, and the daily sweep
+    // catches any left behind. Reinstating never republishes.
+    await check('archiving takes the assistant\'s site offline; the daily sweep catches leftovers', () => {
+        const offline = read('src/utils/site-offline.ts');
+        assert.ok(/unpublishSite\(db, site\)/.test(offline), 'goes offline the way "Take offline" does');
+        assert.ok(offline.includes('purgeCache({ tags: [siteCacheTag(site.slug)] })'), 'cached pages purged');
+        assert.ok(offline.includes('refreshDirectoryAfterAddressChange(db, orgId)'), 'directory re-read');
+        const manage = read('netlify/functions/manage-assistant.ts');
+        const del = manage.slice(manage.indexOf("event.httpMethod === 'DELETE'"));
+        assert.ok(manage.indexOf("event.httpMethod === 'DELETE'") > 0 && del.includes('await takeAssistantSitesOffline(db, [id])'), 'archive takes it offline');
+        const reinstate = manage.slice(manage.indexOf('Only archived assistants can be reinstated'), manage.indexOf("event.httpMethod === 'DELETE'"));
+        assert.ok(reinstate.length > 100, 'reinstate branch found');
+        assert.ok(!/publishSite|takeAssistantSitesOffline/.test(reinstate), 'reinstate never republishes');
+        const purge = read('netlify/functions/purge-archived-assistants.ts');
+        const sweep = purge.indexOf('takeAssistantSitesOffline(db, await archivedAssistantsWithLiveSites(db))');
+        assert.ok(sweep > 0 && sweep < purge.indexOf('db.delete(aiAssistants)'), 'sweep runs before the hard delete');
+        assert.ok(read('assistants.js').includes('Its website is taken offline straight away'), 'archive confirm says so');
+    });
+
     console.log(`\n${passed}/${total} passed`);
 })();
