@@ -9,10 +9,16 @@ import { and, eq, inArray, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, adminAuditLog } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { archivedAssistantsWithLiveSites, takeAssistantSitesOffline } from '../../src/utils/site-offline';
 
 export default withLambda(async () => {
     const db = getDb();
     const now = new Date();
+
+    // Any archived assistant's site still published (archived before archiving took it offline,
+    // or the archive's own attempt failed) goes offline now (site-offline.ts). Never throws.
+    const taken = await takeAssistantSitesOffline(db, await archivedAssistantsWithLiveSites(db));
+    if (taken.length) console.log(`[purge-archived-assistants] took offline ${taken.length} site(s) of archived assistants: ${taken.join(', ')}`);
 
     const expired = await db
         .select({ id: aiAssistants.id, organisationId: aiAssistants.organisationId })
