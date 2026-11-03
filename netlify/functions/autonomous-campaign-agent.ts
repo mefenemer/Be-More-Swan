@@ -13,8 +13,9 @@
 // ── This is NOT a clone of autonomous-strategy-agent's shape, on purpose ─────
 // That one is a DISPATCHER: one org costs ~50 seconds because a model rewrites a playbook, which no
 // scheduled function can hold, so it hands off to a background worker. Every number here comes out
-// of a COUNT or an AVG and there is no model call at all, so the work runs inline in milliseconds
-// per campaign. Adding a background hop would buy nothing and add a way for jobs to strand
+// of a COUNT or an AVG, so the work runs inline in milliseconds per campaign. The one model call is
+// a halt's new search wording (halt-tightening.ts): one short call, only when a halt is filed, and
+// it never touches the evidence figures. Adding a background hop would buy nothing and add a way for jobs to strand
 // (background-trigger-must-be-awaited). Do not "make it consistent" with the strategy agent.
 //
 // ── What it may write ────────────────────────────────────────────────────────
@@ -48,6 +49,7 @@ import {
     detectOutperformingPost, expirePendingDecisions, hasPendingDecision, hiredRoleKeys,
     liveCampaignsForRun, persistProposal, OUTPERFORM_WINDOW_DAYS,
 } from '../../src/utils/campaign-proposer';
+import { proposeTightening } from '../../src/utils/halt-tightening';
 
 /**
  * Campaigns considered per run. Generous — each is a handful of indexed aggregates, and a
@@ -80,7 +82,7 @@ interface OrgNotice {
 export async function runCampaignProposer(): Promise<CampaignAgentResult> {
     const empty: CampaignAgentResult = { campaigns: 0, proposed: 0, expired: 0, escalations: 0, halts: 0, notified: 0 };
 
-    // The platform kill switch. This function makes no model call, so the letter of the flag does
+    // The platform kill switch. Most of this run makes no model call, so the letter of the flag does
     // not cover it — but a decision card appearing in someone's queue during an incident is still
     // the autonomous surface acting, and it is work a human must then respond to. Quiet is quiet.
     if (await isGlobalAiDisabled()) return { ...empty, skipped: 'global_ai_disabled' };
@@ -147,7 +149,11 @@ export async function runCampaignProposer(): Promise<CampaignAgentResult> {
                 && !await hasPendingDecision(db, campaign.id, 'halt')) {
                 const hit = await detectLeadQualityDrop(db, campaign.organisationId, since24h);
                 if (hit) {
-                    const proposal = buildHaltProposal(hit);
+                    // The one model call in this run, and only when a halt is about to be filed:
+                    // the new search wording the card shows (halt-tightening.ts). Fails soft to a
+                    // pause, never to "tightened" with nothing changed.
+                    const tightening = await proposeTightening(db, campaign.organisationId, hit.discoveryCampaignId, since24h);
+                    const proposal = buildHaltProposal(hit, tightening);
                     if (await persistProposal(db, campaign, proposal)) {
                         halts++;
                         note(campaign.organisationId, campaign.aiAssistantId, proposal.title);

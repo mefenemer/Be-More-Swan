@@ -206,6 +206,11 @@ export function planOrderProblem(o: PlanOrder): string | null {
     if (o.action === 'narrow_targeting' && !o.brief.discoveryCampaignId) {
         return `"${label}" needs to know which saved search to tighten.`;
     }
+    // Without a new description the executor has nothing to write, and approving would change
+    // nothing — the 2026-11-03 "Search targeting tightened" that tightened nothing.
+    if (o.action === 'narrow_targeting' && !o.brief.idea) {
+        return `"${label}" needs the new description of who the search should find.`;
+    }
     if (o.action === 'adjust_messaging' && !o.brief.angle) {
         return `"${label}" needs the new angle to take.`;
     }

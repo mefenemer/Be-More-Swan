@@ -19,6 +19,9 @@
 // RE-MEASURED: the search's leads since the original window opened, with the original figures kept
 // as one more line. If the search is now under the threshold it is still restored — the user asked
 // for it — but the line says so, rather than showing old numbers as if they were today's.
+// Its new search description is worked out again too (halt-tightening.ts), against the search's
+// wording TODAY: a halt raised before 2026-11-03 carried none, and one raised since may predate an
+// edit the user made, which the executor would then refuse to overwrite.
 // Every other kind's evidence cannot be re-measured here (a post's lead over the average, a plan the
 // user agreed in chat), so it is restored as it was with a line stating the date it is from.
 //
@@ -35,7 +38,8 @@
 import { and, desc, eq, gte, inArray, ne, sql } from 'drizzle-orm';
 import { assistantRecords, campaignDecisions, campaigns, discoveredLeads, discoveryCampaigns } from '../../db/schema';
 import { mirrorDecision } from './campaign-mirror';
-import { LEAD_QUALITY_FLOOR, MIN_LEADS_FOR_QUALITY, type EvidenceItem } from './campaign-proposer';
+import { LEAD_QUALITY_FLOOR, MIN_LEADS_FOR_QUALITY, narrowTargetingBrief, type EvidenceItem } from './campaign-proposer';
+import { proposeTightening, type Tightening } from './halt-tightening';
 import { DECISION_TTL_DAYS, type CampaignDecisionKind } from '../config/campaign-vocab';
 
 type Db = Parameters<typeof mirrorDecision>[0];
@@ -47,7 +51,11 @@ export const RESTORABLE_DECISION_STATUSES = ['expired', 'rejected'] as const;
 const HALT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 export type RestoreResult =
-    | { ok: true; decisionId: number; campaignId: number; kind: string; expiresAt: Date; remeasured: boolean; belowThreshold: boolean; keptRejectReason: boolean }
+    | {
+        ok: true; decisionId: number; campaignId: number; kind: string; expiresAt: Date; remeasured: boolean; belowThreshold: boolean; keptRejectReason: boolean;
+        /** A halt only: what approving it will now do to the search — rewrite its description, or pause it. */
+        searchChange?: 'rewrite' | 'pause';
+    }
     | { ok: false; status: number; error: string };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -148,6 +156,8 @@ export async function restoreDecision(db: Db, organisationId: number, decisionId
     let evidence = datedEvidence(original, d.createdAt);
     let remeasured = false;
     let belowThreshold = false;
+    let proposed = d.proposed;
+    let searchChange: 'rewrite' | 'pause' | undefined;
 
     if (d.kind === 'halt') {
         const orders = ((d.proposed ?? {}) as { orders?: Array<{ action?: string; brief?: Record<string, unknown> }> }).orders ?? [];
@@ -175,6 +185,14 @@ export async function restoreDecision(db: Db, organisationId: number, decisionId
         evidence = fresh.evidence;
         belowThreshold = fresh.belowThreshold;
         remeasured = true;
+
+        const tightening: Tightening | null = await proposeTightening(db, organisationId, searchId, since);
+        const brief = narrowTargetingBrief(searchId, tightening);
+        proposed = {
+            ...((d.proposed ?? {}) as Record<string, unknown>),
+            orders: orders.map((o) => (o.action === 'narrow_targeting' ? { ...o, brief } : o)),
+        };
+        searchChange = brief.idea ? 'rewrite' : 'pause';
     }
 
     const expiresAt = new Date(Date.now() + DECISION_TTL_DAYS[d.kind as CampaignDecisionKind] * DAY_MS);
@@ -185,6 +203,7 @@ export async function restoreDecision(db: Db, organisationId: number, decisionId
         status: 'pending',
         expiresAt,
         evidence,
+        proposed,
         rejectReason: null,
         rejectNote: null,
         decidedAt: null,
@@ -223,11 +242,11 @@ export async function restoreDecision(db: Db, organisationId: number, decisionId
         });
     }
 
-    return { ok: true, decisionId: d.id, campaignId: d.campaignId, kind: d.kind, expiresAt, remeasured, belowThreshold, keptRejectReason };
+    return { ok: true, decisionId: d.id, campaignId: d.campaignId, kind: d.kind, expiresAt, remeasured, belowThreshold, keptRejectReason, searchChange };
 }
 
 /** The sentence both the tab and the chat card show after a restore. Pure, for the test. */
-export function restoredMessage(r: Pick<Extract<RestoreResult, { ok: true }>, 'kind' | 'expiresAt' | 'remeasured' | 'belowThreshold' | 'keptRejectReason'>): string {
+export function restoredMessage(r: Pick<Extract<RestoreResult, { ok: true }>, 'kind' | 'expiresAt' | 'remeasured' | 'belowThreshold' | 'keptRejectReason' | 'searchChange'>): string {
     const days = Math.max(1, Math.round((r.expiresAt.getTime() - Date.now()) / DAY_MS));
     const parts = [`Back in Decisions. You have ${days} day${days === 1 ? '' : 's'} to approve or turn it down.`];
     if (r.remeasured) {
@@ -236,6 +255,11 @@ export function restoredMessage(r: Pick<Extract<RestoreResult, { ok: true }>, 'k
             : 'Its figures were counted again, so they are today\'s.');
     } else if (r.kind !== 'halt') {
         parts.push('Its figures are from when it was raised.');
+    }
+    if (r.searchChange === 'rewrite') {
+        parts.push('A narrower description for the search was worked out from its cold leads; read it under "If you approve" before approving.');
+    } else if (r.searchChange === 'pause') {
+        parts.push('No narrower description could be worked out from its cold leads, so approving it will pause the search rather than change it.');
     }
     if (r.keptRejectReason) parts.push('The reason you gave when you turned it down is still noted on the campaign.');
     return parts.join(' ');

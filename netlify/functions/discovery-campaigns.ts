@@ -30,7 +30,7 @@ import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, discoveryCampaigns, discoveryGuardrails, discoverySchedules, discoveryJobs, discoveredLeads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { activeCampaignCapacity, campaignCapacityMessage, createDiscoveryRun } from '../../src/utils/discovery';
+import { activeCampaignCapacity, campaignCapacityMessage, createDiscoveryRun, setDiscoverySearchStatus } from '../../src/utils/discovery';
 import {
     clampGuardrail, MAX_LEADS_PER_MONTH_CEILING, MAX_LEADS_PER_RUN_CEILING,
 } from '../../src/config/discovery-limits';
@@ -934,25 +934,8 @@ export default withLambda(async (event) => {
             .limit(1);
         if (!campaign) return json(404, { error: 'Campaign not found.' });
 
-        const nextStatus = action === 'pause' ? 'paused' : action === 'archive' ? 'archived' : 'active';
-        await db.update(discoveryCampaigns)
-            .set({ status: nextStatus, updatedAt: new Date() })
-            .where(eq(discoveryCampaigns.id, campaignId));
-
-        // Keep the schedule in lock-step: paused/archived campaigns stop dispatching; resuming
-        // re-enables recurring cadences (one_off campaigns have no recurring schedule to run).
-        await db.update(discoverySchedules)
-            .set({
-                isEnabled: action === 'resume' ? sql`${discoverySchedules.cadence} <> 'one_off'` : sql`false`,
-                updatedAt: new Date(),
-            })
-            .where(eq(discoverySchedules.campaignId, campaignId));
-
-        // Pausing/archiving also drops any not-yet-finished run from the queue (see cancel_run).
-        if (action !== 'resume') {
-            await db.delete(discoveryJobs)
-                .where(and(eq(discoveryJobs.campaignId, campaignId), sql`${discoveryJobs.status} IN ('queued','processing')`));
-        }
+        // Status, schedule and queue move together — src/utils/discovery.ts.
+        const nextStatus = await setDiscoverySearchStatus(db, campaignId, action);
         return json(200, { status: nextStatus });
     }
 

@@ -1109,7 +1109,7 @@ export default withLambda(async (event) => {
         });
         if (result.status === 'failed') return json(400, { error: result.message ?? 'The order could not be placed.' });
         if (result.status === 'issued') await pokeDrainsFor([order.action], event.headers as Record<string, string | undefined>, 'campaigns-place-order');
-        return json(200, { orderId: result.orderId, status: result.status, workItems: result.workItems });
+        return json(200, { orderId: result.orderId, status: result.status, workItems: result.workItems, summary: result.summary ?? null });
     }
 
     // ── create_link ───────────────────────────────────────────────────────────
@@ -1807,7 +1807,7 @@ export default withLambda(async (event) => {
             }
         }
 
-        const placed: Array<{ orderId: number | null; status: string; message?: string }> = [];
+        const placed: Array<{ orderId: number | null; status: string; message?: string; summary?: string; action?: string }> = [];
         // Plan position (1-based) → the order it became, so "after": 2 can point at a real row.
         const placedByPosition: Array<number | null> = [];
         for (const o of (proposed.orders ?? []).slice(0, 10)) {
@@ -1836,7 +1836,7 @@ export default withLambda(async (event) => {
                 quantity: Number(o.quantity) || 1,
                 blockedOnOrderId,
             });
-            placed.push({ orderId: r.orderId, status: r.status, message: r.message });
+            placed.push({ orderId: r.orderId, status: r.status, message: r.message, summary: r.summary, action: o.action });
             placedByPosition.push(r.status === 'failed' ? null : r.orderId);
         }
 

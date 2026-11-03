@@ -45,7 +45,7 @@ import {
     campaignExperiments, campaignExperimentJobs,
 } from '../../db/schema';
 import { assembleBlueprint } from './blueprint';
-import { createDiscoveryRun } from './discovery';
+import { createDiscoveryRun, setDiscoverySearchStatus } from './discovery';
 import { recordCampaignSpend } from './campaign-ledger';
 import { mirrorOrder } from './campaign-mirror';
 import { HUMAN_ROLE_KEY, ORDER_ACTION_SPECS, orderWorkItems, type CampaignOrderAction } from '../config/campaign-vocab';
@@ -78,6 +78,8 @@ export interface PlaceOrderResult {
     workItems: number;
     /** Present on failure. Already phrased for display. */
     message?: string;
+    /** What the order did, on success — the executor's own sentence (e.g. "Search paused, not changed: …"). */
+    summary?: string;
 }
 
 /**
@@ -354,7 +356,7 @@ export async function issueOrder(db: Db, orderId: number, ctx: IssueContext): Pr
         objective: ctx.campaignObjective, summary: outcome.summary ?? null,
     });
 
-    return { orderId, status: 'issued', workItems: ctx.workItems };
+    return { orderId, status: 'issued', workItems: ctx.workItems, summary: outcome.summary };
 }
 
 /**
@@ -542,32 +544,56 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
         };
     },
 
-    // Tighten an existing search. Appends negative keywords rather than replacing them: the user
-    // may have added their own, and silently dropping those would undo a human decision.
+    // Tighten an existing search by rewriting its description of who to find — the text the query
+    // writer and the scorer both read on the next run.
+    //
+    // ⚠️ Every summary below states what actually happened to the search. Until 2026-11-03 this
+    // returned "Search targeting tightened" whether or not anything was written, and a halt carried
+    // no new description, so approving one changed nothing while saying it had.
+    //   idea given          → written, unless the user has reworded the search since it was proposed
+    //   no idea, pauseSearch → a halt with no workable rewrite: the search is paused instead
+    //   neither             → refused; there is nothing to apply
     narrow_targeting: async (db, ctx) => {
         const campaignId = Number(ctx.brief.discoveryCampaignId);
         if (!Number.isInteger(campaignId)) return { ok: false, message: 'No saved search was named, so nothing was changed.' };
         const [existing] = await db
-            .select({ id: discoveryCampaigns.id, idea: discoveryCampaigns.idea })
+            .select({ id: discoveryCampaigns.id, idea: discoveryCampaigns.idea, status: discoveryCampaigns.status })
             .from(discoveryCampaigns)
             .where(and(
                 eq(discoveryCampaigns.id, campaignId),
                 eq(discoveryCampaigns.organisationId, ctx.organisationId),
             ))
             .limit(1);
-        if (!existing) return { ok: false, message: 'That saved search no longer exists.' };
+        if (!existing || existing.status === 'archived') return { ok: false, message: 'That saved search no longer exists, so nothing was changed.' };
+        const done = (summary: string): ExecutorResult => ({
+            ok: true, terminal: true,
+            artefactKind: 'discovery_campaign', artefactId: campaignId, summary,
+        });
 
         const refinedIdea = String(ctx.brief.idea || '').trim();
-        if (refinedIdea && refinedIdea !== existing.idea) {
+        if (refinedIdea) {
+            const proposedAgainst = typeof ctx.brief.previousIdea === 'string' ? ctx.brief.previousIdea.trim() : '';
+            if (refinedIdea === existing.idea.trim()) return done('Search already reads like that, so nothing needed changing');
+            // A halt's rewrite was worked out from the wording on the day it was raised. If the user
+            // has reworded the search since, theirs is the newer decision and is kept.
+            if (proposedAgainst && proposedAgainst !== existing.idea.trim()) {
+                return { ok: false, message: 'The search was not changed: its description has been edited since this was proposed, so your wording was kept. Edit it on Find New Leads if you still want it narrower.' };
+            }
             await db.update(discoveryCampaigns)
                 .set({ idea: refinedIdea, updatedAt: new Date() })
                 .where(eq(discoveryCampaigns.id, campaignId));
+            return done(`Search description changed to: "${refinedIdea.length > 160 ? `${refinedIdea.slice(0, 157)}…` : refinedIdea}" — used from its next run`);
         }
-        return {
-            ok: true, terminal: true,
-            artefactKind: 'discovery_campaign', artefactId: campaignId,
-            summary: 'Search targeting tightened',
-        };
+
+        if (ctx.brief.pauseSearch === true) {
+            if (existing.status !== 'active') {
+                return done(`Search not changed and not running (it is ${existing.status}). No narrower description could be worked out from its cold leads — edit who it looks for on Find New Leads before starting it again`);
+            }
+            await setDiscoverySearchStatus(db, campaignId, 'pause');
+            return done('Search paused, not changed: no narrower description could be worked out from its cold leads. Edit who it looks for on Find New Leads, then resume it');
+        }
+
+        return { ok: false, message: 'Nothing was changed: no new description of who the search should find was given.' };
     },
 
     // Steering only. Creates nothing: the angle is already stored on the campaign and reaches
@@ -677,3 +703,6 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
         };
     },
 };
+
+/** The narrowing executor on its own, for tests/campaign-halt-tightening.test.ts. */
+export const narrowTargetingExecutor = (db: Db, ctx: IssueContext) => EXECUTORS.narrow_targeting(db, ctx, 0);

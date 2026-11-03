@@ -2431,12 +2431,19 @@ async function _rqApproveCampaignDecision(card, record) {
         // the decision, so "approved" and "briefed" are not the same fact and must not be reported
         // as one. chat-claims-drafts-it-never-saved is the receipt for reporting intent as outcome.
         const placed = Array.isArray(data.orders) ? data.orders : [];
-        const issued = placed.filter((p) => p && p.orderId).length;
+        // A failed order still has a row (placeOrder writes it first), so count by status, not id.
+        const issued = placed.filter((p) => p && p.orderId && p.status !== 'failed').length;
         const refused = placed.length - issued;
+        // A halt's search change is said in the executor's own words — rewritten, paused, or not
+        // changed and why — because "briefs issued" is no answer to "what happened to my search?".
+        const search = placed.find((p) => p && p.action === 'narrow_targeting');
+        const searchSaid = search ? ` ${search.summary || search.message || ''}`.trimEnd() : '';
         window.showToast?.(
-            !placed.length ? 'Approved. No briefs were issued.'
+            (!placed.length ? 'Approved. No briefs were issued.'
                 : refused ? `Approved — ${issued} of ${placed.length} briefs issued. See the Briefs tab for the rest.`
-                    : `Approved — ${issued} ${issued === 1 ? 'brief' : 'briefs'} issued. Track them in the Briefs tab.`,
+                    : `Approved — ${issued} ${issued === 1 ? 'brief' : 'briefs'} issued. Track them in the Briefs tab.`)
+            + (searchSaid ? `${searchSaid.endsWith('.') ? searchSaid : `${searchSaid}.`}` : ''),
+            { icon: search && search.status === 'failed' ? '⚠️' : '✅' },
         );
         await _detailRqRenderGroups(_detailRqCurrentStatus);
     } catch (e) {
@@ -3100,6 +3107,13 @@ const _RQ_BRIEF_LABELS = [
     ['videoMessage', 'Video says'], ['cta', 'Ends with'], ['videoLength', 'Length (seconds)'],
     ['assignee', 'Who'], ['task', 'Task'], ['dueDate', 'Due'], ['name', 'Name'],
 ];
+/**
+ * A halt's narrow_targeting shows the search's wording BEFORE and AFTER, or that it will be paused —
+ * the user is approving a rewrite of their own search and must read it first. Before 2026-11-03 the
+ * order carried neither, the card listed a bare "Narrow the targeting", and approving changed nothing.
+ */
+const _RQ_NARROW_LABELS = [['previousIdea', 'Search now'], ['idea', 'Changes to']];
+const _RQ_NARROW_PAUSE = 'Pauses this search. No narrower description could be worked out from its cold leads, so it stops running until you edit who it looks for on Find New Leads and resume it.';
 const _RQ_EMAIL_TRIGGER_LABELS = {
     form: 'A follow-up for people who sign up through a form — saved switched off',
     custom: 'Emails you send to a group yourself — saved as drafts',
@@ -3121,9 +3135,14 @@ function _rqDecisionDetail(r, statusKey) {
     const actionLabel = (a) => ((window.CampaignConstants?.orderActions || []).find((o) => o.key === a) || {}).label || a;
     const approving = paired ? '' : allOrders.map((o) => {
         const brief = (o && o.brief) || {};
-        const fields = _RQ_BRIEF_LABELS
+        const narrow = o && o.action === 'narrow_targeting';
+        const fields = (narrow ? _RQ_NARROW_LABELS : _RQ_BRIEF_LABELS)
             .filter(([k]) => typeof brief[k] === 'string' && brief[k].trim())
             .map(([k, label]) => line(label, brief[k]));
+        if (narrow && !fields.length) {
+            fields.push(line('What happens', brief.pauseSearch === true ? _RQ_NARROW_PAUSE
+                : 'Nothing — this was raised before proposals carried a new description, so there is nothing to apply. Edit who the search looks for on Find New Leads instead.'));
+        }
         return `<li class="rounded-lg border border-gray-200 bg-white px-3 py-2">
             <p class="text-sm font-bold text-gray-900">${_rqEsc(actionLabel(o && o.action))}</p>
             ${fields.length ? `<div class="mt-1.5 space-y-1">${fields.join('')}</div>` : ''}

@@ -259,7 +259,7 @@ export const ORDER_ACTION_SPECS: Record<CampaignOrderAction, OrderActionSpec> = 
     narrow_targeting: {
         roleKey: LEAD_GENERATOR_ROLE_KEY,
         label: 'Narrow the targeting',
-        description: 'Edits an existing saved search — tightens the ideal-customer description and adds negative keywords — so it stops finding the wrong kind of company.',
+        description: 'Rewrites an existing saved search’s description of who to find, so its next runs stop finding the wrong kind of company. You give the new description; it is used from the search’s next run.',
         workItemsPerUnit: 0,
         takesQuantity: false,
         maxQuantity: 1,
