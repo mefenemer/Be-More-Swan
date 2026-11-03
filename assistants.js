@@ -7173,6 +7173,8 @@ function _roleSchemaFields(roleKey) {
 function _formatSchemaAnswer(field, value) {
     if (field.type === 'toggle') return (value === undefined || value === null) ? '' : (value ? 'Yes' : 'No');
     if (value === undefined || value === null || String(value).trim() === '') return '';
+    if (field.picker === 'voice') return window.VoicePicker?.describe(value) || String(value);
+    if (field.picker === 'captionStyle') return window.CaptionStyle?.describe(typeof value === 'string' ? (() => { try { return JSON.parse(value); } catch { return null; } })() : value) || '';
     if ((field.type === 'radio' || field.type === 'dropdown') && Array.isArray(field.options)) {
         const opt = field.options.find(o => String(o.value) === String(value));
         if (opt) return String(opt.label ?? opt.value);
@@ -7190,6 +7192,10 @@ function _onboardingFieldControl(f, ctx, idPrefix) {
     const inputCls = 'w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm';
     const common = `id="${esc(idPrefix + f.key)}" data-onboarding-key="${esc(f.key)}"`;
     const v = ctx[f.key];
+    // Chosen by ear / with a live sample (voice-picker.js, caption-style.js): a hidden input the
+    // autosave reads, which those components set and dispatch `change` on.
+    if (f.picker === 'voice' && window.VoicePicker) return window.VoicePicker.fieldHtml({ attrs: common, value: v ?? '' });
+    if (f.picker === 'captionStyle' && window.CaptionStyle) return window.CaptionStyle.fieldHtml({ attrs: `${common} data-onb-type="json"`, value: v ?? null });
     switch (f.type) {
         case 'textarea':
             return `<textarea ${common} rows="3" placeholder="${esc(f.placeholder || '')}" class="${inputCls} resize-y">${esc(v ?? '')}</textarea>`;
@@ -7772,6 +7778,47 @@ document.addEventListener('change', (e) => {
 // a `change` is dispatched on it, which is how the profile's [id^="edit_"] autosave picks it up.
 // Handlers are bound ONCE on document — the body re-renders on every change.
 const _VB_ROLES = ['social_media_manager', 'blog_writer', 'newsletter_editor'];
+
+// "Read aloud" voice: chosen in the voice picker and remembered on this browser (a convenience, not a
+// setting of the assistant). One <audio> for the page; a second press stops it.
+const _VB_READ_KEY = 'bms.readaloud.voice';
+let _vbAudio = null;
+let _vbAudioBtn = null;
+function _vbReadVoice() {
+    let v = null;
+    try { v = localStorage.getItem(_VB_READ_KEY); } catch { /* private window */ }
+    return v || 'british_woman';
+}
+function _vbStopReading() {
+    if (_vbAudio) { try { _vbAudio.pause(); } catch { /* already stopped */ } }
+    if (_vbAudioBtn) _vbAudioBtn.textContent = '🔊 Read aloud';
+    _vbAudioBtn = null;
+}
+async function _vbReadAloud(btn) {
+    if (_vbAudioBtn === btn) { _vbStopReading(); return; }
+    _vbStopReading();
+    window.VoicePicker?.stop();
+    const text = btn.closest('[data-vb-sample-card]')?.querySelector('[data-vb-sample-text]')?.textContent || '';
+    if (!text.trim()) return;
+    _vbAudioBtn = btn;
+    btn.textContent = '… Getting the voice';
+    try {
+        const res = await fetch('/.netlify/functions/read-aloud', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, voice: _vbReadVoice() }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'It couldn’t be read aloud just now.');
+        if (_vbAudioBtn !== btn) return;   // stopped, or another sample pressed, while it loaded
+        if (!_vbAudio) { _vbAudio = new Audio(); _vbAudio.addEventListener('ended', _vbStopReading); }
+        _vbAudio.src = `data:${d.mimeType || 'audio/mpeg'};base64,${d.audio}`;
+        btn.textContent = '■ Stop';
+        await _vbAudio.play();
+    } catch (err) {
+        _vbStopReading();
+        window.showToast?.(err.message || 'It couldn’t be read aloud just now.');
+    }
+}
 const _VB_SLIDERS = [
     ['formality', 'Formality', 'Very formal', 'Very casual'],
     ['playfulness', 'Humour', 'Completely serious', 'Very playful'],
@@ -7860,6 +7907,11 @@ function _vbPaint() {
         <p class="text-sm font-bold text-gray-700 mb-1">Preview</p>
         <p class="text-xs text-gray-500 mb-2">Try the voice on your own words — your assistant rewrites them in this voice and writes one fresh example. Leave it empty for two fresh examples. Nothing here is saved.</p>
         <textarea id="vb-try-text" rows="3" maxlength="1200" placeholder="e.g. We help small businesses get their admin done so they can focus on customers." class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-y bg-white mb-2"></textarea>
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-1 mb-2 text-xs text-gray-600">
+          <span class="font-bold">Read aloud by:</span>
+          <span data-vb-read-name data-voice-name-of="${esc(_vbReadVoice())}" class="min-w-0 truncate text-gray-800">${esc(window.VoicePicker?.describe(_vbReadVoice()) || '')}</span>
+          <button type="button" data-vb-read-voice class="font-bold text-emerald-700 hover:text-emerald-900 cursor-pointer">Change voice or language</button>
+        </div>
         <div class="flex justify-end">
           <button type="button" data-vb-hear class="btn-assistant inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg cursor-pointer">
             <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="ai-wand-img w-4 h-4 object-contain"> Preview</button>
@@ -7889,15 +7941,21 @@ document.addEventListener('click', async (e) => {
         _vb.neverSay.push(...(window.VoiceBuilder?.defaultNeverSay || []).filter((x) => !have.has(x.toLowerCase())));
         _vbPaint(); _vbMirror(true); return;
     }
+    if (e.target.closest('[data-vb-read-voice]')) {
+        window.VoicePicker?.open({
+            value: _vbReadVoice(), title: 'Who should read your samples aloud?',
+            onSelect: (id) => {
+                try { localStorage.setItem(_VB_READ_KEY, id); } catch { /* private window */ }
+                document.querySelectorAll('[data-vb-read-name]').forEach((n) => { n.dataset.voiceNameOf = id; n.textContent = window.VoicePicker.describe(id); });
+            },
+        });
+        return;
+    }
     const say = e.target.closest('[data-vb-say]');
     if (say) {
-        // "Read aloud" — the browser's own speech, so the owner can literally hear the voice.
-        try {
-            window.speechSynthesis.cancel();
-            const u = new SpeechSynthesisUtterance(say.closest('[data-vb-sample-card]')?.querySelector('[data-vb-sample-text]')?.textContent || '');
-            u.lang = _vb.spelling === 'american' ? 'en-US' : 'en-GB';
-            window.speechSynthesis.speak(u);
-        } catch { window.showToast?.('This browser cannot read text aloud.'); }
+        // "Read aloud" — a real voice the owner picked (read-aloud.ts), never the browser's robotic
+        // speech (owner, 2026-11-02). Pressing it again while it plays stops it.
+        _vbReadAloud(say);
         return;
     }
     const hear = e.target.closest('[data-vb-hear]');
@@ -7909,14 +7967,15 @@ document.addEventListener('click', async (e) => {
         try {
             const res = await fetch('/.netlify/functions/voice-preview', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assistantId: window._detailCurrentData?.id, tone: document.getElementById('edit_tone')?.value || undefined, voice: _vb, text: document.getElementById('vb-try-text')?.value || undefined }),
+                // The samples are written in the read-aloud voice's language, so a French voice reads French.
+                body: JSON.stringify({ assistantId: window._detailCurrentData?.id, tone: document.getElementById('edit_tone')?.value || undefined, voice: _vb, text: document.getElementById('vb-try-text')?.value || undefined, language: window.VoicePicker?.voice(_vbReadVoice())?.lang || undefined }),
             });
             const d = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(d.error || 'Could not write a preview.');
             if (out) out.innerHTML = (d.samples || []).map((s) => `<div class="bg-white border border-gray-200 rounded-lg p-3" data-vb-sample-card>
                 <div class="flex items-center justify-between gap-2 mb-1">
                   <p class="text-[11px] font-bold uppercase tracking-wide text-gray-500">${_escapeHtml(s.shape || 'Sample')}</p>
-                  ${'speechSynthesis' in window ? '<button type="button" data-vb-say class="link text-xs font-semibold">🔊 Read aloud</button>' : ''}
+                  <button type="button" data-vb-say class="link text-xs font-semibold">🔊 Read aloud</button>
                 </div>
                 <p class="text-sm text-gray-800 whitespace-pre-line" data-vb-sample-text>${_escapeHtml(s.text)}</p>
                 ${s.note ? `<p class="text-[11px] text-gray-500 mt-2">✓ ${_escapeHtml(s.note)}</p>` : ''}</div>`).join('')
@@ -8100,6 +8159,10 @@ function _detailCollect(currentData) {
         } else if (el.dataset.onbType === 'number') {
             const n = Number(el.value);
             newContext[key] = (el.value.trim() === '' || !Number.isFinite(n)) ? null : n;
+        } else if (el.dataset.onbType === 'json') {
+            let parsed = null;
+            try { parsed = el.value ? JSON.parse(el.value) : null; } catch { parsed = null; }
+            newContext[key] = parsed;
         } else {
             newContext[key] = el.value;
         }

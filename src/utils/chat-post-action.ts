@@ -28,11 +28,13 @@
 import { and, eq, or } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { scheduledPosts } from '../../db/schema';
+import { cleanScript, isVoiceId, DEFAULT_VOICE, VOICES } from '../lib/tts';
+import { normalizeCaptionStyle, type CaptionStyle } from '../lib/captions';
 
 type Db = ReturnType<typeof getDb>;
 
 export const POST_ACTION_PROPOSAL_TYPE = 'post_action_proposal';
-export const POST_ACTIONS = ['approve', 'reject', 'retry', 'reschedule', 'remove', 'shorter', 'longer', 'video_version'] as const;
+export const POST_ACTIONS = ['approve', 'reject', 'retry', 'reschedule', 'remove', 'shorter', 'longer', 'video_version', 'voiceover', 'captions', 'time_text'] as const;
 export type PostAction = typeof POST_ACTIONS[number];
 
 /** Which rows each action applies to — the statuses its endpoint accepts. */
@@ -56,6 +58,11 @@ const ACTIONABLE: Record<PostAction, readonly string[]> = {
     // video-projects `from_post` (video-handoff.ts): any post that still stands — a published one
     // too, since a video version of a post that did well is the point. Not one that was turned down.
     video_version: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'publishing', 'published', 'paused', 'paused_credits', 'failed'],
+    // The post editor's "Add a voiceover", its captions settings and "Time the text to the voice" —
+    // generate-voiceover.ts (post-voiceover.ts), which refuses only a post that is out or withdrawn.
+    voiceover: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
+    captions: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
+    time_text: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
 };
 
 /** Said on the card when the post is not in a state the action applies to. */
@@ -68,6 +75,9 @@ const NOT_NOW: Record<PostAction, string> = {
     shorter: 'This post’s words can’t be changed now: it has already gone out, is publishing, or was removed or rejected.',
     longer: 'This post’s words can’t be changed now: it has already gone out, is publishing, or was removed or rejected.',
     video_version: 'This post was removed or rejected, so there is nothing to make a video from.',
+    voiceover: 'This post can’t change now: it has already gone out, is publishing, or was removed or rejected.',
+    captions: 'This post can’t change now: it has already gone out, is publishing, or was removed or rejected.',
+    time_text: 'This post can’t change now: it has already gone out, is publishing, or was removed or rejected.',
 };
 
 const TEXT_MAX = 200;
@@ -82,6 +92,14 @@ export interface PostActionRequest {
     /** Reschedule (required) or retry (optional): the time in the user's own words. reschedule-post-chat
      *  or retry-failed-post reads it; a retry without one goes out on the next run. */
     when: string | null;
+    /** Voiceover: what it says (required), in which voice (voice-catalogue.json id). */
+    script?: string | null;
+    voice?: string | null;
+    /** Voiceover / captions: captions on or off, and their look (captions.ts CaptionStyle). */
+    captions?: boolean | null;
+    captionStyle?: CaptionStyle | null;
+    /** Voiceover / captions: also time the post's text boxes to the voice afterwards. */
+    timeText?: boolean;
 }
 
 /** Shape check on the model's output. Pure. Null when it is not a usable proposal. */
@@ -97,7 +115,19 @@ export function postActionFromUiElement(uiElement: unknown): PostActionRequest |
     const when = str(ui.when, WHEN_MAX);
     // An action that cannot be carried out without its input is not a proposal.
     if (action === 'reschedule' && !when) return null;
-    return { action, postId, reason: action === 'reject' ? reason : null, when: action === 'reschedule' || action === 'retry' ? when : null };
+    const base = { action, postId, reason: action === 'reject' ? reason : null, when: action === 'reschedule' || action === 'retry' ? when : null };
+    if (action === 'voiceover' || action === 'captions') {
+        const script = action === 'voiceover' ? cleanScript(typeof ui.script === 'string' ? ui.script : '') : null;
+        if (action === 'voiceover' && (!script || script.length < 5)) return null;
+        return {
+            ...base, script,
+            voice: action === 'voiceover' ? (isVoiceId(ui.voice) ? String(ui.voice) : DEFAULT_VOICE) : null,
+            captions: typeof ui.captions === 'boolean' ? ui.captions : action === 'voiceover' ? true : null,
+            captionStyle: ui.captionStyle && typeof ui.captionStyle === 'object' ? normalizeCaptionStyle(ui.captionStyle) : null,
+            timeText: ui.timeText === true,
+        };
+    }
+    return base;
 }
 
 export interface PostActionCard {
@@ -117,6 +147,13 @@ export interface PostActionCard {
     when: string | null;
     /** Set when the action does not apply to this post; the card says it and offers no button. */
     blocked: string | null;
+    /** Voiceover / captions / time_text — see PostActionRequest. `voiceName` is the catalogue's words for it. */
+    script?: string | null;
+    voice?: string | null;
+    voiceName?: string | null;
+    captions?: boolean | null;
+    captionStyle?: CaptionStyle | null;
+    timeText?: boolean;
 }
 
 /**
@@ -131,6 +168,7 @@ export async function resolvePostActionProposal(
         const [post] = await db.select({
             id: scheduledPosts.id, status: scheduledPosts.status, platform: scheduledPosts.platform,
             publishDate: scheduledPosts.publishDate, caption: scheduledPosts.caption, crosspostGroupId: scheduledPosts.crosspostGroupId,
+            audioOverlays: scheduledPosts.audioOverlays, imageOverlays: scheduledPosts.imageOverlays,
         })
             .from(scheduledPosts)
             .where(and(eq(scheduledPosts.id, req.postId), eq(scheduledPosts.organisationId, organisationId), eq(scheduledPosts.assistantId, aiAssistantId)))
@@ -161,6 +199,23 @@ export async function resolvePostActionProposal(
             if (!await activeVideoProducer(db, organisationId)) videoBlocked = 'There is no active Video Producer on your team to make it — hire one, or resume yours.';
             else if (gist.length < 10) videoBlocked = 'This post has too few words to make a video from.';
         }
+        // Voiceover actions: the same checks the post editor's controls make visible.
+        const isVoiceAction = req.action === 'voiceover' || req.action === 'captions' || req.action === 'time_text';
+        if (isVoiceAction && rows.length) {
+            // A voiceover clip is the one sound clip that carries a `captions` flag (post-voiceover.ts).
+            const hasVoice = (Array.isArray(post.audioOverlays) ? post.audioOverlays as Array<{ captions?: unknown }> : []).some((a) => a && typeof a.captions === 'boolean');
+            const hasText = (Array.isArray(post.imageOverlays) ? post.imageOverlays as Array<{ text?: unknown }> : []).some((o) => o && String(o.text ?? '').trim());
+            if (req.action === 'voiceover') {
+                const { orgHasAssistantFeature } = await import('./assistant-capabilities');
+                if (!await orgHasAssistantFeature(db, organisationId, 'ai_music_generation')) videoBlocked = 'None of your assistants can add sound to posts, so a voiceover can’t be made.';
+                else if (req.timeText && !hasText) req = { ...req, timeText: false };
+            } else if (!hasVoice) {
+                videoBlocked = 'This post has no voiceover yet. Ask me to add one first, or add it in the post editor.';
+            } else if (req.action === 'time_text' && !hasText) {
+                videoBlocked = 'This post has no text boxes on it to time.';
+            }
+        }
+        const voice = req.action === 'voiceover' && req.voice ? VOICES.find((v) => v.id === req.voice) : null;
 
         return {
             type: POST_ACTION_PROPOSAL_TYPE,
@@ -175,6 +230,14 @@ export async function resolvePostActionProposal(
             reason: req.reason,
             when: req.when,
             blocked: rows.length ? videoBlocked : NOT_NOW[req.action],
+            ...(isVoiceAction ? {
+                script: req.script ?? null,
+                voice: req.voice ?? null,
+                voiceName: voice ? (voice.legacy ? voice.label : `${voice.name} · ${voice.label}`) : null,
+                captions: req.captions ?? null,
+                captionStyle: req.captionStyle ?? null,
+                timeText: req.action === 'time_text' ? true : !!req.timeText,
+            } : {}),
         };
     } catch (err) {
         console.error('[chat-post-action] could not resolve the proposal (non-fatal)', err);

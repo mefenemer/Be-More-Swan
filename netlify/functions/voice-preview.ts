@@ -15,6 +15,7 @@
 //
 // Cheap on purpose: Haiku, ~120 words each, no task credit (it is setup, not work).
 
+import { languageLabel } from '../../src/lib/tts';
 import { HandlerEvent } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, eq } from 'drizzle-orm';
@@ -42,7 +43,7 @@ export default withLambda(async (event: HandlerEvent) => {
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
 
-    let body: { assistantId?: unknown; tone?: unknown; voice?: unknown; text?: unknown };
+    let body: { assistantId?: unknown; tone?: unknown; voice?: unknown; text?: unknown; language?: unknown };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON body.' }); }
     const assistantId = Number(body.assistantId);
     if (!Number.isInteger(assistantId)) return json(400, { error: 'assistantId is required.' });
@@ -70,6 +71,7 @@ export default withLambda(async (event: HandlerEvent) => {
             ? [{ label: 'Email', brief: 'the opening of an email to subscribers' }, { label: 'Email', brief: 'a short email announcing something new' }]
             : allowedSocialShapes(actx.allowed_post_shapes).map((s) => ({ label: s.label, brief: `a social post that is ${s.summary.toLowerCase()}` }));
     const own = typeof body.text === 'string' ? body.text.trim().slice(0, 1200) : '';
+    const language = languageLabel(body.language);
     const picked = [...shapes].sort(() => Math.random() - 0.5).slice(0, own ? 1 : 2);
 
     const system = [
@@ -91,6 +93,10 @@ export default withLambda(async (event: HandlerEvent) => {
         // ⚠️ Previews invented product features ("connect in two clicks", named integrations, a menu
         // that does not exist). Anything not in the business description above is off limits.
         `ONLY use facts stated in the business description above or in the owner's text. Do not mention features, integrations, menus, numbers, prices, names, timeframes or results that are not stated there — talk about the reader and the problem instead. No hashtags.`,
+        // The language of the voice chosen to read them aloud (Voice builder → voice picker).
+        language && language !== 'English'
+            ? `Write every sample in ${language}${own ? ' — Sample 1 is the owner\'s text in ' + language + ', the same claims and nothing added' : ''}.`
+            : '',
         `Return ONLY JSON: {"samples": ["...", "..."]}`,
     ].filter(Boolean).join('\n\n');
     const user = own

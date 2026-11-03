@@ -156,6 +156,9 @@
       }
 
       case 'text':
+        if (field.picker === 'captionStyle' && window.CaptionStyle) {
+          return `${fieldHeader(field)}${window.CaptionStyle.fieldHtml({ attrs: `name="${escapeHtml(name)}"`, value: value ?? null })}`;
+        }
         return `${fieldHeader(field)}
           <input type="text" name="${escapeHtml(name)}" value="${escapeHtml(value ?? '')}"
             placeholder="${escapeHtml(field.placeholder || '')}" class="${inputClasses()}">`;
@@ -173,6 +176,9 @@
             class="${inputClasses()} resize-y">${escapeHtml(value ?? '')}</textarea>`;
 
       case 'dropdown':
+        if (field.picker === 'voice' && window.VoicePicker) {
+          return `${fieldHeader(field)}${window.VoicePicker.fieldHtml({ attrs: `name="${escapeHtml(name)}"`, value: value ?? '' })}`;
+        }
         return `${fieldHeader(field)}
           <select name="${escapeHtml(name)}" class="${inputClasses()}">
             <option value="">${escapeHtml(field.placeholder || 'Please select…')}</option>

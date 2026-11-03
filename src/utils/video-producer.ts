@@ -36,7 +36,8 @@ import { generateAndPersistImage, persistRemoteMediaToR2, r2IsConfigured, render
 import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, i2vModel } from '../lib/fal-gateway';
 import { logMediaCost } from './ai-usage';
 import { makeVoiceoverAsset } from './voiceover-asset';
-import { DEFAULT_VOICE, isVoiceId, cleanScript } from '../lib/tts';
+import { DEFAULT_VOICE, isVoiceId, cleanScript, languageLabel, voiceLanguage } from '../lib/tts';
+import { normalizeCaptionStyle } from '../lib/captions';
 import { presignR2Get } from './social-publish';
 import { resolveBaseUrl } from './base-url';
 import { isUnifiedTaskMetering } from './task-metering-flag';
@@ -81,6 +82,14 @@ export function withSetupDefaults(raw: unknown, onboardingContext: unknown): Rec
     if (!has('lengthS') && isVideoLength(setup.defaultLength)) b.lengthS = Number(setup.defaultLength);
     if (!has('allowAi') && typeof setup.defaultAllowAi === 'string') b.allowAi = setup.defaultAllowAi;
     if (!has('cta') && typeof setup.defaultCta === 'string' && setup.defaultCta.trim()) b.cta = setup.defaultCta;
+    if (!has('language') && typeof setup.defaultLanguage === 'string' && setup.defaultLanguage) b.language = setup.defaultLanguage;
+    if (b.captions == null && (setup.defaultCaptions === 'off' || setup.defaultCaptions === false)) b.captions = false;
+    if (!has('captionStyle') && setup.captionStyle) {
+        // Saved by the setup screens as JSON text (a hidden input), or as an object.
+        let style: unknown = setup.captionStyle;
+        if (typeof style === 'string') { try { style = JSON.parse(style); } catch { style = null; } }
+        if (style && typeof style === 'object') b.captionStyle = style;
+    }
     return b;
 }
 
@@ -103,6 +112,9 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
             voice: isVoiceId(b.voice) ? b.voice : DEFAULT_VOICE,
             allowAi,
             musicMood: typeof b.musicMood === 'string' ? b.musicMood.slice(0, 40) : null,
+            language: languageLabel(b.language) ? String(b.language) : null,
+            captions: b.captions !== false,
+            captionStyle: b.captionStyle && typeof b.captionStyle === 'object' ? normalizeCaptionStyle(b.captionStyle) : null,
             platforms: platforms.length ? [...new Set(platforms)] : ['instagram'],
         },
     };
@@ -199,6 +211,7 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
                 messages: [{ role: 'user', content: storyboardUserPrompt({
                     brief, businessName: org?.name ?? '', businessFacts: facts, library,
                     today: new Date().toISOString().slice(0, 10), feedback,
+                    language: languageLabel(brief.language ?? (brief.voiceover ? voiceLanguage(brief.voice ?? DEFAULT_VOICE) : 'en')),
                 }) }],
                 maxTokens: 2500,
                 deadlineMs: 120_000,
@@ -300,7 +313,7 @@ export const VIDEO_CARD = {
     },
 };
 
-export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
+export function sceneOverlays(scenes: Scene[], durations: number[], captionPosition: 'bottom' | 'middle' | 'top' = 'bottom'): Overlay[] {
     const out: Overlay[] = [];
     let t = 0;
     scenes.forEach((s, i) => {
@@ -312,8 +325,9 @@ export function sceneOverlays(scenes: Scene[], durations: number[]): Overlay[] {
             const text = onScreenLines(s.onScreenText);
             out.push({
                 id: `vp_${s.id}`, text,
-                // Upper third: the captions own the lower part of the frame.
-                x: 0.5, y: 0.2, fontFamily: 'Impact', fontSizePct: onScreenFontPct(text),
+                // Upper third: the captions own the lower part of the frame — unless they were moved
+                // to the top, when the on-screen text takes the lower part instead.
+                x: 0.5, y: captionPosition === 'top' ? 0.7 : 0.2, fontFamily: 'Impact', fontSizePct: onScreenFontPct(text),
                 color: '#FFFFFF', boxStroke: null, boxFill: '#000000', boxOpacity: 0.55,
                 startS: Math.round(t * 10) / 10, endS: Math.round((t + d) * 10) / 10, anim: 'rise',
             });
@@ -529,9 +543,9 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         const clips = sceneClips(storyboard.scenes, done, durations);
         const edit: VideoEdit = { clips, targetRatio: '9:16' };
         const audio: AudioOverlay[] = voiceoverAssetId
-            ? [{ id: `vp_vo_${voiceoverAssetId}`, assetId: voiceoverAssetId, label: 'Voiceover', volume: 1, fadeInS: 0.05, fadeOutS: 0.2, captions: true }]
+            ? [{ id: `vp_vo_${voiceoverAssetId}`, assetId: voiceoverAssetId, label: 'Voiceover', volume: 1, fadeInS: 0.05, fadeOutS: 0.2, captions: brief.captions !== false, ...(brief.captionStyle ? { captionStyle: normalizeCaptionStyle(brief.captionStyle) } : {}) }]
             : [];
-        const overlays = sceneOverlays(storyboard.scenes, durations);
+        const overlays = sceneOverlays(storyboard.scenes, durations, brief.captions !== false ? normalizeCaptionStyle(brief.captionStyle).position : 'bottom');
         const assetIds = clips.map((c) => c.assetId);
         const platforms = (brief.platforms?.length ? brief.platforms : ['instagram']).filter((x) => x in VIDEO_DESTINATIONS);
         const group = platforms.length > 1 ? (p.crosspostGroupId ?? randomUUID()) : null;

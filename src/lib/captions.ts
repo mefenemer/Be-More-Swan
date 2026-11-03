@@ -29,8 +29,26 @@ export interface CaptionSource {
 export interface CaptionWord { text: string; startS: number; endS: number }
 export interface CaptionCue { startS: number; endS: number; words: CaptionWord[] }
 
-/** What the composition receives. */
-export interface CaptionTrack { cues: CaptionCue[]; accent?: string }
+/**
+ * How the captions look — chosen per voiceover in the post editor (the voiceover's row) and per
+ * assistant for the Video Producer (setup `captionStyle`). Absent = DEFAULT_CAPTION_STYLE, which is
+ * exactly how captions looked before styles existed, so an old post renders unchanged.
+ *   mode       'highlight' — short phrases, the spoken word in the highlight colour (the original)
+ *              'phrase'    — longer phrases, no highlight
+ *              'word'      — one word at a time, large
+ *   highlight  'brand' (the brand colour when it reads over footage, captionAccent) or a #hex
+ *   box        a dark band behind the words, for busy footage
+ */
+export type CaptionMode = 'highlight' | 'phrase' | 'word';
+export type CaptionPosition = 'bottom' | 'middle' | 'top';
+export type CaptionSize = 'small' | 'medium' | 'large';
+export interface CaptionStyle {
+    mode: CaptionMode; position: CaptionPosition; size: CaptionSize;
+    font: string; textColor: string; highlight: string; box: boolean;
+}
+
+/** What the composition receives. `style` absent on renders queued before styles existed. */
+export interface CaptionTrack { cues: CaptionCue[]; accent?: string; style?: CaptionStyle }
 
 export const CAPTION_MAX_WORDS = 4;
 export const CAPTION_MAX_CHARS = 26;
@@ -42,6 +60,42 @@ export const CAPTION_PAUSE_S = 0.6;
 export const CAPTION_FONT_ID = 'Impact';
 /** The highlight when the brand colour would not read on video. */
 export const CAPTION_FALLBACK_ACCENT = '#FFD400';
+
+/** The caption faces offered — overlay-fonts.ts ids the render already loads. */
+export const CAPTION_FONTS = ['Impact', 'Arial', 'Georgia', 'Trebuchet MS', 'Verdana', 'Comic Sans MS'] as const;
+
+export const DEFAULT_CAPTION_STYLE: CaptionStyle = {
+    mode: 'highlight', position: 'bottom', size: 'medium', font: CAPTION_FONT_ID, textColor: '#FFFFFF', highlight: 'brand', box: false,
+};
+
+const HEX = /^#[0-9a-f]{6}$/i;
+
+/** Whatever the client or a setup answer sent → a valid style; anything unknown falls back. Pure. */
+export function normalizeCaptionStyle(raw: unknown): CaptionStyle {
+    const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const pick = <T extends string>(v: unknown, allowed: readonly T[], d: T): T => (allowed as readonly unknown[]).includes(v) ? v as T : d;
+    const d = DEFAULT_CAPTION_STYLE;
+    return {
+        mode: pick(o.mode, ['highlight', 'phrase', 'word'] as const, d.mode),
+        position: pick(o.position, ['bottom', 'middle', 'top'] as const, d.position),
+        size: pick(o.size, ['small', 'medium', 'large'] as const, d.size),
+        font: pick(o.font, CAPTION_FONTS, d.font as typeof CAPTION_FONTS[number]),
+        textColor: typeof o.textColor === 'string' && HEX.test(o.textColor) ? o.textColor.toUpperCase() : d.textColor,
+        highlight: o.highlight === 'brand' ? 'brand' : typeof o.highlight === 'string' && HEX.test(o.highlight) ? o.highlight.toUpperCase() : d.highlight,
+        box: o.box === true,
+    };
+}
+
+/**
+ * Words and characters a phrase may hold, by mode and size: bigger letters, shorter phrases, so a
+ * phrase stays on two lines (a large whole phrase ran to four on the first styled render, 2026-11-02). Pure.
+ */
+export function captionLimits(mode: CaptionMode, size: CaptionSize = 'medium'): { words: number; chars: number } {
+    if (mode === 'word') return { words: 1, chars: 40 };
+    const scale = size === 'large' ? 0.7 : size === 'small' ? 1.2 : 1;
+    if (mode === 'phrase') return { words: size === 'large' ? 5 : 7, chars: Math.round(42 * scale) };
+    return { words: CAPTION_MAX_WORDS, chars: Math.round(CAPTION_MAX_CHARS * scale) };
+}
 
 const SENTENCE_END = /[.!?…]$|[,;:]$/;
 
@@ -68,19 +122,30 @@ const sameWord = (heard: string, written: string) => heard === written || (heard
  * across two sentences ("breakdowns Brightside", the first sample render, 2026-11-01). The script is
  * what was spoken, so each word takes the matching script token's spelling — matched in order, and
  * only when the letters agree or differ by one in a word of 5+ letters (whisper wrote "Harbor" for
- * "Harbour Yoga"), so a word the speaker said differently keeps its own text. Pure.
+ * "Harbour Yoga"), so a word the speaker said differently keeps its own text.
+ *
+ * A short misheard word is caught by its neighbours instead: one unmatched word between two matched
+ * ones, with exactly one script token between theirs, is that token misheard ("Sea views" came back
+ * "See views" on the Harbour Yoga sample, 2026-11-02), so it takes the script's spelling. Pure.
  */
 export function withScriptPunctuation<W extends { word: string }>(words: W[], script: string | null | undefined): W[] {
     const tokens = String(script ?? '').split(/\s+/).filter(Boolean);
     if (!tokens.length) return words;
+    const at: number[] = [];   // the script token each word matched, or -1
     let j = 0;
-    return words.map((w) => {
+    for (const w of words) {
         const want = bare(w.word);
-        if (!want) return w;
+        let hit = -1;
         // Look a few tokens ahead: the transcript can drop or merge a word.
-        for (let k = j; k < Math.min(tokens.length, j + 4); k++) {
-            if (sameWord(want, bare(tokens[k]))) { j = k + 1; return { ...w, word: tokens[k] }; }
+        if (want) for (let k = j; k < Math.min(tokens.length, j + 4); k++) {
+            if (sameWord(want, bare(tokens[k]))) { hit = k; j = k + 1; break; }
         }
+        at.push(hit);
+    }
+    return words.map((w, i) => {
+        if (at[i] >= 0) return { ...w, word: tokens[at[i]] };
+        const before = at[i - 1] ?? -1, after = at[i + 1] ?? -1;
+        if (bare(w.word) && before >= 0 && after === before + 2) return { ...w, word: tokens[before + 1] };
         return w;
     });
 }
@@ -106,9 +171,10 @@ export function timelineWords(sources: CaptionSource[]): CaptionWord[] {
     return out.sort((a, b) => a.startS - b.startS);
 }
 
-/** Group words into on-screen phrases. Pure. */
-export function buildCaptionCues(sources: CaptionSource[]): CaptionCue[] {
+/** Group words into on-screen phrases, as long as the caption mode allows. Pure. */
+export function buildCaptionCues(sources: CaptionSource[], mode: CaptionMode = 'highlight', size: CaptionSize = 'medium'): CaptionCue[] {
     const words = timelineWords(sources);
+    const limit = captionLimits(mode, size);
     const cues: CaptionCue[] = [];
     let cur: CaptionWord[] = [];
     let chars = 0;
@@ -120,8 +186,8 @@ export function buildCaptionCues(sources: CaptionSource[]): CaptionCue[] {
     for (const w of words) {
         const prev = cur[cur.length - 1];
         const breakBefore = !!prev && (
-            cur.length >= CAPTION_MAX_WORDS
-            || chars + 1 + w.text.length > CAPTION_MAX_CHARS
+            cur.length >= limit.words
+            || chars + 1 + w.text.length > limit.chars
             || SENTENCE_END.test(prev.text)
             || w.startS - prev.endS > CAPTION_PAUSE_S
         );
@@ -169,13 +235,88 @@ export function captionAccent(hex: string | null | undefined): string {
     return luminance >= 0.35 ? `#${m[1].toUpperCase()}` : CAPTION_FALLBACK_ACCENT;
 }
 
-/** Caption box geometry for a frame `height` px tall. Shared by the render and any preview. Pure. */
-export function captionLayout(height: number): { fontSizePx: number; bottomPct: number; sidePct: number; strokePx: number } {
-    return {
-        fontSizePx: Math.round(height * 0.058),
-        // Above the lower ~18 % where Reels/Shorts/TikTok draw their own caption and buttons.
-        bottomPct: 21,
-        sidePct: 7,
-        strokePx: Math.max(2, Math.round(height * 0.004)),
+/**
+ * Caption box geometry for a frame `height` px tall. Shared by the render and any preview. Pure.
+ * Exactly one of bottomPct / topPct is set; 'middle' sets topPct to centre the line (with translateY).
+ */
+export function captionLayout(height: number, style: Pick<CaptionStyle, 'size' | 'position' | 'mode'> = DEFAULT_CAPTION_STYLE): {
+    fontSizePx: number; bottomPct?: number; topPct?: number; centre: boolean; sidePct: number; strokePx: number;
+} {
+    const scale = style.size === 'small' ? 0.046 : style.size === 'large' ? 0.072 : 0.058;
+    const fontSizePx = Math.round(height * scale * (style.mode === 'word' ? 1.3 : 1));
+    const strokePx = Math.max(2, Math.round(height * 0.004));
+    // Bottom sits above the lower ~18 % where Reels/Shorts/TikTok draw their own caption and buttons;
+    // top sits below the ~12 % their account name and close button take.
+    if (style.position === 'top') return { fontSizePx, topPct: 14, centre: false, sidePct: 7, strokePx };
+    if (style.position === 'middle') return { fontSizePx, topPct: 50, centre: true, sidePct: 7, strokePx };
+    return { fontSizePx, bottomPct: 21, centre: false, sidePct: 7, strokePx };
+}
+
+/** The highlight colour a style asks for: the brand's (when it reads), or its own hex. Pure. */
+export function styleAccent(style: CaptionStyle, brandHex: string | null | undefined): string {
+    return style.highlight === 'brand' ? captionAccent(brandHex) : style.highlight;
+}
+
+/**
+ * "Time text to the voice" (post editor): each text box is shown while its words are spoken.
+ *
+ * A box's words are looked for in the spoken words. A place counts when it holds at least half of
+ * the box's words (all of them for a one- or two-word box); a box with no such place keeps its own
+ * timing and is reported unmatched. Of the places that count, the one nearest the box's current
+ * start wins (a box is usually already near its moment — a Video Producer scene's text is), else the
+ * first one after the previous box's; more of the box's words breaks a tie. A matched box runs from
+ * its first heard word to its last + a short hold, never past the next box's start. Times are on the
+ * post's timeline: `offsetS` is where the voiceover starts. Pure.
+ */
+export function alignTextToWords(
+    boxes: Array<{ id: string; text: string; startS?: number | null }>,
+    words: SpokenWordLike[],
+    offsetS = 0,
+): { timings: Record<string, { startS: number; endS: number }>; unmatched: string[] } {
+    const heard = words.map((w) => bare(w.word));
+    const timings: Record<string, { startS: number; endS: number }> = {};
+    const unmatched: string[] = [];
+    let cursor = 0;
+    /** Every place a window of the box's words starts, with how many of them it holds. */
+    const places = (want: string[]) => {
+        const out: Array<{ first: number; last: number; hits: number }> = [];
+        const span = want.length + 3;   // room for a few spoken words the box leaves out
+        for (let i = 0; i < heard.length; i++) {
+            if (!want.includes(heard[i])) continue;   // a window starts on a word of the box
+            const left = [...want];
+            let hits = 0, last = i;
+            for (let j = i; j < Math.min(heard.length, i + span); j++) {
+                const k = left.indexOf(heard[j]);
+                if (k >= 0) { left.splice(k, 1); hits++; last = j; }
+            }
+            out.push({ first: i, last, hits });
+        }
+        return out;
     };
+    for (const box of boxes) {
+        const want = String(box.text || '').split(/\s+/).map(bare).filter(Boolean);
+        if (!want.length) { unmatched.push(box.id); continue; }
+        const need = want.length <= 2 ? want.length : Math.ceil(want.length / 2);
+        const ok = places(want).filter((p) => p.hits >= need);
+        if (!ok.length) { unmatched.push(box.id); continue; }
+        const hint = typeof box.startS === 'number' && Number.isFinite(box.startS) ? box.startS : null;
+        const at = (p: { first: number }) => offsetS + words[p.first].start;
+        const score = (p: { first: number; hits: number }) => hint != null
+            ? Math.abs(at(p) - hint)
+            : (p.first >= cursor ? 0 : 1e6) + p.first;   // the first one after the previous box
+        ok.sort((x, y) => score(x) - score(y) || y.hits - x.hits);
+        const hit = ok[0];
+        timings[box.id] = {
+            startS: Math.round(at(hit) * 10) / 10,
+            endS: Math.round((offsetS + words[hit.last].end + CAPTION_HOLD_S + 0.4) * 10) / 10,
+        };
+        cursor = hit.last + 1;
+    }
+    // Never over the next box: one piece of text at a time reads as the voice moving on.
+    const order = Object.entries(timings).sort((a, b) => a[1].startS - b[1].startS);
+    for (let i = 0; i < order.length - 1; i++) {
+        const next = order[i + 1][1].startS;
+        if (order[i][1].endS > next && next > order[i][1].startS) order[i][1].endS = next;
+    }
+    return { timings, unmatched };
 }

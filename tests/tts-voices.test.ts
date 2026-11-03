@@ -7,10 +7,10 @@
 // Run:  npx tsx tests/tts-voices.test.ts
 
 import assert from 'node:assert';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { VOICES, voiceRequest, VOICEOVER_INSTRUCTIONS, synthesizeSpeech, speakVoiceover, elevenLabsVoice, voiceoverCostUsd } from '../src/lib/tts';
+import { VOICES, OFFERED_VOICES, VOICE_LANGUAGES, DEFAULT_VOICE, isVoiceId, voiceRequest, VOICEOVER_INSTRUCTIONS, synthesizeSpeech, speakVoiceover, elevenLabsVoice, voiceoverCostUsd } from '../src/lib/tts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -52,10 +52,31 @@ async function withKeys<T>(keys: Record<string, string | undefined>, fn: () => P
     try { return await fn(); } finally { for (const k of Object.keys(was)) { if (was[k] === undefined) delete process.env[k]; else process.env[k] = was[k]; } }
 }
 
-await check('the British women are ElevenLabs Pepper and Beth; every other voice stays OpenAI', () => {
+await check('Pepper and Beth are ElevenLabs; the London man and the legacy six stay OpenAI', () => {
     assert.strictEqual(elevenLabsVoice('british_woman'), '6vIP9mPY4dr6w8krUg01');
     assert.strictEqual(elevenLabsVoice('british_woman_playful'), 'zH7TN9vEZAsEway9xWev');
-    for (const v of VOICES) if (!v.id.startsWith('british_woman')) assert.strictEqual(elevenLabsVoice(v.id), null, v.id);
+    assert.strictEqual(elevenLabsVoice('london_man'), null);
+    for (const v of VOICES) if (v.legacy) assert.strictEqual(elevenLabsVoice(v.id), null, v.id);
+});
+
+await check('the catalogue: unique ids, real languages, a woman and a man per language, a sample per offered voice', () => {
+    const ids = VOICES.map((v) => v.id);
+    assert.strictEqual(new Set(ids).size, ids.length, 'duplicate voice id');
+    const langs = new Set(VOICE_LANGUAGES.map((l) => l.code));
+    for (const v of VOICES) {
+        assert.ok(langs.has(v.lang), `${v.id}: unknown language ${v.lang}`);
+        assert.ok(v.gender === 'female' || v.gender === 'male', `${v.id}: gender`);
+        assert.ok(v.name && v.label, `${v.id}: name and label`);
+    }
+    for (const l of VOICE_LANGUAGES) {
+        const vs = OFFERED_VOICES.filter((v) => v.lang === l.code);
+        assert.ok(vs.some((v) => v.gender === 'female') && vs.some((v) => v.gender === 'male'), `${l.label}: needs a woman and a man`);
+    }
+    // Listening in the picker plays a static file (scripts/make-voice-samples.mjs) — never a fresh voiceover.
+    for (const v of OFFERED_VOICES) assert.ok(existsSync(join(root, 'audio/voices', `${v.id}.mp3`)), `no sample for ${v.id} — run scripts/make-voice-samples.mjs`);
+    assert.ok(isVoiceId(DEFAULT_VOICE) && !VOICES.find((v) => v.id === DEFAULT_VOICE)!.legacy, 'the default voice is offered');
+    // Saved settings from before the catalogue still speak.
+    for (const id of ['coral', 'sage', 'verse', 'alloy', 'onyx', 'shimmer']) assert.ok(isVoiceId(id), id);
 });
 
 await check('ElevenLabs speaks the British woman when its key is set', async () => {
@@ -97,13 +118,17 @@ await check('the voiceover asset records who spoke it', () => {
     assert.ok(src.includes('speakVoiceover(') && !src.includes("provider: 'openai'"), 'voiceover-asset must use speakVoiceover and its provider');
 });
 
-await check('the Videos tab and the onboarding question offer the same voices', () => {
+await check('every screen chooses voices from the catalogue, never a list of its own', () => {
     const tab = read('src/components/assistant-videos.js');
     const onboarding = read('src/public/assistant-onboarding-schemas.js');
-    for (const v of VOICES) {
-        assert.ok(tab.includes(`['${v.id}', '${v.label}']`), `Videos tab: ${v.id}`);
-        assert.ok(onboarding.includes(`{ value: '${v.id}', label: '${v.label}' }`), `onboarding: ${v.id}`);
-    }
+    const editor = read('workspace.html');
+    assert.ok(!tab.includes("['coral', 'Warm and friendly']"), 'Videos tab must not carry its own voice list');
+    assert.ok(tab.includes('VoicePicker?.open('), 'Videos tab opens the voice picker');
+    assert.ok(/key: 'defaultVoice',[\s\S]{0,400}picker: 'voice'/.test(onboarding), 'setup asks for the voice with the picker');
+    assert.ok(!editor.includes('<select id="insp-voice-voice"'), 'post editor must not carry its own voice list');
+    assert.ok(editor.includes("window.VoicePicker?.open({"), 'post editor opens the voice picker');
+    assert.ok(read('src/components/voice-picker.js').includes("'/src/public/voice-catalogue.json'"), 'the picker reads the one catalogue');
+    assert.ok(!read('assistants.js').includes('new SpeechSynthesisUtterance'), 'Read aloud must not use the browser’s robotic speech');
 });
 
 console.log(`\n${passed} checks passed`);

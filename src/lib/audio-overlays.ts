@@ -18,6 +18,8 @@
 // a publishing feature but a rendering one: the still becomes an mp4 (see needsVideoRender below).
 // Threads voice notes are the one true standalone-audio format, and they publish differently again.
 
+import { normalizeCaptionStyle, type CaptionStyle } from './captions';
+
 export interface AudioOverlay {
     id: string;
     /** content_assets.id of an uploaded/recorded audio asset. The bytes live in R2. */
@@ -37,6 +39,8 @@ export interface AudioOverlay {
      * with it absent is captioned too — `false` is the only way to turn captions off.
      */
     captions?: boolean;
+    /** How those captions look (captions.ts CaptionStyle); absent = the original look. */
+    captionStyle?: CaptionStyle;
 }
 
 export const AUDIO_DEFAULTS = { volume: 1, fadeInS: 0.05, fadeOutS: 0.05 };
@@ -82,6 +86,7 @@ export function sanitiseAudioOverlays(raw: unknown): AudioOverlay[] | null {
             ...(startS != null ? { startS } : {}),
             ...(endS != null ? { endS } : {}),
             ...(typeof o.captions === 'boolean' ? { captions: o.captions } : {}),
+            ...(o.captionStyle && typeof o.captionStyle === 'object' ? { captionStyle: normalizeCaptionStyle(o.captionStyle) } : {}),
         });
     }
     return out;

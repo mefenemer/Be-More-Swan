@@ -162,7 +162,7 @@ check('the chat can propose it (same server action), and only ever as a card', (
     assert.deepStrictEqual(postActionFromUiElement({ type: 'post_action_proposal', action: 'video_version', postId: '#12' })?.postId, 12);
     assert.match(read('src/components/chat-session.js'), /d\.action === 'video_version'[\s\S]{0,300}postActionCall\('video-projects', \{ action: 'from_post', postId: d\.postId \}\)/);
     assert.match(read('src/components/disruptive-ui-registry.js'), /video_version: \{ head: 'Make a video version'/);
-    assert.match(read('netlify/functions/chat-orchestrator.ts'), /"shorter" \| "longer" \| "video_version",/);
+    assert.match(read('netlify/functions/chat-orchestrator.ts'), /"shorter" \| "longer" \| "video_version" | "voiceover" | "captions" | "time_text",/);
     assert.match(read('src/utils/chat-post-action.ts'), /activeVideoProducer\(db, organisationId\)/, 'no card for a Video Producer that is not there');
 });
 

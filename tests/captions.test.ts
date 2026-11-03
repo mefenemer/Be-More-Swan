@@ -17,7 +17,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { withScriptPunctuation } from '../src/lib/captions';
+import { withScriptPunctuation, normalizeCaptionStyle, DEFAULT_CAPTION_STYLE, alignTextToWords } from '../src/lib/captions';
 import {
     timelineWords, buildCaptionCues, cueAt, captionAccent, captionLayout,
     CAPTION_MAX_WORDS, CAPTION_MAX_CHARS, CAPTION_HOLD_S, CAPTION_FALLBACK_ACCENT,
@@ -87,7 +87,7 @@ check('the brand colour highlights only when it reads over footage', () => {
 check('caption size scales with the frame and sits above the platform UI', () => {
     const tall = captionLayout(1920);
     assert.ok(tall.fontSizePx > 100 && tall.fontSizePx < 125);
-    assert.ok(tall.bottomPct >= 18, 'Reels/Shorts draw their own UI in the bottom ~18%');
+    assert.ok(tall.bottomPct! >= 18, 'Reels/Shorts draw their own UI in the bottom ~18%');
 });
 
 check('the captions flag survives the save sanitiser, and only as a boolean', () => {
@@ -119,7 +119,8 @@ check('the composition treats captions as optional and loads the caption face', 
     const tsx = readFileSync(join(root, 'remotion/PostOverlay.tsx'), 'utf8');
     assert.ok(tsx.includes('captions?: CaptionTrack;'), 'captions must be optional for old inputs');
     assert.ok(tsx.includes('captions.cues.length ? captions : null'), 'an empty track draws nothing');
-    assert.ok(tsx.includes('...(captionTrack ? [CAPTION_FONT_ID] : [])'), 'the caption font must load before the first frame');
+    assert.ok(tsx.includes('...(captionTrack ? [captionTrack.style?.font || CAPTION_FONT_ID] : [])'), 'the caption font (the chosen one) must load before the first frame');
+    assert.ok(tsx.includes('track.style || DEFAULT_CAPTION_STYLE'), 'a track queued before styles existed renders the original look');
     assert.ok(!/from ['"](node:|fs|path|drizzle)/.test(readFileSync(join(root, 'src/lib/captions.ts'), 'utf8')), 'captions.ts is bundled into Remotion — no Node imports');
 });
 
@@ -137,7 +138,50 @@ check('the script puts punctuation back on bare transcribed words, so phrases br
     // The script's spelling wins a one-letter difference in a longer word — never in a short one.
     assert.strictEqual(withScriptPunctuation([{ word: 'Harbor', start: 0, end: 1 }], 'Harbour Yoga.')[0].word, 'Harbour');
     assert.strictEqual(withScriptPunctuation([{ word: 'cat', start: 0, end: 1 }], 'can.')[0].word, 'cat');
+    // A short word misheard between two that match takes the script's word ("See views", 2026-11-02);
+    // a gap that isn't one-for-one keeps what was heard.
+    const heard = (s: string) => s.split(' ').map((word, i) => ({ word, start: i, end: i + 1 }));
+    assert.deepStrictEqual(withScriptPunctuation(heard('See views from every'), 'Sea views from every single mat.').map((w) => w.word), ['See', 'views', 'from', 'every']);
+    assert.deepStrictEqual(withScriptPunctuation(heard('Mats provided. See views from every'), 'Mats provided. Sea views from every mat.').map((w) => w.word), ['Mats', 'provided.', 'Sea', 'views', 'from', 'every']);
+    assert.deepStrictEqual(withScriptPunctuation(heard('Mats are kindly provided'), 'Mats are provided.').map((w) => w.word), ['Mats', 'are', 'kindly', 'provided.']);
     assert.deepStrictEqual(withScriptPunctuation(words, ''), words);
+});
+
+check('caption styles: unknown values fall back, and the default is the original look', () => {
+    const d = normalizeCaptionStyle(undefined);
+    assert.deepStrictEqual(d, DEFAULT_CAPTION_STYLE);
+    const s = normalizeCaptionStyle({ mode: 'word', position: 'top', size: 'huge', font: 'Wingdings', textColor: '#ffeeaa', highlight: 'red', box: 'yes' });
+    assert.deepStrictEqual([s.mode, s.position, s.size, s.font, s.textColor, s.highlight, s.box], ['word', 'top', 'medium', 'Impact', '#FFEEAA', 'brand', false]);
+    assert.strictEqual(captionLayout(1920, { ...d, position: 'top' }).topPct, 14);
+    assert.ok(captionLayout(1920, { ...d, size: 'large' }).fontSizePx > captionLayout(1920).fontSizePx);
+    const words = 'one two three four five six seven eight nine ten eleven twelve'.split(' ').map((word, i) => ({ word, start: i * 0.3, end: i * 0.3 + 0.25 }));
+    assert.strictEqual(buildCaptionCues([{ words }], 'word').length, 12);
+    assert.ok(buildCaptionCues([{ words }], 'phrase').length < buildCaptionCues([{ words }], 'highlight').length);
+    // The style survives the save sanitiser.
+    const saved = sanitiseAudioOverlays([{ assetId: 9, volume: 1, captions: true, captionStyle: { mode: 'phrase', box: true } }]);
+    assert.strictEqual(saved![0].captionStyle!.mode, 'phrase');
+    assert.strictEqual(saved![0].captionStyle!.box, true);
+});
+
+check('text boxes are timed to the words that say them, in order, never overlapping', () => {
+    const said = 'Three signs your boiler needs a service. First the flame. It should be blue. Yellow or orange is a warning. Second listen out for banging.';
+    const words = said.split(' ').map((word, i) => ({ word, start: i * 0.4, end: i * 0.4 + 0.3 }));
+    const r = alignTextToWords([
+        { id: 'a', text: 'Is your boiler ready?' },
+        { id: 'b', text: 'Sign 1: Yellow flame' },
+        { id: 'c', text: 'Sign 2: Strange noises' },
+        { id: 'd', text: 'Banging?' },
+    ], words, 2);
+    assert.deepStrictEqual(r.unmatched, ['c']);
+    assert.strictEqual(r.timings.a.startS, Math.round((2 + 2 * 0.4) * 10) / 10);   // "your boiler"
+    assert.ok(r.timings.b.startS > r.timings.a.startS && r.timings.d.startS > r.timings.b.startS);
+    assert.ok(r.timings.a.endS <= r.timings.b.startS);
+    // A box already near its moment stays near it, even when a later sentence shares more of its words
+    // (Brightside, 2026-11-02: "Is your boiler ready?" jumped to "…your boiler is never normal").
+    const said2 = 'Three signs your boiler needs a service. Banging from your boiler is never normal.';
+    const w2 = said2.split(' ').map((word, i) => ({ word, start: i * 0.5, end: i * 0.5 + 0.4 }));
+    assert.strictEqual(alignTextToWords([{ id: 'a', text: 'Is your boiler ready?', startS: 0 }], w2).timings.a.startS, 1);
+    assert.ok(alignTextToWords([{ id: 'a', text: 'Is your boiler ready?' }], w2).timings.a.startS === 1, 'no hint: the first place after the last box');
 });
 
 console.log(`\n${passed} checks passed`);
