@@ -2,4 +2,4 @@
 # One line per SITE: <site> <bundle-hash> <deployed-at>. A site absent here has never been
 # deployed from this working tree — it does NOT inherit another site's hash.
 staging cdf0d52f1b2c535d 2026-11-02T19:03:27.131Z
-prod 5c01566ea37ebabb 2026-10-31T12:46:30.955Z
+prod cdf0d52f1b2c535d 2026-11-03T05:05:51.505Z
