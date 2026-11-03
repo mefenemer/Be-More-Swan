@@ -13962,10 +13962,47 @@ function _railRender() {
         const m = st.match(/([\w.-]+\.(?:js|html))(?:\?[^:)\s]*)?:(\d+)(?::\d+)?/);
         return m ? `${m[1]}:${m[2]}` : '';
     };
+    // "Failed to fetch" is the browser saying a request got no answer at all — the connection
+    // dropped (often a laptop waking from sleep), not a bug on this page. Its only stack frame is
+    // the fetch wrapper in cached-fetch.js, which every request passes through, so "(cached-fetch.js:64)"
+    // pointed at the one file that had nothing to do with it. Say what it is, once.
+    let saidOffline = false;
+    const isNetworkFailure = (r) => r instanceof TypeError
+        && /failed to fetch|networkerror|load failed|network connection was lost/i.test(String(r.message || ''));
     window.addEventListener('unhandledrejection', (ev) => {
         const r = ev && ev.reason;
+        if (isNetworkFailure(r)) {
+            if (saidOffline) return;
+            saidOffline = true;
+            show('the connection to Be More Swan dropped. Check your internet, then refresh the page', '');
+            return;
+        }
         show((r && r.message) || String(r || 'a request failed'), frameOf(r));
     });
+})();
+
+/**
+ * A preview image that will not load gets ONE fresh link before it is left broken.
+ *
+ * Private pictures are shown through signed links that expire (ten minutes for a photo — see
+ * resolvePostMedia). Leave the editor open past that, or let the laptop sleep, and the next render
+ * paints a black frame with a broken-image icon although the picture is fine. Refetching the post
+ * mints a new link. Once per URL, so a picture that is genuinely gone cannot loop.
+ */
+(function _pceRecoverExpiredMedia() {
+    const retried = new Set();
+    document.addEventListener('error', async (ev) => {
+        const el = ev.target;
+        if (!el || !el.matches || !el.matches('[data-media-img], [data-media-video]')) return;
+        const src = el.getAttribute('src') || '';
+        if (!src || retried.has(src)) return;
+        retried.add(src);
+        const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+        if (!post) return;
+        await _pceRefetchPostGroup(post);
+        // Redraw even when the link came back the same: that src is now in `retried`, so it stops here.
+        if (_rqReviewPostId === post.id) _rqReviewRenderActive();
+    }, true); // capture: resource errors do not bubble
 })();
 
 /**
