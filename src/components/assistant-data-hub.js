@@ -261,7 +261,7 @@
   }
 
   const state = {
-    hub: null, assistantId: null, records: [], pendingFocusId: null, pendingFocusTone: null,
+    hub: null, assistantId: null, assistantName: '', records: [], pendingFocusId: null, pendingFocusTone: null,
     // Leads the 30-day retention sweep has moved (src/config/lead-retention.ts). A SEPARATE array
     // from `records`, deliberately — see fetchDeletedRecords for why the two populations are never
     // merged. Empty on every hub but the Lead Generator's.
@@ -1172,6 +1172,27 @@
     return via === 'google' || via === 'microsoft';
   }
 
+  /** The assistant's own name for "Ask Ivy to …" — "your assistant" when the page did not pass one. */
+  function assistantLabel() {
+    return state.assistantName || 'your assistant';
+  }
+  function assistantLabelCap() {
+    const name = assistantLabel();
+    return name.charAt(0).toUpperCase() + name.slice(1);
+  }
+
+  /**
+   * The footer for a step the ASSISTANT can carry out (src/config/lead-recipient.ts
+   * leadAssistantStep). The owner asked (2026-11-03) for a button for the assistant to action a
+   * suggested next step wherever it can; these are the steps where it can. The button still
+   * presses the bar's own control, so nothing about what the step does changes — only who it is
+   * framed as being done by. `ownerLabel` replaces the chip's fixed wording with the name.
+   */
+  function askAssistant(key, verb, note) {
+    return { owner: 'assistant', ownerLabel: `${assistantLabelCap()} can do this`,
+      action: { key, label: `Ask ${assistantLabel()} to ${verb}` }, note };
+  }
+
   function nextStepGuidance(record) {
     if (state.hub.recordType !== 'lead') return null;
     const d = record.data || {};
@@ -1222,6 +1243,14 @@
         note: 'The outreach email has gone and the follow-ups are handled for you. Anything else in that step — a call, a meeting, a look at their site — is yours.' };
     }
 
+    // No address and nothing researched: research is how an address gets found — it names the
+    // person to write to and looks for their address — so that is the step, and it is the
+    // assistant's. Once research has run and still found none, adding one is yours.
+    if (!contactEmailOf(record) && !d.intel) {
+      return askAssistant('enrich', 'find one',
+        `There is no email address on this lead yet. ${assistantLabelCap()} can research the company — read their site and recent news, re-score it, name the person to write to and look for their address. You can also add one yourself with Add an address below.`);
+    }
+
     if (!contactEmailOf(record)) {
       return { owner: 'you', action: { key: 'add-address', label: 'Add an address' },
         note: 'There is no email address on this lead, so nothing can be sent for you until you add one.' };
@@ -1243,8 +1272,8 @@
     // is better for having waited for it. Offered only while there is no `intel`: once the research
     // has run, re-running it is a tool on the bar, not the thing to do next.
     if (!d.intel) {
-      return { owner: 'you', action: { key: 'enrich', label: 'Research this lead' },
-        note: 'Nothing has been researched on this company yet. Researching reads their site and recent news and re-scores the lead, so your approve decision rests on more than the first pass.' };
+      return askAssistant('enrich', 'research it',
+        'Nothing has been researched on this company yet. Researching reads their site and recent news and re-scores the lead, so your decision rests on more than the first pass.');
     }
 
     // Already promoted — say so and offer the way there, rather than a second move button that
@@ -1259,8 +1288,8 @@
     // ⚠️ This moves the lead ONE step — into the review column, not past it. It used to approve,
     // which put the lead in the Approved column having never been through the human read of its
     // email. See the Move handler below.
-    return { owner: 'you', action: { key: 'move-to-outreach', label: `Move to ${reviewTabLabel()}` },
-      note: `Moving it puts this lead in the ${reviewTabLabel()} tab's ${reviewColumnLabel()} column, where you read its email before anything is sent. Nothing goes out from here.` };
+    return askAssistant('move-to-outreach', `move it to ${reviewTabLabel()}`,
+      `This puts the lead in the ${reviewTabLabel()} tab's ${reviewColumnLabel()} column, where you read its email before anything is sent. Nothing goes out from here.`);
   }
 
   /**
@@ -1313,6 +1342,120 @@
       target.click();
       btn.disabled = true;
     });
+  }
+
+  // ── The next step, in bulk ──────────────────────────────────────────────────
+  //
+  // Ticked leads, and the step the assistant can take on each — the same rule the panel's
+  // "Ask <name> to …" button and the chat's next-step card read (window.LeadAssistantStep, from
+  // src/config/lead-recipient.ts). Nothing runs until the plan has been read and confirmed: the
+  // strip says what will happen to how many, and lists every lead left for the user and why.
+  //
+  // ⚠️ Research is capped at LeadAssistantStep.BULK_MAX per press. Each one spends real searches
+  // and a model call — the reason Research was per-lead only until the owner asked for this
+  // (2026-11-03). The cap is stated on the strip, never applied silently.
+  // Moves are not capped: they are one PATCH each and send nothing.
+  function bulkNextStepStrip(ids) {
+    const LAS = window.LeadAssistantStep;
+    const max = (LAS && LAS.BULK_MAX) || 10;
+    const byId = new Map(state.records.map((r) => [r.id, r]));
+    const research = [], move = [], yours = [];
+    let overCap = 0;
+    for (const id of ids) {
+      const r = byId.get(id);
+      if (!r) continue;
+      const { step, whyNot } = LAS.of(r.approvalStatus, r.data || {});
+      if (step === 'research') { if (research.length < max) research.push(r); else overCap++; }
+      else if (step === 'move_to_outreach') move.push(r);
+      else yours.push({ r, whyNot: whyNot || 'Nothing for the assistant to do here.' });
+    }
+    const name = assistantLabel();
+    const rq = reviewTabLabel();
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+    const total = research.length + move.length;
+
+    const strip = document.createElement('div');
+    strip.className = 'mt-2 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2.5';
+    strip.innerHTML = `
+      <p class="text-xs font-bold text-emerald-900 mb-1">${total
+        ? `${esc(assistantLabelCap())} will:`
+        : `There is nothing here ${esc(name)} can do — every next step is yours.`}</p>
+      ${total ? `<ul class="text-[11px] text-emerald-900 list-disc pl-4 mb-1.5">
+        ${research.length ? `<li><strong>Research ${plural(research.length, 'lead', 'leads')}</strong> — read their site and recent news, re-score, name the person to write to and look for their address.</li>` : ''}
+        ${move.length ? `<li><strong>Move ${plural(move.length, 'lead', 'leads')} to ${esc(rq)}</strong> — into the ${esc(reviewColumnLabel())} column, where you read each email before anything is sent.</li>` : ''}
+      </ul>
+      <p class="text-[11px] text-gray-600 mb-1.5">Nothing is emailed.${overCap ? ` Research runs on ${max} at a time, because each one spends searches — ${plural(overCap, 'more lead', 'more leads')} will be left for the next press.` : ''}</p>` : ''}
+      ${yours.length ? `<details class="text-[11px] text-gray-700 mb-1.5">
+        <summary class="cursor-pointer font-semibold">${plural(yours.length, 'lead is', 'leads are')} left for you</summary>
+        <ul class="mt-1 space-y-0.5">
+          ${yours.slice(0, 50).map(({ r, whyNot }) => `<li><span class="font-semibold">${esc(r.title || 'Untitled')}</span> — ${esc(whyNot)}</li>`).join('')}
+        </ul>
+      </details>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-1">
+        ${total ? `<button type="button" class="btn-primary px-2.5 py-1 text-[11px] font-bold rounded-lg transition cursor-pointer" data-hub-next-go>Go ahead</button>` : ''}
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-700 transition cursor-pointer" data-hub-next-cancel>${total ? 'Cancel' : 'Close'}</button>
+      </div>
+      <p class="hidden text-[11px] font-semibold mt-1.5" data-hub-next-status></p>`;
+
+    const status = strip.querySelector('[data-hub-next-status]');
+    strip.querySelector('[data-hub-next-cancel]').addEventListener('click', () => strip.remove());
+    strip.querySelector('[data-hub-next-go]')?.addEventListener('click', async () => {
+      strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+      status.className = 'text-[11px] font-semibold text-gray-600 mt-1.5';
+      let moved = 0, researched = 0;
+      const failed = [];
+      // Moves first — instant, and the same write as the panel's Move button and the chat's card:
+      // status and stage together, the stage MERGED so the lead keeps its score, research and draft.
+      for (const r of move) {
+        status.textContent = `Moving ${moved + 1} of ${move.length}…`;
+        try {
+          const res = await fetch(API, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: r.id, approvalStatus: 'pending_approval', dataMerge: { outreachStage: 'review' } }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body.error || 'Could not move it.');
+          moved++;
+        } catch (err) { failed.push(`${r.title || 'A lead'}: ${err.message}`); }
+      }
+      // Research one at a time: each is several searches and a model call, and the server's own
+      // refusals (no website on file, erased) are per lead and worth reporting per lead.
+      for (const r of research) {
+        status.textContent = `Researching ${researched + 1} of ${research.length} — ${r.title || 'a lead'}…`;
+        try {
+          const res = await fetch('/.netlify/functions/lead-generation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
+            body: JSON.stringify({ action: 'enrich_lead', assistantId: state.assistantId, recordId: r.id }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(body.error || 'Could not research it.');
+          researched++;
+        } catch (err) { failed.push(`${r.title || 'A lead'}: ${err.message}`); }
+      }
+      const done = [
+        researched ? `researched ${plural(researched, 'lead', 'leads')}` : '',
+        moved ? `moved ${plural(moved, 'lead', 'leads')} to ${rq}` : '',
+      ].filter(Boolean).join(' and ');
+      window.showToast?.(done
+        ? `${assistantLabelCap()} ${done}. Nothing was emailed.${failed.length ? ` ${plural(failed.length, 'lead', 'leads')} could not be done.` : ''}`
+        : 'Nothing could be done — the reasons are listed.');
+      state.selected.clear();
+      if (!failed.length) { await refresh(); return; }
+      // ⚠️ Not refreshed yet: refresh() re-renders the table and this strip with it, and the reasons
+      // are the part worth reading. Close does the refresh. paintRows only redraws the rows and the
+      // bar, so the ticks clear without taking this strip with them.
+      paintRows();
+      status.className = 'text-[11px] font-semibold text-red-600 mt-1.5 whitespace-pre-line';
+      status.textContent = failed.slice(0, 10).join('\n');
+      const close = strip.querySelector('[data-hub-next-cancel]');
+      close.disabled = false;
+      close.textContent = 'Close';
+      close.addEventListener('click', () => refresh(), { once: true });
+    });
+    return strip;
   }
 
   // Meetings: summary + a check-off-able action-item list persisted via PATCH
@@ -2643,6 +2786,8 @@
              is one act. ml-auto stays on the WRAPPER rather than the button, which is what keeps
              this correct if a second action is ever put back beside it. -->
         <div class="ml-auto flex items-center gap-2">
+          ${hub.recordType === 'lead' && window.LeadAssistantStep ? `<button type="button" data-hub-bulknext
+            class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer"></button>` : ''}
           <button type="button" data-hub-bulkdelete
             class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition cursor-pointer"></button>
         </div>
@@ -2739,6 +2884,14 @@
       if (!strip) return;
       strip.innerHTML = '';
       strip.appendChild(bulkDeleteStrip([...state.selected]));
+      strip.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+    // Same host, same clear-first rule: the next-step plan and the delete confirmation never stack.
+    host.querySelector('[data-hub-bulknext]')?.addEventListener('click', () => {
+      const strip = host.querySelector('[data-hub-bulkstrip]');
+      if (!strip) return;
+      strip.innerHTML = '';
+      strip.appendChild(bulkNextStepStrip([...state.selected]));
       strip.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
   }
@@ -2902,6 +3055,8 @@
     all.textContent = `Select all ${matching} matching`;
     all.style.display = n >= matching ? 'none' : '';
     bar.querySelector('[data-hub-bulkdelete]').textContent = `Delete ${n}`;
+    const next = bar.querySelector('[data-hub-bulknext]');
+    if (next) next.textContent = `Ask ${assistantLabel()} to do the next step`;
   }
 
   // Phone cards (hubTab.phoneCards): below 640px each row restacks as a card — every cell on its own
@@ -3830,10 +3985,11 @@
     (wanted || overlay.querySelector('input[name="title"]'))?.focus();
   }
 
-  async function init({ hub, assistantId }) {
+  async function init({ hub, assistantId, assistantName }) {
     if (!hub || !assistantId) return;
     state.hub = hub;
     state.assistantId = assistantId;
+    state.assistantName = typeof assistantName === 'string' ? assistantName.trim() : '';
     state.records = [];
     // A different assistant is a different table: its columns, its vocabularies, and any row the
     // user had ticked all belong to the one being left. refresh() deliberately does NOT do this —

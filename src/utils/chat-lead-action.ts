@@ -33,10 +33,13 @@
 // ⚠️ Never throws.
 
 import { createHash } from 'node:crypto';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, organisations } from '../../db/schema';
-import { hasOutreachDraft, isInOutreachReview, resolveLeadRecipient } from '../config/lead-recipient';
+import {
+    hasOutreachDraft, isInOutreachReview, resolveLeadRecipient, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX,
+    type LeadAssistantStep,
+} from '../config/lead-recipient';
 import { leadOutreachState } from '../config/lead-outreach-state';
 import { evaluateDoNotContact } from '../config/do-not-contact';
 import { needsPersonalInboxConfirmation } from '../config/lead-email-kind';
@@ -51,7 +54,7 @@ import { previewFollowUps } from './outreach-sequences';
 type Db = ReturnType<typeof getDb>;
 
 export const LEAD_ACTION_PROPOSAL_TYPE = 'lead_action_proposal';
-export const LEAD_ACTIONS = ['send', 'send_all', 'improve', 'move_to_outreach', 'reject', 'set_outcome'] as const;
+export const LEAD_ACTIONS = ['send', 'send_all', 'improve', 'move_to_outreach', 'reject', 'set_outcome', 'next_step'] as const;
 
 /**
  * "Approve all" (owner, 2026-10-27): the most emails one card offers. Every one of them is shown on the
@@ -105,6 +108,13 @@ export function leadActionFromUiElement(uiElement: unknown): LeadActionRequest |
     const ui = uiElement as Record<string, unknown>;
     if (ui.type !== LEAD_ACTION_PROPOSAL_TYPE) return null;
     const action = LEAD_ACTIONS.find((a) => a === ui.action);
+    if (action === 'next_step') {
+        // One lead or several — the card is the same either way, so a single `recordId` is folded in.
+        const raw = Array.isArray(ui.recordIds) ? ui.recordIds : (ui.recordId ?? ui.leadId) != null ? [ui.recordId ?? ui.leadId] : [];
+        const ids = [...new Set(raw.map((v) => Number(String(v ?? '').replace(/^#/, ''))).filter((n) => Number.isInteger(n) && n > 0))];
+        if (!ids.length) return null;
+        return { action, recordId: 0, recordIds: ids, outcome: null, lossReason: null, valueGbp: null };
+    }
     if (action === 'send_all') {
         const ids = Array.isArray(ui.recordIds)
             ? [...new Set(ui.recordIds.map((v) => Number(String(v ?? '').replace(/^#/, ''))).filter((n) => Number.isInteger(n) && n > 0))]
@@ -169,6 +179,8 @@ export interface LeadActionCard {
     skipped?: Array<{ recordId: number; title: string; why: string }>;
     /** send_all: emails waiting beyond LEAD_BULK_MAX, left for the next card. */
     more?: number;
+    /** next_step: what the assistant will do to each lead (src/config/lead-recipient.ts leadAssistantStep). */
+    steps?: Array<{ recordId: number; title: string; rating: string | null; step: LeadAssistantStep }>;
     blocked: string | null;
     settled?: boolean;
 }
@@ -241,6 +253,12 @@ export async function resolveLeadActionProposal(
     db: Db, organisationId: number, aiAssistantId: number, req: LeadActionRequest,
 ): Promise<LeadActionCard | null> {
     try {
+        if (req.action === 'next_step') {
+            return await resolveNextSteps(db, organisationId, aiAssistantId, req, {
+                type: LEAD_ACTION_PROPOSAL_TYPE, action: 'next_step', recordId: 0, assistantId: aiAssistantId,
+                title: '', rating: null, approvalStatus: null, blocked: null,
+            });
+        }
         if (req.action === 'send_all') {
             return await resolveBulkSend(db, organisationId, aiAssistantId, req, {
                 type: LEAD_ACTION_PROPOSAL_TYPE, action: 'send_all', recordId: 0, assistantId: aiAssistantId,
@@ -394,6 +412,56 @@ async function resolveBulkSend(
 }
 
 /**
+ * "Do the next step" (owner, 2026-11-03): for each lead named, the step the assistant can carry out
+ * itself — research it, or move it to Outreach — by the one rule the lead panel and the All leads
+ * table's bulk bar read. Leads whose next step is the user's are listed with why. Research is capped
+ * at LEAD_NEXT_STEP_BULK_MAX per card because each one spends real searches; the rest are counted.
+ */
+async function resolveNextSteps(
+    db: Db, organisationId: number, aiAssistantId: number, req: LeadActionRequest, card: LeadActionCard,
+): Promise<LeadActionCard | null> {
+    const ids = (req.recordIds ?? []).slice(0, 100);
+    if (!ids.length) return null;
+    const rows: LeadRow[] = await db.select({
+        id: assistantRecords.id, title: assistantRecords.title, status: assistantRecords.status,
+        approvalStatus: assistantRecords.approvalStatus, data: assistantRecords.data,
+    })
+        .from(assistantRecords)
+        .where(and(
+            eq(assistantRecords.organisationId, organisationId),
+            eq(assistantRecords.aiAssistantId, aiAssistantId),
+            eq(assistantRecords.recordType, 'lead'),
+            inArray(assistantRecords.id, ids),
+        ));
+    if (!rows.length) return null;
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const steps: NonNullable<LeadActionCard['steps']> = [];
+    const skipped: NonNullable<LeadActionCard['skipped']> = [];
+    let researching = 0;
+    let more = 0;
+    for (const id of ids) {
+        const rec = byId.get(id);
+        if (!rec) continue;
+        const title = String(rec.title ?? '').replace(/\s+/g, ' ').trim().slice(0, TITLE_MAX);
+        const { step, whyNot } = leadAssistantStep(rec.approvalStatus, rec.data);
+        if (!step) { skipped.push({ recordId: rec.id, title, why: whyNot || 'Nothing for me to do on it.' }); continue; }
+        if (step === 'research' && researching >= LEAD_NEXT_STEP_BULK_MAX) { more++; continue; }
+        if (step === 'research') researching++;
+        steps.push({ recordId: rec.id, title, rating: rec.status ? String(rec.status).toLowerCase() : null, step });
+    }
+    card.steps = steps;
+    card.skipped = skipped.slice(0, 50);
+    card.more = more;
+    if (steps.length === 1) { card.recordId = steps[0].recordId; card.title = steps[0].title; card.rating = steps[0].rating; }
+    if (!steps.length) {
+        card.blocked = skipped.length === 1
+            ? `There’s nothing I can do on this one myself — ${skipped[0].why.charAt(0).toLowerCase()}${skipped[0].why.slice(1)}`
+            : 'There’s nothing I can do on these myself — each next step is yours. The reasons are listed.';
+    }
+    return card;
+}
+
+/**
  * Re-check every stored lead_action_proposal in a transcript, so a card acted on — here, on the
  * page, or by the draft being edited since — says so instead of offering a button the endpoint would
  * refuse. Mutates nothing it is given.
@@ -406,6 +474,23 @@ export async function refreshLeadActionCards<M extends { uiElement: unknown }>(
         if (!ui || ui.type !== LEAD_ACTION_PROPOSAL_TYPE || ui.settled) return m;
         const req = leadActionFromUiElement(ui);
         if (!req) return m;
+        if (req.action === 'next_step') {
+            // Settled once no lead on it still has the step the card promised — done, here or on the page.
+            const steps = Array.isArray(ui.steps) ? ui.steps as Array<{ recordId: number; step: string }> : [];
+            try {
+                let still = 0;
+                for (const it of steps) {
+                    const rec = await loadLead(db, organisationId, aiAssistantId, Number(it.recordId));
+                    if (rec && leadAssistantStep(rec.approvalStatus, rec.data).step === it.step) still++;
+                }
+                if (steps.length && !still) {
+                    return { ...m, uiElement: { ...ui, settled: true, blocked: ui.blocked || 'Already done — none of these leads is still waiting on that step.' } };
+                }
+            } catch (err) {
+                console.error('[chat-lead-action] could not refresh a stored next-step card (non-fatal)', err);
+            }
+            return m;
+        }
         if (req.action === 'send_all') {
             // Settled once none of its emails could still go: each was sent, turned down or edited.
             const items = Array.isArray(ui.items) ? ui.items as Array<{ recordId: number; draftHash: string }> : [];

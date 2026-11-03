@@ -107,7 +107,7 @@ import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { confirmCardReply, missingCardReply } from '../../src/utils/confirm-card-reply';
-import { isInOutreachReview } from '../../src/config/lead-recipient';
+import { isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
 import { parseScheduleInstruction } from '../../src/utils/parse-schedule-instruction';
@@ -527,11 +527,12 @@ FINDING NEW LEADS — when the user asks you to find leads, create a search, bui
 // the email are load-bearing: the card shows the stored draft verbatim, and a reply that paraphrases it
 // would put two versions of one email in front of the user with one button under them.
 function leadActionsPrompt(): string {
-    return `EXISTING LEADS — you can act on the leads listed in YOUR LEADS RIGHT NOW, each named by its "#" number, by emitting a lead_action_proposal (shape 4). Six actions:
+    return `EXISTING LEADS — you can act on the leads listed in YOUR LEADS RIGHT NOW, each named by its "#" number, by emitting a lead_action_proposal (shape 4). Seven actions:
 - "send" — approve a lead's outreach email and send it. Only for a lead under "IN OUTREACH, NOT YET EMAILED" that has an email written. The card shows the user the whole email exactly as it will go: who it is to, the subject, every word of the message, the signature and legal footer added at the bottom, and the follow-up emails that would follow if they do not reply. Nothing is sent until they press the button on the card. Do NOT restate, summarise or rewrite the email in your reply — the card shows it word for word. If they want different wording, offer the "improve" card, or tell them to use "Edit draft" on that lead in the Outreach tab, and then ask you again.
 - "send_all" — approve and send several outreach emails at once, when the user asks to approve or send all of them (or a list of them). Leave out "recordIds" for every email waiting in the Outreach tab's "To approve" stage, or give the "#" numbers they named. The card shows every email word for word, up to ${LEAD_BULK_MAX} at a time, and lists any lead it will not send and why — a named person's own inbox and a do-not-contact flag each need their own decision, so those are never sent this way. Nothing is sent until they press the card's one button. Do NOT list or summarise the emails in your reply — the card shows them.
 - "improve" — ask for a lead's drafted email (not yet sent) to be rewritten, when the user wants it better, shorter, warmer, to mention something, and so on. Put what they asked for in "instruction", in their words, or null to improve it generally. Clicking rewrites and saves the email — it sends nothing; the new version is on the Outreach tab, and they can ask you to send it afterwards. Do not write the new email yourself in your reply.
 - "move_to_outreach" — move a lead from the All leads tab into the Outreach tab's "To approve" stage, where its email waits to be read. It sends nothing and it is not an approval.
+- "next_step" — do the suggested next step yourself, on one lead or several, when the user asks you to action, do, handle or "take care of" the next step(s) — or asks what you can do on their leads. Put the "#" numbers in "recordIds" (one or many). Each lead in YOUR LEADS RIGHT NOW shows "you can: research it" or "you can: move it to Outreach" when there is a step you can carry out, and nothing when the next step is the user's. Researching reads the company's site and recent news, re-scores the lead, names the person to write to and looks for their address — up to ${LEAD_NEXT_STEP_BULK_MAX} leads per card, because each one spends searches. Moving puts it in the Outreach tab's "To approve" stage. The card lists what you will do to each lead and which ones are left for the user and why; nothing is emailed. Offer this card whenever the user's next step is something you can do — never tell them to do by hand a step the card can do.
 - "reject" — turn a lead down, before its email has gone.
 - "set_outcome" — record how a deal ended: "won" (with valueGbp only if the user gave a value), or "lost" / "disqualified", which need a lossReason. If they say it was lost but not why, ask them why before emitting the card.
 You never do any of these yourself: the user confirms on the card, and only that click changes anything. So never say an email HAS been sent, or a lead HAS been moved, turned down or marked — say the card is there to confirm. One card per reply. If you cannot tell which lead they mean, ask, quoting the candidates by name. You cannot overrule a do-not-contact flag, type an email's words for them, add or change an email address, or connect an inbox from this chat: for those, name the tab — Outreach for the email and the do-not-contact override, All leads for the lead's details.`;
@@ -617,6 +618,19 @@ async function buildLeadsSnapshot(
                 // I write to at Bloom?" is answered from the record, not guessed.
                 contactName: sql<string | null>`${assistantRecords.data} ->> 'contactName'`,
                 contactTitle: sql<string | null>`${assistantRecords.data} ->> 'contactTitle'`,
+                // What the assistant can do next (leadAssistantStep) and the model's suggestion. Only
+                // the keys the rule reads, so a page of researched leads does not haul their intel.
+                stepData: sql<Record<string, unknown> | null>`jsonb_build_object(
+                    'erasedAt', ${assistantRecords.data} -> 'erasedAt',
+                    'dealOutcome', ${assistantRecords.data} -> 'dealOutcome',
+                    'outreachSentAt', ${assistantRecords.data} -> 'outreachSentAt',
+                    'intel', CASE WHEN coalesce(jsonb_typeof(${assistantRecords.data} -> 'intel'), 'null') = 'null' THEN 'null'::jsonb ELSE 'true'::jsonb END,
+                    'contactEmail', ${assistantRecords.data} -> 'contactEmail',
+                    'lead', jsonb_build_object('email', ${assistantRecords.data} #> '{lead,email}'),
+                    'outreachDraft', ${assistantRecords.data} -> 'outreachDraft',
+                    'outreachStage', ${assistantRecords.data} -> 'outreachStage',
+                    'suggestedNextStep', ${assistantRecords.data} -> 'suggestedNextStep'
+                )`,
             })
             .from(assistantRecords)
             .where(and(
@@ -640,7 +654,12 @@ async function buildLeadsSnapshot(
             const rating = (n.status || 'unrated').toLowerCase();
             const gate = APPROVAL_WORDS[n.approvalStatus ?? ''] ?? 'no approval state recorded';
             const who = n.contactName ? `, contact: ${n.contactName}${n.contactTitle ? ` (${n.contactTitle})` : ''}` : '';
-            return `- #${n.id} ${n.title} (${rating}, ${gate}${who})`;
+            const sd = n.stepData ?? {};
+            const suggested = typeof sd.suggestedNextStep === 'string' && sd.suggestedNextStep.trim()
+                ? `, suggested next step: "${sd.suggestedNextStep.trim().replace(/\s+/g, ' ').slice(0, 140)}"` : '';
+            const step = leadAssistantStep(n.approvalStatus, sd).step;
+            const can = step === 'research' ? ', you can: research it' : step === 'move_to_outreach' ? ', you can: move it to Outreach' : '';
+            return `- #${n.id} ${n.title} (${rating}, ${gate}${who}${suggested}${can})`;
         }).join('\n');
 
         // The leads whose email can be sent from a lead_action_proposal card right now — the Outreach
@@ -2092,10 +2111,10 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTL
   "reply": "your conversational message to the user",
   "uiElement": {                      // shape 4 — act on a lead that already exists (see EXISTING LEADS)
     "type": "lead_action_proposal",
-    "action": "send" | "send_all" | "improve" | "move_to_outreach" | "reject" | "set_outcome",
+    "action": "send" | "send_all" | "improve" | "move_to_outreach" | "reject" | "set_outcome" | "next_step",
     "instruction": "<what to change, in the user's words>" | null,   // improve only
-    "recordId": <the number after # in YOUR LEADS RIGHT NOW>,   // omit for send_all
-    "recordIds": [<#number>, ...] | null,                     // send_all only; null = every email in Review
+    "recordId": <the number after # in YOUR LEADS RIGHT NOW>,   // omit for send_all and next_step
+    "recordIds": [<#number>, ...] | null,                     // send_all: null = every email in Review; next_step: the leads, one or many
     "outcome": "won" | "lost" | "disqualified" | null,      // set_outcome only
     "lossReason": "${LOSS_REASONS.join('" | "')}" | null,   // lost / disqualified only
     "valueGbp": <number> | null                               // won only, when the user said it

@@ -52,7 +52,7 @@ import {
 } from '../src/config/posting-cadence';
 import {
     LEAD_RECIPIENT_PATHS, resolveLeadRecipient, hasOutreachDraft, isLeadDeliverable,
-    leadOutreachStage, isInOutreachReview,
+    leadOutreachStage, isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX,
 } from '../src/config/lead-recipient';
 import {
     ROLE_EMAIL_PREFIXES, roleOrPersonal, classifyEmailKind,
@@ -549,6 +549,20 @@ ${formatRows}
      * ?deliverable=1 filter.
      */
     isInReview: isInOutreachReview,
+  };
+
+  // ── The step the assistant can take next ──────────────────────────────────
+  // From src/config/lead-recipient.ts, stringified. The panel's "Ask <name> to …" button, the All
+  // leads table's bulk "do the next step" and the chat's next-step card all ask this one rule, so
+  // the table can never offer a step the chat would then refuse. Closes over resolveLeadRecipient
+  // and isInOutreachReview, declared above — keep the order.
+  var leadAssistantStep = ${leadAssistantStep.toString()};
+
+  window.LeadAssistantStep = {
+    /** { step: 'research' | 'move_to_outreach' | null, whyNot } — from the lead's state alone. */
+    of: leadAssistantStep,
+    /** The most leads one bulk "do the next step" carries (research spends real searches). */
+    BULK_MAX: ${JSON.stringify(LEAD_NEXT_STEP_BULK_MAX)},
   };
 
   // ── Lead retention (the 30-day clock) ─────────────────────────────────────

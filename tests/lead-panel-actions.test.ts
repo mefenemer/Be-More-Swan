@@ -86,12 +86,13 @@ console.log('\n──── which action is the next step ────');
 check('an unresearched lead is told to research it', () => {
     const guidance = HUB.slice(landmark(HUB, 'function nextStepGuidance(record)'));
     const branch = guidance.slice(landmark(guidance, 'if (!d.intel) {')).slice(0, 500);
-    assert.match(branch, /key: 'enrich'/,
+    // Framed as the assistant's step since 2026-11-03 ("Ask <name> to research it") — same key.
+    assert.match(branch, /askAssistant\('enrich'/,
         'Research is the one control here that can change a lead\'s rating, so on a lead nobody '
         + 'has looked at it is the next step — the approve decision below depends on it');
     // Ordering: research must be asked BEFORE the move fallback, or it is never reached.
     assert.ok(
-        landmark(guidance, "if (!d.intel) {") < landmark(guidance, "action: { key: 'move-to-outreach'"),
+        landmark(guidance, "if (!d.intel) {") < landmark(guidance, "askAssistant('move-to-outreach'"),
         'and it must come before the move fallback, which returns unconditionally',
     );
 });
@@ -100,7 +101,7 @@ check('a researched lead is told to move it on, naming the tab as the role label
     // ⚠️ Was "told to approve it". The fallback approved the lead until 2026-08-24, which put it
     // in the Outreach tab's Approved column having never been through the review of its email.
     const guidance = HUB.slice(landmark(HUB, 'function nextStepGuidance(record)'));
-    const tail = guidance.slice(landmark(guidance, "action: { key: 'move-to-outreach'")).slice(0, 500);
+    const tail = guidance.slice(landmark(guidance, "askAssistant('move-to-outreach'")).slice(0, 500);
     assert.match(tail, /\$\{reviewTabLabel\(\)\} tab/,
         'this role renames Review to "Outreach", and copy naming a tab the user cannot see is the '
         + 'same dead end as naming a tool that does not exist');

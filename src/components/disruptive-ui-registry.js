@@ -162,7 +162,7 @@
     return `
       <div data-next-step-footer class="mt-2 pt-2 border-t border-emerald-200">
         <div class="flex flex-wrap items-center gap-2">
-          <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${owner.cls}">${esc(owner.label)}</span>
+          <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${owner.cls}">${esc(guidance.ownerLabel || owner.label)}</span>
           ${action ? `<button type="button" data-lead-next-step="${esc(action.key)}"
             class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed ml-auto shrink-0">${esc(action.label)}</button>` : ''}
         </div>
@@ -4304,8 +4304,65 @@
     return el;
   }
 
+  // "Do the next step" (next_step): what the assistant will do to each lead — research it, or move
+  // it to Outreach — by the rule the lead panel and the All leads bulk bar read
+  // (src/config/lead-recipient.ts leadAssistantStep), and which leads are left for the user and why.
+  // The click dispatches `lead:action`; chat-session.js runs each step through the tabs' own calls.
+  function renderLeadNextStepCard(ui, esc) {
+    const steps = Array.isArray(ui.steps) ? ui.steps : [];
+    const skipped = Array.isArray(ui.skipped) ? ui.skipped : [];
+    const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
+    const n = steps.length;
+    const STEP_WORDS = { research: 'Research it', move_to_outreach: 'Move it to Outreach' };
+    const research = steps.filter((x) => x.step === 'research').length;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-lg';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Do the next step${n > 1 ? ` on ${n} leads` : ''} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
+      ${n ? `<ul class="mt-3 space-y-1.5">${steps.map((x) => `
+        <li class="text-sm"><span class="font-bold text-gray-900 break-words">${esc(x.title || `#${x.recordId}`)}</span>
+          <span class="text-xs text-gray-500">#${esc(String(x.recordId))}${x.rating ? ` · ${esc(x.rating)}` : ''}</span>
+          <span class="block text-xs text-emerald-800">${esc(STEP_WORDS[x.step] || x.step)}</span></li>`).join('')}</ul>` : ''}
+      ${ui.more ? `<p class="mt-2 text-xs text-gray-600">${esc(String(ui.more))} more need researching — I do up to ${esc(String((window.LeadAssistantStep && window.LeadAssistantStep.BULK_MAX) || 10))} at a time because each one spends searches. Ask again once these are done.</p>` : ''}
+      ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
+      ${skipped.length ? `
+        <div class="mt-3">
+          <p class="text-sm font-bold text-gray-900">Left for you (${skipped.length})</p>
+          <ul class="mt-1 space-y-1">${skipped.map((x) => `<li class="text-xs text-gray-700"><span class="font-bold">${esc(x.title || `#${x.recordId}`)}</span> — ${esc(x.why || '')}</li>`).join('')}</ul>
+        </div>` : ''}
+      ${blocked || !n ? '' : `<p class="text-xs text-gray-600 mt-3">${research ? 'Researching reads each company’s site and recent news, re-scores it, names the person to write to and looks for their address. ' : ''}${steps.some((x) => x.step === 'move_to_outreach') ? 'Moved leads wait in the Outreach tab’s To approve stage for you to read their email. ' : ''}Nothing is emailed.</p>`}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${blocked ? '' : `<button type="button" data-lap-go class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${n === 1 ? esc(STEP_WORDS[steps[0].step] || 'Do it') : `Do all ${n}`}</button>
+        <button type="button" data-lap-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold" data-lap-status role="status" aria-live="polite"></p>`;
+    const status = el.querySelector('[data-lap-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold whitespace-pre-line ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
+    const setBusy = (b) => el.querySelectorAll('[data-lap-go], [data-lap-cancel]').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-lap-cancel]')) { setBusy(true); say('Left as they are.'); return; }
+      if (!e.target.closest('[data-lap-go]')) return;
+      setBusy(true);
+      say(n === 1 ? 'Working on it…' : `Working on 1 of ${n}…`);
+      el.dispatchEvent(new CustomEvent('lead:action', {
+        bubbles: true,
+        detail: {
+          action: 'next_step', assistantId: Number(ui.assistantId) || null,
+          steps: steps.map((x) => ({ recordId: Number(x.recordId), title: x.title, step: x.step })),
+          progress(done, title) { if (n > 1) say(`Working on ${Math.min(done + 1, n)} of ${n}${title ? ` — ${title}` : ''}…`); },
+          respond({ ok, message, error }) {
+            if (ok) { say(message || 'Done.'); return; }
+            say(error || 'That didn’t work.', 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+
   function renderLeadActionProposalCard(ui, esc) {
     if (ui.action === 'send_all') return renderLeadBulkSendCard(ui, esc);
+    if (ui.action === 'next_step') return renderLeadNextStepCard(ui, esc);
     const copy = LEAD_ACTION_COPY[ui.action];
     const recordId = Number(ui.recordId);
     if (!copy || !Number.isInteger(recordId)) return null;
