@@ -28,10 +28,13 @@ import {
     type DiscussionFit, type DiscussionSource, type DiscussionStatus,
 } from '../config/discussion-sites';
 import { isSearchConfigured, search } from '../lib/discovery-search';
-import { THREAD_TEXT_CHARS, improveTopicWording, redraftReply, triageThreads, type TopicSuggestion, type TriageCandidate } from '../lib/discussion-triage';
+import { THREAD_TEXT_CHARS, discussionAudienceBlock, improveTopicWording, redraftReply, triageThreads, type DiscussionSender, type TopicSuggestion, type TriageCandidate } from '../lib/discussion-triage';
 import { robotsAllows, CRAWLERS } from '../lib/robots';
 import { safeFetchText } from './safe-fetch';
 import { loadSenderIdentity } from './sender-identity';
+import { loadBusinessKnowledgeBlock } from './business-knowledge';
+import { loadAssistantRulesBlock } from './assistant-rules-prompt';
+import { getIcpSnapshot } from './icp-snapshot';
 import { loadRoleModel, roleKeyOfAssistant } from './assistant-model';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 import { meterInteraction } from './task-credit';
@@ -284,7 +287,7 @@ export async function runScan(db: Db, watchId: number): Promise<void> {
             // 3. Read what we may. 4. Judge.
             const pages = await Promise.all(fresh.map((c) => readThread(c.url)));
             const [sender, roleKey] = await Promise.all([
-                loadSenderIdentity(db, orgId, assistantId),
+                loadDiscussionSender(db, orgId, assistantId),
                 roleKeyOfAssistant(db, assistantId),
             ]);
             const modelChoice = await loadRoleModel(db, roleKey ?? 'lead_qualifier');
@@ -410,6 +413,21 @@ export async function saveDraft(db: Db, organisationId: number, assistantId: num
     return row ? discussionView(row) : null;
 }
 
+/**
+ * The business as every Discussions prompt sees it (scan, Redraft, "Ask … to improve"): the sender
+ * plus Brand Knowledge, Rules and who it sells to (DiscussionSender). Never throws — each loader
+ * returns null on a failed read, and the prompt then goes without that block.
+ */
+export async function loadDiscussionSender(db: Db, organisationId: number, assistantId: number): Promise<DiscussionSender> {
+    const [sender, knowledgeBlock, rulesBlock, icp] = await Promise.all([
+        loadSenderIdentity(db, organisationId, assistantId),
+        loadBusinessKnowledgeBlock(db, organisationId),
+        loadAssistantRulesBlock(db, { assistantId, organisationId }),
+        getIcpSnapshot(db, { aiAssistantId: assistantId }).catch(() => null),
+    ]);
+    return { ...sender, knowledgeBlock, rulesBlock, audienceBlock: discussionAudienceBlock(icp) };
+}
+
 /** "Redraft" — the model rewrites the reply, optionally to an instruction. Disclosure re-added in code. */
 export async function redraftDiscussion(
     db: Db, organisationId: number, assistantId: number, id: number, instruction: string | null,
@@ -418,7 +436,7 @@ export async function redraftDiscussion(
     if (!row) return { ok: false, error: 'That thread isn’t in this assistant’s Discussions.' };
     const site: DiscussionSource = isDiscussionSource(row.site) ? row.site : 'reddit';
     const [sender, pageText] = await Promise.all([
-        loadSenderIdentity(db, organisationId, assistantId),
+        loadDiscussionSender(db, organisationId, assistantId),
         readThread(row.url),
     ]);
     const modelChoice = await loadRoleModel(db, (await roleKeyOfAssistant(db, assistantId)) ?? 'lead_qualifier');
@@ -453,7 +471,7 @@ export async function suggestTopicWording(
         if (credit.fairUse) return { ok: false, status: 429, error: credit.limitMessage ?? 'Please try again later.', code: 'FAIR_USE_LIMIT' };
         return { ok: false, status: 403, error: credit.limitMessage ?? 'You need a plan for this.', code: 'UPGRADE_REQUIRED' };
     }
-    const [sender, roleKey] = await Promise.all([loadSenderIdentity(db, organisationId, assistantId), roleKeyOfAssistant(db, assistantId)]);
+    const [sender, roleKey] = await Promise.all([loadDiscussionSender(db, organisationId, assistantId), roleKeyOfAssistant(db, assistantId)]);
     const modelChoice = await loadRoleModel(db, roleKey ?? 'lead_qualifier');
     const suggestions = await improveTopicWording(list, sender, w.sites.map((s) => sourceInfo(s).label), modelChoice, { workspaceId: organisationId, assistantId });
     return suggestions ? { ok: true, suggestions } : { ok: false, status: 502, error: 'I couldn’t suggest new wording just now — please try again.' };

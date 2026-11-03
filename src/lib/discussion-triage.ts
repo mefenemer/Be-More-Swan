@@ -45,7 +45,25 @@ export interface TriageVerdict {
     reply: string | null;
 }
 
-function businessBlock(sender: SenderIdentity): string {
+/**
+ * The sender, plus what the rest of the Lead Generator already reads about the business. With only
+ * the Business Information summary, "Ask … to improve" told Be More Swan "You don't build websites"
+ * and swapped "I need a website" for a blog topic: its description and catalogue named the Blog
+ * Writer, and nothing else it saw mentioned the Website Assistant. The website's own pages, Brand
+ * Knowledge, the assistant's Rules and who it sells to all say more — loadDiscussionSender()
+ * (src/utils/discussions.ts) loads them for every Discussions prompt.
+ */
+export type DiscussionSender = SenderIdentity & {
+    /** loadBusinessKnowledgeBlock — Brand Knowledge documents, links and the approved strategy. */
+    knowledgeBlock?: string | null;
+    /** loadAssistantRulesBlock — this assistant's and the workspace's active Rules. */
+    rulesBlock?: string | null;
+    /** discussionAudienceBlock — who it sells to and who is not a customer, from its set-up. */
+    audienceBlock?: string | null;
+};
+
+/** Everything the model knows about the business, for all three Discussions prompts. Pure. */
+export function businessBlock(sender: DiscussionSender): string {
     const lines: string[] = [];
     const name = (sender.businessName || '').trim();
     lines.push(name ? `The business: ${name}.` : 'The business has not been named in this workspace.');
@@ -53,8 +71,26 @@ function businessBlock(sender: SenderIdentity): string {
     if (sender.industry?.trim()) lines.push(`Industry: ${sender.industry.trim()}`);
     if (sender.websiteUrl?.trim()) lines.push(`Website: ${sender.websiteUrl.trim()}`);
     if (sender.productsBlock?.trim()) lines.push(sender.productsBlock.trim());
-    return lines.join('\n');
+    if (sender.audienceBlock?.trim()) lines.push(sender.audienceBlock.trim());
+    // A forum reply carries no link (REPLY_RULES) — here the pages only say what the business offers.
+    if (sender.siteDirectoryBlock?.trim()) lines.push(`${sender.siteDirectoryBlock.trim()}\n${SITE_PAGES_IN_DISCUSSIONS}`);
+    if (sender.knowledgeBlock?.trim()) lines.push(sender.knowledgeBlock.trim());
+    lines.push(`Everything above together is what the business offers — a service named anywhere in it (its website's pages included) is one it really provides, even when the description or Products & Services leave it out.`);
+    if (sender.rulesBlock?.trim()) lines.push(sender.rulesBlock.trim());
+    return lines.join('\n\n');
 }
+
+/** Who the business sells to, from the Lead Generator's set-up (icpFromOnboarding). Pure; null when unanswered. */
+export function discussionAudienceBlock(icp: Record<string, unknown> | null | undefined): string | null {
+    const industries = icp?.targetIndustries;
+    const who = Array.isArray(industries) ? industries.filter((v) => typeof v === 'string' && v.trim()).join(', ')
+        : typeof industries === 'string' ? industries.trim() : '';
+    const not = typeof icp?.excludeProfile === 'string' ? icp.excludeProfile.trim() : '';
+    const lines = [who ? `Who it sells to: ${who}.` : '', not ? `Not its customers: ${not}.` : ''].filter(Boolean);
+    return lines.length ? lines.join('\n') : null;
+}
+
+export const SITE_PAGES_IN_DISCUSSIONS = 'In Discussions these pages only tell you what the business offers: never put a link or web address in a forum reply.';
 
 const REPLY_RULES = `HOW THE REPLY IS WRITTEN — it is posted by a real person from the business, under their own name, on a public forum:
 - Answer the question first, properly: the advice a knowledgeable, honest person would give, useful even to a reader who never buys anything. Name other good options where they are relevant — a reply that only points at one business reads as an advert, and forums remove adverts.
@@ -65,7 +101,7 @@ const REPLY_RULES = `HOW THE REPLY IS WRITTEN — it is posted by a real person 
 - Never mention Be More Swan, this platform, AI, or an assistant.
 ${SPECIAL_CATEGORY_RULE}`;
 
-function systemPrompt(sender: SenderIdentity): string {
+function systemPrompt(sender: DiscussionSender): string {
     return `You find public forum threads where a small business could genuinely help someone, and draft the reply a person from that business would post.
 
 ${businessBlock(sender)}
@@ -117,7 +153,7 @@ export interface TriageResult {
     outputTokens: number;
 }
 
-async function triageGroup(group: TriageCandidate[], offset: number, sender: SenderIdentity, modelChoice: RoleModelChoice | null, usage: TriageUsage | null): Promise<TriageResult> {
+async function triageGroup(group: TriageCandidate[], offset: number, sender: DiscussionSender, modelChoice: RoleModelChoice | null, usage: TriageUsage | null): Promise<TriageResult> {
     try {
         const { resp, model: used } = await withRoleModel(modelChoice, TRIAGE_MODEL, async (model, thinking) => ({ model, resp: await anthropic.messages.create(adaptForModel({
             model,
@@ -140,7 +176,7 @@ async function triageGroup(group: TriageCandidate[], offset: number, sender: Sen
 }
 
 /** Judge every candidate, in small groups side by side. */
-export async function triageThreads(candidates: TriageCandidate[], sender: SenderIdentity, modelChoice: RoleModelChoice | null = null, usage: TriageUsage | null = null): Promise<TriageResult> {
+export async function triageThreads(candidates: TriageCandidate[], sender: DiscussionSender, modelChoice: RoleModelChoice | null = null, usage: TriageUsage | null = null): Promise<TriageResult> {
     if (!candidates.length) return { verdicts: [], inputTokens: 0, outputTokens: 0 };
     const groups: Array<{ items: TriageCandidate[]; offset: number }> = [];
     for (let i = 0; i < candidates.length; i += GROUP_SIZE) groups.push({ items: candidates.slice(i, i + GROUP_SIZE), offset: i });
@@ -159,7 +195,7 @@ export async function triageThreads(candidates: TriageCandidate[], sender: Sende
 export async function redraftReply(
     c: TriageCandidate & { currentReply: string | null },
     instruction: string | null,
-    sender: SenderIdentity,
+    sender: DiscussionSender,
     modelChoice: RoleModelChoice | null = null,
     usage: TriageUsage | null = null,
 ): Promise<string | null> {
@@ -199,7 +235,7 @@ export interface TopicSuggestion { from: string; to: string; why: string }
  */
 export async function improveTopicWording(
     topics: string[],
-    sender: SenderIdentity,
+    sender: DiscussionSender,
     siteLabels: string[],
     modelChoice: RoleModelChoice | null = null,
     usage: TriageUsage | null = null,
@@ -218,7 +254,7 @@ The forums searched: ${siteLabels.join(', ') || 'Reddit, UK Business Forums, Quo
 
 ${TOPIC_WORDING_RULES}
 
-Rewrite EACH topic you are given into the wording most likely to find relevant threads. If one is already well worded, return it unchanged. Keep the same number of topics, in the same order.
+Rewrite EACH topic you are given into the wording most likely to find relevant threads about the SAME subject. If one is already well worded, return it unchanged. Keep the same number of topics, in the same order.
 
 Return STRICT JSON only (no markdown): [{ "topic": "<the improved topic>", "why": "<under 15 words, for the business owner: what changed and why it finds more>" }]`,
             messages: [{ role: 'user', content: JSON.stringify(from) }],
