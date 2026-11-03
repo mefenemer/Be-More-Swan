@@ -265,7 +265,10 @@ check('the swan sits beside Topics, names the assistant, and only fills the box 
 check('the chat proposes improve_topics; its card calls the same action and saves only on “Use these topics”', () => {
     assert.strictEqual(discussionActionFromUiElement({ type: 'discussion_action_proposal', action: 'improve_topics' })?.action, 'improve_topics');
     assert.match(read('src/utils/discussions.ts'), /When the user asks you to improve, reword or check their topics[\s\S]{0,300}send "improve_topics"/);
-    assert.match(read('src/utils/chat-discussion-action.ts'), /There are no topics to improve yet — add one first\./);
+    const act = read('src/utils/chat-discussion-action.ts');
+    assert.match(act, /There are no topics to improve yet — add one first\./);
+    assert.match(act, /const topics = w\.topics;/, 'the card rewords the SAVED topics, never the model’s list');
+    assert.match(read('src/utils/discussions.ts'), /don't say you have suggested anything yet/);
     const cs = read('src/components/chat-session.js');
     assert.match(cs, /await call\(\{ action: 'improve_topics', topics: d\.topics \|\| undefined \}\);\n\s+respond\(\{ ok: true, suggestions: r\.suggestions \|\| \[\] \}\);\n\s+return;/);
     const reg = read('src/components/disruptive-ui-registry.js');

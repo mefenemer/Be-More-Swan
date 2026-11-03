@@ -4400,7 +4400,8 @@
         </dl>
         <p class="text-xs text-gray-600 mt-3">Saving changes what the daily scan looks for. It posts nothing — you reply to threads yourself.</p>`;
     } else if (ui.action === 'improve_topics') {
-      bodyHtml = `<p class="text-sm text-gray-800 mt-3 break-words">Rewords ${list(ui.topics)} the way people post in forums, so the scan finds more of the right threads.</p>
+      bodyHtml = `<p class="text-sm text-gray-800 mt-3">Rewords your topics the way people post in forums, so the scan finds more of the right threads:</p>
+        <ul class="mt-1 list-disc pl-5 text-sm text-gray-900">${(Array.isArray(ui.topics) ? ui.topics : []).map((t) => `<li class="break-words">${esc(String(t))}</li>`).join('')}</ul>
         <p class="text-xs text-gray-600 mt-2">You see the suggestions here first — nothing changes unless you choose “Use these topics”.</p>
         <div data-dap-suggestions></div>`;
     } else if (ui.action === 'scan_now') {

@@ -65,7 +65,7 @@ export interface DiscussionActionCard {
     /** set_watch: before and after, as the user reads them. */
     current?: { topics: string[]; sites: string[]; enabled: boolean };
     proposed?: { topics: string[]; sites: DiscussionSource[]; siteLabels: string[]; enabled: boolean };
-    /** improve_topics: the topics the click asks to reword (the saved ones unless the chat named others). */
+    /** improve_topics: the saved topics the click asks to reword. */
     topics?: string[];
     /** redraft / mark_replied / dismiss: the thread, from its row. */
     discussionId?: number;
@@ -89,8 +89,10 @@ export async function resolveDiscussionActionProposal(
             const w = watchView(await loadWatch(db, organisationId, assistantId));
             const current = { topics: w.topics, sites: w.sites.map((s) => sourceInfo(s).label), enabled: w.enabled };
             if (req.action === 'improve_topics') {
-                // The click calls the same improve_topics action as the swan beside the Topics box.
-                const topics = req.topics ?? w.topics;
+                // The click calls the same improve_topics action as the swan beside the Topics box, on
+                // the SAVED topics — never the model's own list: "Use these topics" swaps each one in
+                // place, so a topic that isn't saved would have nothing to replace.
+                const topics = w.topics;
                 return { ...base, current, topics, blocked: topics.length ? null : 'There are no topics to improve yet — add one first.' };
             }
             if (req.action === 'scan_now') {
