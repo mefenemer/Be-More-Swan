@@ -9,6 +9,7 @@
   "scripts": {
     "test": "npm run test:all",
     "test:all": "npm run typecheck && node scripts/run-tests.mjs",
+    "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit",
     "gen:constants": "tsx scripts/gen-client-constants.ts",
     "remotion:typecheck": "tsc --noEmit -p remotion/tsconfig.json",
@@ -71,6 +72,7 @@
   "private": true,
   "devDependencies": {
     "@netlify/edge-functions": "^3.0.8",
+    "@playwright/test": "^1.64.1",
     "@remotion/cli": "^4.0.0",
     "@types/busboy": "^1.5.4",
     "@types/cheerio": "^0.22.35",

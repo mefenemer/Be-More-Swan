@@ -23,3 +23,7 @@ node_modules/
 meta-vault-backfill-report.json
 # Local Claude Code state: launch configs, harness, worktrees, scratch SQL, settings.local.json.
 .claude/
+
+# Playwright smoke tests (e2e/)
+/test-results/
+/playwright-report/
