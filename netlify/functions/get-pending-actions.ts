@@ -13,6 +13,7 @@ import jwt from 'jsonwebtoken';
 import { and, eq, desc, count as sqlCount } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { pendingActions, aiAssistants, taskRuns } from '../../db/schema';
+import { actionNotFromArchivedAssistant } from '../../src/utils/archived-assistant-drafts';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -66,6 +67,8 @@ export default withLambda(async (event) => {
         .where(and(
             eq(pendingActions.userId, userId),
             eq(pendingActions.status, statusFilter),
+            // An archived assistant's held actions wait on nobody; reinstating brings them back.
+            ...(statusFilter === 'pending' ? [actionNotFromArchivedAssistant()] : []),
         ))
         .orderBy(desc(pendingActions.createdAt))
         .limit(limit)
@@ -78,6 +81,7 @@ export default withLambda(async (event) => {
         .where(and(
             eq(pendingActions.userId, userId),
             eq(pendingActions.status, 'pending'),
+            actionNotFromArchivedAssistant(),
         ));
 
     return {

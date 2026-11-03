@@ -147,5 +147,24 @@ test('scheduled hourly on prod, poked on staging; the digest skips whoever was e
     assert.match(digest, /hadMorning\.has\(Number\(row\.userId\)\)\) continue/);
 });
 
+test('an archived assistant\'s waiting work is left out; its sales and confirmed bookings stay', () => {
+    // 2026-11-03: "1 website enquiry to answer (Website ▸ Enquiries)" for an archived Website Assistant.
+    const m = read('src/utils/mentor-morning.ts');
+    assert.match(m, /eq\(siteEnquiries\.organisationId, orgId\), notFromArchivedSite\(siteEnquiries\.siteId\)/);
+    assert.match(m, /\$\{bookings\.status\} = 'pending'[^`]*notFromArchivedSite\(bookings\.siteId\)/);
+    assert.match(m, /awaitingReview\(\), notFromArchivedAssistant\(\)/);
+    assert.match(m, /eq\(pendingActions\.status, 'pending'\), actionNotFromArchivedAssistant\(\)/);
+    assert.doesNotMatch(m, /\$\{bookings\.status\} = 'confirmed'[^`]*notFromArchived/);
+    assert.doesNotMatch(m, /from\(siteOrders\)[^;]*notFromArchived/);
+    // The site predicate reaches the assistant through sites.ai_assistant_id.
+    assert.match(read('src/utils/archived-assistant-drafts.ts'), /FROM sites archived_s JOIN ai_assistants archived_sa ON archived_sa\.id = archived_s\.ai_assistant_id/);
+    // Held actions are hidden the same way wherever "waiting for you" lists them.
+    assert.match(read('netlify/functions/get-pending-actions.ts'), /statusFilter === 'pending' \? \[actionNotFromArchivedAssistant\(\)\]/);
+    assert.match(read('netlify/functions/pending-actions-digest.ts'), /lt\(pendingActions\.createdAt, cutoff\),\s+actionNotFromArchivedAssistant\(\)/);
+    const stream = read('netlify/functions/dashboard-action-stream.ts');
+    assert.match(stream, /'pending_approval'\), notFromArchivedAssistant\(\)/);
+    assert.match(stream, /eq\(pendingActions\.status, 'pending'\), actionNotFromArchivedAssistant\(\)/);
+});
+
 console.log(`\n${passed}/${total} passed`);
 if (passed !== total) process.exitCode = 1;

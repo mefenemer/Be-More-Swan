@@ -26,6 +26,7 @@ import {
     users,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { actionNotFromArchivedAssistant, notFromArchivedAssistant } from '../../src/utils/archived-assistant-drafts';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { displayCaption } from '../../src/utils/model-json';
 
@@ -102,7 +103,7 @@ export default withLambda(async (event) => {
             })
             .from(scheduledPosts)
             .leftJoin(aiAssistants, eq(aiAssistants.id, scheduledPosts.assistantId))
-            .where(and(eq(scheduledPosts.organisationId, orgId), eq(scheduledPosts.status, 'pending_approval')))
+            .where(and(eq(scheduledPosts.organisationId, orgId), eq(scheduledPosts.status, 'pending_approval'), notFromArchivedAssistant()))
             .orderBy(desc(scheduledPosts.createdAt))
             .limit(8),
 
@@ -118,7 +119,7 @@ export default withLambda(async (event) => {
             })
             .from(pendingActions)
             .leftJoin(aiAssistants, eq(aiAssistants.id, pendingActions.assistantId))
-            .where(and(eq(pendingActions.userId, userId), eq(pendingActions.status, 'pending')))
+            .where(and(eq(pendingActions.userId, userId), eq(pendingActions.status, 'pending'), actionNotFromArchivedAssistant()))
             .orderBy(desc(pendingActions.createdAt))
             .limit(8),
 

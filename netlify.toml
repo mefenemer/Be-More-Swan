@@ -65,6 +65,12 @@
   status = 404
   force = true
 
+[[redirects]]
+  from = "/e2e/*"
+  to = "/404.html"
+  status = 404
+  force = true
+
 # The Mystery Shopper's free website check moved from its own page onto the assistant's page
 # (2026-10-14; src/public/site-taster.js). Both spellings of the old URL, permanently. The page was
 # live only for hours before the move, so no emailed result link points at it.
@@ -150,6 +156,12 @@
 
 [[redirects]]
   from = "/remotion.config.ts"
+  to = "/404.html"
+  status = 404
+  force = true
+
+[[redirects]]
+  from = "/playwright.config.ts"
   to = "/404.html"
   status = 404
   force = true

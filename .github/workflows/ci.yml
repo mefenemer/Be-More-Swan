@@ -21,6 +21,28 @@ jobs:
       # Includes the tenant-isolation guards (tenant-guard, storage-tenant-isolation).
       - run: npm run test:all
 
+  e2e:
+    name: Browser smoke tests (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Static pages in a real browser, every function stubbed (e2e/fixtures.ts) — no DB or secrets.
+      - run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
   rls:
     name: RLS tenant-isolation (Postgres)
     runs-on: ubuntu-latest
