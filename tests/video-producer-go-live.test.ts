@@ -172,11 +172,24 @@ check('its website page has its swan, and does not say "Included in every plan"'
 
 check('its sample videos are real files, for made-up businesses, with a poster each', () => {
     const page = read('assistant.html');
-    const block = page.slice(page.indexOf('const SAMPLE_VIDEOS = {'), page.indexOf('function render('));
+    const block = page.slice(page.indexOf('const SAMPLE_WORK = {'), page.indexOf('function render('));
     const files = [...block.matchAll(/(?:src|poster): '(\/videos\/samples\/video_producer\/[\w-]+\.(?:mp4|jpg))'/g)].map((m) => m[1]);
     assert.ok(files.length >= 4, 'at least two videos, each with a poster');
     for (const f of files) assert.ok(existsSync(join(root, f)), f);
     assert.doesNotMatch(block, /__\w+_META__/, 'every card has its real length and voice');
+    assert.doesNotMatch(block, /Marmalade/, 'never the staging workspace the samples were made in');
+});
+
+check('the Brand Designer page shows three real first rounds, each with one picked and its files in place', () => {
+    const page = read('assistant.html');
+    const all = page.slice(page.indexOf('const SAMPLE_WORK = {'), page.indexOf('function render('));
+    const block = all.slice(all.indexOf('brand_designer: {'), all.indexOf('video_producer: {'));
+    assert.equal([...block.matchAll(/business: '/g)].length, 3, 'three samples');
+    assert.equal([...block.matchAll(/chosen: \d/g)].length, 3, 'each marks the option we picked');
+    const files = [...block.matchAll(/'(\/images\/samples\/brand_designer\/[\w-]+\.(?:jpg|pdf))'/g)].map((m) => m[1]);
+    for (let n = 1; n <= 4; n++) files.push(`/images/samples/brand_designer/willowbrook-latte-${n}.jpg`);
+    assert.ok(files.some((f) => f.endsWith('.pdf')), 'the flyer links its PDF');
+    for (const f of files) assert.ok(existsSync(join(root, f)), f);
     assert.doesNotMatch(block, /Marmalade/, 'never the staging workspace the samples were made in');
 });
 

@@ -324,12 +324,13 @@
   "brand_designer": {
     "headline": "Tell it what you need a picture or video for. Pick the one you like.",
     "overview": [
-      "The Brand Designer finds stock photos and videos, makes AI images and videos, and designs simple graphics in your brand colours with your logo — then shows you the options side by side.",
+      "The Brand Designer finds stock photos and videos, makes AI images and videos, designs simple graphics in your brand colours with your logo, and lays out printable flyers — then shows you the options side by side.",
       "Pick the ones you like and they are saved to your library, ready for every assistant to use. Nothing is used until you approve it, and you can bring in your own files and Canva designs too."
     ],
     "highlights": [
       "Stock, AI and branded graphics",
       "Pictures and video",
+      "Printable flyers",
       "Follows your brand rules",
       "Nothing used until you approve"
     ],
@@ -370,11 +371,15 @@
     "faqs": [
       {
         "q": "Does it use tasks?",
-        "a": "Stock photos, stock videos and branded graphics are free. AI images use 1 task for a round of four, and an AI video clip uses 20 tasks — AI video is on the Busywork Buster plan."
+        "a": "Stock photos, stock videos and branded graphics are free. AI images use 1 task for a round of four, having it write a flyer's words uses 1 task, and an AI video clip uses 20 tasks — AI video is on the Busywork Buster plan."
       },
       {
         "q": "Can I use my own photos?",
         "a": "Yes — upload them, or import designs from Canva, and they appear as options alongside the rest."
+      },
+      {
+        "q": "Can it make a flyer I can print?",
+        "a": "Yes. Say what the flyer is for and pick a paper size — A4, A5, A6 or DL. It writes the words, or you type your own, and lays them out up to three ways in your colours. Approve one and you get a PDF to print at home, and one with bleed for a print shop."
       }
     ]
   },

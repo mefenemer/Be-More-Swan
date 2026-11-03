@@ -56,3 +56,12 @@ curl -sfS "https://images.pexels.com/photos/3755021/pexels-photo-3755021.jpeg?au
 Drop `&fm=webp` for the JPEG. Unsplash uses `?fit=crop&w=160&h=160&q=80` with the same `&fm=webp`
 switch. If you change a file's pixel dimensions, update the `width`/`height` attributes on the
 matching `<img>` in `index.html` — they are what stop the page shifting as images load.
+
+## Brand Designer sample work (`images/samples/brand_designer/`)
+
+Added 2026-11-03. Real output made by the Brand Designer on staging for made-up businesses, shown
+on `assistant.html?role=brand_designer` (`SAMPLE_WORK`). The AI images (FLUX.2 Pro) and the
+branded cards are our own output. The Brightside flyer's top photo (`brightside-flyer-photo-top.jpg`
+and `brightside-flyer-a5.pdf`) is Pexels photo 30871194 by
+[Esra Erdem](https://www.pexels.com/@esrakorkmaz), under the Pexels licence. Its phone number,
+01632 960418, is in Ofcom's drama range and reaches no one.
