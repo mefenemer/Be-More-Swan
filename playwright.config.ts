@@ -11,7 +11,11 @@ export default defineConfig({
     fullyParallel: true,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 1 : 0,
-    reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
+    // Locally the html report is always kept and live progress is written for SwanJira's
+    // "Automated tests" tab (e2e/live-progress-reporter.ts).
+    reporter: process.env.CI
+        ? [['list'], ['html', { open: 'never' }]]
+        : [['list'], ['html', { open: 'never' }], ['./e2e/live-progress-reporter.ts']],
     use: {
         baseURL: `http://127.0.0.1:${port}`,
         trace: 'retain-on-failure',

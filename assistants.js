@@ -7067,7 +7067,7 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-datahub', showDataHub);
     if (hub && showDataHub) {
         setText('datahub-tab-label', hub.label);
-        window.AssistantDataHub?.init({ hub, assistantId: data.id });
+        window.AssistantDataHub?.init({ hub, assistantId: data.id, assistantName: data.name });
     }
 
     // Calendar tab — a CORE tab on every assistant, scoped to just this assistant. Registered

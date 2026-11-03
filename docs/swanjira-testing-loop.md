@@ -52,3 +52,6 @@ steps when a card is dragged. This agreement overrides that.
 - `POST /api/tickets/{key}/retest` — `{result, notes, add_regression_test, actor: "Antigravity"}`
 - `POST /api/tickets/{key}/comments` — `{author, body}`
 - `GET|POST /api/regression`, `POST /api/regression/run`
+- `GET /api/e2e` — the repo's Playwright smoke tests (`e2e/`): live progress from `.playwright-live/progress.json`, written by `e2e/live-progress-reporter.ts` on every local run
+- `POST /api/e2e/run` — starts `npx playwright test` in the repo, one at a time; only from SwanJira's own page (needs header `X-SwanJira: run`)
+- `GET /e2e-report/` — the last local Playwright HTML report

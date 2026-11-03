@@ -1321,7 +1321,37 @@
         return data;
       });
       try {
-        if (d.action === 'send_all') {
+        if (d.action === 'next_step') {
+          // "Do the next step" — each lead through the tabs' own calls: research is lead-generation.ts
+          // enrich_lead (the panel's Research button), the move is the Move to Outreach PATCH with the
+          // stage MERGED. One at a time, and a failure on one does not stop the rest.
+          const steps = Array.isArray(d.steps) ? d.steps : [];
+          let researched = 0, moved = 0;
+          const failed = [];
+          for (let i = 0; i < steps.length; i++) {
+            const x = steps[i];
+            if (typeof d.progress === 'function') d.progress(i, x.title);
+            try {
+              if (x.step === 'research') {
+                await postActionCall('lead-generation', { action: 'enrich_lead', assistantId: aid, recordId: x.recordId });
+                researched++;
+              } else if (x.step === 'move_to_outreach') {
+                await patchRecord({ id: x.recordId, approvalStatus: 'pending_approval', dataMerge: { outreachStage: 'review' } });
+                moved++;
+              }
+            } catch (err) {
+              failed.push(`${x.title || `#${x.recordId}`}: ${err.message}`);
+            }
+          }
+          const done = [
+            researched ? `Researched ${researched} ${researched === 1 ? 'lead' : 'leads'} — the new ratings and contacts are on the All leads tab` : '',
+            moved ? `moved ${moved} to the Outreach tab’s To approve stage` : '',
+          ].filter(Boolean).join(', and ');
+          const head = done ? `${done.charAt(0).toUpperCase()}${done.slice(1)}. Nothing was emailed.` : '';
+          if (failed.length && !done) respond({ ok: false, error: `Nothing could be done.\n${failed.join('\n')}` });
+          else respond({ ok: true, message: failed.length ? `${head}\nCouldn’t do ${failed.length}:\n${failed.join('\n')}` : head });
+          window.AssistantDataHub?.refresh?.();
+        } else if (d.action === 'send_all') {
           // "Approve all" — the Outreach tab's bulk run, one lead at a time through the single-lead
           // path. Never confirms a personal inbox or overrules a do-not-contact flag: those leads are
           // skipped and listed back (src/components/lead-bulk-send.js).

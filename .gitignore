@@ -27,3 +27,4 @@ meta-vault-backfill-report.json
 # Playwright smoke tests (e2e/)
 /test-results/
 /playwright-report/
+/.playwright-live/

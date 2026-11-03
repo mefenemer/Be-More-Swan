@@ -428,6 +428,20 @@
     isInReview: isInOutreachReview,
   };
 
+  // ── The step the assistant can take next ──────────────────────────────────
+  // From src/config/lead-recipient.ts, stringified. The panel's "Ask <name> to …" button, the All
+  // leads table's bulk "do the next step" and the chat's next-step card all ask this one rule, so
+  // the table can never offer a step the chat would then refuse. Closes over resolveLeadRecipient
+  // and isInOutreachReview, declared above — keep the order.
+  var leadAssistantStep = function leadAssistantStep(approvalStatus,data){const d=data&&typeof data==="object"&&!Array.isArray(data)?data:{};const status=typeof approvalStatus==="string"?approvalStatus:"";if(typeof d.erasedAt==="string"&&d.erasedAt.trim())return{step:null,whyNot:"Erased at the person\u2019s request."};const outcome=d.dealOutcome&&typeof d.dealOutcome==="object"?d.dealOutcome.outcome:null;if(outcome)return{step:null,whyNot:`Already marked ${String(outcome)}.`};if(status==="rejected")return{step:null,whyNot:"Turned down."};if(d.outreachSentAt)return{step:null,whyNot:"Already emailed \u2014 follow-ups are handled."};if(status==="approved"||status==="scheduled")return{step:null,whyNot:"Approved \u2014 waiting for you to send it from Outreach."};if(!d.intel)return{step:"research",whyNot:null};if(resolveLeadRecipient(d)===null)return{step:null,whyNot:"No email address \u2014 add one by hand."};if(isInOutreachReview(d))return{step:null,whyNot:"Waiting in Outreach for you to read and approve."};return{step:"move_to_outreach",whyNot:null}};
+
+  window.LeadAssistantStep = {
+    /** { step: 'research' | 'move_to_outreach' | null, whyNot } — from the lead's state alone. */
+    of: leadAssistantStep,
+    /** The most leads one bulk "do the next step" carries (research spends real searches). */
+    BULK_MAX: 10,
+  };
+
   // ── Lead retention (the 30-day clock) ─────────────────────────────────────
   // From src/config/lead-retention.ts, stringified — the REAL countdown, for the sharpest version
   // of the reason the two blocks above are mirrored: this number sits beside a lead and tells the

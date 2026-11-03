@@ -182,3 +182,59 @@ export function isInOutreachReview(data: unknown): boolean {
     if (stage === 'triage') return false;
     return isLeadDeliverable(data);
 }
+
+// ── The step the ASSISTANT can take next ────────────────────────────────────
+//
+// A lead's "Suggested next step" is a sentence the model wrote, and on its own it is just advice.
+// The owner asked (2026-11-03) for the assistant to be able to DO it, wherever it can — from the
+// lead's panel, from a ticked selection in the All leads table, and from chat. This is the one
+// rule all three ask: of the next steps this lead could take, is there one the assistant can carry
+// out by itself, and which?
+//
+// ⚠️ Decided from the lead's STATE, never from the model's sentence — the same rule as the panel's
+// nextStepGuidance (assistant-data-hub.js), whose order this follows. Matching prose ("email them",
+// "call this week") to guess at an action would tell someone their assistant is handling a call it
+// cannot make.
+//
+// Two steps qualify, and only two:
+//   'research'         — lead-generation.ts `enrich_lead`: reads their site and recent news,
+//                        re-scores, names the person to write to and looks for that person's
+//                        address. Offered while nothing has been researched yet, INCLUDING a lead
+//                        with no address — finding one is half of what it does.
+//   'move_to_outreach' — the Enrichment tab's "Move to Outreach": puts the lead in the Outreach
+//                        tab's Review column. Sends nothing; the email is still read there first.
+//
+// Sending is deliberately NOT one. The send is the human read of the email, and it lives on the
+// Outreach tab's Approve / Approve all (and the chat's send cards, which show every word).
+//
+// Pure, and stringified into the browser by scripts/gen-client-constants.ts — so it may call only
+// functions declared in THIS file (CommonJS rewrites cross-file references).
+
+/** What the assistant can do next on a lead. */
+export type LeadAssistantStep = 'research' | 'move_to_outreach';
+
+/**
+ * The most leads one bulk "do the next step" carries. Research spends real searches and a model
+ * call on every lead, so this is a spend limit as much as a size one — the same reason the panel's
+ * Research button was per-lead until now.
+ */
+export const LEAD_NEXT_STEP_BULK_MAX = 10;
+
+/**
+ * The step the assistant can take on this lead now, or null when the next step is the user's (or
+ * there is none). `whyNot` says which, in a sentence fit for a "left for you" list.
+ */
+export function leadAssistantStep(approvalStatus: unknown, data: unknown): { step: LeadAssistantStep | null; whyNot: string | null } {
+    const d = (data && typeof data === 'object' && !Array.isArray(data)) ? data as Record<string, unknown> : {};
+    const status = typeof approvalStatus === 'string' ? approvalStatus : '';
+    if (typeof d.erasedAt === 'string' && d.erasedAt.trim()) return { step: null, whyNot: 'Erased at the person’s request.' };
+    const outcome = d.dealOutcome && typeof d.dealOutcome === 'object' ? (d.dealOutcome as Record<string, unknown>).outcome : null;
+    if (outcome) return { step: null, whyNot: `Already marked ${String(outcome)}.` };
+    if (status === 'rejected') return { step: null, whyNot: 'Turned down.' };
+    if (d.outreachSentAt) return { step: null, whyNot: 'Already emailed — follow-ups are handled.' };
+    if (status === 'approved' || status === 'scheduled') return { step: null, whyNot: 'Approved — waiting for you to send it from Outreach.' };
+    if (!d.intel) return { step: 'research', whyNot: null };
+    if (resolveLeadRecipient(d) === null) return { step: null, whyNot: 'No email address — add one by hand.' };
+    if (isInOutreachReview(d)) return { step: null, whyNot: 'Waiting in Outreach for you to read and approve.' };
+    return { step: 'move_to_outreach', whyNot: null };
+}
