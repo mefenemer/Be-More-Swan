@@ -18,6 +18,8 @@
 //   Enquiries     website enquiries not yet marked done
 //   Needs you     social posts awaiting review (awaiting-review.ts, one per card), actions held for approval
 //                 (pending_actions — so the 09:00 digest can skip whoever was emailed this), open Mentor suggestions
+// Booking requests, enquiries, posts and actions belonging to an ARCHIVED assistant (or its site) are left
+// out — they wait on nobody, and their only home is hidden (archived-assistant-drafts.ts).
 //   Make next     the best-performing post of the last 14 days (post_insights), when its assistant is ACTIVE
 // "Which calls turned into sales" is never claimed: we only see what was booked, bought or marked won.
 //
@@ -32,6 +34,7 @@ import {
 } from '../../db/schema';
 import { addDays, utcToZoned, zonedToUtc, formatDate } from './booking-time';
 import { awaitingReview, reviewCardKey } from './awaiting-review';
+import { actionNotFromArchivedAssistant, notFromArchivedAssistant, notFromArchivedSite } from './archived-assistant-drafts';
 import { MENTOR_ROLE_KEY } from './mentor-provision';
 import { teamState } from './mentor-snapshot';
 import { loadOpenProposals } from './mentor-proposals';
@@ -151,19 +154,19 @@ export async function loadMorningInputs(db: Db, orgId: number, today: string, ti
 
     const [bk] = await optional(() => db.select({
         today: sql<number>`count(*) FILTER (WHERE ${bookings.status} = 'confirmed' AND ${bookings.startsAt} >= ${todayStart.toISOString()}::timestamptz AND ${bookings.startsAt} < ${tomorrowStart.toISOString()}::timestamptz)::int`,
-        requests: sql<number>`count(*) FILTER (WHERE ${bookings.status} = 'pending' AND ${bookings.startsAt} >= ${now.toISOString()}::timestamptz)::int`,
+        requests: sql<number>`count(*) FILTER (WHERE ${bookings.status} = 'pending' AND ${bookings.startsAt} >= ${now.toISOString()}::timestamptz AND ${notFromArchivedSite(bookings.siteId)})::int`,
     }).from(bookings).where(eq(bookings.organisationId, orgId)), [] as any[]);
 
     const [enq] = await optional(() => db.select({
         open: sql<number>`count(*) FILTER (WHERE ${siteEnquiries.status} = 'new')::int`,
         yesterday: sql<number>`count(*) FILTER (WHERE ${siteEnquiries.createdAt} >= ${yesterdayStart.toISOString()}::timestamptz AND ${siteEnquiries.createdAt} < ${todayStart.toISOString()}::timestamptz)::int`,
-    }).from(siteEnquiries).where(eq(siteEnquiries.organisationId, orgId)), [] as any[]);
+    }).from(siteEnquiries).where(and(eq(siteEnquiries.organisationId, orgId), notFromArchivedSite(siteEnquiries.siteId))), [] as any[]);
 
     const [posts] = await optional(() => db.select({ n: sql<number>`count(DISTINCT ${reviewCardKey})::int` })
-        .from(scheduledPosts).where(and(eq(scheduledPosts.organisationId, orgId), awaitingReview())), [] as any[]);
+        .from(scheduledPosts).where(and(eq(scheduledPosts.organisationId, orgId), awaitingReview(), notFromArchivedAssistant())), [] as any[]);
 
     const [acts] = await optional(() => db.select({ n: sql<number>`count(*)::int` })
-        .from(pendingActions).where(and(eq(pendingActions.organisationId, orgId), eq(pendingActions.status, 'pending'))), [] as any[]);
+        .from(pendingActions).where(and(eq(pendingActions.organisationId, orgId), eq(pendingActions.status, 'pending'), actionNotFromArchivedAssistant())), [] as any[]);
 
     const openSuggestions = (await loadOpenProposals(db, orgId).catch(() => [])).length;
 

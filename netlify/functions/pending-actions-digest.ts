@@ -9,6 +9,7 @@ import { pendingActions, users } from '../../db/schema';
 import { Resend } from 'resend';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { emailedMorningUserIds } from '../../src/utils/mentor-morning';
+import { actionNotFromArchivedAssistant } from '../../src/utils/archived-assistant-drafts';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
 const FROM   = process.env.EMAIL_FROM || 'noreply@bemoreswan.com';
@@ -31,6 +32,7 @@ const handler = async () => {
         .where(and(
             eq(pendingActions.status, 'pending'),
             lt(pendingActions.createdAt, cutoff),
+            actionNotFromArchivedAssistant(),
         ))
         .groupBy(pendingActions.userId, users.email, users.firstName);
 
