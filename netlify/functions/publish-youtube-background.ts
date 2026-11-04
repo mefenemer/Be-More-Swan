@@ -22,7 +22,7 @@ import { scheduledPosts } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
-    resolvePostVideo, resolveSocialCredentials, publishYouTubeResumable, youtubeMetaFromCaption,
+    resolvePostVideo, resolveSocialCredentials, publishYouTubeResumable, youtubeMetaFromCaption, describeNetworkError,
     type YouTubeResumeState,
 } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
@@ -145,7 +145,7 @@ export default withLambda(async (event: HandlerEvent) => {
         }
         return { statusCode: 200, body: `Published ${outcome.id}` };
     } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = describeNetworkError(err);
         console.error(`[publish-youtube-background] post ${postId} error:`, msg);
         return settleFailure(db, post, msg, true);
     }

@@ -333,6 +333,25 @@ await check('fails an unreachable source without opening a session', async () =>
     } finally { restore(); }
 });
 
+await check('a network failure names its step and keeps the cause, not a bare "fetch failed"', async () => {
+    // Post 185 on staging (2026-11-04) failed with only "fetch failed" recorded; the reason lives on err.cause.
+    const video = makeVideo(4096);
+    const { restore } = installFake({ video });
+    const fake = globalThis.fetch;
+    globalThis.fetch = (async (input: any, init: any = {}) => {
+        if (String(input).includes('uploadType=resumable')) {
+            throw new TypeError('fetch failed', { cause: Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }) });
+        }
+        return fake(input, init);
+    }) as typeof fetch;
+    try {
+        await assert.rejects(
+            publishYouTubeResumable(META, 'token', VIDEO),
+            (err: Error) => /^Starting the YouTube upload: fetch failed \(ECONNRESET: socket hang up\)$/.test(err.message),
+        );
+    } finally { restore(); }
+});
+
 await check('rejects a post with no video attached', async () => {
     const outcome = await publishYouTubeResumable(META, 'token', null);
     assert.strictEqual(outcome.kind, 'failed');

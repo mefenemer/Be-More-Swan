@@ -1108,6 +1108,26 @@ function parseYouTubeOffset(header: string | null): number | null {
 }
 
 /**
+ * Node's fetch reports every network-level failure (DNS, refused or reset connection, TLS, a body
+ * that doesn't match its Content-Length) as the bare message "fetch failed", with the real reason
+ * on `err.cause`. Recording only the message left a stuck YouTube post saying "fetch failed" and
+ * nothing else (post 185 on staging, 2026-11-04). This keeps the cause's code and message.
+ */
+export function describeNetworkError(err: unknown): string {
+    if (!(err instanceof Error)) return String(err);
+    const cause = (err as Error & { cause?: unknown }).cause as { code?: string; message?: string } | undefined;
+    if (!cause || typeof cause !== 'object') return err.message;
+    const detail = [cause.code, cause.message].filter(Boolean).join(': ');
+    return detail && !err.message.includes(detail) ? `${err.message} (${detail})` : err.message;
+}
+
+/** Re-throw a network failure with the step it happened in, so the post's failure reason says where. */
+async function atStep<T>(step: string, run: () => Promise<T>): Promise<T> {
+    try { return await run(); }
+    catch (err) { throw new Error(`${step}: ${describeNetworkError(err)}`, { cause: err }); }
+}
+
+/**
  * Upload a video over YouTube's resumable protocol, chunked so peak memory is one chunk.
  *
  * Returns `incomplete` when a `deadlineMs` is set and the wall clock runs out mid-upload; feed that
@@ -1126,14 +1146,15 @@ export async function publishYouTubeResumable(
     // been killed after YouTube stored a chunk but before the write landed.
     if (opts.resume) {
         const { uploadUrl, total } = opts.resume;
-        const confirmed = await queryYouTubeOffset(uploadUrl, total);
+        const confirmed = await atStep('Checking the YouTube upload session', () => queryYouTubeOffset(uploadUrl, total));
         if (confirmed == null) {
             return { kind: 'failed', status: null, error: 'The YouTube upload session expired before the video finished. It will start over.' };
         }
         if (confirmed >= total) {
             return { kind: 'failed', status: null, error: 'YouTube has the whole video but did not confirm it. Check the channel before retrying.' };
         }
-        return uploadYouTubeChunked(uploadUrl, video.url, total, opts.chunkSize ?? YT_CHUNK_SIZE, opts.deadlineMs, confirmed);
+        return atStep('Sending the video to YouTube', () =>
+            uploadYouTubeChunked(uploadUrl, video.url, total, opts.chunkSize ?? YT_CHUNK_SIZE, opts.deadlineMs, confirmed));
     }
 
     // 1. Probe the source FIRST — its size and media type belong on the session-open request, and a
@@ -1145,7 +1166,7 @@ export async function publishYouTubeResumable(
 
     // 2. Open the resumable session with the SEO metadata. X-Upload-Content-* describe the MEDIA;
     // this request's own Content-Type describes the metadata JSON in the body.
-    const initRes = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+    const initRes = await atStep('Starting the YouTube upload', () => fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
         method: 'POST',
         headers: {
             Authorization: `Bearer ${token}`,
@@ -1162,7 +1183,7 @@ export async function publishYouTubeResumable(
             },
             status: { privacyStatus: opts.privacyStatus ?? YOUTUBE_DEFAULT_PRIVACY, selfDeclaredMadeForKids: false },
         }),
-    });
+    }));
     const uploadUrl = initRes.headers.get('location');
     if (!initRes.ok || !uploadUrl) {
         const err: any = await initRes.json().catch(() => ({}));
@@ -1170,9 +1191,10 @@ export async function publishYouTubeResumable(
     }
 
     // 3. Send the bytes.
-    return probe.rangeSupported && probe.size && probe.size > 0
-        ? uploadYouTubeChunked(uploadUrl, video.url, probe.size, opts.chunkSize ?? YT_CHUNK_SIZE, opts.deadlineMs, 0)
-        : uploadYouTubeStreamed(uploadUrl, video.url, probe.size, video.mimeType || probe.contentType);
+    const size = probe.size;
+    return atStep('Sending the video to YouTube', () => probe.rangeSupported && size && size > 0
+        ? uploadYouTubeChunked(uploadUrl, video.url, size, opts.chunkSize ?? YT_CHUNK_SIZE, opts.deadlineMs, 0)
+        : uploadYouTubeStreamed(uploadUrl, video.url, size, video.mimeType || probe.contentType));
 }
 
 // Chunked + resumable. Peak memory is one chunk.
