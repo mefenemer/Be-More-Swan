@@ -65,6 +65,8 @@ check('connectors named as working are Live on connections.html, and the Coming-
     assert.ok(!live('YouTube'), 'YouTube is not Live on connections.html');
     assert.ok(!faq.includes('YouTube'), 'YouTube is not named as working in the FAQ');
     assert.ok(faq.includes('HubSpot, Salesforce and Xero are coming soon'));
+    // Nor anywhere else on the homepage: Cat's customer story used to say she used "a connected Notion pad".
+    if (!live('Notion')) assert.ok(!/\bNotion\b/.test(read('index.html')), 'the homepage names Notion only once it is Live');
 });
 
 check('the JSON-LD matches the questions, with prices once baked', () => {
