@@ -68,6 +68,7 @@ import { SITE_TEMPLATES } from '../../src/config/site-templates';
 import { FONT_PAIRS } from '../../src/utils/site-render';
 import { listSignupForms } from '../../src/utils/site-forms';
 import { readWordsFile } from '../../src/utils/site-words';
+import { recheckAfterPublish } from '../../src/utils/site-audit-recheck';
 import { attachmentText, quoteFromChat } from '../../src/utils/chat-attachments';
 import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnectAccount } from '../../src/utils/site-shop';
 import { audienceContacts, bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
@@ -328,7 +329,9 @@ export default withLambda(async (event) => {
         await purgeSitePages(r.site.slug);
         // Every assistant's map of the site (site-directory-store.ts) — rebuilt from the new version, no fetch.
         await refreshDirectoryAfterPublish(db, orgId);
-        return json(200, await view(r.site));
+        // A change the Mystery Shopper flagged has gone live: it checks again. Never throws.
+        const shopperRecheck = await recheckAfterPublish(db, orgId, r.site, userId);
+        return json(200, { ...(await view(r.site)), shopperRecheck });
     }
 
     if (action === 'unpublish') {

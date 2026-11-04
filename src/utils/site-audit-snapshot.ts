@@ -8,11 +8,13 @@
 
 import { and, desc, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, siteAuditBriefs, siteAuditFixes, siteAuditRuns, siteAudits } from '../../db/schema';
+import { aiAssistants, siteAuditBriefs, siteAuditCheckWork, siteAuditFixes, siteAuditItemChecks, siteAuditRuns, siteAudits } from '../../db/schema';
+import { itemVerdict } from './site-audit-check-work';
+import { websiteHelperFor } from './site-audit-recheck';
 import { WEEKDAYS } from './site-audit-setup';
 import { asUtcDate, nextCheckDate } from './site-audit-schedule';
 import { HANDOFF_TARGETS, type Handoff } from './site-audit-prompts';
-import { LENS_LABEL, type Lens, type LensScore } from './site-score';
+import { LENS_LABEL, type CheckOutcome, type Lens, type LensScore } from './site-score';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -94,6 +96,29 @@ export async function buildSiteAuditSnapshot(db: Db, orgId: number, assistantId:
         lines.push('No check has produced a score yet.');
     }
 
+    // "Why your score isn't higher" and what they've said about each line, with the ids a
+    // site_audit_check_update card names. Read apart: before db/z-mystery-shopper-check-work.sql the
+    // tab has no such button, so the chat isn't told about one.
+    try {
+        const work = await db.select({
+            checkId: siteAuditCheckWork.checkId, label: siteAuditCheckWork.label, status: siteAuditCheckWork.status,
+            verifiedRunId: siteAuditCheckWork.verifiedRunId, updatedAt: siteAuditCheckWork.updatedAt,
+        }).from(siteAuditCheckWork).where(and(
+            eq(siteAuditCheckWork.auditId, audit.id), eq(siteAuditCheckWork.organisationId, orgId), eq(siteAuditCheckWork.pageUrl, audit.url),
+        )).limit(100);
+        const failed = (((latestDone?.scores as { outcomes?: CheckOutcome[] } | null)?.outcomes) ?? [])
+            .filter((o) => o.result === 'fail').sort((a, b) => b.weight - a.weight).slice(0, 10);
+        if (failed.length) {
+            lines.push('"Why your score isn\'t higher", from the latest check (checkId — what is missing — what they said):');
+            for (const o of failed) {
+                const w = work.find((x) => x.checkId === o.id && x.verifiedRunId === null);
+                lines.push(`- ${o.id} — ${clip(o.label, 160)} — ${w ? (w.status === 'accepted' ? `they said they will work on it (${day(w.updatedAt)})` : `they marked it done (${day(w.updatedAt)}), but this check still found it`) : 'not taken on'}`);
+            }
+        }
+        const passed = work.filter((w) => w.verifiedRunId !== null && !failed.some((o) => o.id === w.checkId));
+        if (passed.length) lines.push(`Score checks they worked on that the page now passes (Done tab): ${passed.slice(0, 8).map((w) => clip(w.label, 80)).join('; ')}.`);
+    } catch { /* table not there yet */ }
+
     const newest = runs[0];
     if (newest && newest !== latestDone) {
         lines.push(`Most recent check (${day(newest.createdAt)}) ${STATUS_WORDS[newest.status] ?? newest.status}${newest.error ? `: ${clip(newest.error, 200)}` : '.'}`);
@@ -134,6 +159,32 @@ export async function buildSiteAuditSnapshot(db: Db, orgId: number, assistantId:
         lines.push('Ideas for other assistants they rejected (Archived) — never suggest these, or anything like them, again:');
         for (const b of turnedDown) lines.push(`- ${day(b.createdAt)}, for the ${b.targetRole}: ${clip(b.title || b.brief, 120)}`);
     }
+
+    // In progress, for "is it done?": each with the ids a card names, and what its check found.
+    try {
+        const work = await db.select({ id: siteAuditCheckWork.id, label: siteAuditCheckWork.label }).from(siteAuditCheckWork).where(and(
+            eq(siteAuditCheckWork.auditId, audit.id), eq(siteAuditCheckWork.pageUrl, audit.url), eq(siteAuditCheckWork.status, 'accepted'),
+        )).limit(30);
+        const asks = await db.select({ kind: siteAuditItemChecks.itemKind, itemId: siteAuditItemChecks.itemId, askedAt: siteAuditItemChecks.websiteAskedAt, runStatus: siteAuditRuns.status })
+            .from(siteAuditItemChecks).leftJoin(siteAuditRuns, eq(siteAuditRuns.id, siteAuditItemChecks.runId))
+            .where(eq(siteAuditItemChecks.auditId, audit.id)).limit(500);
+        const FOUND = { checking: 'being checked now', not_checked: 'the check could not read the page, so not confirmed', incomplete: 'NOT done at the last check', nothing_changed: 'NOT done at the last check (nothing on the page had changed)' } as const;
+        const found = (kind: string, id: number) => {
+            const a = asks.find((x) => x.kind === kind && x.itemId === id);
+            const v = itemVerdict(a?.runStatus);
+            return `${v ? FOUND[v] : 'not asked to be checked yet'}${a?.askedAt ? '; they asked their Website Assistant to make it, not yet published' : ''}`;
+        };
+        const accepted = waiting.filter((f) => f.status === 'accepted');
+        if (accepted.length || work.length) {
+            lines.push('In progress (kind, id — what it is — what the check they asked for found):');
+            for (const f of accepted) lines.push(`- fix, ${f.id} — "${clip(f.before, 80)}" → "${clip(f.after, 100)}" — ${found('fix', f.id)}`);
+            for (const w of work) lines.push(`- check, ${w.id} — ${clip(w.label, 120)} — ${found('check', w.id)}`);
+            const helper = await websiteHelperFor(db, orgId, audit.url);
+            lines.push(helper
+                ? `Their site is hosted here, so ${helper.name} (their Website Assistant) can make these changes.`
+                : 'Their site is not hosted by a working Website Assistant here, so they must make these changes wherever it is built.');
+        }
+    } catch { /* tables not there yet */ }
 
     // Who a hand-off can go to. A target role nobody has hired cannot take one.
     const team = await db.select({ name: aiAssistants.name, roleKey: sql<string>`${aiAssistants.configuration} ->> 'type'` })

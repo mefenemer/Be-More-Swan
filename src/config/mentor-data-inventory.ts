@@ -73,7 +73,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'campaigns', 'campaign_orders', 'orchestration_runs', 'orchestration_links', 'campaign_learnings',
     ]),
     ...group('on_request', 'Website checks and site status, when those assistants are active', [
-        'site_audits', 'site_audit_fixes', 'site_audit_briefs', 'sites',
+        'site_audits', 'site_audit_fixes', 'site_audit_briefs', 'site_audit_check_work', 'sites',
     ]),
     ...group('on_request', 'Email results: sends and link clicks (totals)', ['newsletter_sends', 'newsletter_link_clicks', 'newsletter_sequences']),
     ...group('on_request', 'Brand Designer briefs and Inspo titles', ['visual_briefs', 'inspo_items']),
@@ -110,7 +110,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'account_edges', 'account_memory', 'account_nodes', 'action_policies', 'active_scenarios', 'agent_run_events',
         'agent_run_summaries', 'calendar_busy', 'canva_import_jobs', 'content_provenance', 'discovery_jobs',
         'discovery_schedules', 'inspo_chunks', 'inspo_style_profiles', 'kb_chunks', 'media_generation_jobs',
-        'pending_actions', 'post_render_jobs', 'rate_limit_states', 'scenario_jobs', 'site_audit_runs', 'site_imports',
+        'pending_actions', 'post_render_jobs', 'rate_limit_states', 'scenario_jobs', 'site_audit_item_checks', 'site_audit_runs', 'site_imports',
         'storage_usage', 'swan_index_posts', 'swan_index_profiles', 'task_runs', 'vector_embeddings', 'webhook_deliveries',
         'webhook_events', 'widget_configs', 'site_domains',
     ]),

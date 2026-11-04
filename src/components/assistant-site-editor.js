@@ -2287,7 +2287,10 @@
         ? `Visitors to ${where} will see your draft as it is now.`
         : `Your site goes live at ${where}. Anyone can visit it and search engines can find it.`, { title: s.status === 'published' ? 'Publish your changes?' : 'Publish your site?', confirmLabel: 'Publish', cancelLabel: 'Not yet' });
       if (!ok) return;
-      await publishAction({ action: 'publish' }, 'Published — your site is live. It can take a minute to show everywhere.', () => { state.versions = null; });
+      await publishAction({ action: 'publish' }, 'Published — your site is live. It can take a minute to show everywhere.', () => {
+        state.versions = null;
+        if (state.data?.shopperRecheck) state.publishNote.text += ` ${state.data.shopperRecheck.assistantName} is checking the change now, which uses 1 task if the score is worked out again.`;
+      });
       return;
     }
     if (t('[data-site-unpublish]')) {

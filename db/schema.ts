@@ -5743,6 +5743,42 @@ export const siteAuditBriefs = pgTable("site_audit_briefs", {
   check("site_audit_briefs_source_check", sql`${t.source} IN ('idea','stalled_fix','chat')`),
 ]);
 
+// "I'll work on this" on "Why your score isn't higher" (db/z-mystery-shopper-check-work.sql).
+export const siteAuditCheckWork = pgTable("site_audit_check_work", {
+  id: serial().primaryKey(),
+  auditId: integer("audit_id").notNull().references(() => siteAudits.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  pageUrl: text("page_url").notNull(),
+  checkId: text("check_id").notNull(),
+  lens: text().notNull(),
+  weight: smallint().notNull(),
+  label: text().notNull(),
+  status: text().notNull(),
+  verifiedRunId: integer("verified_run_id").references(() => siteAuditRuns.id, { onDelete: "set null" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("site_audit_check_work_uq").on(t.auditId, t.pageUrl, t.checkId),
+  check("site_audit_check_work_status_check", sql`${t.status} IN ('accepted','done')`),
+]);
+
+// "Check if this is done" and the loop through the Website Assistant (same SQL file).
+export const siteAuditItemChecks = pgTable("site_audit_item_checks", {
+  id: serial().primaryKey(),
+  auditId: integer("audit_id").notNull().references(() => siteAudits.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  itemKind: text("item_kind").notNull(),
+  itemId: integer("item_id").notNull(),
+  runId: integer("run_id").references(() => siteAuditRuns.id, { onDelete: "set null" }),
+  websiteAskedAt: timestamp("website_asked_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("site_audit_item_checks_uq").on(t.auditId, t.itemKind, t.itemId),
+  check("site_audit_item_checks_kind_check", sql`${t.itemKind} IN ('fix','check')`),
+]);
+
 // ── Website Assistant — one site per hired assistant (docs/website-assistant-plan.md §6) ─────────
 // `draft` has always passed normaliseSiteDefinition (src/utils/site-definition.ts). The live site is
 // served from site_versions (published_version), never from the draft. Requires
