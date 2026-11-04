@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Connections | Be More Swan</title>
     <!-- SEO: canonical + social share metadata -->
-    <meta name="description" content="See which tools each Be More Swan assistant connects to, what it does there and why it helps: Facebook, Instagram, LinkedIn, Gmail, Outlook, Slack, Notion and more.">
+    <meta name="description" content="See which tools each Be More Swan assistant connects to, what it does there and why it helps: Facebook, Instagram, LinkedIn, X, YouTube, Gmail, Outlook, Canva and more.">
     <link rel="canonical" href="https://bemoreswan.com/connections">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Be More Swan">
@@ -80,7 +80,7 @@
         .cx-toggle input { width:1rem; height:1rem; accent-color:var(--color-emerald-700); }
 
         /* Assistant sections */
-        .cx-assistant { padding:3rem 0 1rem; scroll-margin-top:4rem; }
+        .cx-assistant { padding:3rem 0 1rem; scroll-margin-top:7.5rem; } /* clears the sticky bar, three rows of chips on a laptop */
         .cx-assistant-head { display:flex; flex-wrap:wrap; align-items:center; gap:.9rem 1rem; margin-bottom:1.25rem; }
         .cx-assistant-head > div:first-of-type { flex:1; min-width:12rem; }
         .cx-assistant-head h3 { font-size:1.5rem; font-weight:800; color:#111827; margin:0; }
@@ -126,7 +126,7 @@
 
 <div id="nav-placeholder"></div>
 
-<!-- What each assistant connects to — checked against the code 2026-10-20, not against other copy.
+<!-- What each assistant connects to — checked against the code 2026-11-04, not against other copy.
      "Live" = a customer can connect it today: the social platforms and Canva in integrations.js
      PLATFORMS/SOURCES; Gmail/Outlook (MAILBOX_CATALOG, Lead Generator only); Search Console;
      the blog destinations LinkedIn + The Swan Index (WordPress/Ghost are built but WITHHELD in
@@ -136,7 +136,13 @@
      Pages (no Community Management access), Pipedrive/Zoho (recipes 'coming_soon'), Zoom (meetings
      come in as pasted transcripts), Zendesk/Intercom/Xero/QuickBooks (their categories are not
      live in src/utils/connection-map.ts), and HubSpot/Salesforce (owner's call 2026-10-20: not offered
-     yet, though the recipes exist — integrations.html shows them as coming soon too). Assistant names mirror master_assistants — rename both. -->
+     yet, though the recipes exist — integrations.html shows them as coming soon too).
+     An assistant that is itself comingSoon in master_assistants cannot have a Live connection, however
+     finished the recipe is: Slack, Notion, Jira, Asana, the follow-up email and the meeting webhook only
+     fire for the Minute Taker's meeting records (assistant-integrations.js RELEVANT_TYPES), so they stay
+     "Coming soon" until it goes live — move them back then, with the hero list and the homepage, pricing
+     and FAQ mentions. Paid ads: built dark, the registry in src/utils/ad-networks is deliberately empty.
+     Assistant names mirror master_assistants — rename both. -->
 <main class="flex-grow">
 
     <!-- Hero -->
@@ -172,10 +178,6 @@
                     <div class="cx-hub-tools">
                         <span class="cx-tool"><span class="cx-badge" style="background:#EA4335;color:#fff" aria-hidden="true">M</span>Gmail</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#0078D4;color:#fff" aria-hidden="true">O</span>Outlook</span>
-                        <span class="cx-tool"><span class="cx-badge" style="background:#4A154B;color:#fff" aria-hidden="true">#</span>Slack</span>
-                        <span class="cx-tool"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">N</span>Notion</span>
-                        <span class="cx-tool"><span class="cx-badge" style="background:#0052CC;color:#fff" aria-hidden="true">J</span>Jira</span>
-                        <span class="cx-tool"><span class="cx-badge" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span>Asana</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#4285F4;color:#fff" aria-hidden="true">G</span>Google Search Console</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span>Canva</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span>Zapier / Make</span>
@@ -205,9 +207,13 @@
                 <a href="#leads" class="cx-chip"><span aria-hidden="true">🎯</span>Lead Generation Assistant</a>
                 <a href="#meetings" class="cx-chip"><span aria-hidden="true">📝</span>Minute Taker</a>
                 <a href="#design" class="cx-chip"><span aria-hidden="true">🎨</span>Brand Designer</a>
+                <a href="#video" class="cx-chip"><span aria-hidden="true">🎬</span>Video Producer</a>
+                <a href="#website" class="cx-chip"><span aria-hidden="true">🌐</span>Website Assistant</a>
                 <a href="#support" class="cx-chip"><span aria-hidden="true">💬</span>First-Line Support Assistant</a>
                 <a href="#finance" class="cx-chip"><span aria-hidden="true">💷</span>Accounts Receivable Clerk</a>
                 <a href="#campaign" class="cx-chip"><span aria-hidden="true">🧭</span>Marketing Campaign Orchestrator</a>
+                <a href="#none-needed" class="cx-chip"><span aria-hidden="true">🕵️</span>Mystery Shopper</a>
+                <a href="#none-needed" class="cx-chip"><span aria-hidden="true">🧠</span>Business Mentor</a>
             </nav>
             <label class="cx-toggle"><input type="checkbox" id="cx-live-only"> Live only</label>
         </div>
@@ -507,54 +513,54 @@
                 <span class="cx-icon" aria-hidden="true">📝</span>
                 <div>
                     <h3>Minute Taker</h3>
-                    <p>Turns meeting transcripts and notes into minutes and action items.</p>
+                    <p>Turns meeting transcripts and notes into minutes and action items. This assistant is coming soon, and its connections will arrive with it.</p>
                 </div>
                 <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#4A154B;color:#fff" aria-hidden="true">#</span><span class="cx-badge cx-badge-sm" style="background:#111;color:#fff" aria-hidden="true">N</span><span class="cx-badge cx-badge-sm" style="background:#0052CC;color:#fff" aria-hidden="true">J</span><span class="cx-badge cx-badge-sm" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span><span class="cx-badge cx-badge-sm" style="background:#FF7A59;color:#fff" aria-hidden="true">H</span><span class="cx-badge cx-badge-sm" style="background:#374151;color:#fff" aria-hidden="true">✉</span><span class="cx-badge cx-badge-sm" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span><span class="cx-badge cx-badge-sm" style="background:#2D8CFF;color:#fff" aria-hidden="true">Z</span></div>
-                <span class="cx-count">6 live · 2 coming soon</span>
+                <span class="cx-count">8 coming soon</span>
             </div>
             <div class="cx-grid">
-            <article class="cx-card" data-live="1">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#4A154B;color:#fff" aria-hidden="true">#</span><h4>Slack</h4><span class="cx-pill cx-live">Live</span></header>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#4A154B;color:#fff" aria-hidden="true">#</span><h4>Slack</h4><span class="cx-pill cx-soon">Coming soon</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve the minutes</li>
                     <li><span class="cx-step">It</span>Posts the summary and action items to a Slack channel</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Everyone sees what was agreed, even if they missed the call.</p>
             </article>
-            <article class="cx-card" data-live="1">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">N</span><h4>Notion</h4><span class="cx-pill cx-live">Live</span></header>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">N</span><h4>Notion</h4><span class="cx-pill cx-soon">Coming soon</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve the minutes</li>
                     <li><span class="cx-step">It</span>Files a Notion page with the summary and a to-do list</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Your meeting history lives where your team already works.</p>
             </article>
-            <article class="cx-card" data-live="1">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#0052CC;color:#fff" aria-hidden="true">J</span><h4>Jira</h4><span class="cx-pill cx-live">Live</span></header>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#0052CC;color:#fff" aria-hidden="true">J</span><h4>Jira</h4><span class="cx-pill cx-soon">Coming soon</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve the minutes</li>
                     <li><span class="cx-step">It</span>Creates one Jira ticket for each action item</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Nothing agreed in a meeting gets lost.</p>
             </article>
-            <article class="cx-card" data-live="1">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span><h4>Asana</h4><span class="cx-pill cx-live">Live</span></header>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#F06A6A;color:#fff" aria-hidden="true">A</span><h4>Asana</h4><span class="cx-pill cx-soon">Coming soon</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve the minutes</li>
                     <li><span class="cx-step">It</span>Creates one Asana task for each action item</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Nothing agreed in a meeting gets lost.</p>
             </article>
-            <article class="cx-card" data-live="1">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#374151;color:#fff" aria-hidden="true">✉</span><h4>Email follow-up</h4><span class="cx-pill cx-live">Live</span></header>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#374151;color:#fff" aria-hidden="true">✉</span><h4>Email follow-up</h4><span class="cx-pill cx-soon">Coming soon</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve the minutes</li>
                     <li><span class="cx-step">It</span>Emails the follow-up to everyone who attended, from your Gmail if it is connected</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> The follow-up is sent while the meeting is still fresh.</p>
             </article>
-            <article class="cx-card" data-live="1">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span><h4>Zapier / Make</h4><span class="cx-pill cx-live">Live</span></header>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#FF4F00;color:#fff" aria-hidden="true">⚡</span><h4>Zapier / Make</h4><span class="cx-pill cx-soon">Coming soon</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You approve the minutes</li>
                     <li><span class="cx-step">It</span>Sends them to a webhook for any other app</li>
@@ -598,6 +604,74 @@
                     <li><span class="cx-step">It</span>Offers your own Canva designs alongside stock and AI options</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Your best designs get used again, not forgotten.</p>
+            </article>
+            </div>
+        </section>
+
+        <section id="video" class="cx-assistant">
+            <div class="cx-assistant-head">
+                <span class="cx-icon" aria-hidden="true">🎬</span>
+                <div>
+                    <h3>Video Producer</h3>
+                    <p>Turns what you want to say into a short vertical video.</p>
+                </div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:linear-gradient(135deg,#F58529,#DD2A7B 50%,#8134AF);color:#fff" aria-hidden="true">IG</span><span class="cx-badge cx-badge-sm" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span><span class="cx-badge cx-badge-sm" style="background:#1877F2;color:#fff" aria-hidden="true">f</span><span class="cx-badge cx-badge-sm" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span></div>
+                <span class="cx-count">4 live</span>
+            </div>
+            <div class="cx-grid">
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:linear-gradient(135deg,#F58529,#DD2A7B 50%,#8134AF);color:#fff" aria-hidden="true">IG</span><h4>Instagram</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve the finished video</li>
+                    <li><span class="cx-step">It</span>Publishes it as a Reel on your Instagram professional account</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Short video reaches people your static posts do not.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span><h4>YouTube</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve the finished video</li>
+                    <li><span class="cx-step">It</span>Uploads it to your channel as a Short</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your channel stays active without any editing.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#1877F2;color:#fff" aria-hidden="true">f</span><h4>Facebook</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve the finished video</li>
+                    <li><span class="cx-step">It</span>Publishes it as a Reel on your Facebook Page</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> One video, with no extra work for each platform.</p>
+            </article>
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span><h4>Canva</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You pick a Canva design</li>
+                    <li><span class="cx-step">It</span>Brings it into your Content Library to use in a video</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your own designs can appear in your videos.</p>
+            </article>
+            </div>
+        </section>
+
+        <section id="website" class="cx-assistant">
+            <div class="cx-assistant-head">
+                <span class="cx-icon" aria-hidden="true">🌐</span>
+                <div>
+                    <h3>Website Assistant</h3>
+                    <p>Builds your website from a conversation and keeps it up to date.</p>
+                </div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#635BFF;color:#fff" aria-hidden="true">S</span></div>
+                <span class="cx-count">1 live</span>
+            </div>
+            <div class="cx-grid">
+            <article class="cx-card" data-live="1">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#635BFF;color:#fff" aria-hidden="true">S</span><h4>Stripe</h4><span class="cx-pill cx-live">Live</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>A customer buys from your site or pays a booking deposit</li>
+                    <li><span class="cx-step">It</span>Takes the payment through your own Stripe account</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Buyers pay you directly.</p>
             </article>
             </div>
         </section>
@@ -663,11 +737,49 @@
         </section>
 
         <section id="campaign" class="cx-assistant">
-            <div class="cx-note">
+            <div class="cx-assistant-head">
                 <span class="cx-icon" aria-hidden="true">🧭</span>
                 <div>
-                    <h3 class="text-xl font-extrabold text-gray-900">Marketing Campaign Orchestrator</h3>
-                    <p class="text-gray-600 mt-1">Needs no connections of its own. It briefs your other assistants on one shared goal, and they use their connections to do the work.</p>
+                    <h3>Marketing Campaign Orchestrator</h3>
+                    <p>Briefs your other assistants on one shared goal. Today they use their own connections to do the work, and paid advertising is coming soon.</p>
+                </div>
+                <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span><span class="cx-badge cx-badge-sm" style="background:#1877F2;color:#fff" aria-hidden="true">M</span><span class="cx-badge cx-badge-sm" style="background:#4285F4;color:#fff" aria-hidden="true">G</span></div>
+                <span class="cx-count">3 coming soon</span>
+            </div>
+            <div class="cx-grid">
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span><h4>LinkedIn Ads</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve a campaign’s ads and its spending limit</li>
+                    <li><span class="cx-step">It</span>Runs them from your LinkedIn ad account</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Reach decision-makers as part of the same campaign.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#1877F2;color:#fff" aria-hidden="true">M</span><h4>Meta Ads</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve a campaign’s ads and its spending limit</li>
+                    <li><span class="cx-step">It</span>Runs them on Facebook and Instagram from your Meta ad account</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Put your best organic ideas in front of more people.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#4285F4;color:#fff" aria-hidden="true">G</span><h4>Google Ads</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve a campaign’s ads and its spending limit</li>
+                    <li><span class="cx-step">It</span>Runs them from your Google Ads account</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Show up when people search for what you sell.</p>
+            </article>
+            </div>
+        </section>
+
+        <section id="none-needed" class="cx-assistant">
+            <div class="cx-note">
+                <span class="cx-icon" aria-hidden="true">🕵️</span>
+                <div>
+                    <h3 class="text-xl font-extrabold text-gray-900">Mystery Shopper and Business Mentor</h3>
+                    <p class="text-gray-600 mt-1">Neither needs a connection. The Mystery Shopper reads public web pages, and the Business Mentor reads what is already in your workspace.</p>
                 </div>
             </div>
         </section>
@@ -680,7 +792,7 @@
             <div class="cx-trust">
                 <div>
                     <h3>Each assistant sees only what it needs</h3>
-                    <p>A connection is only ever used for its assistant's job. Your Social Media Assistant can't reach your CRM, and your Minute Taker can't post to your social accounts.</p>
+                    <p>A connection is only ever used for its assistant's job. Your Social Media Assistant can't reach your CRM, and your Brand Designer can't post to your social accounts.</p>
                 </div>
                 <div>
                     <h3>Nothing goes out without your OK</h3>
@@ -688,7 +800,7 @@
                 </div>
                 <div>
                     <h3>Disconnect any time</h3>
-                    <p>Remove a connection from the Connections tab whenever you like, and the assistant stops using it straight away. Your plan sets how many apps you can connect.</p>
+                    <p>Remove a connection from the Connections tab whenever you like, and the assistant stops using it straight away. No plan limits how many apps you can connect.</p>
                 </div>
             </div>
         </div>

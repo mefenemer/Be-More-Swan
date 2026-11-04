@@ -53,8 +53,13 @@ check('no typed price or task allowance', () => {
 check('connectors named as working are Live on connections.html, and the Coming-soon ones say so', () => {
     const conn = read('connections.html');
     const live = (name: string) => new RegExp(`<h4>${name}</h4><span class="cx-pill cx-live">`).test(conn);
-    for (const name of ['Facebook', 'Instagram', 'LinkedIn', 'X', 'Gmail', 'Outlook', 'Slack', 'Google Search Console', 'Canva', 'Notion']) {
+    for (const name of ['Facebook', 'Instagram', 'LinkedIn', 'X', 'Gmail', 'Outlook', 'Google Search Console', 'Canva']) {
         assert.ok(live(name), `${name} is Live on connections.html`);
+    }
+    // Slack and Notion only run for the Minute Taker, which is itself coming soon.
+    for (const name of ['Slack', 'Notion']) {
+        assert.ok(!live(name), `${name} is not Live on connections.html`);
+        assert.ok(!faq.includes(name), `${name} is not named as working in the FAQ`);
     }
     assert.ok(faq.includes('HubSpot, Salesforce and Xero are coming soon'));
 });
