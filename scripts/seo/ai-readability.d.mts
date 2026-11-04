@@ -12,6 +12,7 @@ export declare function bakePlanPriceSlots(html: string, plans: Data[]): { html:
 export declare function pricingCardTexts(plans: Data[], enterprisePlan?: Data | null): Record<string, string>;
 export declare function applyTextById(html: string, texts: Record<string, string>): { html: string; applied: string[]; skipped: string[] };
 export declare function pricingJsonLd(plans: Data[]): string;
+export declare function homeFaqJsonLd(html: string): string;
 
 export declare const ASSISTANT_PAGE_SLUGS: Record<string, string>;
 export declare function slugForRole(roleKey: string, name?: string): { slug: string; pinned: boolean };

@@ -340,6 +340,69 @@
         </div>
     </section>
 
+    <!-- Questions owners ask us (Mystery Shopper suggestion, 2026-11-03). Every answer is a claim a
+         visitor can hold us to — checked against the code that day:
+           · prices are plan-prices.js tokens (baked at build); task allowances are NOT restated,
+             they live in master data and pricing.html shows them
+           · connections name only cards marked Live on connections.html; HubSpot, Salesforce and
+             Xero are Coming soon there — keep both lists in step when a connector ships
+           · approval is the default, per-platform auto-publish is opt-in (src/utils/publish-policy.ts)
+           · trial terms from src/utils/trial.ts; replanning is GOAL_AI_TIERS.autonomous (Buster and up)
+         Visible H3 + one <p> per question: scripts/build-seo-html.mjs builds the FAQPage JSON-LD from
+         exactly that shape, so keep it. -->
+    <section id="faq" class="py-20 bg-gray-50 border-t border-gray-100">
+        <div class="max-w-3xl mx-auto px-4">
+            <div class="text-center mb-12">
+                <span class="text-xs font-bold tracking-wider uppercase text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">
+                    FAQ
+                </span>
+                <h2 class="text-4xl font-extrabold text-gray-900 tracking-tight mt-4">
+                    Questions owners ask us
+                </h2>
+            </div>
+            <div id="home-faq" class="space-y-8">
+                <div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-2">What is Be More Swan?</h3>
+                    <p class="text-gray-600">A team of pre-trained AI assistants for your social media, blog, email, leads, website and more. They work in the background, and you direct them in plain English.</p>
+                </div>
+                <div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-2">Do I need to be technical?</h3>
+                    <p class="text-gray-600">No. There's no code and no workflow builder. You tell your assistant about your business the way you'd brief a new hire, and they take it from there.</p>
+                </div>
+                <div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-2">Will the content sound like me?</h3>
+                    <p class="text-gray-600">Yes. Each assistant learns your voice and works to your brand rules, and every draft waits for your OK before it goes out, unless you choose to let a platform publish automatically.</p>
+                </div>
+                <div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-2">What does it cost?</h3>
+                    <p class="text-gray-600"><span data-plan-prices-ready hidden>The Workflow Saver is <span data-plan-price="saver"></span>/month and The Busywork Buster is <span data-plan-price="buster"></span>/month. </span>The Workflow Saver gives you one assistant on the job you most want off your plate. The Busywork Buster gives you every assistant working as one team, plus The Quality Reviewer and assistants that replan when a goal slips. Each plan's monthly task allowance is on our <a href="pricing.html" class="font-semibold text-emerald-700 underline">pricing page</a>.</p>
+                </div>
+                <div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-2">What happens if I use all my tasks?</h3>
+                    <p class="text-gray-600">Work pauses until your next monthly allowance starts. We never bill you for going over, and chatting with your assistants doesn't use tasks.</p>
+                </div>
+                <div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-2">Does it work with the tools I already use?</h3>
+                    <p class="text-gray-600">Yes, with many of them. Your assistants connect today to Facebook, Instagram, LinkedIn, X, Gmail, Outlook, Slack, Google Search Console, Canva, Notion and Zapier or Make. HubSpot, Salesforce and Xero are coming soon. The full list is on our <a href="connections.html" class="font-semibold text-emerald-700 underline">connections page</a>.</p>
+                </div>
+                <div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-2">Can I try it first?</h3>
+                    <p class="text-gray-600">Yes. Every assistant is free for 14 days, with no card needed up front. When the trial ends nothing is charged: your assistants simply pause until you choose a plan.</p>
+                </div>
+                <div>
+                    <h3 class="text-xl font-bold text-gray-900 mb-2">How do I know it's working?</h3>
+                    <p class="text-gray-600">You set SMART goals, like &ldquo;20 new leads this month&rdquo;, and each assistant tracks its progress against them on every plan.</p>
+                </div>
+            </div>
+            <div class="mt-12 text-center">
+                <a href="register.html" data-waitlist-label="Join the waitlist" class="btn-primary inline-block px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">
+                    Start Your Free Trial &mdash; No Card Required
+                </a>
+                <p class="mt-4 text-gray-500">More answers in our <a href="faq.html" class="font-semibold text-emerald-700 underline">full FAQ</a>.</p>
+            </div>
+        </div>
+    </section>
+
 <!-- Real Success Stories Section -->
 <section id="case-studies" class="py-20 bg-white border-t border-gray-100">
     <div class="max-w-7xl mx-auto px-4">

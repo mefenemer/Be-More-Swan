@@ -12,6 +12,8 @@
  * was the same 97-word shell titled "Digital Assistant".
  */
 
+import * as cheerio from 'cheerio';
+
 export const SITE_ORIGIN = 'https://bemoreswan.com';
 
 export const escHtml = (s) => String(s ?? '')
@@ -148,6 +150,41 @@ export function pricingJsonLd(plans) {
         applicationCategory: 'BusinessApplication',
         operatingSystem: 'Web browser',
         offers,
+    }, '    ');
+}
+
+// ── Home page FAQ ─────────────────────────────────────────────────────────────
+
+/**
+ * FAQPage JSON-LD for the home page's "Questions owners ask us" section, read from the visible
+ * copy: each `#home-faq h3` is a question and the first <p> after it the answer. Run AFTER
+ * bakePlanPriceSlots, so the cost answer carries real prices; anything still `hidden` (a price
+ * sentence the bake could not fill) is left out, because the markup must match what a reader sees.
+ * Returns '' when the section has no questions, so the caller can fail loudly.
+ */
+export function homeFaqJsonLd(html) {
+    const $ = cheerio.load(html);
+    const norm = (s) => s.replace(/\s+/g, ' ').trim();
+    const entries = [];
+    $('#home-faq h3').each((_, el) => {
+        const q = norm($(el).text());
+        const $a = $(el).nextAll('p').first().clone();
+        $a.find('[hidden]').remove();
+        const a = norm($a.text());
+        if (q && a) entries.push({ q, a });
+    });
+    if (!entries.length) return '';
+    return ldJson({
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        '@id': `${SITE_ORIGIN}/#faq`,
+        isPartOf: { '@type': 'WebSite', url: `${SITE_ORIGIN}/` },
+        publisher: { '@id': `${SITE_ORIGIN}/#organization` },
+        mainEntity: entries.map(({ q, a }) => ({
+            '@type': 'Question',
+            name: q,
+            acceptedAnswer: { '@type': 'Answer', text: a },
+        })),
     }, '    ');
 }
 
