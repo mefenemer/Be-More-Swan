@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Be More Swan vs Squarespace, Wix, Webador and Lovable | Be More Swan</title>
+    <!-- SEO: canonical + social share metadata -->
+    <meta name="description" content="Compare the price and features of Be More Swan's Website Assistant with Squarespace, Wix, Webador and Lovable: who writes the words, how you edit, what it costs and what you get beyond the website.">
+    <link rel="canonical" href="https://bemoreswan.com/be-more-swan-vs-website-builders">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="Be More Swan">
+    <meta property="og:title" content="Be More Swan vs Squarespace, Wix, Webador and Lovable">
+    <meta property="og:description" content="Website builders give you a template or a prompt box. Our Website Assistant writes your site from your own business details, then a team of assistants helps you grow the business behind it.">
+    <meta property="og:url" content="https://bemoreswan.com/be-more-swan-vs-website-builders">
+    <meta property="og:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="607">
+    <meta property="og:image:alt" content="Be More Swan — your digital workforce">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Be More Swan vs Squarespace, Wix, Webador and Lovable">
+    <meta name="twitter:description" content="Website builders give you a template or a prompt box. Our Website Assistant writes your site from your own business details, then a team of assistants helps you grow the business behind it.">
+    <meta name="twitter:image" content="https://bemoreswan.com/images/og-default.png">
+    <meta name="twitter:image:alt" content="Be More Swan — your digital workforce">
+    <!-- /SEO -->
+    <link href="./style.css" rel="stylesheet">
+    <script src="/site-theme.js"></script>
+    <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="/favicon/manifest.json">
+    <script src="/src/i18n.js"></script>
+  <script src="/waitlist-mode.js" defer></script>
+  <script src="/visit-count.js" defer></script>
+    <!-- Comparison page (owner, 2026-11-04): the Website Assistant vs Squarespace, Wix, Webador and
+         Lovable on price and features. Sits beside /be-more-swan-vs-marketing-agency and links to
+         /website-builder-for-small-business.
+
+         Every claim about us is one the Website Assistant showcase (db/assistant-showcases.json) or
+         website-builder-for-small-business.html already makes (checked 2026-11-04): drafted from
+         business details/products/brand kit, [placeholders] not invented facts, live desktop/phone
+         preview, free yourname.bemoreswan.site or own domain, import from Wix/Squarespace/WordPress,
+         search titles/descriptions/sitemap, no plan page limit, 1 task per draft or import, editing
+         free, no code and no drag-and-drop, Business Mentor on every plan.
+         Shop, bookings, forms, reviews, hosted /blog and the Mystery Shopper → Website Assistant loop
+         added on the owner's instruction 2026-11-04 (all on main; checked in code that day):
+           · shop: Stripe Connect Standard, checkout on the customer's own account, NO application fee
+             (src/utils/site-shop.ts); · bookings: deposits, day-before reminders
+             (send-booking-reminders.ts), change/cancel link, iCal + Outlook calendar sync, classes and
+             events; · forms: enquiries to the account email, sign-ups to the Audience, lead-magnet
+             download; · reviews: org_reviews + review requests after a booking/order with a Google
+             link (send-review-requests.ts, off until the owner turns it on); · /blog needs the Blog
+             Assistant; · the loop needs a hosted site and BOTH assistants (two seats → The Busywork
+             Buster), and still waits on the owner's approve card and Publish click — never say it
+             changes the site unattended.
+
+         Competitor prices are the cheapest paid plan and the usual small-business plan, per month on
+         ANNUAL billing, and they change often. Re-check every figure when you touch the copy:
+           · Squarespace UK: Basic £12, Core £17 (annual), monthly billing costs more. ExpertSure UK
+             pricing guide, prices checked against Squarespace's UK page July 2026.
+           · Wix UK: free plan; Light £9, Core £16 (annual). ExpertSure UK pricing guide, July 2026.
+           · Webador UK: free plan; Lite £4.50, Pro £8.50, Business £17, ex VAT, annual — standard
+             prices (a 50%-off first-year offer runs to 30 Nov 2026; not quoted). webador.co.uk/pricing,
+             checked 4 Nov 2026.
+           · Lovable: free plan with daily credits; Pro $25 a month for 100 credits ($21 on annual),
+             custom domain from Pro. US dollars only. docs.lovable.dev subscription plans, 4 Nov 2026.
+         Our prices are data-plan-price slots: filled by plan-prices.js and baked at build
+         (PRICE_SLOT_PAGES in scripts/build-seo-html.mjs) — never type one here.
+
+         Styles are plain CSS on the site's theme tokens, as in be-more-swan-vs-marketing-agency.html:
+         style.css is a compiled Tailwind build, and a utility class it doesn't already contain fails
+         silently. -->
+    <style>
+        .vs-wrap { max-width: 76rem; margin: 0 auto; padding: 0 1rem; }
+        .vs-narrow { max-width: 46rem; margin: 0 auto; }
+        .vs-eyebrow { display:inline-block; padding:.25rem .75rem; border-radius:9999px; font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; background:var(--color-emerald-50); color:var(--color-emerald-700); border:1px solid var(--color-emerald-100); }
+        .vs-h1 { font-size: clamp(2.1rem, 5vw, 3.5rem); font-weight: 800; line-height: 1.1; letter-spacing: -.02em; color: #111827; margin: 1.25rem 0; }
+        .vs-h1 em { font-style: normal; color: var(--color-emerald-700); }
+        .vs-h2 { font-size: clamp(1.6rem, 3.5vw, 2.3rem); font-weight: 800; line-height: 1.15; letter-spacing: -.015em; color: #111827; margin: 0 0 1rem; }
+        .vs-lead { font-size: 1.15rem; line-height: 1.65; color: #4b5563; }
+        .vs-p { font-size: 1.05rem; line-height: 1.7; color: #4b5563; margin: 0 0 1rem; }
+        .vs-section { padding: 4.5rem 0; }
+        .vs-section-white { background: #fff; border-top: 1px solid #f0ebe0; border-bottom: 1px solid #f0ebe0; }
+        .vs-center { text-align: center; }
+        .vs-small { font-size: .9rem; color: #6b7280; margin-top: 1rem; }
+        .vs-ctas { display:flex; flex-wrap:wrap; gap:.75rem; justify-content:center; margin-top:2rem; }
+
+        /* The comparison table scrolls inside its own box on a phone; the page never does. */
+        .vs-table-box { margin-top: 2.5rem; overflow-x: auto; -webkit-overflow-scrolling: touch; border:1px solid #f0ebe0; border-radius:1.25rem; background:#fff; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+        .vs-table { width: 100%; min-width: 62rem; border-collapse: collapse; font-size: .92rem; }
+        .vs-table th, .vs-table td { padding: .9rem 1rem; text-align: left; vertical-align: top; border-bottom: 1px solid #f3efe6; line-height: 1.5; }
+        .vs-table thead th { font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; color: #6b7280; background: #fcfbf8; }
+        .vs-table tbody th { font-weight: 700; color: #111827; width: 14%; }
+        /* Row labels stay put while the other columns swipe past them on a phone. */
+        .vs-table th:first-child { position: sticky; left: 0; z-index: 1; background: #fff; }
+        .vs-table thead th:first-child { background: #fcfbf8; }
+        .vs-table td { color: #4b5563; }
+        .vs-table .vs-us { background: var(--color-emerald-50); color: #111827; font-weight: 600; }
+        .vs-table thead .vs-us { color: var(--color-emerald-700); }
+        .vs-table tr:last-child th, .vs-table tr:last-child td { border-bottom: 0; }
+        .vs-scroll-hint { display:block; font-size:.8rem; color:#9ca3af; margin-top:.6rem; text-align:center; }
+        @media (min-width: 1024px) { .vs-scroll-hint { display:none; } }
+
+        /* Price cards: one per product */
+        .vs-costs { display:grid; grid-template-columns:1fr; gap:1rem; margin-top:2.5rem; }
+        @media (min-width: 640px) { .vs-costs { grid-template-columns:repeat(2,1fr); } }
+        @media (min-width: 900px) { .vs-costs { grid-template-columns:repeat(3,1fr); } }
+        @media (min-width: 1200px) { .vs-costs { grid-template-columns:repeat(5,1fr); } }
+        .vs-cost { background:#fff; border:1px solid #f0ebe0; border-radius:1.25rem; padding:1.5rem; display:flex; flex-direction:column; }
+        .vs-cost strong { display:block; font-size:1rem; color:#111827; margin-bottom:.25rem; }
+        .vs-cost .vs-num { display:block; font-size:1.6rem; font-weight:800; color:#6b7280; margin:.5rem 0; letter-spacing:-.01em; }
+        .vs-cost .vs-num small { display:block; font-size:.85rem; font-weight:600; }
+        .vs-cost p { margin:0 0 .5rem; color:#4b5563; line-height:1.55; font-size:.92rem; }
+        .vs-cost.vs-cost-us { background: var(--color-emerald-50); border-color: var(--color-emerald-100); }
+        .vs-cost.vs-cost-us .vs-num { color: var(--color-emerald-700); }
+        .vs-note { font-size:.9rem; color:#6b7280; line-height:1.6; margin-top:1.5rem; text-align:center; }
+
+        /* Promise cards */
+        .vs-cards { display:grid; grid-template-columns:1fr; gap:1rem; margin-top:2.5rem; }
+        @media (min-width: 768px) { .vs-cards { grid-template-columns:repeat(2,1fr); } }
+        @media (min-width: 1100px) { .vs-cards { grid-template-columns:repeat(3,1fr); } }
+        .vs-card { background:#fff; border:1px solid #f0ebe0; border-radius:1rem; padding:1.5rem; }
+        .vs-card h3 { font-size:1.1rem; font-weight:800; color:#111827; margin:0 0 .5rem; }
+        .vs-card p { margin:0; color:#4b5563; line-height:1.6; }
+
+        /* When the others are the better choice */
+        .vs-honest { background:#fff; border:1px solid #f0ebe0; border-radius:1.25rem; padding:1.75rem; margin-top:2rem; }
+        .vs-honest ul { margin:.5rem 0 1rem; padding:0; list-style:none; }
+        .vs-honest li { position:relative; padding-left:1.4rem; margin:.7rem 0; color:#4b5563; line-height:1.6; }
+        .vs-honest li::before { content:''; position:absolute; left:0; top:.6em; width:.55rem; height:.55rem; border-radius:9999px; background:var(--color-emerald-700); opacity:.75; }
+        .vs-honest li strong { color:#111827; }
+
+        /* Questions */
+        .vs-faq { margin-top:2rem; }
+        .vs-faq details { background:#fff; border:1px solid #f0ebe0; border-radius:1rem; padding:1.1rem 1.25rem; margin-bottom:.75rem; }
+        .vs-faq summary { cursor:pointer; font-weight:700; color:#111827; list-style:none; }
+        .vs-faq summary::-webkit-details-marker { display:none; }
+        .vs-faq summary::after { content:'+'; float:right; color:var(--color-emerald-700); font-weight:800; }
+        .vs-faq details[open] summary::after { content:'−'; }
+        .vs-faq details p { margin:.75rem 0 0; color:#4b5563; line-height:1.65; }
+
+        .vs-band { background: var(--color-emerald-700); color:#fff; border-radius:1.75rem; padding:3rem 1.5rem; text-align:center; }
+        @media (min-width: 768px) { .vs-band { padding:4rem; } }
+        .vs-band h2 { color:#fff; }
+        .vs-band p { color:rgba(255,255,255,.92); font-size:1.1rem; line-height:1.7; margin:0 auto 1rem; max-width:40rem; }
+        .vs-band a.vs-band-link { color:#fff; text-decoration:underline; }
+
+        .vs-sources { font-size:.8rem; color:#9ca3af; line-height:1.6; margin-top:2rem; }
+        .vs-sources a { color:#6b7280; text-decoration:underline; }
+    </style>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "Is the Website Assistant a website builder?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, but it works the other way round. Instead of handing you a template to fill, it writes every page from your business details, products and brand kit, shows you a live preview, and publishes the site when you are happy." } },
+        { "@type": "Question", "name": "Can I move my site over from Squarespace, Wix or another builder?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, if it is your own. Give the Website Assistant the address of your current site, whether it is on Wix, Squarespace, WordPress or built for you, and it reads your home page and the pages in its menu into a draft. Your own words are kept as they are, and you choose whether to use the imported draft." } },
+        { "@type": "Question", "name": "Can I use my own domain?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. When you publish, your site goes live on its own free address, yourname.bemoreswan.site, or on a domain you own." } },
+        { "@type": "Question", "name": "How many pages can I have?", "acceptedAnswer": { "@type": "Answer", "text": "As many as your site needs. No plan limits how many pages your website has." } },
+        { "@type": "Question", "name": "Can I sell online and take bookings?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Your Website Assistant can add a shop, with checkout on your own Stripe account and no cut taken by us (Stripe's card fees apply), and bookings for appointments, classes and events, with deposits, reminders and sync with your Google or Outlook calendar. Prices and services come from your Business Information, so they are never made up." } },
+        { "@type": "Question", "name": "How do the Mystery Shopper and Website Assistant work together?", "acceptedAnswer": { "@type": "Answer", "text": "Every week the Mystery Shopper scores your site against up to three competitors and suggests changes, with the wording written. Choose to hand a change to your Website Assistant and it shows you exactly what it will change; nothing is saved until you approve it. After you publish, the Mystery Shopper checks the change is live. This works for sites hosted with Be More Swan, on a plan with both assistants." } },
+        { "@type": "Question", "name": "Which plan do I need?", "acceptedAnswer": { "@type": "Answer", "text": "The Workflow Saver includes one assistant plus your Business Mentor. Choose the Website Assistant and you get your website, shop, bookings, forms and reviews. For the Mystery Shopper, your blog at /blog and the rest of the team working together, choose The Busywork Buster." } },
+        { "@type": "Question", "name": "How is this different from Lovable?", "acceptedAnswer": { "@type": "Answer", "text": "Lovable is an AI tool for building web apps from prompts, and each change you ask for uses credits. The Website Assistant is made for small business websites: it already knows your business, never makes up facts, and editing your pages yourself or approving changes it suggests costs nothing." } },
+        { "@type": "Question", "name": "Does it use tasks?", "acceptedAnswer": { "@type": "Answer", "text": "Drafting your whole site, importing your current site, or having it place your own words on a page each uses 1 task from your monthly allowance. Editing pages yourself, and approving changes it suggests in chat, costs nothing." } }
+      ]
+    }
+    </script>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<main class="flex-grow">
+
+    <!-- Hero -->
+    <section class="vs-section">
+        <div class="vs-wrap vs-center">
+            <div class="vs-narrow">
+                <span class="vs-eyebrow">Compare</span>
+                <h1 class="vs-h1">Be More Swan vs <em>Squarespace, Wix, Webador and Lovable</em></h1>
+                <p class="vs-lead">Most website builders hand you a template or a prompt box and leave the words to you. Our Website Assistant writes your website from your own business details, with a shop, bookings, forms and reviews built in. Your Mystery Shopper checks it against your competitors every week, and your Business Mentor helps you grow the business behind it.</p>
+                <div class="vs-ctas">
+                    <a href="register.html" data-waitlist-label="Join the waitlist" class="btn-primary inline-block px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">Start your free trial</a>
+                    <a href="website-builder-for-small-business.html" class="btn-secondary inline-block px-8 py-4 text-lg font-bold rounded-lg border transition">How the Website Assistant works</a>
+                </div>
+                <p class="vs-small">14 days free &middot; no card needed &middot; no code, no drag-and-drop</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- At a glance -->
+    <section class="vs-section vs-section-white">
+        <div class="vs-wrap">
+            <div class="vs-narrow vs-center">
+                <h2 class="vs-h2">Features side by side</h2>
+                <p class="vs-lead">Five ways to get a small business website, compared on the things that decide how much of the work is yours.</p>
+            </div>
+            <div class="vs-table-box">
+                <table class="vs-table">
+                    <thead>
+                        <tr>
+                            <th scope="col"><span class="sr-only">Compared on</span></th>
+                            <th scope="col" class="vs-us">Be More Swan</th>
+                            <th scope="col">Squarespace</th>
+                            <th scope="col">Wix</th>
+                            <th scope="col">Webador</th>
+                            <th scope="col">Lovable</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <th scope="row">What it is</th>
+                            <td class="vs-us">A Website Assistant that writes, builds and publishes your site, with a Business Mentor included</td>
+                            <td>A design-led website builder with templates</td>
+                            <td>A drag-and-drop website builder with an app market</td>
+                            <td>A simple, low-cost website builder</td>
+                            <td>An AI tool that builds web apps from prompts</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Where you start</th>
+                            <td class="vs-us">Your business details, products and brand kit</td>
+                            <td>A template, or a starter site from its AI tools</td>
+                            <td>A template, or a starter site from its AI tools</td>
+                            <td>A first draft from one sentence, or a design</td>
+                            <td>A prompt describing what you want</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">The words on the page</th>
+                            <td class="vs-us">Every page written for you, with [placeholders] instead of made-up facts</td>
+                            <td>You write them, with AI help for starter text</td>
+                            <td>You write them, with AI help for starter text</td>
+                            <td>AI writes a first draft; you edit it</td>
+                            <td>Written from your prompts; you check them</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Making changes</th>
+                            <td class="vs-us">Edit the words, or ask in chat and approve the change first</td>
+                            <td>Drag-and-drop editor</td>
+                            <td>Drag-and-drop editor</td>
+                            <td>Drag-and-drop editor</td>
+                            <td>Ask in chat; each change uses credits</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Design</th>
+                            <td class="vs-us">Your colours and logo; the layout is handled for you</td>
+                            <td>Polished templates and fine design control</td>
+                            <td>Lots of templates and full layout freedom</td>
+                            <td>A smaller set of designs you can switch</td>
+                            <td>Anything you can describe, built as code</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Free option</th>
+                            <td class="vs-us">14-day free trial, no card needed</td>
+                            <td>14-day free trial; no free plan</td>
+                            <td>Free plan with Wix ads and a Wix address</td>
+                            <td>Free plan with no own domain</td>
+                            <td>Free plan with a few credits a day</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Your address</th>
+                            <td class="vs-us">Free yourname.bemoreswan.site, or a domain you own</td>
+                            <td>Free domain for the first year on annual plans</td>
+                            <td>Free domain for the first year on annual plans</td>
+                            <td>Free domain for the first year, then £20 a year</td>
+                            <td>Your own domain from the Pro plan, bought separately</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Online shop</th>
+                            <td class="vs-us">Sell your products with checkout on your own Stripe account. We take no cut of your sales; Stripe&rsquo;s card fees apply</td>
+                            <td>Built in; Basic adds a 2% fee on sales</td>
+                            <td>From the Core plan</td>
+                            <td>Pro (up to 10 products) or Business</td>
+                            <td>Build it with prompts and connect payments</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Bookings</th>
+                            <td class="vs-us">Appointments, classes and events, with deposits, day-before reminders, a change-or-cancel link for customers and sync with your Google or Outlook calendar</td>
+                            <td>Squarespace Scheduling, a separate subscription</td>
+                            <td>Wix Bookings, from the Core plan</td>
+                            <td>Not listed as a feature; usually a third-party widget</td>
+                            <td>Build it with prompts</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Forms</th>
+                            <td class="vs-us">Contact and sign-up forms. Enquiries come to your email, sign-ups join your mailing list, and you can offer a free download</td>
+                            <td>Form blocks</td>
+                            <td>Built-in forms</td>
+                            <td>Contact forms</td>
+                            <td>Build them with prompts</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Customer reviews</th>
+                            <td class="vs-us">Collect and show reviews, and ask each customer for one after a booking or order, with a link to review you on Google</td>
+                            <td>Usually an extension or embed</td>
+                            <td>Usually an app</td>
+                            <td>Not listed as a feature</td>
+                            <td>Build it with prompts</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Blog</th>
+                            <td class="vs-us">Your Blog Assistant&rsquo;s articles appear on your site at /blog, written in your voice and approved by you</td>
+                            <td>Built in; you write the posts</td>
+                            <td>Built in; you write the posts</td>
+                            <td>Built in; you write the posts</td>
+                            <td>Build it with prompts</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Improving the site</th>
+                            <td class="vs-us">Your Mystery Shopper scores your site against up to three competitors every week and suggests changes. It hands them to your Website Assistant, which makes them once you approve, then checks they&rsquo;re live</td>
+                            <td>Search tools and tips; you make the changes</td>
+                            <td>Search tools and tips; you make the changes</td>
+                            <td>Automatic search set-up; you make the changes</td>
+                            <td>Ask for changes in prompts, using credits</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Search basics</th>
+                            <td class="vs-us">Search titles, descriptions and a sitemap on every site</td>
+                            <td>Built-in search tools</td>
+                            <td>Built-in search tools</td>
+                            <td>Built-in search tools</td>
+                            <td>Up to you and your prompts</td>
+                        </tr>
+                        <tr>
+                            <th scope="row">Help with the business</th>
+                            <td class="vs-us">A Business Mentor on every plan, plus assistants for social media, blog, email and leads when you&rsquo;re ready</td>
+                            <td>Help articles, and marketing tools and add-ons</td>
+                            <td>Help articles, and a marketing suite and apps</td>
+                            <td>Help articles and support</td>
+                            <td>Docs and a community</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <span class="vs-scroll-hint">Swipe the table to see every builder</span>
+        </div>
+    </section>
+
+    <!-- Price -->
+    <section class="vs-section">
+        <div class="vs-wrap">
+            <div class="vs-narrow vs-center">
+                <h2 class="vs-h2">What you&rsquo;d actually pay</h2>
+                <p class="vs-lead">Typical prices for a small business website, a month. The others are shown on annual billing, which is their cheapest way to pay; paying monthly costs more.</p>
+            </div>
+            <div class="vs-costs">
+                <div class="vs-cost vs-cost-us">
+                    <strong>Be More Swan</strong>
+                    <span class="vs-num"><span data-plan-prices-ready hidden><span data-plan-price="saver"></span> <small>a month</small></span></span>
+                    <p>Your Website Assistant and Business Mentor on The Workflow Saver. Hosting, shop, bookings, forms and reviews included, and no plan limits your pages.</p>
+                    <p><span data-plan-prices-ready hidden>Add your Mystery Shopper, Blog Assistant and every other assistant: <span data-plan-price="buster"></span> a month.</span> Prices exclude VAT; save 20% when you pay annually.</p>
+                </div>
+                <div class="vs-cost">
+                    <strong>Squarespace</strong>
+                    <span class="vs-num">£12&ndash;£17 <small>a month</small></span>
+                    <p>Basic or Core, billed annually. Basic adds a 2% fee on shop sales.</p>
+                    <p>No free plan.</p>
+                </div>
+                <div class="vs-cost">
+                    <strong>Wix</strong>
+                    <span class="vs-num">£9&ndash;£16 <small>a month</small></span>
+                    <p>Light or Core, billed annually. Core is the cheapest plan that can sell online.</p>
+                    <p>Free plan with Wix ads.</p>
+                </div>
+                <div class="vs-cost">
+                    <strong>Webador</strong>
+                    <span class="vs-num">£4.50&ndash;£17 <small>a month</small></span>
+                    <p>Lite to Business, billed annually, before VAT. Lite shows ads on your site.</p>
+                    <p>Free plan without your own domain.</p>
+                </div>
+                <div class="vs-cost">
+                    <strong>Lovable</strong>
+                    <span class="vs-num">$25 <small>a month</small></span>
+                    <p>Pro, in US dollars, for 100 credits a month ($21 billed annually). More building means buying more credits.</p>
+                    <p>Free plan with daily credits.</p>
+                </div>
+            </div>
+            <p class="vs-note">The others cost less for a website on its own. What you pay us for is the part they leave to you: the words on every page, written from your business, and a Mentor and team to grow the business behind it.</p>
+        </div>
+    </section>
+
+    <!-- Where we win -->
+    <section class="vs-section vs-section-white">
+        <div class="vs-wrap">
+            <div class="vs-narrow vs-center">
+                <h2 class="vs-h2">Where Be More Swan wins</h2>
+            </div>
+            <div class="vs-cards">
+                <div class="vs-card">
+                    <h3>The words are done for you</h3>
+                    <p>The hard part of a website is knowing what to say. Your Website Assistant drafts every page from what it already knows about your business: headings, wording, the questions buyers ask and a clear next step, in plain British English.</p>
+                </div>
+                <div class="vs-card">
+                    <h3>It never makes things up</h3>
+                    <p>It only states what&rsquo;s in your business details and products. Where a page needs a fact only you know, like a customer quote or how long you&rsquo;ve been trading, it leaves a clear [placeholder], and the editor lists every one left before you publish.</p>
+                </div>
+                <div class="vs-card">
+                    <h3>Changes don&rsquo;t cost you credits</h3>
+                    <p>Edit the words yourself, or ask in chat and see exactly what will change before anything is saved. Editing and approving changes is free. A whole-site draft or an import uses 1 task from your monthly allowance.</p>
+                </div>
+                <div class="vs-card">
+                    <h3>Bring your current site with you</h3>
+                    <p>Already on Squarespace, Wix or WordPress? Give the Website Assistant the address and it reads your home page and menu pages into a draft, keeping your own words as they are. You compare it with your current site and choose whether to use it.</p>
+                </div>
+                <div class="vs-card">
+                    <h3>Shop, bookings, forms and reviews, without add-ons</h3>
+                    <p>Sell your products with checkout on your own Stripe account, and we take no cut. Take bookings for appointments, classes and events, with deposits, reminders and calendar sync. Collect enquiries and sign-ups, and ask happy customers for a review. All part of your Website Assistant, with no extra apps to buy.</p>
+                </div>
+                <div class="vs-card">
+                    <h3>A Mystery Shopper that gets things fixed</h3>
+                    <p>Every week your Mystery Shopper reads your site the way buyers do, scores it against up to three competitors and suggests what to change, with the wording written. Hand a change to your Website Assistant and it makes it once you approve. After you publish, the Mystery Shopper checks the change is live.</p>
+                </div>
+                <div class="vs-card">
+                    <h3>A blog that writes itself, on your own site</h3>
+                    <p>Articles from your Blog Assistant appear on your website at /blog, in your voice and only once you&rsquo;ve approved them. No copying and pasting between tools.</p>
+                </div>
+                <div class="vs-card">
+                    <h3>A website, and someone in your corner</h3>
+                    <p>Every plan includes a Business Mentor that tells you what it would sort out first, helps you plan and checks your week with you. It makes at most 3 suggestions a week, and nothing changes without your click.</p>
+                </div>
+                <div class="vs-card">
+                    <h3>Room to grow beyond the website</h3>
+                    <p>When you&rsquo;re ready, The Busywork Buster adds assistants for social media, blog, email and leads. They share your products, your brand and each other&rsquo;s work, so your site and your marketing say the same thing.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- When the others are the better choice -->
+    <section class="vs-section">
+        <div class="vs-wrap">
+            <div class="vs-narrow">
+                <h2 class="vs-h2 vs-center">When another builder is the better choice</h2>
+                <p class="vs-lead vs-center">We&rsquo;d rather you pick the right tool than the wrong one with us.</p>
+                <div class="vs-honest">
+                    <ul>
+                        <li><strong>Squarespace, if design is everything.</strong> Its templates are polished, and you get fine control over how every page looks.</li>
+                        <li><strong>Wix, if you want to place every element yourself.</strong> Its drag-and-drop editor gives you more layout freedom than we do, and its app market has many more add-ons.</li>
+                        <li><strong>Webador, if the lowest price matters most.</strong> Its paid plans start at a few pounds a month, and it&rsquo;s simple to use when you&rsquo;re happy to write your own words.</li>
+                        <li><strong>Lovable, if you&rsquo;re building an app, not a business website.</strong> Logins, databases and custom features are what it&rsquo;s for, and you can take the code away with you on a paid plan.</li>
+                    </ul>
+                    <p class="vs-p" style="margin:0;">If what you want is a clear, professional website without writing it yourself, plus help growing the business behind it, that&rsquo;s what we&rsquo;re built for.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Questions -->
+    <section class="vs-section vs-section-white">
+        <div class="vs-wrap">
+            <div class="vs-narrow">
+                <h2 class="vs-h2 vs-center">Common questions</h2>
+                <div class="vs-faq">
+                    <details>
+                        <summary>Is the Website Assistant a website builder?</summary>
+                        <p>Yes, but it works the other way round. Instead of handing you a template to fill, it writes every page from your business details, products and brand kit, shows you a live preview on a desktop or a phone, and publishes the site when you&rsquo;re happy.</p>
+                    </details>
+                    <details>
+                        <summary>Can I move my site over from Squarespace, Wix or another builder?</summary>
+                        <p>Yes, if it is your own. Give the Website Assistant the address of your current site, whether it is on Wix, Squarespace, WordPress or built for you, and it reads your home page and the pages in its menu into a draft. Your own words are kept as they are, and you choose whether to use the imported draft.</p>
+                    </details>
+                    <details>
+                        <summary>Can I use my own domain?</summary>
+                        <p>Yes. When you publish, your site goes live on its own free address, yourname.bemoreswan.site, or on a domain you own.</p>
+                    </details>
+                    <details>
+                        <summary>How many pages can I have?</summary>
+                        <p>As many as your site needs. No plan limits how many pages your website has.</p>
+                    </details>
+                    <details>
+                        <summary>Can I sell online and take bookings?</summary>
+                        <p>Yes. Your Website Assistant can add a shop, with checkout on your own Stripe account and no cut taken by us (Stripe&rsquo;s card fees apply), and bookings for appointments, classes and events, with deposits, reminders and sync with your Google or Outlook calendar. Prices and services come from your Business Information, so they are never made up.</p>
+                    </details>
+                    <details>
+                        <summary>How do the Mystery Shopper and Website Assistant work together?</summary>
+                        <p>Every week the Mystery Shopper scores your site against up to three competitors and suggests changes, with the wording written. Choose to hand a change to your Website Assistant and it shows you exactly what it will change; nothing is saved until you approve it. After you publish, the Mystery Shopper checks the change is live. This works for sites hosted with Be More Swan, on a plan with both assistants.</p>
+                    </details>
+                    <details>
+                        <summary>Which plan do I need?</summary>
+                        <p>The Workflow Saver includes one assistant plus your Business Mentor. Choose the Website Assistant and you get your website, shop, bookings, forms and reviews. For the Mystery Shopper, your blog at /blog and the rest of the team working together, choose The Busywork Buster.</p>
+                    </details>
+                    <details>
+                        <summary>How is this different from Lovable?</summary>
+                        <p>Lovable is an AI tool for building web apps from prompts, and each change you ask for uses credits. The Website Assistant is made for small business websites: it already knows your business, never makes up facts, and editing your pages yourself or approving changes it suggests costs nothing.</p>
+                    </details>
+                    <details>
+                        <summary>Does it use tasks?</summary>
+                        <p>Drafting your whole site, importing your current site, or having it place your own words on a page each uses 1 task from your monthly allowance. Editing pages yourself, and approving changes it suggests in chat, costs nothing.</p>
+                    </details>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Closing -->
+    <section class="vs-section">
+        <div class="vs-wrap">
+            <div class="vs-band">
+                <h2 class="vs-h2">Get your website written this week</h2>
+                <p>Try it free for 14 days. No card needed, no code, and nothing goes live until you press Publish.</p>
+                <div class="vs-ctas">
+                    <a href="register.html" data-waitlist-label="Join the waitlist" class="btn-inverse inline-block px-8 py-4 text-lg font-bold rounded-lg shadow-lg hover:shadow-xl transition">Start your free trial</a>
+                </div>
+                <p style="margin-top:1.5rem;font-size:1rem;">Already have a site? <a class="vs-band-link" href="/assistant.html?role=mystery_shopper#free-website-check">See how it scores with a stranger</a> in about 30 seconds, free.</p>
+            </div>
+            <p class="vs-sources vs-center">
+                Other builders&rsquo; prices are typical figures for a month on annual billing, not quotations, and they change often; check each provider before you buy.
+                Squarespace and Wix: UK prices from ExpertSure&rsquo;s
+                <a href="https://www.expertsure.com/uk/web-design/squarespace-pricing-uk/" rel="noopener" target="_blank">Squarespace</a> and
+                <a href="https://www.expertsure.com/uk/web-design/wix-pricing-uk/" rel="noopener" target="_blank">Wix</a> pricing guides (checked against each UK site, July 2026).
+                Webador: <a href="https://www.webador.co.uk/pricing" rel="noopener" target="_blank">webador.co.uk/pricing</a>, standard prices excluding VAT, checked November 2026.
+                Lovable: <a href="https://docs.lovable.dev/introduction/subscription-plans" rel="noopener" target="_blank">Lovable subscription plans</a>, US dollars, checked November 2026.
+                Squarespace, Wix, Webador and Lovable are trademarks of their owners; Be More Swan is not connected with them.
+            </p>
+            <p class="vs-small vs-center">Also compare: <a href="be-more-swan-vs-marketing-agency.html" class="underline">Be More Swan vs a marketing agency or freelancer</a></p>
+        </div>
+    </section>
+
+</main>
+
+<div id="footer-placeholder"></div>
+
+<script src="./mobileMenu.js"></script>
+<script src="./plan-prices.js"></script>
+<script>
+    async function loadComponent(id, path) {
+        try {
+            const r = await fetch(path);
+            if (r.ok) document.getElementById(id).innerHTML = await r.text();
+        } catch {}
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadComponent('nav-placeholder', './components/nav.html');
+        loadComponent('footer-placeholder', './components/footer.html');
+        if (window.i18n) window.i18n.apply();
+        setupMobileMenu();
+    });
+</script>
+</body>
+</html>

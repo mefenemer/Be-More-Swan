@@ -130,7 +130,7 @@ check('the endpoint keeps no IP or user agent, and always answers 200 with a bod
 
 check('every marketing page and the sign-up page load the counter', () => {
     const pages = ['index', 'pricing', 'how-it-works', 'assistants', 'assistant', 'about', 'blog', 'faq', 'contact', 'connections',
-        'be-more-swan-vs-marketing-agency', 'website-builder-for-small-business', 'register'];
+        'be-more-swan-vs-marketing-agency', 'be-more-swan-vs-website-builders', 'website-builder-for-small-business', 'register'];
     for (const p of pages) assert.ok(read(`${p}.html`).includes('<script src="/visit-count.js" defer></script>'), `${p}.html`);
     for (const p of ['admin', 'workspace', 'dashboard']) assert.ok(!read(`${p}.html`).includes('src="/visit-count.js"'), `${p}.html is not marketing`);
 });

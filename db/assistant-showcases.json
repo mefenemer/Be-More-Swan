@@ -448,13 +448,14 @@
     "headline": "See your website through a stranger's eyes, and fix what's costing you sales.",
     "overview": [
       "The Mystery Shopper reads your homepage the way real buyers do: a sceptical first-time visitor, a buyer comparing you with up to three competitors, and an AI assistant deciding whether it could recommend you. It scores your page out of 100 and tells you the changes that matter most.",
-      "Every suggested rewrite quotes your page word for word. It checks your site again every week, confirms each change went live, and tells you when a competitor changes their headline, prices or offer."
+      "Every suggested rewrite quotes your page word for word. It checks your site again every week, confirms each change went live, and tells you when a competitor changes their headline, prices or offer.",
+      "Your site is hosted with Be More Swan and you have the Website Assistant too? Hand it any change. It shows you exactly what it will change, nothing is saved until you approve it, and once you publish, the Mystery Shopper checks the change is live."
     ],
     "highlights": [
       "Reads your site like a buyer",
       "Side by side with your competitors",
       "Replacement wording, ready to use",
-      "Every fix checked on the live page"
+      "Fixes made with your Website Assistant, then checked"
     ],
     "steps": [
       {
@@ -467,7 +468,7 @@
       },
       {
         "title": "Make the top changes",
-        "body": "The highest-impact fixes, each with what your page says now and what to say instead."
+        "body": "The highest-impact fixes, each with what your page says now and what to say instead. Make them yourself, or hand them to your Website Assistant."
       },
       {
         "title": "It checks every week",
@@ -501,7 +502,7 @@
     "faqs": [
       {
         "q": "Does it change my website?",
-        "a": "No. It reads your site and writes the changes; you, or whoever runs your site, make them. The next check confirms each one is live."
+        "a": "Not by itself. It reads your site and writes the changes. If your site is hosted with Be More Swan and you have the Website Assistant, you can hand a change to it: it shows you exactly what it will change, and nothing is saved until you approve it and publish. Otherwise you, or whoever runs your site, make them. Either way, the Mystery Shopper checks each change is live."
       },
       {
         "q": "Does it use tasks?",
@@ -525,13 +526,15 @@
     "headline": "Describe your website. Approve it. Done.",
     "overview": [
       "The Website Assistant writes your website from what it already knows about your business: your profile, your products, your brand kit and the answers you give when you set it up. Ask for a whole site and it drafts every page; ask in chat for a change and it shows you exactly what it will do before anything is saved.",
-      "It never makes things up. Where a page needs a fact only you know, such as a price, a customer quote or how long you have been trading, it leaves a clear [placeholder] for you to fill in. You see every page in a live preview, on a desktop or a phone, as you work."
+      "It never makes things up. Where a page needs a fact only you know, such as a price, a customer quote or how long you have been trading, it leaves a clear [placeholder] for you to fill in. You see every page in a live preview, on a desktop or a phone, as you work.",
+      "Your site can do more than tell people about you. Add a shop with checkout on your own Stripe account, bookings for appointments, classes and events, contact and sign-up forms, and your customer reviews. With the Blog Assistant, your articles appear on your site at /blog, and with the Mystery Shopper, the changes it suggests come straight to the Website Assistant for you to approve."
     ],
     "highlights": [
       "Built from a conversation",
       "Live preview, desktop and phone",
       "Your brand colours and logo",
-      "No invented facts, ever"
+      "No invented facts, ever",
+      "Shop, bookings, forms and reviews"
     ],
     "steps": [
       {
@@ -573,6 +576,14 @@
       {
         "title": "Ready for search",
         "body": "Every page gets its own search title and description, one main heading, a sitemap and the details search engines use to understand your business."
+      },
+      {
+        "title": "Sell, take bookings and hear from customers",
+        "body": "Sell your products with checkout on your own Stripe account; we take no cut. Take bookings for appointments, classes and events, with deposits, day-before reminders, a change-or-cancel link and sync with your Google or Outlook calendar. Contact and sign-up forms send enquiries to your email and sign-ups to your mailing list."
+      },
+      {
+        "title": "Reviews, your blog, and a second pair of eyes",
+        "body": "Show your customer reviews and ask each customer for one after a booking or order. With the Blog Assistant, its articles appear on your site at /blog. With the Mystery Shopper, the changes it suggests come to the Website Assistant, which makes them once you approve."
       }
     ],
     "faqs": [
@@ -591,6 +602,18 @@
       {
         "q": "How many pages can I have?",
         "a": "As many as your site needs. No plan limits how many pages your website has."
+      },
+      {
+        "q": "Can I sell online or take bookings?",
+        "a": "Yes. Add a shop, with checkout on your own Stripe account and no cut taken by us (Stripe's card fees apply), and bookings for appointments, classes and events, with deposits, reminders and sync with your Google or Outlook calendar. Prices and services come from your Business Information, so they are never made up."
+      },
+      {
+        "q": "Can my blog be on my website?",
+        "a": "Yes. If you have the Blog Assistant, the articles you approve appear on your site at /blog, with their own page each."
+      },
+      {
+        "q": "Can it make the changes the Mystery Shopper suggests?",
+        "a": "Yes, if your site is hosted with Be More Swan and you have both assistants. Hand a suggested change to the Website Assistant and it shows you exactly what it will change. Nothing is saved until you approve it, and after you publish, the Mystery Shopper checks the change is live."
       },
       {
         "q": "Will it make up reviews or prices?",
