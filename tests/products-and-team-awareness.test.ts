@@ -74,6 +74,24 @@ check('the reviewer gets bare facts, and "no price listed" where there is none',
     assert.ok(f.includes('Bread Masterclass (service) — no price listed'));
     assert.strictEqual(renderProductFacts([]), '');
 });
+check('the reviewer sees what each product includes — a listed benefit is a declared fact', () => {
+    // 2026-11-04: "Business Mentor Assistant included on both plans" was flagged as undeclared
+    // because the facts carried name and price only, never the plan's benefits.
+    const plan: OrgProduct = { kind: 'product', name: 'The Busywork Buster', price: '£69', url: 'https://bemoreswan.com/pricing.html',
+        benefits: 'Every Digital Assistant\nThe Business Mentor Assistant included, on top of your other assistants\n2,750 tasks a month' };
+    const f = renderProductFacts([plan, kit]);
+    assert.ok(f.includes('Includes: Every Digital Assistant; The Business Mentor Assistant included, on top of your other assistants; 2,750 tasks a month'), f);
+    assert.ok(f.includes('What it is: Everything to bake your first loaf.'));
+    assert.ok(f.includes('Includes: Live starter, banneton, scraper'));
+});
+check('past the budget, products fall back to the bare line — never cut mid-product', () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ kind: 'product', name: `Item ${i}`, price: '£1', benefits: 'x'.repeat(400) }));
+    const f = renderProductFacts(many, 3000);
+    assert.ok(f.length <= 3000);
+    assert.ok(f.includes('- Item 0 (product) — £1\n  Includes: '), 'first product lost its detail');
+    assert.ok(/- Item \d+ \(product\) — £1\n- Item/.test(f), 'no bare-line fallback');
+    for (const line of f.split('\n')) assert.ok(/^(- Item \d+ \(product\) — £1|  Includes: x+|Products and|\(\d+ more not shown)/.test(line), `torn line: ${line.slice(0, 60)}`);
+});
 check('only ACTIVE products are loaded, in the business\'s own order', () => {
     const src = slice(code('src/utils/org-products.ts'), 'export async function loadOrgProducts', 'export async function loadProductsBlock');
     assert.ok(src.includes("eq(orgProducts.status, 'active')"));
