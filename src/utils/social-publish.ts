@@ -1092,7 +1092,8 @@ async function probeVideoSource(url: string): Promise<{ size: number | null; ran
 async function queryYouTubeOffset(uploadUrl: string, total: number): Promise<number | null> {
     const res = await fetch(uploadUrl, {
         method: 'PUT',
-        headers: { 'Content-Range': `bytes */${total}`, 'Content-Length': '0' },
+        // No hand-set Content-Length: fetch sends 0 for an empty PUT itself (see the chunk PUT below).
+        headers: { 'Content-Range': `bytes */${total}` },
     });
     // null means "the session is gone" — reserved for an HTTP failure. A live session that has
     // stored NOTHING yet answers 308 with no Range header at all, which is offset 0, not death.
@@ -1253,10 +1254,12 @@ async function uploadYouTubeChunked(
 
         const putRes = await fetch(uploadUrl, {
             method: 'PUT',
-            headers: {
-                'Content-Range': `bytes ${offset}-${last}/${total}`,
-                'Content-Length': String(body.byteLength),
-            },
+            // ⚠️ No hand-set Content-Length. fetch derives it from a Buffer body and adds its own, and
+            // on the deployed runtime the two merged into "N, N", which undici refuses before sending:
+            // "fetch failed (UND_ERR_INVALID_ARG: invalid content-length header)". Every YouTube upload
+            // failed that way (post 185 on staging, 2026-11-04). The streamed PUT keeps its header,
+            // because fetch cannot know a stream's length and so never adds one there.
+            headers: { 'Content-Range': `bytes ${offset}-${last}/${total}` },
             body,
         });
 

@@ -352,6 +352,32 @@ await check('a network failure names its step and keeps the cause, not a bare "f
     } finally { restore(); }
 });
 
+await check('chunk PUTs and offset checks leave Content-Length to fetch', async () => {
+    // A hand-set Content-Length merged with fetch's own into "N, N" on the deployed runtime and undici
+    // refused every chunk: "invalid content-length header" (post 185 on staging, 2026-11-04).
+    const video = makeVideo(CHUNK * 2 + 100);
+    const { restore } = installFake({ video, shortAckOnce: true } as any);
+    const fake = globalThis.fetch;
+    const puts: Array<Record<string, string>> = [];
+    globalThis.fetch = (async (input: any, init: any = {}) => {
+        if (init.method === 'PUT') puts.push(Object.fromEntries(Object.entries(init.headers ?? {}).map(([k, v]) => [k.toLowerCase(), String(v)])));
+        return fake(input, init);
+    }) as typeof fetch;
+    try {
+        const outcome = await publishYouTubeResumable(META, 'token', VIDEO, { chunkSize: CHUNK });
+        assert.strictEqual(outcome.kind, 'done');
+        assert.ok(puts.length >= 3, `expected the chunk PUTs, saw ${puts.length}`);
+        for (const h of puts) assert.ok(!('content-length' in h), `PUT set Content-Length by hand: ${JSON.stringify(h)}`);
+        // And the offset check used on resume.
+        puts.length = 0;
+        const resumed = await publishYouTubeResumable(META, 'token', VIDEO, {
+            chunkSize: CHUNK, resume: { uploadUrl: SESSION_URL, total: video.length, offset: 0 },
+        }).catch(() => null);
+        void resumed;
+        for (const h of puts) assert.ok(!('content-length' in h), `resume PUT set Content-Length by hand: ${JSON.stringify(h)}`);
+    } finally { restore(); }
+});
+
 await check('rejects a post with no video attached', async () => {
     const outcome = await publishYouTubeResumable(META, 'token', null);
     assert.strictEqual(outcome.kind, 'failed');
