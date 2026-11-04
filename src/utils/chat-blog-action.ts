@@ -36,7 +36,7 @@ import { blogPosts } from '../../db/schema';
 type Db = ReturnType<typeof getDb>;
 
 export const BLOG_ACTION_PROPOSAL_TYPE = 'blog_action_proposal';
-export const BLOG_ACTIONS = ['approve', 'schedule', 'unschedule', 'reject', 'remove', 'shorter', 'longer', 'revise'] as const;
+export const BLOG_ACTIONS = ['approve', 'schedule', 'unschedule', 'reject', 'remove', 'shorter', 'longer', 'revise', 'pictures'] as const;
 export type BlogAction = typeof BLOG_ACTIONS[number];
 
 /** Which statuses each action applies to. Mirrors the Blogs tab's columns (assistants.js). */
@@ -57,6 +57,8 @@ const ACTIONABLE: Record<BlogAction, readonly string[]> = {
     shorter: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused'],
     longer: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused'],
     revise: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused'],
+    // Blog Studio's "Add pictures" (generate-blog { addImages }) — same live-article rule.
+    pictures: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused'],
 };
 
 /** Said on the card when the article is not in a state the action applies to. */
@@ -69,6 +71,7 @@ const NOT_NOW: Record<BlogAction, string> = {
     shorter: 'This article can’t be rewritten now: it is live or publishing (unpublish it first), or it was turned down or archived.',
     longer: 'This article can’t be rewritten now: it is live or publishing (unpublish it first), or it was turned down or archived.',
     revise: 'This article can’t be rewritten now: it is live or publishing (unpublish it first), or it was turned down or archived.',
+    pictures: 'Pictures can’t be added now: the article is live or publishing (unpublish it first), or it was turned down or archived.',
 };
 
 const TITLE_MAX = 200;
@@ -82,8 +85,10 @@ export interface BlogActionRequest {
     reason: string | null;
     /** Schedule: the time in the user's own words. */
     when: string | null;
-    /** Revise: what should change, in the user's terms. */
+    /** Revise: what should change, in the user's terms. Pictures: which pictures (optional). */
     instruction?: string | null;
+    /** Pictures: 'stock' (free, the default) or 'ai'. */
+    source?: 'stock' | 'ai' | null;
 }
 
 /** Shape check on the model's output. Pure. Null when it is not a usable proposal. */
@@ -106,7 +111,9 @@ export function blogActionFromUiElement(uiElement: unknown): BlogActionRequest |
         postId,
         reason: action === 'reject' ? str(ui.reason, REASON_MAX) : null,
         when: action === 'schedule' ? when : null,
-        instruction: action === 'revise' ? instruction : null,
+        instruction: action === 'revise' || action === 'pictures' ? instruction : null,
+        // Only on a pictures card, so every other action's shape is unchanged.
+        ...(action === 'pictures' ? { source: (ui.source === 'ai' ? 'ai' : 'stock') as 'stock' | 'ai' } : {}),
     };
 }
 
@@ -124,6 +131,8 @@ export interface BlogActionCard {
     reason: string | null;
     when: string | null;
     instruction: string | null;
+    /** Pictures only: 'stock' or 'ai'. */
+    source?: 'stock' | 'ai' | null;
     /** Set when the action does not apply; the card says it and offers no button. */
     blocked: string | null;
     settled?: boolean;
@@ -162,6 +171,7 @@ export async function resolveBlogActionProposal(
             reason: req.reason,
             when: req.when,
             instruction: req.instruction ?? null,
+            ...(req.action === 'pictures' ? { source: req.source ?? 'stock' } : {}),
             blocked: ACTIONABLE[req.action].includes(post.status) ? null : NOT_NOW[req.action],
         };
 

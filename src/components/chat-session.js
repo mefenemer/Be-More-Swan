@@ -948,12 +948,14 @@
           if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
           if (!(data.archivedIds || []).length) throw new Error('It is live, publishing, or already archived.');
           message = 'Removed — it’s in the "Archived" column.';
-        } else if (d.action === 'shorter' || d.action === 'longer' || d.action === 'revise') {
+        } else if (d.action === 'shorter' || d.action === 'longer' || d.action === 'revise' || d.action === 'pictures') {
           // Blog Studio's buttons: the same queued resize job, polled until it lands (about a minute).
           // "Revise" is that job steered by the user's instruction (src/utils/blog-resize.ts).
           const q = await postActionCall('generate-blog', d.action === 'revise'
             ? { blogPostId: d.postId, revise: d.instruction }
-            : { blogPostId: d.postId, resize: d.action });
+            : d.action === 'pictures'
+              ? { blogPostId: d.postId, addImages: { source: d.source === 'ai' ? 'ai' : 'stock', instruction: d.instruction || undefined } }
+              : { blogPostId: d.postId, resize: d.action });
           const started = Date.now();
           let job = null;
           while (Date.now() - started < 180000) {
@@ -964,11 +966,15 @@
             if (job && (job.status === 'completed' || job.status === 'failed')) break;
           }
           if (!job || job.status === 'queued' || job.status === 'processing') {
-            message = 'Still rewriting — open the article in Blog Studio in a minute to read the new version.';
+            message = d.action === 'pictures'
+              ? 'Still finding pictures — open the article in Blog Studio in a minute to see them.'
+              : 'Still rewriting — open the article in Blog Studio in a minute to read the new version.';
           } else if (job.status === 'failed') {
             throw new Error(job.errorMessage || 'That didn’t work. Your article is unchanged.');
           } else {
-            message = `${d.action === 'shorter' ? 'Shorter' : d.action === 'longer' ? 'Longer' : 'Rewritten'} — saved. Open it in Blog Studio to read it.`;
+            message = d.action === 'pictures'
+              ? `Pictures added — open it in Blog Studio to see them.${job.errorMessage ? ' ' + job.errorMessage : ''}`
+              : `${d.action === 'shorter' ? 'Shorter' : d.action === 'longer' ? 'Longer' : 'Rewritten'} — saved. Open it in Blog Studio to read it.`;
           }
         } else {
           throw new Error('Unknown action.');

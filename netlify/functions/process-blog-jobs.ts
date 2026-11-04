@@ -23,6 +23,7 @@ import { aiAssistants, blogPosts, contentGenerationJobs } from '../../db/schema'
 import { generateBlogBody } from '../../src/utils/blog-generate';
 import { decodeInteractiveBrief } from '../../src/utils/blog-interactive-brief';
 import { resizeBlogBody } from '../../src/utils/blog-resize';
+import { addImagesToBlog } from '../../src/utils/blog-add-images';
 import { ideateBlogTopic } from '../../src/utils/blog-topic-ideation';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { triggerBlogDrain } from '../../src/utils/trigger-drain';
@@ -197,6 +198,9 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
     const resize = rewrite?.resize;
     // "Revise" (the chat's card, Blog Studio's "Ask … to improve"): the same rewrite, to the owner's words.
     const revise = rewrite?.revise;
+    // "Add pictures" (src/utils/blog-add-images.ts): pictures into the body, words untouched. Metered in
+    // generate-blog.ts (a helper; AI images held per image inside), so the task check is skipped too.
+    const addImages = rewrite?.addImages;
 
     // Set with the 'completed' write. Everything after that point is a follow-up — a notification, a
     // hand-off — and a failure there must not re-queue a job whose post is already written: the
@@ -208,7 +212,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
         // Monthly task allowance (src/utils/work-metering.ts). Before any model call; terminal,
         // because the allowance does not come back until the 1st. An interactive draft's own post is
         // left untouched — the author keeps what they wrote and sees why nothing was added.
-        if (!resize && !revise && job.trigger_type !== 'admin_test' && !(await hasTaskCapacity(db, job.organisation_id))) {
+        if (!resize && !revise && !addImages && job.trigger_type !== 'admin_test' && !(await hasTaskCapacity(db, job.organisation_id))) {
             console.warn(`[process-blog-jobs] job ${job.job_id}: org ${job.organisation_id} is out of tasks — not drafting.`);
             await failJob(db, job, attempt, TASK_LIMIT_MESSAGE, { terminal: true });
             return;
@@ -241,6 +245,29 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
         let notes: string | undefined;
         let tone: string | undefined;
         let articleType: string | undefined;
+
+        if (interactive && addImages) {
+            const result = await addImagesToBlog(db, {
+                blogPostId: job.result_blog_post_id as number,
+                organisationId: job.organisation_id,
+                userId: job.user_id,
+                source: addImages.source,
+                instruction: addImages.instruction,
+            });
+            if (!result.added) {
+                // An ordinary "nothing to add" (no good spot, no stock found, no tasks left) — said to
+                // the owner and stopped; a retry would only spend another model call to say it again.
+                console.log(`[process-blog-jobs] job ${job.job_id}: no pictures added to post ${job.result_blog_post_id} — ${result.note}`);
+                await failJob(db, job, attempt, result.note || 'No pictures were added.', { terminal: true });
+                return;
+            }
+            await db.update(contentGenerationJobs)
+                .set({ status: 'completed', errorMessage: result.note ?? null, updatedAt: new Date() })
+                .where(eq(contentGenerationJobs.id, job.id));
+            jobCompleted = true;
+            console.log(`[process-blog-jobs] job ${job.job_id}: added ${result.added} picture(s) (${addImages.source}) to post ${job.result_blog_post_id}`);
+            return;
+        }
 
         if (interactive && (resize || revise)) {
             const { before, after } = await resizeBlogBody(db, {

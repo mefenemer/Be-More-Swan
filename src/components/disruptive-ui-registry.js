@@ -3975,10 +3975,6 @@
           <span>Also keep this as a rule for future posts. A replacement is written either way.</span>
         </label>` : ''}
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">It’s booked into a free slot in your posting schedule.</p>' : ''}
-      ${!blocked && ui.action === 'revise' ? `
-        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">What to change</label>
-        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="3" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
-        <p class="text-xs text-gray-600 mt-2">The article is rewritten and saved in place, using your Business Knowledge for anything new — no invented facts. Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
       ${!blocked && ui.action === 'voiceover' ? `
         <p class="text-xs font-bold text-gray-700 mt-3">What it says</p>
@@ -4074,6 +4070,8 @@
     longer: { head: 'Make this article longer', button: 'Make it longer', busy: 'Rewriting — about a minute…' },
     // The same background rewrite, to the user's own words ("improve it", "bring it up to date").
     revise: { head: 'Revise this article', button: 'Rewrite it', busy: 'Rewriting — about a minute…' },
+    // Blog Studio's "Add pictures".
+    pictures: { head: 'Add pictures to this article', button: 'Add pictures', busy: 'Finding pictures — about a minute…' },
   };
 
   function renderBlogActionProposalCard(ui, esc) {
@@ -4102,6 +4100,18 @@
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">Your assistant books it into the next free slot in its posting schedule. It goes live on your blog then, and to any platforms you’ve connected.</p>' : ''}
       ${!blocked && ui.action === 'unschedule' ? '<p class="text-xs text-gray-600 mt-3">It goes back to a draft in the "Review" column and won’t publish until it’s approved again.</p>' : ''}
       ${!blocked && (ui.action === 'shorter' || ui.action === 'longer') ? `<p class="text-xs text-gray-600 mt-3">${ui.action === 'shorter' ? 'About a third shorter — same message, nothing new added.' : 'About half as long again — it develops what the article already says, with no invented facts.'} Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
+      ${!blocked && ui.action === 'revise' ? `
+        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">What to change</label>
+        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="3" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
+        <p class="text-xs text-gray-600 mt-2">The article is rewritten and saved in place, using your Business Knowledge for anything new — no invented facts. Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
+      ${!blocked && ui.action === 'pictures' ? `
+        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">Anything in particular? (optional)</label>
+        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="2" maxlength="500" placeholder="Leave blank and your assistant decides" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
+        <div class="flex flex-wrap gap-3 mt-2 text-xs text-gray-700">
+          <label class="flex items-center gap-1.5"><input type="radio" name="bap-source-${postId}" data-bap-source value="stock" ${ui.source === 'ai' ? '' : 'checked'}> Stock photos (free)</label>
+          <label class="flex items-center gap-1.5"><input type="radio" name="bap-source-${postId}" data-bap-source value="ai" ${ui.source === 'ai' ? 'checked' : ''}> AI images (uses tasks for each)</label>
+        </div>
+        <p class="text-xs text-gray-600 mt-2">Up to 3 pictures, placed where they help the reader. The words aren’t changed; move or remove any picture in Blog Studio.</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
       ${!blocked && ui.action === 'reject' ? `
         <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-reason-${postId}">What’s wrong with it</label>
@@ -4122,7 +4132,7 @@
       <p class="hidden mt-2 text-xs font-semibold" data-bap-status role="status" aria-live="polite"></p>`;
     const status = el.querySelector('[data-bap-status]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
-    const setBusy = (b) => el.querySelectorAll('[data-bap-go], [data-bap-cancel], [data-bap-reason], [data-bap-instruction], [data-bap-rule], [data-bap-redraft]').forEach((x) => { x.disabled = b; });
+    const setBusy = (b) => el.querySelectorAll('[data-bap-go], [data-bap-cancel], [data-bap-reason], [data-bap-instruction], [data-bap-rule], [data-bap-redraft], [data-bap-source]').forEach((x) => { x.disabled = b; });
     el.addEventListener('change', (e) => {
       if (!e.target.matches('[data-bap-redraft]')) return;
       const go = el.querySelector('[data-bap-go]');
@@ -4142,6 +4152,7 @@
         bubbles: true,
         detail: {
           action: ui.action, postId, scheduleAt: ui.scheduleAt || null, timezone: ui.timezone || null, reason, instruction,
+          source: el.querySelector('[data-bap-source]:checked')?.value === 'ai' ? 'ai' : 'stock',
           applyAsRule: !!el.querySelector('[data-bap-rule]')?.checked,
           redraft: !!el.querySelector('[data-bap-redraft]')?.checked,
           respond({ ok, message, error }) {

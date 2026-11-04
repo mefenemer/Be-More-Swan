@@ -20,6 +20,9 @@
 //        like the social post editor's same two buttons.
 //   POST { blogPostId, revise: '<instruction>' }       → 202 { jobId, … } — the same rewrite, to the
 //        owner's words (the chat's "Revise" card, Blog Studio's "Ask … to improve"). Same price.
+//   POST { blogPostId, addImages: { source: 'stock'|'ai', instruction? } } → 202 { jobId, … } — "Add
+//        pictures" (src/utils/blog-add-images.ts): pictures placed in the body, words untouched.
+//        A helper, plus each AI image held at the usual image price.
 //   GET  ?jobId=<uuid>                                   → 200 { status, resultBlogPostId, errorMessage }
 //
 // The job carries the blogPostId in `result_blog_post_id`, which is what tells the worker to draft
@@ -37,6 +40,7 @@ import { encodeInteractiveBrief } from '../../src/utils/blog-interactive-brief';
 import { BLOG_BATCH_PROPOSAL_TYPE, blogBatchFromUiElement } from '../../src/utils/blog-chat-batch';
 import { triggerBlogDrain } from '../../src/utils/trigger-drain';
 import { meterInteraction } from '../../src/utils/task-credit';
+import { orgHasAssistantFeature } from '../../src/utils/assistant-capabilities';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Matches generate-post.ts. A queue this deep is a stuck worker, not a busy user. */
@@ -164,7 +168,16 @@ export default withLambda(async (event: HandlerEvent) => {
     // "Revise": rewrite the saved body to the owner's instruction (src/utils/blog-resize.ts). Same job,
     // same price and same live-article rule as Shorter / Longer.
     const revise = !resize && typeof body.revise === 'string' && body.revise.trim() ? body.revise.trim().slice(0, 500) : undefined;
-    const rewrite = !!(resize || revise);
+    // "Add pictures" (src/utils/blog-add-images.ts): pictures into the existing body; the words are not
+    // touched. `instruction` optional (blank = the assistant decides); source stock (free) or ai.
+    const addImagesRaw = !resize && !revise && body.addImages && typeof body.addImages === 'object' ? body.addImages as Record<string, unknown> : null;
+    const addImages = addImagesRaw
+        ? {
+            source: (addImagesRaw.source === 'ai' ? 'ai' : 'stock') as 'stock' | 'ai',
+            instruction: typeof addImagesRaw.instruction === 'string' && addImagesRaw.instruction.trim() ? addImagesRaw.instruction.trim().slice(0, 500) : undefined,
+        }
+        : undefined;
+    const rewrite = !!(resize || revise || addImages);
     const topic = typeof body.topic === 'string' ? body.topic.trim() : '';
     if (!topic && !rewrite) return { statusCode: 400, body: JSON.stringify({ error: 'Add a topic to draft from.' }) };
 
@@ -180,7 +193,12 @@ export default withLambda(async (event: HandlerEvent) => {
     // A live article is not rewritten underneath its readers: the new body would sit in the editor
     // while the published copy stayed as it was. Take it off the site first.
     if (rewrite && (post.status === 'published' || post.status === 'publishing')) {
-        return { statusCode: 409, body: JSON.stringify({ error: resize ? 'This article is live. Unpublish it first, then make it shorter or longer.' : 'This article is live. Unpublish it first, then ask for the rewrite.' }) };
+        return { statusCode: 409, body: JSON.stringify({ error: addImages ? 'This article is live. Unpublish it first, then add pictures.' : resize ? 'This article is live. Unpublish it first, then make it shorter or longer.' : 'This article is live. Unpublish it first, then ask for the rewrite.' }) };
+    }
+    // AI pictures are an admin-managed capability of an assistant type — refused here, while there is
+    // someone to tell, not minutes later in the worker.
+    if (addImages?.source === 'ai' && !await orgHasAssistantFeature(db, organisationId, 'ai_image_generation')) {
+        return { statusCode: 403, body: JSON.stringify({ error: 'None of your assistants can generate AI images — choose stock photos instead.', code: 'feature_unavailable' }) };
     }
 
     // Shorter / Longer cost what the social editor's same buttons cost: a helper, under fair use —
@@ -230,6 +248,7 @@ export default withLambda(async (event: HandlerEvent) => {
             articleType: typeof body.articleType === 'string' ? body.articleType : undefined,
             resize,
             revise,
+            addImages,
         }),
         // ⚠️ THE DISCRIMINATOR. Pre-set to the post already open in the editor, which is what tells
         // process-blog-jobs to draft into it rather than insert a second one.

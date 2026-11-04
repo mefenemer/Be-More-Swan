@@ -405,6 +405,11 @@
     + '          <button id="bs-media-ai" class="bs-btn bs-btn-ghost bs-btn-sm">'
     + '<img src="/images/BeMoreSwan_SwanAI.png" alt="" style="width:15px;height:15px;object-fit:contain;">'
     + '<span data-bs-assistant-label="generate">Ask your assistant to generate</span></button>'
+    // "Add pictures" (src/utils/blog-add-images.ts): the assistant reads the article and puts
+    // pictures where they help, or where the box below says. Words are never changed.
+    + '          <button id="bs-media-auto" class="bs-btn bs-btn-assist bs-btn-sm">'
+    + '<img src="/images/BeMoreSwan_SwanAI.png" alt="" style="width:15px;height:15px;object-fit:contain;">'
+    + '<span data-bs-assistant-label="pictures">Ask your assistant to add pictures</span></button>'
     // Images, video and audio all land in the body; the hero stays images-only (blog-media rejects
     // anything else for the feature role). Audio is upload-only by decision (plan §7.4) — there is
     // no stock provider and no AI generation for it. MIME list mirrors content-upload-url.ts's
@@ -417,8 +422,17 @@
     // meet generate-ai-image's 403 — see applyMediaCapabilities().
     + '        <p id="bs-ai-unavailable" class="bs-help bs-hidden" style="margin-top:10px;"></p>'
     + '        <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top:12px;">'
-    + '          <input id="bs-ai-prompt" placeholder="Describe the image\u2026">'
+    + '          <input id="bs-ai-prompt" placeholder="What should the image show? e.g. a team planning at a whiteboard">'
+    + '          <p class="bs-help" style="margin-top:4px;">Leave blank and your assistant decides from the article.</p>'
     + '          <button id="bs-ai-go" class="bs-btn bs-btn-ghost bs-btn-sm" style="margin-top:8px;">Generate</button></div>'
+    + '        <div id="bs-auto-form" class="bs-field bs-hidden" style="margin-top:12px;">'
+    + '          <input id="bs-auto-prompt" maxlength="500" placeholder="Anything in particular? e.g. a photo of a busy café after the second section">'
+    + '          <p class="bs-help" style="margin-top:4px;">Leave blank and your assistant reads the article and decides where pictures help (up to 3). Your words are not changed.</p>'
+    + '          <div class="bs-row" style="margin-top:6px;gap:14px;">'
+    + '            <label style="font-size:13px;"><input type="radio" name="bs-auto-source" value="stock" checked> Stock photos (free)</label>'
+    + '            <label id="bs-auto-ai-label" style="font-size:13px;"><input type="radio" name="bs-auto-source" value="ai"> AI images (uses tasks for each)</label>'
+    + '          </div>'
+    + '          <button id="bs-auto-go" class="bs-btn bs-btn-primary bs-btn-sm" style="margin-top:8px;">Add pictures</button></div>'
     + '        <div id="bs-pexels-form" class="bs-field bs-hidden" style="margin-top:12px;">'
     + '          <input id="bs-pexels-query" placeholder="Search stock photos\u2026">'
     + '          <button id="bs-pexels-go" class="bs-btn bs-btn-ghost bs-btn-sm" style="margin-top:8px;">Search</button></div>'
@@ -722,6 +736,7 @@
     improve: function (n) { return 'Ask ' + n + ' to improve'; },
     stock: function (n) { return 'Ask ' + n + ' to search stock'; },
     generate: function (n) { return 'Ask ' + n + ' to generate'; },
+    pictures: function (n) { return 'Ask ' + n + ' to add pictures'; },
   };
 
   function assistantName() {
@@ -899,7 +914,7 @@
   function aiDraftBusy(busy) {
     var go = el('bs-ai-draft-go');
     if (go) go.disabled = busy;
-    ['bs-resize-shorter', 'bs-resize-longer'].forEach(function (id) { var b = el(id); if (b) b.disabled = busy; });
+    ['bs-resize-shorter', 'bs-resize-longer', 'bs-auto-go', 'bs-media-auto'].forEach(function (id) { var b = el(id); if (b) b.disabled = busy; });
     // The editor is locked while the worker writes into this post. Not decoration: MarkdownEditor
     // autosaves 1.2s after any keystroke, so typing here would race the server's write — one of
     // the two bodies wins and the other is gone, with nothing on screen to say so.
@@ -1013,6 +1028,81 @@
           refreshReadout(md);
           var count = function (t) { return (t || '').replace(/[#*_`>\-\[\]()!]/g, ' ').split(/\s+/).filter(Boolean).length; };
           setBanner('bs-action-status', (direction === 'shorter' ? 'Shorter' : 'Longer') + ' — ' + count(before) + ' \u2192 ' + count(md) + ' words.', 'success');
+          state.contentChanged = false;
+          notifyChanged();
+        });
+      });
+    }, elapsed < 15000 ? 2000 : 5000);
+  }
+
+  // ── Add pictures (src/utils/blog-add-images.ts) ───────────────────────────────────────────────
+  // Same queue, poll and editor lock as Shorter / Longer. What is on screen is saved first, so the
+  // assistant places pictures in what the author sees. Exposed on window.BlogStudio for the chat card.
+  // Said twice on purpose: the banner sits by the action bar, the button that started it is up in
+  // the media panel, and the author is looking at whichever they last touched.
+  function pictureSay(msg, tone) {
+    setBanner('bs-action-status', msg, tone);
+    setStatus('bs-media-status', msg);
+  }
+
+  function runAddPictures(instruction, source) {
+    if (!state.postId || state.aiDraftJobId) return;
+    aiDraftBusy(true);
+    setStatus('bs-media-status', '');
+    pictureSay((assistantName() || 'Your assistant') + ' is reading the article and finding pictures\u2026 about a minute.', 'info');
+    flushDraft().then(function () {
+      return api('generate-blog', { method: 'POST', body: JSON.stringify({
+        blogPostId: state.postId, addImages: { source: source, instruction: instruction || undefined },
+      }) });
+    }).then(function (gen) {
+      if (!gen.ok || !gen.body || !gen.body.jobId) {
+        aiDraftBusy(false);
+        pictureSay((gen.body && gen.body.error) || 'Could not start that \u2014 try again.', 'error');
+        return;
+      }
+      state.aiDraftJobId = gen.body.jobId;
+      pollAddPictures(gen.body.jobId, Date.now());
+    });
+  }
+
+  function pollAddPictures(jobId, startedAt) {
+    if (state.aiDraftJobId !== jobId) return;
+    if (Date.now() - startedAt > DRAFT_POLL_TIMEOUT_MS) {
+      state.aiDraftJobId = null;
+      aiDraftBusy(false);
+      pictureSay('This is taking longer than usual. Close this post and reopen it in a minute to see the pictures.', 'info');
+      return;
+    }
+    var elapsed = Date.now() - startedAt;
+    setTimeout(function () {
+      if (state.aiDraftJobId !== jobId) return;
+      api('generate-blog?jobId=' + encodeURIComponent(jobId), { method: 'GET' }).then(function (res) {
+        if (state.aiDraftJobId !== jobId) return;
+        if (!res.ok) { pollAddPictures(jobId, startedAt); return; }
+        var status = res.body && res.body.status;
+        if (status === 'failed') {
+          state.aiDraftJobId = null;
+          aiDraftBusy(false);
+          pictureSay((res.body && res.body.errorMessage) || 'No pictures were added. Your article is unchanged.', 'error');
+          return;
+        }
+        if (status !== 'completed') { pollAddPictures(jobId, startedAt); return; }
+        var note = res.body && res.body.errorMessage;
+        var count = function (t) { return ((t || '').match(/^:::media\{/gm) || []).length; };
+        var before = count(state.editor ? state.editor.getMarkdown() : '');
+        api('blog-posts?id=' + encodeURIComponent(state.postId), { method: 'GET' }).then(function (p) {
+          if (state.aiDraftJobId !== jobId) return;
+          state.aiDraftJobId = null;
+          aiDraftBusy(false);
+          var md = p.ok && p.body.post ? (p.body.post.bodyMarkdown || '') : '';
+          if (!md) { pictureSay('Done, but the article could not be reloaded. Reopen this post to see the pictures.', 'info'); return; }
+          state.editor.setMarkdown(md);
+          refreshReadout(md);
+          loadFeature();                           // the new pictures' preview URLs
+          var added = Math.max(0, count(md) - before);
+          pictureSay((added ? 'Added ' + added + ' picture' + (added === 1 ? '' : 's') + '. Drag any of them to move it, or remove it.' : 'Done.')
+            + (note ? ' ' + note : ''), 'success');
+          mediaEls.autoForm.classList.add('bs-hidden');
           state.contentChanged = false;
           notifyChanged();
         });
@@ -1796,12 +1886,14 @@
     if (!state.canImage) { setStatus('bs-media-status', AI_UNAVAILABLE); return; }
     mediaEls.picker.classList.add('bs-hidden');
     mediaEls.pexelsForm.classList.add('bs-hidden');
+    mediaEls.autoForm.classList.add('bs-hidden');
     mediaEls.aiForm.classList.remove('bs-hidden');
     mediaEls.aiPrompt.focus();
   }
   function openPexelsForm() {
     mediaEls.picker.classList.add('bs-hidden');
     mediaEls.aiForm.classList.add('bs-hidden');
+    mediaEls.autoForm.classList.add('bs-hidden');
     mediaEls.pexelsForm.classList.remove('bs-hidden');
     if (!mediaEls.pexelsQuery.value.trim()) mediaEls.pexelsQuery.value = (el('bs-title').value || '').trim();
     mediaEls.pexelsQuery.focus();
@@ -2528,6 +2620,7 @@
       library: el('bs-media-library'), upload: el('bs-media-upload'), uploadInput: el('bs-media-upload-input'),
       pexels: el('bs-media-pexels'), ai: el('bs-media-ai'), canva: el('bs-media-canva'),
       aiForm: el('bs-ai-form'), aiPrompt: el('bs-ai-prompt'), aiGo: el('bs-ai-go'),
+      auto: el('bs-media-auto'), autoForm: el('bs-auto-form'), autoPrompt: el('bs-auto-prompt'), autoGo: el('bs-auto-go'),
       pexelsForm: el('bs-pexels-form'), pexelsQuery: el('bs-pexels-query'), pexelsGo: el('bs-pexels-go'),
       picker: el('bs-media-picker'),
       cols2: el('bs-cols-2'), cols3: el('bs-cols-3'),
@@ -2606,6 +2699,22 @@
     mediaEls.cols3.addEventListener('click', function () { insertColumns(3); });
     mediaEls.library.addEventListener('click', function () { openLibrary(); });
     mediaEls.ai.addEventListener('click', openAiForm);
+    mediaEls.auto.addEventListener('click', function () {
+      mediaEls.picker.classList.add('bs-hidden');
+      mediaEls.aiForm.classList.add('bs-hidden');
+      mediaEls.pexelsForm.classList.add('bs-hidden');
+      mediaEls.autoForm.classList.remove('bs-hidden');
+      // AI is only offered where the workspace can generate (applyMediaCapabilities' preflight).
+      var aiOpt = document.querySelector('input[name="bs-auto-source"][value="ai"]');
+      if (aiOpt) { aiOpt.disabled = !state.canImage; if (!state.canImage) aiOpt.checked = false; }
+      var stockOpt = document.querySelector('input[name="bs-auto-source"][value="stock"]');
+      if (stockOpt && !state.canImage) stockOpt.checked = true;
+      mediaEls.autoPrompt.focus();
+    });
+    mediaEls.autoGo.addEventListener('click', function () {
+      var picked = document.querySelector('input[name="bs-auto-source"]:checked');
+      runAddPictures(mediaEls.autoPrompt.value.trim(), picked && picked.value === 'ai' ? 'ai' : 'stock');
+    });
     mediaEls.pexels.addEventListener('click', openPexelsForm);
     mediaEls.canva.addEventListener('click', openCanva);
     mediaEls.upload.addEventListener('click', function () { mediaEls.uploadInput.click(); });
@@ -2615,12 +2724,16 @@
     // a bare grid, and only the CHOSEN one becomes an asset — which then appears as an ordinary
     // tile with the ordinary two actions.
     mediaEls.aiGo.addEventListener('click', function () {
+      // Blank is allowed: the server reads the article and decides (generate-ai-image.ts,
+      // blogPostImageRequest). It used to do nothing at all until something was typed.
       var prompt = mediaEls.aiPrompt.value.trim();
-      if (!prompt || !state.postId) return;
+      if (!state.postId) return;
       setStatus('bs-media-status', 'Generating…');
       mediaEls.picker.classList.remove('bs-hidden');
       mediaEls.picker.innerHTML = '<div class="bs-media-empty">Generating…</div>';
-      api('generate-ai-image', { method: 'POST', body: JSON.stringify({ prompt: prompt, aspectRatio: '16:9' }) })
+      // Blank reads the SAVED article, so save what is on screen first.
+      (prompt ? Promise.resolve() : flushDraft())
+        .then(function () { return api('generate-ai-image', { method: 'POST', body: JSON.stringify({ prompt: prompt, blogPostId: state.postId, aspectRatio: '16:9' }) }); })
         .then(function (res) {
           if (!res.ok) {
             mediaEls.picker.innerHTML = '';

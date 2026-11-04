@@ -734,6 +734,23 @@ window.showComplianceModals = function showComplianceModals(force) {
             class="hidden btn-utility shrink-0 px-2.5 py-1 text-[11px] font-bold border rounded-lg transition cursor-pointer">↻ Show different <span id="gp-ai-find-more-noun">photos</span></button>
         </div>
       </div>
+      <!-- AI generate box (shown by "Ask your assistant to generate"). Same shape as the stock box above:
+           say what the picture should show, or leave it blank and the assistant decides from the post.
+           Generating used to start on the click, with no way to ask for anything in particular. -->
+      <div id="gp-ai-gen-box" class="hidden mt-2">
+        <label for="gp-ai-gen-query" class="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+          What should the <span id="gp-ai-gen-noun">image</span> show?
+        </label>
+        <div class="flex gap-1.5">
+          <input type="text" id="gp-ai-gen-query" maxlength="500"
+            placeholder="e.g. a barista handing over a latte, morning light"
+            onkeydown="if (event.key === 'Enter') { event.preventDefault(); gpAiRunGenerate(); }"
+            class="flex-1 min-w-0 px-2.5 py-1.5 text-xs border border-sky-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-200">
+          <button type="button" id="gp-ai-gen-go" onclick="gpAiRunGenerate()"
+            class="btn-assistant px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer">Generate</button>
+        </div>
+        <p class="text-[11px] text-gray-400 mt-1">Leave blank and your assistant decides from the post.</p>
+      </div>
       <!-- Library picker (shown after "Use my own") — already-uploaded content-assets -->
       <!-- Asked BEFORE a search or a generation: both cost time (and credits), and there is no undo
            once the result has landed on the post. -->
@@ -20015,7 +20032,7 @@ function gpGoConnect() {
 function gpBackToChooser() {
     // New post in the panel — drop the last search so the box re-prefills from THIS post's
     // media suggestion rather than inheriting the previous one's terms.
-    { const q = document.getElementById('gp-ai-find-query'); if (q) { q.value = ''; delete q.dataset.touched; } }
+    { const q = document.getElementById('gp-ai-find-query'); if (q) { q.value = ''; delete q.dataset.touched; } const g = document.getElementById('gp-ai-gen-query'); if (g) g.value = ''; }
     clearInterval(_gpPollInterval);
 
     // Reset AI mode controls.
@@ -20042,7 +20059,7 @@ function gpBackToChooser() {
     _gpAiMediaType = 'image';
     document.getElementById('gp-ai-media')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
-    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden'); document.getElementById('gp-ai-gen-box')?.classList.add('hidden');
     document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
     gpAiMediaStatus('');
 
@@ -20389,7 +20406,7 @@ async function gpPollJob() {
 async function gpLoadPreview(postId) {
     // New post in the panel — drop the last search so the box re-prefills from THIS post's
     // media suggestion rather than inheriting the previous one's terms.
-    { const q = document.getElementById('gp-ai-find-query'); if (q) { q.value = ''; delete q.dataset.touched; } }
+    { const q = document.getElementById('gp-ai-find-query'); if (q) { q.value = ''; delete q.dataset.touched; } const g = document.getElementById('gp-ai-gen-query'); if (g) g.value = ''; }
     try {
         const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval`);
         if (!res.ok) return;
@@ -20411,7 +20428,7 @@ async function gpLoadPreview(postId) {
         gpAiMediaStatus('');
         gpAiMediaBusy(false);
         document.getElementById('gp-ai-pexels')?.classList.add('hidden');
-    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden'); document.getElementById('gp-ai-gen-box')?.classList.add('hidden');
         document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
         document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
@@ -21304,7 +21321,9 @@ function _gpSyncAssistantLabels() {
 }
 
 function gpAiMediaBusy(busy) {
-    document.querySelectorAll('#gp-ai-media-actions button').forEach(btn => {
+    // The Generate button sits in its own box below the row, so it is named — or a second press
+    // while the first image is still coming would pay for two.
+    document.querySelectorAll('#gp-ai-media-actions button, #gp-ai-gen-go').forEach(btn => {
         btn.disabled = busy;
         btn.classList.toggle('opacity-50', busy);
         btn.classList.toggle('cursor-not-allowed', busy);
@@ -21408,7 +21427,7 @@ function gpAiSetMediaType(type) {
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
-    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden'); document.getElementById('gp-ai-gen-box')?.classList.add('hidden');
     gpAiMediaStatus('');
 }
 
@@ -21463,7 +21482,7 @@ function gpAiShowThumb(url, type) {
     }
     _gpHasMedia = !!url;
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
-    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden'); document.getElementById('gp-ai-gen-box')?.classList.add('hidden');
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     gpAiMediaBusy(false);
@@ -21843,7 +21862,7 @@ async function gpAiUseOwn() {
     const empty = document.getElementById('gp-ai-own-empty');
     if (!panel || !grid) return;
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
-    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden'); document.getElementById('gp-ai-gen-box')?.classList.add('hidden');
     document.getElementById('gp-ai-intent')?.classList.add('hidden');
     panel.classList.remove('hidden');
     empty?.classList.add('hidden');
@@ -21946,7 +21965,7 @@ async function gpAiUploadSelected(e) {
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
-    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden'); document.getElementById('gp-ai-gen-box')?.classList.add('hidden');
     gpAiMediaBusy(true);
     try {
         const { assets, failures } = await gpUploadContentAssets(files, (n, total, name) => {
@@ -21979,7 +21998,7 @@ function gpAiBrowseCanva() {
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
-    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden'); document.getElementById('gp-ai-gen-box')?.classList.add('hidden');
     window.CanvaBrowser.open({
         assetType: _gpAiMediaType === 'video' ? 'any' : 'image',
         multiple: false,
@@ -22016,6 +22035,7 @@ function _gpAiFindAfterIntent() {
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
 
+    document.getElementById('gp-ai-gen-box')?.classList.add('hidden');
     const noun = document.getElementById('gp-ai-find-noun');
     if (noun) noun.textContent = isVideo ? 'video' : 'photo';
 
@@ -22177,19 +22197,41 @@ async function gpAiGenerate() {
     _pceAskAddOrReplace('The video we generate', _gpAiGenerateAfterIntent);
 }
 
-async function _gpAiGenerateAfterIntent() {
+// Opens the "what should it show?" box. Nothing is generated (or charged) until Generate is pressed.
+function _gpAiGenerateAfterIntent() {
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-own-bar')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
-    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden'); document.getElementById('gp-ai-gen-box')?.classList.add('hidden');
+    const box = document.getElementById('gp-ai-gen-box');
+    const input = document.getElementById('gp-ai-gen-query');
+    if (!box || !input) return gpAiRunGenerate();
+    const noun = document.getElementById('gp-ai-gen-noun');
+    if (noun) noun.textContent = _gpAiMediaType === 'video' ? 'video' : 'image';
+    input.placeholder = _gpAiMediaType === 'video'
+        ? 'e.g. slow pan across a busy coffee shop counter'
+        : 'e.g. a barista handing over a latte, morning light';
+    box.classList.remove('hidden');
+    input.focus();
+}
+
+/** The typed description, or '' — blank means the assistant decides from the post. */
+function _gpAiGenTyped() {
+    return (document.getElementById('gp-ai-gen-query')?.value || '').trim();
+}
+
+async function gpAiRunGenerate() {
     if (_gpAiMediaType === 'video') return gpAiGenerateVideo();
+    const typed = _gpAiGenTyped();
     gpAiMediaBusy(true);
     gpAiMediaStatus('Generating an image… this usually takes ~20 seconds.');
     try {
         const res = await fetch('/.netlify/functions/regenerate-post-media', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: _gpCurrentPostId, prompt: _gpAiMediaPrompt || undefined, applyToGroup: gpApplyToGroup() }),
+            // Typed words win; blank lets the assistant decide (the server falls back to the drafter's
+            // own picture idea, then the caption — regenerate-post-media.ts).
+            body: JSON.stringify({ postId: _gpCurrentPostId, prompt: typed || _gpAiMediaPrompt || undefined, applyToGroup: gpApplyToGroup() }),
         });
         const d = await res.json().catch(() => ({}));
         if (res.status === 402) { gpAiMediaStatus(_gpCap && _gpCap.unifiedTaskMetering ? "Your monthly tasks are used up — they reset on the 1st, or upgrade for more." : "You're out of image credits — upgrade to generate more.", 'error'); gpAiMediaBusy(false); return; }
@@ -22230,7 +22272,7 @@ async function gpAiGenerateVideo() {
         const res = await fetch('/.netlify/functions/generate-ai-video', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: _gpAiMediaPrompt || 'On-brand social media video', aspectRatio: '9:16', durationSeconds: 6 }),
+            body: JSON.stringify({ prompt: _gpAiGenTyped() || _gpAiMediaPrompt || 'On-brand social media video', aspectRatio: '9:16', durationSeconds: 6 }),
         });
         const d = await res.json().catch(() => ({}));
         if (res.status === 403 && d.error === 'video_requires_upgrade') { gpAiMediaStatus(d.message || 'AI video is available on the Busywork Buster and Digital Employee plans.', 'error'); gpAiMediaBusy(false); return; }
