@@ -61,6 +61,9 @@ check('connectors named as working are Live on connections.html, and the Coming-
         assert.ok(!live(name), `${name} is not Live on connections.html`);
         assert.ok(!faq.includes(name), `${name} is not named as working in the FAQ`);
     }
+    // YouTube's Google project is still in Testing, so customers cannot connect it.
+    assert.ok(!live('YouTube'), 'YouTube is not Live on connections.html');
+    assert.ok(!faq.includes('YouTube'), 'YouTube is not named as working in the FAQ');
     assert.ok(faq.includes('HubSpot, Salesforce and Xero are coming soon'));
 });
 

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Connections | Be More Swan</title>
     <!-- SEO: canonical + social share metadata -->
-    <meta name="description" content="See which tools each Be More Swan assistant connects to, what it does there and why it helps: Facebook, Instagram, LinkedIn, X, YouTube, Gmail, Outlook, Canva and more.">
+    <meta name="description" content="See which tools each Be More Swan assistant connects to, what it does there and why it helps: Facebook, Instagram, LinkedIn, X, Threads, Gmail, Outlook, Canva and more.">
     <link rel="canonical" href="https://bemoreswan.com/connections">
     <meta property="og:type" content="website">
     <meta property="og:site_name" content="Be More Swan">
@@ -142,6 +142,9 @@
      fire for the Minute Taker's meeting records (assistant-integrations.js RELEVANT_TYPES), so they stay
      "Coming soon" until it goes live — move them back then, with the hero list and the homepage, pricing
      and FAQ mentions. Paid ads: built dark, the registry in src/utils/ad-networks is deliberately empty.
+     YouTube: Coming soon since 2026-11-04. The Google project behind it is still in Testing, so only
+     listed test users can connect and their sign-ins lapse after 7 days. Move it back, with the hero
+     list and the FAQ, once it is in production and a real upload lands public.
      Assistant names mirror master_assistants — rename both. -->
 <main class="flex-grow">
 
@@ -163,7 +166,6 @@
                         <span class="cx-tool"><span class="cx-badge" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span>LinkedIn</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">X</span>X</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#111;color:#fff" aria-hidden="true">@</span>Threads</span>
-                        <span class="cx-tool"><span class="cx-badge" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span>YouTube</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:#374151;color:#fff" aria-hidden="true">&lt;/&gt;</span>Your website</span>
                         <span class="cx-tool"><span class="cx-badge" style="background:var(--color-emerald-700);color:#fff" aria-hidden="true">S</span>The Swan Index</span>
                     </div>
@@ -228,7 +230,7 @@
                     <p>Plans, writes and publishes your social posts.</p>
                 </div>
                 <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:#1877F2;color:#fff" aria-hidden="true">f</span><span class="cx-badge cx-badge-sm" style="background:linear-gradient(135deg,#F58529,#DD2A7B 50%,#8134AF);color:#fff" aria-hidden="true">IG</span><span class="cx-badge cx-badge-sm" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span><span class="cx-badge cx-badge-sm" style="background:#111;color:#fff" aria-hidden="true">X</span><span class="cx-badge cx-badge-sm" style="background:#111;color:#fff" aria-hidden="true">@</span><span class="cx-badge cx-badge-sm" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span><span class="cx-badge cx-badge-sm" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span><span class="cx-badge cx-badge-sm" style="background:#111;color:#fff" aria-hidden="true">♪</span></div>
-                <span class="cx-count">8 live · 2 coming soon</span>
+                <span class="cx-count">7 live · 3 coming soon</span>
             </div>
             <div class="cx-grid">
             <article class="cx-card" data-live="1">
@@ -272,14 +274,6 @@
                 <p class="cx-why"><strong>Why:</strong> One more audience, without one more job.</p>
             </article>
             <article class="cx-card" data-live="1">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span><h4>YouTube</h4><span class="cx-pill cx-live">Live</span></header>
-                <ol class="cx-flow">
-                    <li><span class="cx-step">When</span>You attach a video and approve</li>
-                    <li><span class="cx-step">It</span>Uploads it with the title and description written for you</li>
-                </ol>
-                <p class="cx-why"><strong>Why:</strong> Your videos go out with the words done for you.</p>
-            </article>
-            <article class="cx-card" data-live="1">
                 <header class="cx-card-head"><span class="cx-badge" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span><h4>Canva</h4><span class="cx-pill cx-live">Live</span></header>
                 <ol class="cx-flow">
                     <li><span class="cx-step">When</span>You pick a Canva design</li>
@@ -294,6 +288,14 @@
                     <li><span class="cx-step">It</span>Reads how it performed on Facebook and Instagram</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Your assistant learns what your audience responds to.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span><h4>YouTube</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You attach a video and approve</li>
+                    <li><span class="cx-step">It</span>Uploads it with the title and description written for you</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your videos go out with the words done for you.</p>
             </article>
             <article class="cx-card is-soon" data-live="0">
                 <header class="cx-card-head"><span class="cx-badge" style="background:#0A66C2;color:#fff" aria-hidden="true">in</span><h4>LinkedIn</h4><span class="cx-pill cx-soon">Coming soon</span></header>
@@ -616,7 +618,7 @@
                     <p>Turns what you want to say into a short vertical video.</p>
                 </div>
                 <div class="cx-strip" aria-hidden="true"><span class="cx-badge cx-badge-sm" style="background:linear-gradient(135deg,#F58529,#DD2A7B 50%,#8134AF);color:#fff" aria-hidden="true">IG</span><span class="cx-badge cx-badge-sm" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span><span class="cx-badge cx-badge-sm" style="background:#1877F2;color:#fff" aria-hidden="true">f</span><span class="cx-badge cx-badge-sm" style="background:#00C4CC;color:#fff" aria-hidden="true">C</span></div>
-                <span class="cx-count">4 live</span>
+                <span class="cx-count">3 live · 1 coming soon</span>
             </div>
             <div class="cx-grid">
             <article class="cx-card" data-live="1">
@@ -626,14 +628,6 @@
                     <li><span class="cx-step">It</span>Publishes it as a Reel on your Instagram professional account</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Short video reaches people your static posts do not.</p>
-            </article>
-            <article class="cx-card" data-live="1">
-                <header class="cx-card-head"><span class="cx-badge" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span><h4>YouTube</h4><span class="cx-pill cx-live">Live</span></header>
-                <ol class="cx-flow">
-                    <li><span class="cx-step">When</span>You approve the finished video</li>
-                    <li><span class="cx-step">It</span>Uploads it to your channel as a Short</li>
-                </ol>
-                <p class="cx-why"><strong>Why:</strong> Your channel stays active without any editing.</p>
             </article>
             <article class="cx-card" data-live="1">
                 <header class="cx-card-head"><span class="cx-badge" style="background:#1877F2;color:#fff" aria-hidden="true">f</span><h4>Facebook</h4><span class="cx-pill cx-live">Live</span></header>
@@ -650,6 +644,14 @@
                     <li><span class="cx-step">It</span>Brings it into your Content Library to use in a video</li>
                 </ol>
                 <p class="cx-why"><strong>Why:</strong> Your own designs can appear in your videos.</p>
+            </article>
+            <article class="cx-card is-soon" data-live="0">
+                <header class="cx-card-head"><span class="cx-badge" style="background:#FF0000;color:#fff" aria-hidden="true">▶</span><h4>YouTube</h4><span class="cx-pill cx-soon">Coming soon</span></header>
+                <ol class="cx-flow">
+                    <li><span class="cx-step">When</span>You approve the finished video</li>
+                    <li><span class="cx-step">It</span>Uploads it to your channel as a Short</li>
+                </ol>
+                <p class="cx-why"><strong>Why:</strong> Your channel stays active without any editing.</p>
             </article>
             </div>
         </section>
