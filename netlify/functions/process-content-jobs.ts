@@ -34,6 +34,8 @@ import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { raiseBriefForPost } from '../../src/utils/visual-briefs';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
+import { directPostImage } from '../../src/utils/post-image-direction';
+import { triggerContentDrain } from '../../src/utils/trigger-drain';
 import { generateAndPersistImage, renderAndPersistBrandCard, r2IsConfigured } from '../../src/lib/media-persist';
 import { headlineFromCaption, MAX_HEADLINE_CHARS } from '../../src/lib/brand-card';
 import { resolveBrandKitForOrg } from '../../src/lib/brand-extract-fetch';
@@ -119,7 +121,7 @@ async function resolveFallbackPlatform(
 // native Netlify schedule (this file's `handler`) AND by an on-demand HTTP trigger
 // (run-content-jobs.ts) — the latter is how staging/branch deploys drain their queue, since
 // Netlify only runs scheduled functions on the production deploy.
-export async function drainContentJobs(): Promise<number> {
+export async function drainContentJobs(opts: { imageWriter?: boolean } = {}): Promise<number> {
     const db = getDb();
     const now = new Date();
 
@@ -173,14 +175,27 @@ export async function drainContentJobs(): Promise<number> {
     for (let i = 0; i < jobs.length; i += CONCURRENCY) {
         if (i > 0 && Date.now() - startedAt > START_BUDGET_MS) break; // always run at least one chunk
         const chunk = jobs.slice(i, i + CONCURRENCY);
-        await Promise.allSettled(chunk.map(job => processJob(db, job, now)));
+        await Promise.allSettled(chunk.map(job => processJob(db, job, now, !!opts.imageWriter)));
         processed += chunk.length;
     }
 
     return processed;
 }
 
+/**
+ * The ten-minute cron. It STARTS the drain in run-content-jobs-background rather than running it here,
+ * as process-blog-jobs does: a heavy image job already took 15-20 s of this function's 26 s, and writing
+ * the picture's prompt adds up to 10 s more. A job killed part-way is stranded and retried, and a retry
+ * is how one job has written two posts before. The status-guarded claim in processJob makes a poke from
+ * generate-post safe to overlap with this.
+ */
 export default withLambda(async () => {
+    // No request headers on a cron, so the target resolves from BASE_URL.
+    if (await triggerContentDrain(undefined, 'cron', 'process-content-jobs')) {
+        return { statusCode: 200, body: 'handed off to the background drain' };
+    }
+    // Could not be started. Drain here rather than not at all, without the image writer: it would not fit.
+    console.warn('[process-content-jobs] background drain not started; draining in-process without the image writer.');
     const processed = await drainContentJobs();
     return { statusCode: 200, body: processed ? `processed ${processed} jobs` : 'no jobs' };
 });
@@ -191,7 +206,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
     context_prompt: string | null; trigger_type: string | null; platform: string | null;
     admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
     platforms: string[] | null; revised_from_post_id: number | null; created_at?: string;
-}, now: Date) {
+}, now: Date, imageWriter: boolean) {
     // Claim the job ATOMICALLY. `AND status = 'queued'` is the whole guard: the SELECT above uses
     // FOR UPDATE SKIP LOCKED, but it runs as a standalone statement, so postgres-js autocommits and
     // the row locks are released the moment it returns — long before any job is processed. Two
@@ -1004,7 +1019,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // what was scheduled on their behalf, not asked to review something that already left.
         let autoPublished = false;
         try {
-            // Two contexts, deliberately different: the AI generator gets the full art-direction brief
+            // Two contexts, deliberately different: the AI generator starts from the full art-direction brief
             // (suggestedMediaDescription), but stock SEARCH gets the literal, photographable subject
             // (imageSearchQuery). A brief like "split graphic, 41 days crossed out, logo" produced a
             // wrong/contradictory stock photo when it was used as the search text; the plain subject
@@ -1034,9 +1049,22 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     }).returning({ id: mediaGenerationJobs.id });
 
                     try {
+                        // Opus 5.5 writes the picture from the drafter's brief, in the background lane
+                        // only (see the cron above). Never throws, so it cannot cost a draft its picture.
+                        // Words are dropped, as they always were here: nothing on this path lays text
+                        // layers over a picture, and the no-text rule keeps them out of the pixels.
+                        const prompt = imageWriter
+                            ? (await directPostImage(db, {
+                                orgId: job.organisation_id, userId: job.user_id, postId: null,
+                                assistantId: job.assistant_id, platform,
+                                request: aiMediaContext.slice(0, 1000),
+                                requestIsCaption: !generated.suggestedMediaDescription,
+                                wordsOnPicture: false,
+                            })).scene
+                            : aiMediaContext;
                         const assetId = await generateAndPersistImage(db, {
                             orgId: job.organisation_id, userId: job.user_id,
-                            prompt: aiMediaContext, aspectRatio: aspect, generationJobId: genJob.id,
+                            prompt, aspectRatio: aspect, generationJobId: genJob.id,
                         });
                         await settleHold(db, { orgId: job.organisation_id, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: job.user_id, jobId: genJob.id, assistantId: job.assistant_id });
                         await db.update(mediaGenerationJobs).set({ status: 'completed', resultAssetIds: [assetId], updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, genJob.id));

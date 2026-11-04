@@ -692,13 +692,6 @@ window.showComplianceModals = function showComplianceModals(force) {
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           <span id="gp-ai-gen-label">Ask your assistant to generate</span>
         </button>
-        <!-- Brand Designer (plan Phase 5): brief it for this post's picture. Hidden until a check finds a
-             Brand Designer in the workspace (_gpDesignerCheck) — a button that can only fail is worse
-             than none. `hidden` loses to `flex`, so the starting state is pinned inline too. -->
-        <button type="button" id="gp-ai-src-designer" onclick="gpAiAskDesigner()" style="display:none" class="hidden btn-secondary px-2.5 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
-          <span>✏️</span>
-          <span id="gp-ai-designer-label">Ask your Brand Designer</span>
-        </button>
         <!-- Text overlays moved to the "Text on image" inspector layer in the Review Queue (Phase 3);
              the old inline "Add text" button here is retired to keep a single entry point. -->
       </div>
@@ -21264,31 +21257,9 @@ function gpAiMediaStatus(msg, type) {
     el.textContent = msg;
 }
 
-// ── Brand Designer for this post (docs/brand-designer-plan.md Phase 5) ──────────────────────────
-// One check per page load: is there a Brand Designer to ask? The answer only changes when someone
-// hires or archives one, and a stale "yes" fails with a plain message rather than silently.
-let _gpDesignerId = null;
-let _gpDesignerName = null;
-(async function _gpDesignerCheck() {
-    try {
-        const res = await fetch('/.netlify/functions/brand-briefs', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-            body: JSON.stringify({ action: 'post_brief' }),
-        });
-        if (!res.ok) return;
-        const d = await res.json();
-        _gpDesignerId = d.designerId || null;
-        _gpDesignerName = d.designerName || null;
-        const btn = document.getElementById('gp-ai-src-designer');
-        if (btn && _gpDesignerId) { btn.classList.remove('hidden'); btn.style.display = ''; }
-        _gpSyncAssistantLabels();
-    } catch { /* no button — nothing else depends on it */ }
-})();
-
 /**
- * Name the assistants on the media buttons — "Ask Marvin to generate", "Ask Iris" — instead of a
- * generic "Generate with AI". The post's own assistant does the generating; the Brand Designer is a
- * separate hire with its own name. Called whenever the media panel is (re)shown for a post.
+ * Name the assistant on the media buttons — "Ask Marvin to generate" — instead of a generic "Generate
+ * with AI". Called whenever the media panel is (re)shown for a post.
  */
 function _gpSyncAssistantLabels() {
     const id = typeof _gpCurrentPostId !== 'undefined' && _gpCurrentPostId != null ? _gpCurrentPostId : _rqReviewPostId;
@@ -21296,29 +21267,7 @@ function _gpSyncAssistantLabels() {
     const name = (post && post.assistantName) || null;
     const gen = document.getElementById('gp-ai-gen-label');
     if (gen) gen.textContent = name ? `Ask ${name} to generate` : 'Ask your assistant to generate';
-    const des = document.getElementById('gp-ai-designer-label');
-    if (des) des.textContent = _gpDesignerName ? `Ask ${_gpDesignerName} (Brand Designer)` : 'Ask your Brand Designer';
     document.querySelectorAll('[data-pce-assistant-ask]').forEach(el => { el.textContent = name ? `Ask ${name}` : 'Ask your assistant'; });
-}
-
-async function gpAiAskDesigner() {
-    if (!_gpCurrentPostId) return;
-    gpAiMediaBusy(true);
-    gpAiMediaStatus(`Briefing ${_gpDesignerName || 'your Brand Designer'}…`);
-    try {
-        const res = await fetch('/.netlify/functions/brand-briefs', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-            body: JSON.stringify({ action: 'brief_for_post', postId: _gpCurrentPostId, context: _gpAiMediaPrompt || '', mediaType: _gpAiMediaType }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `Could not brief ${_gpDesignerName || 'the Brand Designer'}.`);
-        // Says where the choice happens and what happens next — nothing lands here until they choose.
-        gpAiMediaStatus(`Briefed. Choose a picture on ${_gpDesignerName ? _gpDesignerName + '\u2019s' : 'your Brand Designer\u2019s'} Briefs tab — it comes onto this post if the post still has none.`);
-    } catch (e) {
-        gpAiMediaStatus(e.message, 'error');
-    } finally {
-        gpAiMediaBusy(false);
-    }
 }
 
 function gpAiMediaBusy(busy) {

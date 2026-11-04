@@ -12,6 +12,8 @@
 // skip review — manual and chat drafts always have a human present.
 //
 // Schedule: "0 7 * * *" (07:00 UTC daily), after draft-horizon-fill (06:00). Also POSTable for tests.
+// The cron STARTS run-autonomous-drafts-background, which has fifteen minutes and does the work. It runs
+// the work here only if that could not be started, without the image prompt writer, which would not fit.
 
 import { loadOfferingsText } from '../../src/utils/org-products';
 import { Handler } from '@netlify/functions';
@@ -25,6 +27,9 @@ import {
 import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { generateAndPersistImage } from '../../src/lib/media-persist';
+import { directPostImage } from '../../src/utils/post-image-direction';
+import { isGlobalAiDisabled } from '../../src/utils/platform-config';
+import { triggerAutonomousDrafts } from '../../src/utils/trigger-drain';
 import { holdAutonomousCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { FalContentPolicyError, IMAGE_MODEL } from '../../src/lib/fal-gateway';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
@@ -71,10 +76,7 @@ async function draftCopy(system: string): Promise<DraftCopy> {
     return { caption: safeSlice(salvaged, 2000), hashtags: '', imagePrompt: safeSlice(salvaged, 300) };
 }
 
-export default withLambda(async (event) => {
-    if (event.httpMethod !== 'POST' && !(event as any).schedule) {
-        return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
-    }
+export async function runAutonomousDrafts(opts: { imageWriter?: boolean } = {}) {
     const db = getDb();
     const now = new Date();
 
@@ -106,7 +108,7 @@ export default withLambda(async (event) => {
             inArray(masterAssistants.roleKey, SMM_ROLE_KEYS),
         ));
 
-    let drafted = 0, autoScheduled = 0, skippedNoGap = 0, skippedNoBrief = 0, failed = 0, exhausted = 0;
+    let drafted = 0, autoScheduled = 0, skippedNoGap = 0, skippedNoBrief = 0, skippedAlreadyToday = 0, failed = 0, exhausted = 0;
     // A scorer that times out or returns junk falls back to amber, which looks exactly like a
     // cautious verdict. Count it separately so a persistently broken scorer is visible in the
     // cron's own output instead of silently routing everything to review forever.
@@ -116,206 +118,236 @@ export default withLambda(async (event) => {
     const exhaustedByUser = new Map<number, number>();     // AC2.3: assistants that couldn't source any media
 
     for (const a of assistants) {
-        const org = {
-            name: a.orgName, industry: a.orgIndustry, businessDescription: a.orgDescription,
-            targetAudience: a.orgAudience, websiteUrl: a.orgWebsite,
-            // Business Information ▸ Products & Services — the one place products and prices live.
-            offerings: await loadOfferingsText(db, a.organisationId, (a.onboardingContext as { service_offerings?: unknown } | null)?.service_offerings),
-        };
-        // Nothing to write ABOUT: a post guessed from the business name is worse than no post.
-        if (!hasUsableBrief(org, a.onboardingContext)) { skippedNoBrief++; continue; }
-
-        const horizonDays = a.horizonDays ?? 7;
-        const windowEnd = new Date(now.getTime() + horizonDays * 24 * 60 * 60 * 1000);
-
-        // One idea per assistant: pick a single empty day, draft ONE caption + ONE image, and fan it
-        // across every platform the assistant targets — siblings share a crosspost_group_id so the
-        // Review Queue shows one card the human previews per platform (not N per-platform posts).
-        // Legacy assistants with no recognised platforms stay Instagram-only.
-        // Scoped to the assistant, so a platform switched off in its Connections tab drops out of
-        // the fan-out here exactly as it does in the scheduled path (schedule-gap-fill.ts).
-        const targetPlatforms = await resolveConnectedDraftPlatforms(db, a.organisationId, {
-            onboardingContext: a.onboardingContext,
-            configuration: a.configuration,
-        });
-        const platforms: AutonomousDraftPlatform[] = targetPlatforms.length ? targetPlatforms : ['instagram'];
-        const representative = platforms[0];
-        const fmt = platformFormat(representative);
-
-        // Coverage is per day (one cross-post covers every platform that day): any planned post on a
-        // day means that day is already taken. Only the assistant's own posting slots are candidates
-        // — this used to take the first day with nothing on it, so days the owner chose NOT to post
-        // on (weekends, for a weekdays-only schedule) were filled too.
-        const coveredRows = await db
-            .select({ publishDate: scheduledPosts.publishDate })
-            .from(scheduledPosts)
-            .where(and(
-                eq(scheduledPosts.assistantId, a.id),
-                gte(scheduledPosts.publishDate, now),
-                lte(scheduledPosts.publishDate, windowEnd),
-                sql`status IN ('draft','in_review','approved','scheduled','pending_approval')`,
-            ));
-        const gapDay = pickAutonomousSlot({
-            onboardingContext: a.onboardingContext,
-            horizonDays,
-            plannedDates: coveredRows.map(r => new Date(r.publishDate)),
-            now,
-        });
-        if (!gapDay) { skippedNoGap++; continue; }
-
-        // Least-used pillar over the last 60 days, the same balance the scheduled path keeps.
-        let pillarUsage: Record<string, number> = {};
+        // One assistant's failure is that assistant's, not the whole list's, and never the notifications'.
         try {
-            const used = await db
-                .select({ pillar: scheduledPosts.pillar, n: sql<number>`count(*)::int` })
+            const org = {
+                name: a.orgName, industry: a.orgIndustry, businessDescription: a.orgDescription,
+                targetAudience: a.orgAudience, websiteUrl: a.orgWebsite,
+                // Business Information ▸ Products & Services — the one place products and prices live.
+                offerings: await loadOfferingsText(db, a.organisationId, (a.onboardingContext as { service_offerings?: unknown } | null)?.service_offerings),
+            };
+            // Nothing to write ABOUT: a post guessed from the business name is worse than no post.
+            if (!hasUsableBrief(org, a.onboardingContext)) { skippedNoBrief++; continue; }
+
+            // At most one run a day per assistant. This job fills the next empty day each time it runs, so a
+            // platform retry or a repeated poke would otherwise draft (and charge for) an extra post. 20
+            // hours, not 24, so a run that starts a little early tomorrow is not skipped.
+            const [alreadyToday] = await db.select({ id: scheduledPosts.id }).from(scheduledPosts)
+                .where(and(
+                    eq(scheduledPosts.assistantId, a.id),
+                    eq(scheduledPosts.isAutonomous, true),
+                    sql`${scheduledPosts.createdAt} > now() - interval '20 hours'`,
+                ))
+                .limit(1);
+            if (alreadyToday) { skippedAlreadyToday++; continue; }
+
+            const horizonDays = a.horizonDays ?? 7;
+            const windowEnd = new Date(now.getTime() + horizonDays * 24 * 60 * 60 * 1000);
+
+            // One idea per assistant: pick a single empty day, draft ONE caption + ONE image, and fan it
+            // across every platform the assistant targets — siblings share a crosspost_group_id so the
+            // Review Queue shows one card the human previews per platform (not N per-platform posts).
+            // Legacy assistants with no recognised platforms stay Instagram-only.
+            // Scoped to the assistant, so a platform switched off in its Connections tab drops out of
+            // the fan-out here exactly as it does in the scheduled path (schedule-gap-fill.ts).
+            const targetPlatforms = await resolveConnectedDraftPlatforms(db, a.organisationId, {
+                onboardingContext: a.onboardingContext,
+                configuration: a.configuration,
+            });
+            const platforms: AutonomousDraftPlatform[] = targetPlatforms.length ? targetPlatforms : ['instagram'];
+            const representative = platforms[0];
+            const fmt = platformFormat(representative);
+
+            // Coverage is per day (one cross-post covers every platform that day): any planned post on a
+            // day means that day is already taken. Only the assistant's own posting slots are candidates
+            // — this used to take the first day with nothing on it, so days the owner chose NOT to post
+            // on (weekends, for a weekdays-only schedule) were filled too.
+            const coveredRows = await db
+                .select({ publishDate: scheduledPosts.publishDate })
                 .from(scheduledPosts)
                 .where(and(
                     eq(scheduledPosts.assistantId, a.id),
-                    isNotNull(scheduledPosts.pillar),
-                    sql`${scheduledPosts.createdAt} > now() - interval '60 days'`,
-                ))
-                .groupBy(scheduledPosts.pillar);
-            pillarUsage = Object.fromEntries(used.map(u => [u.pillar as string, u.n]));
-        } catch { /* plain rotation */ }
-        const pillar = pickPillar(a.onboardingContext, pillarUsage, gapDay);
-
-        const copy = await draftCopy(buildAutonomousDraftSystem({
-            org, assistantName: a.name, platformLabel: fmt.label,
-            onboardingContext: a.onboardingContext, pillar, slot: gapDay,
-        }));
-        if (!copy.caption) { failed++; continue; }
-
-        // AI generation source — encapsulates the autonomous credit hold/settle + the generation-job
-        // ledger, so the resolver only pays for AI when it actually reaches that source. A reached cap
-        // throws → the resolver treats AI as unavailable and falls through (or reports exhausted).
-        const generateAi = async (): Promise<number> => {
-            const hold = await holdAutonomousCredits(db, { orgId: a.organisationId, amount: IMAGE_CREDIT_COST, monthlyCap: a.cap ?? 20, assistantId: a.id });
-            if (!hold.ok) throw new Error('autonomous_cap_reached');
-
-            const [job] = await db.insert(mediaGenerationJobs).values({
-                organisationId: a.organisationId, userId: a.userId, assistantId: a.id,
-                mediaType: 'image', prompt: copy.imagePrompt, aspectRatio: fmt.aspectRatio,
-                model: IMAGE_MODEL, creditCost: IMAGE_CREDIT_COST, isAutonomous: true, status: 'processing',
-            }).returning({ id: mediaGenerationJobs.id });
-
-            try {
-                const assetId = await generateAndPersistImage(db, {
-                    orgId: a.organisationId, userId: a.userId,
-                    prompt: copy.imagePrompt, aspectRatio: fmt.aspectRatio, generationJobId: job.id,
-                });
-                await settleHold(db, { orgId: a.organisationId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: a.userId, jobId: job.id, isAutonomous: true, assistantId: a.id });
-                await db.update(mediaGenerationJobs).set({ status: 'completed', resultAssetIds: [assetId], updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, job.id));
-                return assetId;
-            } catch (err) {
-                await settleHold(db, { orgId: a.organisationId, amount: IMAGE_CREDIT_COST, success: false, mediaType: 'image', userId: a.userId, isAutonomous: true });
-                const flagged = err instanceof FalContentPolicyError;
-                await db.update(mediaGenerationJobs)
-                    .set({ status: flagged ? 'flagged' : 'failed', errorMessage: err instanceof Error ? err.message : 'generation failed', updatedAt: new Date() })
-                    .where(eq(mediaGenerationJobs.id, job.id));
-                throw err;
-            }
-        };
-
-        // Walk the assistant's media-source priority matrix (manual → stock → ai) with fallback.
-        let resolved;
-        try {
-            resolved = await resolveMediaForPost(db, {
-                assistant: { mediaSources: a.mediaSources },
-                orgId: a.organisationId, userId: a.userId,
-                context: copy.imagePrompt || copy.caption,
-                mediaType: 'image',
-                generateAi,
-            });
-        } catch (err) {
-            console.error('[autonomous-media] resolver error:', err);
-            failed++;
-            continue;
-        }
-
-        if (!resolved.ok) {
-            // AC2.3: every enabled source came back empty — notify the user instead of drafting.
-            exhaustedByUser.set(a.userId, (exhaustedByUser.get(a.userId) || 0) + 1);
-            exhausted++;
-            continue;
-        }
-
-        const assetId = resolved.assetId;
-        const dateLabel = gapDay.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
-        const sourceLabel = resolved.source === 'manual' ? 'your content library'
-            : resolved.source === 'stock' ? 'a Pexels stock photo' : 'an AI-generated image';
-        // Siblings of this one idea share the group id (null when there's only one platform).
-        const crosspostGroupId = platforms.length > 1 ? randomUUID() : null;
-
-        // Fan the one idea across the platforms. Caption, image and slot are shared; the auto-publish
-        // gate is per platform (connection, policy, confidence), so it runs inside the loop.
-        let stockReserved = false;
-        let anyAwaitingReview = false;
-        for (const platform of platforms) {
-            // Autopilot publish gate — platform policy, no AI media, green caption, a live connection,
-            // and the rolling weekly ceiling. Everything else lands in 'pending_approval'.
-            const gate = await decideAutoPublish(db, {
-                assistantId: a.id,
-                organisationId: a.organisationId,
-                platform,
-                caption: copy.caption,
-                mediaSource: resolved.source,
+                    gte(scheduledPosts.publishDate, now),
+                    lte(scheduledPosts.publishDate, windowEnd),
+                    sql`status IN ('draft','in_review','approved','scheduled','pending_approval')`,
+                ));
+            const gapDay = pickAutonomousSlot({
                 onboardingContext: a.onboardingContext,
+                horizonDays,
+                plannedDates: coveredRows.map(r => new Date(r.publishDate)),
                 now,
             });
+            if (!gapDay) { skippedNoGap++; continue; }
 
-            if (gate.reason === 'scoring_unavailable') {
-                scoringUnavailable++;
-                console.warn(`[autonomous-media] confidence scorer unavailable (${gate.confidence?.failureMode}) for assistant ${a.id} — routed to review.`);
+            // Least-used pillar over the last 60 days, the same balance the scheduled path keeps.
+            let pillarUsage: Record<string, number> = {};
+            try {
+                const used = await db
+                    .select({ pillar: scheduledPosts.pillar, n: sql<number>`count(*)::int` })
+                    .from(scheduledPosts)
+                    .where(and(
+                        eq(scheduledPosts.assistantId, a.id),
+                        isNotNull(scheduledPosts.pillar),
+                        sql`${scheduledPosts.createdAt} > now() - interval '60 days'`,
+                    ))
+                    .groupBy(scheduledPosts.pillar);
+                pillarUsage = Object.fromEntries(used.map(u => [u.pillar as string, u.n]));
+            } catch { /* plain rotation */ }
+            const pillar = pickPillar(a.onboardingContext, pillarUsage, gapDay);
+
+            const copy = await draftCopy(buildAutonomousDraftSystem({
+                org, assistantName: a.name, platformLabel: fmt.label,
+                onboardingContext: a.onboardingContext, pillar, slot: gapDay,
+            }));
+            if (!copy.caption) { failed++; continue; }
+
+            // AI generation source — encapsulates the autonomous credit hold/settle + the generation-job
+            // ledger, so the resolver only pays for AI when it actually reaches that source. A reached cap
+            // throws → the resolver treats AI as unavailable and falls through (or reports exhausted).
+            const generateAi = async (): Promise<number> => {
+                const hold = await holdAutonomousCredits(db, { orgId: a.organisationId, amount: IMAGE_CREDIT_COST, monthlyCap: a.cap ?? 20, assistantId: a.id });
+                if (!hold.ok) throw new Error('autonomous_cap_reached');
+
+                const [job] = await db.insert(mediaGenerationJobs).values({
+                    organisationId: a.organisationId, userId: a.userId, assistantId: a.id,
+                    mediaType: 'image', prompt: copy.imagePrompt, aspectRatio: fmt.aspectRatio,
+                    model: IMAGE_MODEL, creditCost: IMAGE_CREDIT_COST, isAutonomous: true, status: 'processing',
+                }).returning({ id: mediaGenerationJobs.id });
+
+                try {
+                    // Opus 5.5 writes the picture from the drafter's prompt, in the background lane only.
+                    // Never throws. Words are dropped, as they always were here: nothing on this path
+                    // lays text layers over a picture.
+                    const prompt = opts.imageWriter
+                        ? (await directPostImage(db, {
+                            orgId: a.organisationId, userId: a.userId, postId: null,
+                            assistantId: a.id, platform: representative,
+                            request: copy.imagePrompt,
+                            requestIsCaption: copy.caption.startsWith(copy.imagePrompt),
+                            wordsOnPicture: false,
+                        })).scene
+                        : copy.imagePrompt;
+                    const assetId = await generateAndPersistImage(db, {
+                        orgId: a.organisationId, userId: a.userId,
+                        prompt, aspectRatio: fmt.aspectRatio, generationJobId: job.id,
+                    });
+                    await settleHold(db, { orgId: a.organisationId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: a.userId, jobId: job.id, isAutonomous: true, assistantId: a.id });
+                    await db.update(mediaGenerationJobs).set({ status: 'completed', resultAssetIds: [assetId], updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, job.id));
+                    return assetId;
+                } catch (err) {
+                    await settleHold(db, { orgId: a.organisationId, amount: IMAGE_CREDIT_COST, success: false, mediaType: 'image', userId: a.userId, isAutonomous: true });
+                    const flagged = err instanceof FalContentPolicyError;
+                    await db.update(mediaGenerationJobs)
+                        .set({ status: flagged ? 'flagged' : 'failed', errorMessage: err instanceof Error ? err.message : 'generation failed', updatedAt: new Date() })
+                        .where(eq(mediaGenerationJobs.id, job.id));
+                    throw err;
+                }
+            };
+
+            // Walk the assistant's media-source priority matrix (manual → stock → ai) with fallback.
+            let resolved;
+            try {
+                resolved = await resolveMediaForPost(db, {
+                    assistant: { mediaSources: a.mediaSources },
+                    orgId: a.organisationId, userId: a.userId,
+                    context: copy.imagePrompt || copy.caption,
+                    mediaType: 'image',
+                    generateAi,
+                });
+            } catch (err) {
+                console.error('[autonomous-media] resolver error:', err);
+                failed++;
+                continue;
             }
-            if (gate.reason === 'weekly_cap_reached') {
-                console.warn(`[autonomous-media] assistant ${a.id} hit its weekly auto-publish ceiling — routed to review.`);
+
+            if (!resolved.ok) {
+                // AC2.3: every enabled source came back empty — notify the user instead of drafting.
+                exhaustedByUser.set(a.userId, (exhaustedByUser.get(a.userId) || 0) + 1);
+                exhausted++;
+                continue;
             }
 
-            const gateLabel = describeDecision(gate);
+            const assetId = resolved.assetId;
+            const dateLabel = gapDay.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
+            const sourceLabel = resolved.source === 'manual' ? 'your content library'
+                : resolved.source === 'stock' ? 'a Pexels stock photo' : 'an AI-generated image';
+            // Siblings of this one idea share the group id (null when there's only one platform).
+            const crosspostGroupId = platforms.length > 1 ? randomUUID() : null;
 
-            const [post] = await db.insert(scheduledPosts).values({
-                userId: a.userId, organisationId: a.organisationId, assistantId: a.id,
-                platform, postFormat: 'image', publishDate: gapDay,
-                caption: copy.caption, hashtags: copy.hashtags || null,
-                contentAssetIds: [assetId],
-                connectionId: gate.connectionId,
-                status: gate.status, isAutonomous: true, triggerType: 'scheduled', pillar,
-                // Marks the post unattended and counts toward the rolling weekly ceiling.
-                autoPublishedAt: gate.status === 'scheduled' ? new Date() : null,
-                ownerLabel: `AI: ${a.name}`,
-                generationReason: `Drafted to fill an empty slot on ${dateLabel} (media from ${sourceLabel}). ${gateLabel}`,
-                generatedAt: new Date(),
-                crosspostGroupId,
-                // Persist the scorer's verdict inline — the drafter calls scoreCaption directly, so
-                // there's no separate score-post-confidence round-trip to fill these in. Null when the
-                // platform is in review mode and scoring was skipped.
-                confidenceScore: gate.confidence?.confidenceScore ?? null,
-                factualClaimsCount: gate.confidence?.factualClaimsCount ?? null,
-                factualClaims: (gate.confidence?.factualClaims ?? null) as any,
-                confidenceAssessedAt: gate.confidence ? new Date() : null,
-                confidenceAssessmentMs: gate.confidence?.assessmentDurationMs ?? null,
-            }).returning({ id: scheduledPosts.id });
+            // Fan the one idea across the platforms. Caption, image and slot are shared; the auto-publish
+            // gate is per platform (connection, policy, confidence), so it runs inside the loop.
+            let stockReserved = false;
+            let anyAwaitingReview = false;
+            for (const platform of platforms) {
+                // Autopilot publish gate — platform policy, no AI media, green caption, a live connection,
+                // and the rolling weekly ceiling. Everything else lands in 'pending_approval'.
+                const gate = await decideAutoPublish(db, {
+                    assistantId: a.id,
+                    organisationId: a.organisationId,
+                    platform,
+                    caption: copy.caption,
+                    mediaSource: resolved.source,
+                    onboardingContext: a.onboardingContext,
+                    now,
+                });
 
-            await db.insert(scheduledPostAssets).values({ scheduledPostId: post.id, contentAssetId: assetId, position: 0 }).onConflictDoNothing();
+                if (gate.reason === 'scoring_unavailable') {
+                    scoringUnavailable++;
+                    console.warn(`[autonomous-media] confidence scorer unavailable (${gate.confidence?.failureMode}) for assistant ${a.id} — routed to review.`);
+                }
+                if (gate.reason === 'weekly_cap_reached') {
+                    console.warn(`[autonomous-media] assistant ${a.id} hit its weekly auto-publish ceiling — routed to review.`);
+                }
 
-            // Reserve the stock pick once for the group so the same Pexels asset can't be drafted twice.
-            if (resolved.source === 'stock' && !stockReserved) {
-                await recordPostedAssets(db, { orgId: a.organisationId, userId: a.userId, scheduledPostId: post.id }).catch(() => {});
-                stockReserved = true;
+                const gateLabel = describeDecision(gate);
+
+                const [post] = await db.insert(scheduledPosts).values({
+                    userId: a.userId, organisationId: a.organisationId, assistantId: a.id,
+                    platform, postFormat: 'image', publishDate: gapDay,
+                    caption: copy.caption, hashtags: copy.hashtags || null,
+                    contentAssetIds: [assetId],
+                    connectionId: gate.connectionId,
+                    status: gate.status, isAutonomous: true, triggerType: 'scheduled', pillar,
+                    // Marks the post unattended and counts toward the rolling weekly ceiling.
+                    autoPublishedAt: gate.status === 'scheduled' ? new Date() : null,
+                    ownerLabel: `AI: ${a.name}`,
+                    generationReason: `Drafted to fill an empty slot on ${dateLabel} (media from ${sourceLabel}). ${gateLabel}`,
+                    generatedAt: new Date(),
+                    crosspostGroupId,
+                    // Persist the scorer's verdict inline — the drafter calls scoreCaption directly, so
+                    // there's no separate score-post-confidence round-trip to fill these in. Null when the
+                    // platform is in review mode and scoring was skipped.
+                    confidenceScore: gate.confidence?.confidenceScore ?? null,
+                    factualClaimsCount: gate.confidence?.factualClaimsCount ?? null,
+                    factualClaims: (gate.confidence?.factualClaims ?? null) as any,
+                    confidenceAssessedAt: gate.confidence ? new Date() : null,
+                    confidenceAssessmentMs: gate.confidence?.assessmentDurationMs ?? null,
+                }).returning({ id: scheduledPosts.id });
+
+                await db.insert(scheduledPostAssets).values({ scheduledPostId: post.id, contentAssetId: assetId, position: 0 }).onConflictDoNothing();
+
+                // Reserve the stock pick once for the group so the same Pexels asset can't be drafted twice.
+                if (resolved.source === 'stock' && !stockReserved) {
+                    await recordPostedAssets(db, { orgId: a.organisationId, userId: a.userId, scheduledPostId: post.id }).catch(() => {});
+                    stockReserved = true;
+                }
+
+                if (gate.status !== 'scheduled') anyAwaitingReview = true;
             }
 
-            if (gate.status !== 'scheduled') anyAwaitingReview = true;
+            // Count one idea (one Review Queue card), not one per platform: it shows in review if any
+            // platform awaits approval, else it's an all-scheduled auto-published cross-post.
+            if (anyAwaitingReview) {
+                draftedByUser.set(a.userId, (draftedByUser.get(a.userId) || 0) + 1);
+            } else {
+                autoScheduledByUser.set(a.userId, (autoScheduledByUser.get(a.userId) || 0) + 1);
+                autoScheduled++;
+            }
+            drafted++;
+        } catch (err) {
+            console.error(`[autonomous-media] assistant ${a.id} failed:`, err instanceof Error ? err.message : err);
+            failed++;
         }
-
-        // Count one idea (one Review Queue card), not one per platform: it shows in review if any
-        // platform awaits approval, else it's an all-scheduled auto-published cross-post.
-        if (anyAwaitingReview) {
-            draftedByUser.set(a.userId, (draftedByUser.get(a.userId) || 0) + 1);
-        } else {
-            autoScheduledByUser.set(a.userId, (autoScheduledByUser.get(a.userId) || 0) + 1);
-            autoScheduled++;
-        }
-        drafted++;
     }
 
     // US8 in-app alert: one summary notification per user ("drafted N new posts for your review").
@@ -350,9 +382,22 @@ export default withLambda(async (event) => {
         });
     }
 
-    return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ran: true, assistantsChecked: assistants.length, drafted, autoScheduled, scoringUnavailable, skippedNoGap, skippedNoBrief, failed, exhausted }),
-    };
+    return { ran: true, assistantsChecked: assistants.length, drafted, autoScheduled, scoringUnavailable, skippedNoGap, skippedNoBrief, skippedAlreadyToday, failed, exhausted };
+}
+
+export default withLambda(async (event) => {
+    if (event.httpMethod !== 'POST' && !(event as any).schedule) {
+        return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
+    }
+    const reply = (body: unknown) => ({ statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    // An unattended path that spends credits. Checked here too, so a switched-off platform spends no invocation.
+    if (await isGlobalAiDisabled()) return reply({ ran: false, reason: 'ai_disabled' });
+
+    // No request headers on a cron, so the target resolves from BASE_URL.
+    if (await triggerAutonomousDrafts(undefined, 'cron', 'autonomous-media-suggestions')) {
+        return reply({ ran: true, handedOff: true });
+    }
+    console.warn('[autonomous-media] background run not started; running here without the image writer, and a long list may be cut short.');
+    return reply(await runAutonomousDrafts());
 });

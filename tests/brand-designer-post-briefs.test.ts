@@ -10,7 +10,7 @@
 //   • One open brief per post — a retried job or a second click does not make two.
 //   • Approving puts the picture on the post through the one attach function, and both surfaces say
 //     what happened to the post.
-//   • The post editor shows "Ask the Brand Designer" only when there is one to ask.
+//   • The post editor no longer offers a Brand Designer button (owner, 2026-11-04): its generate button writes with the same knowledge.
 //   • No import cycle: brief-post-media does not import visual-briefs.
 //
 // Run:  npx tsx tests/brand-designer-post-briefs.test.ts
@@ -102,15 +102,12 @@ check('the attach rules: editable status, no existing media, siblings too, never
 
 console.log('\n──── the post editor and the migration ────');
 
-check('"Ask the Brand Designer" appears only when there is one, and asks through the API', () => {
+check('the post editor has no Brand Designer button: drafting raises these briefs, the editor generates', () => {
     const page = read('workspace.html');
-    assert.match(page, /id="gp-ai-src-designer"[^>]*style="display:none"[^>]*class="hidden /, 'hidden until the check says yes');
-    assert.match(page, /if \(btn && _gpDesignerId\) \{ btn\.classList\.remove\('hidden'\); btn\.style\.display = ''; \}/);
-    assert.match(page, /action: 'brief_for_post', postId: _gpCurrentPostId/);
-    const api = code(read('netlify/functions/brand-briefs.ts'));
-    const bfp = span(api, "if (action === 'brief_for_post')", "if (action === 'cancel')", 'brief_for_post');
-    assert.match(bfp, /eq\(scheduledPosts\.organisationId, orgId\)/);
-    assert.ok(bfp.indexOf('enforcePromptModeration') < bfp.indexOf('raiseBriefForPost'), 'moderated before anything is made');
+    for (const gone of ['gp-ai-src-designer', 'gpAiAskDesigner', '_gpDesignerCheck']) assert.ok(!page.includes(gone), gone);
+    const api = read('netlify/functions/brand-briefs.ts');
+    for (const gone of ['brief_for_post', 'post_brief', 'raiseBriefForPost']) assert.ok(!api.includes(gone), gone);
+    assert.match(read('netlify/functions/process-content-jobs.ts'), /raiseBriefForPost\(db, \{/, 'a draft with no picture still raises one');
 });
 
 check('the migration links briefs to posts without deleting either way, and widens origin as a superset', () => {

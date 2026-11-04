@@ -313,12 +313,12 @@ export async function generateImages(opts: {
 /**
  * One image per prompt, drawn in parallel — the round of four as four different pictures (see
  * image-prompt.ts visualisePrompts). Same cost as one call for four: FLUX is priced per image. A prompt
- * that fails is left out; throws only when none came back.
+ * that fails is left out; throws only when none came back. Each image says which prompt made it.
  */
-export async function generateImageVariants(opts: Omit<Parameters<typeof generateImages>[0], 'prompt' | 'numImages'> & { prompts: string[] }): Promise<GeneratedImage[]> {
+export async function generateImageVariants(opts: Omit<Parameters<typeof generateImages>[0], 'prompt' | 'numImages'> & { prompts: string[] }): Promise<Array<GeneratedImage & { prompt: string }>> {
     const { prompts, ...rest } = opts;
     const settled = await Promise.allSettled(prompts.slice(0, 4).map((prompt) => generateImages({ ...rest, prompt, numImages: 1 })));
-    const images = settled.flatMap((r) => (r.status === 'fulfilled' ? r.value.slice(0, 1) : []));
+    const images = settled.flatMap((r, i) => (r.status === 'fulfilled' ? r.value.slice(0, 1).map((img) => ({ ...img, prompt: prompts[i] })) : []));
     if (!images.length) {
         const first = settled.find((r): r is PromiseRejectedResult => r.status === 'rejected');
         throw first?.reason instanceof Error ? first.reason : new FalError('Fal returned no images.');

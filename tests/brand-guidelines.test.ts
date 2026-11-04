@@ -118,7 +118,8 @@ check('the Brand Designer: workspace guidelines win; Phase 1 setup answers only 
     assert.strictEqual(merged.photoStyle, 'workspace style');
     assert.strictEqual(merged.mustAvoid, 'setup avoid');
     const engine = code(read('src/utils/visual-briefs.ts'));
-    assert.match(engine, /\.\.\.guidelinesPromptLines\(ctx\.guidelines\)/, 'art direction reads them');
+    assert.match(engine, /\.\.\.businessPromptLines\(ctx\)/, 'art direction reads them');
+    assert.match(code(read('src/utils/art-direction-context.ts')), /\.\.\.guidelinesPromptLines\(ctx\.guidelines\)/, 'through the shared lines');
     assert.match(engine, /fallbackArtDirection\(brief, ctx\.kit, ctx\.guidelines\)/, 'and so does the fallback when the model is down');
     const schema = read('src/public/assistant-onboarding-schemas.js');
     assert.match(schema, /Used when your workspace has no photo style set under Business Information ▸ Brand Assets/,

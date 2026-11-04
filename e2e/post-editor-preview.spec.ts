@@ -81,6 +81,21 @@ test.describe('wide window', () => {
         await expect(page.getByText('Something went wrong on this page').first()).toBeHidden();
     });
 
+    test('the media panel offers one generate button, named after the post\'s assistant', async ({ page, api, signedIn, pageErrors }) => {
+        stubCrossPost(api);
+        const asked: string[] = [];
+        page.on('request', (r) => { if (r.url().includes('/brand-briefs')) asked.push(r.postData() || ''); });
+        await openPost(page);
+
+        await page.evaluate(() => (window as unknown as { _gpSyncAssistantLabels: () => void })._gpSyncAssistantLabels());
+        await expect(page.locator('#gp-ai-gen-label').first()).toHaveText('Ask Social Assistant to generate');
+        await expect(page.locator('#gp-ai-src-ai')).toHaveCount(1);
+        await expect(page.locator('#gp-ai-src-designer')).toHaveCount(0);
+        expect(await page.locator('#gp-ai-media-actions').first().textContent()).not.toContain('Brand Designer');
+        expect(asked.filter((body) => body.includes('post_brief'))).toEqual([]);
+        expect(pageErrors).toEqual([]);
+    });
+
     test('folding the setup steps gives the room to the post', async ({ page, api, signedIn }) => {
         stubCrossPost(api);
         await page.setViewportSize({ width: 1100, height: 833 });

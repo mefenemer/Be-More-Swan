@@ -39,7 +39,8 @@ export default withLambda(async (event) => {
     }
 
     try {
-        const processed = await drainContentJobs();
+        // This lane has the time for the image prompt writer; the 26 s functions do not.
+        const processed = await drainContentJobs({ imageWriter: true });
         console.log(`[run-content-jobs-background] drained ${processed} job(s)`);
         return { statusCode: 200, body: JSON.stringify({ ok: true, processed }) };
     } catch (err) {

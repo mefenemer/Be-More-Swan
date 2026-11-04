@@ -29,7 +29,7 @@
 // reaching its chat and its outreach drafts. Email Marketing reads its rules through blueprint §4
 // (newsletter-generate.ts) for autopilot; since 2026-10-22 its chat reads them here too.
 
-import { and, desc, eq, isNull, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { contentRules } from '../../db/schema';
 
@@ -95,15 +95,18 @@ export function formatRulesBlock(rules: PromptRule[]): string | null {
 /** The active rules for one assistant, as a prompt block. Never throws: a failed read means no block. */
 export async function loadAssistantRulesBlock(
     db: PostgresJsDatabase<any>,
-    params: { assistantId: number; organisationId: number },
+    // alsoAssistantId: a second assistant's rules read alongside — the post editor's image writer reads
+    // the Brand Designer's too, where someone wrote their picture rules down.
+    params: { assistantId: number | null; organisationId: number; alsoAssistantId?: number | null },
 ): Promise<string | null> {
     try {
         // The same set blueprint §4 gives autopilot: this assistant's rules plus the workspace-wide
         // ones (assistant_id NULL). Reading only the first left chat behind autopilot.
+        const ids = [params.assistantId, params.alsoAssistantId].filter((id): id is number => id != null);
         const rows = await db.select({ ruleText: contentRules.ruleText, origin: contentRules.origin, platform: contentRules.platform })
             .from(contentRules)
             .where(and(
-                or(eq(contentRules.assistantId, params.assistantId), isNull(contentRules.assistantId)),
+                ids.length ? or(inArray(contentRules.assistantId, ids), isNull(contentRules.assistantId)) : isNull(contentRules.assistantId),
                 eq(contentRules.workspaceId, params.organisationId),
                 eq(contentRules.isActive, true),
             ))
