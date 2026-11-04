@@ -157,11 +157,12 @@ export type MailboxProvider = (typeof MAILBOX_PROVIDERS)[number];
 // This is role-scoped rather than a plain entry in EXTERNALLY_LIVE_CATEGORIES because the two
 // halves are independent: the Gmail/Outlook grants are workspace-wide and real for everybody, but
 // only these roles have code that actually sends through them (lead_qualifier → lead-generation.ts
-// `send_outreach`). Marking `email` live for a role with nothing to render would make the category
+// `send_outreach`; newsletter_editor → newsletter-send.ts, the small-list route when no sending
+// domain is verified). Marking `email` live for a role with nothing to render would make the category
 // VANISH from the Connections grid — no connector card, and no "coming soon" card either — which is
 // the failure mode this module's header warns about. So a role joins this set at the same time as
 // the code that uses the mailbox, never before.
-export const MAILBOX_ROLES = new Set<string>(['lead_qualifier']);
+export const MAILBOX_ROLES = new Set<string>(['lead_qualifier', 'newsletter_editor']);
 
 export function usesOutreachMailbox(a: AssistantRole | null | undefined): boolean {
     return !!(a?.roleKey && MAILBOX_ROLES.has(a.roleKey));

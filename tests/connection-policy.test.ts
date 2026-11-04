@@ -164,6 +164,12 @@ check('Email stays coming-soon for a role with no mailbox send path', () => {
     assert.equal(supportedToolsForAssistant(a).find(t => t.key === 'email')?.available, false);
 });
 
+check('Email is live for the Email Marketing Assistant, which sends through a connected mailbox', () => {
+    const a = { roleKey: 'newsletter_editor', role: 'Email Marketing Assistant' };
+    assert.equal(usesOutreachMailbox(a), true);
+    assert.equal(supportedToolsForAssistant(a).find(t => t.key === 'email')?.available, true);
+});
+
 // A role marked as a mailbox role must actually be allowed the email category — otherwise
 // usesOutreachMailbox() is true, the server sends mailboxProviders, and the grid renders mailbox
 // cards for a category the policy would never have shown. Fail loudly on that mismatch.
