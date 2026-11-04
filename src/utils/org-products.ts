@@ -102,16 +102,39 @@ export function renderProductsBlock(products: OrgProduct[] | null | undefined, b
 
 /**
  * The catalogue as bare FACTS — no writing rules — for a reviewer checking a claim, not writing one
- * (src/utils/post-quality-review.ts). Name, kind and price only: a reviewer needs to know a listed
- * price is the real one, and a long description would crowd the caption out of its prompt.
+ * (src/utils/post-quality-review.ts, the warning verifier, the Video Producer).
+ *
+ * Name, kind, price and link, PLUS what each product is and includes (capped per product). It used
+ * to be name and price only, so a feature the business lists as a benefit — "The Business Mentor
+ * Assistant included" on Be More Swan's own plans — read to the reviewer as undeclared and was
+ * flagged on every post that named it (2026-11-04). Past the budget, products fall back to the bare
+ * line rather than the list being cut mid-product.
  */
-export function renderProductFacts(products: OrgProduct[] | null | undefined, maxChars = 2500): string {
-    const lines = (products ?? [])
-        .filter((p) => oneLine(p?.name, PRODUCT_LIMITS.name))
-        .map((p) => `- ${oneLine(p.name, PRODUCT_LIMITS.name)} (${p.kind === 'service' ? 'service' : 'product'})${oneLine(p.price, PRODUCT_LIMITS.price) ? ` — ${oneLine(p.price, PRODUCT_LIMITS.price)}` : ' — no price listed'}${oneLine(p.url, PRODUCT_LIMITS.url) ? ` — ${oneLine(p.url, PRODUCT_LIMITS.url)}` : ''}`);
-    if (!lines.length) return '';
-    return `Products and services the business lists (Business Information), with their only valid prices:\n${lines.join('\n')}`.slice(0, maxChars);
+export function renderProductFacts(products: OrgProduct[] | null | undefined, maxChars = 6000): string {
+    const list = (products ?? []).filter((p) => oneLine(p?.name, PRODUCT_LIMITS.name));
+    if (!list.length) return '';
+    const header = 'Products and services the business lists (Business Information), with their only valid prices and what each one includes:';
+    const shown: string[] = [];
+    let used = header.length + 100; // room for the "N more not shown" line
+    for (const p of list) {
+        const head = `- ${oneLine(p.name, PRODUCT_LIMITS.name)} (${p.kind === 'service' ? 'service' : 'product'})${oneLine(p.price, PRODUCT_LIMITS.price) ? ` — ${oneLine(p.price, PRODUCT_LIMITS.price)}` : ' — no price listed'}${oneLine(p.url, PRODUCT_LIMITS.url) ? ` — ${oneLine(p.url, PRODUCT_LIMITS.url)}` : ''}`;
+        // Benefits keep their line breaks as "; " — one benefit per line in the editor (and the plan
+        // facts plan-products.ts puts first) must stay distinct items, not run together.
+        const benefits = String(p.benefits ?? '').split('\n').map((l) => oneLine(l, PRODUCT_LIMITS.benefits)).filter(Boolean).join('; ').slice(0, FACT_DETAIL_MAX);
+        const description = oneLine(p.description, FACT_DETAIL_MAX);
+        const full = [head, description ? `  What it is: ${description}` : '', benefits ? `  Includes: ${benefits}` : ''].filter(Boolean).join('\n');
+        // Detail while it fits, then the bare line, then stop — never a product cut off mid-line.
+        const line = used + 1 + full.length <= maxChars ? full : head;
+        if (used + 1 + line.length > maxChars) break;
+        shown.push(line);
+        used += 1 + line.length;
+    }
+    const hidden = list.length - shown.length;
+    return [header, ...shown, hidden > 0 ? `(${hidden} more not shown — do not treat a product as undeclared just because it is not in this list.)` : '']
+        .filter(Boolean).join('\n');
 }
+/** Per product, how much of its description and of its benefits the facts carry. */
+const FACT_DETAIL_MAX = 500;
 
 /** The ACTIVE catalogue, in the business's own order. [] on any failure. */
 export async function loadOrgProducts(db: Db, organisationId: number): Promise<OrgProduct[]> {
