@@ -25,6 +25,7 @@ import { aiAssistants, chatMessages, chatSessions, mentorJobs, organisations } f
 import { gatewayGenerateGrounded } from '../lib/ai-gateway';
 import { adaptForModel, replyText } from '../config/model-options';
 import { MENTOR_RESEARCH_CRAFT, MENTOR_STRATEGY_CRAFT } from '../constants/mentor-craft';
+import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { playbookFor, renderPlaybookForMentor } from '../config/mentor-playbooks';
 import { loadRoleModel, withRoleModel } from './assistant-model';
 import { matchesSearchedUrl } from './compliance-verification';
@@ -261,7 +262,7 @@ async function businessLine(db: Db, orgId: number): Promise<string> {
 
 async function runResearch(db: Db, job: any): Promise<{ result: ResearchResult; charge: boolean }> {
     const question = String(job.input?.question ?? '');
-    const system = `${MENTOR_RESEARCH_CRAFT}\n\nTHE BUSINESS (for context only — the question is about the world, not about their own records): ${await businessLine(db, job.organisationId)}\nAssume the UK unless the question says otherwise.`;
+    const system = `${MENTOR_RESEARCH_CRAFT}\n\nTHE BUSINESS (for context only — the question is about the world, not about their own records): ${await businessLine(db, job.organisationId)}\nAssume the UK unless the question says otherwise.\n\n${SPECIAL_CATEGORY_RULE}`;
     const gw = await withRoleModel(
         await loadRoleModel(db, MENTOR_ROLE_KEY), MENTOR_JOB_DEFAULT_MODEL,
         (m, thinking) => gatewayGenerateGrounded({
@@ -303,7 +304,11 @@ async function runStrategyDraft(db: Db, job: any): Promise<{ result: Record<stri
     const ideaDoc = idea ? (idea.approved ?? idea.draft) : null;
     const ideaText = ideaDoc ? STRATEGY_KINDS.idea_check.sections.filter((s) => ideaDoc.body.sections[s.key]?.trim()).map((s) => `- ${s.label} ${ideaDoc.body.sections[s.key].trim()}`).join('\n') || null : null;
     const playbook = renderPlaybookForMentor(playbookFor(parts.data.offerKinds)).join('\n');
-    const system = [MENTOR_STRATEGY_CRAFT, parts.text, playbook, strategyDraftBrief(kind, (draft ?? approved)?.body ?? null, ideaText)].join('\n\n');
+    const system = [
+        MENTOR_STRATEGY_CRAFT,
+        SPECIAL_CATEGORY_RULE,
+        parts.text, playbook, strategyDraftBrief(kind, (draft ?? approved)?.body ?? null, ideaText),
+    ].join('\n\n');
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const { response, model } = await withRoleModel(

@@ -16,6 +16,7 @@
 //   articles                      src/utils/blog-generate.ts
 //   emails + email campaigns      src/utils/newsletter-generate.ts (×2), src/utils/newsletter-campaign-generate.ts
 //   lead outreach (4 prompts)     src/config/sender-identity.ts senderIdentityBlock
+//   Mentor background work        src/utils/mentor-feedback.ts, mentor-jobs.ts (strategy + research), mentor-review.ts
 // tests/special-category-rule.test.ts fails if a seam stops carrying it; the go-live check
 // (src/utils/assistant-go-live.ts) passes for a built role BECAUSE of that test.
 

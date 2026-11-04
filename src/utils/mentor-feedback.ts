@@ -11,6 +11,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { eq } from 'drizzle-orm';
 import { organisations } from '../../db/schema';
 import { MENTOR_FEEDBACK_CRAFT } from '../constants/mentor-craft';
+import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { CHAT_DEFAULT_MODEL } from '../config/assistant-prompt-layers';
 import { adaptForModel, replyText } from '../config/model-options';
 import { loadRoleModel, withRoleModel } from './assistant-model';
@@ -64,7 +65,9 @@ ${MENTOR_FEEDBACK_CRAFT}
 
 - Never invent anything about the business: only what is listed above. If something the draft says isn't above, say you can't check it.
 - No statistic or benchmark unless you can say where it comes from; otherwise call it your own judgement.
-- This is the "Get feedback" box on your Overview tab: nothing is saved or changed, so never say you have changed anything.`;
+- This is the "Get feedback" box on your Overview tab: nothing is saved or changed, so never say you have changed anything.
+
+${SPECIAL_CATEGORY_RULE}`;
 }
 
 /** The screen's action: judge the draft. */
