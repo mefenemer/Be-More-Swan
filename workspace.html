@@ -9232,6 +9232,16 @@ const PCE_ACTS = {
         const box = host.getBoundingClientRect();
         if (!box.width || ev.clientX < box.left || ev.clientX > box.right
             || ev.clientY < box.top || ev.clientY > box.bottom) return null;
+        // ⚠️ A real control of its OWN is not a coverer. The "Remove text?" dialog opens over this
+        // panel, and its Remove button was being read as a cover for the × beneath it: the press
+        // re-fired the ×, which re-opened the dialog (replacing the one being answered), so the
+        // text was never removed and you had to delete twice. Only a non-interactive layer — a
+        // stray transparent box — is something to see through.
+        const t = ev.target;
+        if (t && t.closest && !host.contains(t)
+            && t.closest('button, a[href], input, select, textarea, label, [role="dialog"], [aria-modal="true"], #aura-confirm-modal')) {
+            return null;
+        }
         for (const cand of document.elementsFromPoint(ev.clientX, ev.clientY)) {
             const hit = cand.closest && cand.closest('[data-pce-act]');
             if (!hit || !host.contains(hit)) continue;
@@ -11686,6 +11696,29 @@ function _prqRenderVerification(index, d) {
             <button type="button" onclick="rqAcceptVerified(${index})"
               class="btn-primary mt-2 w-full px-2 py-1.5 text-[11px] font-bold rounded-md">Use this source</button>
           </div>`;
+        return;
+    }
+
+    if (d.status === 'declared') {
+        // The reviewer flagged as undeclared a claim the business's records ALREADY cover. Telling
+        // the owner to "fix this in your records" (what this used to say) sent them to check a
+        // record that was right all along. One button clears it, through the normal disposition
+        // path so the audit trail still has a person behind it.
+        host.innerHTML = `
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+            <p class="text-[11px] font-bold text-emerald-700">Already in your records</p>
+            <p class="mt-1 text-[11px] text-gray-700">${_prqEsc(d.reason || '')}</p>
+            ${d.fixWhere ? `<p class="mt-1 text-[11px] text-gray-600">Declared in: <span class="font-semibold">${_prqEsc(d.fixWhere)}</span></p>` : ''}
+            <button type="button" data-prq-clear-declared="${index}"
+              class="btn-primary mt-2 w-full px-2 py-1.5 text-[11px] font-bold rounded-md">Clear this warning</button>
+          </div>`;
+        host.querySelector('[data-prq-clear-declared]')?.addEventListener('click', () => {
+            const warning = _prqWarningAt(index);
+            if (!warning) return;
+            _prqStopPoll(index);
+            const where = d.fixWhere ? ` (${d.fixWhere})` : '';
+            _prqResolve(warning, 'not_applicable', { note: `Already declared in the business's records${where}: ${d.reason || ''}`.slice(0, 500) });
+        });
         return;
     }
 

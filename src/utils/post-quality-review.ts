@@ -88,6 +88,8 @@ export type WarningVerification =
     | { status: 'rewrite'; before: string; after: string; reason: string; searchCount: number; finishedAt: string }
     /** About the business's own records: what to change, where (a FACT_LOCATIONS value or null), and an optional corrected caption. */
     | { status: 'records'; reason: string; fixWhere: string | null; before: string | null; after: string | null; searchCount: number; finishedAt: string }
+    /** A declared fact already covers the flagged claim — the warning was a false alarm. */
+    | { status: 'declared'; reason: string; fixWhere: string | null; searchCount: number; finishedAt: string }
     | { status: 'inconclusive'; reason: string; searchCount: number; finishedAt: string }
     | { status: 'failed'; error: string; finishedAt: string };
 
@@ -430,6 +432,10 @@ being asked again on every post:
 - a free trial, discount, guarantee, "no card required" or other standing offer → "If it's real,
   add it under ${FACT_LOCATIONS.catalogue} ▸ Free trial or introductory offer, or mark this warning
   as sourced."
+Before raising a "not among the declared facts" warning, read EVERY declared fact below, the
+Business Profile lines included — not only Products & Services. A fact that covers the claim in
+different words still covers it ("a Business Mentor on every plan" covers "the Business Mentor
+Assistant, included on both plans"), so do not warn.
 A "Free trial / introductory offer" or "Standard offer / incentive" fact below that covers the
 offer means it IS declared — do not warn. If the introductory-offer fact says NONE and no
 incentive names one, an offer in the caption is untrue — warn.

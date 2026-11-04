@@ -51,6 +51,8 @@ export type VerificationOutcome =
     | { outcome: 'sourced'; sourceUrl: string; note: string; searchCount: number }
     | { outcome: 'rewrite'; before: string; after: string; reason: string; searchCount: number }
     | { outcome: 'records'; reason: string; fixWhere: string | null; after: string | null; searchCount: number }
+    /** The claim is ALREADY covered by a declared fact — nothing to fix; the warning was a false alarm. */
+    | { outcome: 'declared'; reason: string; fixWhere: string | null; searchCount: number }
     | { outcome: 'inconclusive'; reason: string; searchCount: number };
 
 /**
@@ -102,14 +104,20 @@ facts, or a link pointing at the wrong site — DO NOT search. The web cannot se
 business charges; its own records can, and the business is the only one who can change them. Use
 "records": say plainly what is wrong (quote the values) and which record to change.
 
+If a declared fact ALREADY covers what the warning says is missing — the caption's claim agrees
+with it, even in different words ("a Business Mentor on every plan" covers "the Business Mentor
+Assistant, included on both plans") — the warning was a false alarm. Use "declared": nothing needs
+changing, and fixWhere is the [Edited in: …] place of the fact that covers it. Never use "records"
+to tell the owner to add or change something that is already there.
+
 Otherwise, search for a credible, primary source for the specific factual claim the warning is about.
 Prefer original research, official statistics, regulatory guidance, or the company's own published
 figures. A blog post restating someone else's number is not a source; find what it cites.
 
 Then return ONLY a JSON object, no markdown:
 {
-  "outcome": "records" | "sourced" | "rewrite" | "inconclusive",
-  "fixWhere": "<records only: the [Edited in: …] place to change, copied exactly, without brackets>",
+  "outcome": "declared" | "records" | "sourced" | "rewrite" | "inconclusive",
+  "fixWhere": "<records/declared only: the [Edited in: …] place, copied exactly, without brackets>",
   "sourceUrl": "<the exact URL of the supporting page, from your search results>",
   "note": "<one sentence: what the source says and how it supports the claim>",
   "rewrittenCaption": "<the full caption with the unsupportable claim removed or softened>",
@@ -123,6 +131,8 @@ Rules:
   the unsupported claim removed, or softened to something defensible ("many small businesses juggle
   a stack of subscriptions" rather than a fabricated statistic). Preserve the author's voice, the
   structure, and everything the warning did not concern. Keep it suitable for ${platform}.
+- For "declared", reason is one plain sentence to the business owner quoting the declared fact
+  that already covers the claim.
 - For "records", reason is one or two plain sentences to the business owner: what disagrees or is
   wrong, and what to change where. If the caption itself states the out-of-date value, ALSO give
   rewrittenCaption using the value from the record that wins (the catalogue wins on prices and
@@ -160,6 +170,7 @@ export async function runWarningVerification(args: {
     }>(gw.text);
     if (!parsed) throw new Error('The assistant did not return a readable answer.');
 
+    if (parsed.outcome === 'declared') return declaredOutcome(parsed, gw.searchCount);
     if (parsed.outcome === 'records') return recordsOutcome(parsed, caption, gw.searchCount);
 
     // ── The grounding check ──────────────────────────────────────────────────────────────
@@ -211,6 +222,32 @@ export async function runWarningVerification(args: {
     };
 }
 
+/** Normalise an `[Edited in: …]` place the model copied; only a known FACT_LOCATIONS value survives. */
+function factLocation(raw: string | undefined): string | null {
+    const where = (raw || '').replace(/^\[?\s*Edited in:\s*/i, '').replace(/\]$/, '').trim();
+    return FACT_LOCATION_VALUES.includes(where) ? where : null;
+}
+
+/**
+ * Shape an "already in your records" answer. Exported for tests.
+ *
+ * The reviewer flagged a claim as undeclared that a declared fact already covers (a Business
+ * Profile line naming the very thing, 2026-11-04). The verifier saw that, but its only answer was
+ * "records", which the panel renders as "Fix this in your records" — telling the owner to fix a
+ * record that was already right. This outcome lets the panel offer to clear the warning instead.
+ */
+export function declaredOutcome(
+    parsed: { reason?: string; fixWhere?: string },
+    searchCount: number,
+): Extract<VerificationOutcome, { outcome: 'declared' }> {
+    return {
+        outcome: 'declared',
+        reason: (parsed.reason || 'Your records already cover this claim.').slice(0, 600),
+        fixWhere: factLocation(parsed.fixWhere),
+        searchCount,
+    };
+}
+
 /**
  * Shape a "fix it in your records" answer. Exported for tests.
  *
@@ -222,12 +259,11 @@ export function recordsOutcome(
     caption: string,
     searchCount: number,
 ): Extract<VerificationOutcome, { outcome: 'records' }> {
-    const where = (parsed.fixWhere || '').replace(/^\[?\s*Edited in:\s*/i, '').replace(/\]$/, '').trim();
     const after = (parsed.rewrittenCaption || '').trim();
     return {
         outcome: 'records',
         reason: (parsed.reason || 'This is about your own records, not something the web can confirm.').slice(0, 600),
-        fixWhere: FACT_LOCATION_VALUES.includes(where) ? where : null,
+        fixWhere: factLocation(parsed.fixWhere),
         // A "rewrite" that changes nothing is no rewrite.
         after: after && after !== caption ? after : null,
         searchCount,
