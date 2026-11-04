@@ -37,6 +37,9 @@ const SEAMS: Array<[string, number]> = [
     ['src/utils/blog-generate.ts', 1],
     ['src/utils/newsletter-generate.ts', 2],            // an email, and an email campaign step
     ['src/utils/newsletter-campaign-generate.ts', 1],
+    ['src/utils/mentor-feedback.ts', 1],                // Get feedback
+    ['src/utils/mentor-jobs.ts', 2],                    // research, and strategy documents
+    ['src/utils/mentor-review.ts', 1],                  // the weekly review
 ];
 for (const [file, n] of SEAMS) {
     check(`${file} carries the rule (${n}×)`, () => {

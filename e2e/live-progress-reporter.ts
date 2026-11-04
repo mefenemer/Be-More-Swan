@@ -18,6 +18,9 @@ interface TestRow {
     status: TestState;
     durationMs: number | null;
     error: string | null;
+    // The whole message, for the ticket SwanJira raises when this test fails.
+    errorDetail: string | null;
+    line: number;
 }
 
 export default class LiveProgressReporter implements Reporter {
@@ -41,6 +44,8 @@ export default class LiveProgressReporter implements Reporter {
                 status: 'pending',
                 durationMs: null,
                 error: null,
+                errorDetail: null,
+                line: test.location.line,
             });
         }
         this.write('running');
@@ -64,9 +69,10 @@ export default class LiveProgressReporter implements Reporter {
             : result.retry < test.retries ? 'running'
             : 'failed';
         row.durationMs = result.duration;
-        // First line only, colour codes stripped — the HTML report has the whole thing.
-        const message = result.error?.message?.replace(/\u001b\[[0-9;]*m/g, '').split('\n').find((l) => l.trim()) || null;
-        row.error = row.status === 'failed' ? message : null;
+        // Colour codes stripped. The page shows the first line; the HTML report has the stack and trace.
+        const message = result.error?.message?.replace(/\u001b\[[0-9;]*m/g, '').trim() || null;
+        row.error = row.status === 'failed' && message ? message.split('\n')[0] : null;
+        row.errorDetail = row.status === 'failed' && message ? message.slice(0, 4000) : null;
         this.write('running');
     }
 

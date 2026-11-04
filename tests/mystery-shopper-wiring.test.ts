@@ -133,6 +133,8 @@ console.log('\nGUI ↔ chat parity');
 check('each card type in the prompt is registered and dispatches an event the chat session handles', () => {
     const pairs: Array<[string, string]> = [
         ['site_audit_check', 'siteaudit:check'], ['site_audit_settings', 'siteaudit:save'], ['site_audit_fix_update', 'siteaudit:fix'],
+        ['site_audit_check_update', 'siteaudit:checkwork'],
+        ['site_audit_item_check', 'siteaudit:itemcheck'], ['site_audit_website_request', 'siteaudit:askwebsite'],
         ['site_audit_handoff', 'siteaudit:handoff'],
     ];
     for (const [type, evt] of pairs) {
@@ -145,7 +147,7 @@ check('each card type in the prompt is registered and dispatches an event the ch
 });
 
 check('chat handlers call the same actions as the tab, and tell the tab to reload', () => {
-    for (const action of ["action: 'run'", "action: 'save'", "action: 'fix'"]) {
+    for (const action of ["action: 'run'", "action: 'save'", "action: 'fix'", "action: 'check_work'", "action: 'check_item'", "action: 'ask_website'"]) {
         assert.ok(session.includes(action), `chat: ${action}`);
         assert.ok(tab.includes(action), `tab: ${action}`);
     }

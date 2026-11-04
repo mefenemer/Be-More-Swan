@@ -1897,6 +1897,101 @@
   }
   register('site_audit_fix_update', renderSiteAuditFixUpdateCard);
 
+  // { type: 'site_audit_check_update', decisions: [{ checkId, label, status: 'accepted'|'done'|'open' }] }
+  // "I'll work on this" on a line of "Why your score isn't higher". `label` is only what this card
+  // shows; the server saves the line's wording from its own latest check (site-audits.ts `check_work`).
+  function renderSiteAuditCheckUpdateCard(ui, esc) {
+    const WORDS = { accepted: "I'll work on this", done: "I've done this", open: 'Not working on this' };
+    const decisions = (Array.isArray(ui.decisions) ? ui.decisions : [])
+      .map((d) => ({ checkId: String((d && d.checkId) || ''), label: String((d && d.label) || ''), status: d && d.status }))
+      .filter((d) => d.checkId && Object.prototype.hasOwnProperty.call(WORDS, d.status))
+      .slice(0, 10);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Why your score isn't higher · Approval needed</p>
+      ${decisions.length
+        ? `<ul class="mt-2 space-y-1">${decisions.map((d) => `<li class="text-xs text-gray-800">${esc(d.label || 'This check')}: <span class="font-bold">${esc(WORDS[d.status])}</span></li>`).join('')}</ul>`
+        : '<p class="text-xs text-amber-700 mt-2">No checks were named.</p>'}
+      <p class="text-xs text-gray-600 mt-2">The next check confirms each one once your page passes it.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sacu-confirm ${decisions.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Confirm</button>
+        <button type="button" data-sacu-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sacu-status></p>`;
+    const status = el.querySelector('[data-sacu-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sacu-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-sacu-confirm]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('siteaudit:checkwork', {
+        bubbles: true,
+        detail: {
+          decisions,
+          respond({ results }) {
+            const failed = (results || []).filter((r) => !r.ok);
+            if (!failed.length) { say('Done — the Website tab is up to date.'); return; }
+            say(`${(results || []).length - failed.length} saved; ${failed.map((f) => f.error).join('; ')}`, 'error');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('site_audit_check_update', renderSiteAuditCheckUpdateCard);
+
+  // { type: 'site_audit_item_check', items: [{ kind: 'fix'|'check', id, label }] } — "Check if this is done".
+  // One check reads the whole page, so naming several still starts one. It can spend, so it says so.
+  // { type: 'site_audit_website_request', kind, id, label } — "Ask <Website Assistant> to make this change".
+  function renderSiteAuditItemCard(ui, esc) {
+    const asking = ui.type === 'site_audit_website_request';
+    const items = (asking ? [ui] : (Array.isArray(ui.items) ? ui.items : []))
+      .map((x) => ({ kind: x && x.kind, id: Number(x && x.id), label: String((x && x.label) || '') }))
+      .filter((x) => (x.kind === 'fix' || x.kind === 'check') && Number.isInteger(x.id) && x.id > 0)
+      .slice(0, 10);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${asking ? 'Ask your Website Assistant' : 'Check if this is done'} · Approval needed</p>
+      ${items.length
+        ? `<ul class="mt-2 space-y-1">${items.map((x) => `<li class="text-xs text-gray-800">${esc(x.label || 'This change')}</li>`).join('')}</ul>`
+        : '<p class="text-xs text-amber-700 mt-2">Nothing was named.</p>'}
+      <p class="text-xs text-gray-600 mt-2">${asking
+        ? 'Opens its chat with this typed in. Nothing is sent or changed until you say so, and when you publish the change the check runs again.'
+        : 'A check that re-scores uses 1 task. If nothing has changed, it\'s free.'}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-saic-confirm ${items.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${asking ? 'Open its chat' : 'Check now'}</button>
+        <button type="button" data-saic-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-saic-status></p>`;
+    const status = el.querySelector('[data-saic-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-saic-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-saic-confirm]')) return;
+      setBusy(true);
+      say(asking ? 'Opening…' : 'Starting the check…');
+      const init = {
+        bubbles: true,
+        detail: {
+          items,
+          respond({ ok, error }) {
+            if (ok) { say(asking ? 'Its chat is open with this typed in.' : 'Checking now. The Website tab will show what it finds.'); return; }
+            say(error || 'That didn\'t work.', 'error');
+          },
+        },
+      };
+      el.dispatchEvent(asking ? new CustomEvent('siteaudit:askwebsite', init) : new CustomEvent('siteaudit:itemcheck', init));
+    });
+    return el;
+  }
+  register('site_audit_item_check', renderSiteAuditItemCard);
+  register('site_audit_website_request', renderSiteAuditItemCard);
+
   // { type: 'site_audit_handoff', target: 'social_media_manager'|'blog_writer'|'campaign_orchestrator', title?, brief }
   // Opens the target assistant's chat with the brief TYPED IN — the user reads it and sends it. The
   // same as "Brief <name>" under "Ideas for your other assistants" on the Website tab.

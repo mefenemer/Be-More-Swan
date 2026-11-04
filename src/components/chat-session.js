@@ -1507,6 +1507,50 @@
       siteAuditChanged();
     }
 
+    async function onSiteAuditCheckWork(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const results = [];
+      for (const x of Array.isArray(d.decisions) ? d.decisions : []) {
+        try {
+          await siteAuditPost({ action: 'check_work', assistantId, checkId: x.checkId, status: x.status });
+          results.push({ checkId: x.checkId, ok: true });
+        } catch (err) {
+          results.push({ checkId: x.checkId, ok: false, error: err.message });
+        }
+      }
+      respond({ results });
+      siteAuditChanged();
+    }
+
+    async function onSiteAuditItemCheck(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        for (const x of Array.isArray(d.items) ? d.items : []) {
+          await siteAuditPost({ action: 'check_item', assistantId, kind: x.kind, itemId: x.id });
+        }
+        respond({ ok: true });
+      } catch (err) { respond({ ok: false, error: err.message }); }
+      siteAuditChanged();
+    }
+
+    async function onSiteAuditAskWebsite(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const x = (d.items || [])[0] || {};
+        const data = await siteAuditPost({ action: 'ask_website', assistantId, kind: x.kind, itemId: x.id });
+        siteAuditChanged();
+        if (typeof window.openAssistantChat === 'function') window.openAssistantChat({ assistantId: data.assistantId, draft: data.draft });
+        else {
+          try { await navigator.clipboard.writeText(data.draft); } catch { /* best effort */ }
+          window.location.href = `assistant-chat.html?assistantId=${encodeURIComponent(data.assistantId)}`;
+        }
+        respond({ ok: true });
+      } catch (err) { respond({ ok: false, error: err.message }); }
+    }
+
     // "Open their chat" on a site_audit_handoff card: find this workspace's assistant in that role
     // (site-audits.ts `get` lists them), and open its chat with the brief typed in — never sent.
     // The brief is recorded (site-audits.ts `brief`, source 'chat'), the same as the Website tab's
@@ -2173,6 +2217,9 @@
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
     container.addEventListener('siteaudit:save', onSiteAuditSave);
     container.addEventListener('siteaudit:fix', onSiteAuditFix);
+    container.addEventListener('siteaudit:checkwork', onSiteAuditCheckWork);
+    container.addEventListener('siteaudit:itemcheck', onSiteAuditItemCheck);
+    container.addEventListener('siteaudit:askwebsite', onSiteAuditAskWebsite);
     container.addEventListener('siteaudit:handoff', onSiteAuditHandoff);
     container.addEventListener('site:apply', onSiteApply);
     container.addEventListener('site:draft', onSiteDraft);
@@ -2270,6 +2317,9 @@
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);
         container.removeEventListener('siteaudit:save', onSiteAuditSave);
         container.removeEventListener('siteaudit:fix', onSiteAuditFix);
+        container.removeEventListener('siteaudit:checkwork', onSiteAuditCheckWork);
+        container.removeEventListener('siteaudit:itemcheck', onSiteAuditItemCheck);
+        container.removeEventListener('siteaudit:askwebsite', onSiteAuditAskWebsite);
         container.removeEventListener('siteaudit:handoff', onSiteAuditHandoff);
         container.removeEventListener('site:apply', onSiteApply);
         container.removeEventListener('site:draft', onSiteDraft);

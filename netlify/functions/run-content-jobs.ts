@@ -12,10 +12,11 @@
 // as `Authorization: Bearer <secret>`.
 //
 // POST /.netlify/functions/run-content-jobs
-//   → 200 { ok: true, processed: <n> }
+//   → 200 { ok: true, handedOff: true }  (or handedOff: false, processed: <n>)
 
 import { Handler } from '@netlify/functions';
 import { drainContentJobs } from './process-content-jobs';
+import { triggerContentDrain } from '../../src/utils/trigger-drain';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -33,11 +34,13 @@ export default withLambda(async (event) => {
     if (token !== secret) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Unauthorized.' }) };
 
     try {
-        const processed = await drainContentJobs();
+        // The same hand-off as the production cron, so staging drafts the way production does.
+        const handedOff = await triggerContentDrain(event.headers as Record<string, string | undefined>, 'cron', 'run-content-jobs');
+        const processed = handedOff ? undefined : await drainContentJobs();
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ok: true, processed }),
+            body: JSON.stringify({ ok: true, handedOff, processed }),
         };
     } catch (err) {
         console.error('[run-content-jobs]', err);

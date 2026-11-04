@@ -419,12 +419,12 @@ const MAILBOX_CATALOG = {
         iconBg: 'bg-red-100',
         iconText: 'text-red-700',
         account: 'Gmail or Google Workspace',
-        tagline: 'Approved leads are emailed from your own inbox, with a chase reminder set for you.',
+        tagline: 'Emails you approve go out from your own inbox.',
         // Google's consent screen reads "Be More Swan wants access to your Google Account", which
         // users setting a client up have read as being asked to sign into US. Say what the screen
         // is before they meet it, and which account to pick — the grant decides the send-from
         // mailbox, and it has to be a Google-hosted one.
-        note: 'Sign in with the Google account the outreach should come from. Google’s screen names Be More Swan as the app asking for access — it is not a Be More Swan login.',
+        note: 'Sign in with the Google account your emails should come from. Google’s screen names Be More Swan as the app asking for access — it is not a Be More Swan login.',
     },
     outlook: {
         label: 'Outlook',
@@ -432,10 +432,10 @@ const MAILBOX_CATALOG = {
         iconBg: 'bg-blue-100',
         iconText: 'text-blue-700',
         account: 'Outlook, Microsoft 365 or a personal Microsoft account',
-        tagline: 'Approved leads are emailed from your own mailbox, and a copy is kept in Sent Items.',
+        tagline: 'Emails you approve go out from your own mailbox.',
         // Microsoft publisher verification is still pending, so a work/school tenant may refuse
         // consent until an administrator approves it. Personal and own-tenant accounts connect fine.
-        note: 'Sign in with the Microsoft account the outreach should come from. On a work or school account, your IT administrator may need to approve the connection first.',
+        note: 'Sign in with the Microsoft account your emails should come from. On a work or school account, your IT administrator may need to approve the connection first.',
     },
 };
 
@@ -851,7 +851,7 @@ function _mailboxCard(m) {
             key: `mailbox-${m.provider}`, iconBg: meta.iconBg, iconText: meta.iconText, emoji: meta.emoji,
             label: meta.label,
             sub: connected ? (m.accountName ? `Sending as ${_esc(m.accountName)}` : 'Connected')
-                : broken ? 'Needs reconnecting' : `Send outreach from ${_esc(meta.account)}`,
+                : broken ? 'Needs reconnecting' : `Send email from ${_esc(meta.account)}`,
             subTone: broken ? 'warn' : '',
             control: connected
                 ? _rowPill('Connected')
@@ -874,7 +874,7 @@ function _mailboxCard(m) {
         <div class="grow">
           <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-xl ${meta.iconBg} ${meta.iconText} flex items-center justify-center text-lg shrink-0">${meta.emoji}</div>
-            <p class="font-bold text-gray-900">Send outreach from ${_esc(meta.account)}</p>
+            <p class="font-bold text-gray-900">Send email from ${_esc(meta.account)}</p>
           </div>
           <p class="text-sm text-gray-500 mt-2">${_esc(meta.tagline)}</p>
           ${meta.note && !connected ? `<p class="text-xs text-gray-400 mt-1.5">${_esc(meta.note)}</p>` : ''}
@@ -886,7 +886,7 @@ function _mailboxCard(m) {
 }
 
 window._intDisconnectMailbox = async function (provider, label) {
-    if (!(await window.confirmModal('Approved leads will stop being emailed automatically until you reconnect.', { title: `Disconnect ${_esc(label)}?`, confirmLabel: 'Disconnect' }))) return;
+    if (!(await window.confirmModal('Your assistants will stop sending email from this mailbox until you reconnect. This applies across your whole workspace.', { title: `Disconnect ${_esc(label)}?`, confirmLabel: 'Disconnect' }))) return;
     try {
         const res = await fetch(`/api/oauth/${encodeURIComponent(provider)}/disconnect`, { method: 'POST' });
         if (!res.ok) {

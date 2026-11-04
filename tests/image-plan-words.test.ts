@@ -77,7 +77,7 @@ const fn = read('netlify/functions/regenerate-post-media.ts');
 const ws = read('workspace.html');
 
 test('regenerate plans the image, never sends the request straight to FLUX', () => {
-    assert.match(fn, /const \{ scene: prompt, words \} = await planImage\(request/);
+    assert.match(fn, /const \{ scene: prompt, words \} = await directPostImage\(db, \{/);
     assert.ok(!/visualisePrompt\(/.test(fn));
 });
 

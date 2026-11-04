@@ -32,6 +32,7 @@ import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
 import { loadAlreadyCovered, type CoveredItem } from './site-audit-covered';
+import { confirmPassedChecks } from './site-audit-check-work';
 import {
     buildLensPrompt, buildSummaryPrompt, HANDOFF_TARGETS, rejectedFixesBlock, sanitiseSummary, type AuditBrief, type Handoff, type HandoffTarget, type Priority,
 } from './site-audit-prompts';
@@ -502,6 +503,7 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
             finishedAt: new Date(),
         }).where(and(eq(siteAuditRuns.id, runId), eq(siteAuditRuns.status, 'running'))).returning({ id: siteAuditRuns.id });
         if (!latched) return;   // swept as stuck meanwhile — not charged, not reported
+        await confirmPassedChecks(db, audit.id, audit.url, runId, outcome.score.outcomes);
 
         await recordCompletedWork(db, orgId, 'site_audit', 1, runId);
 

@@ -136,10 +136,13 @@ const WRAP_AT = 26;
 /** Average glyph width as a fraction of font size — generous, so a wrapped row never overruns. */
 const GLYPH_W = 0.56;
 
+/** Shared with the post editor's writer (post-image-direction.ts): the model copies words, never writes copy. */
+export const PLAN_WORDS_RULE = `"words": ONLY the exact words the request explicitly asks to appear ON the image (a headline, a label, a quote, "text overlay reading ...", a before/after label), copied character for character, at most ${MAX_IMAGE_WORDS} short items in reading order. A post caption, hashtags or a description of the scene are NOT words for the image. If the request does not explicitly ask for words on the image, or asks for text without saying what it says, return [].`;
+
 const SYSTEM_PLAN = `You plan an image for an image-generation model (FLUX) that cannot draw readable text. You are given what a person asked for.
 Return JSON only: {"scene": string, "words": string[]}.
 "scene": 50-90 words describing a single image to draw: subject, action, setting, composition and camera angle, lighting and mood, style (photographic unless they asked for illustration). If the request is an idea, a quote or a sentence, depict what it MEANS. Never ask for text, words, letters, captions, signs or logos in the scene. Leave clear space where the words will sit when there are any.
-"words": ONLY the exact words the request explicitly asks to appear ON the image (a headline, a label, a quote, "text overlay reading ...", a before/after label), copied character for character, at most ${MAX_IMAGE_WORDS} short items in reading order. A post caption, hashtags or a description of the scene are NOT words for the image. If the request does not explicitly ask for words on the image, or asks for text without saying what it says, return [].`;
+${PLAN_WORDS_RULE}`;
 
 export interface ImagePlan { scene: string; words: string[] }
 

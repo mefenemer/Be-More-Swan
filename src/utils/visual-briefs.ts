@@ -19,20 +19,28 @@
 // bury the user's real pictures. Options live in visual_brief_options until approved.
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, organisations, scheduledPosts, visualBriefOptions, visualBriefs } from '../../db/schema';
+import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, scheduledPosts, visualBriefOptions, visualBriefs } from '../../db/schema';
 import type { getDb } from '../../db/client';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
 import { ART_DIRECTION_CRAFT } from '../constants/art-direction-craft';
 import { logMediaCost } from './ai-usage';
 import {
-    FalContentPolicyError, FalError, extractVideo, falConfigured, generateImages, result as falResult, status as falStatus,
+    FalContentPolicyError, FalError, extractVideo, falConfigured, generateImageVariants, generateImages, result as falResult, status as falStatus,
     submitFramedVideo, imageToVideoEnabled, billedSecondsFor, i2vModel, IMAGE_MODEL, type AspectRatio,
 } from '../lib/fal-gateway';
 import { renderBrandCard, type CardVariant } from '../lib/brand-card';
 import { deleteR2Object, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
-import { normalizeBrandKit, type BrandKit } from './brand-kit';
-import { guidelinesPromptLines, hasGuidelines, normaliseGuidelines, readBrandGuidelines, type BrandGuidelines } from './brand-guidelines';
+import type { BrandKit } from './brand-kit';
+import { guidelinesPromptLines, hasGuidelines, readBrandGuidelines, type BrandGuidelines } from './brand-guidelines';
+import { fillPrompts } from '../lib/image-prompt';
+import {
+    businessPromptLines, clip, colourWords, parseStoredRejection, readBriefContext, rejectionPromptSection, setupAnswer, sourceLabel, withoutColourCodes,
+    type BriefContext, type PastRejection,
+} from './art-direction-context';
+
+export { colourWords, readBriefContext, setupAnswer, sourceLabel, withSetupFallback, withoutColourCodes } from './art-direction-context';
+export type { BriefContext, PastRejection } from './art-direction-context';
 import { holdCredits, settleHold, getBalance, tasksForCredits, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, tierCanGenerateVideo } from './ai-credits';
 import { aiVideoTasks } from '../config/task-weights';
 import { getActiveTierKeyByOrg } from './plan-features';
@@ -52,7 +60,7 @@ import {
     FLYER_PURPOSE, FLYER_SOURCE, FLYER_SOURCE_LABEL,
     GENERATION_TIMEOUT_MS, MAX_ROUNDS, OWN_SOURCE, OWN_SOURCE_LABEL, PURPOSE_SPECS, REJECT_REASON_LABELS, SOURCE_SPECS,
     normaliseBrief, sourcesAreFree,
-    type BriefPurpose, type RejectReason,
+    type BriefPurpose,
 } from '../config/visual-brief-vocab';
 
 type Db = ReturnType<typeof getDb>;
@@ -78,29 +86,7 @@ const GENERATED_SOURCES = new Set(['ai_image', 'brand_card', 'ai_video', FLYER_S
 /** The Brand Designer's AI clip length — what its round holds and is charged for (aiVideoTasks). */
 const BRIEF_CLIP_SECONDS = 6;
 /** A source label for display, including "Your own". */
-export function sourceLabel(source: string): string {
-    if (source === FLYER_SOURCE) return FLYER_SOURCE_LABEL;
-    return source === OWN_SOURCE ? OWN_SOURCE_LABEL : (SOURCE_SPECS[source as keyof typeof SOURCE_SPECS]?.label ?? source);
-}
-
 // ── Art direction ───────────────────────────────────────────────────────────────────────────────
-
-export interface BriefContext {
-    kit: BrandKit; orgName: string; industry: string | null; description: string | null;
-    /**
-     * The workspace's picture guidelines (src/utils/brand-guidelines.ts) — the same ones every
-     * automatic AI image reads. Phase 1 asked the Brand Designer's own setup for a photo style and a
-     * "never show"; those answers still fill a guideline the workspace has left EMPTY, so nobody who
-     * answered them loses the steer when Phase 2 lands.
-     */
-    guidelines: BrandGuidelines;
-}
-
-/** One setup answer, as a trimmed string or null. A plain lookup — the keys match the schema. */
-export function setupAnswer(onboardingContext: unknown, key: string): string | null {
-    const v = onboardingContext && typeof onboardingContext === 'object' ? (onboardingContext as Record<string, unknown>)[key] : null;
-    return typeof v === 'string' && v.trim() ? v.trim() : null;
-}
 
 /** The new-brief default for sources, from setup. 'free_only' never ticks AI by default. */
 export function defaultSourcesFor(onboardingContext: unknown): string[] {
@@ -110,6 +96,11 @@ export function defaultSourcesFor(onboardingContext: unknown): string[] {
 export interface ArtDirection {
     /** What FLUX is asked for. Never contains words to render — words belong on cards. */
     imagePrompt: string;
+    /**
+     * One prompt per AI option, imagePrompt first. One prompt drawn four times only changes the seed,
+     * so the options came back as the same picture four times (see image-prompt.ts). Absent from older rounds.
+     */
+    imagePrompts?: string[];
     /** 2–4 words for the Pexels search (photos and videos). */
     stockKeywords: string;
     /** For the AI video model: the image prompt plus motion. Absent from older rounds. */
@@ -118,40 +109,6 @@ export interface ArtDirection {
     cardHeadlines: string[];
     /** 'model' when Claude wrote it; 'fallback' when it could not and the brief was used as-is. */
     by: 'model' | 'fallback';
-}
-
-export interface PastRejection { source: string; reason: string; note: string | null; prompt: string | null }
-
-export async function readBriefContext(db: Db, orgId: number, assistantId: number): Promise<BriefContext> {
-    const [[org], [assistant]] = await Promise.all([
-        db.select({
-            name: organisations.name, industry: organisations.industry,
-            description: organisations.businessDescription, brandKit: organisations.brandKit,
-            guidelines: organisations.brandGuidelines,
-        }).from(organisations).where(eq(organisations.id, orgId)).limit(1),
-        db.select({ onboardingContext: aiAssistants.onboardingContext }).from(aiAssistants)
-            .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1),
-    ]);
-    return {
-        kit: normalizeBrandKit(org?.brandKit),
-        orgName: org?.name ?? '',
-        industry: org?.industry ?? null,
-        description: org?.description ?? null,
-        guidelines: withSetupFallback(normaliseGuidelines(org?.guidelines), assistant?.onboardingContext),
-    };
-}
-
-/** Phase 1 setup answers fill only the guidelines the workspace left empty — never override one. */
-export function withSetupFallback(g: BrandGuidelines, onboardingContext: unknown): BrandGuidelines {
-    return {
-        ...g,
-        photoStyle: g.photoStyle ?? setupAnswer(onboardingContext, 'photoStyle'),
-        mustAvoid: g.mustAvoid ?? setupAnswer(onboardingContext, 'avoidAlways'),
-    };
-}
-
-function clip(s: string | null | undefined, n: number): string {
-    return (s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 }
 
 /**
@@ -178,6 +135,7 @@ export function fallbackArtDirection(
     ].filter(Boolean).join(' ');
     return {
         imagePrompt: imagePrompt.slice(0, 1000),
+        imagePrompts: fillPrompts([imagePrompt.slice(0, 1000)], imagePrompt.slice(0, 1000), AI_OPTIONS),
         videoPrompt: `${imagePrompt.slice(0, 850)} Slow, steady camera movement; one continuous shot.`,
         stockKeywords: clip(brief.message, 80) || clip(brief.title, 80),
         cardHeadlines: [clip(brief.headline, 120) || clip(brief.message, 120) || clip(brief.title, 120)].filter(Boolean),
@@ -185,71 +143,33 @@ export function fallbackArtDirection(
     };
 }
 
-/**
- * A brand colour as words an image model can use ("deep green", "warm cream"). Hex codes in an image
- * prompt can be painted into the picture as text (audit, 2026-10-25). Pure; '' for a bad value.
- */
-export function colourWords(hex: string | null | undefined): string {
-    const m = /^#?([0-9a-f]{6}|[0-9a-f]{3})$/i.exec(String(hex ?? '').trim());
-    if (!m) return '';
-    const h6 = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1];
-    const [r, g, b] = [0, 2, 4].map((i) => parseInt(h6.slice(i, i + 2), 16) / 255);
-    const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2, d = max - min;
-    const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
-    if (l > 0.93) return s > 0.25 ? 'warm cream' : 'white';
-    if (l < 0.1) return 'near-black';
-    let hue = 0;
-    if (d) hue = max === r ? 60 * (((g - b) / d) % 6) : max === g ? 60 * ((b - r) / d + 2) : 60 * ((r - g) / d + 4);
-    if (hue < 0) hue += 360;
-    const shade = l < 0.3 ? 'deep ' : l > 0.75 ? 'pale ' : '';
-    if (s < 0.15) return l < 0.3 ? 'charcoal' : l > 0.75 ? 'light grey' : 'grey';
-    const name = hue < 15 || hue >= 345 ? (l < 0.45 ? 'wine red' : 'red') : hue < 40 ? (l < 0.45 ? 'brown' : 'orange') : hue < 65 ? 'yellow'
-        : hue < 160 ? 'green' : hue < 195 ? 'teal' : hue < 255 ? 'blue' : hue < 290 ? 'purple' : hue < 345 ? (l < 0.4 ? 'plum' : 'pink') : 'red';
-    return `${shade}${name}`;
-}
-
-/** An image or video prompt with every colour code taken out — the code guard behind the prompt rule. Pure. */
-export function withoutColourCodes(prompt: string): string {
-    return prompt
-        .replace(/\s*\(\s*#[0-9a-f]{3,8}\s*\)/gi, '')
-        .replace(/#[0-9a-f]{6}\b|#[0-9a-f]{3}\b/gi, '')
-        .replace(/\s{2,}/g, ' ')
-        .replace(/\s+([.,;])/g, '$1')
-        .trim();
-}
-
 export function artDirectionSystemPrompt(): string {
-    return `You are a brand designer's art director. From a visual brief and a brand kit you write four things, and nothing else:
+    return `You are a brand designer's art director. From a visual brief and a brand kit you write five things, and nothing else:
 
 1. "imagePrompt" — a prompt for an AI image model (FLUX). One paragraph, under 900 characters. Describe the scene, subject, composition, lighting and mood concretely. Steer colour towards the brand colours given. NEVER ask for words, letters, signs, captions or logos in the image — image models render text badly, and the words go on branded cards instead. Never name a real person or a trademark.
-2. "stockKeywords" — 2 to 4 plain words to search a stock photo library (Pexels). Visual nouns, no adjectives about quality, no punctuation.
-3. "videoPrompt" — a prompt for a 6-second AI video that animates the image above: the same scene with ONE simple motion (a slow push-in, a pan, people moving naturally). One continuous shot, no cuts, no words on screen. Under 900 characters.
-4. "cardHeadlines" — one or two short headlines (max 90 characters each) for a typographic card in the brand's colours. If the brief gives exact words, the FIRST headline is those words unchanged. Never invent a price, a statistic, a date or an offer the brief does not state.
+2. "imageAlternatives" — three more prompts for the same brief, under the same rules and in the same style, each a genuinely DIFFERENT picture: a different visual idea, a different main subject, a different setting and a different composition or camera angle. Not the same scene reworded. Each under 900 characters.
+3. "stockKeywords" — 2 to 4 plain words to search a stock photo library (Pexels). Visual nouns, no adjectives about quality, no punctuation.
+4. "videoPrompt" — a prompt for a 6-second AI video that animates the scene in "imagePrompt": the same scene with ONE simple motion (a slow push-in, a pan, people moving naturally). One continuous shot, no cuts, no words on screen. Under 900 characters.
+5. "cardHeadlines" — one or two short headlines (max 90 characters each) for a typographic card in the brand's colours. If the brief gives exact words, the FIRST headline is those words unchanged. Never invent a price, a statistic, a date or an offer the brief does not state.
 
-Respect every "must avoid" in the brief in all four. When earlier options were turned down, the reasons are listed: change what the reason names, keep what it does not.
+Respect every "must avoid" in the brief in all five. When earlier options were turned down, the reasons are listed: change what the reason names, keep what it does not.
 
 ${ART_DIRECTION_CRAFT}
 
-Return STRICT JSON only: {"imagePrompt": "...", "stockKeywords": "...", "videoPrompt": "...", "cardHeadlines": ["..."]}`;
+Return STRICT JSON only: {"imagePrompt": "...", "imageAlternatives": ["...", "...", "..."], "stockKeywords": "...", "videoPrompt": "...", "cardHeadlines": ["..."]}`;
 }
 
 export function artDirectionUserPrompt(brief: BriefRow, ctx: BriefContext, rejections: PastRejection[]): string {
     const purpose = PURPOSE_SPECS[brief.purpose as BriefPurpose]?.label ?? brief.purpose;
     return [
-        `BUSINESS: ${clip(ctx.orgName, 120)}${ctx.industry ? ` (${clip(ctx.industry, 80)})` : ''}`,
-        ctx.description ? `ABOUT THEM: ${clip(ctx.description, 400)}` : '',
-        // In words as well as codes: the codes are for the cards; an image prompt must use the words.
-        `BRAND COLOURS (describe them in words in the prompts, never as codes): accent ${colourWords(ctx.kit.primaryColor)} (${ctx.kit.primaryColor}), ink ${colourWords(ctx.kit.textColor)} (${ctx.kit.textColor}), background ${colourWords(ctx.kit.backgroundColor)} (${ctx.kit.backgroundColor}).`,
-        ...guidelinesPromptLines(ctx.guidelines),
+        ...businessPromptLines(ctx),
         `BRIEF: "${clip(brief.title, 120)}" — a ${purpose.toLowerCase()} in ${brief.aspectRatio}.`,
         brief.message ? `WHAT IT SHOULD SHOW OR SAY: ${clip(brief.message, 1000)}` : '',
         brief.headline ? `EXACT WORDS FOR THE CARD: ${clip(brief.headline, 120)}` : '',
         brief.mood ? `MOOD: ${clip(brief.mood, 300)}` : '',
         brief.mustInclude ? `MUST INCLUDE: ${clip(brief.mustInclude, 500)}` : '',
         brief.mustAvoid ? `MUST AVOID: ${clip(brief.mustAvoid, 500)}` : '',
-        rejections.length
-            ? `TURNED DOWN EARLIER:\n${rejections.slice(-8).map((r) => `- a ${sourceLabel(r.source).toLowerCase()} option: ${r.reason}${r.note ? ` — "${clip(r.note, 200)}"` : ''}${r.prompt ? ` (it was made from: ${clip(r.prompt, 160)})` : ''}`).join('\n')}`
-            : '',
+        rejectionPromptSection(rejections),
     ].filter(Boolean).join('\n');
 }
 
@@ -261,14 +181,20 @@ export function parseArtDirection(raw: string, fallback: ArtDirection, exactHead
         j = m ? JSON.parse(m[0]) : {};
     } catch { return fallback; }
     const imagePrompt = clip(typeof j.imagePrompt === 'string' ? withoutColourCodes(j.imagePrompt) : '', 1000);
+    const alternatives = (Array.isArray(j.imageAlternatives) ? j.imageAlternatives : [])
+        .filter((p): p is string => typeof p === 'string')
+        .map((p) => clip(withoutColourCodes(p), 1000))
+        .filter((p) => p.length >= 20);
     const stockKeywords = clip(typeof j.stockKeywords === 'string' ? j.stockKeywords.replace(/[^\p{L}\p{N}\s-]/gu, ' ') : '', 80);
     const videoPrompt = clip(typeof j.videoPrompt === 'string' ? withoutColourCodes(j.videoPrompt) : '', 1000);
     let heads = Array.isArray(j.cardHeadlines) ? j.cardHeadlines.filter((h): h is string => typeof h === 'string').map((h) => clip(h, 120)).filter(Boolean) : [];
     // The user's exact words are never paraphrased away, whatever the model returned.
     if (exactHeadline) heads = [clip(exactHeadline, 120), ...heads.filter((h) => h !== clip(exactHeadline, 120))];
     if (!imagePrompt && !stockKeywords && !heads.length) return fallback;
+    const firstImage = imagePrompt || fallback.imagePrompt;
     return {
-        imagePrompt: imagePrompt || fallback.imagePrompt,
+        imagePrompt: firstImage,
+        imagePrompts: fillPrompts([firstImage, ...alternatives], firstImage, AI_OPTIONS),
         stockKeywords: stockKeywords || fallback.stockKeywords,
         videoPrompt: videoPrompt || fallback.videoPrompt,
         cardHeadlines: (heads.length ? heads : fallback.cardHeadlines).slice(0, CARD_VARIANTS.length),
@@ -285,7 +211,7 @@ export async function writeArtDirection(db: Db, brief: BriefRow, ctx: BriefConte
         const res = await gatewayGenerate({
             system: artDirectionSystemPrompt() + (rules ? `\n\n${rules}` : ''),
             messages: [{ role: 'user', content: artDirectionUserPrompt(brief, ctx, rejections) }],
-            maxTokens: 700,
+            maxTokens: 1500,
             deadlineMs: 45_000,
             usage: { workspaceId: brief.organisationId, assistantId: brief.aiAssistantId },
             // The Brand Designer role's model (Admin ▸ Assistants ▸ Model & rules). A background round.
@@ -460,14 +386,7 @@ async function pastRejections(db: Db, briefId: number): Promise<{ rejections: Pa
     const rejections: PastRejection[] = [];
     for (const r of rows) {
         if (r.status !== 'rejected' || !r.reason) continue;
-        // Stored as "<reason key>" or "<reason key>: <the user's words>".
-        const [key, ...rest] = r.reason.split(':');
-        rejections.push({
-            source: r.source,
-            reason: REJECT_REASON_LABELS[key as RejectReason] ?? key,
-            note: rest.join(':').trim() || null,
-            prompt: r.prompt,
-        });
+        rejections.push(parseStoredRejection(r.source, r.reason, r.prompt));
     }
     // Photos and videos share Pexels' id space only through the 'v' prefix on video ids (pexels.ts),
     // so one exclude list serves both searches.
@@ -568,7 +487,7 @@ async function stockOptions(db: Db, brief: BriefRow, ad: ArtDirection, exclude: 
 }
 
 /**
- * Four FLUX variations for one credit, each copied into R2 at once — fal's URLs expire within
+ * Four different FLUX pictures for one credit, each from its own prompt and copied into R2 at once — fal's URLs expire within
  * hours and a brief can sit in review for days. Every attempt writes a media_generation_jobs row, so
  * the platform-wide failure alert (check-provider-balances) sees this path like every other.
  */
@@ -578,11 +497,13 @@ async function aiOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId: numb
         organisationId: brief.organisationId, userId, assistantId: brief.aiAssistantId, mediaType: 'image',
         prompt: ad.imagePrompt, aspectRatio, model: IMAGE_MODEL, creditCost: IMAGE_CREDIT_COST,
     };
+    // A round written before imagePrompts existed still gets four different framings.
+    const prompts = fillPrompts(ad.imagePrompts?.length ? ad.imagePrompts : [ad.imagePrompt], ad.imagePrompt, AI_OPTIONS);
     let images;
     try {
         images = falConfigured()
-            ? await generateImages({ prompt: ad.imagePrompt, aspectRatio, numImages: AI_OPTIONS, usage: { workspaceId: brief.organisationId, userId, assistantId: brief.aiAssistantId } })
-            : Array.from({ length: AI_OPTIONS }, (_, i) => ({ url: `https://picsum.photos/seed/brief-${brief.id}-${brief.rounds}-${i}/1024/1024`, width: 1024, height: 1024, contentType: 'image/jpeg' }));
+            ? await generateImageVariants({ prompts, aspectRatio, usage: { workspaceId: brief.organisationId, userId, assistantId: brief.aiAssistantId } })
+            : prompts.map((prompt, i) => ({ prompt, url: `https://picsum.photos/seed/brief-${brief.id}-${brief.rounds}-${i}/1024/1024`, width: 1024, height: 1024, contentType: 'image/jpeg' }));
     } catch (err) {
         const flagged = err instanceof FalContentPolicyError;
         await db.insert(mediaGenerationJobs).values({
@@ -603,7 +524,8 @@ async function aiOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId: numb
         } else {
             externalUrl = img.url;
         }
-        out.push({ source: 'ai_image', storageKey, externalUrl, mimeType, width: img.width || null, height: img.height || null, prompt: ad.imagePrompt });
+        // This picture's OWN prompt: a rejection's reason is read back against what made it.
+        out.push({ source: 'ai_image', storageKey, externalUrl, mimeType, width: img.width || null, height: img.height || null, prompt: img.prompt });
     }
     await db.insert(mediaGenerationJobs).values({
         ...job, status: out.length ? 'completed' : 'failed',
@@ -890,7 +812,7 @@ async function settleCampaignOrder(db: Db, briefId: number): Promise<void> {
 
 /**
  * Raise a brief for a social draft that has no picture — called by the drafting job when every media
- * source came back empty, and by "Ask the Brand Designer" in the post editor. Returns the brief id,
+ * source came back empty. Returns the brief id,
  * or null when there is no Brand Designer to ask (or the post is not this organisation's).
  *
  * - ONE open brief per post: a retried job, or a second click, returns the one that exists.

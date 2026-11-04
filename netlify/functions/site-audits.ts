@@ -17,6 +17,9 @@
 //              { assistantId, source: 'stalled_fix', fixId }            suggestion is actioned and moves
 //              { assistantId, source: 'chat', target, title?, brief }   to History (site_audit_briefs)
 //   unbrief    { briefId }                           → undo a brief that was clicked by mistake
+//   check_work { assistantId, checkId, status: 'accepted'|'done'|'open' } → "I'll work on this"
+//   check_item { assistantId, kind: 'fix'|'check', itemId } → "Check if this is done" (starts a check)
+//   ask_website { assistantId, kind, itemId }        → the brief for "Ask <Website Assistant> to make this change"
 //
 // A check marks a fix done when the old text has gone or the suggested text is on the page
 // (site-audit.ts fixesNowDone) and records which run proved it (verified_run_id). The user can also
@@ -26,7 +29,7 @@
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { aiAssistants, contentRules, siteAuditBriefs, siteAuditFixes, siteAuditRuns, siteAudits } from '../../db/schema';
+import { aiAssistants, contentRules, siteAuditBriefs, siteAuditCheckWork, siteAuditFixes, siteAuditItemChecks, siteAuditRuns, siteAudits } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { MYSTERY_SHOPPER_ROLE_KEY } from '../../src/constants/roles';
@@ -34,7 +37,9 @@ import { failAuditRun, MAX_COMPETITORS, requestAuditRun, sweepStuckAuditRuns } f
 import { CONVERSION_GOALS, saveSiteAuditSettings, WEEKDAYS } from '../../src/utils/site-audit-setup';
 import { asUtcDate, nextCheckDate } from '../../src/utils/site-audit-schedule';
 import { HANDOFF_TARGETS, type Handoff } from '../../src/utils/site-audit-prompts';
-import { plainLocation } from '../../src/utils/site-score';
+import { plainLocation, type CheckOutcome } from '../../src/utils/site-score';
+import { CHECK_WORK_STALLED_DAYS, CHECK_WORK_STATUSES, decideCheckWork, isCheckWorkTableMissing, ITEM_KINDS, itemVerdict, websiteChangeBrief, type CheckWorkStatus } from '../../src/utils/site-audit-check-work';
+import { websiteHelperFor } from '../../src/utils/site-audit-recheck';
 import { pickSecondaryPages, type SitePage } from '../../src/utils/site-extract';
 
 /** A fix the user said they'd make that a check has not found on the site for this long. */
@@ -196,10 +201,42 @@ export default withLambda(async (event) => {
             briefsAvailable = false;
         }
 
+        // Read apart too: before db/z-mystery-shopper-check-work.sql the tab hides "I'll work on this".
+        let checkWork: Array<typeof siteAuditCheckWork.$inferSelect> = [];
+        let checkWorkAvailable = true;
+        try {
+            checkWork = await db.select().from(siteAuditCheckWork)
+                .where(and(eq(siteAuditCheckWork.auditId, audit.id), eq(siteAuditCheckWork.organisationId, orgId)))
+                .orderBy(desc(siteAuditCheckWork.id)).limit(500);
+        } catch (err) {
+            if (!isCheckWorkTableMissing(err)) throw err;
+            checkWorkAvailable = false;
+        }
+        let itemChecks: Array<{ kind: string; itemId: number; runId: number | null; verdict: ReturnType<typeof itemVerdict>; websiteAskedAt: Date | null }> = [];
+        try {
+            itemChecks = (await db.select({
+                kind: siteAuditItemChecks.itemKind, itemId: siteAuditItemChecks.itemId, runId: siteAuditItemChecks.runId,
+                websiteAskedAt: siteAuditItemChecks.websiteAskedAt, runStatus: siteAuditRuns.status,
+            }).from(siteAuditItemChecks)
+                .leftJoin(siteAuditRuns, eq(siteAuditRuns.id, siteAuditItemChecks.runId))
+                .where(and(eq(siteAuditItemChecks.auditId, audit.id), eq(siteAuditItemChecks.organisationId, orgId)))
+                .limit(500))
+                .map(({ runStatus, ...c }) => ({ ...c, verdict: itemVerdict(runStatus) }));
+        } catch (err) {
+            if (!isCheckWorkTableMissing(err)) throw err;
+            checkWorkAvailable = false;
+        }
+        const websiteHelper = checkWorkAvailable ? await websiteHelperFor(db, orgId, audit.url) : null;
+        const checksStalledBefore = Date.now() - CHECK_WORK_STALLED_DAYS * 86_400_000;
+        const stalledChecks = checkWork
+            .filter((w) => w.status === 'accepted' && new Date(w.updatedAt).getTime() < checksStalledBefore)
+            .map((w) => w.id);
+
         const { lastHashes: _h, ...auditOut } = audit;
         return json(200, {
             audit: auditOut, runs, latest: latest ?? null, fixes, vocab, team, stalled, nextCheck, nextPages,
             pastIdeas, briefs, briefsAvailable, scoreHistory, previousLenses,
+            checkWork, checkWorkAvailable, stalledChecks, itemChecks, websiteHelper,
         });
     }
 
@@ -356,6 +393,103 @@ export default withLambda(async (event) => {
             }
         }
         return json(200, { fix: { id: updated.id, status: updated.status }, ruleId });
+    }
+
+    // "I'll work on this" on "Why your score isn't higher": the tab and the chat card both land here.
+    // What the line says comes from the server's own latest check, never the browser's copy.
+    if (action === 'check_work') {
+        const shopper = await requireShopper(body.assistantId);
+        if (!shopper) return json(404, { error: 'Assistant not found.' });
+        const audit = await auditFor(shopper.id);
+        if (!audit) return json(400, { error: 'Add your website first.' });
+        const checkId = String(body.checkId || '');
+        const status = String(body.status || '');
+        if (!checkId) return json(400, { error: 'checkId required.' });
+        if (!(CHECK_WORK_STATUSES as readonly string[]).includes(status)) return json(400, { error: 'Unknown status.' });
+
+        const [latest] = await db.select({ scores: siteAuditRuns.scores }).from(siteAuditRuns)
+            .where(and(eq(siteAuditRuns.auditId, audit.id), eq(siteAuditRuns.status, 'done')))
+            .orderBy(desc(siteAuditRuns.id)).limit(1);
+        const outcome = ((latest?.scores as { outcomes?: CheckOutcome[] } | null)?.outcomes ?? []).find((o) => o.id === checkId);
+        const row = and(
+            eq(siteAuditCheckWork.auditId, audit.id), eq(siteAuditCheckWork.organisationId, orgId),
+            eq(siteAuditCheckWork.pageUrl, audit.url), eq(siteAuditCheckWork.checkId, checkId),
+        );
+        try {
+            const [existing] = await db.select().from(siteAuditCheckWork).where(row).limit(1);
+            const decision = decideCheckWork(existing, status as CheckWorkStatus, outcome);
+            if (decision.op === 'refuse') return json(decision.statusCode, { error: decision.error });
+            if (decision.op === 'none') return json(200, { work: existing ?? null, label: existing?.label ?? outcome?.label ?? null });
+            if (decision.op === 'delete') {
+                await db.delete(siteAuditCheckWork).where(row);
+                return json(200, { work: null, label: existing?.label ?? null });
+            }
+            const [saved] = existing
+                ? await db.update(siteAuditCheckWork)
+                    .set({ status: decision.status, verifiedRunId: null, updatedAt: new Date() })
+                    .where(row).returning()
+                : await db.insert(siteAuditCheckWork).values({
+                    auditId: audit.id, organisationId: orgId, pageUrl: audit.url, checkId, lens: outcome!.lens,
+                    weight: outcome!.weight, label: outcome!.label, status: decision.status, createdBy: userId,
+                }).onConflictDoUpdate({
+                    target: [siteAuditCheckWork.auditId, siteAuditCheckWork.pageUrl, siteAuditCheckWork.checkId],
+                    set: { status: decision.status, verifiedRunId: null, updatedAt: new Date() },
+                }).returning();
+            return json(200, { work: saved, label: saved.label });
+        } catch (err) {
+            if (!isCheckWorkTableMissing(err)) throw err;
+            return json(503, { error: 'This isn\'t switched on yet — it needs a database update.', code: 'CHECK_WORK_UNAVAILABLE' });
+        }
+    }
+
+    // "Check if this is done" and "Ask <Website Assistant> to make this change", on anything in In
+    // progress. Same run as "Check my site now": one that re-scores uses 1 task, and one that finds
+    // nothing changed is free. Whatever else it finds on the page moves on too.
+    if (action === 'check_item' || action === 'ask_website') {
+        const shopper = await requireShopper(body.assistantId);
+        if (!shopper) return json(404, { error: 'Assistant not found.' });
+        const audit = await auditFor(shopper.id);
+        if (!audit) return json(400, { error: 'Add your website first.' });
+        const kind = String(body.kind || '');
+        const itemId = Number(body.itemId);
+        if (!(ITEM_KINDS as readonly string[]).includes(kind) || !Number.isInteger(itemId) || itemId <= 0) return json(400, { error: 'kind and itemId required.' });
+
+        try {
+            let brief: string | null = null;
+            if (kind === 'fix') {
+                const [f] = await db.select({ location: siteAuditFixes.location, beforeText: siteAuditFixes.beforeText, afterText: siteAuditFixes.afterText }).from(siteAuditFixes)
+                    .where(and(eq(siteAuditFixes.id, itemId), eq(siteAuditFixes.auditId, audit.id), eq(siteAuditFixes.status, 'accepted'))).limit(1);
+                if (f) brief = websiteChangeBrief({ kind: 'fix', ...f, location: f.location ? plainLocation(f.location) : null });
+            } else {
+                const [w] = await db.select({ label: siteAuditCheckWork.label }).from(siteAuditCheckWork)
+                    .where(and(eq(siteAuditCheckWork.id, itemId), eq(siteAuditCheckWork.auditId, audit.id), eq(siteAuditCheckWork.status, 'accepted'))).limit(1);
+                if (w) brief = websiteChangeBrief({ kind: 'check', label: w.label });
+            }
+            if (!brief) return json(404, { error: 'That isn\'t in progress any more.' });
+            const conflict = { target: [siteAuditItemChecks.auditId, siteAuditItemChecks.itemKind, siteAuditItemChecks.itemId] };
+
+            if (action === 'ask_website') {
+                const helper = await websiteHelperFor(db, orgId, audit.url);
+                if (!helper) return json(400, { error: 'Your website isn\'t hosted by your Website Assistant, so this change needs making wherever your site is built.' });
+                const now = new Date();
+                await db.insert(siteAuditItemChecks).values({ auditId: audit.id, organisationId: orgId, itemKind: kind, itemId, websiteAskedAt: now })
+                    .onConflictDoUpdate({ ...conflict, set: { websiteAskedAt: now, updatedAt: now } });
+                return json(200, { assistantId: helper.id, assistantName: helper.name, draft: brief });
+            }
+
+            await sweepStuckAuditRuns(db, audit.id);
+            const { runId, alreadyRunning } = await requestAuditRun(db, { auditId: audit.id, organisationId: orgId, kind: 'manual', userId });
+            if (!alreadyRunning && !(await triggerSiteAudit(runId))) {
+                await failAuditRun(db, runId, 'The check couldn\'t be started. Nothing was charged — try again.');
+                return json(503, { error: 'The check couldn\'t be started. Nothing was charged — try again.', runId });
+            }
+            await db.insert(siteAuditItemChecks).values({ auditId: audit.id, organisationId: orgId, itemKind: kind, itemId, runId })
+                .onConflictDoUpdate({ ...conflict, set: { runId, updatedAt: new Date() } });
+            return json(202, { runId, alreadyRunning });
+        } catch (err) {
+            if (!isCheckWorkTableMissing(err)) throw err;
+            return json(503, { error: 'This isn\'t switched on yet — it needs a database update.', code: 'CHECK_WORK_UNAVAILABLE' });
+        }
     }
 
     if (action === 'brief') {

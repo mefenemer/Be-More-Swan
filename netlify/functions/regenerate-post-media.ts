@@ -14,7 +14,8 @@ import { scheduledPosts, scheduledPostAssets, contentAssets, mediaGenerationJobs
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { generateAndPersistImage } from '../../src/lib/media-persist';
-import { planImage, wordsToOverlays } from '../../src/lib/image-prompt';
+import { wordsToOverlays } from '../../src/lib/image-prompt';
+import { directPostImage } from '../../src/utils/post-image-direction';
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { FalContentPolicyError, FalError, FalServiceError, IMAGE_MODEL } from '../../src/lib/fal-gateway';
@@ -25,6 +26,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
+    const startedAt = Date.now();
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -38,7 +40,10 @@ export default withLambda(async (event) => {
     if (!Number.isInteger(postId)) return { statusCode: 400, body: JSON.stringify({ error: 'postId required.' }) };
 
     const [post] = await db
-        .select({ id: scheduledPosts.id, caption: scheduledPosts.caption, mediaDescription: scheduledPosts.suggestedMediaDescription })
+        .select({
+            id: scheduledPosts.id, caption: scheduledPosts.caption, mediaDescription: scheduledPosts.suggestedMediaDescription,
+            assistantId: scheduledPosts.assistantId, platform: scheduledPosts.platform, contentAssetIds: scheduledPosts.contentAssetIds,
+        })
         .from(scheduledPosts)
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, orgId)))
         .limit(1);
@@ -48,20 +53,23 @@ export default withLambda(async (event) => {
     // post, and only then the caption. ⚠️ The caption used to be sent to FLUX as it was (owner,
     // 2026-11-02: a "Before: … After: …" caption came back as a picture of that list, misspelt and
     // garbled) — a model asked to draw a page of text draws letters as shapes. Whatever the source, it
-    // is rewritten as a scene first (image-prompt.ts planImage); the no-text rule is still added to
-    // every prompt in fal-gateway.ts.
+    // is rewritten as a scene first (post-image-direction.ts, which knows the business, the brand, the
+    // rules and what was turned down); the no-text rule is still added to every prompt in fal-gateway.ts.
     //
     // Picture first, words second: when the request asks for words ON the picture (a drafter's "headline
-    // reading …", a "Before / After" label), planImage hands those back separately and they go on below
+    // reading …", a "Before / After" label), the plan hands those back separately and they go on below
     // as editable text layers — drawn by us, spelt right — instead of being lost to the no-text rule.
     const request = (body.prompt || post.mediaDescription || post.caption || 'On-brand social media image').trim().slice(0, 1000);
     const blocked = await enforcePromptModeration({ text: request, userId, organisationId: orgId, source: 'regenerate-post-media' });
     if (blocked) return blocked;
-    const { scene: prompt, words } = await planImage(request, { workspaceId: orgId, userId });
+    const fromCaption = request === (post.caption || '').trim().slice(0, 1000);
+    const { scene: prompt, words } = await directPostImage(db, {
+        orgId, userId, postId, assistantId: post.assistantId, platform: post.platform,
+        request, requestIsCaption: fromCaption, contentAssetIds: post.contentAssetIds,
+    });
     // A caption is what the post SAYS, not a request for words on its picture — and the editor sends
     // the caption as `prompt` when the drafter left no media description. Only a real request
     // (typed, or the drafter's media description) puts words on the image.
-    const fromCaption = request === (post.caption || '').trim().slice(0, 1000);
     const overlays = fromCaption ? [] : wordsToOverlays(words);
 
     const hold = await holdCredits(db, { orgId, amount: IMAGE_CREDIT_COST });
@@ -69,8 +77,10 @@ export default withLambda(async (event) => {
 
     let assetId: number;
     try {
-        // 18 s: the rewrite above may have used up to 4 s of the function's 26 s.
-        assetId = await generateAndPersistImage(db, { orgId, userId, prompt, aspectRatio: '4:5', timeoutMs: 18_000 });
+        // Up to 18 s, out of what the 26 s function has left: 23 s less what the writer above took,
+        // never under 12 s (its budget is 10 s), which keeps room to store the picture afterwards.
+        const timeoutMs = Math.min(18_000, Math.max(12_000, 23_000 - (Date.now() - startedAt)));
+        assetId = await generateAndPersistImage(db, { orgId, userId, prompt, aspectRatio: '4:5', timeoutMs });
         await settleHold(db, { orgId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId });
     } catch (err) {
         await settleHold(db, { orgId, amount: IMAGE_CREDIT_COST, success: false, mediaType: 'image', userId });

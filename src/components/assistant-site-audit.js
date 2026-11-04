@@ -21,6 +21,16 @@
  * for In progress, and after 30 days Done. Fixes that went live are in Done, dismissed ones and
  * earlier checks' unactioned ideas in Archived. "Undo" puts a brief back.
  *
+ * ── "I'll work on this" ────────────────────────────────────────────────────────
+ * Each line of "Why your score isn't higher" can be taken on (site-audits.ts `check_work`, the same
+ * action as the chat's site_audit_check_update card): In progress, then Done when a later check passes
+ * it (site-audit-check-work.ts), or Needs attention after a week.
+ *
+ * ── "Check if this is done" ───────────────────────────────────────────────────
+ * On every fix and score check in progress (`check_item`). Done moves it to Done; if not, the card says
+ * what's still missing and offers "Ask <Website Assistant> to make this change" when we host the site
+ * (`ask_website`), whose Publish starts the next check (site-audit-recheck.ts).
+ *
  * Handlers are bound to `document` once, at load, never from render. Every server value is escaped.
  * ⚠️ The button and section names are quoted to the chat (chat-orchestrator.ts mysteryShopperSurfaces);
  * tests/mystery-shopper-wiring.test.ts fails if they drift apart.
@@ -53,6 +63,7 @@
     range: 'month',        // the Results tab's score chart: month | quarter | year
     pastOpen: false,       // "View past checks"
     whyOpen: false,        // "Why your score isn't higher" expanded
+    watching: new Set(),   // "kind:id" of items a "Check if this is done" click is waiting on
     tab: 'checks',         // the sub-tab: checks | review | progress | done | attention | archived
     historyShown: 20,      // client-paged: "Show more" adds HISTORY_PAGE
     note: null,          // { text, tone }
@@ -102,6 +113,7 @@
       state.data = await post({ action: 'get', assistantId: state.assistantId });
       state.loadError = null;
       if (state.note?.whileRunning && !inFlight()) state.note = null;
+      reportWatched();
     } catch (err) {
       console.error('[AssistantSiteAudit] load failed:', err);
       state.loadError = err.message;
@@ -112,6 +124,19 @@
   }
 
   const inFlight = () => (state.data?.runs || []).find((r) => r.status === 'queued' || r.status === 'running') || null;
+
+  const itemCheck = (kind, id) => (state.data?.itemChecks || []).find((c) => c.kind === kind && c.itemId === id) || null;
+  const itemStillOpen = (kind, id) => (kind === 'fix' ? state.data?.fixes : state.data?.checkWork)?.some((x) => x.id === id && x.status === 'accepted');
+
+  /** The check they asked for has ended: say how it went, once. */
+  function reportWatched() {
+    if (inFlight() || !state.watching.size) return;
+    const open = [...state.watching].filter((k) => { const [kind, id] = k.split(':'); return itemStillOpen(kind, Number(id)); });
+    const finished = state.watching.size - open.length;
+    state.watching.clear();
+    if (finished && !open.length) state.note = { text: "That's done — a check confirmed it, so it's moved to Done." };
+    else if (open.length) state.note = { text: "Not done yet. The card in In progress says what's still missing.", tone: 'error' };
+  }
 
   /** Poll only while a check is in flight. The server ends a stuck one, so this always stops. */
   function schedulePoll() {
@@ -375,6 +400,37 @@
                <button type="button" data-sa-reject-fix="${esc(f.id)}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">Reject</button>`}
           <button type="button" data-sa-copy="${esc(f.id)}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Copy</button>
         </div>
+        ${accepted ? completionBlock('fix', f.id, `Your page still says "${f.beforeText}", and the suggested wording isn't there yet.`) : ''}
+      </div>`;
+  }
+
+  /**
+   * "Check if this is done" on an item in progress, with what the check it asked for found, and who
+   * can make the change. `missing` says, in words for this item, what's still not right.
+   */
+  function completionBlock(kind, id, missing) {
+    if (state.data?.checkWorkAvailable === false) return '';
+    const c = itemCheck(kind, id);
+    const helper = state.data?.websiteHelper;
+    const v = c?.verdict;
+    const running = !!inFlight();
+    const asked = !!c?.websiteAskedAt;
+    let verdict = '';
+    if (v === 'checking') verdict = '<p class="text-xs font-semibold text-gray-600 mt-3">Checking your site now…</p>';
+    else if (v === 'not_checked') verdict = '<p class="text-xs text-amber-700 mt-3">That check couldn\'t read your page, so this hasn\'t been confirmed. Nothing was charged — try again.</p>';
+    else if (v === 'incomplete' || v === 'nothing_changed') {
+      verdict = `<div class="bg-amber-50 rounded-lg p-3 mt-3">
+        <p class="text-xs font-bold text-amber-800">Not done yet</p>
+        <p class="text-xs text-gray-800 mt-1">${esc(missing)}</p>
+        ${v === 'nothing_changed' ? '<p class="text-xs text-gray-600 mt-1">Nothing on your page has changed since the last check, so that check was free.</p>' : ''}
+        <p class="text-xs text-gray-800 mt-1">${helper ? `Make this change yourself, or ask ${esc(helper.name)} to make it for you. Then check again.` : 'Please make this change on your site, then check again.'}</p>
+      </div>`;
+    }
+    return `${verdict}
+      ${asked && helper ? `<p class="text-xs font-semibold text-green-700 mt-3">You've asked ${esc(helper.name)} to make this change. When you publish it, ${esc(state.assistantName || 'your Mystery Shopper')} checks again.</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sa-check-item="${esc(id)}" data-kind="${kind}" ${running ? 'disabled' : ''} title="A check that re-scores uses 1 task. If nothing on your site or your competitors' sites has changed, it's free." class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${v ? 'Check again' : 'Check if this is done'}</button>
+        ${helper ? `<button type="button" data-sa-ask-website="${esc(id)}" data-kind="${kind}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Ask ${esc(helper.name)} to make this change</button>` : ''}
       </div>`;
   }
 
@@ -429,6 +485,46 @@
    * with the question typed in.
    */
   const WEIGHT_WORDS = { 3: IMPACT.high, 2: IMPACT.medium, 1: IMPACT.low };
+  /** What they've said about this line, on the page being checked now. */
+  const workFor = (checkId) => (state.data?.checkWork || []).find((w) => w.checkId === checkId && w.pageUrl === state.data?.audit?.url) || null;
+  const askButton = (checkId) => `<button type="button" data-sa-ask="${esc(checkId)}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Ask ${esc(state.assistantName || 'your Mystery Shopper')} how to fix this</button>`;
+
+  /** The commitment part of a line: the button, or where it has got to. */
+  function checkCommitment(o, latest) {
+    if (state.data?.checkWorkAvailable === false) return '';
+    const btn = (status, label, primary) => `<button type="button" data-sa-check="${esc(o.id)}" data-status="${status}" class="${primary ? 'btn-primary' : 'btn-secondary border'} px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">${label}</button>`;
+    const undo = (status, label) => `<button type="button" data-sa-check="${esc(o.id)}" data-status="${status}" class="text-xs text-gray-500 underline">${label}</button>`;
+    const w = workFor(o.id);
+    if (w?.status === 'accepted') {
+      return `<span class="text-xs font-semibold text-green-700">You said you'll work on this. It's in In progress.</span>${btn('done', "I've done this", true)}${undo('open', 'Undo')}`;
+    }
+    if (w?.status === 'done' && w.verifiedRunId == null) {
+      const seenSince = new Date(latest.finishedAt || latest.createdAt) > new Date(w.updatedAt);
+      return `<span class="text-xs font-semibold ${seenSince ? 'text-amber-700' : 'text-green-700'}">${seenSince ? 'You marked this done, but the last check still found it.' : 'You marked this done. The next check will look for it.'}</span>${undo('accepted', 'Not done after all')}`;
+    }
+    return `${w ? '<span class="text-xs text-amber-700">This passed a check before, and the last check found it again.</span>' : ''}${btn('accepted', "I'll work on this", true)}`;
+  }
+
+  /** A line they took on, for In progress and Needs attention. */
+  function checkWorkCard(w) {
+    const [impactLabel, impactCls] = WEIGHT_WORDS[w.weight] || IMPACT.medium;
+    const lens = (LENSES.find((l) => l[0] === w.lens) || [null, ''])[1];
+    return `
+      <div class="border border-gray-200 rounded-xl p-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${impactCls}">${esc(impactLabel)}</span>
+          <span class="text-[10px] text-gray-500">${esc(lens)}</span>
+        </div>
+        <p class="text-sm text-gray-800 mt-2">${esc(w.label)}</p>
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+          <button type="button" data-sa-check="${esc(w.checkId)}" data-status="done" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">I've done this</button>
+          ${askButton(w.checkId)}
+          <button type="button" data-sa-check="${esc(w.checkId)}" data-status="open" class="text-xs text-gray-500 underline">Undo</button>
+        </div>
+        ${completionBlock('check', w.id, `The last check still found this: ${w.label}`)}
+      </div>`;
+  }
+
   function missingBlock(latest) {
     const failed = (latest?.scores?.outcomes || []).filter((o) => o.result === 'fail').sort((a, b) => b.weight - a.weight);
     if (!failed.length) return '';
@@ -440,17 +536,20 @@
         <h3 class="text-sm font-black text-gray-900">Why your score isn't higher <span class="text-xs font-semibold text-gray-500">(${failed.length})</span></h3>
         <span class="text-xs font-semibold text-gray-500" aria-hidden="true">${state.whyOpen ? 'Hide' : 'Show'}</span>
       </summary>
-      <p class="text-xs text-gray-500 mt-2">What a buyer's eye looks for and didn't find, most important first. This list is worked out afresh at every check: there's nothing to tick off — once your page passes one, it simply drops off the list at the next check and the score goes up. The suggested fixes are what move through In progress to Done.</p>
-      <ul class="mt-3 space-y-2">${failed.slice(0, 10).map((o, i) => {
+      <p class="text-xs text-gray-500 mt-2">What a buyer's eye looks for and didn't find, most important first. Say you'll work on one and it moves to In progress. Once your page passes it, the next check moves it to Done and your score goes up.</p>
+      <ul class="mt-3 space-y-2">${failed.slice(0, 10).map((o) => {
         const [w, cls] = WEIGHT_WORDS[o.weight] || IMPACT.medium;
         const lens = (LENSES.find((l) => l[0] === o.lens) || [null, ''])[1];
         const fx = fixFor(o.lens);
         return `<li class="border border-gray-200 rounded-xl p-3">
           <div class="flex flex-wrap items-center gap-2"><span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}">${esc(w)}</span><span class="text-[10px] text-gray-500">${esc(lens)}</span></div>
           <p class="text-xs text-gray-800 mt-1">${esc(o.label)}</p>
-          ${fx
-            ? `<button type="button" data-sa-goto-fix="${esc(fx.id)}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">See the suggested fix</button>`
-            : `<button type="button" data-sa-ask="${i}" class="mt-2 btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Ask ${esc(state.assistantName || 'your Mystery Shopper')} how to fix this</button>`}
+          <div class="flex flex-wrap items-center gap-2 mt-2">
+            ${checkCommitment(o, latest)}
+            ${fx
+              ? `<button type="button" data-sa-goto-fix="${esc(fx.id)}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">See the suggested fix</button>`
+              : askButton(o.id)}
+          </div>
         </li>`;
       }).join('')}</ul></details>`;
   }
@@ -479,6 +578,19 @@
           ${confirmed ? '' : live
             ? `<button type="button" data-sa-fix="${esc(f.id)}" data-status="accepted" class="mt-2 text-xs text-gray-500 underline">Not done after all</button>`
             : `<button type="button" data-sa-fix="${esc(f.id)}" data-status="open" class="mt-2 text-xs text-gray-500 underline">Bring back</button>`}
+        </li>`;
+    }
+    if (e.kind === 'check') {
+      const w = e.w;
+      const confirmed = w.verifiedRunId != null;
+      return `
+        <li class="border border-gray-200 rounded-xl p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            ${pill(confirmed ? 'Passed a check' : 'You marked this done', 'bg-green-50 text-green-700')}
+            <span class="text-[10px] text-gray-500">${confirmed ? `Confirmed by a check ${esc(when(w.updatedAt))}` : `Marked done ${esc(when(w.updatedAt))}`}</span>
+          </div>
+          <p class="text-xs text-gray-700 mt-2">${esc(w.label)}</p>
+          ${confirmed ? '' : `<button type="button" data-sa-check="${esc(w.checkId)}" data-status="accepted" class="mt-2 text-xs text-gray-500 underline">Not done after all</button>`}
         </li>`;
     }
     if (e.kind === 'rejected') {
@@ -540,6 +652,10 @@
       (r.handoffs || []).forEach((h, i) => { if (!ideaBrief(r.runId, i)) pastIdeas.push({ kind: 'idea', at: r.at, h, runId: r.runId, i }); });
     }
     const byNew = (a, b) => new Date(b.at) - new Date(a.at);
+    const work = state.data?.checkWork || [];
+    const stalledChecks = new Set(state.data?.stalledChecks || []);
+    // Accepted on a page they've since moved away from: no check will ever look at it again.
+    const onPage = (w) => w.status === 'accepted' && w.pageUrl === state.data?.audit?.url;
     return {
       review: {
         fixes: fixes.filter((f) => f.status === 'open'),
@@ -547,14 +663,17 @@
       },
       progress: {
         fixes: fixes.filter((f) => f.status === 'accepted' && !stalled.has(f.id)),
+        checks: work.filter((w) => onPage(w) && !stalledChecks.has(w.id)),
         briefs: briefs().filter((b) => !settled(b)).map((b) => ({ kind: 'brief', at: b.createdAt, b })).sort(byNew),
       },
       done: [
         ...fixes.filter((f) => f.status === 'done').map((f) => ({ kind: 'fix', at: f.updatedAt, f })),
+        ...work.filter((w) => w.status === 'done').map((w) => ({ kind: 'check', at: w.updatedAt, w })),
         ...briefs().filter(settled).map((b) => ({ kind: 'brief', at: b.createdAt, b })),
       ].sort(byNew),
       attention: {
         fixes: fixes.filter((f) => f.status === 'accepted' && stalled.has(f.id)),
+        checks: work.filter((w) => onPage(w) && stalledChecks.has(w.id)),
         run: newest && (newest.status === 'failed' || newest.status === 'unreadable') ? newest : null,
         comps: latest?.report?.competitorsUnread || [],
       },
@@ -569,9 +688,9 @@
   function counts(b) {
     return {
       review: b.review.fixes.length + b.review.ideas.length,
-      progress: b.progress.fixes.length + b.progress.briefs.length,
+      progress: b.progress.fixes.length + b.progress.checks.length + b.progress.briefs.length,
       done: b.done.length,
-      attention: b.attention.fixes.length + (b.attention.run ? 1 : 0) + b.attention.comps.length,
+      attention: b.attention.fixes.length + b.attention.checks.length + (b.attention.run ? 1 : 0) + b.attention.comps.length,
       archived: b.archived.length,
     };
   }
@@ -609,8 +728,12 @@
     return `
       ${card(`
         <h3 class="text-sm font-black text-gray-900">Changes you're making</h3>
-        <p class="text-xs text-gray-500 mt-1">The next check looks for the new wording on your site. When it's there, the fix moves to Done; if it's still missing after a week, to Needs attention.</p>
+        <p class="text-xs text-gray-500 mt-1">The next check looks for the new wording on your site. When it's there, the fix moves to Done; if it's still missing after a week, to Needs attention. Made one? "Check if this is done" looks now, and uses 1 task if the score is worked out again.</p>
         <div class="space-y-3 mt-3">${b.progress.fixes.length ? b.progress.fixes.map(fixCard).join('') : empty('None — say “I’ll make this change” on a fix in To review.')}</div>`)}
+      ${b.progress.checks.length ? card(`
+        <h3 class="text-sm font-black text-gray-900">Score checks you're working on</h3>
+        <p class="text-xs text-gray-500 mt-1">From "Why your score isn't higher". When a check finds your page now passes one, it moves to Done; if it's still not passing after a week, to Needs attention.</p>
+        <div class="space-y-3 mt-3">${b.progress.checks.map(checkWorkCard).join('')}</div>`) : ''}
       ${card(`
         <h3 class="text-sm font-black text-gray-900">Briefs with your other assistants</h3>
         <p class="text-xs text-gray-500 mt-1">Sent in the last ${BRIEF_SETTLE_DAYS} days. Older ones are in Done.</p>
@@ -621,7 +744,7 @@
   function donePanel(b) {
     return card(`
       <h3 class="text-sm font-black text-gray-900">Done</h3>
-      <p class="text-xs text-gray-500 mt-1">Fixes a check confirmed are live on your site, and briefs sent over ${BRIEF_SETTLE_DAYS} days ago.</p>
+      <p class="text-xs text-gray-500 mt-1">Fixes a check confirmed are live on your site, score checks your page now passes, and briefs sent over ${BRIEF_SETTLE_DAYS} days ago.</p>
       ${b.done.length ? list(b.done.slice(0, state.historyShown)) : `<div class="mt-3">${empty('Nothing yet — a fix lands here when a check finds the new wording on your site.')}</div>`}
       ${b.done.length > state.historyShown ? `<button type="button" data-sa-history-more class="mt-3 text-xs text-gray-500 underline">Show more (${b.done.length - state.historyShown} older)</button>` : ''}`);
   }
@@ -634,6 +757,7 @@
     const parts = [
       a.run ? card(`<h3 class="text-sm font-black text-gray-900">The last check didn't finish</h3><p class="text-xs text-gray-700 mt-1">${esc(when(a.run.createdAt))}: ${esc(why)}</p><p class="text-xs text-gray-500 mt-1">Nothing was charged. Try again from Checks.</p>`) : '',
       a.fixes.length ? card(`<h3 class="text-sm font-black text-gray-900">Promised, but not on your site yet</h3><p class="text-xs text-gray-500 mt-1">Over a week since you said you'd make these changes, and the last check didn't find them.</p><div class="space-y-3 mt-3">${a.fixes.map(fixCard).join('')}</div>`) : '',
+      a.checks.length ? card(`<h3 class="text-sm font-black text-gray-900">Score checks still not passing</h3><p class="text-xs text-gray-500 mt-1">Over a week since you said you'd work on these, and your page hasn't passed them yet.</p><div class="space-y-3 mt-3">${a.checks.map(checkWorkCard).join('')}</div>`) : '',
       a.comps.length ? card(`<h3 class="text-sm font-black text-gray-900">Competitors that couldn't be read</h3><ul class="mt-2 space-y-1">${a.comps.map((c) => `<li class="text-xs text-gray-700"><span class="font-bold">${esc(host(c.url))}</span> — ${esc(c.message)}</li>`).join('')}</ul><div class="mt-3"><button type="button" data-sa-edit-competitors class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Edit competitors</button></div>`) : '',
     ].filter(Boolean);
     return parts.length ? parts.join('') : card(empty('Nothing needs you right now.'));
@@ -784,7 +908,8 @@
     }
     const ask = t('[data-sa-ask]');
     if (ask) {
-      const o = (state.data?.latest?.scores?.outcomes || []).filter((x) => x.result === 'fail').sort((a, z) => z.weight - a.weight)[Number(ask.dataset.saAsk)];
+      const id = ask.dataset.saAsk;
+      const o = (state.data?.latest?.scores?.outcomes || []).find((x) => x.id === id) || workFor(id);
       if (o) openChatWithBrief({ id: state.assistantId }, `My last website check says: "${o.label}". How do I fix that on my site?`);
       return;
     }
@@ -819,6 +944,39 @@
       try {
         await post({ action: 'fix', fixId: Number(fix.dataset.saFix), status: fix.dataset.status });
         say(null);
+      } catch (err) { say(err.message, 'error'); }
+      await load();
+      return;
+    }
+
+    const checkItem = t('[data-sa-check-item]');
+    if (checkItem) {
+      checkItem.disabled = true;
+      try {
+        await post({ action: 'check_item', assistantId: state.assistantId, kind: checkItem.dataset.kind, itemId: Number(checkItem.dataset.saCheckItem) });
+        state.watching.add(`${checkItem.dataset.kind}:${checkItem.dataset.saCheckItem}`);
+        say('Checking your site…', null, true);
+      } catch (err) { say(err.message, 'error'); }
+      await load();
+      return;
+    }
+    const askWebsite = t('[data-sa-ask-website]');
+    if (askWebsite) {
+      askWebsite.disabled = true;
+      try {
+        const data = await post({ action: 'ask_website', assistantId: state.assistantId, kind: askWebsite.dataset.kind, itemId: Number(askWebsite.dataset.saAskWebsite) });
+        openChatWithBrief({ id: data.assistantId }, data.draft);
+      } catch (err) { say(err.message, 'error'); }
+      await load();
+      return;
+    }
+
+    const chk = t('[data-sa-check]');
+    if (chk) {
+      chk.disabled = true;
+      try {
+        await post({ action: 'check_work', assistantId: state.assistantId, checkId: chk.dataset.saCheck, status: chk.dataset.status });
+        say({ accepted: "It's in In progress. The next check will see whether your page passes it.", done: 'Marked as done. The next check will confirm it.', open: null }[chk.dataset.status]);
       } catch (err) { say(err.message, 'error'); }
       await load();
       return;

@@ -68,7 +68,8 @@ check('a platform-only rule is labelled, a global one is not', () => {
 });
 check('chat reads the same rule set as autopilot §4: this assistant\'s AND workspace-wide', () => {
     const src = read('src/utils/assistant-rules-prompt.ts');
-    assert.ok(src.includes('or(eq(contentRules.assistantId, params.assistantId), isNull(contentRules.assistantId))'));
+    assert.ok(src.includes('const ids = [params.assistantId, params.alsoAssistantId].filter('));
+    assert.ok(src.includes('ids.length ? or(inArray(contentRules.assistantId, ids), isNull(contentRules.assistantId)) : isNull(contentRules.assistantId)'));
     const bp = read('src/utils/blueprint.ts');
     assert.ok(bp.includes('r.assistantId === assistantId || r.assistantId === null'), 'blueprint §4 changed — re-check the chat reader matches');
 });

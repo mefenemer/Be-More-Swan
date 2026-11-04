@@ -97,6 +97,16 @@
   #post-review-modal.pr-page [data-mockup-card],
   #post-review-modal.pr-page #post-review-tabs,
   #post-review-modal.pr-page #pce-stage-strip { max-width: 600px; }
+  /* Picture beside the words, once the page has the width for both (_pceFitCanvasToView decides and
+     sets the card's width and column split inline). Stacked, a post on a wide screen was fitted to the
+     height left under the tabs and sat in a 260px strip between two empty bands, its caption below
+     the fold. Areas rather than source order because a text-first platform writes its words first. */
+  #post-review-modal.pr-page [data-mockup-card].pce-card-side { display: grid;
+    grid-template-areas: "media head" "media words" "media foot"; grid-template-rows: auto 1fr auto; }
+  .pce-card-side > [data-media-host] { grid-area: media; align-self: start; }
+  .pce-card-side > [data-mock-head] { grid-area: head; }
+  .pce-card-side > [data-caption-host] { grid-area: words; }
+  .pce-card-side > [data-mock-foot] { grid-area: foot; }
   /* The editor and Blog Studio PAGES sit below the header but above it in z-order (90 / 85 against
      the header's 50), so every header dropdown — the assistant switcher, notifications, the profile
      menu — opened UNDERNEATH the page and could not be clicked (2026-10-14). While a page is open the
@@ -681,13 +691,6 @@ window.showComplianceModals = function showComplianceModals(force) {
         <button type="button" id="gp-ai-src-ai" onclick="gpAiGenerate()" class="btn-assistant px-2.5 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           <span id="gp-ai-gen-label">Ask your assistant to generate</span>
-        </button>
-        <!-- Brand Designer (plan Phase 5): brief it for this post's picture. Hidden until a check finds a
-             Brand Designer in the workspace (_gpDesignerCheck) — a button that can only fail is worse
-             than none. `hidden` loses to `flex`, so the starting state is pinned inline too. -->
-        <button type="button" id="gp-ai-src-designer" onclick="gpAiAskDesigner()" style="display:none" class="hidden btn-secondary px-2.5 py-1 text-xs font-semibold border rounded-lg transition cursor-pointer flex items-center gap-1">
-          <span>✏️</span>
-          <span id="gp-ai-designer-label">Ask your Brand Designer</span>
         </button>
         <!-- Text overlays moved to the "Text on image" inspector layer in the Review Queue (Phase 3);
              the old inline "Add text" button here is retired to keep a single entry point. -->
@@ -7370,7 +7373,7 @@ function renderPlatformMockup(post) {
         : '';
 
     const header = `
-      <div class="flex items-center gap-2.5 px-3.5 py-3">
+      <div data-mock-head class="flex items-center gap-2.5 px-3.5 py-3">
         <div class="w-9 h-9 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0" style="background:${meta.accent}">${_rqEsc(initial)}</div>
         <div class="min-w-0">
           <p class="text-sm font-semibold text-gray-900 truncate">${_rqEsc(brand)}</p>
@@ -7381,7 +7384,7 @@ function renderPlatformMockup(post) {
 
     // Faint engagement row to make it feel like a real post.
     const footer = `
-      <div class="flex items-center gap-5 px-3.5 py-2.5 border-t border-gray-100 text-gray-400">
+      <div data-mock-foot class="flex items-center gap-5 px-3.5 py-2.5 border-t border-gray-100 text-gray-400">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
@@ -7554,6 +7557,13 @@ const _PCE_CANVAS_MAX_VH = 0.52;
 const _PCE_PAGE_MAX_VH = 0.74;
 const _PCE_PAGE_CARD_MAX_PX = 600;
 /**
+ * Picture beside the words: the width of the words' column, the most the picture may take (a landscape
+ * shot has the room once nothing has to stack under it), and the narrowest stage worth splitting.
+ */
+const _PCE_SIDE_WORDS_PX = 340;
+const _PCE_SIDE_MEDIA_MAX_PX = 720;
+const _PCE_SIDE_MIN_STAGE_PX = 640;
+/**
  * How tall the media may be on the PAGE: the room between the top of the media and the bottom of
  * the scrolling area, so the whole picture is on screen without scrolling. Measured, not a fraction
  * of the window: the header, alerts, platform tabs and the card's own name row above the media all
@@ -7579,10 +7589,33 @@ function _pceFitCanvasToView() {
     // already repaint the overlays call back in here once it does.
     if (!(natW > 0) || !(natH > 0)) return;
     const page = _pceIsPageMode();
+    // A cut's timeline already takes the room beside the picture, so only a post without one splits.
+    // Set BEFORE the height is measured: it moves the media up, level with the card's name row.
+    const hasTimeline = _pceSplitOn && window.innerWidth >= _PCE_SPLIT_MIN_PX;
+    const stageW = document.getElementById('pce-stage-main')?.clientWidth || 0;
+    const side = page && !hasTimeline && stageW >= _PCE_SIDE_MIN_STAGE_PX;
+    card.classList.toggle('pce-card-side', side);
     const cap = page
         ? _pcePageMediaCap(body, media)
         : Math.max(240, Math.round(window.innerHeight * _PCE_CANVAS_MAX_VH));
-    const widthForCap = Math.round(cap * (natW / natH));
+    // The shape on screen, which is the FORMAT's frame where there is one (a square photo in a 4:5
+    // feed post is drawn 4:5); going by the file's own shape would overshoot the height.
+    const host = media.closest('[data-media-host]');
+    const hostBox = host && host.className.includes('aspect-') ? host.getBoundingClientRect() : null;
+    const ratio = hostBox && hostBox.height > 0 ? hostBox.width / hostBox.height : natW / natH;
+    const widthForCap = Math.round(cap * ratio);
+    if (side) {
+        const mediaW = Math.max(260, Math.min(widthForCap, _PCE_SIDE_MEDIA_MAX_PX, stageW - _PCE_SIDE_WORDS_PX));
+        const total = mediaW + _PCE_SIDE_WORDS_PX;
+        card.style.maxWidth = total + 'px';
+        // Proportional, not fixed: the side menu can take width back before the next fit runs.
+        card.style.gridTemplateColumns = `${mediaW}fr ${_PCE_SIDE_WORDS_PX}fr`;
+        const tabs = document.getElementById('post-review-tabs');
+        if (tabs) tabs.style.maxWidth = total + 'px';
+        _pceApplyStageSplit();
+        return;
+    }
+    card.style.gridTemplateColumns = '';
     if (page) {
         // Never wider than a post plausibly is on a big screen, never taller than the space allows.
         // 260px floor: below it the card's own name row truncates, and a short screen is better
@@ -7601,6 +7634,22 @@ function _pceFitCanvasToView() {
     card.style.maxWidth = widthForCap < 448 ? widthForCap + 'px' : '';
 }
 window.addEventListener('resize', () => _pceFitCanvasToView());
+// The stage also changes width without the window doing so: the setup rail appears or folds, the side
+// menu collapses. Width only: the fit changes the stage's height, and answering that would loop.
+// ⚠️ On the next frame, not in the callback: resizing what is observed from inside the callback makes
+// the browser raise "ResizeObserver loop completed", and our page-error catcher shows that to the
+// customer as "Something went wrong on this page".
+(() => {
+    const stage = document.getElementById('pce-stage-main');
+    if (!stage || !window.ResizeObserver) return;
+    let lastW = 0;
+    new ResizeObserver(([entry]) => {
+        const w = Math.round(entry.contentRect.width);
+        if (!w || w === lastW) return;
+        lastW = w;
+        requestAnimationFrame(() => _pceFitCanvasToView());
+    }).observe(stage);
+})();
 
 /**
  * @param canvasOnly Paint the boxes on the picture and STOP — no list repaint, no rebinding.
@@ -21208,31 +21257,9 @@ function gpAiMediaStatus(msg, type) {
     el.textContent = msg;
 }
 
-// ── Brand Designer for this post (docs/brand-designer-plan.md Phase 5) ──────────────────────────
-// One check per page load: is there a Brand Designer to ask? The answer only changes when someone
-// hires or archives one, and a stale "yes" fails with a plain message rather than silently.
-let _gpDesignerId = null;
-let _gpDesignerName = null;
-(async function _gpDesignerCheck() {
-    try {
-        const res = await fetch('/.netlify/functions/brand-briefs', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-            body: JSON.stringify({ action: 'post_brief' }),
-        });
-        if (!res.ok) return;
-        const d = await res.json();
-        _gpDesignerId = d.designerId || null;
-        _gpDesignerName = d.designerName || null;
-        const btn = document.getElementById('gp-ai-src-designer');
-        if (btn && _gpDesignerId) { btn.classList.remove('hidden'); btn.style.display = ''; }
-        _gpSyncAssistantLabels();
-    } catch { /* no button — nothing else depends on it */ }
-})();
-
 /**
- * Name the assistants on the media buttons — "Ask Marvin to generate", "Ask Iris" — instead of a
- * generic "Generate with AI". The post's own assistant does the generating; the Brand Designer is a
- * separate hire with its own name. Called whenever the media panel is (re)shown for a post.
+ * Name the assistant on the media buttons — "Ask Marvin to generate" — instead of a generic "Generate
+ * with AI". Called whenever the media panel is (re)shown for a post.
  */
 function _gpSyncAssistantLabels() {
     const id = typeof _gpCurrentPostId !== 'undefined' && _gpCurrentPostId != null ? _gpCurrentPostId : _rqReviewPostId;
@@ -21240,29 +21267,7 @@ function _gpSyncAssistantLabels() {
     const name = (post && post.assistantName) || null;
     const gen = document.getElementById('gp-ai-gen-label');
     if (gen) gen.textContent = name ? `Ask ${name} to generate` : 'Ask your assistant to generate';
-    const des = document.getElementById('gp-ai-designer-label');
-    if (des) des.textContent = _gpDesignerName ? `Ask ${_gpDesignerName} (Brand Designer)` : 'Ask your Brand Designer';
     document.querySelectorAll('[data-pce-assistant-ask]').forEach(el => { el.textContent = name ? `Ask ${name}` : 'Ask your assistant'; });
-}
-
-async function gpAiAskDesigner() {
-    if (!_gpCurrentPostId) return;
-    gpAiMediaBusy(true);
-    gpAiMediaStatus(`Briefing ${_gpDesignerName || 'your Brand Designer'}…`);
-    try {
-        const res = await fetch('/.netlify/functions/brand-briefs', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-            body: JSON.stringify({ action: 'brief_for_post', postId: _gpCurrentPostId, context: _gpAiMediaPrompt || '', mediaType: _gpAiMediaType }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(data.error || `Could not brief ${_gpDesignerName || 'the Brand Designer'}.`);
-        // Says where the choice happens and what happens next — nothing lands here until they choose.
-        gpAiMediaStatus(`Briefed. Choose a picture on ${_gpDesignerName ? _gpDesignerName + '\u2019s' : 'your Brand Designer\u2019s'} Briefs tab — it comes onto this post if the post still has none.`);
-    } catch (e) {
-        gpAiMediaStatus(e.message, 'error');
-    } finally {
-        gpAiMediaBusy(false);
-    }
 }
 
 function gpAiMediaBusy(busy) {

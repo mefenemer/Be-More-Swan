@@ -98,6 +98,18 @@ export function triggerBlogDrain(
 }
 
 /**
+ * Start the daily autonomous drafter. Not a queue: every run walks the opted-in assistants, which is
+ * why its background function guards against a second run in a day (autonomous-media-suggestions.ts).
+ */
+export function triggerAutonomousDrafts(
+    headers: Record<string, string | undefined> | undefined,
+    jobId: string,
+    caller: string,
+): Promise<boolean> {
+    return poke('run-autonomous-drafts-background', headers, jobId, caller);
+}
+
+/**
  * Start the lead-discovery queue immediately.
  *
  * Discovery needs this more than content does, not less. A discovery run is SLICED: the worker

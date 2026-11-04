@@ -32,6 +32,7 @@ import { aiAssistants, chatMessages, chatSessions, mentorReviews, organisations,
 import { AWAITING_REVIEW_STATUSES } from '../config/post-status';
 import { adaptForModel, replyText } from '../config/model-options';
 import { MENTOR_HONESTY_RULES, MENTOR_REVIEW_CRAFT } from '../constants/mentor-craft';
+import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { recordPlatformIncident } from './platform-incident';
 import { contentFindings, contentFindingsText, loadContentChecks, renderContentChecksForMentor, type ContentCheckInputs } from './mentor-content-checks';
 import { loadRoleModel, withRoleModel } from './assistant-model';
@@ -543,6 +544,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
             const system = [
                 `You are ${name}, the Business Mentor of ${org?.name || 'this business'} on Be More Swan.`,
                 MENTOR_REVIEW_CRAFT, MENTOR_HONESTY_RULES, REVIEW_CONSISTENCY_RULES,
+                SPECIAL_CATEGORY_RULE,
                 renderMentorSnapshot(inputs.data), renderProposalState(inputs.proposals, now),
                 renderFigures(inputs.figures, inputs.data, now).join('\n'),
                 renderCommitmentsForMentor(inputs.commitments, null, now).join('\n'),
