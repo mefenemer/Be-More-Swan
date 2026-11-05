@@ -14,7 +14,7 @@ import { safeFetchText, SafeFetchError } from '../utils/safe-fetch';
 import { gatewayGenerate } from './ai-gateway';
 import { parseModelJson } from '../utils/model-json';
 import { harvestBrandSignals, signalsToBrandKit, type BrandSignals } from '../utils/brand-extract';
-import { normalizeBrandKit, shouldExtractBrandKit, type BrandKit } from '../utils/brand-kit';
+import { kitWithNoColourFound, normalizeBrandKit, shouldExtractBrandKit, type BrandKit } from '../utils/brand-kit';
 import type { getDb } from '../../db/client';
 
 type Db = ReturnType<typeof getDb>;
@@ -31,26 +31,27 @@ const CSS_MAX_BYTES = 2 * 1024 * 1024;
 const MAX_STYLESHEETS = 4;
 
 /**
- * Fetch a website and derive a brand kit from it. Returns null when nothing usable was found —
- * which is a normal outcome, not an error (a site can legitimately be a monochrome wordmark).
- * Never throws.
+ * Fetch a website and derive a brand kit from it. `kit` is null when no brand colour was found —
+ * a normal outcome, not an error (a site can legitimately be monochrome). `fontFamily` is reported
+ * either way, because a monochrome site still has a typeface of its own (Love Cat Studio's is
+ * Playfair Display, and losing it drew their flyers in the bundled sans). Never throws.
  */
-export async function extractBrandKitFromWebsite(
+export async function readWebsiteBrand(
     websiteUrl: string,
     opts: { useModel?: boolean; now?: Date } = {},
-): Promise<BrandKit | null> {
+): Promise<{ kit: BrandKit | null; fontFamily: string | null }> {
     let page;
     try {
         page = await safeFetchText(websiteUrl, { timeoutMs: PAGE_TIMEOUT_MS, maxBytes: PAGE_MAX_BYTES });
     } catch (err) {
         const why = err instanceof SafeFetchError ? err.message : (err as Error)?.message;
         console.warn(`[brand-extract] could not fetch ${websiteUrl}: ${why}`);
-        return null;
+        return { kit: null, fontFamily: null };
     }
 
     if (!/html/i.test(page.contentType)) {
         console.warn(`[brand-extract] ${websiteUrl} is not HTML (${page.contentType})`);
-        return null;
+        return { kit: null, fontFamily: null };
     }
 
     // First pass: inline styles only. This also tells us which stylesheets are worth fetching.
@@ -60,16 +61,17 @@ export async function extractBrandKitFromWebsite(
 
     if (!signals.candidates.length) {
         console.warn(`[brand-extract] no brand-like colour found on ${websiteUrl}`);
-        return null;
+        return { kit: null, fontFamily: signals.fontFamily };
     }
 
     const chosenAccent = opts.useModel === false ? null : await chooseAccentWithModel(signals, websiteUrl);
 
-    return signalsToBrandKit(signals, {
+    const kit = signalsToBrandKit(signals, {
         website: hostOf(page.finalUrl),
         chosenAccent,
         now: opts.now,
     });
+    return { kit, fontFamily: signals.fontFamily };
 }
 
 /** Fetch stylesheets in parallel; a failure just contributes nothing. */
@@ -156,11 +158,11 @@ export async function resolveBrandKitForOrg(db: Db, orgId: number, now = new Dat
     const stored = normalizeBrandKit(org?.brandKit);
     if (!org?.websiteUrl || !shouldExtractBrandKit(stored, now)) return stored;
 
-    const extracted = await extractBrandKitFromWebsite(org.websiteUrl, { now });
+    const { kit: extracted, fontFamily } = await readWebsiteBrand(org.websiteUrl, { now });
 
-    // Stamp the attempt either way. On failure this is the ONLY thing written, and it is what stops
-    // an unreachable site being re-fetched on every post for the life of the account.
-    const next: BrandKit = extracted ?? { ...stored, lastExtractAttemptAt: now.toISOString() };
+    // Stamp the attempt either way. With no colour found this is all that is written, besides a font,
+    // and it is what stops an unreachable site being re-fetched on every post for the life of the account.
+    const next: BrandKit = extracted ?? kitWithNoColourFound(stored, fontFamily, now);
 
     try {
         await db.update(organisations)

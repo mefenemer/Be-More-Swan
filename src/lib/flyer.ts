@@ -25,7 +25,8 @@ import { PDFDocument, clip, endPath, popGraphicsState, pushGraphicsState, rectan
 import { brandCardFonts, BRAND_CARD_FONT_FAMILY } from './brand-card-fonts';
 import { loadWebFont } from './brand-card-webfont';
 import { estimateWrappedLines, inlineLogo, resolveCardPalette } from './brand-card';
-import { readableInkOn, type BrandKit } from '../utils/brand-kit';
+import { contrastRatio, readableInkOn, type BrandKit } from '../utils/brand-kit';
+import { mixHex } from '../public/brand-contrast.js';
 import { PAPER_SPECS, type FlyerContent, type FlyerLayout, type PaperSize } from '../config/flyer-vocab';
 
 export const PREVIEW_DPI = 150;
@@ -84,7 +85,13 @@ export function flyerGeometry(layout: FlyerLayout, paperSize: PaperSize, dpi: nu
     let photo: Box | null = null;
     let panel: Box | null = null;
     let text: Box;
-    if (layout === 'photo_top') {
+    if (layout === 'photo_framed') {
+        // The photo sits on the coloured page with a margin all round, and the words start below it,
+        // so no word can ever land on the picture.
+        photo = { left: bleed + pad, top: bleed + pad, width: trimWidth - pad * 2, height: Math.round(trimHeight * 0.38) };
+        const top = photo.top + photo.height + Math.round(pad * 0.7);
+        text = { left: bleed + pad, top, width: trimWidth - pad * 2, height: bleed + trimHeight - pad - top };
+    } else if (layout === 'photo_top') {
         const photoTrim = Math.round(trimHeight * 0.42);
         // The photo runs into the bleed on three sides; the words start below it.
         photo = { left: 0, top: 0, width: canvasWidth, height: bleed + photoTrim };
@@ -111,6 +118,53 @@ export function effectivePhotoDpi(photo: { width: number | null; height: number 
     if (!photo.width || !photo.height) return null;
     const s = Math.max(box.width / photo.width, box.height / photo.height);
     return Math.round(dpi / s);
+}
+
+// ── The page's colours ──────────────────────────────────────────────────────────────────────────
+
+/** A page's colours, worked out once and stored on the option, so its PDF matches its preview. */
+export interface FlyerPageStyle {
+    field: string; headline: string; ink: string; accent: string; offerBg: string; offerInk: string;
+    /** Two big soft circles behind the words (the words-only page), or null. */
+    decor: string | null;
+}
+
+const WHITE = '#ffffff';
+const BODY_CONTRAST = 4.5;
+
+/**
+ * The ink for a coloured page. Stricter than a card's readableInkOn, which lets white win at 3:1 for a
+ * big headline: this page also carries a phone number in small print. White when it reads at body-text
+ * contrast, else the dark ink when that does; on a colour where neither does, the card's rule.
+ */
+function printInkOn(colour: string, dark: string): string {
+    if (contrastRatio(WHITE, colour) >= BODY_CONTRAST) return WHITE;
+    if (contrastRatio(dark, colour) >= BODY_CONTRAST) return dark;
+    return readableInkOn(colour, dark);
+}
+
+/**
+ * The colours for one page, from one chosen colour. Null colour = no colour is known for this business:
+ * the page is its light background. A whole page of near-black is never the fallback, because that is
+ * what a brand kit nobody has filled in looks like, and it is not a design anybody chose.
+ */
+export function flyerPageStyle(layout: FlyerLayout, colour: string | null, kit: BrandKit): FlyerPageStyle {
+    if (!colour || layout === 'photo_framed') {
+        const field = colour ? mixHex(colour, WHITE, 0.82) : kit.backgroundColor;
+        const ink = readableInkOn(field, kit.textColor);
+        const strong = colour && contrastRatio(colour, field) >= BODY_CONTRAST ? colour : ink;
+        const offerBg = colour ?? ink;
+        return { field, headline: strong, ink, accent: strong, offerBg, offerInk: readableInkOn(offerBg, kit.textColor), decor: null };
+    }
+    const ink = printInkOn(colour, kit.textColor);
+    const white = ink === WHITE;
+    const offerBg = white ? WHITE : ink;
+    const offerInk = white ? (contrastRatio(colour, WHITE) >= BODY_CONTRAST ? colour : kit.textColor) : WHITE;
+    return {
+        field: colour, headline: ink, ink, accent: ink, offerBg, offerInk,
+        // Always the way that keeps the words readable: darker under white words, lighter under dark ones.
+        decor: layout === 'type_only' ? mixHex(colour, white ? '#000000' : WHITE, white ? 0.1 : 0.3) : null,
+    };
 }
 
 // ── Sizing the words ────────────────────────────────────────────────────────────────────────────
@@ -193,6 +247,17 @@ function dataUri(bytes: Buffer, mimeType: string): string {
     return `data:${mimeType};base64,${bytes.toString('base64')}`;
 }
 
+/** The colours of a page drawn before they were stored: its PDF must still match its preview. */
+function olderPageStyle(layout: FlyerLayout, kit: BrandKit): FlyerPageStyle {
+    const light = layout === 'photo_top';
+    const palette = resolveCardPalette(kit, light ? 'light' : 'bold');
+    const offerBg = light ? kit.primaryColor : kit.backgroundColor;
+    return {
+        field: light ? kit.backgroundColor : kit.primaryColor, headline: palette.headline, ink: palette.footer, accent: palette.eyebrow,
+        offerBg, offerInk: readableInkOn(offerBg, kit.textColor), decor: null,
+    };
+}
+
 /**
  * Draw one flyer page. `drawPhoto: false` leaves the photo's box transparent — the PDF's word layer,
  * laid over the photo embedded as itself (flyerPdf). Throws FlyerFitError when the words do not fit.
@@ -207,6 +272,8 @@ export async function renderFlyer(opts: {
     dpi?: number;
     bleedMm?: number;
     drawPhoto?: boolean;
+    /** The page's colours. Absent only on a page drawn before they were stored, which keeps its old look. */
+    style?: FlyerPageStyle | null;
 }): Promise<FlyerRender> {
     const { content, kit, paperSize, layout } = opts;
     const dpi = opts.dpi ?? PREVIEW_DPI;
@@ -215,13 +282,8 @@ export async function renderFlyer(opts: {
     const pt = (n: number) => n * dpi / 72;
     const mm = (n: number) => Math.round(n * g.pxPerMm);
 
-    // Words on the light page in photo_top; on a brand-colour field everywhere else.
-    const palette = resolveCardPalette(kit, layout === 'photo_top' ? 'light' : 'bold');
-    const fieldColour = layout === 'photo_top' ? kit.backgroundColor : kit.primaryColor;
-    const accent = palette.eyebrow;
-    const ink = palette.footer;
-    const offerBg = layout === 'photo_top' ? kit.primaryColor : kit.backgroundColor;
-    const offerInk = readableInkOn(offerBg, kit.textColor);
+    const style = opts.style ?? olderPageStyle(layout, kit);
+    const { field: fieldColour, accent, ink, offerBg, offerInk } = style;
 
     const [logoSrc, webFont, qrSrc] = await Promise.all([
         kit.logoUrl ? inlineLogo(kit.logoUrl) : Promise.resolve(null),
@@ -276,9 +338,9 @@ export async function renderFlyer(opts: {
         const common = { fontSize: sizePx, lineHeight: spec.lineHeight, fontWeight: spec.weight };
         switch (spec.field) {
             case 'dateLine': return textNode(spec.texts[0], { ...common, color: accent, textTransform: 'uppercase', letterSpacing: Math.round(sizePx * 0.04) });
-            case 'headline': return textNode(spec.texts[0], { ...common, color: palette.headline });
+            case 'headline': return textNode(spec.texts[0], { ...common, color: style.headline });
             case 'subheading': return textNode(spec.texts[0], { ...common, color: ink });
-            case 'callToAction': return textNode(spec.texts[0], { ...common, color: palette.headline });
+            case 'callToAction': return textNode(spec.texts[0], { ...common, color: style.headline });
             case 'offer': return el({
                 display: 'flex', alignSelf: 'flex-start', maxWidth: '100%', backgroundColor: offerBg, color: offerInk,
                 padding: `${Math.round(sizePx * 0.5)}px ${Math.round(sizePx * 0.8)}px`, borderRadius: Math.round(sizePx * 0.4), ...common,
@@ -310,7 +372,7 @@ export async function renderFlyer(opts: {
         column.push(el({ display: 'flex', flexDirection: 'row', alignItems: 'flex-end', height: footerHeight, marginTop: gap }, [
             el({ display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'flex-end' },
                 contactLines.map((l) => textNode(l.text, {
-                    fontSize: contactSize, lineHeight: 1.3, fontWeight: l.weight, color: l.weight === 800 ? palette.headline : ink,
+                    fontSize: contactSize, lineHeight: 1.3, fontWeight: l.weight, color: l.weight === 800 ? style.headline : ink,
                     ...(l.wrap ? {} : { whiteSpace: 'nowrap' }),
                 }))),
             ...(qrSrc ? [{ type: 'img', props: { src: qrSrc, width: qrSize, height: qrSize, style: { width: qrSize, height: qrSize, marginLeft: gap } } }] : []),
@@ -320,10 +382,26 @@ export async function renderFlyer(opts: {
     const layers: Node[] = [];
     // The background field: everything except the photo's box, which is left clear for the photo
     // (or for the PDF to lay the photo under this layer).
-    if (layout === 'photo_top' && g.photo) {
+    if (layout === 'photo_framed' && g.photo) {
+        // Four strips round the photo rather than one sheet: the PDF lays the photo UNDER this layer.
+        const b = g.photo;
+        const strip = (left: number, top: number, width: number, height: number) => el({ position: 'absolute', left, top, width, height, backgroundColor: fieldColour });
+        layers.push(
+            strip(0, 0, g.canvasWidth, b.top),
+            strip(0, b.top, b.left, b.height),
+            strip(b.left + b.width, b.top, g.canvasWidth - b.left - b.width, b.height),
+            strip(0, b.top + b.height, g.canvasWidth, g.canvasHeight - b.top - b.height),
+        );
+    } else if (layout === 'photo_top' && g.photo) {
         layers.push(el({ position: 'absolute', left: 0, top: g.photo.height, width: g.canvasWidth, height: g.canvasHeight - g.photo.height, backgroundColor: fieldColour }));
     } else if (layout === 'type_only') {
         layers.push(el({ position: 'absolute', left: 0, top: 0, width: g.canvasWidth, height: g.canvasHeight, backgroundColor: fieldColour }));
+    }
+    if (style.decor) {
+        const circle = (size: number, left: number, top: number) => el({ position: 'absolute', left, top, width: size, height: size, borderRadius: 9999, backgroundColor: style.decor });
+        const big = Math.round(g.canvasWidth * 0.8);
+        const small = Math.round(g.canvasWidth * 0.5);
+        layers.push(circle(big, g.canvasWidth - Math.round(big * 0.6), -Math.round(big * 0.4)), circle(small, -Math.round(small * 0.45), g.canvasHeight - Math.round(small * 0.6)));
     }
     if (g.photo && opts.photo && opts.drawPhoto !== false) {
         layers.unshift({ type: 'img', props: {
@@ -406,7 +484,7 @@ export async function flyerPdf(opts: {
  */
 export async function renderFlyerPdfs(opts: {
     content: FlyerContent; kit: BrandKit; paperSize: PaperSize; layout: FlyerLayout;
-    photo: FlyerPhoto | null; orgName?: string | null; title: string; bleedMm: number;
+    photo: FlyerPhoto | null; orgName?: string | null; title: string; bleedMm: number; style?: FlyerPageStyle | null;
 }): Promise<{ home: Buffer; printShop: Buffer }> {
     const layered = !opts.photo || pdfCanEmbed(opts.photo.mimeType);
     const one = async (bleedMm: number) => {

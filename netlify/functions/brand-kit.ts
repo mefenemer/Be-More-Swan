@@ -24,9 +24,9 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { extractBrandKitFromWebsite } from '../../src/lib/brand-extract-fetch';
+import { readWebsiteBrand } from '../../src/lib/brand-extract-fetch';
 import { renderBrandCard, MAX_HEADLINE_CHARS } from '../../src/lib/brand-card';
-import { normalizeBrandKit, normalizeHex, cleanFontFamily, type BrandKit } from '../../src/utils/brand-kit';
+import { kitWithNoColourFound, normalizeBrandKit, normalizeHex, cleanFontFamily, type BrandKit } from '../../src/utils/brand-kit';
 import { mergeGuidelines, normaliseGuidelines } from '../../src/utils/brand-guidelines';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -96,11 +96,11 @@ export default withLambda(async (event) => {
         }
 
         const now = new Date();
-        const extracted = await extractBrandKitFromWebsite(org.websiteUrl, { now });
+        const { kit: extracted, fontFamily } = await readWebsiteBrand(org.websiteUrl, { now });
 
         // Stamp the attempt even when nothing was found, exactly as the lazy path does — otherwise
         // a user hammering the button re-fetches an unreadable site on every click.
-        const next: BrandKit = extracted ?? { ...stored, lastExtractAttemptAt: now.toISOString() };
+        const next: BrandKit = extracted ?? kitWithNoColourFound(stored, fontFamily, now);
         await db.update(organisations).set({ brandKit: next, updatedAt: now })
             .where(eq(organisations.id, ctx.organisationId));
 
@@ -111,7 +111,9 @@ export default withLambda(async (event) => {
             // reported as a message rather than an error the UI has to treat as a failure.
             message: extracted
                 ? `Brand colours read from ${org.websiteUrl}.`
-                : "We couldn't find a clear brand colour on that site. Your cards will use a neutral palette — you can set the colours by hand.",
+                : next.fontFamily && next.fontFamily !== stored.fontFamily
+                    ? `We couldn't find a clear brand colour on that site, but we'll use its font, ${next.fontFamily}. You can set the colours by hand.`
+                    : "We couldn't find a clear brand colour on that site. Your cards will use a neutral palette — you can set the colours by hand.",
         });
     }
 

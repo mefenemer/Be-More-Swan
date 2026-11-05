@@ -50,7 +50,10 @@ import { PexelsRateLimitError, searchUniqueImages, searchUniqueVideos } from './
 import { BRAND_CARD_PROVIDER } from './brand-card-lifecycle';
 import { resolveAssetDisplayUrl } from './social-publish';
 import { POST_ATTACH_NOTES, attachApprovedToPost, placeOnCampaignPost } from './brief-post-media';
-import { approveFlyerOption, flyerRoundOptions, type FlyerRenderParams } from './flyer-briefs';
+import { approveFlyerOption, brandPageColours, flyerRoundOptions, type FlyerRenderParams } from './flyer-briefs';
+import { resolveBrandKitForOrg } from '../lib/brand-extract-fetch';
+import { isAccentCandidate } from './brand-extract';
+import { normalizeHex } from '../public/brand-contrast.js';
 import { normaliseFlyerContent } from '../config/flyer-vocab';
 
 /** Brief purposes whose pictures belong on social posts (blog and email headers have their own briefs). */
@@ -107,6 +110,8 @@ export interface ArtDirection {
     videoPrompt?: string;
     /** Up to two headlines for branded cards — the brief's own words come first. */
     cardHeadlines: string[];
+    /** A flyer only: up to three page colours the art director chose. Used as flyerColours (flyer-briefs.ts) says. */
+    flyerColours?: string[];
     /** 'model' when Claude wrote it; 'fallback' when it could not and the brief was used as-is. */
     by: 'model' | 'fallback';
 }
@@ -159,6 +164,13 @@ ${ART_DIRECTION_CRAFT}
 Return STRICT JSON only: {"imagePrompt": "...", "imageAlternatives": ["...", "...", "..."], "stockKeywords": "...", "videoPrompt": "...", "cardHeadlines": ["..."]}`;
 }
 
+/** Added to the system prompt for a flyer: its pages are coloured, and an unset kit is not a colour scheme. */
+export const FLYER_COLOUR_RULE = `This brief is a printed flyer, so also return "flyerColours": three hex colours for its page backgrounds, strongest first, chosen to suit this business, its customers and what this flyer is for.
+- If MOOD names colours or a look, follow it.
+- Otherwise use the BRAND COLOURS and extra brand colours, when they are real colours.
+- Black, white and grey brand colours mean none has been set. Then choose a palette that fits the business, and do not steer the pictures towards black, white or grey either.
+- Every one must be a real colour, never black, white or grey, and not so pale that it looks white on paper.`;
+
 export function artDirectionUserPrompt(brief: BriefRow, ctx: BriefContext, rejections: PastRejection[]): string {
     const purpose = PURPOSE_SPECS[brief.purpose as BriefPurpose]?.label ?? brief.purpose;
     return [
@@ -187,6 +199,7 @@ export function parseArtDirection(raw: string, fallback: ArtDirection, exactHead
         .filter((p) => p.length >= 20);
     const stockKeywords = clip(typeof j.stockKeywords === 'string' ? j.stockKeywords.replace(/[^\p{L}\p{N}\s-]/gu, ' ') : '', 80);
     const videoPrompt = clip(typeof j.videoPrompt === 'string' ? withoutColourCodes(j.videoPrompt) : '', 1000);
+    const flyerPicks = (Array.isArray(j.flyerColours) ? j.flyerColours : []).map((c) => normalizeHex(c)).filter((c): c is string => !!c && isAccentCandidate(c)).slice(0, 3);
     let heads = Array.isArray(j.cardHeadlines) ? j.cardHeadlines.filter((h): h is string => typeof h === 'string').map((h) => clip(h, 120)).filter(Boolean) : [];
     // The user's exact words are never paraphrased away, whatever the model returned.
     if (exactHeadline) heads = [clip(exactHeadline, 120), ...heads.filter((h) => h !== clip(exactHeadline, 120))];
@@ -198,6 +211,7 @@ export function parseArtDirection(raw: string, fallback: ArtDirection, exactHead
         stockKeywords: stockKeywords || fallback.stockKeywords,
         videoPrompt: videoPrompt || fallback.videoPrompt,
         cardHeadlines: (heads.length ? heads : fallback.cardHeadlines).slice(0, CARD_VARIANTS.length),
+        ...(flyerPicks.length ? { flyerColours: flyerPicks } : {}),
         by: 'model',
     };
 }
@@ -209,7 +223,7 @@ export async function writeArtDirection(db: Db, brief: BriefRow, ctx: BriefConte
         // block its chat reads. Never throws; null when there are none.
         const rules = await loadAssistantRulesBlock(db, { assistantId: brief.aiAssistantId, organisationId: brief.organisationId });
         const res = await gatewayGenerate({
-            system: artDirectionSystemPrompt() + (rules ? `\n\n${rules}` : ''),
+            system: artDirectionSystemPrompt() + (brief.purpose === FLYER_PURPOSE ? `\n\n${FLYER_COLOUR_RULE}` : '') + (rules ? `\n\n${rules}` : ''),
             messages: [{ role: 'user', content: artDirectionUserPrompt(brief, ctx, rejections) }],
             maxTokens: 1500,
             deadlineMs: 45_000,
@@ -405,7 +419,10 @@ export async function runRound(db: Db, briefId: number, userId: number | null): 
     let artDirection: ArtDirection | null = null;
     const notes: string[] = brief.generationNote ? [brief.generationNote] : [];
     try {
-        const ctx = await readBriefContext(db, brief.organisationId, brief.aiAssistantId);
+        const read = await readBriefContext(db, brief.organisationId, brief.aiAssistantId);
+        // A kit nobody has set is read from their website first, as the drafting path does. Without
+        // this, a workspace whose posts never used a branded card drew every option in black and white.
+        const ctx = { ...read, kit: await resolveBrandKitForOrg(db, brief.organisationId).catch(() => read.kit) };
         const { rejections, shownStockIds } = await pastRejections(db, brief.id);
         const sources = Array.isArray(brief.sources) ? (brief.sources as string[]) : [];
         const base = { organisationId: brief.organisationId, briefId: brief.id, round: brief.rounds };
@@ -417,7 +434,9 @@ export async function runRound(db: Db, briefId: number, userId: number | null): 
                 ? { ...brief, message: [words.content.headline, words.content.subheading].filter(Boolean).join('. ') }
                 : brief;
             const wantPhoto = sources.includes('stock') || sources.includes('ai_image');
-            artDirection = wantPhoto ? await writeArtDirection(db, forArt, ctx, rejections) : fallbackArtDirection(forArt, ctx.kit, ctx.guidelines);
+            // A words-only flyer still needs the art director when there are colours to choose.
+            const needsColours = !!brief.mood || !brandPageColours(ctx.kit, ctx.guidelines.secondaryColors).length;
+            artDirection = wantPhoto || needsColours ? await writeArtDirection(db, forArt, ctx, rejections) : fallbackArtDirection(forArt, ctx.kit, ctx.guidelines);
             const imageHeld = brief.creditHold - brief.creditHoldVideo;
             const r = await flyerRoundOptions(db, {
                 brief, ad: artDirection, ctx, userId, shownStockIds,

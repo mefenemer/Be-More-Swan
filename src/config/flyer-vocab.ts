@@ -21,17 +21,21 @@ export const DEFAULT_PAPER_SIZE: PaperSize = 'A5';
 /** What a print shop asks for: 3 mm of picture past every trimmed edge. */
 export const PRINT_BLEED_MM = 3;
 
-export const FLYER_LAYOUTS = ['photo_top', 'photo_full', 'type_only'] as const;
+// ⚠️ photo_full is no longer drawn by a new round (the words' panel covered most of the photo — Love
+// Cat Studio, 2026-11-05). It stays because a page already drawn in it can still be approved, and its
+// PDF has to match the preview the user chose.
+export const FLYER_LAYOUTS = ['photo_top', 'photo_framed', 'type_only', 'photo_full'] as const;
 export type FlyerLayout = typeof FLYER_LAYOUTS[number];
 
 export const FLYER_LAYOUT_LABELS: Record<FlyerLayout, string> = {
     photo_top: 'Photo at the top',
-    photo_full: 'Full-page photo',
+    photo_framed: 'Framed photo',
     type_only: 'Words only',
+    photo_full: 'Full-page photo',
 };
 
 /** Layouts that need a photo. A round with no photo still draws the rest. */
-export const PHOTO_LAYOUTS: readonly FlyerLayout[] = ['photo_top', 'photo_full'];
+export const PHOTO_LAYOUTS: readonly FlyerLayout[] = ['photo_top', 'photo_framed', 'photo_full'];
 
 /** Field limits — what the form enforces and the normaliser clips to. */
 export const FLYER_LIMITS = {

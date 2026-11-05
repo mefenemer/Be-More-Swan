@@ -15,7 +15,7 @@ import assert from 'node:assert';
 import {
     harvestBrandSignals, signalsToBrandKit, parseColour, isAccentCandidate,
 } from '../src/utils/brand-extract';
-import { shouldExtractBrandKit, normalizeBrandKit, cleanFontFamily, EXTRACT_RETRY_DAYS } from '../src/utils/brand-kit';
+import { kitWithNoColourFound, shouldExtractBrandKit, normalizeBrandKit, cleanFontFamily, EXTRACT_RETRY_DAYS } from '../src/utils/brand-kit';
 
 let passed = 0;
 let total = 0;
@@ -257,6 +257,33 @@ check('a failed attempt backs off instead of re-fetching on every post', () => {
 check('a garbage timestamp does not become an Invalid Date that blocks extraction forever', () => {
     assert.equal(normalizeBrandKit({ lastExtractAttemptAt: 'not a date' }).lastExtractAttemptAt, null);
     assert.equal(shouldExtractBrandKit(normalizeBrandKit({ lastExtractAttemptAt: 'not a date' }), now), true);
+});
+
+// A monochrome site has no brand colour but still has a typeface (Love Cat Studio, 2026-11-05).
+const monochromeSite = `<html><head><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600&family=Inter:wght@300;400&display=swap" rel="stylesheet"><style>:root { --brand-text: #1a1a1a; --brand-surface: #f5f3f0; }</style></head><body></body></html>`;
+
+check('a monochrome site finds no colour, and still names its font', () => {
+    const s = harvestBrandSignals(monochromeSite, 'https://example.com');
+    assert.equal(s.candidates.length, 0);
+    assert.equal(s.fontFamily, 'Playfair Display');
+    assert.equal(signalsToBrandKit(s), null);
+});
+
+check('no colour found: the font is kept, and the colours, source and retry behave as before', () => {
+    const kit = kitWithNoColourFound(normalizeBrandKit(null), 'Playfair Display', now);
+    assert.equal(kit.fontFamily, 'Playfair Display');
+    assert.equal(kit.source, 'default', 'a font is not a brand colour read');
+    assert.equal(kit.primaryColor, normalizeBrandKit(null).primaryColor);
+    assert.equal(shouldExtractBrandKit(kit, now), false, 'the attempt is stamped');
+    const stale = new Date(now.getTime() + (EXTRACT_RETRY_DAYS + 1) * 24 * 60 * 60 * 1000);
+    assert.equal(shouldExtractBrandKit(kit, stale), true, 'and it tries again later');
+});
+
+check('no colour found never replaces a font already set, and a failed fetch changes no font', () => {
+    const set = normalizeBrandKit({ fontFamily: 'Poppins' });
+    assert.equal(kitWithNoColourFound(set, 'Playfair Display', now).fontFamily, 'Poppins');
+    assert.equal(kitWithNoColourFound(set, null, now).fontFamily, 'Poppins');
+    assert.equal(kitWithNoColourFound(normalizeBrandKit(null), null, now).fontFamily, null);
 });
 
 console.log(`\n${passed}/${total} passed`);

@@ -471,6 +471,7 @@
         <p class="text-xs text-gray-500">${esc(name())} draws the pages in your brand. When you approve one, a print-ready PDF goes into My Content — print it at home, or send it to a print shop.</p>
         ${field('Name', input('title', v.title, 'e.g. November open day flyer', 120))}
         ${field('What is the flyer for?', `<textarea data-keep="${k('message')}" name="message" maxlength="1000" rows="2" placeholder="e.g. Bring new local customers in for our first-visit offer — hand out at the farmers' market" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">${esc(v.message || '')}</textarea>`)}
+        ${field('The look you want (optional)', input('mood', v.mood, 'e.g. bright and playful, pink and teal', 300), 'Colours or a feel. Leave it empty to use your brand colours.')}
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           ${field('Paper', `<select data-keep="${k('paperSize')}" name="paperSize" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">
             ${F.paperSizes.map((p) => `<option value="${esc(p.key)}" ${p.key === (v.paperSize || F.defaultPaperSize) ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}
@@ -981,7 +982,7 @@
     const fd = new FormData(form);
     const editing = state.form && state.form.mode === 'edit';
     const brief = {
-      purpose: 'flyer', title: fd.get('title'), message: fd.get('message'), paperSize: fd.get('paperSize'),
+      purpose: 'flyer', title: fd.get('title'), message: fd.get('message'), mood: fd.get('mood'), paperSize: fd.get('paperSize'),
       sources: fd.getAll('source'),
       // Only an edit carries words; an empty headline leaves the saved words as they were.
       ...(editing && flyerContentFrom(fd) ? { flyerContent: flyerContentFrom(fd) } : {}),
