@@ -9,7 +9,8 @@
 
 import { visualBriefs } from '../../db/schema';
 import type { getDb } from '../../db/client';
-import { normaliseBrief } from '../config/visual-brief-vocab';
+import { FLYER_PURPOSE, normaliseBrief } from '../config/visual-brief-vocab';
+import { normaliseFlyerContent } from '../config/flyer-vocab';
 import { contactDefaults, offerLine } from './flyer-words';
 import { loadIntroOffer } from './intro-offer';
 import { endRound, startRound } from './visual-briefs';
@@ -51,6 +52,12 @@ export async function startDesignFromChat(db: Db, args: {
 }): Promise<DesignStartedCard | null> {
     const n = normaliseBrief({ ...args.proposal, sources: startableSources(args.proposal.sources, args.aiChosen) });
     if (!n.ok) return null;
+    // A flyer is always drawn from words, so one sent with none (they answered "No words") gets its title as the
+    // headline rather than a round that refuses to start. Changeable in the editor, and costs nothing.
+    if (n.brief.purpose === FLYER_PURPOSE && !n.brief.flyerContent) {
+        const w = normaliseFlyerContent({ headline: n.brief.title });
+        if (w.ok) n.brief.flyerContent = w.content;
+    }
     // Contact details, the QR link and the offer only ever come from what the business recorded.
     if (n.brief.flyerContent && !Object.values(n.brief.flyerContent.contact).some(Boolean) && !n.brief.flyerContent.qr) {
         const intro = await loadIntroOffer(db, args.orgId).catch(() => null);

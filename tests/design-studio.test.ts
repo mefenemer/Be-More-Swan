@@ -167,6 +167,19 @@ check('the browser opens the editor when a design starts, and a chat card change
     assert.ok(read('workspace.html').includes('<script src="/src/components/design-studio.js"></script>'));
 });
 
+check('a flyer never starts with no words: "No words" is not offered for one, and its title becomes the headline', () => {
+    const chat = read('netlify/functions/chat-orchestrator.ts');
+    assert.ok(chat.includes('ONLY when it is not a printed flyer or poster, "No words"'));
+    const from = read('src/utils/brief-from-chat.ts');
+    assert.ok(from.includes("n.brief.purpose === FLYER_PURPOSE && !n.brief.flyerContent") && from.includes('normaliseFlyerContent({ headline: n.brief.title })'));
+});
+
+check('New brief opens a new conversation every time (owner 2026-11-05)', () => {
+    const pane = read('src/components/chat-pane.js');
+    assert.ok(pane.includes('sendFresh(text) {') && pane.includes('if (fresh) pane.sendFresh(text)'));
+    assert.ok(read('src/components/assistant-briefs.js').includes("askChat('I need a new brief.', { fresh: true })"));
+});
+
 // ── What prints is what was dragged ──────────────────────────────────────────────────────────────
 
 check('a flyer becomes layers, and a changed design draws to a preview and print PDFs', async () => {

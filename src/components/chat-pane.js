@@ -88,6 +88,12 @@
       setReference(ref) { if (session) session.setReference(ref); else pendingRef = ref; },
       /** Say this for the user, once the chat is ready ("New brief" on the Briefs tab). */
       send(text) { return Promise.resolve(api.ready).then(() => (session ? session.sendMessage(text, { noReference: true }) : undefined)); },
+      /** "New chat", then say this: a new piece of work never continues the conversation on screen. */
+      sendFresh(text) {
+        if (key) write(key, null);
+        api.ready = start(null);
+        return api.send(text);
+      },
       focus() { if (session) session.focus(); },
       get session() { return session; },
       destroy() {
@@ -164,9 +170,9 @@
         if (!on) api.setOn(true, true);
         if (pane) pane.setReference(ref);
       },
-      ask(text) {
+      ask(text, { fresh = false } = {}) {
         if (!on) api.setOn(true, true);
-        if (pane) { pane.focus(); pane.send(text); }
+        if (pane) { pane.focus(); if (fresh) pane.sendFresh(text); else pane.send(text); }
       },
       destroy() {
         if (pane) { try { pane.destroy(); } catch { /* gone */ } }

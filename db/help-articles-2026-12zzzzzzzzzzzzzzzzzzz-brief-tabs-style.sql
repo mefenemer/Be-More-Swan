@@ -20,6 +20,16 @@ $$2. Press **New brief** and answer your Brand Designer's questions, choosing **
 WHERE title = 'Making a Printed Flyer'
 RETURNING title, is_published, content_md LIKE '%opens in the editor as soon as it is ready%' AS ok;
 
+-- The flyer article's "Save and ask … for pages" button is now "Save and make the flyer", which opens the editor.
+-- Only the sentence's start is matched: the rest differs depending on whether the flyer-look file has run.
+UPDATE help_articles SET
+    content_md = replace(content_md,
+$$Press **Save and ask … for pages**. Your Brand Designer draws up to three pages from your words:$$,
+$$Press **Save and make the flyer** (or **Make the flyer** on the brief). The editor opens and shows the flyer as soon as it is ready, to change or approve with **Use this design**. Your Brand Designer draws up to three pages from your words:$$),
+    updated_at = now()
+WHERE title = 'Making a Printed Flyer'
+RETURNING title, is_published, content_md LIKE '%Save and make the flyer%' AS ok;
+
 INSERT INTO help_articles (category, sort_order, title, content_md, is_published) VALUES
 ('Your Assistants', 71, 'Briefs and Your Brand Style', $$
 # Briefs and Your Brand Style

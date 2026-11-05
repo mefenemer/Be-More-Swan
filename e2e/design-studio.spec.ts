@@ -201,4 +201,45 @@ test.describe('the questions go straight to the editor', () => {
         await expect(page.locator('[data-design-studio], [data-brief-studio-wait]')).toHaveCount(0);
         expect(pageErrors).toEqual([]);
     });
+
+    test('New brief always starts a new conversation, never the one on screen', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        api.set('chat-orchestrator', { chatSessionId: 9, message: { id: 1, role: 'assistant', content: 'A few quick questions.', uiElement: null } });
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-new]').click();
+        await expect(page.getByText('A few quick questions.')).toHaveCount(1);
+        await page.locator('[data-brief-new]').click();
+        await expect.poll(() => api.called('chat-orchestrator').length).toBe(2);
+        const second = api.called('chat-orchestrator')[1].body as { chatSessionId?: number; message: string };
+        expect(second.message).toBe('I need a new brief.');
+        expect(second.chatSessionId ?? null).toBeNull();
+        await expect(page.getByText('A few quick questions.')).toHaveCount(1);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a flyer with no words: Edit flyer starts from its title, "Save and make the flyer" goes to the editor while it is made', async ({ page, api, pageErrors }) => {
+        // The usual stub's handler, wrapped: edit and generate move this brief along.
+        let base: ((route: unknown, body: unknown) => unknown) | null = null;
+        const store = stubBriefs({ set: (_n: string, h: typeof base) => { base = h; } } as unknown as ApiStub);
+        store.brief = { ...store.brief, status: 'open', rounds: 0, options: [], flyerContent: null, paperSize: 'A5', title: 'Marmalade Productions launch party' };
+        const calls: string[] = [];
+        api.set('brand-briefs', (route, body) => {
+            const b = (body || {}) as Record<string, unknown>;
+            calls.push(String(b.action));
+            if (b.action === 'edit') { store.brief = { ...store.brief, flyerContent: b.flyerContent }; return { ok: true }; }
+            if (b.action === 'generate') { store.brief = { ...store.brief, status: 'generating', rounds: 1 }; return { ok: true, briefId: 12, round: 1 }; }
+            return base!(route, body);
+        });
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await expect(page.locator('[data-brief-generate="12"]')).toHaveText('Make the flyer');
+        await page.locator('[data-brief-edit="12"]').first().click();
+        await expect(page.locator('[data-flyer-form] input[name="headline"]')).toHaveValue('Marmalade Productions launch party');
+        await page.getByRole('button', { name: 'Save and make the flyer' }).click();
+        await expect.poll(() => calls.includes('generate')).toBe(true);
+        expect(calls.indexOf('edit')).toBeLessThan(calls.indexOf('generate'));
+        await expect(page.locator('[data-brief-studio-wait]')).toContainText('is making');
+        expect(pageErrors).toEqual([]);
+    });
 });

@@ -278,6 +278,7 @@
   // The button names who does the work; the cost sits on its own line under the buttons (owner,
   // 2026-10-14: "1 AI Credit" on the button itself read as part of the action's name).
   function roundButtonLabel(b) {
+    if (b.purpose === 'flyer') return b.rounds > 0 ? 'Make different versions' : 'Make the flyer';
     return b.rounds > 0 ? `Ask ${name()} for more options` : `Ask ${name()} for options`;
   }
 
@@ -499,7 +500,8 @@
     const v = editing || { title: '', message: '', paperSize: F.defaultPaperSize, sources: (state.defaultSources || ['stock']).filter((k) => F.photoSources.includes(k)), flyerContent: null };
     // A flyer with no words yet starts from the business's recorded details (last flyer, website, offer).
     const d = state.flyerDefaults || {};
-    const c = v.flyerContent || { offer: d.offer || '' };
+    // No words yet on a saved flyer: its title starts as the headline, so Save works, and the user sees it to change.
+    const c = v.flyerContent || { offer: d.offer || '', headline: editing ? (v.title || '') : '' };
     const contact = c.contact || d.contact || {};
     const qr = c.qr || (v.flyerContent ? {} : d.qr) || {};
     const points = (c.points || []).concat(['', '', '']).slice(0, L.points || 3);
@@ -565,7 +567,7 @@
         <p class="text-xs text-red-600 font-semibold hidden" data-brief-form-error></p>
         <div class="flex flex-wrap gap-2">
           ${editing
-            ? `<button type="submit" data-brief-submit="generate" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save and ask ${esc(name())} for pages</button>
+            ? `<button type="submit" data-brief-submit="generate" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save and make the flyer</button>
                <button type="submit" data-brief-submit="save" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Just save</button>`
             : `<button type="submit" data-brief-submit="draft" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Next: draft the words for me${draftCost}</button>
                <button type="submit" data-brief-submit="save" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Next: I'll write the words</button>`}
@@ -680,7 +682,7 @@
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
         <p class="text-sm font-bold text-gray-700">No briefs yet</p>
-        <p class="text-xs text-gray-500 mt-2">Press "New brief" and ${esc(state.assistantName || 'your Brand Designer')} will ask a few quick questions, or just say what you need in the chat. Either way, nothing is made until you press "Ask ${esc(name())} for options" on the brief, and nothing is used until you press "Use this".</p>
+        <p class="text-xs text-gray-500 mt-2">Press "New brief" and ${esc(state.assistantName || 'your Brand Designer')} will ask a few quick questions, or just say what you need in the chat. Once you have answered, it starts making the design and opens it here, to change and approve. Only an AI-made picture uses a task, and the question says so.</p>
       </div>`;
   }
 
@@ -855,6 +857,9 @@
       await post({ action: 'generate', briefId });
       say(briefId, null);
       state.tab = 'making';
+      // Pictures and flyers: watch it being made in the editor, which opens on it when ready. Videos stay on the tabs.
+      const b = state.briefs.find((x) => x.id === briefId);
+      if (b && !isVideoBrief(b) && window.DesignStudio) state.studio = { briefId, optionId: null };
     } catch (err) {
       say(briefId, err.message, 'error');
     } finally {
@@ -1149,7 +1154,7 @@
       ...(editing && flyerContentFrom(fd) ? { flyerContent: flyerContentFrom(fd) } : {}),
     };
     if (editing && submitter === 'generate' && !brief.flyerContent) {
-      if (errEl) { errEl.textContent = 'Write a headline first — a page draws exactly the words you save.'; errEl.classList.remove('hidden'); }
+      if (errEl) { errEl.textContent = 'Type a headline first: it is the main line on the flyer, for example "Launch party, 21 December".'; errEl.classList.remove('hidden'); }
       return;
     }
     form.querySelectorAll('button').forEach((b) => { b.disabled = true; });
@@ -1286,12 +1291,13 @@
   }
   function referBrief(b) { chatRefer({ label: `Brief “${b.title}”`, message: `About my brief ${b.id} “${b.title}”.` }); }
   /** Opens the chat and says this for them. Nothing is spent: the reply is questions or a card to press. */
-  function askChat(text) { getChatDock()?.ask(text); }
+  function askChat(text, opts) { getChatDock()?.ask(text, opts); }
   /** One button for every kind of brief: the assistant's questions decide what it should be. */
   // One way in (owner 2026-11-05: "either the chat or one button"). The form only appears when the chat cannot run,
   // so a brief can still be made in an AI outage.
   function startNewBrief() {
-    if (chatPaneAvailable()) { askChat('I need a new brief.'); return; }
+    // A new conversation each time (owner 2026-11-05): it never carries on from the chat that was on screen.
+    if (chatPaneAvailable()) { state.studio = null; closeStudioInstance(); askChat('I need a new brief.', { fresh: true }); render(); return; }
     state.form = { mode: 'create' };
     render();
   }
