@@ -4451,6 +4451,73 @@
   }
   register('post_picture', renderPostPictureCard);
 
+  // The Email Studio's cards (src/utils/chat-email-parts.ts). Each one asks the open Studio to act
+  // (newsletter.js), which says what happened; with the email not open, nothing can happen.
+  function emailStudioCard(ui, esc, opts) {
+    const issueId = Number(ui.issueId);
+    if (!Number.isInteger(issueId) || issueId <= 0) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${esc(opts.head)}</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      ${opts.body || ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-es-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">${esc(opts.go)}</button>
+        <button type="button" data-es-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-es-status></p>`;
+    const status = el.querySelector('[data-es-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-es-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-es-go]')) return;
+      setBusy(true);
+      const detail = { ...opts.detail, issueId, handled: false, respond({ ok, error, message }) {
+        if (!ok) { setBusy(false); say(error || 'That couldn\'t be done.', 'error'); return; }
+        say(message || 'Done.');
+      } };
+      document.dispatchEvent(new CustomEvent(opts.event, { detail }));
+      if (!detail.handled) detail.respond({ ok: false, error: 'Open this email in the Email Studio to use this.' });
+    });
+    return el;
+  }
+  register('email_edit', (ui, esc) => {
+    const find = typeof ui.find === 'string' ? ui.find.trim() : '';
+    const replace = typeof ui.replace === 'string' ? ui.replace.trim() : '';
+    if (!find || !replace) return null;
+    const box = (t, cls) => `<p class="text-sm bg-white border rounded-lg px-3 py-2 mt-1 whitespace-pre-line ${cls}" style="max-height:200px;overflow:auto">${esc(t)}</p>`;
+    return emailStudioCard(ui, esc, {
+      head: ui.part === 'subject' ? 'Change to the subject line' : ui.part === 'preheader' ? 'Change to the preview line' : 'Change to this email',
+      go: 'Use this', event: 'email:partEdit', detail: { part: ui.part, find, replace },
+      body: `<p class="text-xs font-bold text-gray-500 mt-3">Now</p>${box(find, 'text-gray-500 border-gray-200 line-through decoration-gray-300')}
+        <p class="text-xs font-bold text-gray-700 mt-3">Instead</p>${box(replace, 'text-gray-900 border-indigo-200')}`,
+    });
+  });
+  register('email_block_add', (ui, esc) => {
+    const text = typeof ui.text === 'string' ? ui.text.trim() : '';
+    if (!text) return null;
+    const noun = ui.kind === 'button' ? 'button' : ui.kind === 'heading' ? 'heading' : 'paragraph';
+    return emailStudioCard(ui, esc, {
+      head: `Add a ${noun}`, go: `Add the ${noun}`, event: 'email:blockAdd', detail: { kind: ui.kind, text },
+      body: `<p class="text-sm text-gray-900 bg-white border border-indigo-200 rounded-lg px-3 py-2 mt-3 whitespace-pre-line">${esc(text)}</p>
+        ${ui.kind === 'button' ? '<p class="text-xs text-gray-600 mt-2">It goes in with no link: add where it should go, in the panel beside the email.</p>' : ''}`,
+    });
+  });
+  register('email_picture', (ui, esc) => emailStudioCard(ui, esc, {
+    head: 'Choose a picture', go: 'Choose a picture', event: 'email:pictureAsk', detail: {},
+    body: '<p class="text-sm text-gray-700 mt-2">Opens your library, where you can pick one or upload your own.</p>',
+  }));
+  register('email_refine', (ui, esc) => {
+    const instruction = typeof ui.instruction === 'string' ? ui.instruction.trim() : '';
+    if (!instruction) return null;
+    return emailStudioCard(ui, esc, {
+      head: 'Rewrite this email', go: 'Write the new version', event: 'email:refineAsk', detail: { instruction },
+      body: `<p class="text-sm text-gray-700 mt-2">${esc(instruction)}</p><p class="text-xs text-gray-600 mt-2">Uses 1 task. You read the new version before anything changes.</p>`,
+    });
+  });
+
   // ── Built-in: Post Action Proposal Card (Social Media chat) ────────────────
   // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove'|'shorter'|'longer'|'video_version'
   //   |'voiceover'|'captions'|'time_text', postId, postIds, platforms, status, publishDate, timezone, text, reason, when, blocked,

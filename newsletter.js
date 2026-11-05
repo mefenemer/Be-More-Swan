@@ -431,6 +431,9 @@
       hide($('nl-warnings'));
       renderFailure(issue);
       renderStats(issue);
+      chat.away = false;
+      chat.blockId = null;
+      syncChat();
 
       // "Send now" only exists once a human has approved. The worker is what actually sends, so
       // this button only makes the issue due — there is one send path, scheduled or not.
@@ -3324,7 +3327,201 @@
     }
   }
 
+  // ── The chat docked beside the email (chat-pane.js) ───────────────────────────────────────────
+  // Owner, 2026-11-05: the Website tab's pane, for the Email Marketing assistant. One conversation per
+  // email, remembered in this browser. Every turn says which email it is about (forIssueId), and every
+  // change is a card (chat-email-parts.ts) that these handlers apply through the Studio's own writer.
+  const CHAT_ON_KEY = 'bms-email-chat-on';
+  const chat = { pane: null, key: null, selecting: false, away: false, blockId: null };
+  const chatIsOn = () => $('nl-chat-toggle')?.getAttribute('aria-pressed') === 'true';
+  function chatWanted() {
+    try { const v = localStorage.getItem(CHAT_ON_KEY); if (v === '1' || v === '0') return v === '1'; } catch { /* private window */ }
+    return window.innerWidth >= 1440;   // on by default where the email keeps its room beside it
+  }
+  function chatDestroy() {
+    if (chat.pane) { try { chat.pane.destroy(); } catch { /* gone */ } }
+    chat.pane = null; chat.key = null;
+  }
+  async function chatAssistantFor(issue) {
+    try {
+      const res = await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' }));
+      const all = (res.ok ? await res.json() : { assistants: [] }).assistants || [];
+      const id = Number(issue.assistantId || window._newsletterAssistantId || 0);
+      const a = (id && all.find((x) => Number(x.id) === id))
+        || (!issue.assistantId && all.find((x) => x.roleKey === 'newsletter_editor' && x.status !== 'archived')) || null;
+      return a && a.roleKey === 'newsletter_editor' && a.status !== 'archived' ? a : null;
+    } catch { return null; }
+  }
+  function setBtn(id, on) { const b = $(id); if (!b) return; if (on) show(b, 'inline-flex'); else hide(b); }
+  async function syncChat() {
+    const issue = state.current;
+    const page = $('nl-page');
+    if (!page) return;
+    const assistant = issue && window.ChatPane?.available?.() ? await chatAssistantFor(issue) : null;
+    if (issue !== state.current) return;   // they moved on while that loaded
+    const can = !!assistant;
+    const on = can && chatWanted() && !chat.away;
+    setBtn('nl-chat-toggle', can);
+    setBtn('nl-select', can && editable());
+    if (!can || !editable()) setChatSelecting(false);
+    $('nl-chat-toggle')?.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (assistant) $('nl-chat-toggle-label').textContent = `Chat with ${assistant.name || 'your assistant'}`;
+    page.classList.toggle('nl-chat-on', on);
+    if (!on) return;
+    const key = `${assistant.id}:${issue.id}`;
+    if (chat.key === key && chat.pane && $('nl-chat-host')?.firstChild) return;
+    chatDestroy();
+    chat.key = key;
+    chat.pane = window.ChatPane.mount($('nl-chat-host'), {
+      assistantId: Number(assistant.id), assistantName: assistant.name, roleKey: assistant.roleKey,
+      rememberKey: `bms-email-chat:${key}`,
+      placeholder: 'Ask for a change to this email, or 🎯 Select a part of it…',
+      starterPrompts: editable()
+        ? ['Make this email shorter and easier to read.', 'Give me a stronger subject line.', 'What would make more people click?']
+        : null,
+      composerRows: 3,
+      turnContext: () => (state.current ? { forIssueId: state.current.id } : {}),
+      // Over the page on a narrower screen, and it covers its own toggle there.
+      onClose: () => chatToggle(),
+    });
+  }
+  function chatToggle() {
+    const on = !chatIsOn();
+    try { localStorage.setItem(CHAT_ON_KEY, on ? '1' : '0'); } catch { /* private window */ }
+    chat.away = false;
+    syncChat().then(() => { if (on && chat.pane) chat.pane.focus(); });
+  }
+
+  // "Select": click the subject, the preview line or a part of the email to talk about it in the chat.
+  // Taken in the capture phase, so the click never reaches the field or the designer.
+  function setChatSelecting(on) {
+    chat.selecting = !!on;
+    $('nl-select')?.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const label = $('nl-select-label');
+    if (label) label.textContent = on ? 'Click a part… (Esc to stop)' : 'Select';
+    $('nl-editor')?.classList.toggle('nl-selecting', !!on);
+    $('nl-chat-col')?.classList.toggle('nl-chat-aside', !!on);   // over the email on a narrow screen
+  }
+  function chatPartAt(target) {
+    const block = target.closest?.('[data-nld-block]');
+    if (block) return { kind: 'block', id: block.getAttribute('data-nld-block') };
+    const field = target.closest?.('#nl-subject, #nl-preheader, #nl-body');
+    return field ? { kind: field.id } : null;
+  }
+  function onChatPick(ev) {
+    if (!chat.selecting) return;
+    const part = chatPartAt(ev.target);
+    if (!part) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (ev.type !== 'click' || !state.current) return;
+    setChatSelecting(false);
+    const n = state.current.id;
+    const short = (t) => { const f = String(t).replace(/\s+/g, ' ').trim(); return f.length > 44 ? `${f.slice(0, 43)}…` : f; };
+    let ref = null;
+    chat.blockId = null;
+    if (part.kind === 'nl-subject') {
+      const t = $('nl-subject').value.trim();
+      ref = { label: t ? `Subject “${short(t)}”` : 'The subject line', message: `About this part of my email #${n}: the subject line “${t}”.` };
+    } else if (part.kind === 'nl-preheader') {
+      const t = $('nl-preheader').value.trim();
+      ref = { label: t ? `Preview line “${short(t)}”` : 'The preview line', message: `About this part of my email #${n}: the preview line “${t}”.` };
+    } else if (part.kind === 'nl-body') {
+      ref = { label: 'The whole email', message: `About this part of my email #${n}: all of its words.` };
+    } else {
+      const info = state.designer?.blockInfo(part.id);
+      if (!info) return;
+      chat.blockId = part.id;
+      const noun = { heading: 'heading', text: 'paragraph', button: 'button', image: 'picture', divider: 'divider', spacer: 'space', columns: 'two columns' }[info.type] || 'block';
+      ref = info.text.trim()
+        ? { label: `${noun[0].toUpperCase()}${noun.slice(1)} “${short(info.text)}”`, message: `About this part of my email #${n}: the ${noun} “${info.text.trim().slice(0, 2500)}”.` }
+        : { label: `The ${noun}`, message: `About this part of my email #${n}: the ${noun}.` };
+    }
+    if (!chatIsOn()) { try { localStorage.setItem(CHAT_ON_KEY, '1'); } catch { /* private window */ } chat.away = false; }
+    syncChat().then(() => chat.pane?.setReference(ref));
+  }
+
+  // The cards (disruptive-ui-registry.js). Only for the email open here, and one that can still change.
+  const chatFor = (d) => !!state.current && Number(d.issueId) === Number(state.current.id) && !!$('nl-editor');
+  const landed = async (d, message) => {
+    try { await flushPending(); d.respond({ ok: true, message }); }
+    catch (err) { d.respond({ ok: false, error: `It’s changed on screen, but couldn’t be saved just now: ${err.message}` }); }
+  };
+  const flatText = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+  function typeInto(el, value) { el.value = value; el.dispatchEvent(new Event('input', { bubbles: true })); }
+  document.addEventListener('email:partEdit', (e) => {
+    const d = e.detail || {};
+    if (!chatFor(d)) return;
+    d.handled = true;
+    if (!editable()) { d.respond({ ok: false, error: 'This email has gone out, so it can’t be changed.' }); return; }
+    const stale = { ok: false, error: 'That part has changed since — select it again and ask once more.' };
+    if (d.part === 'subject' || d.part === 'preheader') {
+      const el = $(d.part === 'subject' ? 'nl-subject' : 'nl-preheader');
+      if (flatText(el.value) !== flatText(d.find)) { d.respond(stale); return; }
+      typeInto(el, d.replace);
+      landed(d);
+      return;
+    }
+    if (state.designer) {
+      if (!state.designer.replaceWords(d.find, d.replace, chat.blockId)) { d.respond(stale); return; }
+      landed(d);
+      return;
+    }
+    // Plain text: exactly one place, matched whitespace-blind, the rest of the text left as it is.
+    const body = $('nl-body');
+    const part = new RegExp(flatText(d.find).split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'), 'g');
+    if ((body.value.match(part) || []).length !== 1) { d.respond(stale); return; }
+    typeInto(body, body.value.replace(part, () => d.replace));
+    landed(d);
+  });
+  document.addEventListener('email:blockAdd', (e) => {
+    const d = e.detail || {};
+    if (!chatFor(d)) return;
+    d.handled = true;
+    if (!editable()) { d.respond({ ok: false, error: 'This email has gone out, so it can’t be changed.' }); return; }
+    if (!state.designer) { d.respond({ ok: false, error: 'This email is plain text. Press “Design this email” under it first, then press this again.' }); return; }
+    if (!state.designer.insertBlock(d.kind, d.text, chat.blockId)) { d.respond({ ok: false, error: 'That is as many blocks as one email can hold.' }); return; }
+    landed(d, d.kind === 'button' ? 'Added. Now give it a link, in the panel beside the email.' : undefined);
+  });
+  document.addEventListener('email:pictureAsk', (e) => {
+    const d = e.detail || {};
+    if (!chatFor(d)) return;
+    d.handled = true;
+    const info = chat.blockId && state.designer?.blockInfo(chat.blockId);
+    if (!info || info.type !== 'image') { d.respond({ ok: false, error: 'Press 🎯 Select and click the picture first, then press this again.' }); return; }
+    state.designer.openPicker(chat.blockId);
+    d.respond({ ok: true, message: 'Your library is open. Pick one, or upload your own.' });
+  });
+  document.addEventListener('email:refineAsk', async (e) => {
+    const d = e.detail || {};
+    if (!chatFor(d)) return;
+    d.handled = true;
+    if (!editable()) { d.respond({ ok: false, error: 'This email has gone out, so it can’t be changed.' }); return; }
+    await refine('custom', d.instruction);
+    if (state.revision) d.respond({ ok: true, message: 'The new version is under the email. Press “Use it” there if you like it.' });
+    else d.respond({ ok: false, error: 'That didn’t work this time. Your email is unchanged.' });
+  });
+  // Approve, book or send back from a card: unsaved words land first (flushPending throws, which stops
+  // the card rather than approving the version before them), then the page shows what is now true.
+  document.addEventListener('email:actionStarting', (e) => {
+    const d = e.detail || {};
+    if (chatFor(d)) d.ready = flushPending();
+  });
+  document.addEventListener('email:actionFinished', (e) => {
+    const d = e.detail || {};
+    if (chatFor(d)) { refreshList(); openIssue(d.issueId); }
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && chat.selecting) { e.preventDefault(); e.stopPropagation(); setChatSelecting(false); }
+  }, true);
+
   window.initNewsletter = async function initNewsletter() {
+    chatDestroy();
+    chat.selecting = false; chat.away = false; chat.blockId = null;
+    $('nl-chat-toggle')?.addEventListener('click', chatToggle);
+    $('nl-select')?.addEventListener('click', () => setChatSelecting(!chat.selecting));
+    $('nl-all-emails')?.addEventListener('click', () => { chat.away = true; syncChat(); });
+    ['pointerdown', 'mousedown', 'click'].forEach((t) => $('nl-editor')?.addEventListener(t, onChatPick, true));
     state.current = null;
     // The view was swapped out and back: nothing on the new page belongs to the old issue.
     cancelPending();

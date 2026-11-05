@@ -27,7 +27,7 @@ import { adaptForModel, replyText } from '../../src/config/model-options';
 import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, blogPosts, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
+import { aiAssistants, assistantRecords, blogPosts, newsletterIssues, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { appendFooter } from '../../src/utils/disclosure-footer';
 import { resolvePostFooter } from '../../src/utils/post-disclosure';
@@ -106,8 +106,9 @@ import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsPr
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
-import { confirmCardReply, missingCardReply, pictureReply } from '../../src/utils/confirm-card-reply';
+import { confirmCardReply, missingCardReply, pictureReply, replyClaimsPicture } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
+import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
 import { postPartCardFromUiElement, POST_PICTURE_TYPE, POST_TEXT_EDIT_TYPE, type PostPartCard } from '../../src/utils/chat-post-parts';
 import { isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
@@ -1109,6 +1110,20 @@ function draftTargetPromptBlock(target: { id: number; platform: string | null; c
 - "the text box": change ONLY that box with { "type": "post_text_edit", "postId": N, "find": "<its words EXACTLY as quoted>", "replace": "<the new words, about as short>", "summary": "<one sentence: what changes>" }.
 - "the picture" or "the video", when they want a different one: { "type": "post_picture", "postId": N, "kind": "image" | "video", "description": "<what it should show, in a sentence, or \"\" to leave it to them>" }. You cannot make, find or place a picture yourself: the card opens the post's picture step, and they choose there.
 For either card, say the card is there for them to use. Never say it has been changed, and never say you are making or finding a picture.`,
+    ].join('\n\n');
+}
+
+/** The email open beside the Email Studio's docked chat. Same job as draftTargetPromptBlock. */
+function emailTargetPromptBlock(t: { id: number; subject: string | null; preheader: string | null; bodyMarkdown: string | null }): string {
+    return [
+        `IMPORTANT — this conversation sits beside email #${t.id}, which the user has open in the Email Studio. When they say "it" or "this", they mean this email. A change to it is one of the cards below, never a new email: a newsletter_issue_draft is only for when they ask for a separate new one.`,
+        `THE EMAIL AS SAVED:\nSubject: ${String(t.subject || '').slice(0, 200) || '(none yet)'}\nPreview line: ${String(t.preheader || '').slice(0, 200) || '(none yet)'}\n---\n${String(t.bodyMarkdown || '').slice(0, 5000) || '(nothing written yet)'}\n---`,
+        `A PART THEY SELECTED — their message may start "About this part of my email #${t.id}:" followed by what they want.
+- The subject line, the preview line, or a heading, paragraph or button: change ONLY that with { "type": "email_edit", "issueId": ${t.id}, "part": "subject" | "preheader" | "block", "find": "<its words EXACTLY as quoted>", "replace": "<the new words, the same kind of thing>", "summary": "<one sentence: what changes>" }. Keep their facts; invent nothing (no new numbers, names, prices or claims). Keep any {{merge}} tags and links exactly as they are.
+- To add something after the part they selected (or at the end, if none): { "type": "email_block_add", "issueId": ${t.id}, "kind": "button" | "text" | "heading", "text": "<a button's label, or the words>", "summary": "<what it adds>" }. A button goes in with no link; never invent a URL. Tell them to add its link.
+- A picture, when they want a different one: { "type": "email_picture", "issueId": ${t.id} }. You cannot make, find or place a picture: the card opens their library and they choose.
+A change to the whole email ("make it shorter", "warmer"): { "type": "email_refine", "issueId": ${t.id}, "instruction": "<what should change, in their words>", "summary": "<one sentence>" }. They read the new version before it is used.
+For any of these, say the card is there for them to use. Never say it has been changed, and never paste the whole email into your reply.`,
     ].join('\n\n');
 }
 
@@ -2889,6 +2904,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
          *  caption is offered to that post instead of being saved as a new one. See
          *  draftTarget below. */
         forPostId?: number;
+        /** The email open beside the Email Studio's docked chat. See emailTarget below. */
+        forIssueId?: number;
         /** Pictures (library assetIds) and documents (base64) — chat-attachments.ts. */
         attachments?: unknown;
         /** A note the user just sent this assistant on the Team page (team.ts `send`, reply:'model').
@@ -3058,6 +3075,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // open), degrades to ordinary behaviour rather than failing the turn: the conversation stays
     // usable, the draft is saved as a new post, and its review link says where it went. Failing here
     // would kill the conversation over a post the user may have stopped caring about.
+    // The same for the Email Studio. Tenant-scoped; an email that has gone out degrades to ordinary chat.
+    const forIssueId = Number(body.forIssueId);
+    const [issueRow] = Number.isInteger(forIssueId) && forIssueId > 0
+        ? await db.select({ id: newsletterIssues.id, status: newsletterIssues.status, subject: newsletterIssues.subject, preheader: newsletterIssues.preheader, bodyMarkdown: newsletterIssues.bodyMarkdown })
+            .from(newsletterIssues)
+            .where(and(eq(newsletterIssues.id, forIssueId), eq(newsletterIssues.organisationId, orgId))).limit(1)
+        : [];
+    const emailTarget = issueRow && !['sending', 'sent'].includes(issueRow.status ?? '') ? issueRow : null;
+
     const draftTarget = targetRow && EDITABLE_POST_STATUSES.includes(targetRow.status ?? '')
         ? { id: targetRow.id, platform: targetRow.platform ?? null, caption: targetRow.caption ?? null, hashtags: targetRow.hashtags ?? null }
         : null;
@@ -3341,7 +3367,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
         // which is exactly what must NOT happen when the user is editing a post already.
-        draftTarget ? `${promptWithRules}\n\n${draftTargetPromptBlock(draftTarget)}` : promptWithRules,
+        draftTarget ? `${promptWithRules}\n\n${draftTargetPromptBlock(draftTarget)}`
+            : emailTarget && route === ROUTES.newsletter_editor ? `${promptWithRules}\n\n${emailTargetPromptBlock(emailTarget)}`
+            : promptWithRules,
         assistantRow.onboardingContext,
     );
     // The Mentor's reply format, restated LAST. Twenty blocks follow its role prompt, and on long turns the
@@ -3884,6 +3912,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
         // And the Audience cards (src/utils/chat-audience.ts): a rule-based segment, or one contact.
         let audienceCard: SegmentProposalCard | ContactProposalCard | null = null;
+        // The Email Studio's cards (src/utils/chat-email-parts.ts): only for the email open beside this chat.
+        let emailPartCard: EmailPartCard | null = null;
+        if (route === ROUTES.newsletter_editor && isEmailPartType((uiElement as { type?: unknown } | null)?.type)) {
+            const req = emailPartCardFromUiElement(uiElement);
+            emailPartCard = req && emailTarget && req.issueId === emailTarget.id ? req : null;
+            uiElement = emailPartCard;
+            if (!emailPartCard) content = 'I can only do that with the email open in front of you. Open it in the Email Studio and ask me again; nothing has changed.';
+        }
         const segmentReq = route === ROUTES.newsletter_editor ? segmentProposalFromUiElement(uiElement) : null;
         const contactReq = route === ROUTES.newsletter_editor && !segmentReq ? contactProposalFromUiElement(uiElement) : null;
         if (segmentReq || contactReq) {
@@ -4026,7 +4062,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 : formDraft ? { type: AUDIENCE_FORM_DRAFT_TYPE, ...formDraft }
                 // An action card on an existing email, or an Audience card, was already checked and
                 // rebuilt above — keep it.
-                : emailAction ?? audienceCard ?? reviewsCard ?? profileCard;
+                : emailAction ?? emailPartCard ?? audienceCard ?? reviewsCard ?? profileCard;
         }
 
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
@@ -4088,7 +4124,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // does that, and a refused card's reply says it was refused (src/utils/confirm-card-reply.ts).
         // The voiceover actions on a post too: "I've added a voiceover" over a card nobody pressed.
         const voicePostCard = !!postAction && uiElement === postAction && ['voiceover', 'captions', 'time_text'].includes(postAction.action);
-        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || voicePostCard)) {
+        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || (!!emailPartCard && uiElement === emailPartCard) || voicePostCard)) {
             content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
         }
         // The Website Assistant can't make, find or place a picture in a reply — only its site_picture
@@ -4097,12 +4133,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             content = pictureReply(content, !!uiElement && (uiElement as { type?: unknown }).type === 'site_picture');
         }
         if (postPartCard?.type === POST_PICTURE_TYPE) content = pictureReply(content, true);
+        if (emailPartCard?.type === EMAIL_PICTURE_TYPE && replyClaimsPicture(content)) content = 'Here it is: press the button on the card below to choose a picture. Nothing changes until you do.';
 
         // And the newsletter route's. Identical shape: it never persists on the turn, so the only
         // unbacked claim available to it is claiming an issue it did not write.
         // !emailAction / !audienceCard: a "booked for Tuesday" or "here's the segment" reply describes
         // its card, not an unbacked claim.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !audienceCard && !reviewsCard && !profileCard) {
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !emailPartCard && !audienceCard && !reviewsCard && !profileCard) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );

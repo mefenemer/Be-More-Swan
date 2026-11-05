@@ -9,6 +9,8 @@
  *     rememberKey,        // localStorage key for "carry on this thread here" (e.g. 'bms-site-chat:63')
  *     placeholder?, starterPrompts?, composerRows? (default 4), title?,
  *     draftTarget?        // () => the post this chat is about, or null: see chat-session.js
+ *     turnContext?        // () => extra fields sent with every turn (the Email Studio's forIssueId)
+ *     onClose?            // a ✕ on the pane: for where it covers the page and its own toggle
  *   });
  *   pane.setReference({ label, message })   — "Select": a part of the page on a chip above the box
  *   pane.focus();  pane.ready (Promise);  pane.destroy();
@@ -35,7 +37,7 @@
     container.innerHTML = `<div data-chatpane class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col" style="height:100%">
         <div class="flex items-center justify-between gap-2 px-4 py-2 border-b border-gray-200" style="flex-shrink:0">
           <p class="text-sm font-black text-gray-900 truncate">${esc(opts.title || `Chat with ${opts.assistantName || 'your assistant'}`)}</p>
-          <button type="button" data-chatpane-new title="Start a new conversation" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">New chat</button>
+          <span class="flex items-center gap-1" style="flex-shrink:0"><button type="button" data-chatpane-new title="Start a new conversation" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">New chat</button>${opts.onClose ? '<button type="button" data-chatpane-close aria-label="Close the chat" class="px-2 py-1 text-lg leading-none text-gray-500 hover:text-gray-900">&times;</button>' : ''}</span>
         </div>
         <div style="position:relative;flex:1;min-height:0"><div data-chatpane-mount style="position:absolute;inset:0"><p class="text-sm text-gray-500 text-center p-8">Loading the chat…</p></div></div>
       </div>`;
@@ -67,11 +69,13 @@
         starterPrompts: chatSessionId ? null : opts.starterPrompts || null,
         composerRows: opts.composerRows || 4,
         draftTarget: opts.draftTarget,
+        turnContext: opts.turnContext,
         onSession: (id) => { if (key && !destroyed) write(key, id); },
       });
       if (pendingRef) { session.setReference(pendingRef); pendingRef = null; }
     }
     const onClick = (e) => {
+      if (e.target.closest('[data-chatpane-close]')) { opts.onClose(); return; }
       if (!e.target.closest('[data-chatpane-new]')) return;
       if (key) write(key, null);
       api.ready = start(null);

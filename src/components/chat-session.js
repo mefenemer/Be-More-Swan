@@ -511,6 +511,7 @@
           ? { chatSessionId, message }
           : { aiAssistantId: assistantId, message };
         if (attachments.length) body.attachments = attachments;
+        if (typeof props.turnContext === 'function') Object.assign(body, props.turnContext() || {});
         if (opts && opts.approvedHandoff) body.approvedHandoff = opts.approvedHandoff;
         // The post the user has open in the editor, when this chat was opened from there
         // (window.ChatDraftTarget, set by whoever opened it). Sent on EVERY turn, not just the
@@ -1112,6 +1113,11 @@
         catch { return new Date(iso).toLocaleString('en-GB', opts); }
       };
       try {
+        // This email may be open in the Email Studio (newsletter.js): anything unsaved lands first, and
+        // if it can't, this stops here rather than approving the version before it.
+        const studio = { issueId: d.issueId, ready: null };
+        document.dispatchEvent(new CustomEvent('email:actionStarting', { detail: studio }));
+        if (studio.ready) await studio.ready;
         let message = 'Done.';
         if (d.action === 'approve') {
           await postActionCall('newsletter-issues', { action: 'approve', id: d.issueId });
@@ -1126,6 +1132,7 @@
         } else {
           throw new Error('Unknown action.');
         }
+        document.dispatchEvent(new CustomEvent('email:actionFinished', { detail: { issueId: d.issueId } }));
         respond({ ok: true, message });
       } catch (err) {
         respond({ ok: false, error: err.message });
