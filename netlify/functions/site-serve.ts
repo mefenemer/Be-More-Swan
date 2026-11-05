@@ -21,13 +21,15 @@ import { eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { sites } from '../../db/schema';
-import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH } from '../../src/utils/site-render';
+import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH, LISTING_POST_PATH, renderSiteListing } from '../../src/utils/site-render';
 import { reviewPage, reviewSubmit } from '../../src/utils/site-review';
 import { bookStep, bookSubmit } from '../../src/utils/site-booking';
 import { loadSiteReviews } from '../../src/utils/reviews';
 import { loadSiteSocialFeed } from '../../src/utils/site-social-feed';
 import { loadSiteBlogIndex, loadSiteBlogLatest, loadSiteBlogPost, siteBlogRoute, siteBlogSlugs } from '../../src/utils/site-blog';
 import { BLOG_PATH, blogOn } from '../../src/utils/site-definition';
+import { listingIcs, listingRoute, listingSlugs, loadListingBySlug, loadSiteListings } from '../../src/utils/site-listings';
+import { listingPostPage, listingPostSubmit } from '../../src/utils/site-listing-post';
 import { bookableSessions } from '../../src/utils/class-sessions';
 import { bookingSummary, businessSummary } from '../../src/utils/bookings';
 import { canSell, loadSiteProducts, startCheckout } from '../../src/utils/site-shop';
@@ -184,6 +186,12 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         }
         // A review from the link in a review request email (site-review.ts) — it posts to /_form too.
         const posted = new URLSearchParams(raw.slice(0, 8000));
+        // "Post your event" from a listings section (site-listing-post.ts) — saved pending, for the owner to approve.
+        if (posted.get('_k') === 'listing') {
+            const r = await listingPostSubmit({ db, site, def: definition, ctx, now: new Date() }, posted, ip);
+            if ('location' in r) return { statusCode: 303, headers: { Location: r.location, 'Cache-Control': 'no-store' } as Record<string, string>, body: '' };
+            return { statusCode: r.status, headers: headers('text/html; charset=utf-8', 'no-store'), body: r.html };
+        }
         if (posted.get('_k') === 'review' || posted.get('_k') === 'review_stop') {
             const r = await reviewSubmit({ db, site, def: definition, ctx, now: new Date() }, posted, ip);
             if ('location' in r) return { statusCode: 303, headers: { Location: r.location, 'Cache-Control': 'no-store' } as Record<string, string>, body: '' };
@@ -208,6 +216,11 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         if ('location' in r) return { statusCode: 303, headers: { Location: r.location } as Record<string, string>, body: '' };
         return { statusCode: r.status, headers: { ...headers('text/html; charset=utf-8', 'no-store'), 'X-Robots-Tag': 'noindex' }, body: r.html };
     }
+    if (path === LISTING_POST_PATH) {
+        const r = listingPostPage({ db, site, def: definition, ctx, now: new Date() }, new URLSearchParams(String(event.queryStringParameters?.q || '')));
+        if ('location' in r) return { statusCode: 303, headers: { Location: r.location } as Record<string, string>, body: '' };
+        return { statusCode: r.status, headers: { ...headers('text/html; charset=utf-8', 'no-store'), 'X-Robots-Tag': 'noindex' }, body: r.html };
+    }
     if (path === FORM_SENT_PATH) {
         const q = new URLSearchParams(String(event.queryStringParameters?.q || ''));
         const m = await sentMessage(db, site, definition, q);
@@ -219,7 +232,8 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
     const origins = [origin, siteOrigin(slug), ...(resolved?.redirectTo ? [resolved.redirectTo] : [])];
     if (path === '/sitemap.xml') {
         const blog = blogOn(definition) ? await siteBlogSlugs(db, site.organisationId, origin, origins) : [];
-        return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin, blog) };
+        const hasListings = definition.pages.some((p) => p.sections.some((x) => x.type === 'listings'));
+        return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin, blog, hasListings ? await listingSlugs(db, site.organisationId) : []) };
     }
 
     // ── The Blog Assistant's posts (site-blog.ts): /blog and /blog/<slug>, while the blog is on ──
@@ -243,6 +257,20 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         return { statusCode: 200, headers: headers('text/html; charset=utf-8', cache), body: event.httpMethod === 'HEAD' ? '' : renderSiteBlogPost(definition, blogCtx, post) };
     }
 
+    // ── A listing's own page, and its "Add to calendar" file: /listings/<slug>(.ics) ──
+    const lr = listingRoute(path);
+    if (lr && definition.pages.some((p) => p.sections.some((x) => x.type === 'listings'))) {
+        const l = await loadListingBySlug(db, site.organisationId, lr.slug);
+        if (!l) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
+        const pageUrl = `${origin}/listings/${encodeURIComponent(l.slug)}`;
+        if (lr.ics) {
+            const ics = listingIcs(l, definition.settings.siteName, pageUrl);
+            if (!ics) return { statusCode: 404, headers: headers('text/plain; charset=utf-8', 'public, max-age=60'), body: '' };
+            return { statusCode: 200, headers: { ...headers('text/calendar; charset=utf-8', 'public, max-age=300'), 'Content-Disposition': `attachment; filename="${l.slug}.ics"` }, body: event.httpMethod === 'HEAD' ? '' : ics };
+        }
+        return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : renderSiteListing(definition, ctx, l) };
+    }
+
     const hasShop = definition.pages.some((p) => p.sections.some((s) => s.type === 'products'));
     const hasBooking = definition.pages.some((p) => p.sections.some((s) => s.type === 'booking'));
     const hasClasses = definition.pages.some((p) => p.sections.some((s) => s.type === 'booking' && s.props.kind === 'class'));
@@ -255,6 +283,8 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         reviews: await loadSiteReviews(db, site.organisationId, definition),
         socialFeed: await loadSiteSocialFeed(db, site.organisationId, definition),
         blog: await loadSiteBlogLatest(db, site.organisationId, definition),
+        listings: await loadSiteListings(db, site.organisationId, definition),
+        query: String(event.queryStringParameters?.q || ''),
     });
     return { statusCode: page.status, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : page.html };
 }

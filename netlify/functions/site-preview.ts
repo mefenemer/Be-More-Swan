@@ -7,13 +7,15 @@
 // Policy forbids scripts outright and lets only our own app frame it.
 // Internal links are mapped back onto this preview, so clicking around the preview stays in it.
 
+import { listingRoute, loadListingBySlug, loadSiteListings } from '../../src/utils/site-listings';
+import { listingPostPage } from '../../src/utils/site-listing-post';
 import { and, eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { aiAssistants, sites } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { renderSiteBlogIndex, renderSiteBlogPost, renderSitePage } from '../../src/utils/site-render';
+import { renderSiteBlogIndex, renderSiteBlogPost, renderSitePage, renderSiteListing } from '../../src/utils/site-render';
 import { loadSiteBlogIndex, loadSiteBlogLatest, loadSiteBlogPost, siteBlogRoute } from '../../src/utils/site-blog';
 import { applySiteOperation, blogOn } from '../../src/utils/site-definition';
 import { definitionOf, maxPagesFor } from '../../src/utils/site-store';
@@ -87,7 +89,19 @@ export default withLambda(async (event) => {
         reviews: await loadSiteReviews(db, ctx.organisationId, definition),
         socialFeed: await loadSiteSocialFeed(db, ctx.organisationId, definition),
         blog: await loadSiteBlogLatest(db, ctx.organisationId, definition),
+        listings: await loadSiteListings(db, ctx.organisationId, definition),
     };
+    // "Post your event": the visitor's form, to look at (posting works on the live site only).
+    if (path.split('?')[0] === '/_post') {
+        const r = listingPostPage({ db, site: row.site, def: definition, ctx: renderCtx, now: new Date() }, new URLSearchParams(path.split('?')[1] || ''));
+        if ('html' in r) return page(r.status, r.html.replace('<button class="btn" type="submit">', '<button class="btn" type="submit" disabled>'));
+    }
+    // A listing's own page (/listings/<slug>) — a published one, as the live site shows it.
+    const lr = listingRoute(path);
+    if (lr && !lr.ics) {
+        const l = await loadListingBySlug(db, ctx.organisationId, lr.slug);
+        if (l) return page(200, renderSiteListing(definition, renderCtx, l));
+    }
     // The blog's pages, so the preview's Blog menu entry and post links lead somewhere (site-blog.ts).
     const blogRoute = blogOn(definition) ? siteBlogRoute(path) : null;
     if (blogRoute?.kind === 'index') {

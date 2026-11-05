@@ -1947,6 +1947,35 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // "Add these" on a listings_add card → site-listings.ts POST { listings } (the Listings tab's "Add a listing").
+    function onListingsAdd(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/site-listings', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listings: Array.isArray(d.listings) ? d.listings : [] }),
+      })
+        .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'They couldn\'t be added.'); })
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+    // "Do it" on a listing_decisions card → site-listings.ts PATCH { id, decision }, one at a time.
+    async function onListingDecisions(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      let done = 0;
+      try {
+        for (const x of (Array.isArray(d.decisions) ? d.decisions : [])) {
+          const r = await fetch('/.netlify/functions/site-listings', { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: x.listingId, decision: x.decision }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(`Listing ${x.listingId}: ${j.error || 'couldn\'t be saved.'}`);
+          done++;
+        }
+        respond({ ok: true, done });
+        siteChanged();
+      } catch (err) { respond({ ok: false, error: `${done ? `${done} saved, then: ` : ''}${err.message}` }); }
+    }
+
     // "Read my site" on a site_import_request card — sites.ts `import`, the Website tab's same button.
     function onSiteImport(e) {
       const d = e.detail || {};
@@ -2258,6 +2287,8 @@
     container.addEventListener('discovery:create', onDiscoveryCreate);
     container.addEventListener('campaign:create', onCampaignCreate);
     container.addEventListener('chat:send', onCardSend);
+    container.addEventListener('site:listingsAdd', onListingsAdd);
+    container.addEventListener('site:listingDecisions', onListingDecisions);
     if (refEl) refEl.addEventListener('click', onRefClick);
     container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
     container.addEventListener('campaign:edit', onCampaignEdit);
@@ -2362,6 +2393,8 @@
         container.removeEventListener('discovery:create', onDiscoveryCreate);
         container.removeEventListener('campaign:create', onCampaignCreate);
         container.removeEventListener('chat:send', onCardSend);
+        container.removeEventListener('site:listingsAdd', onListingsAdd);
+        container.removeEventListener('site:listingDecisions', onListingDecisions);
         if (refEl) refEl.removeEventListener('click', onRefClick);
         container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);
         container.removeEventListener('campaign:edit', onCampaignEdit);

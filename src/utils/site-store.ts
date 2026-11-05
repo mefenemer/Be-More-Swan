@@ -11,6 +11,7 @@ import { bookableSessions } from './class-sessions';
 import { socialFeedForPrompt } from './site-social-feed';
 import { siteBlogForPrompt } from './site-blog';
 import { reviewsForPrompt } from './reviews';
+import { listingsForPrompt } from './site-listings';
 import { and, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { describeOfferProfile, loadOfferProfile } from './offer-profile';
@@ -422,7 +423,8 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
             const lk = s.look && (s.look.background !== 'auto' || s.look.columns !== 'auto' || s.look.menuLabel)
                 ? ` · look: ${[s.look.background !== 'auto' ? `${s.look.background} background` : '', s.look.columns !== 'auto' ? `${s.look.columns} columns` : '', s.look.menuLabel ? `menu label "${s.look.menuLabel}"` : ''].filter(Boolean).join(', ')}` : '';
             const feed = s.type === 'social_feed' ? ` · ${s.props.enabled ? 'ON' : 'SWITCHED OFF'}, ${s.props.count} newest from ${s.props.platforms.length ? s.props.platforms.join(', ') : 'every platform'}`
-                : s.type === 'blog_posts' ? ` · ${s.props.enabled ? 'ON' : 'SWITCHED OFF'}, ${s.props.count} newest blog posts` : '';
+                : s.type === 'blog_posts' ? ` · ${s.props.enabled ? 'ON' : 'SWITCHED OFF'}, ${s.props.count} newest blog posts`
+                : s.type === 'listings' ? ` · ${s.props.kind === 'event' ? 'events' : 'entries'}${s.props.categories.length ? ` in ${s.props.categories.join(', ')}` : ''}, ${s.props.show === 'all' ? 'all' : 'upcoming only'}, up to ${s.props.count}, ${s.props.layout}${s.props.allowPosts ? `, visitors may send one in ("${s.props.postLabel}")` : ''}` : '';
             lines.push(`    · ${s.type} (sectionId ${s.id})${main ? `: "${clip(main, 90)}"` : ''}${items}${typeof pr.body === 'string' ? ` · "${clip(pr.body, 80)}"` : ''}${feed}${lk}`);
         }
     }
@@ -451,6 +453,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     lines.push(await reviewsForPrompt(db, orgId).catch(() => 'Their reviews could not be read this turn.'));
     lines.push(await socialFeedForPrompt(db, orgId).catch(() => 'Their published social posts could not be read this turn.'));
     lines.push(await siteBlogForPrompt(db, orgId, d).catch(() => 'Their blog posts could not be read this turn.'));
+    lines.push(await listingsForPrompt(db, orgId).catch(() => 'Their listings could not be read this turn.'));
     const forms = await listSignupForms(db, orgId).catch(() => []);
     lines.push(forms.length
         ? `Their sign-up forms (for a signup section's formId): ${forms.map((f) => `${f.name} (formId ${f.id}${f.download ? `, emails a free download: "${f.download}"` : ''}${f.active ? '' : ', switched off'})`).join('; ')}.`

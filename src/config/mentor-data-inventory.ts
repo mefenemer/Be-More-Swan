@@ -93,6 +93,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'audience_contacts', 'audience_consent_events', 'audience_confirmations', 'audience_custom_fields',
         'audience_form_submissions', 'lead_opt_outs', 'review_opt_outs', 'suppression_list', 'site_enquiries',
     ], 'Your contacts\' email addresses, phone numbers and consent records'),
+    ...group('never', 'Website listings (events and directory entries) — they hold the names and emails of visitors who sent entries in; the Website Assistant manages them', ['site_listings'], 'Your website\'s listings and who sent them in'),
     ...group('never', 'Message bodies and transcripts (size and privacy; the owning assistant reads them)', [
         'lead_messages', 'chat_attachments',
     ], 'The emails and messages your leads send'),

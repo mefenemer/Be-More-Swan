@@ -5548,6 +5548,42 @@ export const orgReviews = pgTable("org_reviews", {
   check("org_reviews_status_check", sql`${t.status} IN ('published','hidden','pending','declined')`),
 ]);
 
+// ── Listings (db/z-site-listings.sql; src/utils/site-listings.ts) ───────────────────────────────
+// A workspace's own lists shown on its website: events (dated) and entries (places, people, jobs…).
+// Dates/times kept as typed (no timezone maths). 'pending' = sent in by a visitor, never shown until approved.
+export const siteListings = pgTable("site_listings", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  kind: text().notNull().default("event"),
+  title: text().notNull(),
+  slug: text().notNull(),
+  category: text(),
+  summary: text(),
+  body: text(),
+  startsOn: date("starts_on"),
+  startTime: text("start_time"),
+  endsOn: date("ends_on"),
+  endTime: text("end_time"),
+  location: text(),
+  imageAssetId: integer("image_asset_id"),
+  imageAlt: text("image_alt"),
+  linkUrl: text("link_url"),
+  linkLabel: text("link_label"),
+  status: text().notNull().default("published"),
+  source: text().notNull().default("owner"),
+  submitterName: text("submitter_name"),
+  submitterEmail: text("submitter_email"),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("site_listings_org_slug_idx").on(t.organisationId, t.slug),
+  index("site_listings_org_idx").on(t.organisationId, t.status, t.startsOn),
+  check("site_listings_kind_check", sql`${t.kind} IN ('event','entry')`),
+  check("site_listings_status_check", sql`${t.status} IN ('published','hidden','pending','declined')`),
+  check("site_listings_source_check", sql`${t.source} IN ('owner','public')`),
+]);
+
 // ── What the business offers (db/z-org-offer-profile.sql; src/utils/offer-profile.ts) ──────────────
 // Decides which product fields and booking sections Business Information shows. No row = not
 // answered (guessed from the business's data); an empty array = answered "neither".

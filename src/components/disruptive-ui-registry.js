@@ -2040,7 +2040,7 @@
   // change and refuses the whole batch if any one would break a rule.
 
   // Plain words for each change — never the internal page or section ids the operations carry.
-  const SITE_SECTION_WORDS = { hero: 'top (hero)', features: 'features', steps: 'steps', text: 'text', faq: 'questions', testimonials: 'testimonials', cta: 'call-to-action', social_feed: 'latest social posts', blog_posts: 'latest blog posts' };
+  const SITE_SECTION_WORDS = { hero: 'top (hero)', features: 'features', steps: 'steps', text: 'text', faq: 'questions', testimonials: 'testimonials', cta: 'call-to-action', social_feed: 'latest social posts', blog_posts: 'latest blog posts', listings: 'listings' };
   const SITE_PROP_WORDS = { headline: 'headline', subheadline: 'line under the headline', eyebrow: 'small label', primaryCta: 'main button', secondaryCta: 'second button',
     image: 'picture', heading: 'heading', intro: 'introduction', items: 'items', body: 'text', button: 'button', layout: 'layout',
     platforms: 'platforms shown', count: 'number of posts', enabled: 'on/off' };
@@ -3539,6 +3539,95 @@
     return el;
   }
   register('review_decisions', renderReviewDecisionsCard);
+
+  // { type: 'listings_add', summary, listings: [{ kind, title, category, summary, body, startsOn, startTime, endsOn, endTime, location, linkUrl, linkLabel }] }
+  // The owner's own events or entries, from what they told the chat (site-listings.ts POST { listings },
+  // the Listings tab's "Add a listing"). Shown before anything is saved; one click adds them.
+  function renderListingsAddCard(ui, esc) {
+    const str = (v, n) => (typeof v === 'string' && v.trim() ? v.replace(/\s+/g, ' ').trim().slice(0, n) : null);
+    const list = (Array.isArray(ui.listings) ? ui.listings : []).slice(0, 30).map((x) => ({
+      kind: x && x.kind === 'entry' ? 'entry' : 'event', title: str(x && x.title, 120), category: str(x && x.category, 40),
+      summary: str(x && x.summary, 300), body: typeof (x && x.body) === 'string' ? x.body.slice(0, 5000) : null,
+      startsOn: str(x && x.startsOn, 10), startTime: str(x && x.startTime, 5), endsOn: str(x && x.endsOn, 10), endTime: str(x && x.endTime, 5),
+      location: str(x && x.location, 160), linkUrl: str(x && x.linkUrl, 500), linkLabel: str(x && x.linkLabel, 40),
+    })).filter((x) => x.title);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    const when = (x) => [x.startsOn, x.startTime && `${x.startTime}${x.endTime ? `–${x.endTime}` : ''}`, x.endsOn && x.endsOn !== x.startsOn && `to ${x.endsOn}`].filter(Boolean).join(' ');
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Add to your listings</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="mt-2 space-y-2">${list.map((x) => `<li class="text-xs text-gray-700 bg-white border border-gray-200 rounded-lg p-2">
+        <strong class="text-gray-900">${esc(x.title)}</strong>${x.category ? ` <span class="text-gray-500">· ${esc(x.category)}</span>` : ''}
+        ${x.kind === 'event' ? `<br>${esc(when(x) || 'no date yet')}` : ''}${x.location ? `<br>${esc(x.location)}` : ''}${x.summary ? `<br><span class="text-gray-600">${esc(x.summary)}</span>` : ''}</li>`).join('')}</ul>
+      <p class="text-xs text-gray-600 mt-2">They go on your Listings tab and show on your site wherever you have a listings section. You can edit or remove them there.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-la-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${list.length ? '' : 'disabled'}>Add ${list.length === 1 ? 'it' : `these ${list.length}`}</button>
+        <button type="button" data-la-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-la-status></p>`;
+    const status = el.querySelector('[data-la-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-la-cancel]')) { setBusy(true); say('Nothing added.'); return; }
+      if (!e.target.closest('[data-la-go]')) return;
+      setBusy(true);
+      say('Adding…');
+      el.dispatchEvent(new CustomEvent('site:listingsAdd', {
+        bubbles: true,
+        detail: {
+          listings: list,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'They couldn\'t be added.', 'error'); return; }
+            say(`Added — ${list.length === 1 ? 'it\'s' : 'they\'re'} on your Listings tab.`);
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('listings_add', renderListingsAddCard);
+
+  // { type: 'listing_decisions', summary, decisions: [{ listingId, decision: 'approve' | 'decline' }] }
+  // Visitors' entries waiting for the owner (site-listings.ts PATCH { id, decision }, the Listings tab's buttons).
+  function renderListingDecisionsCard(ui, esc) {
+    const decisions = (Array.isArray(ui.decisions) ? ui.decisions : [])
+      .map((d) => ({ listingId: Number(d && d.listingId), decision: d && d.decision === 'decline' ? 'decline' : d && d.decision === 'approve' ? 'approve' : null }))
+      .filter((d) => Number.isInteger(d.listingId) && d.listingId > 0 && d.decision).slice(0, 30);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Visitors' listings · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="text-xs text-gray-700 mt-2 space-y-0.5">${decisions.map((d) => `<li>Listing ${esc(d.listingId)}: <strong>${d.decision === 'approve' ? 'approve — it goes on your website' : 'decline — never shown'}</strong></li>`).join('')}</ul>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-ld-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${decisions.length ? '' : 'disabled'}>Do it</button>
+        <button type="button" data-ld-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-ld-status></p>`;
+    const status = el.querySelector('[data-ld-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-ld-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-ld-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('site:listingDecisions', {
+        bubbles: true,
+        detail: {
+          decisions,
+          respond({ ok, error, done }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
+            say(`Done — ${done} listing${done === 1 ? '' : 's'} updated.`);
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('listing_decisions', renderListingDecisionsCard);
 
   // ── Built-in: Visual Option Review Card (Brand Designer) ───────────────────
   // { type: 'visual_option_review', briefId, decisions: [{ optionId, decision, reason?, note? }], remake? }

@@ -58,6 +58,16 @@ click writes it).
 
 ## 4. Phase 1 — Listings (an events directory, and every other "list of things")
 
+**Status: built 2026-11-05** (staging). ⚠️ `db/z-site-listings.sql` must be applied to BOTH DBs before
+this reaches prod. Files: `src/utils/site-listings.ts`, `src/utils/site-listing-post.ts`,
+`netlify/functions/site-listings.ts`, routes in `site-serve.ts` / `site-preview.ts`, section
+`listings` in `site-definition.ts` / `site-render.ts`, the Listings tab in
+`assistant-site-editor.js`, chat cards `listings_add` / `listing_decisions`. Tests:
+`tests/site-listings.test.ts`, `e2e/website-listings.spec.ts`.
+Not in this phase: a picture with a visitor's entry (no file upload on a no-script form — the owner
+adds one), an in-app notification for a waiting entry (the owner is emailed; the tab shows a badge),
+and kinds beyond event / entry (people, jobs) — they use "entry" with a category for now.
+
 The single most reusable piece: a store of entries the owner (and, if they choose, the public) adds
 to, shown on the site as a filterable list with a page per entry. One engine covers event
 directories and calendars, business and property directories, team / people, job vacancies, case

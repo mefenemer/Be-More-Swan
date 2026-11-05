@@ -1092,6 +1092,7 @@ window._activateMainTab = function(name) {
     if (name === 'siteenquiries') siteEditor((ed) => ed.activate('enquiries'));
     if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));
     if (name === 'sitebookings') siteEditor((ed) => ed.activate('bookings'));
+    if (name === 'sitelistings') siteEditor((ed) => ed.activate('listings'));
     // Strategy resolved its gate (and loaded) on init — activation only paints.
     if (name === 'strategy') window.AssistantStrategy?.activate();
     // A hub whose rows change in the background (the Campaign Assistant's Orders) re-reads on open.
@@ -7159,6 +7160,8 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-siteenquiries', !!siteEditorTab);
     toggle('maintab-btn-siteorders', !!siteEditorTab);
     toggle('maintab-btn-sitebookings', !!siteEditorTab);
+    // Listings: shown by the editor once the site lists things (the feature, or a listings section).
+    toggle('maintab-btn-sitelistings', false);
     if (siteEditorTab) {
         setText('sitebuilder-tab-label', siteEditorTab.label || 'Website');
         siteEditor((ed) => ed.init({ assistantId: data.id, assistantName: data.name }));
