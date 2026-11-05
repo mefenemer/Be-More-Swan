@@ -59,3 +59,32 @@ export function missingCardReply(content: string, hasCard: boolean): string {
     if (hasCard || !replyPointsAtCard(content) || content.includes(NO_CARD_NOTE)) return content;
     return `${content}\n\n${NO_CARD_NOTE}`;
 }
+
+/**
+ * Pictures (staging 2026-11-05): asked for a picture, the Website Assistant replied "I'm generating a
+ * dramatic film scene for that section now. Once it's created, I'll add it to your site" — with no
+ * card, and nothing ever came. A reply cannot make, find or place a picture; only a site_picture card
+ * does, on a click. So a reply that says it is doing so is replaced.
+ */
+const PICTURE_CLAIM = new RegExp([
+    /\bI(?:'|’)?m (?:now )?(?:generating|creating|making|finding|searching|looking for|adding|placing|putting)\b/.source,
+    /\bI(?:'|’)?ll (?:generate|create|make|find|add|place|put|drop|insert)\b[^.\n]{0,60}\b(?:picture|image|photo|it)\b/.source,
+    /\bI will (?:generate|create|make|find|add|place|put|insert)\b[^.\n]{0,60}\b(?:picture|image|photo|it)\b/.source,
+    /\b(?:I(?:'|’)?ve|I have) (?:generated|created|made|found|added|placed|put|inserted)\b[^.\n]{0,60}\b(?:picture|image|photo)\b/.source,
+    /\bonce (?:it(?:'|’)?s|it is) (?:created|generated|ready|made|done)\b/.source,
+    /\b(?:generating|creating) (?:it|that|the (?:picture|image)|one) now\b/.source,
+].join('|'), 'i');
+
+/** Only a reply about a picture: "I'll add it to your home page" beside a page-change card is fine. */
+const ABOUT_PICTURE = /\b(?:picture|image|photo|illustration|graphic|visual|scene)s?\b/i;
+export function replyClaimsPicture(content: string): boolean {
+    return ABOUT_PICTURE.test(content) && PICTURE_CLAIM.test(content);
+}
+
+/** The Website Assistant's reply: never "I'm creating it" — with the card, point at it; without, say plainly. */
+export function pictureReply(content: string, hasPictureCard: boolean): string {
+    if (!replyClaimsPicture(content)) return content;
+    return hasPictureCard
+        ? 'Here it is — choose “Create with AI” or “Find stock photos” on the card below, then pick the one you like. Nothing is made or added until you do.'
+        : 'I can’t make or add a picture from a message — ask me for a picture for a section and I’ll put a card here with options to choose from. Nothing has been made or added.';
+}

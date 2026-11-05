@@ -12,6 +12,8 @@
  *     asset = { id, url, name, video }  — every source ends as a content_asset in the library, so a
  *     site only ever uses the workspace's own pictures (site-store.ts verifySiteAssets).
  *   video: true lets videos be chosen too (hero, text and gallery pictures; never a logo).
+ *   documents: { onFiles(files) } adds "Attach a document" (Word, PDF, text) — the chat's paperclip
+ *     (chat-session.js), where a document is read rather than shown. The window closes and hands the files back.
  *   topic: what the picture is for — the stock search and the AI prompt start from it.
  *
  * Used by the Website Assistant's editor (assistant-site-editor.js). Uploads go through the
@@ -99,6 +101,9 @@
               <span class="block text-sm font-bold text-gray-800">Upload your own ${multiple ? (allowVideo ? 'pictures or videos' : 'pictures') : noun}</span>
               <span class="block text-xs text-gray-500 mt-1">Click to choose, drag it here, or paste it. It's saved to your library too.</span>
             </label>
+            ${opts.documents ? `<p class="text-xs text-gray-600 mt-2">Attaching words instead?
+              <label class="btn-secondary border inline-block px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer ml-1">Attach a document (Word, PDF, text)
+                <input type="file" multiple hidden data-mp-docs accept=".docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"></label></p>` : ''}
             <p class="text-xs font-bold text-gray-700 mt-4 mb-2">Or choose from your library</p>
             <div data-mp-grid class="grid gap-2" style="grid-template-columns:repeat(auto-fill,minmax(120px,1fr))"><p class="text-xs text-gray-500">Loading your library…</p></div>
           </div>
@@ -115,7 +120,7 @@
           <div data-mp-pane="ai" hidden>
             <p data-mp-ai-note class="text-xs text-gray-500">Checking what you can create…</p>
             <div data-mp-ai-form hidden>
-              <textarea data-mp-ai-prompt rows="3" maxlength="900" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 mt-2" placeholder="Describe it, e.g. warm morning light over a tidy salon chair, no people">${esc(opts.topic || '')}</textarea>
+              <textarea data-mp-ai-prompt rows="3" maxlength="900" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 mt-2" placeholder="Describe it (optional) — e.g. warm morning light over a tidy salon chair, no people. Leave it blank and ${esc(who)} decides from your business.">${esc(opts.topic || '')}</textarea>
               <div class="flex flex-wrap items-center gap-2 mt-2">
                 ${kindToggle('ai')}
                 <select data-mp-ai-shape class="text-xs border border-gray-300 rounded-lg px-2 py-1.5">
@@ -193,6 +198,8 @@
     document.addEventListener('paste', onPaste);
     back.addEventListener('click', (e) => { if (e.target === back) close(); });
     $('[data-mp-close]').addEventListener('click', close);
+    const docs = $('[data-mp-docs]');
+    if (docs) docs.addEventListener('change', (e) => { const fs = [...(e.target.files || [])]; e.target.value = ''; if (fs.length) { close(); opts.documents.onFiles(fs); } });
     $('[data-mp-file]').addEventListener('change', (e) => { const fs = [...(e.target.files || [])]; e.target.value = ''; if (fs.length) doUploads(multiple ? fs : fs.slice(0, 1)); });
     const drop = $('[data-mp-drop]');
     drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.style.borderColor = '#db2777'; });
@@ -293,8 +300,10 @@
       ? 'Your monthly tasks are used up — they reset on the 1st. Upgrade your plan for more.'
       : 'You don\'t have enough credits to create this. Upgrade your plan for more.');
     $('[data-mp-ai-go]').addEventListener('click', async () => {
+      // Blank = "you decide" for a picture: the server writes the request from the business
+      // (generate-ai-image.ts). A video still needs words — it costs more and takes minutes.
       const prompt = $('[data-mp-ai-prompt]').value.trim();
-      if (!prompt) { say('Describe what it should show first.', true); return; }
+      if (!prompt && kinds.ai === 'video') { say('Describe what the video should show first.', true); return; }
       const go = $('[data-mp-ai-go]');
       go.disabled = true;
       aiGrid.innerHTML = '';

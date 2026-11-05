@@ -45,6 +45,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
   <div class="page-wide p-4"><div id="site-editor-host" data-site-host="website"></div></div>
   <script src="/src/components/scroll-lock.js"></script><script src="/dialogs.js"></script>
   <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script>
+  <script src="/src/components/media-picker.js"></script>
   <script src="/src/components/assistant-site-editor.js"></script>
   <script>AssistantSiteEditor.init({ assistantId: 7, assistantName: 'Wren' }); AssistantSiteEditor.activate('website');</script>
 </body></html>`;
@@ -207,5 +208,66 @@ test('full screen: the editor fills the window, and the button or Esc puts it ba
     await page.getByRole('button', { name: /Full screen/ }).click();
     await page.keyboard.press('Escape');
     await expect(host).not.toHaveAttribute('data-sb-editor-full', '');
+    expect(pageErrors).toEqual([]);
+});
+
+test('the paperclip opens upload / library / find stock / create — and a library picture rides with the message', async ({ page, api, pageErrors }) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    api.set('content-assets', { assets: { pending: [{ id: 41, name: 'Harbour at dusk', assetType: 'image', status: 'approved', storageUrl: 'https://example.invalid/h.jpg' }], scheduled: [], posted: [] } });
+    api.set('chat-orchestrator', { chatSessionId: 57, message: { id: 4, role: 'assistant', content: 'Lovely picture.', uiElement: null } });
+    await page.route('https://example.invalid/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>' }));
+    await page.goto('/e2e-website-chat.html');
+    await page.locator('[data-sb-chat] label[title^="Add pictures"]').click();
+    const picker = page.locator('#bms-media-picker');
+    await expect(picker).toBeVisible();
+    for (const t of ['Upload or library', 'Ask Wren to find stock', 'Ask Wren to create one']) await expect(picker.getByRole('button', { name: t })).toBeVisible();
+    await expect(picker.getByText('Attach a document (Word, PDF, text)')).toBeVisible();
+    await picker.getByRole('button', { name: 'Ask Wren to create one' }).click();
+    await expect(picker.locator('[data-mp-ai-prompt]')).toHaveAttribute('placeholder', /Leave it blank and Wren decides/);
+    await picker.getByRole('button', { name: 'Upload or library' }).click();
+    await page.screenshot({ path: 'test-results/website-chat-paperclip.png' });
+    await picker.locator('[data-mp-asset="41"]').click();
+    await picker.getByRole('button', { name: 'Add 1' }).click();
+    await expect(picker).toHaveCount(0);
+    await expect(page.locator('[data-sb-chat] [data-chat-chips]')).toContainText('Harbour at dusk');
+    const input = page.locator('[data-sb-chat] [data-chat-input]');
+    await input.fill('Use this on the home page');
+    await input.press('Enter');
+    await expect(page.getByText('Lovely picture.')).toBeVisible();
+    const body = api.called('chat-orchestrator')[0].body as { attachments: unknown[] };
+    expect(body.attachments).toEqual([{ kind: 'image', assetId: 41, name: 'Harbour at dusk' }]);
+    expect(pageErrors).toEqual([]);
+});
+
+test('a picture from the chat: the card finds options, the preview shows where it will go, a pick places it', async ({ page, api, pageErrors }) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    api.set('chat-orchestrator', { chatSessionId: 58, message: { id: 5, role: 'assistant', content: 'Choose one on the card below.', uiElement: {
+        type: 'site_picture', pageId: 'home', sectionId: 'how', sectionLabel: 'How wholesale works', place: 'after', source: 'stock', description: 'coffee being roasted', alt: 'Coffee being roasted' } } });
+    api.set('get-ai-credit-balance', { canImage: true, imageCost: 1, unit: 'tasks' });
+    let release: () => void = () => {};
+    const held = new Promise<void>((r) => { release = r; });
+    api.set('pexels-search', async (route, body) => {
+        const b = body as { action?: string };
+        if (b.action === 'save') return { assetId: 77 };
+        await held;   // keep the search open so the placeholder can be seen
+        return { keywords: 'coffee roast', candidates: [1, 2, 3].map((i) => ({ providerAssetId: `p${i}`, url: `https://example.invalid/${i}.jpg`, title: `Roaster ${i}`, photographer: 'Ana' })) };
+    });
+    await page.route('https://example.invalid/**', (r) => r.fulfill({ status: 200, contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>' }));
+    const applied: unknown[] = [];
+    api.set('sites', (_route, body) => { const b = body as { action: string; ops?: unknown[] }; if (b.action === 'apply') applied.push(...(b.ops || [])); return siteView; });
+    await page.goto('/e2e-website-chat.html');
+    const input = page.locator('[data-sb-chat] [data-chat-input]');
+    await input.fill('Add a picture after this');
+    await input.press('Enter');
+    await page.getByRole('button', { name: 'Find stock photos (free)' }).click();
+    const placeholder = page.frameLocator('iframe[data-site-preview]').locator('[data-bms-picture-working]');
+    await expect(placeholder).toContainText('Wren: Finding a picture');
+    await page.waitForTimeout(900);   // the preview scrolls the placeholder into view
+    await page.screenshot({ path: 'test-results/website-chat-picture-working.png' });
+    release();
+    await page.getByRole('button', { name: /Use photo 2/ }).click();
+    await expect(page.getByText(/Done — it's after “How wholesale works”/)).toBeVisible();
+    expect(applied).toEqual([{ op: 'add_section', pageId: 'home', index: 2, section: { type: 'gallery', props: { heading: null, intro: null, layout: 'natural', images: [{ assetId: 77, url: '', alt: 'Coffee being roasted', caption: null }] } } }]);
+    await expect(placeholder).toHaveCount(0);
     expect(pageErrors).toEqual([]);
 });

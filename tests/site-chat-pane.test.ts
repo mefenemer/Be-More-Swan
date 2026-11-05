@@ -95,6 +95,28 @@ check('full screen: one button in, the same button (or Esc) out', () => {
     assert.ok(editor.includes("window.ScrollLock.release('site-editor-full')"));
 });
 
+check('the paperclip opens the picture window (with documents), and a blank "create" lets the assistant decide', () => {
+    assert.ok(session.includes('function onAttachClick(e)') && session.includes("documents: { onFiles: (files) => { addFiles(files); inputEl.focus(); } },"));
+    assert.ok(session.includes("attachLabel?.addEventListener('click', onAttachClick);") && session.includes("attachLabel?.removeEventListener('click', onAttachClick);"));
+    assert.ok(session.includes("if (p.asset) { out.push({ kind: 'image', assetId: p.asset.id"), 'a library picture is sent by id, not uploaded again');
+    const mp = read('src/components/media-picker.js');
+    assert.ok(!mp.includes("if (!prompt) { say('Describe what it should show first.', true); return; }"), 'a blank picture description is allowed');
+    assert.ok(mp.includes("if (!prompt && kinds.ai === 'video')"), 'a video still needs words');
+    const gen = read('netlify/functions/generate-ai-image.ts');
+    assert.ok(gen.includes('if (!prompt) prompt = await businessImageRequest(db, orgId);'));
+    assert.ok(gen.includes('.where(eq(organisations.id, orgId))'), 'only this workspace\'s own details');
+});
+
+check('a picture from the chat: the card does the work on a click, and the preview shows where it goes', () => {
+    assert.ok(cards.includes("register('site_picture', renderSitePictureCard);"));
+    const card = slice(cards, 'function renderSitePictureCard(', "register('site_picture'");
+    assert.ok(card.includes("new CustomEvent('site:pictureWorking'") && card.includes("new CustomEvent('site:picturePlace'"));
+    assert.ok(card.includes("call('pexels-search'") && card.includes("call('generate-ai-image'"));
+    assert.ok(!card.includes("call('sites'"), 'placing goes through the chat session, not the card');
+    assert.ok(session.includes("container.addEventListener('site:picturePlace', onSitePicturePlace);") && session.includes("container.removeEventListener('site:picturePlace', onSitePicturePlace);"));
+    assert.ok(editor.includes("document.addEventListener('site:pictureWorking'") && editor.includes('if (state.pictureWorking) paintPictureWorking(e.target);'));
+});
+
 check('"Select" only describes what was clicked — it never changes the site', () => {
     const pick = slice(editor, '// ── "Select"', '/** The preview full screen');
     for (const w of ["action: 'apply'", 'apply(', 'post(', 'fetch(']) assert.ok(!pick.includes(w), `picker must not ${w}`);

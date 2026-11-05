@@ -1638,6 +1638,55 @@
     tryGive(0);
   }
 
+
+  // ── A picture being found or made from the chat (site_picture card) ────────
+  // A placeholder in the preview where it will go — over the section's own picture, or as a new block
+  // after the section — with the swan and moving dots, until the picture lands (the preview reloads)
+  // or the card stops. Drawn into the same-origin preview, like Select's outline.
+  function paintPictureWorking(frame) {
+    let doc;
+    try { doc = frame && frame.contentDocument; } catch { return; }
+    if (!doc || !doc.body) return;
+    doc.querySelectorAll('[data-bms-picture-working]').forEach((x) => x.remove());
+    const w = state.pictureWorking;
+    if (!w) return;
+    const sec = doc.getElementById(w.sectionId);
+    if (!sec) return;
+    if (!doc.getElementById('bms-pw-style')) {
+      const st = doc.createElement('style');
+      st.id = 'bms-pw-style';
+      st.textContent = '@keyframes bmsPw{0%{background-position:100% 0}100%{background-position:-100% 0}}@keyframes bmsDot{0%,80%,100%{opacity:.25}40%{opacity:1}}'
+        + '[data-bms-picture-working]{border-radius:12px;overflow:hidden;background:linear-gradient(90deg,#fdf2f8 25%,#fce7f3 50%,#fdf2f8 75%);background-size:200% 100%;animation:bmsPw 1.6s linear infinite;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#9d174d;font:600 14px/1.3 system-ui,sans-serif;text-align:center;padding:16px;box-sizing:border-box}'
+        + '[data-bms-picture-working] i{display:inline-block;width:7px;height:7px;margin:0 2px;border-radius:9999px;background:#db2777;animation:bmsDot 1.2s infinite}[data-bms-picture-working] i:nth-child(2){animation-delay:.15s}[data-bms-picture-working] i:nth-child(3){animation-delay:.3s}';
+      doc.head.appendChild(st);
+    }
+    const box = doc.createElement('div');
+    box.setAttribute('data-bms-picture-working', '');
+    box.setAttribute('role', 'status');
+    box.innerHTML = `<img src="${SWAN}" alt="" style="width:44px;height:44px;object-fit:contain"><span>${esc(state.assistantName || 'Your assistant')}: ${esc(w.label || 'working on a picture')}<br><span><i></i><i></i><i></i></span></span>`;
+    const own = w.place !== 'after' && sec.querySelector('img, video');
+    if (own) {
+      const r = own.getBoundingClientRect();
+      box.style.cssText = `position:absolute;left:${own.offsetLeft}px;top:${own.offsetTop}px;width:${r.width}px;height:${r.height}px;z-index:40`;
+      if (doc.defaultView.getComputedStyle(own.offsetParent || sec).position === 'static') (own.offsetParent || sec).style.position = 'relative';
+      (own.offsetParent || sec).appendChild(box);
+    } else {
+      box.style.cssText = 'width:min(640px,calc(100% - 32px));aspect-ratio:16/9;margin:8px auto 32px';
+      sec.insertAdjacentElement(w.place === 'after' ? 'afterend' : 'beforeend', box);
+    }
+    box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  document.addEventListener('site:pictureWorking', (e) => {
+    const d = e.detail || {};
+    state.pictureWorking = d.on ? { sectionId: d.sectionId, pageId: d.pageId, place: d.place, label: d.label } : null;
+    const frame = document.querySelector('[data-site-host="website"] iframe[data-site-preview]');
+    if (!frame) return;
+    // Showing another page: bring up the section's page first; the load handler paints it there.
+    const pg = d.on && def() && def().pages.find((x) => x.id === d.pageId);
+    if (pg && pathOf(pg) !== state.previewPath.split('#')[0] && !(previewPage(frame) && previewPage(frame).id === pg.id)) { state.previewPath = pathOf(pg); rerender(); return; }
+    paintPictureWorking(frame);
+  });
+
   /** The whole Website tab full screen (wide screens) — and back. Esc leaves it. */
   function setEditorFull(on) {
     if (!!state.editorFull === !!on) return;
@@ -2166,6 +2215,8 @@
       // confused people (owner, 2026-11-05), so the swans stay only where there is no docked chat.
       if (!chatAvailable()) swanThePreview(e.target);
       if (picker.on) attachPicker(e.target);
+      // A picture still being made: its placeholder again (a reload that isn't the picture landing).
+      if (state.pictureWorking) paintPictureWorking(e.target);
     }
   }, true);
   document.addEventListener('submit', async (e) => {
@@ -2895,6 +2946,7 @@
   document.addEventListener('site:changed', (e) => {
     const id = e.detail && e.detail.assistantId;
     if (!state.assistantId || Number(id) !== Number(state.assistantId)) return;
+    state.pictureWorking = null;
     load();
     if (state.listings || state.surface === 'listings') loadListings();
   });

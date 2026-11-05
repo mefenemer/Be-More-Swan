@@ -163,7 +163,7 @@
           ${canAttach ? '<div class="hidden flex-wrap gap-2 mb-2" data-chat-chips></div>' : ''}
           <div class="mb-2" data-chat-ref style="display:none"></div>
           <form class="flex items-end gap-3" data-chat-form>
-            ${canAttach ? `<label class="btn-secondary border px-3 py-3 rounded-lg cursor-pointer shrink-0 text-sm" title="Attach pictures or documents (Word, PDF, text)">
+            ${canAttach ? `<label class="btn-secondary border px-3 py-3 rounded-lg cursor-pointer shrink-0 text-sm" title="Add pictures — upload, your library, find stock or create one — or attach a document">
               <span aria-hidden="true">📎</span><span class="sr-only">Attach pictures or documents</span>
               <input type="file" multiple hidden data-chat-attach accept="image/*,.docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
             </label>` : ''}
@@ -215,6 +215,7 @@
     }
     function onRefClick(e) { if (e.target.closest('[data-chat-ref-clear]')) setReference(null); }
     const attachInput = container.querySelector('[data-chat-attach]');
+    const attachLabel = attachInput ? attachInput.closest('label') : null;
 
     // ── Attachments (only where canAttach) ──
     function renderChips() {
@@ -223,8 +224,8 @@
       chipsEl.style.display = pending.length ? 'flex' : 'none';
       chipsEl.innerHTML = pending.map((p, i) => `
         <span class="inline-flex items-center gap-1 bg-gray-100 border border-gray-200 rounded-full pl-3 pr-1 py-1 text-xs text-gray-800">
-          ${p.kind === 'image' ? '🖼️' : '📄'} ${escapeHtml(p.file.name)}
-          <button type="button" data-chat-chip-remove="${i}" class="px-1 text-gray-500 hover:text-gray-900" aria-label="Remove ${escapeHtml(p.file.name)}">×</button>
+          ${p.kind === 'image' ? '🖼️' : '📄'} ${escapeHtml(p.asset ? p.asset.name || 'Picture' : p.file.name)}
+          <button type="button" data-chat-chip-remove="${i}" class="px-1 text-gray-500 hover:text-gray-900" aria-label="Remove ${escapeHtml(p.asset ? p.asset.name || 'picture' : p.file.name)}">×</button>
         </span>`).join('');
     }
     function addFiles(files) {
@@ -249,6 +250,8 @@
     async function prepareAttachments(items) {
       const out = [];
       for (const p of items) {
+        // Already in the library (chosen, found or created in the picture window): just its id.
+        if (p.asset) { out.push({ kind: 'image', assetId: p.asset.id, name: p.asset.name || 'Picture' }); continue; }
         if (p.kind === 'image') {
           if (!window.MediaPicker || typeof window.MediaPicker.upload !== 'function') throw new Error('Pictures can\'t be attached on this page — add them on the Website tab instead.');
           const asset = await window.MediaPicker.upload(p.file);
@@ -260,6 +263,25 @@
       return out;
     }
     function onAttachChange() { addFiles(Array.from(attachInput.files || [])); attachInput.value = ''; }
+    // The paperclip opens the same picture window the Website tab uses (media-picker.js): upload, your
+    // library, "Ask … to find stock", "Ask … to create one" (description optional) — and documents.
+    // Without that window on the page it falls back to the computer's own file chooser.
+    function onAttachClick(e) {
+      if (!window.MediaPicker || typeof window.MediaPicker.open !== 'function') return;
+      e.preventDefault();
+      window.MediaPicker.open({
+        title: 'Add to your message', multiple: true, assistantName: props.assistantName,
+        onPickMany: (assets) => {
+          for (const a of assets) {
+            if (pending.length >= ATTACH_MAX) { showError(`Attach up to ${ATTACH_MAX} files at a time.`); break; }
+            if (!pending.some((p) => p.asset && p.asset.id === a.id)) pending.push({ kind: 'image', asset: a });
+          }
+          renderChips();
+          inputEl.focus();
+        },
+        documents: { onFiles: (files) => { addFiles(files); inputEl.focus(); } },
+      });
+    }
     function onChipsClick(e) {
       const b = e.target.closest('[data-chat-chip-remove]');
       if (!b) return;
@@ -480,7 +502,7 @@
         pending = [];
         renderChips();
       }
-      appendMessage({ role: 'user', content: [message, files.length ? `📎 Attached: ${files.map((f) => f.file.name).join(', ')}` : ''].filter(Boolean).join('\n\n') });
+      appendMessage({ role: 'user', content: [message, files.length ? `📎 Attached: ${files.map((f) => (f.asset ? f.asset.name || 'Picture' : f.file.name)).join(', ')}` : ''].filter(Boolean).join('\n\n') });
       setSending(true);
       const skeleton = showTypingSkeleton();
 
@@ -1947,6 +1969,37 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // A site_picture card's chosen picture → sites.ts apply. IN a section that holds one picture (hero,
+    // text, sign-up) it becomes that picture; in a gallery it is added; anywhere else, or place
+    // 'after', it goes in a new picture section straight after this one. Read fresh, so ids are real.
+    async function onSitePicturePlace(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const data = await sitePost({ action: 'get', assistantId });
+        const pages = (data.definition && data.definition.pages) || [];
+        const pg = pages.find((x) => x.id === d.pageId);
+        const at = pg ? pg.sections.findIndex((x) => x.id === d.sectionId) : -1;
+        if (!pg || at < 0) throw new Error('That section isn\'t on your site any more.');
+        const sec = pg.sections[at];
+        const img = { assetId: Number(d.assetId), url: '', alt: String(d.alt || 'A picture').slice(0, 150) };
+        const holdsOne = ['hero', 'text', 'signup'].includes(sec.type);
+        const ops = d.place !== 'after' && holdsOne ? [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { image: img } }]
+          : d.place !== 'after' && sec.type === 'gallery' ? [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { images: [...(sec.props.images || []), { ...img, caption: null }] } }]
+          : [{ op: 'add_section', pageId: pg.id, index: at + 1, section: { type: 'gallery', props: { heading: null, intro: null, layout: 'natural', images: [{ ...img, caption: null }] } } }];
+        let r;
+        try { r = await sitePost({ action: 'apply', assistantId, ops }); }
+        catch (err) {
+          // A new picture section can be refused (the site's "gallery" is switched off): beside the
+          // section's own words instead, where it holds a picture.
+          if (ops[0].op !== 'add_section' || !holdsOne) throw err;
+          r = await sitePost({ action: 'apply', assistantId, ops: [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { image: img } }] });
+        }
+        respond({ ok: true, warnings: r.warnings || [] });
+        siteChanged();
+      } catch (err) { respond({ ok: false, error: err.message }); }
+    }
+
     // "Add these" on a listings_add card → site-listings.ts POST { listings } (the Listings tab's "Add a listing").
     function onListingsAdd(e) {
       const d = e.detail || {};
@@ -2277,6 +2330,7 @@
       inputEl.addEventListener('input', onInput);
       if (canAttach) {
         attachInput.addEventListener('change', onAttachChange);
+        attachLabel?.addEventListener('click', onAttachClick);
         chipsEl.addEventListener('click', onChipsClick);
         container.addEventListener('dragover', onDragOver);
         container.addEventListener('drop', onDrop);
@@ -2288,6 +2342,7 @@
     container.addEventListener('campaign:create', onCampaignCreate);
     container.addEventListener('chat:send', onCardSend);
     container.addEventListener('site:listingsAdd', onListingsAdd);
+    container.addEventListener('site:picturePlace', onSitePicturePlace);
     container.addEventListener('site:listingDecisions', onListingDecisions);
     if (refEl) refEl.addEventListener('click', onRefClick);
     container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
@@ -2383,6 +2438,7 @@
           inputEl.removeEventListener('input', onInput);
           if (canAttach) {
             attachInput.removeEventListener('change', onAttachChange);
+            attachLabel?.removeEventListener('click', onAttachClick);
             chipsEl.removeEventListener('click', onChipsClick);
             container.removeEventListener('dragover', onDragOver);
             container.removeEventListener('drop', onDrop);
@@ -2394,6 +2450,7 @@
         container.removeEventListener('campaign:create', onCampaignCreate);
         container.removeEventListener('chat:send', onCardSend);
         container.removeEventListener('site:listingsAdd', onListingsAdd);
+        container.removeEventListener('site:picturePlace', onSitePicturePlace);
         container.removeEventListener('site:listingDecisions', onListingDecisions);
         if (refEl) refEl.removeEventListener('click', onRefClick);
         container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);

@@ -106,7 +106,7 @@ import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsPr
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
-import { confirmCardReply, missingCardReply } from '../../src/utils/confirm-card-reply';
+import { confirmCardReply, missingCardReply, pictureReply } from '../../src/utils/confirm-card-reply';
 import { isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -1829,7 +1829,7 @@ Section props: hero {layout:"centered|split|banner", eyebrow, headline (max ${SI
 
 ${rc.attachmentsBlock ?? 'They have not attached any files in this conversation. They can attach pictures and documents with the paperclip, or by dragging them into the chat.'}
 
-THEIR PICTURES. Put a picture they attached on the site by its assetId in a site_changes card: an image is {"assetId": <id>, "alt": "<what the picture shows>"} — a hero's "image", a text section's "image", one of a gallery's "images" (several pictures at once → a gallery), or set_theme {"logoAssetId": <id>} for their logo. Write "alt" from what they told you the picture shows; if you don't know, ask before proposing it. A library VIDEO goes in the same places (a hero, a text section, a gallery) the same way — the site plays it silently on a loop with a pause button; it can't be a logo, a sign-up picture or a product picture. To get a new picture or video, point them to "Choose picture or video" on the section: there they can upload, pick from their library, have you find stock, or have you create one with AI.
+THEIR PICTURES. Put a picture they attached on the site by its assetId in a site_changes card: an image is {"assetId": <id>, "alt": "<what the picture shows>"} — a hero's "image", a text section's "image", one of a gallery's "images" (several pictures at once → a gallery), or set_theme {"logoAssetId": <id>} for their logo. Write "alt" from what they told you the picture shows; if you don't know, ask before proposing it. A library VIDEO goes in the same places (a hero, a text section, a gallery) the same way — the site plays it silently on a loop with a pause button; it can't be a logo, a sign-up picture or a product picture. A NEW PICTURE for a section (find a stock photo, or create one with AI): you CANNOT make, find, generate or add a picture in a reply — only a site_picture card does, after they click. So emit a site_picture card straight away (don't ask what it should show first; the card has an optional description box, and blank lets the business decide): {"type":"site_picture","pageId":"<a pageId above>","sectionId":"<that section>","sectionLabel":"<its heading, or kind>","place":"in"|"after","source":"ai"|"stock","description":"<what it should show, from what they said, or empty>","alt":"<what the picture will show, a few words>"}. "place": "in" when the section holds a picture (hero, text — beside its words, sign-up, gallery — added to it); "after" puts a new picture section straight after it. "source": "ai" when they asked you to create or generate one, "stock" when they asked you to find one, else your choice. Say in one sentence that the card will show options to choose from. NEVER say you are creating, generating, finding or adding it, that it is on its way, or that you will add it when it's ready — nothing happens until they press a button on the card. To upload their own or pick from their library, point them to the paperclip in this chat, or "Choose picture or video" on the section.
 
 THEIR OWN WORDS. When they give you wording to use — an attached document, or text they wrote in this chat — NEVER retype, shorten, tidy or reword it in a site_changes card. Emit a site_words card instead: {"type":"site_words","pageId":"<a pageId above>","attachmentId":<the document's attachmentId, or null>,"quote":"<only when the words are in their chat message: copy them EXACTLY, character for character; else null>","note":"<where it should go, in their words>"}. The server places their exact words on that page and shows them where everything goes before anything changes; it uses 1 task — say so. One page per card; for words meant for two pages, ask which part goes where, then send one card per page.
 
@@ -1877,6 +1877,11 @@ or
 {
   "reply": "your conversational message to the user",
   "uiElement": { "type": "site_draft_request", "request": "<what the site should cover, in their words>" }
+}
+or
+{
+  "reply": "<one sentence: the card below shows options to choose from>",
+  "uiElement": { "type": "site_picture", "pageId": "...", "sectionId": "...", "sectionLabel": "Stories that deserve a screen", "place": "after", "source": "ai", "description": "a dramatic film scene", "alt": "A dramatic film scene" }
 }
 or
 {
@@ -4043,6 +4048,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         const voicePostCard = !!postAction && uiElement === postAction && ['voiceover', 'captions', 'time_text'].includes(postAction.action);
         if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || voicePostCard)) {
             content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
+        }
+        // The Website Assistant can't make, find or place a picture in a reply — only its site_picture
+        // card can, on a click (staging 2026-11-05: "I'm generating it now… I'll add it", then nothing).
+        if (assistantRow.roleKey === 'website_assistant') {
+            content = pictureReply(content, !!uiElement && (uiElement as { type?: unknown }).type === 'site_picture');
         }
 
         // And the newsletter route's. Identical shape: it never persists on the turn, so the only

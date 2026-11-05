@@ -3589,6 +3589,120 @@
   }
   register('listings_add', renderListingsAddCard);
 
+  // { type: 'site_picture', pageId, sectionId, sectionLabel, place: 'in' | 'after', source: 'ai' | 'stock', description, alt }
+  // A picture for one section, found or made RIGHT HERE (owner, 2026-11-05: the chat said "I'm generating
+  // it now" and nothing ever came back — a reply can't make a picture; this card does, on a click).
+  // Stock (pexels-search.ts, free) or AI (generate-ai-image.ts, charges as it says; blank = the business
+  // decides). The chosen one is saved to the library, then placed IN the section (its picture) or AFTER
+  // it (a new picture section) by site:picturePlace → sites.ts apply. While it works the Website tab's
+  // preview shows a placeholder where it will go (site:pictureWorking).
+  function renderSitePictureCard(ui, esc) {
+    const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const pageId = str(ui.pageId, 80);
+    const sectionId = str(ui.sectionId, 80);
+    if (!pageId || !sectionId) return null;
+    const label = str(ui.sectionLabel, 120) || 'this section';
+    const place = ui.place === 'after' ? 'after' : 'in';
+    let source = ui.source === 'stock' ? 'stock' : 'ai';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">A picture ${place === 'after' ? 'after' : 'for'} “${esc(label)}”</p>
+      <label class="block text-xs font-bold text-gray-700 mt-2">What should it show? <span class="font-normal text-gray-500">(optional)</span>
+        <textarea data-sp-desc rows="2" maxlength="600" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="Leave blank and your assistant decides from your business">${esc(str(ui.description, 600))}</textarea></label>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sp-go="ai" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Create with AI</button>
+        <button type="button" data-sp-go="stock" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Find stock photos (free)</button>
+      </div>
+      <p data-sp-cost class="text-xs text-gray-500 mt-1"></p>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sp-status role="status"></p>
+      <div data-sp-grid class="grid gap-2 mt-2" style="grid-template-columns:repeat(2,minmax(0,1fr))"></div>
+      <div data-sp-more class="mt-2"></div>`;
+    const $ = (q) => el.querySelector(q);
+    const status = $('[data-sp-status]');
+    const grid = $('[data-sp-grid]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const paintSource = () => el.querySelectorAll('[data-sp-go]').forEach((b) => { b.className = `${b.dataset.spGo === source ? 'btn-primary' : 'btn-secondary'} px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50`; });
+    paintSource();
+    const setBusy = (b) => el.querySelectorAll('button, textarea').forEach((x) => { x.disabled = b; });
+    const working = (on, what) => document.dispatchEvent(new CustomEvent('site:pictureWorking', { detail: { pageId, sectionId, place, on, label: what || '' } }));
+    const call = async (name, body) => {
+      const r = await fetch(`/.netlify/functions/${name}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      return { ok: r.ok, body: await r.json().catch(() => ({})) };
+    };
+    // What AI pictures cost here, said before the click (get-ai-credit-balance; the endpoint is the real gate).
+    fetch('/.netlify/functions/get-ai-credit-balance', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((c) => {
+      if (!c || !el.isConnected) return;
+      const btn = el.querySelector('[data-sp-go="ai"]');
+      if (!c.canImage) { btn.disabled = true; btn.title = 'None of your assistants can create pictures'; if (source === 'ai') { source = 'stock'; paintSource(); } return; }
+      if (c.imageCost) $('[data-sp-cost]').textContent = `Creating uses ${c.imageCost} ${c.unit === 'tasks' ? (c.imageCost === 1 ? 'task' : 'tasks') : (c.imageCost === 1 ? 'credit' : 'credits')} and gives four to choose from. Stock photos are free.`;
+    }).catch(() => {});
+    let stock = { keywords: '', shown: [], candidates: [] };
+    let job = null;
+    async function find(again) {
+      const desc = $('[data-sp-desc]').value.trim();
+      setBusy(true); grid.innerHTML = ''; $('[data-sp-more]').innerHTML = '';
+      working(true, source === 'ai' ? 'Creating a picture' : 'Finding a picture');
+      try {
+        if (source === 'stock') {
+          const topic = desc || label;
+          say('Looking for photos…');
+          const res = await call('pexels-search', again && stock.keywords ? { topic, mediaType: 'image', dedup: false, keywords: stock.keywords, exclude: stock.shown } : { topic, mediaType: 'image', dedup: false });
+          if (!res.ok) throw new Error((res.body && res.body.error) || 'The search didn\'t work.');
+          stock = { keywords: res.body.keywords || '', candidates: (res.body.candidates || []).slice(0, 6), shown: [...new Set([...(again ? stock.shown : []), ...(res.body.candidates || []).map((c) => c.providerAssetId)])] };
+          if (!stock.candidates.length) { say('Nothing matched — try different words.'); working(false); return; }
+          say('Choose one — photos by Pexels creators.');
+          grid.innerHTML = stock.candidates.map((c, i) => `<button type="button" data-sp-pick="s${i}" class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400 bg-white" aria-label="Use photo ${i + 1}${c.photographer ? ` by ${esc(c.photographer)}` : ''}"><img src="${esc(c.url)}" alt="" style="width:100%;height:96px;object-fit:cover;display:block"></button>`).join('');
+          $('[data-sp-more]').innerHTML = '<button type="button" data-sp-again class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Show different ones</button>';
+        } else {
+          say('Creating four for you to choose from — about half a minute…');
+          const res = await call('generate-ai-image', { prompt: desc, aspectRatio: '16:9' });
+          if (!res.ok) throw new Error(res.body && res.body.error === 'insufficient_credits' ? 'Your monthly tasks are used up — they reset on the 1st.' : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be created.');
+          job = res.body.jobId;
+          say('Choose the one you like.');
+          grid.innerHTML = (res.body.images || []).map((im, i) => `<button type="button" data-sp-pick="a${im.index}" class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400 bg-white" aria-label="Use picture ${i + 1}"><img src="${esc(im.url)}" alt="" style="width:100%;height:96px;object-fit:cover;display:block"></button>`).join('');
+          $('[data-sp-more]').innerHTML = '<button type="button" data-sp-again class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Try again</button>';
+        }
+      } catch (err) { say(err.message, 'error'); working(false); }
+      setBusy(false);
+    }
+    async function choose(key) {
+      setBusy(true);
+      say('Saving it and putting it on your page…');
+      try {
+        let assetId; let alt = str(ui.alt, 150) || $('[data-sp-desc]').value.trim().slice(0, 150);
+        if (key[0] === 's') {
+          const c = stock.candidates[Number(key.slice(1))];
+          const res = await call('pexels-search', { action: 'save', candidate: c, mediaType: 'image' });
+          if (!res.ok || !res.body.assetId) throw new Error((res.body && res.body.error) || 'It couldn\'t be saved.');
+          assetId = res.body.assetId; alt = alt || c.title || label;
+        } else {
+          const res = await call('generate-ai-image', { action: 'select', jobId: Number(job), index: Number(key.slice(1)), words: false });
+          if (!res.ok || !res.body.assetId) throw new Error((res.body && res.body.error) || 'It couldn\'t be saved.');
+          assetId = res.body.assetId; alt = alt || `A picture for ${label}`;
+        }
+        await new Promise((resolve, reject) => el.dispatchEvent(new CustomEvent('site:picturePlace', {
+          bubbles: true, detail: { pageId, sectionId, place, assetId, alt, respond: ({ ok, error }) => (ok ? resolve() : reject(new Error(error || 'It couldn\'t be placed.'))) },
+        })));
+        grid.innerHTML = ''; $('[data-sp-more]').innerHTML = '';
+        say(`Done — it's ${place === 'after' ? 'after' : 'in'} “${label}” in your draft. Nothing is live until you publish.`);
+        el.querySelectorAll('button, textarea').forEach((x) => { x.disabled = true; });
+        working(false);
+        return;
+      } catch (err) { say(err.message, 'error'); }
+      setBusy(false);
+    }
+    el.addEventListener('click', (e) => {
+      const go = e.target.closest('[data-sp-go]');
+      if (go) { source = go.dataset.spGo; paintSource(); find(false); return; }
+      if (e.target.closest('[data-sp-again]')) { find(true); return; }
+      const pick = e.target.closest('[data-sp-pick]');
+      if (pick) choose(pick.dataset.spPick);
+    });
+    return el;
+  }
+  register('site_picture', renderSitePictureCard);
+
   // { type: 'listing_decisions', summary, decisions: [{ listingId, decision: 'approve' | 'decline' }] }
   // Visitors' entries waiting for the owner (site-listings.ts PATCH { id, decision }, the Listings tab's buttons).
   function renderListingDecisionsCard(ui, esc) {
