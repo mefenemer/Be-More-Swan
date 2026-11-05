@@ -224,6 +224,8 @@ export default withLambda(async (event) => {
         if (!brief) return json(404, { error: 'Brief not found.' });
         if (brief.status === 'generating') return json(409, { error: 'Options are being made right now — edit the brief when they arrive.' });
         if (brief.status === 'cancelled') return json(409, { error: 'This brief was cancelled.' });
+        // Its PDF is made and no more rounds run, so new words here would never reach the printed flyer.
+        if (brief.purpose === 'flyer' && brief.status === 'approved') return json(409, { error: 'This flyer is finished. Press "Change this flyer" to make a new version.' });
         // Merge over the stored brief, then normalise the whole thing: an edit cannot produce a brief
         // that create would have refused.
         const merged = {
@@ -248,6 +250,7 @@ export default withLambda(async (event) => {
         if (brief.purpose !== 'flyer') return json(400, { error: 'That brief is not a flyer.' });
         if (brief.status === 'generating') return json(409, { error: 'Options are being made right now — try again when they arrive.' });
         if (brief.status === 'cancelled') return json(409, { error: 'This brief was cancelled.' });
+        if (brief.status === 'approved') return json(409, { error: 'This flyer is finished. Press "Change this flyer" to make a new version.' });
         const blocked = await enforcePromptModeration({ text: briefText(brief), userId, organisationId: orgId, source: 'brand-briefs' });
         if (blocked) return blocked;
         const r = await draftFlyerWords(db, { orgId, brief });
