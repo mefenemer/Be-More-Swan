@@ -516,7 +516,9 @@
         // (window.ChatDraftTarget, set by whoever opened it). Sent on EVERY turn, not just the
         // first: "make it punchier" is still about that post, and the orchestrator needs to know
         // on each turn that a drafted caption must be offered rather than saved as a new post.
-        const draftTarget = window.ChatDraftTarget;
+        // A docked pane says so itself (props.draftTarget): the pop-up chat clears the global target
+        // whenever it opens or closes, and that must not turn this chat's drafts into new posts.
+        const draftTarget = typeof props.draftTarget === 'function' ? props.draftTarget() : window.ChatDraftTarget;
         if (draftTarget && Number.isInteger(Number(draftTarget.postId))) {
           body.forPostId = Number(draftTarget.postId);
         }
@@ -898,7 +900,14 @@
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
       const ids = Array.isArray(d.postIds) && d.postIds.length ? d.postIds : [d.postId];
+      // This post may be open in the editor (workspace.html): it saves what is on screen first, and
+      // afterwards reloads or closes, so what it shows and later saves is never the old version.
+      const editor = { postIds: ids, open: false, ready: null };
+      let done = false;
+      let doneMessage = '';
       try {
+        document.dispatchEvent(new CustomEvent('post:actionStarting', { detail: editor }));
+        if (editor.ready) await editor.ready;
         let message = 'Done.';
         if (d.action === 'approve') {
           for (const id of ids) {
@@ -972,7 +981,7 @@
             for (const id of ids) timed = await postActionCall('generate-voiceover', { action: 'align', postId: id });
           }
           const timedLine = timed ? ` ${Object.keys(timed.timings || {}).length} of ${timed.total} text boxes now follow the voice.` : '';
-          message = d.action === 'voiceover' ? `Voiceover added.${timedLine} Open the post to hear it.`
+          message = d.action === 'voiceover' ? `Voiceover added.${timedLine}${editor.open ? '' : ' Open the post to hear it.'}`
             : d.action === 'captions' ? `Captions saved.${timedLine}`
             : `Done.${timedLine}`;
         } else if (d.action === 'video_version') {
@@ -985,10 +994,13 @@
         } else {
           throw new Error('Unknown action.');
         }
+        done = true;
+        doneMessage = message;
         respond({ ok: true, message });
       } catch (err) {
         respond({ ok: false, error: err.message });
       }
+      if (editor.open) document.dispatchEvent(new CustomEvent('post:actionFinished', { detail: { postIds: ids, action: d.action, ok: done, message: doneMessage } }));
       // Whatever happened, a row may have changed (a group can half-succeed): repaint the tab behind
       // the chat so it shows the truth.
       window.detailRqRefresh?.();

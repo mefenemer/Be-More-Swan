@@ -1042,6 +1042,18 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
     });
 }
 
+/** A flyer's saved words for the chat, so a new version can carry them all, not only the headline. */
+function flyerWordsForChat(content: unknown): string {
+    const c = (content ?? {}) as { headline?: string; subheading?: string; points?: string[]; callToAction?: string; dateLine?: string };
+    return [
+        c.headline ? `headline "${clip(c.headline, 80)}"` : '',
+        c.subheading ? `subheading "${clip(c.subheading, 140)}"` : '',
+        Array.isArray(c.points) && c.points.length ? `points ${c.points.map((p) => `"${clip(p, 80)}"`).join(', ')}` : '',
+        c.callToAction ? `call to action "${clip(c.callToAction, 80)}"` : '',
+        c.dateLine ? `date line "${clip(c.dateLine, 80)}"` : '',
+    ].filter(Boolean).join(', ') || 'no words saved yet';
+}
+
 /**
  * What the chat sees each turn: open briefs with every option awaiting a decision, BY ID, so "approve
  * the second AI one" can be turned into a card naming a real option — and nothing else can.
@@ -1063,7 +1075,7 @@ export async function buildBriefsSnapshot(db: Db, orgId: number, assistantId: nu
     const lines = briefs.map((b) => {
         const waiting = b.options.filter((o) => o.status === 'proposed');
         const approved = b.options.filter((o) => o.status === 'approved').length;
-        const head = `- Brief ${b.id} "${b.title}"${b.campaign ? ` (commissioned by the campaign "${clip(b.campaign.objective, 80)}" — the picture approved joins that campaign)` : ''}${b.scheduledPostId ? ' (raised for a social post with no picture — the picture approved goes onto that post if it still has none)' : ''}${b.purpose === FLYER_PURPOSE ? ` (a printed ${b.paperSize ?? 'A5'} flyer — ${b.flyerContent ? `headline "${clip((b.flyerContent as { headline?: string }).headline, 80)}"` : 'no words saved yet'}; approving one makes its print PDFs in My Content)` : ''} — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}${b.waitingOn ? `; waiting on ${clip(b.waitingOn, 60)} to add their own` : ''}.`;
+        const head = `- Brief ${b.id} "${b.title}"${b.campaign ? ` (commissioned by the campaign "${clip(b.campaign.objective, 80)}" — the picture approved joins that campaign)` : ''}${b.scheduledPostId ? ' (raised for a social post with no picture — the picture approved goes onto that post if it still has none)' : ''}${b.purpose === FLYER_PURPOSE ? ` (a printed ${b.paperSize ?? 'A5'} flyer — ${flyerWordsForChat(b.flyerContent)}; approving one makes its print PDFs in My Content)` : ''} — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}${b.waitingOn ? `; waiting on ${clip(b.waitingOn, 60)} to add their own` : ''}.`;
         const rows = waiting.map((o, i) => `    • option ${o.id} (#${i + 1} waiting) — ${sourceLabel(o.source).replace(/s$/, '').toLowerCase()}${o.prompt ? `: ${clip(o.prompt, 90)}` : ''}`);
         return [head, ...rows].join('\n');
     });

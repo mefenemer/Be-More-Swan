@@ -4293,9 +4293,13 @@
 
     // The offer stands only while the editor that opened this chat is still pointed at this post.
     // A reloaded transcript has the forPostId but no live target, so it shows the copy alone.
-    const target = window.ChatDraftTarget;
+    // The docked pane's target (workspace.html) answers only for a card it was the target of: a pop-up
+    // chat over the editor saves its drafts as new posts, and those must not offer to go into this one.
+    const docked = window.ChatDockedDraftTarget;
+    const target = window.ChatDraftTarget
+      || (docked && ui.forPostId != null && docked.covers(ui.forPostId) ? docked : null);
     const canApply = !!(target && typeof target.apply === 'function'
-      && (ui.forPostId == null || Number(ui.forPostId) === Number(target.postId)));
+      && (ui.forPostId == null || Number(ui.forPostId) === Number(target.postId) || (target.covers && target.covers(ui.forPostId))));
 
     const el = document.createElement('div');
     el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm p-4 max-w-md space-y-2';
@@ -4345,15 +4349,16 @@
       button.textContent = 'Adding…';
       status.className = 'text-xs text-gray-500';
       try {
-        await window.ChatDraftTarget.apply({ caption, hashtags: hashtags || null });
+        await target.apply({ caption, hashtags: hashtags || null, forPostId: ui.forPostId == null ? null : Number(ui.forPostId) });
+        // Beside the post there is nothing to go back to.
         offer.innerHTML = `
           <p class="text-xs font-bold text-emerald-700">✓ Added to your draft</p>
-          <button type="button" data-back-to-draft
+          ${target.done ? `<button type="button" data-back-to-draft
             class="btn-secondary mt-2 px-3 py-2 border text-xs font-bold rounded-lg transition">
             Back to the post
-          </button>`;
-        offer.querySelector('[data-back-to-draft]').addEventListener('click', () => {
-          try { window.ChatDraftTarget?.done?.(); } catch { /* the chat is already closing */ }
+          </button>` : ''}`;
+        offer.querySelector('[data-back-to-draft]')?.addEventListener('click', () => {
+          try { target.done?.(); } catch { /* the chat is already closing */ }
         });
       } catch (err) {
         button.disabled = false;
@@ -4367,6 +4372,84 @@
   }
 
   register('social_post_draft', renderSocialPostDraftCard);
+
+  // { type: 'post_text_edit', postId, find, replace, summary }
+  // One text box on a post's picture, selected in the post editor, shown before and after. "Use this"
+  // goes to the open editor (post:textEdit, workspace.html); nothing else can apply it.
+  function renderPostTextEditCard(ui, esc) {
+    const postId = Number(ui.postId);
+    const find = typeof ui.find === 'string' ? ui.find.trim() : '';
+    const replace = typeof ui.replace === 'string' ? ui.replace.trim() : '';
+    if (!Number.isInteger(postId) || postId <= 0 || !find || !replace) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change to a text box</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <p class="text-xs font-bold text-gray-500 mt-3">Now</p>
+      <p class="text-sm text-gray-500 bg-white border border-gray-200 rounded-lg px-3 py-2 mt-1 line-through decoration-gray-300 whitespace-pre-line">${esc(find)}</p>
+      <p class="text-xs font-bold text-gray-700 mt-3">Instead</p>
+      <p class="text-sm text-gray-900 bg-white border border-indigo-200 rounded-lg px-3 py-2 mt-1 whitespace-pre-line">${esc(replace)}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-pt-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Use this</button>
+        <button type="button" data-pt-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-pt-status></p>`;
+    const status = el.querySelector('[data-pt-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-pt-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-pt-go]')) return;
+      setBusy(true);
+      say('Changing it…');
+      const detail = { postId, find, replace, handled: false, respond({ ok, error }) {
+        if (!ok) { setBusy(false); say(error || 'That couldn\'t be changed.', 'error'); return; }
+        say('Done — the text box is changed.');
+      } };
+      document.dispatchEvent(new CustomEvent('post:textEdit', { detail }));
+      if (!detail.handled) detail.respond({ ok: false, error: 'Open the post to use this.' });
+    });
+    return el;
+  }
+  register('post_text_edit', renderPostTextEditCard);
+
+  // { type: 'post_picture', postId, kind: 'image' | 'video', description }
+  // A new picture or video for a post. Opens the post editor's own picture step with the description
+  // filled in (post:pictureAsk, workspace.html): its search, its Generate button, its charge.
+  function renderPostPictureCard(ui, esc) {
+    const postId = Number(ui.postId);
+    if (!Number.isInteger(postId) || postId <= 0) return null;
+    const noun = ui.kind === 'video' ? 'video' : 'picture';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">A new ${noun} for this post</p>
+      <label class="block text-xs font-bold text-gray-700 mt-3">What should it show?
+        <input type="text" data-pp-desc maxlength="300" value="${esc(typeof ui.description === 'string' ? ui.description : '')}" placeholder="Leave blank and your assistant decides"
+          class="block w-full mt-1 px-3 py-2 text-sm font-normal bg-white border border-gray-200 rounded-lg">
+      </label>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-pp-go="stock" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Find stock ${noun === 'video' ? 'videos' : 'photos'}</button>
+        <button type="button" data-pp-go="ai" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Create with AI</button>
+      </div>
+      <p class="text-xs text-gray-600 mt-2">Stock is free. AI uses tasks when you press Generate in the picture window.</p>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-pp-status></p>`;
+    const status = el.querySelector('[data-pp-status]');
+    el.addEventListener('click', (e) => {
+      const go = e.target.closest('[data-pp-go]');
+      if (!go) return;
+      const detail = { postId, kind: ui.kind === 'video' ? 'video' : 'image', source: go.getAttribute('data-pp-go'),
+        description: el.querySelector('[data-pp-desc]').value.trim(), handled: false, respond({ ok, error, message }) {
+          status.textContent = ok ? (message || 'It\'s open beside this chat.') : (error || 'That couldn\'t be opened.');
+          status.className = `mt-2 text-xs font-semibold ${ok ? 'text-indigo-700' : 'text-red-600'}`;
+        } };
+      document.dispatchEvent(new CustomEvent('post:pictureAsk', { detail }));
+      if (!detail.handled) detail.respond({ ok: false, error: 'Open the post to use this.' });
+    });
+    return el;
+  }
+  register('post_picture', renderPostPictureCard);
 
   // ── Built-in: Post Action Proposal Card (Social Media chat) ────────────────
   // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove'|'shorter'|'longer'|'video_version'

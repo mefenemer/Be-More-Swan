@@ -200,6 +200,7 @@
     const p = progress(b);
     if (b.status === 'generating') return `${name()} is making options now — usually under a minute. This page updates by itself.`;
     if (b.status === 'cancelled') return 'Cancelled. Anything you chose is still in your library.';
+    if (p.done && isFlyer(b)) return 'Done — your flyer is ready to print. Need different words or a different photo? "Change this flyer" starts a new version with these words filled in.';
     if (p.done) {
       return p.needed > 1 || b.campaign
         ? `All ${p.needed} chosen — no more pictures are needed for ${forWhat(b)}.`
@@ -264,7 +265,13 @@
     if (o.status === 'approved') {
       // Approved pictures go to My Content, which this page has no tab for — so say where, and link
       // it (review, 2026-10-22).
-      actions = `<p class="text-xs font-bold text-emerald-800 mt-2">✓ ${o.flyer ? 'Print-ready PDF in' : 'In'} your library · <button type="button" data-brief-library class="btn-swan-link text-xs font-bold">${o.flyer ? 'Print it from My Content' : 'See it in My Content'}</button></p>`;
+      actions = o.flyer
+        ? `<p class="text-xs font-bold text-emerald-800 mt-2">✓ Print-ready PDF in your library</p>
+           <div class="flex flex-wrap items-center gap-2 mt-1">
+             ${o.contentAssetId ? `<a href="/.netlify/functions/content-asset-download?assetId=${encodeURIComponent(o.contentAssetId)}&inline=1" target="_blank" rel="noopener" class="btn-primary min-h-[44px] sm:min-h-0 inline-flex items-center px-3 py-1.5 text-xs font-bold rounded-lg">Print</a>` : ''}
+             <button type="button" data-brief-library class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold">See it in My Content</button>
+           </div>`
+        : `<p class="text-xs font-bold text-emerald-800 mt-2">✓ In your library · <button type="button" data-brief-library class="btn-swan-link text-xs font-bold">See it in My Content</button></p>`;
     } else if (state.rejecting === o.id) {
       actions = `
         <div class="mt-2 space-y-1" data-brief-reject-panel="${o.id}">
@@ -286,8 +293,11 @@
     }
     return `
       <div class="bg-white border ${o.status === 'approved' ? 'border-emerald-700' : 'border-gray-200'} rounded-xl p-2">
-        <div class="relative rounded-lg overflow-hidden bg-gray-100" style="aspect-ratio:${esc(ratio)}">${img}</div>
+        <div class="relative rounded-lg overflow-hidden bg-gray-100" style="aspect-ratio:${esc(ratio)}">${o.flyer && o.url
+          ? `<button type="button" data-brief-preview="${o.id}" aria-label="${esc(`Preview ${o.prompt || 'this flyer'} larger`)}" class="block w-full h-full" style="cursor:zoom-in">${img}</button>`
+          : img}</div>
         <p class="text-[11px] font-bold text-gray-600 mt-1">${o.flyer ? esc(o.prompt || 'Flyer') : esc(sourceLabel(o.source).replace(/s$/, ''))} · round ${o.round}</p>
+        ${o.flyer && o.url ? `<button type="button" data-brief-preview="${o.id}" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">Preview</button>` : ''}
         ${o.flyer && o.flyer.lowResPhoto ? '<p class="text-[11px] text-amber-700 mt-1">This photo may look soft when printed — try a smaller paper size or another round.</p>' : ''}
         ${credit}
         ${actions}
@@ -395,7 +405,7 @@
         ${b.message ? `<p class="text-sm text-gray-700 mt-2 break-words">${esc(b.message)}</p>` : ''}
         ${b.headline && !flyer ? `<p class="text-xs text-gray-600 mt-1">Words on the card: <span class="font-bold">${esc(b.headline)}</span></p>` : ''}
         ${flyer ? (words
-          ? `<p class="text-xs text-gray-600 mt-1">Headline: <span class="font-bold">${esc(words.headline)}</span> · <button type="button" data-brief-edit="${b.id}" class="btn-swan-link text-xs font-bold">Edit the words</button></p>`
+          ? `<p class="text-xs text-gray-600 mt-1">Headline: <span class="font-bold">${esc(words.headline)}</span>${progress(b).done ? '' : ` · <button type="button" data-brief-edit="${b.id}" class="btn-swan-link text-xs font-bold">Edit the words</button>`}</p>`
           : `<p class="text-xs text-amber-800 mt-1 font-semibold">No words yet — <button type="button" data-brief-edit="${b.id}" class="btn-swan-link text-xs font-bold">write or draft them</button> before asking for options.</p>`) : ''}
         <p class="text-xs text-gray-600 mt-2 flex items-center gap-2">${b.status === 'generating' && window.bmsSpinnerHtml ? window.bmsSpinnerHtml(14) : ''}<span>${esc(activityLine(b))}</span></p>
         ${b.generationNote ? `<p class="text-xs text-amber-700 mt-1">${esc(b.generationNote)}</p>` : ''}
@@ -411,7 +421,7 @@
             ${flyer ? '' : `<button type="button" data-brief-own-open="${b.id}"
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add your own</button>`}
             <button type="button" data-brief-edit="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
-              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">${flyer ? 'Edit flyer' : 'Edit brief'}</button>
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">${flyer ? (progress(b).done ? 'Change this flyer' : 'Edit flyer') : 'Edit brief'}</button>
             <button type="button" data-brief-chat="${b.id}"
               class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1.5 text-xs font-bold">Talk it through with ${esc(name())}</button>
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
@@ -455,7 +465,8 @@
     const draftCost = state.unit === 'tasks' ? ' (1 task)' : '';
     return `
       <form data-flyer-form class="bg-white rounded-2xl border-2 border-emerald-200 shadow-sm p-5 mb-4 space-y-3">
-        <p class="text-sm font-bold text-gray-900">${editing ? 'Edit flyer' : 'New printed flyer'}</p>
+        <p class="text-sm font-bold text-gray-900">${state.form.fork ? 'Change this flyer' : editing ? 'Edit flyer' : 'New printed flyer'}</p>
+        ${state.form.fork ? '<p class="text-xs text-gray-600">This makes a new version. The flyer you approved stays in My Content until you delete it.</p>' : ''}
         <p class="text-xs text-gray-500">${esc(name())} draws the pages in your brand. When you approve one, a print-ready PDF goes into My Content — print it at home, or send it to a print shop.</p>
         ${field('Name', input('title', v.title, 'e.g. November open day flyer', 120))}
         ${field('What is the flyer for?', `<textarea data-keep="${k('message')}" name="message" maxlength="1000" rows="2" placeholder="e.g. Bring new local customers in for our first-visit offer — hand out at the farmers' market" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">${esc(v.message || '')}</textarea>`)}
@@ -569,7 +580,7 @@
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4" data-brief-toolbar>
         <div>
           <h2 class="text-base font-bold text-gray-900"><span data-explain="brand-briefs">Briefs</span></h2>
-          <p class="text-xs text-gray-500">Say what a picture is for. Approve the option that fits — it goes into your library for every assistant to use.</p>
+          <p class="text-xs text-gray-500">Say what a picture or printed flyer is for. Approve the option that fits — it goes into your library for every assistant to use. Your flyers are listed here too.</p>
         </div>
         <div class="flex items-center gap-3">
           ${credits}
@@ -772,8 +783,21 @@
     const edit = t('[data-brief-edit]');
     if (edit) {
       const id = Number(edit.dataset.briefEdit);
-      state.form = { mode: 'edit', id, flyer: isFlyer(state.briefs.find((b) => b.id === id)), gen: Date.now() };
+      const target = state.briefs.find((b) => b.id === id);
+      // An approved flyer's PDF is already made and no more rounds run on its brief, so saving words
+      // onto it would change nothing printed. `fork`: the form opens with its words, and saving makes
+      // a new flyer brief instead. Nothing is created if they cancel.
+      state.form = { mode: 'edit', id, flyer: isFlyer(target), fork: isFlyer(target) && progress(target).done, gen: Date.now() };
       render(); window.scrollTo?.({ top: 0, behavior: 'smooth' }); return;
+    }
+
+    const preview = t('[data-brief-preview]');
+    if (preview) {
+      const optionId = Number(preview.dataset.briefPreview);
+      const pages = state.briefs.flatMap((b) => (b.options.some((o) => o.id === optionId) ? b.options : []))
+        .filter((o) => o.flyer && o.url && o.status !== 'rejected');
+      window.ImageLightbox?.open({ urls: pages.map((o) => o.url), index: pages.findIndex((o) => o.id === optionId) });
+      return;
     }
 
     const gen = t('[data-brief-generate]');
@@ -951,7 +975,7 @@
     form.querySelectorAll('button').forEach((b) => { b.disabled = true; });
     try {
       let id = editing ? state.form.id : null;
-      if (editing) await post({ action: 'edit', briefId: id, ...brief });
+      if (editing && !state.form.fork) await post({ action: 'edit', briefId: id, ...brief });
       else id = (await post({ action: 'create', assistantId: state.assistantId, ...brief })).briefId;
       if (submitter === 'draft') {
         if (errEl) { errEl.textContent = 'Drafting the words…'; errEl.classList.remove('hidden', 'text-red-600'); }

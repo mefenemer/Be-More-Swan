@@ -80,6 +80,11 @@ test('narrow screen: the chat opens over the right edge without the page scrolli
     const chat = await input(page).boundingBox();
     expect(chat!.x + chat!.width).toBeLessThanOrEqual(1000);
     await page.screenshot({ path: 'test-results/blog-studio-chat-narrow.png' });
+    // Select: it steps aside so the article can be clicked, and comes back with the part in it.
+    await page.locator('#bs-select').click();
+    await expect(input(page)).toBeHidden();
+    await page.locator('#bs-editor .bmsme-block', { hasText: 'Coffee goes stale' }).click();
+    await expect(input(page)).toBeVisible();
     expect(pageErrors).toEqual([]);
 });
 

@@ -107,6 +107,18 @@
   .pce-card-side > [data-mock-head] { grid-area: head; }
   .pce-card-side > [data-caption-host] { grid-area: words; }
   .pce-card-side > [data-mock-foot] { grid-area: foot; }
+  /* The assistant's chat docked on the right of the post (_pceChatSync; owner 2026-11-05, as on the
+     Website tab and in Blog Studio): beside the post on a wide screen, over its right edge otherwise. */
+  #pce-chat-row { position: relative; }
+  .pce-chat-col { width: 400px; flex-shrink: 0; padding: 12px; background: #f9fafb; border-left: 1px solid #f3f4f6; }
+  .pce-chat-col > div { height: 100%; }
+  @media (max-width: 1279px) { .pce-chat-col { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6;
+    width: min(420px, 100%); box-shadow: -8px 0 30px rgba(0,0,0,.18); } }
+  /* Over the post on a narrow screen, so it steps aside while they pick a part of it ("Select"). */
+  @media (max-width: 1279px) { .pce-chat-col.pce-chat-aside { display: none; } }
+  .pce-selecting [data-caption-host], .pce-selecting [data-media-host], .pce-selecting [data-overlay-layer] > * { cursor: crosshair !important; }
+  .pce-selecting [data-caption-host]:hover, .pce-selecting [data-overlay-layer] > *:hover { outline: 2px solid #db2777; outline-offset: 2px; background: rgba(219,39,119,.06); }
+  .pce-selecting [data-media-host]:hover { outline: 2px solid #db2777; outline-offset: -2px; }
   /* The editor and Blog Studio PAGES sit below the header but above it in z-order (90 / 85 against
      the header's 50), so every header dropdown — the assistant switcher, notifications, the profile
      menu — opened UNDERNEATH the page and could not be clicked (2026-10-14). While a page is open the
@@ -1019,12 +1031,19 @@ window.showComplianceModals = function showComplianceModals(force) {
         <!-- Back to the "Where should this go?" picker that opened this post — same picker, pre-filled
              with what the post has (rqReviewAddDestination). It already existed as "+ Destination"
              on the tab strip, which nobody could find; this is where you look for "go back". -->
+        <button type="button" id="pce-select" onclick="_pceChatToggleSelect()" aria-pressed="false" title="Click the caption, the picture or a text box to ask your assistant to change it"
+          class="hidden btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer whitespace-nowrap">🎯 <span id="pce-select-label" class="hidden sm:inline">Select</span></button>
+        <button type="button" id="pce-chat-toggle" onclick="_pceChatToggle()" aria-pressed="false" title="Show or hide the chat beside your post"
+          class="hidden btn-assistant px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer whitespace-nowrap">💬 <span id="pce-chat-toggle-label" class="hidden sm:inline">Chat</span></button>
         <button type="button" id="pce-change-dest" onclick="rqReviewAddDestination()" class="hidden btn-secondary px-3 py-1.5 text-xs font-bold border rounded-lg cursor-pointer whitespace-nowrap" aria-label="Change platform and format"><span class="sm:hidden">Platform</span><span class="hidden sm:inline">Change platform &amp; format</span></button>
         <button onclick="closePostReview()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
     </div>
+    <!-- The post and its buttons on the left, the docked chat on the right (#pce-chat-col, below). -->
+    <div id="pce-chat-row" class="flex-1 min-h-0 flex">
+    <div class="flex-1 min-w-0 flex flex-col">
     <!-- Body: platform mock-up -->
     <!-- overscroll-behavior:contain stops a wheel gesture that reaches the end of THIS scroller from
          continuing into the page behind it. Inline because the compiled style.css has no
@@ -2106,6 +2125,9 @@ window.showComplianceModals = function showComplianceModals(force) {
           <button type="button" onclick="_rqReviewRefresh()" class="btn-secondary flex-1 py-2.5 text-sm font-bold rounded-lg border transition cursor-pointer">Done</button>
         </div>
       </div>
+    </div>
+    </div>
+    <aside id="pce-chat-col" class="pce-chat-col hidden" aria-label="Chat with your assistant"><div id="pce-chat-host"></div></aside>
     </div>
   </div>
 </div>
@@ -10695,7 +10717,7 @@ async function _rqPersistOverlays(postId) {
     const post = _rqPostCache[postId];
     if (!post) return;
     try {
-        await fetch('/.netlify/functions/save-post-overlays', {
+        const res = await fetch('/.netlify/functions/save-post-overlays', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             // ⚠️ applyToGroup on EVERY call. save-post-overlays reads `body.applyToGroup === true`
             // and says so in its own comment: "the client states the scope on every call, and a
@@ -10710,7 +10732,8 @@ async function _rqPersistOverlays(postId) {
                 applyToGroup: _pceOverlayApplyToGroup(),
             }),
         });
-    } catch { /* a dropped save is recoverable — the next edit re-sends the whole set */ }
+        return res.ok;
+    } catch { /* a dropped save is recoverable — the next edit re-sends the whole set */ return false; }
 }
 
 // Find the cache item a timeline segment stands for (by id, falling back to index for text, whose
@@ -11205,6 +11228,11 @@ async function _rqOpenPostReview(postId, opts = {}) {
     // halves are fixed: the lock, and overscroll-behavior on the scroller (see the markup).
     // Refcounted under a key, so a second overlay opening and closing over the top cannot unlock us.
     window.ScrollLock?.lock('post-review');
+    // The render above ran while the page was hidden, so the picture measured zero and the text boxes
+    // were sized against nothing. A picture still loading repaints when it arrives; one already in the
+    // browser's cache (the list behind has just shown it) never did, so its text boxes didn't appear.
+    _rqRenderCanvasOverlays(post, true);
+    _pceChatSync();
 
     // Load the quality verdict for this post. Not awaited — the modal must open instantly; the
     // panel fills in when the answer arrives (usually from cache, since the review now runs at
@@ -18713,6 +18741,7 @@ function closePostReview() {
     // The draft may still land, but nobody is waiting for it here — reopening it over a closed
     // modal would be the editor grabbing the screen back.
     _pceStopAiPoll();
+    _pceChatClose();
     const modal = document.getElementById('post-review-modal');
     modal.classList.add('hidden');
     modal.classList.remove('flex');
@@ -21227,6 +21256,14 @@ async function gpAskSwanImprove() {
 async function _pceAskSwanCaption() {
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     if (!post) return;
+    // With the chat docked beside the post, ask there rather than in a pop-up.
+    if (_pceChat?.pane?.session && _pceChatIsOn()) {
+        const typed = _pceEl('post-review-caption')?.value?.trim();
+        _pceChat.pane.session.sendMessage(typed
+            ? 'Please suggest improvements to this post and give me a stronger version I can use.'
+            : 'Please write this post for me: a caption I can use as-is, plus a few hashtags.');
+        return;
+    }
     return askSwanAboutDraft({
         assistantId: post.assistantId || _gpCurrentAssistantId || window._currentAssistantId || null,
         caption: _pceEl('post-review-caption')?.value?.trim() || '',
@@ -21255,7 +21292,10 @@ async function _pceAskSwanCaption() {
  * platforms" on a cross-post, the cache update and the re-render. Throws on failure so the card can
  * say so and offer a retry.
  */
-async function _pceApplyChatCaption({ caption, hashtags }) {
+async function _pceApplyChatCaption({ caption, hashtags, forPostId }) {
+    // Written for one platform of a cross-post, and they have since moved to another tab: go back to
+    // it, or that platform's wording lands on this one.
+    if (forPostId != null && forPostId !== _rqReviewPostId && _rqReviewGroupIds.includes(forPostId)) rqReviewSwitchPlatform(forPostId);
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     if (!post) throw new Error('That post is no longer open.');
     const box = _pceEl('post-review-caption');
@@ -21278,6 +21318,206 @@ async function _pceApplyChatCaption({ caption, hashtags }) {
         throw new Error('Could not save that to your draft — please try again.');
     }
 }
+
+// ── The chat docked beside the post (chat-pane.js) ──────────────────────────────────────────────
+// Owner, 2026-11-05: "loving the chat pane on the right" on the Website tab. One conversation per post
+// (a cross-post's platforms share it), remembered in this browser. Its own draft target, because the
+// pop-up chat clears the global one: without it, a draft from this pane would be saved as a NEW post.
+// Only the Social Media assistant's posts: its route is the one that understands an open post.
+const _PCE_CHAT_ON_KEY = 'bms-post-chat-on';
+let _pceChat = null;              // { pane, key }
+let _pceChatSelecting = false;
+const _pceChatSameText = (a, b) => String(a || '').replace(/\s+/g, ' ').trim() === String(b || '').replace(/\s+/g, ' ').trim();
+const _pceChatTarget = {
+    get postId() { return _rqReviewPostId; },
+    covers(id) { return _rqReviewGroupIds.includes(Number(id)); },
+    apply: (draft) => _pceApplyChatCaption(draft),
+};
+function _pceChatIsOn() { return document.getElementById('pce-chat-toggle')?.getAttribute('aria-pressed') === 'true'; }
+function _pceChatWanted() {
+    try { const v = localStorage.getItem(_PCE_CHAT_ON_KEY); if (v === '1' || v === '0') return v === '1'; } catch { /* private window */ }
+    return window.innerWidth >= 1440;   // on by default where the post keeps its room beside it
+}
+function _pceChatDestroy() {
+    if (_pceChat?.pane) { try { _pceChat.pane.destroy(); } catch { /* gone */ } }
+    _pceChat = null;
+}
+function _pceChatClose() {
+    _pceChatSetSelecting(false);
+    _pceChatDestroy();
+    window.ChatDockedDraftTarget = null;
+}
+async function _pceChatSync() {
+    const post = _rqPostCache[_rqReviewPostId];
+    if (!post) return;
+    const meta = post.assistantId ? await gpResolveAssistantMeta(post.assistantId) : null;
+    if (post !== _rqPostCache[_rqReviewPostId]) return;   // they moved on while that loaded
+    const can = !!(window.ChatPane?.available?.() && meta && meta.roleKey === 'social_media_manager');
+    const on = can && _pceChatWanted();
+    const editable = _pceIsEditablePost(post);
+    window.ChatDockedDraftTarget = can && editable ? _pceChatTarget : null;
+    const toggle = document.getElementById('pce-chat-toggle');
+    toggle.classList.toggle('hidden', !can);
+    toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (meta) document.getElementById('pce-chat-toggle-label').textContent = `Chat with ${meta.name}`;
+    document.getElementById('pce-select').classList.toggle('hidden', !(can && editable));
+    if (!editable) _pceChatSetSelecting(false);
+    const col = document.getElementById('pce-chat-col');
+    const moved = col.classList.contains('hidden') === on;
+    col.classList.toggle('hidden', !on);
+    // The post just changed width, and its text boxes are sized in pixels off the picture.
+    if (moved) requestAnimationFrame(() => { const p = _rqPostCache[_rqReviewPostId]; if (p) _rqRenderCanvasOverlays(p, true); });
+    if (!on) return;
+    const key = `${post.assistantId}:${post.crosspostGroupId || Math.min(..._rqReviewGroupIds)}`;
+    if (_pceChat?.key === key) return;
+    _pceChatDestroy();
+    _pceChat = {
+        key,
+        pane: window.ChatPane.mount(document.getElementById('pce-chat-host'), {
+            assistantId: post.assistantId, assistantName: meta.name, roleKey: meta.roleKey,
+            rememberKey: `bms-post-chat:${key}`,
+            placeholder: 'Ask for a change to this post, or 🎯 Select a part of it…',
+            starterPrompts: editable
+                ? ['Make this post punchier.', 'Give it a stronger opening line.', 'What would make this post do better?']
+                : null,
+            composerRows: 3,
+            draftTarget: () => window.ChatDockedDraftTarget,
+        }),
+    };
+}
+function _pceChatToggle() {
+    const on = !_pceChatIsOn();
+    try { localStorage.setItem(_PCE_CHAT_ON_KEY, on ? '1' : '0'); } catch { /* private window */ }
+    _pceChatSync().then(() => { if (on) _pceChat?.pane?.focus(); });
+}
+
+// "Select": click the caption, the picture or a text box to talk about it in the chat. Taken in the
+// capture phase, so it never reaches the canvas: a text box must not start a drag, nor the caption open.
+function _pceChatSetSelecting(on) {
+    _pceChatSelecting = !!on;
+    document.getElementById('pce-select')?.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const label = document.getElementById('pce-select-label');
+    if (label) label.textContent = on ? 'Click a part… (Esc to stop)' : 'Select';
+    document.getElementById('post-review-body')?.classList.toggle('pce-selecting', !!on);
+    document.getElementById('pce-chat-col')?.classList.toggle('pce-chat-aside', !!on);
+}
+function _pceChatToggleSelect() { _pceChatSetSelecting(!_pceChatSelecting); }
+function _pceChatPartAt(target) {
+    const box = target.closest?.('[data-overlay-layer] > *');
+    if (box) return { kind: 'text', id: box.dataset.id || null };
+    if (target.closest?.('[data-caption-host]')) return { kind: 'caption' };
+    if (target.closest?.('[data-media-host]')) return { kind: 'media' };
+    return null;
+}
+function _pceChatPick(ev) {
+    if (!_pceChatSelecting) return;
+    const part = _pceChatPartAt(ev.target);
+    if (!part) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    if (ev.type !== 'click') return;      // the pointerdown is only stopped, so the box can't start to drag
+    const post = _rqPostCache[_rqReviewPostId];
+    _pceChatSetSelecting(false);
+    if (!post) return;
+    const quote = (t) => t.replace(/\s+/g, ' ').trim();
+    const short = (t) => (quote(t).length > 44 ? `${quote(t).slice(0, 43)}…` : quote(t));
+    let ref;
+    if (part.kind === 'text') {
+        const ov = (post.overlays || []).find((o) => o && o.id === part.id);
+        const text = String(ov?.text || '').trim();
+        ref = { label: `Text box “${short(text)}”`, message: `About this part of my post #${post.id}: the text box “${text}”.` };
+    } else if (part.kind === 'caption') {
+        const text = String(_pceEl('post-review-caption')?.value || post.caption || '').trim();
+        ref = { label: text ? `Caption “${short(text)}”` : 'The caption', message: `About this part of my post #${post.id}: the caption “${text.slice(0, 2500)}”.` };
+    } else {
+        const noun = _rqMediaIsVideo(post) ? 'video' : 'picture';
+        ref = { label: `The ${noun}`, message: `About this part of my post #${post.id}: the ${noun}.` };
+    }
+    if (!_pceChatIsOn()) { try { localStorage.setItem(_PCE_CHAT_ON_KEY, '1'); } catch { /* private window */ } }
+    _pceChatSync().then(() => _pceChat?.pane?.setReference(ref));
+}
+(() => {
+    const body = document.getElementById('post-review-body');
+    if (!body) return;
+    body.addEventListener('pointerdown', _pceChatPick, true);
+    body.addEventListener('mousedown', _pceChatPick, true);
+    body.addEventListener('click', _pceChatPick, true);
+})();
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && _pceChatSelecting) { e.preventDefault(); e.stopPropagation(); _pceChatSetSelecting(false); }
+}, true);
+
+// The cards behind Select, when this post is open here (disruptive-ui-registry.js).
+function _pceChatOpenFor(postId) {
+    const open = !document.getElementById('post-review-modal')?.classList.contains('hidden');
+    if (!open || !_rqReviewGroupIds.includes(Number(postId))) return false;
+    if (Number(postId) !== _rqReviewPostId) rqReviewSwitchPlatform(Number(postId));
+    return _pceIsEditablePost(_rqPostCache[_rqReviewPostId]);
+}
+document.addEventListener('post:textEdit', async (e) => {
+    const d = e.detail || {};
+    if (!_pceChatOpenFor(d.postId)) return;
+    d.handled = true;
+    const post = _rqPostCache[_rqReviewPostId];
+    const ov = (post.overlays || []).find((o) => o && _pceChatSameText(o.text, d.find));
+    if (!ov) { d.respond({ ok: false, error: 'That text box has changed since — select it again and ask once more.' }); return; }
+    const before = ov.text;
+    ov.text = d.replace;
+    _rqRenderCanvasOverlays(post);
+    if (await _rqPersistOverlays(_rqReviewPostId)) { d.respond({ ok: true }); return; }
+    ov.text = before;
+    _rqRenderCanvasOverlays(post);
+    d.respond({ ok: false, error: 'That couldn’t be saved just now — check your connection.' });
+});
+document.addEventListener('post:pictureAsk', (e) => {
+    const d = e.detail || {};
+    if (!_pceChatOpenFor(d.postId)) return;
+    d.handled = true;
+    _pceOpenMediaPicker();   // sets the post the search and Generate act on
+    gpAiSetMediaType(d.kind === 'video' ? 'video' : 'image');
+    if (d.source === 'ai') {
+        const ai = document.getElementById('gp-ai-src-ai');
+        if (!ai || ai.disabled || ai.closest('.hidden')) { d.respond({ ok: false, error: ai?.title || 'AI pictures aren’t available on this post. Stock photos are.' }); return; }
+        gpAiGenerate();
+        const input = document.getElementById('gp-ai-gen-query');
+        if (input) input.value = d.description || '';
+        d.respond({ ok: true, message: 'It’s ready in the picture window. Press Generate there when you’re happy; that’s when it uses tasks.' });
+        return;
+    }
+    const input = document.getElementById('gp-ai-find-query');
+    if (input && d.description) { input.value = d.description.slice(0, 120); input.dataset.touched = '1'; }
+    gpAiFind();
+    // A clip already on the post asks "add or replace?" first, and that answer opens the search itself.
+    if (!document.getElementById('gp-ai-find-box')?.classList.contains('hidden')) gpAiRunFind();
+    d.respond({ ok: true, message: 'The options are in the picture window. Pick the one you like.' });
+});
+
+// A card pressed in the chat that acts on this post on the server (chat-session.js). Save what is on
+// screen first; afterwards reload it, or close it when it has moved on. Left alone, the editor keeps
+// showing the old version, and its next save writes that back over the change.
+function _pceChatIsThisPost(postIds) {
+    const open = !document.getElementById('post-review-modal')?.classList.contains('hidden');
+    return open && (postIds || []).some((id) => _rqReviewGroupIds.includes(Number(id)));
+}
+document.addEventListener('post:actionStarting', (e) => {
+    const d = e.detail || {};
+    if (!_pceChatIsThisPost(d.postIds)) return;
+    d.open = true;
+    d.ready = Promise.all([_pceFlushCardSave(), _pceFlushOverlayBake()]).catch(() => {});
+});
+document.addEventListener('post:actionFinished', (e) => {
+    const d = e.detail || {};
+    if (!d.ok || !_pceChatIsThisPost(d.postIds)) return;
+    if (d.action === 'video_version') return;   // the post itself is unchanged
+    if (['shorter', 'longer', 'voiceover', 'captions', 'time_text'].includes(d.action)) {
+        _rqOpenPostReview(_rqReviewPostId, { refresh: true });
+        return;
+    }
+    // Approved, rejected, moved, removed, retried: it isn't this editor's any more, and the chat goes
+    // with it, so its card can't be what says so.
+    _rqReviewRefresh();
+    window.showToast?.(d.message || 'Done.', { icon: '✅' });
+});
 
 // Resolve an assistant's display name / role / roleKey for opening the chat modal. Cached per id so
 // repeat clicks don't refetch. Falls back to a neutral placeholder if the lookup fails — it used to

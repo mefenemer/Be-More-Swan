@@ -176,7 +176,7 @@ check('the editor caches what the SERVER stored, not what it sent', () => {
 check('the chat apply confirms by prefix, so a longer saved caption is not a failure', () => {
     const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
     const apply = ws.slice(landmark(ws, 'async function _pceApplyChatCaption('));
-    const head = apply.slice(0, 1400);
+    const head = apply.slice(0, landmark(apply, '// ── The chat docked beside the post'));
     assert.ok(!/!== caption\) \{\n\s+throw new Error\('Could not save that to your draft/.test(head),
         'exact equality now fails on EVERY successful save — the server appends the disclosure');
     assert.match(head, /saved\.startsWith\(caption\.replace\(\/\\s\+\$\/, ''\)\)/,

@@ -11,7 +11,7 @@
 // FLYER_SAMPLES_DIR=/some/dir also writes every preview and both PDFs there, to look at.
 
 import assert from 'node:assert';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 import { PDFDocument } from 'pdf-lib';
@@ -213,6 +213,19 @@ function content(over: Record<string, unknown> = {}): FlyerContent {
     await check('only JPEG and PNG photos are embedded as themselves', () => {
         assert.ok(pdfCanEmbed('image/jpeg') && pdfCanEmbed('image/png'));
         assert.ok(!pdfCanEmbed('image/webp') && !pdfCanEmbed(null));
+    });
+
+    console.log('Reaching a flyer after it is made');
+    await check('an approved flyer can be previewed, printed and changed as a NEW brief, never overwritten', () => {
+        const tab = readFileSync('src/components/assistant-briefs.js', 'utf8');
+        const fn = readFileSync('netlify/functions/brand-briefs.ts', 'utf8');
+        const chat = readFileSync('netlify/functions/chat-orchestrator.ts', 'utf8');
+        assert.ok(tab.includes('data-brief-preview="${o.id}"') && tab.includes('window.ImageLightbox?.open('), 'a flyer page opens large');
+        assert.ok(tab.includes('content-asset-download?assetId=${encodeURIComponent(o.contentAssetId)}&inline=1'), 'Print on the approved page');
+        assert.ok(tab.includes('fork: isFlyer(target) && progress(target).done'), 'approved flyers open the form as a new version');
+        assert.ok(tab.includes("if (editing && !state.form.fork) await post({ action: 'edit'"), 'a new version creates, not edits');
+        assert.ok(fn.includes("brief.purpose === 'flyer' && brief.status === 'approved'"), 'the server refuses new words on a finished flyer');
+        assert.ok(chat.includes('A flyer with an approved page is finished') && chat.includes('"Change this flyer"'), 'the chat knows the same route');
     });
 
     console.log(`\n${passed}/${total} passed`);

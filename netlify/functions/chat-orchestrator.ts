@@ -108,6 +108,7 @@ import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type Reviews
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { confirmCardReply, missingCardReply, pictureReply } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
+import { postPartCardFromUiElement, POST_PICTURE_TYPE, POST_TEXT_EDIT_TYPE, type PostPartCard } from '../../src/utils/chat-post-parts';
 import { isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -741,7 +742,7 @@ PROPOSING A CAMPAIGN — when the user gives you an objective, emit the campaign
 function brandDesignerSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
 - "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Ask <your name> for options" / "Ask <your name> for more options" (the cost of a round costs), "Edit brief" and "Cancel brief". "New brief" at the top writes one without chatting, and "New flyer" starts a printed flyer. Everything you can do here, the user can also do there by hand.
-- Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles. An approved flyer is there too, with "Print", "PDF for home printing" and "PDF for a print shop".`;
+- Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles. An approved flyer is there too, with "Print", "PDF for home printing" and "PDF for a print shop". Every flyer is also listed on the "Briefs" tab, where "Preview" shows its page large, an approved one has "Print", and "Change this flyer" starts a new version with its words filled in.`;
 }
 
 // ⚠️ The tab and button names below are copied from assistant-dashboard-registry.js (siteAuditTab
@@ -1096,11 +1097,18 @@ async function retireSupersededChatDraft(
 const EDITABLE_POST_STATUSES = ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled'];
 
 /** Appended AFTER the role prompt, so it overrides the "saved for real" paragraph in it. */
-function draftTargetPromptBlock(platform: string | null): string {
+function draftTargetPromptBlock(target: { id: number; platform: string | null; caption: string | null; hashtags: string | null }): string {
+    const { platform } = target;
     return [
         `IMPORTANT — this conversation is about a ${platform ? `${platform} post` : 'post'} the user already has open in the post editor. This OVERRIDES anything above about drafted posts being saved automatically.`,
         `Nothing you draft in this conversation is saved anywhere. Under your reply the user is shown a button that puts your caption into the post they are editing, and only they can press it. That button carries the CAPTION only, so no branded card is made here however the instructions above read — the post already has its own picture controls in the editor the user is sitting in.`,
         `So: still return the post draft object exactly as specified whenever you have enough to write finished copy${platform ? `, with "platforms": ["${platform}"] — that is this post's platform, so never draft for another one` : ''}. But do NOT say you have saved, drafted or scheduled it, do NOT suggest a posting time, and do NOT mention a link to review or approve it — none of that happens here. Keep "reply" to one short sentence offering the caption.`,
+        `THE POST THEY HAVE OPEN is #${target.id}. Its saved caption, for when they say "it" or "this":\n---\n${String(target.caption || '').slice(0, 2500) || '(no caption yet)'}\n---${target.hashtags ? `\nHashtags: ${target.hashtags.slice(0, 300)}` : ''}\nFor a change to its words, always return the post draft object, keeping their facts and inventing nothing. Everything else you can do to a post (approve, move, voiceover and so on) still works on this one, by a post_action_proposal naming #${target.id}.`,
+        `A PART THEY SELECTED — their message may start "About this part of my post #N:" followed by what they want.
+- "the caption": return the post draft object with the new caption.
+- "the text box": change ONLY that box with { "type": "post_text_edit", "postId": N, "find": "<its words EXACTLY as quoted>", "replace": "<the new words, about as short>", "summary": "<one sentence: what changes>" }.
+- "the picture" or "the video", when they want a different one: { "type": "post_picture", "postId": N, "kind": "image" | "video", "description": "<what it should show, in a sentence, or \"\" to leave it to them>" }. You cannot make, find or place a picture yourself: the card opens the post's picture step, and they choose there.
+For either card, say the card is there for them to use. Never say it has been changed, and never say you are making or finding a picture.`,
     ].join('\n\n');
 }
 
@@ -1671,7 +1679,7 @@ CHOOSING. When the user says which options they want or do not want, emit a visu
 
 PICTURE GUIDELINES. The workspace's guidelines (listed above) are read by EVERY AI image any assistant here makes, not only yours — say so when you change them. When the user states a lasting rule ("never use handshakes", "we're always outdoors"), emit a brand_guideline_proposal carrying the WHOLE new text of each field it changes — the current text plus the change, never only the new part, because saving replaces the field. Stock photo search cannot filter by these: say so if they ask. They are also on Business Information ▸ Brand Assets ▸ Picture guidelines.
 
-PRINTED FLYERS. You make printable flyers too (A5, A4, A6 postcard or DL leaflet, portrait, one side). Emit a visual_brief_proposal with "purpose": "flyer", a "paperSize", and "flyerContent" with the words: "headline" (max 80 characters), "subheading", up to three short "points", a "callToAction", and a "dateLine" only for a date or opening times the user gave you. NEVER put a phone number, email, street address, web address, QR link or offer in flyerContent — those are filled in from what the business recorded, and the user checks them on the "Edit flyer" form before printing. A flyer's photo comes from "stock" or "ai_image" only (or none, for a words-only flyer). A round draws up to three pages from exactly those words (photo at the top, full-page photo, words only) and the pages themselves are free. Approving one makes a print-ready PDF in My Content, which they can print at home or send to a print shop (that file has a 3 mm bleed). You cannot print or post it for them. If the words are too long for the paper, the round says which field to shorten.
+PRINTED FLYERS. You make printable flyers too (A5, A4, A6 postcard or DL leaflet, portrait, one side). Emit a visual_brief_proposal with "purpose": "flyer", a "paperSize", and "flyerContent" with the words: "headline" (max 80 characters), "subheading", up to three short "points", a "callToAction", and a "dateLine" only for a date or opening times the user gave you. NEVER put a phone number, email, street address, web address, QR link or offer in flyerContent — those are filled in from what the business recorded, and the user checks them on the "Edit flyer" form before printing. A flyer's photo comes from "stock" or "ai_image" only (or none, for a words-only flyer). A round draws up to three pages from exactly those words (photo at the top, full-page photo, words only) and the pages themselves are free. Approving one makes a print-ready PDF in My Content, which they can print at home or send to a print shop (that file has a 3 mm bleed). You cannot print or post it for them. If the words are too long for the paper, the round says which field to shorten. A flyer with an approved page is finished and cannot be changed in place: to change one, emit a new visual_brief_proposal for a flyer carrying ALL its words from the brief list above with the change made. The approved PDF stays in My Content, and the user asks for pages on the new brief.
 
 MORE OPTIONS. If none fit, say they can press "Ask <your name> for more options" on the brief, or set "remake": true on the review card so the user can start the next round with one click. A round with AI images uses ${SOURCE_SPECS.ai_image.tasks} task from their monthly allowance, and AI video ${SOURCE_SPECS.ai_video.tasks} more; stock photos, stock videos and branded cards use none. Say so before they click.
 
@@ -3038,7 +3046,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // can only ever resolve to this org's own row.
         Number.isInteger(forPostId)
             ? db
-                .select({ id: scheduledPosts.id, status: scheduledPosts.status, platform: scheduledPosts.platform })
+                .select({ id: scheduledPosts.id, status: scheduledPosts.status, platform: scheduledPosts.platform, caption: scheduledPosts.caption, hashtags: scheduledPosts.hashtags })
                 .from(scheduledPosts)
                 .where(and(eq(scheduledPosts.id, forPostId), eq(scheduledPosts.organisationId, orgId)))
                 .limit(1)
@@ -3051,7 +3059,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // usable, the draft is saved as a new post, and its review link says where it went. Failing here
     // would kill the conversation over a post the user may have stopped caring about.
     const draftTarget = targetRow && EDITABLE_POST_STATUSES.includes(targetRow.status ?? '')
-        ? { id: targetRow.id, platform: targetRow.platform ?? null }
+        ? { id: targetRow.id, platform: targetRow.platform ?? null, caption: targetRow.caption ?? null, hashtags: targetRow.hashtags ?? null }
         : null;
 
     // Every route's prompt is grounded in this — the business the assistant actually works
@@ -3333,7 +3341,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
         // which is exactly what must NOT happen when the user is editing a post already.
-        draftTarget ? `${promptWithRules}\n\n${draftTargetPromptBlock(draftTarget.platform)}` : promptWithRules,
+        draftTarget ? `${promptWithRules}\n\n${draftTargetPromptBlock(draftTarget)}` : promptWithRules,
         assistantRow.onboardingContext,
     );
     // The Mentor's reply format, restated LAST. Twenty blocks follow its role prompt, and on long turns the
@@ -3911,7 +3919,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 content = 'I couldn’t find that lead among this assistant’s leads, so I haven’t set anything up. Which one do you mean? You can also find it on the "All leads" tab.';
             }
         }
-        const postActionReq = route === ROUTES.social_media_manager && !draftTarget ? postActionFromUiElement(uiElement) : null;
+        // Allowed with a post open in the editor too: the docked chat is always about one, and the
+        // editor saves first and reloads afterwards (post:actionStarting / post:actionFinished).
+        const postActionReq = route === ROUTES.social_media_manager ? postActionFromUiElement(uiElement) : null;
         if (postActionReq) {
             postAction = await resolvePostActionProposal(db, orgId, session.aiAssistantId, postActionReq, snapshotTz);
             uiElement = postAction;
@@ -3920,6 +3930,20 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (!postAction) {
                 content = 'I couldn’t find that post among this assistant’s posts, so I haven’t set anything up. Which one do you mean? You can also open it on the "Posts" tab.';
             }
+        }
+
+        // The cards behind "Select" on a text box or a picture (src/utils/chat-post-parts.ts): rebuilt
+        // here, only for this workspace's own post, and only where a post is open to act through.
+        let postPartCard: PostPartCard | null = null;
+        const postPartReq = route === ROUTES.social_media_manager ? postPartCardFromUiElement(uiElement) : null;
+        if (postPartReq) {
+            const [post] = draftTarget ? await db.select({ id: scheduledPosts.id }).from(scheduledPosts)
+                .where(and(eq(scheduledPosts.id, postPartReq.postId), eq(scheduledPosts.organisationId, orgId))).limit(1) : [];
+            postPartCard = post ? postPartReq : null;
+            uiElement = postPartCard;
+            if (!post) content = 'I can only do that with the post open in front of you. Open it from the "Posts" tab and ask me again; nothing has changed.';
+        } else if ([POST_TEXT_EDIT_TYPE, POST_PICTURE_TYPE].includes(String((uiElement as { type?: unknown } | null)?.type))) {
+            uiElement = null;   // half-formed, or on another route: never stored as a broken card
         }
 
         const hubRecords = hubRecordsFromUiElement(uiElement);
@@ -4033,7 +4057,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // A post-action turn is not a drafting turn: "approve it and it's scheduled" describes the
         // card, and the card is the backing — the user's click is what does it.
-        if (route === ROUTES.social_media_manager && !postActionReq && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.social_media_manager && !postActionReq && !postPartCard && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             let breach: DraftClaimFailure | null = null;
             if (draftTarget) breach = 'not_saved_here';                      // saving here is wrong by design
             else if (persistedPosts?.length === 0) breach = 'persist_failed'; // valid draft, the write threw
@@ -4064,7 +4088,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // does that, and a refused card's reply says it was refused (src/utils/confirm-card-reply.ts).
         // The voiceover actions on a post too: "I've added a voiceover" over a card nobody pressed.
         const voicePostCard = !!postAction && uiElement === postAction && ['voiceover', 'captions', 'time_text'].includes(postAction.action);
-        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || voicePostCard)) {
+        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || voicePostCard)) {
             content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
         }
         // The Website Assistant can't make, find or place a picture in a reply — only its site_picture
@@ -4072,6 +4096,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (assistantRow.roleKey === 'website_assistant') {
             content = pictureReply(content, !!uiElement && (uiElement as { type?: unknown }).type === 'site_picture');
         }
+        if (postPartCard?.type === POST_PICTURE_TYPE) content = pictureReply(content, true);
 
         // And the newsletter route's. Identical shape: it never persists on the turn, so the only
         // unbacked claim available to it is claiming an issue it did not write.
