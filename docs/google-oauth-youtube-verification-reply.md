@@ -31,8 +31,9 @@ scope, so **no CASA assessment is needed**.
      protected (AES-256-GCM encrypted tokens, TLS), and how long we keep it.
    - How to revoke access, both in-app (Disconnect) and at
      https://security.google.com/settings/security/permissions.
-3. **Demo video.** ✅ Mostly done: https://youtu.be/d1K6GqxN2pM is unlisted and playable for
-   anyone with the link (3:33, Be More Swan channel). Checked frame by frame on 2026-11-05. Its
+3. **Demo video.** ✅ Done: https://youtu.be/W2E0gbRaM00 (uploaded 2026-11-05, with the subscriber-count
+   steps) plays for anyone with the link on the Be More Swan channel. It replaces https://youtu.be/d1K6GqxN2pM
+   (3:33, no subscriber count). The old cut was checked frame by frame on 2026-11-05. Its
    captioned steps:
    1. Assistant Profile → Connections → YouTube → Connect, recorded on staging.
    2. Our own checklist pop-up, then "Continue to YouTube".
@@ -56,8 +57,8 @@ scope, so **no CASA assessment is needed**.
    number. Re-upload and replace the link.
    Joined 2026-11-05 as new Steps 13–16 (from 3:33, 26 s, real screen captures with captions, no
    live motion): Felix's connection and YouTube Studio both show channel "BMS Test User", and both
-   show 0 subscribers. The full 3:59 video is not uploaded yet. Upload it as unlisted, then replace
-   the link in the draft reply below.
+   show 0 subscribers. Uploaded 2026-11-05 as https://youtu.be/W2E0gbRaM00; the draft reply below
+   now links it.
    Minor: the consent screen names the app "staging--bemoreswan.netlify.app" rather than "Be More
    Swan". That is expected while branding is unverified, and isn't a reason to re-record.
 4. **Reviewer access.** ✅ Checked 2026-11-05:
@@ -116,7 +117,7 @@ scope, so **no CASA assessment is needed**.
 > The scopes configured in Cloud Console exactly match the scopes the app requests. No restricted
 > scopes are requested.
 >
-> **Demo video (unlisted):** https://youtu.be/d1K6GqxN2pM
+> **Demo video (unlisted):** https://youtu.be/W2E0gbRaM00
 > It was recorded on our staging environment, as your guidance asks for a live app. It shows the
 > OAuth client ID, the unverified-app notice, the consent screen with both scopes, the connected
 > channel's name and subscriber count in the app (youtube.readonly), and an approved video being
