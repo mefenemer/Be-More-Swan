@@ -19,7 +19,7 @@
 // bury the user's real pictures. Options live in visual_brief_options until approved.
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, scheduledPosts, visualBriefOptions, visualBriefs } from '../../db/schema';
+import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, organisations, scheduledPosts, visualBriefOptions, visualBriefs } from '../../db/schema';
 import type { getDb } from '../../db/client';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
@@ -31,7 +31,7 @@ import {
 } from '../lib/fal-gateway';
 import { renderBrandCard, type CardVariant } from '../lib/brand-card';
 import { deleteR2Object, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
-import type { BrandKit } from './brand-kit';
+import { normalizeBrandKit, type BrandKit } from './brand-kit';
 import { guidelinesPromptLines, hasGuidelines, readBrandGuidelines, type BrandGuidelines } from './brand-guidelines';
 import { fillPrompts } from '../lib/image-prompt';
 import {
@@ -1090,6 +1090,18 @@ export async function buildBriefsSnapshot(db: Db, orgId: number, assistantId: nu
             ? `PICTURE GUIDELINES (current, workspace-wide):\n${guidelinesPromptLines(g).map((l) => `- ${l}`).join('\n')}`
             : 'PICTURE GUIDELINES: none set yet.';
     } catch { /* stated above */ }
+    // The colours and font, so the chat can talk them through and write a change. An unset kit is said to be
+    // unset: its black and white is only our default, and the user must not be told it is their brand.
+    let style = 'BRAND STYLE: could not be read this turn. Do not propose a change to it.';
+    try {
+        const [org] = await db.select({ kit: organisations.brandKit }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+        const kit = normalizeBrandKit(org?.kit);
+        const font = kit.fontFamily ? `font ${kit.fontFamily}` : 'our standard font';
+        style = kit.source === 'default'
+            ? `BRAND STYLE: no brand colours chosen yet, so designs use our black and white default; ${font}.`
+            : `BRAND STYLE (current, ${kit.source === 'manual' ? 'set by them' : 'read from their website'}): main colour ${colourWords(kit.primaryColor)} (${kit.primaryColor}), background ${colourWords(kit.backgroundColor)} (${kit.backgroundColor}), text ${colourWords(kit.textColor)} (${kit.textColor}), ${font}.`;
+    } catch { /* stated above */ }
+    guide = `${style}\n${guide}`;
     if (!briefs.length) return `YOUR BRIEFS: none yet. ${credits}\n${guide}`.trim();
     const lines = briefs.map((b) => {
         const waiting = b.options.filter((o) => o.status === 'proposed');

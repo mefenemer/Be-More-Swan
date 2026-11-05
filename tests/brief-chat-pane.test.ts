@@ -26,9 +26,9 @@ check('nothing to change, or no brief to change it on, is no card', () => {
     assert.strictEqual(briefEditFromUiElement({ type: 'visual_brief_proposal', briefId: 12, mood: 'Bright' }), null);
 });
 
-check('the card is only for this workspace\'s brief, and never a flyer or a cancelled one', () => {
+check('the card is only for this workspace\'s brief, and never a finished flyer or a cancelled one', () => {
     assert.ok(chat.includes('eq(visualBriefs.id, req.briefId), eq(visualBriefs.organisationId, orgId)'));
-    assert.ok(chat.includes("brief.purpose !== 'flyer' && brief.status !== 'cancelled'"));
+    assert.ok(chat.includes("brief.status !== 'cancelled' && !(isFlyer && brief.status === 'approved')"));
 });
 
 check('the words beside the card stay honest, and the model is told it only saves', () => {

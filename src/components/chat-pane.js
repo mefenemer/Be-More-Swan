@@ -86,6 +86,8 @@
       ready: start(key ? read(key) : null),
       /** A part of the page onto the chip above the message box (waits for the chat to be ready). */
       setReference(ref) { if (session) session.setReference(ref); else pendingRef = ref; },
+      /** Say this for the user, once the chat is ready ("New brief" on the Briefs tab). */
+      send(text) { return Promise.resolve(api.ready).then(() => (session ? session.sendMessage(text, { noReference: true }) : undefined)); },
       focus() { if (session) session.focus(); },
       get session() { return session; },
       destroy() {
@@ -161,6 +163,10 @@
       refer(ref) {
         if (!on) api.setOn(true, true);
         if (pane) pane.setReference(ref);
+      },
+      ask(text) {
+        if (!on) api.setOn(true, true);
+        if (pane) { pane.focus(); pane.send(text); }
       },
       destroy() {
         if (pane) { try { pane.destroy(); } catch { /* gone */ } }

@@ -53,7 +53,12 @@
     rejecting: null,
     /** Brief ids with their per-brief message line, e.g. a refusal from the server. */
     notes: {},
-    showCancelled: false,
+    /** The brand kit, for the style panel; null until loaded or if unreadable. */
+    brandKit: null,
+    /** The open tab (TABS below). null until the first load picks the one that needs the user. */
+    tab: null,
+    /** "Select" is on: the next option or brief clicked goes onto the chat's chip. */
+    picking: false,
     pollTimer: null,
     /** The HTML each brief card and the toolbar were last painted with — what a poll diffs against. */
     painted: { cards: new Map(), toolbar: '' },
@@ -111,6 +116,7 @@
       state.aiVideoUnavailable = data.aiVideoUnavailable || null;
       state.defaultSources = Array.isArray(data.defaultSources) ? data.defaultSources : null;
       state.guidelines = data.guidelines === undefined ? undefined : data.guidelines;
+      state.brandKit = data.brandKit || null;
       state.flyerDefaults = data.flyerDefaults || null;
       state.loadError = null;
     } catch (err) {
@@ -158,11 +164,52 @@
   }
 
   // ── Pieces ─────────────────────────────────────────────────────────────────
+  // ── Tabs ───────────────────────────────────────────────────────────────
+  // Left to right, the order a brief moves through, each named for where it is. Every brief is in exactly
+  // one, and the count on each shows where the work is without opening it (owner, 2026-11-05).
+  const TABS = [
+    { key: 'todo', label: 'Not started', help: 'Ask for options on a brief to get it going.', empty: 'Nothing waiting to start. Press "New brief" to begin one.' },
+    { key: 'making', label: 'Being made', help: 'Nothing to do here. Options move to "To review" when they are ready.', empty: 'Nothing is being made right now.' },
+    { key: 'review', label: 'To review', help: 'Choose "Use this" on the one you like, or "Not this" and say why.', empty: 'Nothing is waiting for you to review.' },
+    { key: 'approved', label: 'Approved', help: 'Finished, and in My Content for your assistants to use.', empty: 'Nothing approved yet.' },
+    { key: 'archived', label: 'Archived', help: 'Briefs you stopped. Anything you had approved stays in My Content.', empty: 'Nothing archived.' },
+  ];
+  function tabOf(b) {
+    if (b.status === 'cancelled') return 'archived';
+    if (b.status === 'generating') return 'making';
+    if (b.status === 'approved' || progress(b).done) return 'approved';
+    return b.options.some((o) => o.status === 'proposed') ? 'review' : 'todo';
+  }
+  const inTab = (key) => state.briefs.filter((b) => tabOf(b) === key);
+  /** Where the page opens: what needs the user first, then what is under way, then anything at all. */
+  function firstTab() {
+    return ['review', 'todo', 'making', 'approved', 'archived'].find((k) => inTab(k).length) || 'todo';
+  }
+  function tabsHtml() {
+    return `
+      <div role="tablist" aria-label="Briefs by stage" class="flex overflow-x-auto gap-1 border-b border-gray-200 mb-4" data-brief-tabs>
+        ${TABS.map((t) => {
+          const n = inTab(t.key).length;
+          const on = state.tab === t.key;
+          const urgent = t.key === 'review' && n > 0;
+          return `<button type="button" role="tab" id="brief-tab-${t.key}" aria-selected="${on}" aria-controls="brief-tab-panel" tabindex="${on ? 0 : -1}" data-brief-tab="${t.key}"
+            class="flex-shrink-0 min-h-[44px] px-3 py-2 text-sm font-bold whitespace-nowrap border-b-2 -mb-px transition ${on ? 'border-emerald-700 text-gray-900' : 'border-transparent text-gray-600 hover:text-gray-900'}">
+            ${esc(t.label)} <span class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center ${urgent ? 'bg-amber-100 text-amber-900' : 'bg-gray-100 text-gray-700'}">${n}</span>
+          </button>`;
+        }).join('')}
+      </div>`;
+  }
+  function openTab(key, focus) {
+    state.tab = key;
+    render();
+    if (focus) document.getElementById(`brief-tab-${key}`)?.focus();
+  }
+
   function chip(b) {
     const base = 'inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border';
     const waiting = b.options.filter((o) => o.status === 'proposed').length;
     if (b.status === 'generating') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Making options</span>`;
-    if (b.status === 'cancelled') return `<span class="${base} bg-gray-50 text-gray-500 border-gray-200">Cancelled</span>`;
+    if (b.status === 'cancelled') return `<span class="${base} bg-gray-50 text-gray-500 border-gray-200">Archived</span>`;
     if (b.status === 'approved') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Approved</span>`;
     if (waiting) return `<span class="${base} bg-amber-50 text-amber-800 border-amber-200">Needs you</span>`;
     return `<span class="${base} bg-gray-50 text-gray-600 border-gray-200">Not started</span>`;
@@ -292,7 +339,7 @@
         </div>`;
     }
     return `
-      <div class="bg-white border ${o.status === 'approved' ? 'border-emerald-700' : 'border-gray-200'} rounded-xl p-2">
+      <div class="bg-white border ${o.status === 'approved' ? 'border-emerald-700' : 'border-gray-200'} rounded-xl p-2" data-brief-option="${o.id}" data-brief-option-brief="${b.id}">
         <div class="relative rounded-lg overflow-hidden bg-gray-100" style="aspect-ratio:${esc(ratio)}">${o.flyer && o.url
           ? `<button type="button" data-brief-preview="${o.id}" aria-label="${esc(`Preview ${o.prompt || 'this flyer'} larger`)}" class="block w-full h-full" style="cursor:zoom-in">${img}</button>`
           : img}</div>
@@ -426,7 +473,7 @@
             <button type="button" data-brief-chat="${b.id}"
               class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1.5 text-xs font-bold">Talk it through with ${esc(name())}</button>
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
-              class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Cancel brief</button>
+              class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Archive brief</button>
           </div>
           ${progress(b).done ? '' : `<p class="text-[11px] text-gray-500 mt-1">${esc(flyer ? flyerCostLine(b) : roundCostLine(b))}</p>
           ${flyer ? '' : videoOfferHtml(b)}`}` : ''}
@@ -548,7 +595,7 @@
           ${field('Must avoid (optional)', input('mustAvoid', v.mustAvoid, 'e.g. handshakes, suits', 500))}
           ${field('Someone on my team is making it (optional)', input('waitingOn', v.waitingOn, 'e.g. Sam (designer)', 120), 'brand-brief-own')}
           ${field('What is it for?', `<select data-keep="brief-purpose" name="purpose" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">
-            ${V().purposes.filter((p) => p.key !== 'flyer').map((p) => `<option value="${esc(p.key)}" ${p.key === v.purpose ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}
+            ${V().purposes.filter((p) => p.key !== 'flyer' || !editing).map((p) => `<option value="${esc(p.key)}" ${p.key === v.purpose ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}
           ${field('Shape', `<select data-keep="brief-aspectRatio" name="aspectRatio" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">
             <option value="">Best for what it is for</option>
             ${V().aspectRatios.map((a) => `<option value="${esc(a.key)}" ${editing && a.key === v.aspectRatio ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}</select>`)}
@@ -582,37 +629,47 @@
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4" data-brief-toolbar>
         <div>
           <h2 class="text-base font-bold text-gray-900"><span data-explain="brand-briefs">Briefs</span></h2>
-          <p class="text-xs text-gray-500">Say what a picture or printed flyer is for. Approve the option that fits — it goes into your library for every assistant to use. Your flyers are listed here too.</p>
+          <p class="text-xs text-gray-500">Say what you need, whether a picture, a printed flyer or a video. Approve the option that fits and it goes into your library for every assistant to use.</p>
         </div>
         <div class="flex flex-wrap items-center gap-3">
           ${credits}
-          ${chatPaneAvailable() ? `<button type="button" data-brief-chat-toggle aria-pressed="${chatIsOn() ? 'true' : 'false'}" title="Show or hide the chat beside your briefs" class="btn-assistant border min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">💬 Chat with ${esc(name())}</button>` : ''}
-          ${state.form ? '' : `${V().flyer ? '<button type="button" data-brief-new-flyer class="btn-secondary border min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New flyer</button>' : ''}
-          <button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
+          ${chatPaneAvailable() ? `<button type="button" data-brief-pick aria-pressed="${state.picking ? 'true' : 'false'}" title="Choose an option or a brief to talk about" class="${state.picking ? 'btn-primary' : 'btn-secondary border'} min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">🎯 ${state.picking ? 'Selecting…' : 'Select'}</button>` : ''}
+          ${chatPaneAvailable() && !chatIsOn() ? `<button type="button" data-brief-chat-toggle aria-pressed="false" title="Show the chat beside your briefs" class="btn-assistant border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">Chat with ${esc(name())}</button>` : ''}
+          ${state.form ? '' : `${chatPaneAvailable() ? '<button type="button" data-brief-new-form class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold">Use a form instead</button>' : ''}<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
         </div>
       </div>`;
   }
 
   /**
-   * What every round is told, on top of the brief — the workspace's picture guidelines. Edited on
-   * Business Information ▸ Brand Assets, or from chat; read by EVERY assistant's AI images.
+   * What every round starts from: the brand kit and the picture guidelines, both changed in a pop-up here
+   * (brand-style-dialog.js) or in chat, so nobody has to leave the Brand Designer to see or change them.
    */
-  function guidelinesHtml() {
+  function styleHtml() {
     const g = state.guidelines;
     if (g === undefined) return '';
-    const link = '<a href="#" data-brief-edit-guidelines class="font-bold underline">Edit</a>';
-    if (g === null) return `<p class="text-xs text-gray-500 mb-4">Your picture guidelines could not be read just now. ${link}</p>`;
+    const kit = state.brandKit;
+    const link = '<button type="button" data-brief-edit-style class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-1.5 text-xs font-bold rounded-lg flex-shrink-0">View or change</button>';
+    if (g === null || !kit) return `<div class="flex items-center justify-between gap-3 bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4"><p class="text-xs text-gray-600">Your brand style could not be read just now.</p>${link}</div>`;
+    const unset = kit.source !== 'manual' && kit.source !== 'website';
+    const swatch = (c, label) => `<span title="${esc(label)}: ${esc(c)}" class="inline-block w-6 h-6 rounded-full border border-gray-300" style="background:${esc(c)}"></span>`;
     const parts = [
       g.photoStyle ? `<span class="font-bold">Style:</span> ${esc(g.photoStyle)}` : '',
       g.mustInclude ? `<span class="font-bold">Include:</span> ${esc(g.mustInclude)}` : '',
       g.mustAvoid ? `<span class="font-bold">Never show:</span> ${esc(g.mustAvoid)}` : '',
-      g.secondaryColors && g.secondaryColors.length ? `<span class="font-bold">Extra colours:</span> ${g.secondaryColors.map(esc).join(', ')}` : '',
     ].filter(Boolean);
+    if (kit.fontFamily) window.FontPicker?.loadFamily(kit.fontFamily);
     return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4">
-        <p class="text-xs font-bold text-gray-700"><span data-explain="brand-guidelines">Picture guidelines</span> · ${link}</p>
-        <p class="text-xs text-gray-600 mt-1">${parts.length ? parts.join(' · ') : 'None set yet. Add a photo style and anything pictures must never show — every round reads them, and so do your other assistants\' AI images.'}</p>
-        ${parts.length && g.mustAvoid ? '<p class="text-[11px] text-gray-500 mt-1">Stock photo search can\'t filter by these — check stock picks yourself.</p>' : ''}
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4" data-brief-style>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-3 min-w-0">
+            <p class="text-xs font-bold text-gray-700"><span data-explain="brand-guidelines">Your brand style</span></p>
+            <span class="inline-flex items-center gap-1">${unset ? '' : `${swatch(kit.primaryColor, 'Main colour')}${swatch(kit.backgroundColor, 'Background')}${swatch(kit.textColor, 'Text')}`}${(g.secondaryColors || []).map((c) => swatch(c, 'Extra colour')).join('')}</span>
+            ${unset ? '<span class="text-xs font-semibold text-amber-900">No brand colours chosen yet</span>' : ''}
+            <span class="text-sm text-gray-900 truncate" ${kit.fontFamily ? `style="font-family:'${esc(kit.fontFamily)}', system-ui, sans-serif"` : ''}>${esc(kit.fontFamily || 'Our standard font')}</span>
+          </div>
+          ${link}
+        </div>
+        <p class="text-xs text-gray-600 mt-2">${parts.length ? parts.join(' · ') : 'No picture guidelines yet. Add a photo style and anything pictures must never show.'}</p>
       </div>`;
   }
 
@@ -620,7 +677,7 @@
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
         <p class="text-sm font-bold text-gray-700">No briefs yet</p>
-        <p class="text-xs text-gray-500 mt-2">Press "New brief", or tell ${esc(state.assistantName || 'your Brand Designer')} in chat what you need — "a square image for our spring offer, warm and bright". Either way, nothing is made until you press "Ask ${esc(name())} for options" on the brief, and nothing is used until you press "Use this".</p>
+        <p class="text-xs text-gray-500 mt-2">Press "New brief" and ${esc(state.assistantName || 'your Brand Designer')} will ask a few quick questions, or just say what you need in the chat. Either way, nothing is made until you press "Ask ${esc(name())} for options" on the brief, and nothing is used until you press "Use this".</p>
       </div>`;
   }
 
@@ -646,17 +703,21 @@
     const keptNotes = {};
     host.querySelectorAll('[data-brief-reject-note]').forEach((el) => { keptNotes[el.dataset.briefRejectNote] = el.value; });
 
-    const live = state.briefs.filter((b) => b.status !== 'cancelled');
-    const cancelled = state.briefs.filter((b) => b.status === 'cancelled');
+    if (!state.tab) state.tab = firstTab();
+    // The brief being watched is finished: follow it, rather than leaving an empty "Being made".
+    if (state.tab === 'making' && !inTab('making').length && inTab('review').length) state.tab = 'review';
+    const tab = TABS.find((t) => t.key === state.tab);
+    const shown = inTab(state.tab);
     host.innerHTML = `
       ${toolbarHtml()}
-      ${guidelinesHtml()}
+      ${styleHtml()}
       ${formHtml()}
-      ${!live.length && !state.form ? emptyState() : ''}
-      <div class="space-y-4">${live.map(briefCard).join('')}</div>
-      ${cancelled.length ? `
-        <button type="button" data-brief-toggle-cancelled class="mt-4 text-xs text-gray-500 underline">${state.showCancelled ? 'Hide' : 'Show'} cancelled briefs (${cancelled.length})</button>
-        ${state.showCancelled ? `<div class="space-y-4 mt-3">${cancelled.map(briefCard).join('')}</div>` : ''}` : ''}`;
+      ${state.briefs.length || state.form ? tabsHtml() : ''}
+      <div id="brief-tab-panel" role="tabpanel" aria-labelledby="brief-tab-${tab.key}" class="${state.picking ? 'brief-picking' : ''}">
+        ${!state.briefs.length && !state.form ? emptyState() : shown.length ? `<p class="text-xs text-gray-600 mb-3">${esc(tab.help)}</p>` : `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-600">${esc(tab.empty)}</p></div>`}
+        <div class="space-y-4">${shown.map(briefCard).join('')}</div>
+      </div>`;
+    ensurePickCss();
 
     host.querySelectorAll('[data-keep]').forEach((el) => {
       if (!Object.prototype.hasOwnProperty.call(kept, el.dataset.keep)) return;
@@ -672,9 +733,7 @@
 
   /** The brief ids in the order render() lays them out — live first, then cancelled when shown. */
   function paintedOrder() {
-    const live = state.briefs.filter((b) => b.status !== 'cancelled');
-    const cancelled = state.showCancelled ? state.briefs.filter((b) => b.status === 'cancelled') : [];
-    return [...live, ...cancelled].map((b) => String(b.id));
+    return inTab(state.tab).map((b) => String(b.id));
   }
 
   /**
@@ -689,6 +748,7 @@
     if (!host) return;
     const onScreen = Array.from(host.querySelectorAll('[data-brief-card]')).map((el) => el.dataset.briefCard);
     const wanted = paintedOrder();
+    if (state.tab === 'making' && !wanted.length) { render(); return; }
     if (onScreen.length !== wanted.length || onScreen.some((id, i) => id !== wanted[i])) { render(); return; }
 
     const toolbar = toolbarHtml();
@@ -697,7 +757,9 @@
       if (el) el.outerHTML = toolbar;
       state.painted.toolbar = toolbar;
     }
-    for (const b of state.briefs) {
+    const tabs = host.querySelector('[data-brief-tabs]');
+    if (tabs) tabs.outerHTML = tabsHtml();
+    for (const b of inTab(state.tab)) {
       const html = briefCard(b);
       if (state.painted.cards.get(b.id) === html) continue;
       state.painted.cards.set(b.id, html);
@@ -733,6 +795,7 @@
     try {
       await post({ action: 'generate', briefId });
       say(briefId, null);
+      state.tab = 'making';
     } catch (err) {
       say(briefId, err.message, 'error');
     } finally {
@@ -746,18 +809,41 @@
     if (!state.assistantId || !e.target.closest('#briefs-host')) return;
     const t = (sel) => e.target.closest(sel);
 
-    if (t('[data-brief-new]')) { state.form = { mode: 'create' }; render(); return; }
-    if (t('[data-brief-new-flyer]')) { state.form = { mode: 'create', flyer: true, gen: Date.now() }; render(); return; }
-    if (t('[data-brief-edit-guidelines]')) {
-      e.preventDefault();
-      // Business Information opens on its profile tab; this hint (read once by assets.html) opens it
-      // on Brand Assets, where the guidelines are.
+    // "Select" is on: this click chooses what to talk about, whatever it landed on.
+    if (state.picking) {
+      const onTool = t('[data-brief-pick]');
+      const tile = t('[data-brief-option]');
+      const card = t('[data-brief-card]');
+      if (!onTool && (tile || card)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const b = state.briefs.find((x) => x.id === Number((tile || card).dataset.briefOptionBrief || (card && card.dataset.briefCard)));
+        setPicking(false);
+        if (!b) return;
+        const o = tile && b.options.find((x) => x.id === Number(tile.dataset.briefOption));
+        if (o) referOption(b, o); else referBrief(b);
+        return;
+      }
+    }
+    if (t('[data-brief-pick]')) { setPicking(!state.picking); return; }
+    const tabBtn = t('[data-brief-tab]');
+    if (tabBtn) { openTab(tabBtn.dataset.briefTab, false); return; }
+    if (t('[data-brief-new]')) { startNewBrief(); return; }
+    if (t('[data-brief-new-form]')) { state.form = { mode: 'create' }; render(); return; }
+    if (t('[data-brief-edit-style]')) {
+      if (window.BrandStyleDialog && window.FontPicker) {
+        window.BrandStyleDialog.open({
+          assistantName: name(),
+          onSaved: () => load(),
+          onAskChat: chatPaneAvailable() ? () => askChat('Help me choose my brand colours and font. Ask me a few quick questions first.') : null,
+        });
+        return;
+      }
       window._bizinfoInitialTab = 'assets';
       if (window.loadView) window.loadView('assets');
       return;
     }
     if (t('[data-brief-form-close]')) { state.form = null; render(); return; }
-    if (t('[data-brief-toggle-cancelled]')) { state.showCancelled = !state.showCancelled; render(); return; }
     if (t('[data-brief-reject-cancel]')) { state.rejecting = null; render(); return; }
 
     const ownOpen = t('[data-brief-own-open]');
@@ -809,8 +895,8 @@
     const cancel = t('[data-brief-cancel]');
     if (cancel) {
       const id = Number(cancel.dataset.briefCancel);
-      const ok = await window.confirmModal('Options you have not approved are deleted. Anything already in your library stays.', {
-        title: 'Cancel this brief?', confirmLabel: 'Cancel brief', cancelLabel: 'Keep it',
+      const ok = await window.confirmModal('It moves to the Archived tab, and it cannot be started again. Options you have not approved are deleted. Anything already in your library stays.', {
+        title: 'Archive this brief?', confirmLabel: 'Archive brief', cancelLabel: 'Keep it',
       });
       if (!ok) return;
       try { await post({ action: 'cancel', briefId: id }); } catch (err) { say(id, err.message, 'error'); }
@@ -825,19 +911,14 @@
       const b = state.briefs.find((x) => x.id === Number(select.dataset.brief));
       const o = b && b.options.find((x) => x.id === Number(select.dataset.briefSelect));
       if (!o) return;
-      const what = o.flyer ? (o.prompt || 'Flyer') : sourceLabel(o.source).replace(/s$/, '');
-      const about = o.prompt && !o.flyer ? `, showing: ${String(o.prompt).slice(0, 300)}` : '';
-      chatRefer({
-        label: `${what} on “${b.title}”`,
-        message: `About this option on my brief ${b.id} “${b.title}”: option ${o.id} (${what}, round ${o.round}${about}).`,
-      });
+      referOption(b, o);
       return;
     }
     const chat = t('[data-brief-chat]');
     if (chat) {
       const b = state.briefs.find((x) => x.id === Number(chat.dataset.briefChat));
       // With the docked chat here, talk it through there rather than in a pop-up.
-      if (b && chatPaneAvailable()) { chatRefer({ label: `Brief “${b.title}”`, message: `About my brief ${b.id} “${b.title}”.` }); return; }
+      if (b && chatPaneAvailable()) { referBrief(b); return; }
       window.openAssistantChat?.({ assistantId: state.assistantId, draft: b ? `About the brief "${b.title}": ` : '' });
       return;
     }
@@ -939,6 +1020,25 @@
     return data.asset.id;
   }
 
+  // The one form: choosing a printed flyer swaps to its own fields (paper, words, contact details).
+  document.addEventListener('change', (e) => {
+    if (!e.target.matches || !e.target.matches('[data-brief-form] select[name="purpose"]')) return;
+    if (e.target.value !== 'flyer' || !state.form || state.form.mode !== 'create') return;
+    state.form = { mode: 'create', flyer: true, gen: Date.now() };
+    render();
+  });
+
+  // The tabs' arrow keys, and Escape to stop selecting.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.picking) { setPicking(false); return; }
+    const tab = e.target.closest && e.target.closest('[data-brief-tab]');
+    if (!tab || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    const at = TABS.findIndex((t) => t.key === tab.dataset.briefTab);
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : (at + (e.key === 'ArrowRight' ? 1 : -1) + TABS.length) % TABS.length;
+    openTab(TABS[next].key, true);
+  });
+
   document.addEventListener('change', async (e) => {
     const input = e.target.closest && e.target.closest('[data-brief-own-file]');
     if (!input || !input.files || !input.files[0]) return;
@@ -995,7 +1095,7 @@
     try {
       let id = editing ? state.form.id : null;
       if (editing && !state.form.fork) await post({ action: 'edit', briefId: id, ...brief });
-      else id = (await post({ action: 'create', assistantId: state.assistantId, ...brief })).briefId;
+      else { id = (await post({ action: 'create', assistantId: state.assistantId, ...brief })).briefId; state.tab = 'todo'; }
       if (submitter === 'draft') {
         if (errEl) { errEl.textContent = 'Drafting the words…'; errEl.classList.remove('hidden', 'text-red-600'); }
         try { await post({ action: 'draft_flyer_words', briefId: id }); }
@@ -1031,6 +1131,7 @@
         await post({ action: 'edit', briefId: state.form.id, ...brief });
       } else {
         const res = await post({ action: 'create', assistantId: state.assistantId, ...brief, generate: submitter === 'generate' });
+        state.tab = res.roundStarted ? 'making' : 'todo';
         // The brief was saved even when its first round could not start — show why ON the brief, and
         // close the form, so pressing Save again cannot make a second copy.
         if (res.roundError && res.briefId) state.notes[res.briefId] = { text: errorText(res.roundError, 0), tone: 'error' };
@@ -1047,7 +1148,12 @@
   document.addEventListener('brief:changed', (e) => {
     const id = e.detail && e.detail.assistantId;
     if (!state.assistantId || Number(id) !== Number(state.assistantId)) return;
-    load();
+    // A brief just saved from the chat: open the tab it landed on, so it does not seem to vanish.
+    const known = new Set(state.briefs.map((b) => b.id));
+    load().then(() => {
+      const fresh = state.briefs.find((b) => !known.has(b.id));
+      if (fresh && state.rendered) openTab(tabOf(fresh), false);
+    });
   });
 
   // ── The chat docked beside the briefs (chat-pane.js) ─────────────────────────────────────────────
@@ -1065,7 +1171,9 @@
     chatDock = window.ChatPane.dock(host, {
       prefix: 'briefs', storageKey: 'bms-brief-chat-on',
       onToggle: (on) => {
-        document.querySelector('[data-brief-chat-toggle]')?.setAttribute('aria-pressed', on ? 'true' : 'false');
+        // Only offered while the chat is closed: with it open beside the briefs the button says nothing.
+        const bar = document.querySelector('[data-brief-toolbar]');
+        if (bar) bar.outerHTML = toolbarHtml();
         state.painted.toolbar = toolbarHtml();
       },
       pane: () => ({
@@ -1080,6 +1188,36 @@
   }
   function setChatOn(on, remember) { getChatDock()?.setOn(on, remember); }
   function chatRefer(ref) { getChatDock()?.refer(ref); }
+  function referOption(b, o) {
+    const what = o.flyer ? (o.prompt || 'Flyer') : sourceLabel(o.source).replace(/s$/, '');
+    const about = o.prompt && !o.flyer ? `, showing: ${String(o.prompt).slice(0, 300)}` : '';
+    chatRefer({
+      label: `${what} on “${b.title}”`,
+      message: `About this option on my brief ${b.id} “${b.title}”: option ${o.id} (${what}, round ${o.round}${about}).`,
+    });
+  }
+  function referBrief(b) { chatRefer({ label: `Brief “${b.title}”`, message: `About my brief ${b.id} “${b.title}”.` }); }
+  /** Opens the chat and says this for them. Nothing is spent: the reply is questions or a card to press. */
+  function askChat(text) { getChatDock()?.ask(text); }
+  /** One button for every kind of brief: the assistant's questions decide what it should be. */
+  function startNewBrief() {
+    if (chatPaneAvailable()) { askChat('I need a new brief.'); return; }
+    state.form = { mode: 'create' };
+    render();
+  }
+  function setPicking(on) {
+    state.picking = !!on;
+    render();
+  }
+  function ensurePickCss() {
+    if (document.getElementById('brief-pick-css')) return;
+    const css = document.createElement('style');
+    css.id = 'brief-pick-css';
+    css.textContent = `.brief-picking [data-brief-card], .brief-picking [data-brief-option] { cursor: pointer; }
+      .brief-picking [data-brief-option]:hover, .brief-picking [data-brief-option]:focus-within { outline: 3px solid var(--color-emerald-700, #ff007f); outline-offset: 2px; border-radius: 8px; }
+      .brief-picking [data-brief-card]:not(:has([data-brief-option]:hover)):hover { outline: 2px dashed var(--color-emerald-700, #ff007f); outline-offset: 2px; }`;
+    document.head.appendChild(css);
+  }
 
   window.AssistantBriefs = {
     init({ assistantId, assistantName }) {
@@ -1089,6 +1227,8 @@
       state.assistantName = assistantName || null;
       state.rendered = false;
       state.form = null;
+      state.tab = null;
+      state.picking = false;
       state.rejecting = null;
       state.notes = {};
       state.own = { briefId: null, library: null, error: null, selected: new Set(), busy: false, status: '' };

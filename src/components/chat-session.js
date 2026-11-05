@@ -2121,6 +2121,22 @@
 
     // "Save guidelines" on a brand_guideline_proposal card — brand-kit.ts `save_guidelines`, the same
     // save as Business Information ▸ Brand Assets ▸ Picture guidelines.
+    // "Save my brand style" on a brand_style_proposal card: brand-kit.ts PATCH, the pop-up's own save.
+    async function onBrandSaveStyle(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const res = await fetch('/.netlify/functions/brand-kit', {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify(d.fields || {}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('brief:changed', { detail: { assistantId } }));
+      } catch (err) { respond({ ok: false, error: err.message }); }
+    }
+
     function onBrandSaveGuidelines(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -2450,6 +2466,7 @@
     container.addEventListener('brief:review', onBriefReview);
     container.addEventListener('brief:edit', onBriefEdit);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
+    container.addEventListener('brand:saveStyle', onBrandSaveStyle);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
     container.addEventListener('siteaudit:save', onSiteAuditSave);
     container.addEventListener('siteaudit:fix', onSiteAuditFix);
@@ -2561,6 +2578,7 @@
         container.removeEventListener('brief:review', onBriefReview);
         container.removeEventListener('brief:edit', onBriefEdit);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
+        container.removeEventListener('brand:saveStyle', onBrandSaveStyle);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);
         container.removeEventListener('siteaudit:save', onSiteAuditSave);
         container.removeEventListener('siteaudit:fix', onSiteAuditFix);

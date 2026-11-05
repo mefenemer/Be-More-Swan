@@ -22,7 +22,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { aiAssistants, visualBriefs } from '../../db/schema';
+import { aiAssistants, organisations, visualBriefs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { getBalance } from '../../src/utils/ai-credits';
@@ -34,6 +34,7 @@ import {
     sweepStuckRounds, videoUnavailableReason, type BriefRow,
 } from '../../src/utils/visual-briefs';
 import { readBrandGuidelines } from '../../src/utils/brand-guidelines';
+import { normalizeBrandKit } from '../../src/utils/brand-kit';
 import { triggerBriefRound } from '../../src/utils/trigger-brief-round';
 import { contactDefaults, draftFlyerWords, offerLine } from '../../src/utils/flyer-words';
 import { loadIntroOffer } from '../../src/utils/intro-offer';
@@ -106,7 +107,7 @@ export default withLambda(async (event) => {
         const designer = await requireDesigner(body.assistantId);
         if (!designer) return json(404, { error: 'Assistant not found.' });
         await sweepStuckRounds(db, orgId);
-        const [briefs, balance, aiAvailable, guidelines, videoBlocked, flyerDefaults] = await Promise.all([
+        const [briefs, balance, aiAvailable, guidelines, videoBlocked, flyerDefaults, brandKit] = await Promise.all([
             listBriefs(db, orgId, designer.id),
             getBalance(db, orgId).catch(() => null),
             orgHasAssistantFeature(db, orgId, 'ai_image_generation').catch(() => false),
@@ -117,6 +118,8 @@ export default withLambda(async (event) => {
             loadIntroOffer(db, orgId).catch(() => null)
                 .then(async (intro) => ({ ...await contactDefaults(db, orgId, intro), offer: offerLine(intro) }))
                 .catch(() => null),
+            db.select({ kit: organisations.brandKit }).from(organisations).where(eq(organisations.id, orgId)).limit(1)
+                .then(([o]) => normalizeBrandKit(o?.kit)).catch(() => null),
         ]);
         return json(200, {
             briefs,
@@ -135,6 +138,8 @@ export default withLambda(async (event) => {
             // The workspace's picture guidelines — shown on the tab so the user can see what every
             // round is told. null = could not be read (said as such), not "none set".
             guidelines,
+            // The colours and font, for the brand style panel. null = could not be read.
+            brandKit,
             flyerDefaults,
         });
     }
