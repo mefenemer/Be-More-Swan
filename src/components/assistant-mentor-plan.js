@@ -77,6 +77,11 @@
   // ── Documents ─────────────────────────────────────────────────────────────
   function docOf(kind) { return (state.data && state.data.docs && state.data.docs[kind]) || {}; }
   function defOf(kind) { return (state.data && state.data.kinds && state.data.kinds[kind]) || { label: kind, sections: [] }; }
+  /** The saved text of a document, without the unsaved edits. */
+  function baseOf(kind) {
+    const d = docOf(kind);
+    return (d.draft && d.draft.body) || (d.approved && d.approved.body) || d.prefill || { sections: {}, assumptions: [] };
+  }
   /** What the page shows for a document: unsaved edits over the draft, else the approved text, else the pre-fill. */
   function working(kind) {
     const d = docOf(kind);
@@ -182,7 +187,10 @@
     return `<div class="${opts.compact ? '' : 'py-3 border-b border-gray-100 last:border-0'} min-w-0">
       <div class="flex items-baseline justify-between gap-2 flex-wrap">
         <label for="${id}" class="text-sm font-bold text-gray-900">${esc(s.label)}</label>
-        ${opts.noLookup ? '' : `<button type="button" data-mplan-lookup="${esc(kind)}:${esc(s.key)}" class="btn-swan-link px-0 py-0.5 text-[11px] font-bold">Look this up</button>`}
+        <span class="flex items-baseline gap-3">
+          ${chatPaneAvailable() ? `<button type="button" data-mplan-select="${esc(kind)}:${esc(s.key)}" title="Ask ${esc(state.assistantName)} about this part" class="px-0 py-0.5 text-[11px] font-bold text-indigo-700 hover:underline">🎯 Select</button>` : ''}
+          ${opts.noLookup ? '' : `<button type="button" data-mplan-lookup="${esc(kind)}:${esc(s.key)}" class="btn-swan-link px-0 py-0.5 text-[11px] font-bold">Look this up</button>`}
+        </span>
       </div>
       <p class="text-[11px] text-gray-500">${esc(s.hint)}</p>
       <textarea id="${id}" data-mplan-field="${esc(kind)}:${esc(s.key)}" rows="${opts.rows || 3}" maxlength="${Number(s.max)}" class="mt-1 w-full rounded-lg border border-gray-300 p-2 text-sm">${esc(value || '')}</textarea>
@@ -246,7 +254,10 @@
           <li class="rounded-lg border border-gray-200 p-2 grid grid-cols-1 sm:grid-cols-2 gap-2 min-w-0">
             <label class="text-[11px] font-semibold text-gray-600 min-w-0">Assumption<input type="text" maxlength="400" data-mplan-assumption="${i}:assumption" value="${esc(a.assumption)}" class="mt-0.5 w-full rounded-md border border-gray-300 p-1.5 text-sm"></label>
             <label class="text-[11px] font-semibold text-gray-600 min-w-0">Cheap test this month<input type="text" maxlength="400" data-mplan-assumption="${i}:test" value="${esc(a.test)}" class="mt-0.5 w-full rounded-md border border-gray-300 p-1.5 text-sm"></label>
-            <button type="button" data-mplan-remove-assumption="${i}" class="btn-swan-link justify-self-start px-0 text-[11px] font-bold">Remove</button>
+            <span class="flex items-baseline gap-3">
+              ${chatPaneAvailable() ? `<button type="button" data-mplan-select-assumption="${i}" title="Ask ${esc(state.assistantName)} about this assumption" class="px-0 text-[11px] font-bold text-indigo-700 hover:underline">🎯 Select</button>` : ''}
+              <button type="button" data-mplan-remove-assumption="${i}" class="btn-swan-link justify-self-start px-0 text-[11px] font-bold">Remove</button>
+            </span>
           </li>`).join('') || '<li class="text-sm text-gray-500">None yet.</li>'}</ul>
         ${assumptions.length < 6 ? '<button type="button" data-mplan-add-assumption class="btn-secondary mt-2 px-3 py-1.5 border text-xs font-bold rounded-lg">+ Add an assumption</button>' : ''}
       </div>
@@ -374,18 +385,24 @@
     if (!state.data) { el.innerHTML = card('<p class="text-sm text-gray-400 animate-pulse">Loading…</p>'); return; }
     // Keep the caret where the user was typing across a repaint.
     const active = document.activeElement;
+    // …and the caret or selection inside it (a repaint just after clicking into a box must not move it).
+    let caret = [];
+    try { if (active && el.contains(active) && typeof active.selectionStart === 'number') caret = [active.selectionStart, active.selectionEnd]; } catch (e) { /* number inputs */ }
     const focusKey = active && el.contains(active) ? (active.getAttribute('data-mplan-field') || active.getAttribute('data-mplan-assumption') || active.getAttribute('data-mplan-calc') || (active.hasAttribute('data-mplan-research-q') ? 'research' : null)) : null;
     el.innerHTML = `
+      ${chatPaneAvailable() ? `<div class="flex justify-end mb-3"><button type="button" data-mplan-chat-toggle aria-pressed="${chatDock && chatDock.isOn() ? 'true' : 'false'}" title="Show or hide the chat beside your plans" class="btn-assistant border px-4 py-2 text-sm font-bold rounded-lg">💬 Chat with ${esc(state.assistantName)}</button></div>` : ''}
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
         <div class="space-y-4 min-w-0 lg:col-span-2">${plansHtml()}${researchHtml()}</div>
         <div class="space-y-4 min-w-0">${calcHtml()}${playbookHtml()}
-          ${card(`<p class="text-xs text-gray-600">Prefer to talk it through? Ask ${esc(state.assistantName)} in chat — it fills in the same plans, and nothing is saved without your click.</p>`)}
+          ${card(chatPaneAvailable()
+            ? `<p class="text-xs text-gray-600">Prefer to talk it through? 🎯 Select a part of a plan and ask ${esc(state.assistantName)} — “challenge this”, “make it shorter”. It changes the same plans, and nothing is saved without your click.</p>`
+            : `<p class="text-xs text-gray-600">Prefer to talk it through? Ask ${esc(state.assistantName)} in chat — it fills in the same plans, and nothing is saved without your click.</p>`)}
         </div>
       </div>`;
     if (focusKey) {
       const sel = focusKey === 'research' ? '[data-mplan-research-q]' : `[data-mplan-field="${focusKey}"],[data-mplan-assumption="${focusKey}"],[data-mplan-calc="${focusKey}"]`;
       const again = el.querySelector(sel);
-      if (again) { again.focus(); try { const n = again.value.length; again.setSelectionRange(n, n); } catch (e) { /* number inputs */ } }
+      if (again) { again.focus(); try { const n = again.value.length; again.setSelectionRange(Math.min(caret[0] ?? n, n), Math.min(caret[1] ?? n, n)); } catch (e) { /* number inputs */ } }
     }
   }
 
@@ -452,6 +469,9 @@
   document.addEventListener('click', (e) => {
     const t = e.target;
     if (!(t instanceof Element) || !host()?.contains(t)) return;
+    if (t.closest('[data-mplan-chat-toggle]')) { const d = getChatDock(); if (d) d.setOn(!d.isOn(), true); return; }
+    const sel = t.closest('[data-mplan-select], [data-mplan-select-assumption]');
+    if (sel) { const ref = selectionRef(sel); if (ref) getChatDock()?.refer(ref); return; }
     const k = t.closest('[data-mplan-kind]');
     if (k) { state.kind = k.getAttribute('data-mplan-kind'); state.showChanges = false; render(); return; }
     const sv = t.closest('[data-mplan-save]'); if (sv) { saveEdits(sv.getAttribute('data-mplan-save')); return; }
@@ -500,6 +520,12 @@
     if (t.closest('[data-mplan-calc-go]')) { workItOut(); return; }
     if (t.closest('[data-mplan-retry]')) load();
   });
+  // Select and the chat toggle keep focus where it is: leaving a box repaints the tab (the "change" handler
+  // below), which would swap the button out between the press and the click, and the click would be lost.
+  document.addEventListener('mousedown', (e) => {
+    const t = e.target;
+    if (t instanceof Element && host()?.contains(t) && t.closest('[data-mplan-select], [data-mplan-select-assumption], [data-mplan-chat-toggle]')) e.preventDefault();
+  });
   // Typing is kept in state (never lost to a repaint from a chat card or a poll).
   document.addEventListener('input', (e) => {
     const t = e.target;
@@ -531,10 +557,31 @@
       state.calc.inputs[g] = { ...prev, source: t.checked ? 'assumption' : 'you' };
       render(); return;
     }
-    if (t.matches('[data-mplan-field],[data-mplan-assumption]')) render();
+    // After focus has moved: "change" fires while the box being left still has focus, so a repaint here
+    // replaced the box the user was clicking into, and what they typed next went nowhere.
+    if (t.matches('[data-mplan-field],[data-mplan-assumption]')) setTimeout(render, 0);
   });
   // A chat card saved or approved a plan, or a job finished: repaint from the server.
-  document.addEventListener('mentor:planChanged', () => { if (state.assistantId && host()) load(); });
+  // Unsaved typing elsewhere is kept, but a part the chat has just changed shows the chat's words: the
+  // user approved that card, and their older typing over it would hide the change and then overwrite it
+  // on "Save draft".
+  document.addEventListener('mentor:planChanged', async () => {
+    if (!state.assistantId || !host()) return;
+    const before = Object.fromEntries(KINDS.map((k) => [k, JSON.stringify(baseOf(k))]));
+    const beforeParts = Object.fromEntries(KINDS.map((k) => [k, baseOf(k)]));
+    await load();
+    let dropped = false;
+    for (const k of KINDS) {
+      const e = state.edits[k];
+      if (!e || before[k] === JSON.stringify(baseOf(k))) continue;
+      const now = baseOf(k);
+      for (const key of Object.keys(e.sections || {})) {
+        if ((now.sections || {})[key] !== (beforeParts[k].sections || {})[key]) { delete e.sections[key]; dropped = true; }
+      }
+      if (e.assumptions && JSON.stringify(now.assumptions || []) !== JSON.stringify(beforeParts[k].assumptions || [])) { delete e.assumptions; dropped = true; }
+    }
+    if (dropped) render();
+  });
   // A break-even card's "Open in the calculator": fill the inputs and show this tab.
   document.addEventListener('mentor:openCalculator', (e) => {
     const inputs = (e.detail && e.detail.inputs) || {};
@@ -545,8 +592,58 @@
     if (state.data) { render(); workItOut(); }
   });
 
+  // ── The chat docked beside the plans (ChatPane.dock) ─────────────────────
+  // Owner, 2026-11-05: the Website tab's pane, for the Mentor's Plan tab. As on Briefs, Videos and Campaigns:
+  // one conversation for the tab, and "Select" is a button on each part of a plan. No card of its own: the
+  // Mentor's strategy_proposal ("revise") already changes a plan's parts, before and after, and saves only on
+  // the user's click (a draft, never approved by the chat). Its words go in whole, unsaved typing included,
+  // because the Mentor's own view of the plans is cut to 300 characters a part.
+  let chatDock = null;
+  const chatPaneAvailable = () => !!window.ChatPane?.available?.() && !!state.assistantId;
+  const clip = (s, n) => { const t = String(s || '').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+  function getChatDock() {
+    const el = host();
+    if (!el || !chatPaneAvailable()) return null;
+    if (chatDock && chatDock.connected()) return chatDock;
+    chatDock = window.ChatPane.dock(el, {
+      prefix: 'mentorplan', storageKey: 'bms-mentorplan-chat-on',
+      onToggle: (on) => document.querySelector('[data-mplan-chat-toggle]')?.setAttribute('aria-pressed', on ? 'true' : 'false'),
+      pane: () => ({
+        assistantId: state.assistantId, assistantName: state.assistantName, roleKey: 'business_mentor',
+        rememberKey: `bms-mentorplan-chat:${state.assistantId}`,
+        placeholder: 'Ask about your plans, or 🎯 Select a part…',
+        starterPrompts: ['Which part of my business plan is weakest?', 'Challenge my riskiest assumption.', 'Help me write my marketing plan.'],
+        composerRows: 3,
+      }),
+    });
+    return chatDock;
+  }
+  function selectionRef(btn) {
+    const unsaved = (kind, key) => state.edits[kind]?.sections?.[key] !== undefined;
+    if (btn.hasAttribute('data-mplan-select')) {
+      const [kind, key] = btn.getAttribute('data-mplan-select').split(':');
+      const def = defOf(kind);
+      const s = def.sections.find((x) => x.key === key);
+      if (!s) return null;
+      const text = (working(kind).sections[key] || '').trim();
+      return {
+        label: `${clip(s.label, 40)} · ${def.label}`,
+        message: `About this part of my ${def.label} (section ${key}, “${s.label}”)${unsaved(kind, key) ? ', as I have typed it (not saved yet)' : ''}: ${text ? `“${clip(text, 1800)}”` : '(empty so far)'}.`,
+      };
+    }
+    const i = Number(btn.getAttribute('data-mplan-select-assumption'));
+    const a = (working('idea_check').assumptions || [])[i];
+    if (!a) return null;
+    return {
+      label: `Assumption ${i + 1} · ${defOf('idea_check').label}`,
+      message: `About riskiest assumption ${i + 1} in my ${defOf('idea_check').label}: “${clip(a.assumption, 500)}”${a.test ? `, tested by “${clip(a.test, 500)}”` : ', with no test yet'}.`,
+    };
+  }
+
   window.AssistantMentorPlan = {
     init({ assistantId, assistantName }) {
+      chatDock?.destroy();
+      chatDock = null;
       clearTimeout(pollTimer);
       const keepCalc = state.assistantId === assistantId ? state.calc : null;
       state = fresh();
@@ -556,6 +653,10 @@
       render();
       load();
     },
-    activate() { if (!state.data && !state.loading) load(); else { render(); schedulePoll(); } },
+    activate() {
+      if (!state.data && !state.loading) load(); else { render(); schedulePoll(); }
+      const dock = getChatDock();
+      if (dock && !dock.isOn() && dock.wanted()) dock.setOn(true, false);
+    },
   };
 })();
