@@ -17,10 +17,9 @@ scope, so **no CASA assessment is needed**.
 
 ## Before you reply
 
-1. **Scope match.** In Cloud Console → `be-more-swan` → Google Auth Platform → Data Access, the list
-   must be **exactly** `youtube.upload` + `youtube.readonly`. Remove anything else, including
-   Search Console, Drive, Sheets or Gmail. Any mismatch is an automatic rejection, which is how
-   the Gmail submission failed on 2026-08-26.
+1. **Scope match.** ✅ Checked 2026-11-05: Data Access lists exactly `youtube.readonly` and
+   `youtube.upload` as sensitive, with nothing non-sensitive or restricted. The justification is
+   filled in (874/1000 characters).
 2. **Privacy policy.** ✅ Done 2026-11-05: privacy.html section 13 now has a "YouTube API Services" subsection (anchor `#youtube-api-services`). Deploy it to prod before replying. It says:
    - Be More Swan uses YouTube API Services, with links to the YouTube Terms of Service
      (https://www.youtube.com/t/terms) and the Google Privacy Policy
@@ -31,19 +30,45 @@ scope, so **no CASA assessment is needed**.
      protected (AES-256-GCM encrypted tokens, TLS), and how long we keep it.
    - How to revoke access, both in-app (Disconnect) and at
      https://security.google.com/settings/security/permissions.
-3. **Demo video.** Upload it to YouTube as unlisted. In order:
-   - Sign in → Connections → YouTube → Connect.
-   - On the Google consent screen, click "Show all services" so both scopes can be read.
-   - Back in the app, the connection card shows the channel name (`youtube.readonly`).
-   - Results tab shows the subscriber count; cut to YouTube Studio showing the same number.
-   - Approve a video → publish it → cut to YouTube Studio showing the video on the channel
-     (`youtube.upload`).
-   - Show the browser address bar while the consent screen is up, so the OAuth client ID is visible.
-4. **Reviewer access.** The staging reviewer sign-in is live until 2027-01-31
-   (`https://staging--bemoreswan.netlify.app/review-login.html`, account `bmsreview.test@gmail.com`;
-   the password is `REVIEW_LOGIN_PASSWORD` in Netlify). Check the staging callback URL is listed under
-   the YouTube OAuth client's authorised redirect URIs, and that the reviewer workspace can reach
-   the YouTube connection.
+3. **Demo video.** ✅ Mostly done: https://youtu.be/d1K6GqxN2pM is unlisted and playable for
+   anyone with the link (3:33, Be More Swan channel). Checked frame by frame on 2026-11-05. Its
+   captioned steps:
+   1. Assistant Profile → Connections → YouTube → Connect, recorded on staging.
+   2. Our own checklist pop-up, then "Continue to YouTube".
+   3. Google sign-in. The caption shows the OAuth client ID `218009229183-r5hkj9…` (the project's
+      only client).
+   4. Google's "hasn't verified this app" notice.
+   5. Consent screen showing both scopes: "Manage your YouTube videos" (upload) and "View your
+      YouTube account" (readonly).
+   6. Connected, with the channel name read via channels.list mine=true.
+   7. YouTube switched on for the assistant.
+   8–10. A YouTube Short is created, a video attached and titled, and the owner approves it:
+      "Post it now → Yes, publish now".
+   11. The upload runs with videos.insert (resumable).
+   12. The Short appears in YouTube Studio on the owner's channel, Public.
+
+   ⚠️ **Gap:** the video never shows the **subscriber count**, but both the Console
+   justification and the reply say `youtube.readonly` is used for it. Google asks you to
+   "demonstrate the full operational functionality of every requested scope", so this is the one
+   likely objection. Fix: add a ~15-second clip showing the assistant's Results tab → Autopilot card → "Audience"
+   chart with the YouTube subscriber count, then cut to YouTube Studio → Dashboard showing the same
+   number. Re-upload and replace the link.
+   Minor: the consent screen names the app "staging--bemoreswan.netlify.app" rather than "Be More
+   Swan". That is expected while branding is unverified, and isn't a reason to re-record.
+4. **Reviewer access.** ✅ Checked 2026-11-05:
+   - The staging sign-in is deployed: `https://staging--bemoreswan.netlify.app/review-login.html`
+     returns 200, the function answers GET with 405 (live), and `REVIEW_LOGIN_EXPIRES` is 2027-01-31.
+     The account is the code default `bmsreview.test@gmail.com`, because `REVIEW_LOGIN_EMAIL` is
+     unset. The password is `REVIEW_LOGIN_PASSWORD` in the Netlify branch-deploy context.
+   - The redirect URI is `https://staging--bemoreswan.netlify.app/api/oauth/youtube/callback`
+     (`${BASE_URL}/api/oauth/youtube/callback`). The video shows a successful connect on staging,
+     so it is registered on the YouTube client.
+   - **Not checked (needs a staging DB read):** whether the reviewer's workspace (org 58) still
+     contains only made-up data. Earlier notes say only the Lead Generator was ever cleaned, and
+     the video shows Felix with 50 posts waiting. Click through Felix's Review tab as the reviewer
+     before sending.
+   - Sign in once with the password yourself before sending it. Nobody has yet confirmed it works
+     end to end.
 
 ---
 
@@ -56,12 +81,13 @@ scope, so **no CASA assessment is needed**.
 >
 > **App and scopes**
 > Be More Swan (https://bemoreswan.com) is an AI marketing assistant for small businesses. It
-> drafts social posts and short videos, and publishes them only after the business owner approves
-> them. This project requests two scopes, both used only by the YouTube connection:
+> drafts social posts and short videos, and publishes them to the business's own accounts. This
+> project requests two scopes, both used only by the YouTube connection:
 >
-> 1. `https://www.googleapis.com/auth/youtube.upload`: when the user approves a video in the app,
->    we upload it to their own channel with videos.insert. Nothing is uploaded without the user
->    approving it first. This is the narrowest scope that allows uploading; we do not request
+> 1. `https://www.googleapis.com/auth/youtube.upload`: we upload the video, title and description
+>    to the channel the user connected, using videos.insert. A video is uploaded only after the
+>    user approves it, or if the user has chosen automatic publishing. Weekly Shorts made by the
+>    assistant are opt-in and upload as unlisted. This is the narrowest scope that allows uploading; we do not request
 >    `youtube` or `youtube.force-ssl` because we never edit, delete or comment on existing content.
 > 2. `https://www.googleapis.com/auth/youtube.readonly`: we call channels.list (mine=true) to show
 >    the connected channel's name on the connection card, so the user knows which channel will be
@@ -72,25 +98,31 @@ scope, so **no CASA assessment is needed**.
 > The scopes configured in Cloud Console exactly match the scopes the app requests. No restricted
 > scopes are requested.
 >
-> **Demo video (unlisted):** <VIDEO LINK>
-> The video shows the consent screen with every scope expanded, the channel name and statistics
-> appearing in the app, and an approved video being uploaded and then shown in YouTube Studio.
+> **Demo video (unlisted):** https://youtu.be/d1K6GqxN2pM
+> It was recorded on our staging environment, as your guidance asks for a live app. It shows the
+> OAuth client ID, the unverified-app notice, the consent screen with both scopes, the connected
+> channel's name and subscriber count in the app (youtube.readonly), and an approved video being
+> uploaded and then shown on the channel in YouTube Studio (youtube.upload).
 >
 > **Test access**
 > Sign-in page: https://staging--bemoreswan.netlify.app/review-login.html
 > Email: bmsreview.test@gmail.com
 > Password: <PASSWORD>
-> The account has no phone verification or payment step. After signing in: Connections → YouTube →
-> Connect, then sign in with any Google account that has a YouTube channel.
+> The account needs no phone verification or payment. After signing in: My Assistants → Felix →
+> Assistant Profile → Connections → YouTube → Connect, then sign in with any Google account that
+> has a YouTube channel. To publish: Posts → Create a Post → YouTube Short → attach a video →
+> approve → "Post it now". The subscriber count is on Felix's Results tab, in the "Audience" chart
+> of the Autopilot card.
 >
-> **Privacy policy:** https://bemoreswan.com/privacy (section 13, including its YouTube API
-> Services section). It states what YouTube data we access and why, that we share it with no
-> third party beyond our hosting sub-processors, how it is protected (tokens encrypted with
+> **Privacy policy:** https://bemoreswan.com/privacy#youtube-api-services (section 13). It states
+> what YouTube data we access and why, that we share it only with the service providers that run
+> the app (hosting, database, and AI providers who are contractually barred from training on it),
+> how it is protected (tokens encrypted with
 > AES-256-GCM, TLS in transit), how long we keep it and how it is deleted, and how users can revoke
 > access in the app or in their Google security settings. Google user data is never used for
 > advertising, never sold, and never used to train AI/ML models.
 >
-> **Use case:** publishing the user's own approved videos to their own channel. We do not reward
+> **Use case:** publishing the user's own videos to their own channel. We do not reward
 > viewers for subscribing, liking or any other interaction.
 >
 > Please let us know if you need anything else.
