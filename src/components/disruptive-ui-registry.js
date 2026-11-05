@@ -4451,6 +4451,47 @@
   }
   register('post_picture', renderPostPictureCard);
 
+  // { type: 'visual_brief_edit', briefId, message?, mood?, mustInclude?, mustAvoid?, summary }
+  // A change to what a brief asks for (src/utils/chat-brief-edit.ts). It only saves: making options, the
+  // part that can cost, stays the button on the brief. chat-session.js → brand-briefs.ts `edit`.
+  function renderVisualBriefEditCard(ui, esc) {
+    const briefId = Number(ui.briefId);
+    const rows = [['message', 'What it should show'], ['mood', 'Mood'], ['mustInclude', 'Must include'], ['mustAvoid', 'Must avoid']]
+      .filter(([k]) => typeof ui[k] === 'string' && ui[k].trim());
+    if (!Number.isInteger(briefId) || briefId <= 0 || !rows.length) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change this brief</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      ${rows.map(([k, label]) => `<p class="text-xs font-bold text-gray-700 mt-3">${esc(label)}</p>
+        <p class="text-sm text-gray-900 bg-white border border-indigo-200 rounded-lg px-3 py-2 mt-1 whitespace-pre-line">${esc(ui[k].trim())}</p>`).join('')}
+      <p class="text-xs text-gray-600 mt-2">This only saves the brief. Nothing is made until you ask for more options on it.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vbe-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save the change</button>
+        <button type="button" data-vbe-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vbe-status></p>`;
+    const status = el.querySelector('[data-vbe-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vbe-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-vbe-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('brief:edit', {
+        bubbles: true,
+        detail: { briefId, fields: Object.fromEntries(rows.map(([k]) => [k, ui[k].trim()])), respond({ ok, error }) {
+          if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
+          say('Saved. Ask for more options on the brief when you\'re ready; it says there what that costs.');
+        } },
+      }));
+    });
+    return el;
+  }
+  register('visual_brief_edit', renderVisualBriefEditCard);
+
   // The Email Studio's cards (src/utils/chat-email-parts.ts). Each one asks the open Studio to act
   // (newsletter.js), which says what happened; with the email not open, nothing can happen.
   function emailStudioCard(ui, esc, opts) {

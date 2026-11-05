@@ -27,7 +27,7 @@ import { adaptForModel, replyText } from '../../src/config/model-options';
 import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, blogPosts, newsletterIssues, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
+import { aiAssistants, assistantRecords, blogPosts, newsletterIssues, visualBriefs, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { appendFooter } from '../../src/utils/disclosure-footer';
 import { resolvePostFooter } from '../../src/utils/post-disclosure';
@@ -109,6 +109,7 @@ import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { confirmCardReply, missingCardReply, pictureReply, replyClaimsPicture } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
+import { briefEditFromUiElement, VISUAL_BRIEF_EDIT_TYPE, type BriefEditCard } from '../../src/utils/chat-brief-edit';
 import { postPartCardFromUiElement, POST_PICTURE_TYPE, POST_TEXT_EDIT_TYPE, type PostPartCard } from '../../src/utils/chat-post-parts';
 import { isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
@@ -1691,6 +1692,8 @@ BRIEFS FOR POSTS. When the Social Media Assistant drafts a post and finds no pic
 BRIEFS FROM CAMPAIGNS. The Campaign Assistant can commission a brief from you; those are marked in your list with the campaign they came from. The picture the user approves on one of them joins that campaign's own pictures, and marks the campaign's order done. You cannot take a campaign's work on yourself — campaigns are planned with the Campaign Assistant.
 
 CHOOSING. When the user says which options they want or do not want, emit a visual_option_review naming option ids from the list above — only ids listed there, never invented, and only options listed as waiting. Turning one down needs a reason; the next round reads it. Approving puts the picture in their library, where every assistant can use it.
+
+A PART THEY SELECTED. On the "Briefs" tab this chat sits beside their briefs, and the user can select one. Their message may then start "About this option on my brief N" or "About my brief N". For "more like this one, but brighter" or any other change to what a brief asks for, emit { "type": "visual_brief_edit", "briefId": N, "message": "<the whole new text, only if it changes>", "mood": "<only if it changes>", "mustInclude": "<only if it changes>", "mustAvoid": "<only if it changes>", "summary": "<one sentence: what changes>" }, working what they liked about that option into the words: you cannot show a designer a picture, only describe it. Keep the rest of what the brief says; invent nothing. It only saves the brief: nothing is made and nothing is spent until they press the button on the brief for more options, so tell them that, and never say the change has been made. Not for a flyer: its words are changed by a new flyer brief, as below.
 
 PICTURE GUIDELINES. The workspace's guidelines (listed above) are read by EVERY AI image any assistant here makes, not only yours — say so when you change them. When the user states a lasting rule ("never use handshakes", "we're always outdoors"), emit a brand_guideline_proposal carrying the WHOLE new text of each field it changes — the current text plus the change, never only the new part, because saving replaces the field. Stock photo search cannot filter by these: say so if they ask. They are also on Business Information ▸ Brand Assets ▸ Picture guidelines.
 
@@ -3968,6 +3971,17 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             }
         }
 
+        // "More like this one": a change to a brief (src/utils/chat-brief-edit.ts), for this workspace's own.
+        let briefEdit: BriefEditCard | null = null;
+        if (route === ROUTES.brand_designer && (uiElement as { type?: unknown } | null)?.type === VISUAL_BRIEF_EDIT_TYPE) {
+            const req = briefEditFromUiElement(uiElement);
+            const [brief] = req ? await db.select({ purpose: visualBriefs.purpose, status: visualBriefs.status }).from(visualBriefs)
+                .where(and(eq(visualBriefs.id, req.briefId), eq(visualBriefs.organisationId, orgId))).limit(1) : [];
+            briefEdit = req && brief && brief.purpose !== 'flyer' && brief.status !== 'cancelled' ? req : null;
+            uiElement = briefEdit;
+            if (!briefEdit) content = 'I couldn’t set that up on the brief, so nothing has changed. Which brief do you mean? You can also press Edit on it, on the "Briefs" tab.';
+        }
+
         // The cards behind "Select" on a text box or a picture (src/utils/chat-post-parts.ts): rebuilt
         // here, only for this workspace's own post, and only where a post is open to act through.
         let postPartCard: PostPartCard | null = null;
@@ -4124,7 +4138,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // does that, and a refused card's reply says it was refused (src/utils/confirm-card-reply.ts).
         // The voiceover actions on a post too: "I've added a voiceover" over a card nobody pressed.
         const voicePostCard = !!postAction && uiElement === postAction && ['voiceover', 'captions', 'time_text'].includes(postAction.action);
-        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || (!!emailPartCard && uiElement === emailPartCard) || voicePostCard)) {
+        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || (!!emailPartCard && uiElement === emailPartCard) || (!!briefEdit && uiElement === briefEdit) || voicePostCard)) {
             content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
         }
         // The Website Assistant can't make, find or place a picture in a reply — only its site_picture

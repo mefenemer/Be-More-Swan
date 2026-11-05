@@ -297,6 +297,7 @@
           ? `<button type="button" data-brief-preview="${o.id}" aria-label="${esc(`Preview ${o.prompt || 'this flyer'} larger`)}" class="block w-full h-full" style="cursor:zoom-in">${img}</button>`
           : img}</div>
         <p class="text-[11px] font-bold text-gray-600 mt-1">${o.flyer ? esc(o.prompt || 'Flyer') : esc(sourceLabel(o.source).replace(/s$/, ''))} · round ${o.round}</p>
+        ${chatPaneAvailable() ? `<button type="button" data-brief-select="${o.id}" data-brief="${b.id}" title="Ask ${esc(name())} about this one" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">🎯 Select</button>` : ''}
         ${o.flyer && o.url ? `<button type="button" data-brief-preview="${o.id}" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">Preview</button>` : ''}
         ${o.flyer && o.flyer.lowResPhoto ? '<p class="text-[11px] text-amber-700 mt-1">This photo may look soft when printed — try a smaller paper size or another round.</p>' : ''}
         ${credit}
@@ -582,8 +583,9 @@
           <h2 class="text-base font-bold text-gray-900"><span data-explain="brand-briefs">Briefs</span></h2>
           <p class="text-xs text-gray-500">Say what a picture or printed flyer is for. Approve the option that fits — it goes into your library for every assistant to use. Your flyers are listed here too.</p>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
           ${credits}
+          ${chatPaneAvailable() ? `<button type="button" data-brief-chat-toggle aria-pressed="${chatIsOn() ? 'true' : 'false'}" title="Show or hide the chat beside your briefs" class="btn-assistant border min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">💬 Chat with ${esc(name())}</button>` : ''}
           ${state.form ? '' : `${V().flyer ? '<button type="button" data-brief-new-flyer class="btn-secondary border min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New flyer</button>' : ''}
           <button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
         </div>
@@ -816,9 +818,25 @@
     }
 
     if (t('[data-brief-library]')) { window.loadView?.('my-content'); return; }
+    if (t('[data-brief-chat-toggle]')) { setChatOn(!chatIsOn(), true); return; }
+    const select = t('[data-brief-select]');
+    if (select) {
+      const b = state.briefs.find((x) => x.id === Number(select.dataset.brief));
+      const o = b && b.options.find((x) => x.id === Number(select.dataset.briefSelect));
+      if (!o) return;
+      const what = o.flyer ? (o.prompt || 'Flyer') : sourceLabel(o.source).replace(/s$/, '');
+      const about = o.prompt && !o.flyer ? `, showing: ${String(o.prompt).slice(0, 300)}` : '';
+      chatRefer({
+        label: `${what} on “${b.title}”`,
+        message: `About this option on my brief ${b.id} “${b.title}”: option ${o.id} (${what}, round ${o.round}${about}).`,
+      });
+      return;
+    }
     const chat = t('[data-brief-chat]');
     if (chat) {
       const b = state.briefs.find((x) => x.id === Number(chat.dataset.briefChat));
+      // With the docked chat here, talk it through there rather than in a pop-up.
+      if (b && chatPaneAvailable()) { chatRefer({ label: `Brief “${b.title}”`, message: `About my brief ${b.id} “${b.title}”.` }); return; }
       window.openAssistantChat?.({ assistantId: state.assistantId, draft: b ? `About the brief "${b.title}": ` : '' });
       return;
     }
@@ -1031,8 +1049,86 @@
     load();
   });
 
+  // ── The chat docked beside the briefs (chat-pane.js) ─────────────────────────────────────────────
+  // Owner, 2026-11-05: the Website tab's pane, for the Brand Designer. One conversation for the tab, because
+  // it is a list of briefs and the chat already knows them all (buildBriefsSnapshot). "Select" is a button on
+  // each option rather than a mode: there is nothing to pick from but the options, and this way it is there
+  // at any scroll position, on a phone too. The layout is built here, around #briefs-host, which render()
+  // replaces the contents of. Below 1280 the chat goes over the right edge, with its own ✕.
+  const CHAT_ON_KEY = 'bms-brief-chat-on';
+  const chat = { pane: null, on: false };
+  const chatPaneAvailable = () => !!window.ChatPane?.available?.() && !!state.assistantId;
+  const chatIsOn = () => chat.on;
+  function chatWanted() {
+    try { const v = localStorage.getItem(CHAT_ON_KEY); if (v === '1' || v === '0') return v === '1'; } catch { /* private window */ }
+    return window.innerWidth >= 1440;   // on by default where the options keep their room beside it
+  }
+  function chatDestroy() {
+    if (chat.pane) { try { chat.pane.destroy(); } catch { /* gone */ } }
+    chat.pane = null;
+  }
+  function chatLayout() {
+    const host = document.getElementById('briefs-host');
+    if (!host) return null;
+    if (!document.getElementById('briefs-chat-css')) {
+      const css = document.createElement('style');
+      css.id = 'briefs-chat-css';
+      css.textContent = `
+        #briefs-chat-col { display: none; }
+        #briefs-layout.briefs-chat-on #briefs-chat-col { display: block; }
+        #briefs-chat-host { height: 100%; }
+        @media (min-width: 1280px) {
+          #briefs-layout.briefs-chat-on { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
+          #briefs-layout.briefs-chat-on #briefs-chat-col { position: sticky; top: 76px; height: calc(100vh - 92px); }
+        }
+        @media (max-width: 1279px) {
+          #briefs-layout.briefs-chat-on #briefs-chat-col { position: fixed; top: 76px; right: 12px; bottom: 12px; z-index: 40; width: min(420px, calc(100vw - 24px)); box-shadow: 0 18px 50px rgba(0,0,0,.25); border-radius: 16px; }
+        }`;
+      document.head.appendChild(css);
+    }
+    let layout = document.getElementById('briefs-layout');
+    if (!layout) {
+      layout = document.createElement('div');
+      layout.id = 'briefs-layout';
+      host.parentNode.insertBefore(layout, host);
+      layout.appendChild(host);
+      host.classList.add('min-w-0');
+      const col = document.createElement('aside');
+      col.id = 'briefs-chat-col';
+      col.setAttribute('aria-label', 'Chat with your assistant');
+      col.innerHTML = '<div id="briefs-chat-host"></div>';
+      layout.appendChild(col);
+    }
+    return layout;
+  }
+  function setChatOn(on, remember) {
+    const layout = chatLayout();
+    if (!layout || !chatPaneAvailable()) return;
+    chat.on = !!on;
+    if (remember) { try { localStorage.setItem(CHAT_ON_KEY, on ? '1' : '0'); } catch { /* private window */ } }
+    layout.classList.toggle('briefs-chat-on', chat.on);
+    const toggle = document.querySelector('[data-brief-chat-toggle]');
+    if (toggle) toggle.setAttribute('aria-pressed', chat.on ? 'true' : 'false');
+    state.painted.toolbar = toolbarHtml();
+    if (!chat.on || chat.pane) { if (chat.on) chat.pane.focus(); return; }
+    chat.pane = window.ChatPane.mount(document.getElementById('briefs-chat-host'), {
+      assistantId: state.assistantId, assistantName: name(), roleKey: 'brand_designer',
+      rememberKey: `bms-brief-chat:${state.assistantId}`,
+      placeholder: 'Ask for a picture or a flyer, or 🎯 Select an option…',
+      starterPrompts: ['I need a picture for a post.', 'Make me a printed flyer.', 'Which of these options would you choose?'],
+      composerRows: 3,
+      onClose: () => setChatOn(false, true),
+    });
+  }
+  function chatRefer(ref) {
+    setChatOn(true, !chat.on);
+    chat.pane?.setReference(ref);
+  }
+
   window.AssistantBriefs = {
     init({ assistantId, assistantName }) {
+      chatDestroy();
+      chat.on = false;
       state.assistantId = assistantId;
       state.assistantName = assistantName || null;
       state.rendered = false;
@@ -1048,6 +1144,7 @@
       if (state.rendered) return;
       state.rendered = true;
       render();
+      if (chatPaneAvailable() && chatWanted()) setChatOn(true, false);
     },
   };
 })();

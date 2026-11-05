@@ -2154,6 +2154,22 @@
       document.dispatchEvent(new CustomEvent('brief:changed', { detail: { assistantId } }));
     }
 
+    // "Save the change" on a visual_brief_edit card: brand-briefs.ts `edit`, the Briefs tab's own action.
+    async function onBriefEdit(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const res = await fetch('/.netlify/functions/brand-briefs', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ action: 'edit', briefId: d.briefId, ...d.fields }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That couldn’t be saved (HTTP ${res.status}).`);
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('brief:changed', { detail: { assistantId } }));
+      } catch (err) { respond({ ok: false, error: err.message }); }
+    }
+
     // "Save these changes" on a campaign_edit_proposal card. Sends ONLY the descriptive fields,
     // and marks the call viaChat so the server refuses any budget field outright — a chat turn
     // may never raise a ceiling, whatever a card happens to carry.
@@ -2423,6 +2439,7 @@
     container.addEventListener('platforms:change', onPlatformsChange);
     container.addEventListener('library:add', onLibraryAdd);
     container.addEventListener('brief:review', onBriefReview);
+    container.addEventListener('brief:edit', onBriefEdit);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
     container.addEventListener('siteaudit:save', onSiteAuditSave);
@@ -2532,6 +2549,7 @@
         container.removeEventListener('platforms:change', onPlatformsChange);
         container.removeEventListener('library:add', onLibraryAdd);
         container.removeEventListener('brief:review', onBriefReview);
+        container.removeEventListener('brief:edit', onBriefEdit);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);
         container.removeEventListener('siteaudit:save', onSiteAuditSave);

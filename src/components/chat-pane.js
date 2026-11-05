@@ -2,7 +2,7 @@
  * src/components/chat-pane.js — an assistant's chat DOCKED beside what it works on (owner, 2026-11-05:
  * "loving the chat pane on the right"). First built inside the Website tab; shared here so every
  * assistant's editor can have one: the Website tab (assistant-site-editor.js), the Blog Studio
- * (blog-studio-modal.js), the post editor (workspace.html), and next the email designer.
+ * (blog-studio-modal.js), the post editor (workspace.html), the Email Studio (newsletter.js) and the Brand Designer's Briefs tab.
  *
  *   const pane = window.ChatPane.mount(container, {
  *     assistantId, assistantName, roleKey,
