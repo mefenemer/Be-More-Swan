@@ -157,11 +157,13 @@ check('Business Information ▸ Brand Assets has the section and saves through t
     assert.match(page, /const wanted = window\._bizinfoInitialTab;\s*window\._bizinfoInitialTab = null;/, 'the deep link is one-shot');
 });
 
-check('the Briefs tab shows them, in its brand style panel; Brand Assets only if the pop-up is missing', () => {
+check('the profile\'s Brand Knowledge shows them (owner 2026-11-05); Brand Assets only if the pop-up is missing', () => {
+    const card = read('src/components/brand-style-card.js');
+    assert.match(card, /window\.BrandStyleDialog\.open\(/);
+    assert.match(card, /window\._bizinfoInitialTab = 'assets';\s*if \(window\.loadView\) window\.loadView\('assets'\)/);
     const tab = read('src/components/assistant-briefs.js');
-    assert.match(tab, /function styleHtml\(\)/);
-    assert.match(tab, /window\.BrandStyleDialog\.open\(/);
-    assert.match(tab, /window\._bizinfoInitialTab = 'assets';\s*if \(window\.loadView\) window\.loadView\('assets'\)/);
+    assert.ok(tab.includes("document.getElementById('tab-strategy')") && !tab.includes('function styleHtml()'), 'in the profile, not above the briefs');
+    assert.ok(read('workspace.html').includes('<script src="/src/components/brand-style-card.js"></script>'));
     assert.match(code(read('netlify/functions/brand-briefs.ts')), /readBrandGuidelines\(db, orgId\)\.catch\(\(\) => null\)/);
 });
 

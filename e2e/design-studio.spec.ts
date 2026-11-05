@@ -198,7 +198,7 @@ test.describe('the questions go straight to the editor', () => {
         await input.press('Enter');
         await expect(page.locator('[data-brief-tab="making"]')).toHaveAttribute('aria-selected', 'true');
         await expect(page.locator('[data-brief-card="12"]')).toBeVisible();
-        await expect(page.locator('[data-design-studio], [data-brief-studio-wait]')).toHaveCount(0);
+        await expect(page.locator('[data-design-studio]')).toHaveCount(0);
         expect(pageErrors).toEqual([]);
     });
 
@@ -239,7 +239,14 @@ test.describe('the questions go straight to the editor', () => {
         await page.getByRole('button', { name: 'Save and make the flyer' }).click();
         await expect.poll(() => calls.includes('generate')).toBe(true);
         expect(calls.indexOf('edit')).toBeLessThan(calls.indexOf('generate'));
-        await expect(page.locator('[data-brief-studio-wait]')).toContainText('is making');
+        // No waiting screen (owner 2026-11-05): the brief moves to "Being made", with a half see-through pop-up.
+        await expect(page.locator('[data-design-studio]')).toHaveCount(0);
+        await expect(page.locator('[data-brief-tab="making"]')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('[data-brief-card="12"]')).toBeVisible();
+        const notice = page.locator('#brief-notice');
+        await expect(notice).toContainText('Mira is making your flyer');
+        await expect(notice).toHaveCSS('background-color', 'rgba(17, 24, 39, 0.5)');
+        await page.screenshot({ path: 'test-results/briefs-making-notice.png' });
         expect(pageErrors).toEqual([]);
     });
 
@@ -281,6 +288,39 @@ test.describe('the questions go straight to the editor', () => {
         await expect(page.getByRole('button', { name: 'Edit flyer' })).toHaveCount(0);
         await edit.click();
         await expect(page.locator('[data-brief-edit-keeps]')).toContainText('The 1 flyer page already made stay as they are');
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('every brief can be hidden and shown, remembered; Hide all and Show all for the tab', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        store.brief = { ...store.brief };
+        const second = { ...store.brief, id: 13, title: 'Second flyer', options: [{ ...(store.brief.options as Record<string, unknown>[])[0], id: 78 }] };
+        let base: ((route: unknown, body: unknown) => unknown) | null = null;
+        stubBriefs({ set: (_n: string, h: typeof base) => { base = h; } } as unknown as ApiStub);
+        api.set('brand-briefs', (route, body) => {
+            const out = base!(route, body) as Record<string, unknown>;
+            if ((body as { action?: string })?.action === 'list') return { ...out, briefs: [store.brief, second] };
+            return out;
+        });
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-tab="review"]').click();
+        const toggle = page.locator('[data-brief-toggle="12"]');
+        await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+        await expect(page.locator('[data-brief-body="12"]')).toBeVisible();
+        await toggle.click();
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.locator('[data-brief-body="12"]')).toBeHidden();
+        await expect(page.locator('[data-brief-body="13"]')).toBeVisible();
+        await page.reload();
+        await page.locator('[data-brief-tab="review"]').click();
+        await expect(page.locator('[data-brief-body="12"]')).toBeHidden();
+        await page.getByRole('button', { name: 'Hide all' }).click();
+        await expect(page.locator('[data-brief-body="13"]')).toBeHidden();
+        await page.screenshot({ path: 'test-results/briefs-collapsed.png' });
+        await page.getByRole('button', { name: 'Show all' }).click();
+        await expect(page.locator('[data-brief-body="12"]')).toBeVisible();
+        await expect(page.locator('[data-brief-body="13"]')).toBeVisible();
         expect(pageErrors).toEqual([]);
     });
 });

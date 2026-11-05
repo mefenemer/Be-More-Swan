@@ -8,11 +8,11 @@ const PICTURE = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www
 
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="/style.css"></head><body class="bg-gray-50">
-  <div class="page-wide p-4"><div id="maintab-briefs"><div id="briefs-host"></div></div></div>
+  <div class="page-wide p-4"><div id="tab-strategy" class="space-y-6"></div><div id="maintab-briefs"><div id="briefs-host"></div></div></div>
   <script src="/src/components/scroll-lock.js"></script><script src="/dialogs.js"></script>
   <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/chat-pane.js"></script>
   <script src="/src/generated/platform-constants.js"></script><script src="/src/components/font-picker.js"></script><script src="/src/components/brand-style-dialog.js"></script>
-  <script src="/src/components/assistant-briefs.js"></script>
+  <script src="/src/components/brand-style-card.js"></script><script src="/src/components/assistant-briefs.js"></script>
   <script>AssistantBriefs.init({ assistantId: 4, assistantName: 'Mira' }); setTimeout(() => AssistantBriefs.activate(), 50);</script>
 </body></html>`;
 
@@ -201,7 +201,7 @@ test.describe('Love Cat feedback (2026-11-05)', () => {
         expect(pageErrors).toEqual([]);
     });
 
-    test('brand style opens here: says plainly nothing is chosen, fonts show in a list with an example, saves only what changed', async ({ page, api, pageErrors }) => {
+    test('brand style is in the profile (owner 2026-11-05), not above the briefs: says plainly nothing is chosen, fonts show in a list with an example, saves only what changed', async ({ page, api, pageErrors }) => {
         stubStages(api);
         const calls: Array<{ method: string; body: unknown }> = [];
         await page.route('**/.netlify/functions/brand-kit', async (r) => {
@@ -211,8 +211,10 @@ test.describe('Love Cat feedback (2026-11-05)', () => {
             return r.fulfill({ json: { ok: true, dataUrl: PICTURE, brandKit: {} } });
         });
         await open(page);
-        await expect(page.locator('[data-brief-style]').getByText('No brand colours chosen yet')).toBeVisible();
-        await page.locator('[data-brief-edit-style]').click();
+        await expect(page.locator('#briefs-host [data-brief-style], #briefs-host [data-brand-style-edit]')).toHaveCount(0);
+        const card = page.locator('#tab-strategy > #module-brand-style');
+        await expect(card.getByText('No brand colours chosen yet')).toBeVisible();
+        await card.locator('[data-brand-style-edit]').click();
         const dialog = page.getByRole('dialog');
         await expect(dialog.getByText(/You have not chosen brand colours yet/)).toBeVisible();
         await dialog.locator('[data-fp-toggle]').click();

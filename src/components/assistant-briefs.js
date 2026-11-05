@@ -160,6 +160,11 @@
     // The page's Needs-you strip counts the same briefs as this badge.
     window._setNeedsYouCount?.(n);
     window._setNextUp?.(nextUpLine());
+    // The compact header's Needs-you card lists them, each opening its brief on "To review".
+    window._setNeedsYouItems?.(inTab('review').slice(0, 3).map((b) => {
+      const w = b.options.filter((o) => o.status === 'proposed').length;
+      return { id: b.id, label: b.title || 'Untitled brief', sub: `${w} option${w === 1 ? '' : 's'} to choose from` };
+    }));
     el.classList.toggle('hidden', n === 0);
     // `hidden` loses to inline-flex (equal specificity, later in style.css) — pin it inline too.
     el.style.display = n === 0 ? 'none' : '';
@@ -443,16 +448,22 @@
       flyer ? (b.sources.length ? `photo from ${b.sources.map(sourceLabel).join(' or ')}` : 'words only') : b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '', b.origin === 'campaign' && !b.requestedBy ? 'from a campaign' : '', b.origin === 'assistant' && !b.requestedBy ? 'raised by your Social Media Assistant' : '']
       .filter(Boolean).map(esc).join(' · ');
     const live = b.status !== 'cancelled';
+    const open = !isCollapsed(b.id);
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5" data-brief-card="${b.id}">
         <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="text-sm font-bold text-gray-900 break-words">${esc(b.title)}</p>
-            <p class="text-xs text-gray-500 mt-0.5">${meta}</p>
-            ${b.requestedBy && window.rqRequestedPill ? `<div class="flex mt-1.5">${window.rqRequestedPill(b.requestedBy)}</div>` : ''}
-          </div>
+          <button type="button" data-brief-toggle="${b.id}" aria-expanded="${open}" aria-controls="brief-body-${b.id}" class="min-w-0 flex items-start gap-2 text-left flex-1 rounded-lg -m-1 p-1 hover:bg-gray-50">
+            <span aria-hidden="true" class="text-gray-500 text-xs mt-0.5 inline-block transition-transform" style="transform:rotate(${open ? 90 : 0}deg)">▶</span>
+            <span class="min-w-0">
+              <span class="block text-sm font-bold text-gray-900 break-words">${esc(b.title)}</span>
+              <span class="block text-xs text-gray-500 mt-0.5">${meta}</span>
+              <span class="sr-only">${open ? 'Hide details' : 'Show details'}</span>
+            </span>
+          </button>
           ${chip(b)}
         </div>
+        ${b.requestedBy && window.rqRequestedPill ? `<div class="flex mt-1.5">${window.rqRequestedPill(b.requestedBy)}</div>` : ''}
+        <div id="brief-body-${b.id}" data-brief-body="${b.id}" ${open ? '' : 'hidden'}>
         ${b.scheduledPostId ? '<p class="text-xs text-gray-700 mt-1">For a social post that found no picture — the one you approve goes onto that post if it still has none.</p>' : ''}
         ${b.campaign ? `<p class="text-xs text-gray-700 mt-1 break-words">For the campaign “${esc(b.campaign.objective)}” — the picture you approve joins that campaign's pictures.</p>` : ''}
         ${b.message ? `<p class="text-sm text-gray-700 mt-2 break-words">${esc(b.message)}</p>` : ''}
@@ -482,7 +493,61 @@
           </div>
           ${progress(b).done ? '' : `<p class="text-[11px] text-gray-500 mt-1">${esc(flyer ? flyerCostLine(b) : roundCostLine(b))}</p>
           ${flyer ? '' : videoOfferHtml(b)}`}` : ''}
+        </div>
       </div>`;
+  }
+
+  // ── "Your brand style" in the profile's Brand Knowledge section (owner 2026-11-05: not above the briefs) ──
+  // Added from here because init() only ever runs for a Brand Designer, so no other role's profile gets it.
+  function mountProfileStyle() {
+    const section = document.getElementById('tab-strategy');
+    if (!section || !window.BrandStyleCard) return;
+    let el = document.getElementById('module-brand-style');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'module-brand-style';
+      el.className = 'bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8';
+      section.prepend(el);
+    }
+    window.BrandStyleCard.mount(el, { assistantName: state.assistantName });
+  }
+
+  // ── "It is being made" pop-up (owner 2026-11-05: half see-through, over the page, not a screen of its own) ──
+  function makingNotice(b) {
+    const what = isFlyer(b) ? 'your flyer' : isVideoBrief(b) ? 'your video' : 'your pictures';
+    showNotice(`${name()} is making ${what}. It will be under “To review” in about a minute, ready to open in the editor.`);
+  }
+  function showNotice(text) {
+    document.getElementById('brief-notice')?.remove();
+    const el = document.createElement('div');
+    el.id = 'brief-notice';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:10600;max-width:min(420px,calc(100vw - 32px));'
+      + 'background:rgba(17,24,39,0.5);color:#fff;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border-radius:16px;padding:18px 22px;'
+      + 'font-size:15px;font-weight:700;line-height:1.4;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.2);cursor:pointer;text-shadow:0 1px 2px rgba(0,0,0,.4)';
+    el.textContent = text;
+    el.title = 'Click to close';
+    el.addEventListener('click', () => el.remove());
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 6000);
+  }
+
+  // ── Show or hide a brief (owner 2026-11-05: every tab's briefs expandable/collapsible) ─────
+  // Remembered per assistant in this browser. Open unless hidden; "Hide all" / "Show all" per tab.
+  const collapseKey = () => `bms-briefs-collapsed-${state.assistantId}`;
+  let collapsedIds = null;
+  function collapsedSet() {
+    if (collapsedIds) return collapsedIds;
+    try { collapsedIds = new Set(JSON.parse(localStorage.getItem(collapseKey()) || '[]').map(Number)); }
+    catch { collapsedIds = new Set(); }
+    return collapsedIds;
+  }
+  const isCollapsed = (id) => collapsedSet().has(Number(id));
+  function setCollapsed(ids, hide) {
+    const set = collapsedSet();
+    ids.forEach((id) => (hide ? set.add(Number(id)) : set.delete(Number(id))));
+    try { localStorage.setItem(collapseKey(), JSON.stringify([...set].slice(-500))); } catch { /* private window */ }
   }
 
   /** A flyer round: the pages are drawn free; only an AI photo costs. Said before the click. */
@@ -660,34 +725,7 @@
    * What every round starts from: the brand kit and the picture guidelines, both changed in a pop-up here
    * (brand-style-dialog.js) or in chat, so nobody has to leave the Brand Designer to see or change them.
    */
-  function styleHtml() {
-    const g = state.guidelines;
-    if (g === undefined) return '';
-    const kit = state.brandKit;
-    const link = '<button type="button" data-brief-edit-style class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-1.5 text-xs font-bold rounded-lg flex-shrink-0">View or change</button>';
-    if (g === null || !kit) return `<div class="flex items-center justify-between gap-3 bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4"><p class="text-xs text-gray-600">Your brand style could not be read just now.</p>${link}</div>`;
-    const unset = kit.source !== 'manual' && kit.source !== 'website';
-    const swatch = (c, label) => `<span title="${esc(label)}: ${esc(c)}" class="inline-block w-6 h-6 rounded-full border border-gray-300" style="background:${esc(c)}"></span>`;
-    const parts = [
-      g.photoStyle ? `<span class="font-bold">Style:</span> ${esc(g.photoStyle)}` : '',
-      g.mustInclude ? `<span class="font-bold">Include:</span> ${esc(g.mustInclude)}` : '',
-      g.mustAvoid ? `<span class="font-bold">Never show:</span> ${esc(g.mustAvoid)}` : '',
-    ].filter(Boolean);
-    if (kit.fontFamily) window.FontPicker?.loadFamily(kit.fontFamily);
-    return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4" data-brief-style>
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex flex-wrap items-center gap-3 min-w-0">
-            <p class="text-xs font-bold text-gray-700"><span data-explain="brand-guidelines">Your brand style</span></p>
-            <span class="inline-flex items-center gap-1">${unset ? '' : `${swatch(kit.primaryColor, 'Main colour')}${swatch(kit.backgroundColor, 'Background')}${swatch(kit.textColor, 'Text')}`}${(g.secondaryColors || []).map((c) => swatch(c, 'Extra colour')).join('')}</span>
-            ${unset ? '<span class="text-xs font-semibold text-amber-900">No brand colours chosen yet</span>' : ''}
-            <span class="text-sm text-gray-900 truncate" ${kit.fontFamily ? `style="font-family:'${esc(kit.fontFamily)}', system-ui, sans-serif"` : ''}>${esc(kit.fontFamily || 'Our standard font')}</span>
-          </div>
-          ${link}
-        </div>
-        <p class="text-xs text-gray-600 mt-2">${parts.length ? parts.join(' · ') : 'No picture guidelines yet. Add a photo style and anything pictures must never show.'}</p>
-      </div>`;
-  }
+  // "Your brand style" moved to the profile's Brand Knowledge section: src/components/brand-style-card.js.
 
   function emptyState() {
     return `
@@ -729,11 +767,12 @@
     const shown = inTab(state.tab);
     host.innerHTML = `
       ${toolbarHtml()}
-      ${styleHtml()}
       ${formHtml()}
       ${state.briefs.length || state.form ? tabsHtml() : ''}
       <div id="brief-tab-panel" role="tabpanel" aria-labelledby="brief-tab-${tab.key}" class="${state.picking ? 'brief-picking' : ''}">
-        ${!state.briefs.length && !state.form ? emptyState() : shown.length ? `<p class="text-xs text-gray-600 mb-3">${esc(tab.help)}</p>` : `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-600">${esc(tab.empty)}</p></div>`}
+        ${!state.briefs.length && !state.form ? emptyState() : shown.length ? `<div class="flex flex-wrap items-center justify-between gap-2 mb-3"><p class="text-xs text-gray-600">${esc(tab.help)}</p>${shown.length > 1 ? (shown.every((b) => isCollapsed(b.id))
+          ? '<button type="button" data-brief-expand-all class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold">Show all</button>'
+          : '<button type="button" data-brief-collapse-all class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold">Hide all</button>') : ''}</div>` : `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-600">${esc(tab.empty)}</p></div>`}
         <div class="space-y-4">${shown.map(briefCard).join('')}</div>
       </div>`;
     ensurePickCss();
@@ -768,14 +807,10 @@
     closeStudioInstance();
     const first = state.studio.optionId || (b.options.filter(canEdit)[0] || {}).id;
     if (!first) {
-      // Still being made, or the round stopped with nothing to edit: never a blank editor.
-      const making = b.status === 'generating';
-      host.innerHTML = `
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center" data-brief-studio-wait>
-          <p class="text-base font-bold text-gray-900">${making ? `${esc(name())} is making “${esc(b.title)}”` : `Nothing to edit on “${esc(b.title)}” yet`}</p>
-          <p class="text-sm text-gray-600 mt-2">${making ? 'It opens here as soon as it is ready, usually in about a minute.' : esc(b.generationNote || 'Ask for options on the brief to get it going.')}</p>
-          <button type="button" data-brief-studio-back class="btn-secondary border min-h-[44px] sm:min-h-0 px-4 py-2 mt-4 text-sm font-bold rounded-lg">Back to briefs</button>
-        </div>`;
+      // Nothing to edit (still being made, or nothing came back): back to the brief on its tab, never a waiting screen.
+      state.studio = null;
+      state.tab = tabOf(b);
+      render();
       return;
     }
     state.studio.optionId = first;
@@ -798,6 +833,17 @@
   }
   function openStudio(briefId, optionId) {
     state.picking = false;
+    // Nothing to edit yet (it is still being made): the brief on its tab and a pop-up, never a waiting screen.
+    const b = state.briefs.find((x) => x.id === briefId);
+    if (b && !optionId && !b.options.some(canEdit)) {
+      state.studio = null;
+      closeStudioInstance();
+      state.tab = tabOf(b);
+      setCollapsed([b.id], false);
+      render();
+      if (b.status === 'generating') makingNotice(b);
+      return;
+    }
     state.studio = { briefId, optionId: optionId || null };
     render();
     document.getElementById('briefs-host')?.scrollIntoView({ block: 'start' });
@@ -868,9 +914,10 @@
       await post({ action: 'generate', briefId });
       say(briefId, null);
       state.tab = 'making';
-      // Pictures and flyers: watch it being made in the editor, which opens on it when ready. Videos stay on the tabs.
+      // Stay on the Briefs tab, on "Being made", with a pop-up saying so (owner 2026-11-05: no waiting screen).
       const b = state.briefs.find((x) => x.id === briefId);
-      if (b && !isVideoBrief(b) && window.DesignStudio) state.studio = { briefId, optionId: null };
+      setCollapsed([briefId], false);
+      if (b) makingNotice(b);
     } catch (err) {
       say(briefId, err.message, 'error');
     } finally {
@@ -901,25 +948,25 @@
       }
     }
     if (t('[data-brief-pick]')) { setPicking(!state.picking); return; }
+    const toggle = t('[data-brief-toggle]');
+    if (toggle && !state.picking) {
+      const id = Number(toggle.dataset.briefToggle);
+      setCollapsed([id], !isCollapsed(id));
+      render();
+      document.querySelector(`[data-brief-toggle="${id}"]`)?.focus();
+      return;
+    }
+    if (t('[data-brief-collapse-all]') || t('[data-brief-expand-all]')) {
+      setCollapsed(inTab(state.tab).map((b) => b.id), !!t('[data-brief-collapse-all]'));
+      render();
+      return;
+    }
     const toStudio = t('[data-brief-open-studio]');
     if (toStudio) { openStudio(Number(toStudio.dataset.brief), Number(toStudio.dataset.briefOpenStudio)); return; }
     if (t('[data-brief-studio-back]')) { state.studio = null; render(); return; }
     const tabBtn = t('[data-brief-tab]');
     if (tabBtn) { openTab(tabBtn.dataset.briefTab, false); return; }
     if (t('[data-brief-new]')) { startNewBrief(); return; }
-    if (t('[data-brief-edit-style]')) {
-      if (window.BrandStyleDialog && window.FontPicker) {
-        window.BrandStyleDialog.open({
-          assistantName: name(),
-          onSaved: () => load(),
-          onAskChat: chatPaneAvailable() ? () => askChat('Help me choose my brand colours and font. Ask me a few quick questions first.') : null,
-        });
-        return;
-      }
-      window._bizinfoInitialTab = 'assets';
-      if (window.loadView) window.loadView('assets');
-      return;
-    }
     if (t('[data-brief-form-close]')) { state.form = null; render(); return; }
     if (t('[data-brief-reject-cancel]')) { state.rejecting = null; render(); return; }
 
@@ -1338,6 +1385,7 @@
       chatDock = null;
       state.assistantId = assistantId;
       state.assistantName = assistantName || null;
+      collapsedIds = null;
       state.rendered = false;
       state.form = null;
       state.tab = null;
@@ -1349,6 +1397,18 @@
       state.own = { briefId: null, library: null, error: null, selected: new Set(), busy: false, status: '' };
       // Eager: the count drives the tab badge, visible from every tab.
       load();
+      mountProfileStyle();
+    },
+    /** The Needs-you card's buttons: the Briefs tab on "To review", one brief opened and in view. */
+    openReview(briefId) {
+      window._activateMainTab?.('briefs');
+      if (briefId != null) setCollapsed([briefId], false);
+      state.tab = 'review';
+      state.rendered = true;
+      render();
+      if (briefId != null) {
+        setTimeout(() => document.querySelector(`[data-brief-card="${Number(briefId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+      }
     },
     /** Called on first activation of the tab. */
     activate() {

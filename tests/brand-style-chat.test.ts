@@ -69,8 +69,8 @@ check('the chat talks style through, never calls an unset kit their brand, and n
     assert.ok(prompt.includes('(!!brandStyle && uiElement === brandStyle)'), 'the reply cannot claim it is done');
 });
 check('Edit no longer leaves the page when the pop-up is there; the pop-up saves only what changed', () => {
-    const tab = read('src/components/assistant-briefs.js');
-    assert.ok(tab.includes('window.BrandStyleDialog.open(') && !tab.includes('data-brief-edit-guidelines'));
+    const tab = read('src/components/brand-style-card.js');
+    assert.ok(tab.includes('window.BrandStyleDialog.open(') && !read('src/components/assistant-briefs.js').includes('data-brief-edit-guidelines'));
     const dlg = read('src/components/brand-style-dialog.js');
     assert.ok(dlg.includes('if (Object.keys(kitPatch).length) await call(\'PATCH\', kitPatch);') && dlg.includes('if (gChanged) await call('));
 });
