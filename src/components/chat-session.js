@@ -109,9 +109,10 @@
     const hasHistory = (props.initialMessages || []).some(
       (m) => m && m.role !== 'system' && typeof m.content === 'string'
     );
-    const starterPrompts = !hasHistory && window.AssistantStarterPrompts
-      ? window.AssistantStarterPrompts.get(props.roleKey)
-      : null;
+    // props.starterPrompts: a surface's own first prompts (the Website tab's chat pane on a new site).
+    const starterPrompts = hasHistory ? null
+      : Array.isArray(props.starterPrompts) && props.starterPrompts.length ? props.starterPrompts
+      : window.AssistantStarterPrompts ? window.AssistantStarterPrompts.get(props.roleKey) : null;
 
     // Read-only: an ARCHIVED conversation. chat-orchestrator.ts 409s on a non-active session, so
     // a composer here would only ever produce an error — the transcript is still worth reading,
@@ -160,12 +161,13 @@
         <div class="border-t border-gray-200 bg-white px-4 sm:px-6 py-4">
           <div class="hidden mb-2 text-sm text-red-600 font-semibold" data-chat-error role="alert"></div>
           ${canAttach ? '<div class="hidden flex-wrap gap-2 mb-2" data-chat-chips></div>' : ''}
+          <div class="mb-2" data-chat-ref style="display:none"></div>
           <form class="flex items-end gap-3" data-chat-form>
             ${canAttach ? `<label class="btn-secondary border px-3 py-3 rounded-lg cursor-pointer shrink-0 text-sm" title="Attach pictures or documents (Word, PDF, text)">
               <span aria-hidden="true">📎</span><span class="sr-only">Attach pictures or documents</span>
               <input type="file" multiple hidden data-chat-attach accept="image/*,.docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
             </label>` : ''}
-            <textarea rows="1" placeholder="${canAttach ? 'Type your message, or attach pictures and documents…' : 'Type your message…'}" maxlength="${MAX_MESSAGE_CHARS}"
+            <textarea rows="1" placeholder="${escapeHtml(props.placeholder || (canAttach ? 'Type your message, or attach pictures and documents…' : 'Type your message…'))}" maxlength="${MAX_MESSAGE_CHARS}"
               class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm bg-white resize-none max-h-40"
               data-chat-input></textarea>
             <button type="submit"
@@ -182,6 +184,27 @@
     const sendBtn = container.querySelector('[data-chat-send]');
     const errorEl = container.querySelector('[data-chat-error]');
     const chipsEl = container.querySelector('[data-chat-chips]');
+    const refEl = container.querySelector('[data-chat-ref]');
+
+    // ── A reference to something on screen (the Website tab's "Select" picker) ──
+    // { label: '<short, shown on the chip>', message: '<what the assistant is told it refers to>' }.
+    // Shown as a chip above the composer; the next message is sent with `message` in front of what
+    // they typed, then the chip clears. The user's own bubble shows the whole thing, so nothing is
+    // sent that they could not see.
+    let reference = null;
+    function setReference(ref) {
+      reference = ref && typeof ref.message === 'string' && ref.message.trim()
+        ? { label: String(ref.label || ref.message).slice(0, 140), message: String(ref.message).slice(0, 600) } : null;
+      if (!refEl) return;
+      refEl.style.display = reference ? '' : 'none';
+      refEl.innerHTML = reference ? `
+        <span class="inline-flex items-center gap-2 max-w-full rounded-lg pl-3 pr-1 py-1 text-xs font-semibold" style="background:#fdf2f8;border:1px solid #fbcfe8;color:#831843">
+          <span aria-hidden="true">🎯</span><span class="truncate" title="${escapeHtml(reference.label)}">${escapeHtml(reference.label)}</span>
+          <button type="button" data-chat-ref-clear class="px-1.5 font-black" style="color:#be185d;background:none;border:0;cursor:pointer" aria-label="Remove the selected part">×</button>
+        </span>` : '';
+      if (reference && inputEl) inputEl.focus();
+    }
+    function onRefClick(e) { if (e.target.closest('[data-chat-ref-clear]')) setReference(null); }
     const attachInput = container.querySelector('[data-chat-attach]');
 
     // ── Attachments (only where canAttach) ──
@@ -271,6 +294,9 @@
       emptyEl?.remove();
 
       const isUser = message.role === 'user';
+      // A step-by-step question card (chat_questions) is answered by the next thing they send —
+      // from the card itself or typed instead — so it closes then, live or when a thread reloads.
+      if (isUser) scrollEl.querySelectorAll('[data-questions-open]').forEach((q) => q.dispatchEvent(new CustomEvent('questions:closed')));
       const row = document.createElement('div');
       row.className = `flex flex-col gap-2 ${isUser ? 'items-end' : 'items-start'}`;
 
@@ -417,11 +443,15 @@
      * Shape: { targetRoleKey, targetAssistantName, payloadToPass }.
      */
     async function sendMessage(text, opts) {
-      const message = String(text ?? '').trim();
+      const typed = String(text ?? '').trim();
       const files = canAttach ? pending.slice() : [];
       // An archived conversation is read-only end to end: the orchestrator would 409 anyway,
       // so a programmatic send must not append an optimistic user bubble that never gets a reply.
-      if (readOnly || (!message && !files.length) || sending) return;
+      if (readOnly || (!typed && !files.length) || sending) return;
+      // A part of the page they selected goes in front of what they typed (setReference).
+      const withRef = reference && typed && !(opts && opts.noReference);
+      const message = withRef ? `${reference.message}\n\n${typed}` : typed;
+      if (withRef) setReference(null);
       if (message.length > MAX_MESSAGE_CHARS) {
         showError(`Message too long (max ${MAX_MESSAGE_CHARS} characters).`);
         return;
@@ -470,7 +500,11 @@
 
         // The orchestrator creates the session before the LLM call — keep its id even
         // on failure so a retry continues the same conversation.
-        if (data.chatSessionId) chatSessionId = data.chatSessionId;
+        if (data.chatSessionId && data.chatSessionId !== chatSessionId) {
+          chatSessionId = data.chatSessionId;
+          // A surface that keeps its own thread (the Website tab's chat pane) remembers which one.
+          if (typeof props.onSession === 'function') { try { props.onSession(chatSessionId); } catch { /* the surface's problem */ } }
+        }
 
         if (!res.ok || !data.message) {
           // Over plan limit: render the upgrade paywall as a native chat bubble.
@@ -499,6 +533,17 @@
         setSending(false);
         inputEl?.focus();
       }
+    }
+
+    // A card that answers for the user (chat_questions' "Send answers") — sent as their own message,
+    // exactly as if typed, with no on-screen reference in front of it.
+    function onCardSend(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      if (readOnly) { respond({ ok: false, error: 'This conversation is archived.' }); return; }
+      if (sending) { respond({ ok: false, error: 'Wait for the reply, then send again.' }); return; }
+      respond({ ok: true });
+      sendMessage(String(d.text || ''), { noReference: true });
     }
 
     function onSubmit(e) {
@@ -2198,6 +2243,8 @@
     container.addEventListener('handoff:response', onHandoffResponse);
     container.addEventListener('discovery:create', onDiscoveryCreate);
     container.addEventListener('campaign:create', onCampaignCreate);
+    container.addEventListener('chat:send', onCardSend);
+    if (refEl) refEl.addEventListener('click', onRefClick);
     container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
     container.addEventListener('campaign:edit', onCampaignEdit);
     container.addEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
@@ -2281,6 +2328,8 @@
     return {
       sendMessage,
       appendMessage,
+      setReference,
+      focus() { if (inputEl) inputEl.focus(); },
       getSessionId: () => chatSessionId,
       destroy() {
         if (!readOnly) {
@@ -2298,6 +2347,8 @@
         container.removeEventListener('handoff:response', onHandoffResponse);
         container.removeEventListener('discovery:create', onDiscoveryCreate);
         container.removeEventListener('campaign:create', onCampaignCreate);
+        container.removeEventListener('chat:send', onCardSend);
+        if (refEl) refEl.removeEventListener('click', onRefClick);
         container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);
         container.removeEventListener('campaign:edit', onCampaignEdit);
         container.removeEventListener('campaign:taskUpdate', onCampaignTaskUpdate);

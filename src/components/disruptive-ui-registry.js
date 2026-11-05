@@ -2155,6 +2155,128 @@
   }
   register('site_draft_request', renderSiteDraftRequestCard);
 
+  // { type: 'chat_questions', intro?, questions: [{ question, options: [..], multiple?, other? }] }
+  // The step-by-step questions an assistant asks before it builds something (owner 2026-11-04, after
+  // trying Lovable): one question at a time, tap an answer (or type "something else"), Back / Next,
+  // then "Send answers" sends them as the user's own message (chat:send). It changes nothing and spends
+  // nothing itself — the assistant's next reply proposes the work as its usual card. The chat closes
+  // the card (questions:closed) as soon as the user sends anything, so typing instead also answers it.
+  function renderChatQuestionsCard(ui, esc) {
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const qs = (Array.isArray(ui.questions) ? ui.questions : []).slice(0, 6).map((q) => ({
+      question: clean(q && q.question, 200),
+      // An answer is "text", or { label, description } — a line under it saying what it means.
+      options: (Array.isArray(q && q.options) ? q.options : []).map((o) => (o && typeof o === 'object'
+        ? { label: clean(o.label, 80), description: clean(o.description, 160) } : { label: clean(o, 80), description: '' }))
+        .filter((o) => o.label).slice(0, 6),
+      multiple: !!(q && q.multiple),
+      other: !(q && q.other === false),
+    })).filter((q) => q.question && (q.options.length || q.other));
+    if (!qs.length) return null;
+    const intro = clean(ui.intro, 300);
+    const answers = qs.map(() => ({ picked: [], other: '' }));
+    let at = 0;
+    let sent = false;
+    const qid = `cq-${Math.random().toString(36).slice(2, 8)}`;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-gray-200 rounded-xl shadow-sm p-4 w-full max-w-md';
+    el.setAttribute('data-questions-open', '');
+    const pill = (on) => `display:inline-flex;align-items:center;gap:6px;text-align:left;border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;border:1.5px solid ${on ? '#db2777' : '#e5e7eb'};background:${on ? '#fdf2f8' : '#fff'};color:${on ? '#831843' : '#1f2937'}`;
+    const answerText = (a) => [...a.picked, a.other.trim()].filter(Boolean).join(', ');
+    function paint() {
+      const q = qs[at];
+      const a = answers[at];
+      const last = at === qs.length - 1;
+      el.innerHTML = `
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-xs font-bold text-gray-500 tracking-wider uppercase">A few quick questions</p>
+          <p class="text-xs font-semibold text-gray-500">${at + 1} of ${qs.length}</p>
+        </div>
+        <div aria-hidden="true" style="height:4px;background:#f3f4f6;border-radius:9999px;margin-top:8px;overflow:hidden"><div style="height:100%;width:${Math.round(((at + 1) / qs.length) * 100)}%;background:#db2777;border-radius:9999px;transition:width .2s"></div></div>
+        ${at === 0 && intro ? `<p class="text-xs text-gray-600 mt-3">${esc(intro)}</p>` : ''}
+        <p class="text-sm font-bold text-gray-900 mt-3" id="${qid}">${esc(q.question)}</p>
+        ${q.multiple ? '<p class="text-xs text-gray-500 mt-0.5">Choose any that fit.</p>' : ''}
+        <div class="${q.options.some((o) => o.description) ? 'flex flex-col' : 'flex flex-wrap'} gap-2 mt-3" role="group" aria-labelledby="${qid}">${q.options.map((o, i) => {
+          const on = a.picked.includes(o.label);
+          return `<button type="button" data-cq-opt="${i}" aria-pressed="${on}" style="${pill(on)}">${q.multiple ? `<span aria-hidden="true">${on ? '☑' : '☐'}</span>` : ''}<span>${esc(o.label)}${o.description ? `<span style="display:block;font-weight:400;font-size:12px;color:#6b7280;margin-top:2px">${esc(o.description)}</span>` : ''}</span></button>`;
+        }).join('')}</div>
+        ${q.other ? `<input data-cq-other class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-3" placeholder="${q.options.length ? 'Or type something else…' : 'Type your answer…'}" aria-label="${q.options.length ? 'Something else' : 'Your answer'}" value="${esc(a.other)}" maxlength="300">` : ''}
+        <div class="flex flex-wrap items-center justify-between gap-2 mt-4">
+          <div class="flex gap-2">${at > 0 ? '<button type="button" data-cq-back class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Back</button>' : ''}<button type="button" data-cq-skipall class="text-xs font-bold text-gray-500 hover:text-gray-800 px-2" title="Let the assistant decide">Skip all</button></div>
+          <div class="flex gap-2">
+            ${last ? '' : `<button type="button" data-cq-skip class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">${answerText(a) ? 'Next' : 'Skip'}</button>`}
+            ${last ? '<button type="button" data-cq-send class="btn-primary px-4 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Send answers</button>' : ''}
+          </div>
+        </div>
+        <p class="hidden mt-2 text-xs font-semibold text-red-600" data-cq-status></p>`;
+    }
+    function done(answeredHere) {
+      el.removeAttribute('data-questions-open');
+      const rows = qs.map((q, i) => `<li class="text-xs text-gray-700"><span class="font-bold">${esc(q.question)}</span><br>${esc(answerText(answers[i]) || 'Skipped')}</li>`).join('');
+      el.innerHTML = answeredHere
+        ? `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">Your answers</p><ul class="mt-2 space-y-2">${rows}</ul>`
+        : `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">A few quick questions</p><p class="text-xs text-gray-500 mt-1">Answered in the chat.</p>`;
+    }
+    el.addEventListener('questions:closed', () => done(sent));
+    el.addEventListener('input', (e) => {
+      if (!e.target.matches('[data-cq-other]')) return;
+      answers[at].other = e.target.value;
+      const skip = el.querySelector('[data-cq-skip]');
+      if (skip) skip.textContent = answerText(answers[at]) ? 'Next' : 'Skip';
+    });
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !e.target.matches('[data-cq-other]')) return;
+      e.preventDefault();
+      (el.querySelector('[data-cq-skip]') || el.querySelector('[data-cq-send]'))?.click();
+    });
+    el.addEventListener('click', (e) => {
+      const opt = e.target.closest('[data-cq-opt]');
+      const q = qs[at];
+      const a = answers[at];
+      if (opt) {
+        const o = q.options[Number(opt.dataset.cqOpt)].label;
+        if (q.multiple) { a.picked = a.picked.includes(o) ? a.picked.filter((x) => x !== o) : [...a.picked, o]; paint(); el.querySelector(`[data-cq-opt="${opt.dataset.cqOpt}"]`)?.focus(); return; }
+        a.picked = a.picked[0] === o ? [] : [o];
+        // One answer: picking it moves straight on (the last question waits for "Send answers").
+        if (a.picked.length && at < qs.length - 1) { at++; paint(); el.querySelector('[data-cq-opt], [data-cq-other]')?.focus(); return; }
+        paint();
+        el.querySelector(`[data-cq-opt="${opt.dataset.cqOpt}"]`)?.focus();
+        return;
+      }
+      if (e.target.closest('[data-cq-back]')) { at = Math.max(0, at - 1); paint(); el.querySelector('[data-cq-opt], [data-cq-other]')?.focus(); return; }
+      if (e.target.closest('[data-cq-skip]')) { at = Math.min(qs.length - 1, at + 1); paint(); el.querySelector('[data-cq-opt], [data-cq-other]')?.focus(); return; }
+      const skipAll = !!e.target.closest('[data-cq-skipall]');
+      if (!skipAll && !e.target.closest('[data-cq-send]')) return;
+      if (!skipAll && !answers.some((x) => answerText(x))) {
+        const st = el.querySelector('[data-cq-status]');
+        st.textContent = 'Answer at least one question, or just type in the chat instead.';
+        st.classList.remove('hidden');
+        return;
+      }
+      const lines = qs.map((x, i) => `• ${x.question} — ${answerText(answers[i]) || '(skipped)'}`);
+      const text = skipAll ? 'Skip the questions — use your best judgement from what you know about my business.' : `My answers:\n${lines.join('\n')}`;
+      sent = true;
+      el.querySelectorAll('button, input').forEach((b) => { b.disabled = true; });
+      el.dispatchEvent(new CustomEvent('chat:send', {
+        bubbles: true,
+        detail: {
+          text,
+          respond({ ok, error }) {
+            if (ok) return;
+            sent = false;
+            el.querySelectorAll('button, input').forEach((b) => { b.disabled = false; });
+            const st = el.querySelector('[data-cq-status]');
+            st.textContent = error || 'Could not send your answers.';
+            st.classList.remove('hidden');
+          },
+        },
+      }));
+    });
+    paint();
+    return el;
+  }
+  register('chat_questions', renderChatQuestionsCard);
+
   // { type: 'site_import_request', url } — "Import my current site" (sites.ts `import`, the same action
   // as the Website tab's "Read my site"). The owner confirms the site is theirs and chooses what happens
   // to its pictures HERE — the assistant never decides either. It makes a draft to review; nothing is

@@ -2,9 +2,10 @@
  * src/components/assistant-site-editor.js
  * The Website Assistant's Website tab — docs/website-assistant-plan.md §5.3, §5.5.
  *
- * Left: the site — Pages (each page's sections: edit, move, remove, add), Design (colours, font,
- * corners, logo) and Details (business details, footer, menu). Right: the live preview, rendered by
- * the real renderer (site-preview.ts) in desktop or phone width. "Write my site" ("Write the words"
+ * Left: the live preview, rendered by the real renderer (site-preview.ts) in desktop or phone width,
+ * with "Select" (click a part of it to talk about it in the chat). Right: the pane — "Chat" (this
+ * assistant's chat, docked; its cards still need the user's click) or a sub-tab: Set up, Design,
+ * Pages (each page's sections: edit, move, remove, add) and Publish. Narrow screens: the pane first. "Write my site" ("Write the words"
  * on a template, "Replace my draft" later) asks the assistant for a complete draft (1 task).
  *
  * Backed by netlify/functions/sites.ts — the SAME actions the chat cards call (chat-session.js →
@@ -324,6 +325,11 @@
       '@media (max-width: 639px) { .sb-tap { min-height: 44px; min-width: 44px; } [data-sb-wide-only] { display: none !important; } }',
       '@media (min-width: 1024px) { [data-sb-narrow-only] { display: none !important; } }',
       'iframe[data-site-preview] { max-width: 100%; }',
+      // Preview on the left, the pane (Chat or one of the sub-tabs) on the right — narrow screens keep
+      // the pane first, with the preview a button away (owner, 2026-11-04, after trying Lovable).
+      '@media (min-width: 1024px) { [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important; } [data-site-layout][data-sb-mode="chat"] { grid-template-columns: minmax(0, 1fr) minmax(360px, 440px) !important; } [data-sb-preview-col] { order: 1; } [data-sb-pane] { order: 2; } }',
+      '[data-sb-chatbox] { height: clamp(460px, calc(100vh - 150px), 880px); }',
+      '@media (min-width: 1024px) { [data-sb-mode="chat"] iframe[data-site-preview] { height: clamp(408px, calc(100vh - 202px), 828px) !important; } }',
       '[data-sb-full] { position: fixed; inset: 0; z-index: 10500; background: #fff; overflow: auto; }',
       '[data-sb-full] > div { height: 100%; display: flex; flex-direction: column; padding: 8px !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }',
       '[data-sb-full] [data-sb-frame-box] { flex: 1; min-height: 0; }',
@@ -669,6 +675,12 @@
     const sec = pg && pg.sections.find((x) => x.id === sectionId);
     if (!sec) return;
     const label = TYPE_LABEL[sec.type] || sec.type;
+    // With the chat docked beside the preview, the swan selects the section there (as "Select" does).
+    if (chatAvailable()) {
+      const where = def().pages.length > 1 ? ` on the ${pg.title} page` : '';
+      giveToChat({ label: `${label} section${where ? ` (${pg.title})` : ''}`, message: `About this part of my website: the ${label} section${where} (section ${sectionId}).` });
+      return;
+    }
     const text = await window.promptModal(`What would you like to change in the <strong>${esc(label)}</strong> section${def().pages.length > 1 ? ` on ${esc(pg.title)}` : ''}?<br><span style="color:#6b7280">“${esc(String(sectionSummary(sec)).slice(0, 120))}”</span>`,
       { title: `Ask ${esc(state.assistantName || 'your assistant')}`, multiline: true, required: true, confirmLabel: 'Ask', placeholder: 'e.g. make the heading warmer, add our free delivery, use a darker background' });
     if (!text || !text.trim()) return;
@@ -1248,7 +1260,7 @@
   function previewHeadHtml(showImport) {
     return `<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
         <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${showImport ? 'your imported site (not your draft yet)' : state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
-        <div class="flex gap-1" data-sb-wide-only>${btn(`data-site-device="desktop" aria-pressed="${state.device === 'desktop'}"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile" aria-pressed="${state.device === 'mobile'}"`, 'Phone', state.device === 'mobile')}</div>
+        <div class="flex flex-wrap gap-1">${!showImport && chatAvailable() ? btn(`data-site-pick aria-pressed="${!!picker.on}" title="Click any part of the preview to ask ${esc(state.assistantName || 'your assistant')} to change it"`, `<span aria-hidden="true">🎯</span> ${picker.on ? 'Click a part… (Esc to stop)' : 'Select'}`, picker.on) : ''}<span class="flex gap-1" data-sb-wide-only>${btn(`data-site-device="desktop" aria-pressed="${state.device === 'desktop'}"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile" aria-pressed="${state.device === 'mobile'}"`, 'Phone', state.device === 'mobile')}</span></div>
         ${state.previewFull ? btn('data-site-preview-close', 'Close preview', true) : ''}
       </div>`;
   }
@@ -1270,6 +1282,196 @@
     // Phone: 390px wide, or the whole box on a screen narrower than that (no sideways scroll).
     frame.style.width = state.device === 'mobile' ? 'min(390px, 100%)' : '100%';
     if (frame.dataset.src !== src) { frame.dataset.src = src; frame.src = src; }
+  }
+
+
+  // ── The chat pane (the "Chat" sub-tab) ─────────────────────────────────────
+  // The same conversation as the chat pop-up (chat-session.js), docked beside the preview so a change
+  // the user approves on a card shows in the preview straight away (site:changed → load). Its thread
+  // is remembered per assistant in this browser, so coming back carries on; "New chat" starts again.
+  const chatPane = { session: null, assistantId: null, mountEl: null, loading: false };
+  const chatKey = () => `bms-site-chat:${state.assistantId}`;
+  const storedChat = () => { try { return Number(localStorage.getItem(chatKey())) || null; } catch { return null; } };
+  const storeChat = (id) => { try { if (id) localStorage.setItem(chatKey(), String(id)); else localStorage.removeItem(chatKey()); } catch { /* private window */ } };
+  function unmountChat() {
+    if (chatPane.session && chatPane.session.destroy) { try { chatPane.session.destroy(); } catch { /* already gone */ } }
+    chatPane.session = null; chatPane.mountEl = null; chatPane.assistantId = null;
+  }
+  function paintChat(box) {
+    if (!box) return;
+    const show = state.panel === 'chat' && chatAvailable();
+    box.hidden = !show;
+    if (!show) return;
+    if (chatPane.loading) return;
+    if (chatPane.session && chatPane.assistantId === state.assistantId && chatPane.mountEl && box.contains(chatPane.mountEl)) return;
+    mountChat(box, storedChat());
+  }
+  async function mountChat(box, sessionId) {
+    unmountChat();
+    const who = esc(state.assistantName || 'your assistant');
+    box.innerHTML = `<div data-sb-chatbox class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+        <div class="flex items-center justify-between gap-2 px-4 py-2 border-b border-gray-200" style="flex-shrink:0">
+          <p class="text-sm font-black text-gray-900 truncate">Chat with ${who}</p>
+          ${btn('data-sb-chat-new title="Start a new conversation"', 'New chat')}
+        </div>
+        <div style="position:relative;flex:1;min-height:0"><div data-sb-chat-mount style="position:absolute;inset:0"><p class="text-sm text-gray-500 text-center p-8">Loading the chat…</p></div></div>
+      </div>`;
+    const mountEl = box.querySelector('[data-sb-chat-mount]');
+    const forId = state.assistantId;
+    chatPane.loading = true;
+    let initialMessages = [];
+    let chatSessionId = null;
+    if (sessionId) {
+      // Carry on the remembered thread — unless it is archived, gone or someone else's.
+      try {
+        const r = await fetch(`/.netlify/functions/get-chat-session?chatSessionId=${encodeURIComponent(sessionId)}`, { credentials: 'same-origin' });
+        const d = r.ok ? await r.json() : null;
+        if (d && d.session && Number(d.session.aiAssistantId) === Number(forId) && d.session.status !== 'archived') {
+          chatSessionId = sessionId; initialMessages = d.messages || [];
+        } else storeChat(null);
+      } catch { /* start a new one */ }
+    }
+    chatPane.loading = false;
+    if (forId !== state.assistantId || !mountEl.isConnected) return;
+    const fresh = state.data && isFresh();
+    chatPane.session = window.ChatSession.mount({
+      container: mountEl,
+      assistantId: forId,
+      chatSessionId,
+      assistantName: state.assistantName,
+      roleKey: 'website_assistant',
+      initialMessages,
+      placeholder: fresh ? 'Describe the website you’d like…' : 'Ask for a change…',
+      starterPrompts: fresh ? [
+        'Build me a website — ask me a few quick questions first.',
+        'Bring over my current website so I can start from what I have.',
+        'What do you already know about my business?',
+      ] : null,
+      onSession: (id) => { if (state.assistantId === forId) storeChat(id); },
+    });
+    chatPane.assistantId = forId;
+    chatPane.mountEl = mountEl;
+  }
+
+  // ── "Select": pick a part of the preview to talk about ────────────────────
+  // Hover outlines the part under the pointer (a heading, a paragraph, a button, a picture — or the
+  // whole section); a click puts it on a chip above the chat's message box and stops selecting. The
+  // preview is same-origin with no scripts of its own, so all of this is added from here.
+  const picker = { on: false, frame: null, off: null };
+  const PART_KIND = { H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading', P: 'text', A: 'button or link', BUTTON: 'button', IMG: 'picture', PICTURE: 'picture', FIGURE: 'picture', VIDEO: 'video', LI: 'item', BLOCKQUOTE: 'quote', DT: 'question', DD: 'answer', SUMMARY: 'question', LABEL: 'form field', INPUT: 'form field', TEXTAREA: 'form field', SELECT: 'form field', TABLE: 'table' };
+  const PART_SEL = Object.keys(PART_KIND).join(',').toLowerCase();
+  /** The page the preview is showing — it may not be the one open on Pages (links inside it navigate). */
+  function previewPage(frame) {
+    let path = state.previewPath;
+    try { path = new URL(frame.contentWindow.location.href).searchParams.get('path') || path; } catch { /* keep */ }
+    const d = def();
+    return d && (d.pages.find((x) => pathOf(x) === String(path).split('#')[0]) || page());
+  }
+  /** What the pointer is over: { el (to outline), label (the chip), message (what the assistant is told) }. */
+  function describePart(doc, target, pg) {
+    if (!target || !target.closest || !pg) return null;
+    const ids = new Set(pg.sections.map((x) => x.id));
+    let secEl = target;
+    while (secEl && secEl !== doc.body && !(secEl.id && ids.has(secEl.id))) secEl = secEl.parentElement;
+    const where = def().pages.length > 1 ? ` on the ${pg.title} page` : '';
+    const words = (el) => String((el.tagName === 'IMG' ? el.getAttribute('alt') : el.textContent) || '').replace(/\s+/g, ' ').trim();
+    const short = (t, n) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+    if (!secEl || secEl === doc.body) {
+      const band = target.closest('header, nav') ? ['the menu at the top', 'Menu at the top'] : target.closest('footer') ? ['the footer', 'Footer'] : null;
+      const el = band && target.closest(band[0] === 'the footer' ? 'footer' : 'header, nav');
+      return el ? { el, label: band[1], message: `About this part of my website: ${band[0]}${where}.` } : null;
+    }
+    const sec = pg.sections.find((x) => x.id === secEl.id);
+    const typeLabel = TYPE_LABEL[sec.type] || sec.type;
+    const part = target.closest(PART_SEL);
+    if (part && part !== secEl && secEl.contains(part) && !part.closest('[data-bms-ask]')) {
+      const kind = PART_KIND[part.tagName] || 'part';
+      const t = words(part);
+      return { el: part,
+        label: `${typeLabel} › ${kind}${t ? ` “${short(t, 40)}”` : ''}`,
+        message: `About this part of my website: the ${typeLabel} section${where} (section ${sec.id}) — the ${kind}${t ? ` “${short(t, 160)}”` : ''}.` };
+    }
+    return { el: secEl, label: `${typeLabel} section${where ? ` (${pg.title})` : ''}`,
+      message: `About this part of my website: the ${typeLabel} section${where} (section ${sec.id}).` };
+  }
+  function attachPicker(frame) {
+    if (picker.off) picker.off();
+    picker.off = null;
+    let doc;
+    try { doc = frame.contentDocument; } catch { return; }
+    if (!doc || !doc.body) return;
+    picker.frame = frame;
+    const style = doc.createElement('style');
+    style.textContent = '*{cursor:crosshair !important}';
+    doc.head.appendChild(style);
+    const box = doc.createElement('div');
+    box.style.cssText = 'position:fixed;z-index:2147483646;pointer-events:none;border:2px solid #db2777;background:rgba(219,39,119,.08);border-radius:6px;display:none;transition:all .06s';
+    const tag = doc.createElement('div');
+    tag.style.cssText = 'position:absolute;left:-2px;top:-24px;background:#db2777;color:#fff;font:600 12px/1 system-ui,sans-serif;padding:5px 8px;border-radius:6px;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis';
+    box.appendChild(tag);
+    doc.body.appendChild(box);
+    let last = null;
+    const show = (hit) => {
+      last = hit;
+      if (!hit) { box.style.display = 'none'; return; }
+      const r = hit.el.getBoundingClientRect();
+      Object.assign(box.style, { display: 'block', left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+      tag.textContent = hit.label;
+      tag.style.top = r.top < 26 ? '2px' : '-24px';
+      tag.style.left = r.top < 26 ? '2px' : '-2px';
+    };
+    const pg = () => previewPage(frame);
+    const onMove = (e) => show(describePart(doc, e.target, pg()));
+    const onScroll = () => { if (last) show(last); };
+    const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+    const onClick = (e) => {
+      stop(e);
+      const hit = describePart(doc, e.target, pg());
+      if (!hit) return;
+      setPicker(false);
+      giveToChat(hit);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { stop(e); setPicker(false); } };
+    doc.addEventListener('mousemove', onMove, true);
+    doc.addEventListener('click', onClick, true);
+    doc.addEventListener('submit', stop, true);
+    doc.addEventListener('keydown', onKey, true);
+    doc.defaultView.addEventListener('scroll', onScroll, true);
+    picker.off = () => {
+      doc.removeEventListener('mousemove', onMove, true);
+      doc.removeEventListener('click', onClick, true);
+      doc.removeEventListener('submit', stop, true);
+      doc.removeEventListener('keydown', onKey, true);
+      try { doc.defaultView.removeEventListener('scroll', onScroll, true); } catch { /* frame gone */ }
+      style.remove(); box.remove();
+    };
+  }
+  function setPicker(on) {
+    picker.on = !!on;
+    if (!on && picker.off) { picker.off(); picker.off = null; }
+    const host = document.querySelector('[data-site-host="website"]');
+    const frame = host && host.querySelector('iframe[data-site-preview]');
+    if (on && frame) attachPicker(frame);
+    rerender();
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && picker.on) setPicker(false); });
+  /** A selected part (or a section's swan) onto the chip above the docked chat's message box. */
+  function giveToChat(ref) {
+    if (!chatAvailable()) {
+      window.openAssistantChat?.({ assistantId: state.assistantId, draft: `${ref.message}\n\n` });
+      return;
+    }
+    if (state.previewFull) setPreviewFull(false);
+    if (state.panel !== 'chat') { keepEditing(); state.panel = 'chat'; render(); }
+    const tryGive = (n) => {
+      if (chatPane.session && chatPane.assistantId === state.assistantId) {
+        chatPane.session.setReference(ref);
+        chatPane.mountEl?.closest('[data-sb-chat]')?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if (n < 40) setTimeout(() => tryGive(n + 1), 100);
+    };
+    tryGive(0);
   }
 
   /** The preview full screen (narrow screens, where it sits below everything else) — and back. */
@@ -1299,8 +1501,12 @@
   // site is made: Set up (what it does, business details, bring your site, start again) → Design
   // (template, layout, look) → Pages (the words and sections) → Publish (address, domain, versions).
   // The preview stays beside whichever is open. Arrow keys move between them (assistants.js).
-  const SUBTABS = [['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];
+  // "Chat" (2026-11-04): this assistant's chat, docked beside the preview, first because it is the
+  // quickest way to build — every change it proposes still waits for the user's click on its card.
+  const chatAvailable = () => !!(window.ChatSession && typeof window.ChatSession.mount === 'function');
+  const SUBTABS_ALL = [['chat', 'Chat'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];
   function siteSubtabsHtml() {
+    const SUBTABS = SUBTABS_ALL.filter(([k]) => k !== 'chat' || chatAvailable());
     const s = state.data.site;
     const brackets = (state.data.placeholders || []).length;
     // What a tab is waiting on, said on the tab so the owner needn't open each to find out.
@@ -1682,9 +1888,10 @@
       return;
     }
     if (!host.querySelector(':scope > [data-site-layout]')) {
-      host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div class="space-y-4 min-w-0"></div><div class="min-w-0"></div></div>';
+      host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div data-sb-pane class="min-w-0"><div data-sb-blocks class="space-y-4"></div><div data-sb-chat class="mt-4"></div></div><div data-sb-preview-col class="min-w-0"></div></div>';
     }
     const layout = host.firstElementChild;
+    const blocksEl = layout.querySelector('[data-sb-blocks]');
     const s = state.data.site;
     const fresh = isFresh();
     const step = fresh ? setupStep() : 0;
@@ -1692,14 +1899,16 @@
     // Which sub-tab. A new site (or one whose imported draft is waiting to be looked at) opens on
     // Set up, where its steps are; a site under way opens on Pages. Finishing set-up moves on to
     // Pages once, so the words just written are what the owner sees next.
-    if (!state.panel) state.panel = fresh || (imp && imp.status === 'ready') ? 'setup' : 'pages';
+    // With the chat available it opens first (an imported draft waiting still opens on Set up).
+    if (state.panel === 'chat' && !chatAvailable()) state.panel = null;
+    if (!state.panel) state.panel = imp && imp.status === 'ready' ? 'setup' : chatAvailable() ? 'chat' : fresh ? 'setup' : 'pages';
     if (state.wasFresh && !fresh && state.panel === 'setup') state.panel = 'pages';
     state.wasFresh = fresh;
     const tabbar = siteSubtabsHtml();
     // During set-up the other tabs are for looking around: their buttons give way to the step's.
     quietPrimary = fresh && !state.editing && state.panel !== 'setup';
     const P = state.panel;
-    const blocks = P === 'setup' ? (fresh ? [
+    const blocks = P === 'chat' ? [] : P === 'setup' ? (fresh ? [
       ['setup', setupStepsHtml(step)],
       ['features', step === 1 ? featuresCard(true) : ''],
       ['templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true }],
@@ -1726,7 +1935,8 @@
     // Drafting takes a minute or two and can be started from more than one tab: say it on all of them.
     const drafting = s.drafting && !blocks.some(([k, h]) => (k === 'draft') && h) ? draftCard('start') : '';
     quietPrimary = false;
-    paintBlocks(layout.firstElementChild, [
+    layout.setAttribute('data-sb-mode', P === 'chat' ? 'chat' : 'edit');
+    paintBlocks(blocksEl, [
       ['tabs', tabbar],
       ['note', noteHtml(), { live: true }],
       ['drafting', drafting],
@@ -1736,6 +1946,7 @@
       ['preview-jump', btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site'),
         { attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
     ]);
+    paintChat(layout.querySelector('[data-sb-chat]'));
     paintPreview(layout.lastElementChild);
     afterPaint(host);
   }
@@ -1766,7 +1977,10 @@
   // ── Events (bound once) ────────────────────────────────────────────────────
   // The preview's swans: `load` does not bubble, so listen in the capture phase.
   document.addEventListener('load', (e) => {
-    if (e.target && e.target.matches && e.target.matches('iframe[data-site-preview]')) swanThePreview(e.target);
+    if (e.target && e.target.matches && e.target.matches('iframe[data-site-preview]')) {
+      swanThePreview(e.target);
+      if (picker.on) attachPicker(e.target);
+    }
   }, true);
   document.addEventListener('submit', async (e) => {
     const form = e.target.closest && e.target.closest('[data-site-section-form]');
@@ -1895,6 +2109,8 @@
       if (pg.dataset.sitePage !== p.id) state.editing = null;
       state.pageId = pg.dataset.sitePage; state.previewPath = pathOf(page()); render(); return;
     }
+    if (t('[data-site-pick]')) { setPicker(!picker.on); return; }
+    if (t('[data-sb-chat-new]')) { storeChat(null); unmountChat(); render(); return; }
     if (t('[data-site-preview-full]')) { setPreviewFull(true); return; }
     if (t('[data-site-preview-close]')) { setPreviewFull(false); return; }
     const dev = t('[data-site-device]');
@@ -2436,6 +2652,10 @@
   window.AssistantSiteEditor = {
     init({ assistantId, assistantName }) {
       clearTimeout(state.pollTimer);
+      // Another assistant's page: its own chat thread, and no part of the old preview still selecting.
+      picker.on = false;
+      if (picker.off) { picker.off(); picker.off = null; }
+      if (chatPane.assistantId !== assistantId) unmountChat();
       Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
         importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false });
@@ -2445,6 +2665,7 @@
     // each its own tab. A list re-reads every time its tab is opened.
     activate(surface) {
       setPreviewFull(false);
+      if (picker.on && (surface || 'website') !== 'website') { picker.on = false; if (picker.off) { picker.off(); picker.off = null; } }
       // Leaving the Website tab keeps an open section form, with what was typed, for coming back.
       if (state.surface === 'website') keepEditing();
       // A note ("Saved.") belongs to the tab it was said on.
