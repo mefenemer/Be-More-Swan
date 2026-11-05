@@ -12,6 +12,7 @@ import { socialFeedForPrompt } from './site-social-feed';
 import { siteBlogForPrompt } from './site-blog';
 import { reviewsForPrompt } from './reviews';
 import { listingsForPrompt } from './site-listings';
+import { visitStats, visitsLine } from './site-visits';
 import { and, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { describeOfferProfile, loadOfferProfile } from './offer-profile';
@@ -465,6 +466,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     lines.push(await socialFeedForPrompt(db, orgId).catch(() => 'Their published social posts could not be read this turn.'));
     lines.push(await siteBlogForPrompt(db, orgId, d).catch(() => 'Their blog posts could not be read this turn.'));
     lines.push(await listingsForPrompt(db, orgId).catch(() => 'Their listings could not be read this turn.'));
+    lines.push(await visitStats(db, site.id).then((v) => visitsLine(v, site.status === 'published')).catch(() => 'Visitor figures could not be read this turn.'));
     const forms = await listSignupForms(db, orgId).catch(() => []);
     lines.push(forms.length
         ? `Their sign-up forms (for a signup section's formId): ${forms.map((f) => `${f.name} (formId ${f.id}${f.download ? `, emails a free download: "${f.download}"` : ''}${f.active ? '' : ', switched off'})`).join('; ')}.`

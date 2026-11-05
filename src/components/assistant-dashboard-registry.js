@@ -625,9 +625,11 @@
       // Fed by sites.ts `get` (routed by metricsSource in assistants.js).
       metricsSource: 'site',
       kpis: [
-        { label: 'Pages', title: 'Built of Your Plan', desc: 'Pages in your site, out of the number your plan includes.' },
-        { label: 'Needs You', title: 'Details to Fill In', desc: 'Parts in [square brackets] — facts only you know — to fill in before you publish.' },
-        { label: 'Sections', title: 'On Your Pages', desc: 'Sections across every page of your site.' },
+        // Visitors are counted on the live site at the edge, with no cookies (src/utils/site-visits.ts);
+        // sites.ts `visits` feeds these. The draft's own figures are on the Website tab (Pages badge).
+        { label: 'Visitors', title: 'In the Last 30 Days', desc: 'People who visited your live site. Counted without cookies, so your site needs no cookie banner.' },
+        { label: 'Page Views', title: 'Pages Read', desc: 'Every page they opened across your site in the last 30 days.' },
+        { label: 'Brought In', title: 'Enquiries, Orders & Bookings', desc: 'What your site brought in over the same 30 days.' },
         { label: 'Status', title: 'Draft or Live', desc: 'Your site stays a private draft until you publish it.' },
       ],
       hideReviewQueue: true,

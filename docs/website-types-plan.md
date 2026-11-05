@@ -129,3 +129,15 @@ countdown, add to calendar, map link.
   us they have none — because the answer decides every question after it.
 - **Full screen** button on the Website tab: the editor fills the window; "Exit full screen" (or
   Esc) goes back.
+
+## 8. Visitor analytics (built 2026-11-05)
+
+The gap against Lovable's back-end panel. Counted at the sites edge (`sites-host/edge-functions/serve.ts`
+— every view passes it before the cache) → `netlify/functions/site-visit.ts` → `src/utils/site-visits.ts`.
+No cookie, no script, no IP or browser string stored: a one-way daily hash (secret, day, host, IP,
+browser) counts each visitor once a day and is deleted after two days. Results tab: Visitors, Page
+Views, Brought In (enquiries, orders, bookings), most-read pages, where visitors came from; the chat
+reads the same figures. ⚠️ `db/z-site-visits.sql` on both DBs first. ⚠️ The sites-host project deploys
+from `main` only, so counting starts with the next prod release — not on staging. Each human page view
+is one extra function call on the app project (watch the invocation count as sites grow).
+

@@ -11229,46 +11229,78 @@ async function _loadBrandMetrics(assistantId) {
 // Routed here by `metricsSource: 'site'`. From sites.ts `get`: pages built against the plan's cap,
 // the [placeholders] still to fill, sections, and whether the site is live (publishing is step 3).
 async function _loadSiteMetrics(assistantId) {
+    // Website Assistant: visitors to the LIVE site (counted at the edge, no cookies — site-visits.ts),
+    // pages read, and what the site brought in, over the last 30 days; plus Draft / Live.
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
-    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
     document.getElementById('metric-value-wins')?.classList.add('hidden');
+    const post = (body) => fetch('/.netlify/functions/sites', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify(body),
+    });
     try {
-        const res = await fetch('/.netlify/functions/sites', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
-            body: JSON.stringify({ action: 'get', assistantId }),
-        });
-        if (!res.ok) { _setMetricsEmptyState('error'); return; }
-        const data = await res.json();
+        const [siteRes, visitRes] = await Promise.all([post({ action: 'get', assistantId }), post({ action: 'visits', assistantId })]);
+        if (!siteRes.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await siteRes.json();
+        const v = visitRes.ok ? await visitRes.json() : null;
         _setMetricsEmptyState('cards');
+        const live = data.site?.status === 'published';
         const note = document.getElementById('metrics-status-note');
-        if (note) note.textContent = 'Your draft';
-        const pages = (data.definition?.pages || []);
-        const sections = pages.reduce((n, p) => n + (p.sections || []).length, 0);
-        const holes = (data.placeholders || []).length;
-
-        valEl('engagement').textContent = `${pages.length}`;
-        _setKpiCard('engagement', { empty: !pages.length });
-        if (trendEl('engagement')) trendEl('engagement').textContent = '—';
-
-        // Amber: the number the owner brings down before publishing.
-        valEl('reach').textContent = String(holes);
-        _setKpiCard('reach', { empty: !holes });
-        if (trendEl('reach')) trendEl('reach').textContent = '—';
-        if (dotEl('reach')) dotEl('reach').className = 'w-2 h-2 rounded-full ' + (holes ? 'bg-amber-400' : 'bg-gray-200');
-
-        valEl('ctr').textContent = String(sections);
-        _setKpiCard('ctr', { empty: !sections });
-        if (trendEl('ctr')) trendEl('ctr').textContent = '—';
-
-        if (valEl('value')) {
-            valEl('value').textContent = data.site?.status === 'published' ? 'Live' : 'Draft';
-            _setKpiCard('value', { empty: data.site?.status !== 'published' });
-            if (trendEl('value')) trendEl('value').textContent = '—';
+        if (note) note.textContent = live ? 'Last 30 days · counted without cookies' : 'Visitors are counted once your site is live';
+        const s = v && v.stats;
+        const vsBefore = (now, before) => {
+            if (!before) return now ? 'New this month' : '—';
+            const pct = Math.round(((now - before) / before) * 100);
+            return `${pct > 0 ? '+' : ''}${pct}% vs the 30 days before`;
+        };
+        const put = (key, value, empty, series, trend) => {
+            if (!valEl(key)) return;
+            valEl(key).textContent = value;
+            _setKpiCard(key, { empty, series, tone: s && trend && /^-/.test(trend) ? 'down' : 'brand' });
+            if (trendEl(key)) trendEl(key).textContent = trend || '—';
+        };
+        if (live && s) {
+            put('engagement', s.visitors.toLocaleString('en-GB'), !s.visitors, s.series.map((d) => d.visitors), vsBefore(s.visitors, s.prevVisitors));
+            put('reach', s.views.toLocaleString('en-GB'), !s.views, s.series.map((d) => d.views), vsBefore(s.views, s.prevViews));
+            const b = v.brought || {};
+            const brought = (b.enquiries || 0) + (b.orders || 0) + (b.bookings || 0);
+            put('ctr', String(brought), !brought, null, [b.enquiries ? `${b.enquiries} enquir${b.enquiries === 1 ? 'y' : 'ies'}` : '', b.orders ? `${b.orders} order${b.orders === 1 ? '' : 's'}` : '', b.bookings ? `${b.bookings} booking${b.bookings === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ') || '—');
+        } else {
+            put('engagement', '—', true, null, live ? 'Could not be read just now' : 'Counted once you publish');
+            put('reach', '—', true, null, '—');
+            put('ctr', '—', true, null, '—');
         }
+        const holes = (data.placeholders || []).length;
+        put('value', live ? 'Live' : 'Draft', !live, null, live ? (data.site?.unpublishedChanges ? 'Changes waiting to publish' : 'Up to date') : holes ? `${holes} part${holes === 1 ? '' : 's'} to fill in first` : 'Ready to publish');
+        _paintSiteVisitDetail(live && s ? s : null);
     } catch {
         _setMetricsEmptyState('error');
     }
+}
+
+/** Under the cards: the most-read pages and where visitors came from (sites.ts `visits`). */
+function _paintSiteVisitDetail(s) {
+    const grid = document.getElementById('metrics-kpi-grid');
+    if (!grid) return;
+    let box = document.getElementById('site-visit-detail');
+    if (!s || (!s.topPages.length && !s.topRefs.length)) { box?.remove(); return; }
+    if (!box) {
+        box = document.createElement('div');
+        box.id = 'site-visit-detail';
+        box.className = 'grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4';
+        grid.insertAdjacentElement('afterend', box);
+    }
+    const esc = (x) => String(x == null ? '' : x).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const bars = (rows, label, count) => {
+        const max = Math.max(1, ...rows.map(count));
+        return rows.map((r) => `<li class="text-sm"><div class="flex justify-between gap-3"><span class="truncate text-gray-800">${esc(label(r))}</span><span class="font-bold text-gray-900">${count(r).toLocaleString('en-GB')}</span></div>
+          <div class="h-1.5 bg-gray-100 rounded-full mt-1"><div class="h-1.5 rounded-full" style="width:${Math.round((count(r) / max) * 100)}%;background:#db2777"></div></div></li>`).join('');
+    };
+    box.innerHTML = `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5"><p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Most-read pages</p>
+        <ul class="space-y-3 mt-3">${s.topPages.length ? bars(s.topPages, (r) => (r.path === '/' ? 'Home page' : r.path), (r) => r.views) : '<li class="text-sm text-gray-500">None yet.</li>'}</ul></div>
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5"><p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Where visitors came from</p>
+        <ul class="space-y-3 mt-3">${s.topRefs.length ? bars(s.topRefs, (r) => r.host, (r) => r.visits) : '<li class="text-sm text-gray-500">Everyone typed your address, used a bookmark, or came from an app that doesn\'t say.</li>'}</ul>
+        ${s.topRefs.length ? '<p class="text-xs text-gray-500 mt-3">Visitors who typed your address or came from an app that doesn\'t say aren\'t listed.</p>' : ''}</div>`;
 }
 
 // ── Mystery Shopper KPI cards ────────────────────────────────────────────────
@@ -11439,6 +11471,8 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     // Role-specific data source. Registry-driven rather than a roleKey compared inline here, so a
     // second role needing its own figures is a registry entry and not another branch in this file.
     const source = window.AssistantDashboardRegistry?.get?.(roleKey)?.metricsSource;
+    // The Website Assistant's visits panel belongs to its Results tab only.
+    if (source !== 'site') document.getElementById('site-visit-detail')?.remove();
     if (source === 'campaign') {
         _setMetricsEmptyState('pending');
         return _loadCampaignMetrics(assistantId);
