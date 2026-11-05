@@ -486,7 +486,16 @@
     document.addEventListener('keydown', onKey);
     const onResize = () => { if (st.design) { sizePage(); paintPage(); } };
     window.addEventListener('resize', onResize);
-    const ro = window.ResizeObserver ? new ResizeObserver(onResize) : null;
+    // Width only, on the next frame: sizing the page from inside the callback changes what is observed, and the
+    // browser then raises "ResizeObserver loop completed", which the page shows as "Something went wrong"
+    // (owner 2026-11-05, adding words). Same rule as the post editor's stage in workspace.html.
+    let roWidth = 0;
+    const ro = window.ResizeObserver ? new ResizeObserver(([entry]) => {
+      const w = Math.round(entry.contentRect.width);
+      if (!w || w === roWidth) return;
+      roWidth = w;
+      requestAnimationFrame(onResize);
+    }) : null;
     if (ro) ro.observe(q('[data-ds-wrap]'));
 
     openOption(o.optionId);

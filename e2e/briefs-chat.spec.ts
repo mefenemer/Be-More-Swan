@@ -193,18 +193,11 @@ test.describe('Love Cat feedback (2026-11-05)', () => {
         expect(pageErrors).toEqual([]);
     });
 
-    test('Select: the toolbar tool picks an option by clicking it, and Escape stops it', async ({ page, api, pageErrors }) => {
+    test('no Select beside New brief: it lives in the editor (owner 2026-11-05)', async ({ page, api, pageErrors }) => {
         stubStages(api);
         await open(page);
-        await page.locator('[data-brief-pick]').click();
-        await expect(page.locator('[data-brief-pick]')).toHaveAttribute('aria-pressed', 'true');
-        await page.keyboard.press('Escape');
-        await expect(page.locator('[data-brief-pick]')).toHaveAttribute('aria-pressed', 'false');
-        await page.getByRole('tab', { name: /To review/ }).click();
-        await page.locator('[data-brief-pick]').click();
-        await page.locator('[data-brief-option="31"] img').click();
-        await expect(page.locator('#briefs-chat-host').getByText(/Waiting for you/)).toBeVisible();
-        await expect(page.locator('[data-brief-pick]')).toHaveAttribute('aria-pressed', 'false');
+        await expect(page.locator('[data-brief-new]')).toBeVisible();
+        await expect(page.locator('[data-brief-pick]')).toHaveCount(0);
         expect(pageErrors).toEqual([]);
     });
 

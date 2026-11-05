@@ -242,4 +242,45 @@ test.describe('the questions go straight to the editor', () => {
         await expect(page.locator('[data-brief-studio-wait]')).toContainText('is making');
         expect(pageErrors).toEqual([]);
     });
+
+    test('no Select beside New brief or on an option the editor opens; Select is in the editor', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-tab="review"]').click();
+        await expect(page.locator('[data-brief-open-studio="77"]')).toBeVisible();
+        await expect(page.locator('[data-brief-pick]')).toHaveCount(0);
+        await expect(page.locator('[data-brief-select="77"]')).toHaveCount(0);
+        await page.locator('[data-brief-open-studio="77"]').click();
+        await expect(page.locator('[data-ds-pick]')).toBeVisible();
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('"Not this" with only their own words: a button sends it, and the flyer leaves the list', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-tab="review"]').click();
+        await page.locator('[data-brief-reject="77"]').click();
+        await page.getByRole('button', { name: 'Not this one' }).click();
+        expect(store.decided).toHaveLength(0);
+        await page.locator('[data-brief-reject-note="77"]').fill('The cat should be ginger, not grey');
+        await page.getByRole('button', { name: 'Not this one' }).click();
+        await expect.poll(() => store.decided.length).toBe(1);
+        expect(store.decided[0]).toMatchObject({ action: 'decide', optionId: 77, decision: 'reject', reason: 'other', note: 'The cat should be ginger, not grey' });
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('Edit brief says what saving does to what is already made', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-tab="review"]').click();
+        const edit = page.getByRole('button', { name: 'Edit brief', exact: true });
+        await expect(edit).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Edit flyer' })).toHaveCount(0);
+        await edit.click();
+        await expect(page.locator('[data-brief-edit-keeps]')).toContainText('The 1 flyer page already made stay as they are');
+        expect(pageErrors).toEqual([]);
+    });
 });

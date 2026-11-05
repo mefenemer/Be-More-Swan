@@ -68,9 +68,13 @@ Briefs move left to right through these tabs. The number on each tells you how m
 | **Approved** | Finished, and in My Content |
 | **Archived** | Briefs you stopped. Anything you had approved stays in My Content |
 
-## Talk about one option
+## Not this one
 
-Press **Select**, then click an option or a brief. It appears above the chat's message box, so you can say what to change, for example "like this one, but brighter". Press Esc to stop selecting.
+Press **Not this** on an option you don't want, then choose a reason, or type your own and press **Not this one**. It leaves the list, and your Brand Designer takes the reason into account in this brief's next round.
+
+## Changing a brief
+
+**Edit brief** changes what the brief asks for. Saving changes only the brief: anything already made stays as it is, and the next round uses your changes.
 
 ## Your brand style
 

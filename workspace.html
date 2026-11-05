@@ -14084,6 +14084,8 @@ function _railRender() {
     window.addEventListener('error', (ev) => {
         // Resource loads (a 404 on an image) also arrive here and are not what this is for.
         if (!ev || !ev.message) return;
+        // The browser's note that a resize was put off to the next frame: harmless, never the customer's problem.
+        if (/^ResizeObserver loop/.test(ev.message)) return;
         const at = ev.filename ? `${String(ev.filename).split('/').pop().split('?')[0]}:${ev.lineno}` : frameOf(ev.error);
         show(ev.message, at);
     });

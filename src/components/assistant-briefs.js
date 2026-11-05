@@ -330,8 +330,9 @@
             ${V().rejectReasons.map((r) => `<button type="button" data-brief-reject-reason="${esc(r.key)}" data-option="${o.id}"
               class="btn-secondary min-h-[44px] sm:min-h-0 px-2 py-1 border text-xs font-bold rounded-lg">${esc(r.label)}</button>`).join('')}
           </div>
-          <input type="text" data-brief-reject-note="${o.id}" maxlength="300" placeholder="In your words (optional)" aria-label="Why not this one (optional)"
+          <input type="text" data-brief-reject-note="${o.id}" maxlength="300" placeholder="Or say why in your words" aria-label="Why not this one, in your words"
             class="w-full mt-1 px-2 py-1 border border-gray-200 rounded-lg text-base sm:text-xs">
+          <button type="button" data-brief-reject-reason="other" data-brief-reject-own data-option="${o.id}" class="btn-primary min-h-[44px] sm:min-h-0 px-3 py-1 text-xs font-bold rounded-lg">Not this one</button>
           <button type="button" data-brief-reject-cancel class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1 text-xs font-bold">Keep it</button>
         </div>`;
     } else if (o.status === 'proposed' && b.status !== 'cancelled' && !progress(b).done) {
@@ -347,7 +348,7 @@
           ? `<button type="button" data-brief-preview="${o.id}" aria-label="${esc(`Preview ${o.prompt || 'this flyer'} larger`)}" class="block w-full h-full" style="cursor:zoom-in">${img}</button>`
           : img}</div>
         <p class="text-[11px] font-bold text-gray-600 mt-1">${o.flyer ? esc(o.prompt || 'Flyer') : esc(sourceLabel(o.source).replace(/s$/, ''))} · round ${o.round}</p>
-        ${chatPaneAvailable() ? `<button type="button" data-brief-select="${o.id}" data-brief="${b.id}" title="Ask ${esc(name())} about this one" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">🎯 Select</button>` : ''}
+        ${chatPaneAvailable() && !canEdit(o) ? `<button type="button" data-brief-select="${o.id}" data-brief="${b.id}" title="Ask ${esc(name())} about this one" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">🎯 Select</button>` : ''}
         ${canEdit(o) ? `<button type="button" data-brief-open-studio="${o.id}" data-brief="${b.id}" class="btn-primary w-full min-h-[44px] sm:min-h-0 px-2 py-1.5 mt-1 text-xs font-bold rounded-lg">Open in editor</button>` : ''}
         ${o.flyer && o.url ? `<button type="button" data-brief-preview="${o.id}" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">Preview</button>` : ''}
         ${o.flyer && o.flyer.lowResPhoto ? '<p class="text-[11px] text-amber-700 mt-1">This photo may look soft when printed — try a smaller paper size or another round.</p>' : ''}
@@ -473,7 +474,7 @@
             ${flyer ? '' : `<button type="button" data-brief-own-open="${b.id}"
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add your own</button>`}
             <button type="button" data-brief-edit="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
-              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">${flyer ? (progress(b).done ? 'Change this flyer' : 'Edit flyer') : 'Edit brief'}</button>
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">${flyer && progress(b).done ? 'Change this flyer' : 'Edit brief'}</button>
             <button type="button" data-brief-chat="${b.id}"
               class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1.5 text-xs font-bold">Talk it through with ${esc(name())}</button>
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
@@ -518,7 +519,8 @@
     const draftCost = state.unit === 'tasks' ? ' (1 task)' : '';
     return `
       <form data-flyer-form class="bg-white rounded-2xl border-2 border-emerald-200 shadow-sm p-5 mb-4 space-y-3">
-        <p class="text-sm font-bold text-gray-900">${state.form.fork ? 'Change this flyer' : editing ? 'Edit flyer' : 'New printed flyer'}</p>
+        <p class="text-sm font-bold text-gray-900">${state.form.fork ? 'Change this flyer' : editing ? 'Edit brief' : 'New printed flyer'}</p>
+        ${editing && !state.form.fork ? editKeepsMadeHtml(editing, true) : ''}
         ${state.form.fork ? '<p class="text-xs text-gray-600">This makes a new version. The flyer you approved stays in My Content until you delete it.</p>' : ''}
         <p class="text-xs text-gray-500">${esc(name())} draws the pages in your brand. When you approve one, a print-ready PDF goes into My Content — print it at home, or send it to a print shop.</p>
         ${field('Name', input('title', v.title, 'e.g. November open day flyer', 120))}
@@ -576,6 +578,14 @@
       </form>`;
   }
 
+  /** What saving an edit does to what is already made (owner 2026-11-05 asked): nothing; the next round uses it. */
+  function editKeepsMadeHtml(b, flyer) {
+    const made = b && Array.isArray(b.options) ? b.options.filter((o) => o.status === 'proposed' || o.status === 'approved').length : 0;
+    if (!made) return '';
+    const what = flyer ? (made === 1 ? 'flyer page' : 'flyer pages') : (made === 1 ? 'option' : 'options');
+    return `<p class="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2" data-brief-edit-keeps>Saving changes only this brief. The ${made} ${what} already made stay as they are${flyer ? ': change one with "Open in editor", or press "Save and make the flyer" for new pages from these words' : ', and the next options you ask for use these changes'}.</p>`;
+  }
+
   function formHtml() {
     if (!state.form) return '';
     const editing = state.form.mode === 'edit' ? state.briefs.find((b) => b.id === state.form.id) : null;
@@ -590,6 +600,7 @@
     return `
       <form data-brief-form class="bg-white rounded-2xl border-2 border-emerald-200 shadow-sm p-5 mb-4 space-y-3">
         <p class="text-sm font-bold text-gray-900">${editing ? 'Edit brief' : 'New brief'}</p>
+        ${editKeepsMadeHtml(editing, false)}
         ${field('Name', input('title', v.title, 'e.g. Spring launch — hero image', 120))}
         ${field('What should it show, or say?', `<textarea data-keep="brief-message" name="message" maxlength="1000" rows="3" placeholder="e.g. A small team celebrating in a bright studio — the feeling of finally having time back" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">${esc(v.message || '')}</textarea>`)}
         ${field('Exact words for a branded card (optional)', input('headline', v.headline, 'e.g. Your Monday, sorted.', 120))}
@@ -638,7 +649,7 @@
         </div>
         <div class="flex flex-wrap items-center gap-3">
           ${credits}
-          ${chatPaneAvailable() ? `<button type="button" data-brief-pick aria-pressed="${state.picking ? 'true' : 'false'}" title="Choose an option or a brief to talk about" class="${state.picking ? 'btn-primary' : 'btn-secondary border'} min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">🎯 ${state.picking ? 'Selecting…' : 'Select'}</button>` : ''}
+          ${''/* Select lives in the editor, where the design is changed (owner 2026-11-05): not beside New brief. */}
           ${chatPaneAvailable() && !chatIsOn() ? `<button type="button" data-brief-chat-toggle aria-pressed="false" title="Show the chat beside your briefs" class="btn-assistant border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">Chat with ${esc(name())}</button>` : ''}
           ${state.form ? '' : `<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
         </div>
@@ -1035,6 +1046,12 @@
       const optionId = Number(reason.dataset.option);
       const note = document.querySelector(`[data-brief-reject-note="${optionId}"]`)?.value || '';
       const brief = state.briefs.find((b) => b.options.some((o) => o.id === optionId));
+      // Their own words, sent with the button under them (owner 2026-11-05: typed a reason, then nothing to press).
+      if (reason.hasAttribute('data-brief-reject-own') && !note.trim()) {
+        const box = document.querySelector(`[data-brief-reject-note="${optionId}"]`);
+        if (box) { box.placeholder = 'Type why, or choose a reason above'; box.focus(); }
+        return;
+      }
       try {
         await post({ action: 'decide', optionId, decision: 'reject', reason: reason.dataset.briefRejectReason, note });
         state.rejecting = null;

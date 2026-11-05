@@ -180,6 +180,14 @@ check('New brief opens a new conversation every time (owner 2026-11-05)', () => 
     assert.ok(read('src/components/assistant-briefs.js').includes("askChat('I need a new brief.', { fresh: true })"));
 });
 
+check('a resize never shows "Something went wrong": the editor sizes the page a frame later, and the catcher ignores the note', () => {
+    // Owner 2026-11-05: adding words showed "ResizeObserver loop completed with undelivered notifications".
+    const studio = read('src/components/design-studio.js');
+    assert.ok(studio.includes('if (!w || w === roWidth) return;') && studio.includes('requestAnimationFrame(onResize);'));
+    assert.ok(!studio.includes('new ResizeObserver(onResize)'), 'never resize from inside the callback');
+    assert.ok(read('workspace.html').includes("if (/^ResizeObserver loop/.test(ev.message)) return;"));
+});
+
 // ── What prints is what was dragged ──────────────────────────────────────────────────────────────
 
 check('a flyer becomes layers, and a changed design draws to a preview and print PDFs', async () => {
