@@ -236,9 +236,9 @@
     // A draft just finished: say so in the docked chat too (shown here only, not saved to the thread),
     // so "are you done?" is answered before it is asked.
     const nowDrafting = !!(state.data && state.data.site.drafting);
-    if (state.wasDrafting && !nowDrafting && state.data && chatPane.session && chatPane.assistantId === state.assistantId) {
+    if (state.wasDrafting && !nowDrafting && state.data && chatPane.session && chatPane.session.session && chatPane.assistantId === state.assistantId) {
       const imp = state.data.import;
-      chatPane.session.appendMessage({ role: 'assistant', content: state.data.site.draftNote
+      chatPane.session.session.appendMessage({ role: 'assistant', content: state.data.site.draftNote
         ? `The draft didn't finish: ${state.data.site.draftNote}`
         : imp && imp.status === 'ready' ? 'Your current site has been read — have a look at it on the Set up tab, then choose whether to use it as your draft.'
         : imp && imp.status === 'failed' ? (imp.message || 'The import didn\'t work.')
@@ -1451,10 +1451,10 @@
   // The same conversation as the chat pop-up (chat-session.js), docked beside the preview so a change
   // the user approves on a card shows in the preview straight away (site:changed → load). Its thread
   // is remembered per assistant in this browser, so coming back carries on; "New chat" starts again.
-  const chatPane = { session: null, assistantId: null, mountEl: null, loading: false };
+  // The shared docked chat (chat-pane.js): its thread is remembered per assistant in this browser.
+  // chatPane.session is the pane (setReference) and chatPane.chat the conversation (appendMessage).
+  const chatPane = { session: null, assistantId: null, mountEl: null };
   const chatKey = () => `bms-site-chat:${state.assistantId}`;
-  const storedChat = () => { try { return Number(localStorage.getItem(chatKey())) || null; } catch { return null; } };
-  const storeChat = (id) => { try { if (id) localStorage.setItem(chatKey(), String(id)); else localStorage.removeItem(chatKey()); } catch { /* private window */ } };
   function unmountChat() {
     if (chatPane.session && chatPane.session.destroy) { try { chatPane.session.destroy(); } catch { /* already gone */ } }
     chatPane.session = null; chatPane.mountEl = null; chatPane.assistantId = null;
@@ -1464,57 +1464,30 @@
     const show = state.panel === 'chat' && chatAvailable();
     box.hidden = !show;
     if (!show) return;
-    if (chatPane.loading) return;
     if (chatPane.session && chatPane.assistantId === state.assistantId && chatPane.mountEl && box.contains(chatPane.mountEl)) return;
-    mountChat(box, storedChat());
+    mountChat(box);
   }
-  async function mountChat(box, sessionId) {
+  function mountChat(box) {
     unmountChat();
-    const who = esc(state.assistantName || 'your assistant');
-    box.innerHTML = `<div data-sb-chatbox class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
-        <div class="flex items-center justify-between gap-2 px-4 py-2 border-b border-gray-200" style="flex-shrink:0">
-          <p class="text-sm font-black text-gray-900 truncate">Chat with ${who}</p>
-          ${btn('data-sb-chat-new title="Start a new conversation"', 'New chat')}
-        </div>
-        <div style="position:relative;flex:1;min-height:0"><div data-sb-chat-mount style="position:absolute;inset:0"><p class="text-sm text-gray-500 text-center p-8">Loading the chat…</p></div></div>
-      </div>`;
-    const mountEl = box.querySelector('[data-sb-chat-mount]');
-    const forId = state.assistantId;
-    chatPane.loading = true;
-    let initialMessages = [];
-    let chatSessionId = null;
-    if (sessionId) {
-      // Carry on the remembered thread — unless it is archived, gone or someone else's.
-      try {
-        const r = await fetch(`/.netlify/functions/get-chat-session?chatSessionId=${encodeURIComponent(sessionId)}`, { credentials: 'same-origin' });
-        const d = r.ok ? await r.json() : null;
-        if (d && d.session && Number(d.session.aiAssistantId) === Number(forId) && d.session.status !== 'archived') {
-          chatSessionId = sessionId; initialMessages = d.messages || [];
-        } else storeChat(null);
-      } catch { /* start a new one */ }
-    }
-    chatPane.loading = false;
-    if (forId !== state.assistantId || !mountEl.isConnected) return;
+    box.innerHTML = '<div data-sb-chatbox style="display:flex;flex-direction:column"></div>';
+    const host = box.firstElementChild;
     const fresh = state.data && isFresh();
-    chatPane.session = window.ChatSession.mount({
-      container: mountEl,
-      assistantId: forId,
-      chatSessionId,
+    chatPane.session = window.ChatPane.mount(host, {
+      assistantId: state.assistantId,
       assistantName: state.assistantName,
       roleKey: 'website_assistant',
-      initialMessages,
+      rememberKey: chatKey(),
       placeholder: fresh ? 'Describe the website you’d like…' : 'Ask for a change…',
       starterPrompts: fresh ? [
         'Build me a website — ask me a few quick questions first.',
         'Bring over my current website so I can start from what I have.',
         'What do you already know about my business?',
       ] : null,
-      onSession: (id) => { if (state.assistantId === forId) storeChat(id); },
       // A bigger box to describe a site in (owner, 2026-11-05).
       composerRows: 4,
     });
-    chatPane.assistantId = forId;
-    chatPane.mountEl = mountEl;
+    chatPane.assistantId = state.assistantId;
+    chatPane.mountEl = host;
   }
 
   // ── "Select": pick a part of the preview to talk about ────────────────────
@@ -1733,7 +1706,7 @@
   // The preview stays beside whichever is open. Arrow keys move between them (assistants.js).
   // "Chat" (2026-11-04): this assistant's chat, docked beside the preview, first because it is the
   // quickest way to build — every change it proposes still waits for the user's click on its card.
-  const chatAvailable = () => !!(window.ChatSession && typeof window.ChatSession.mount === 'function');
+  const chatAvailable = () => !!(window.ChatSession && typeof window.ChatSession.mount === 'function' && window.ChatPane);
   const SUBTABS_ALL = [['chat', 'Chat'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];
   function siteSubtabsHtml() {
     const SUBTABS = SUBTABS_ALL.filter(([k]) => k !== 'chat' || chatAvailable());
@@ -2409,7 +2382,6 @@
     }
     if (t('[data-site-pick]')) { setPicker(!picker.on); return; }
     if (t('[data-site-editor-full]')) { setEditorFull(!state.editorFull); return; }
-    if (t('[data-sb-chat-new]')) { storeChat(null); unmountChat(); render(); return; }
     if (t('[data-site-preview-full]')) { setPreviewFull(true); return; }
     if (t('[data-site-preview-close]')) { setPreviewFull(false); return; }
     const dev = t('[data-site-device]');

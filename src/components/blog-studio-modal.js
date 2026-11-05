@@ -196,6 +196,18 @@
     + 'width:32px;height:32px;font-size:18px;line-height:1;cursor:pointer;color:#374151;}'
     + '.bms-blog-close:hover{background:#e5e7eb;}'
     + '.bs-grid{display:grid;grid-template-columns:320px minmax(0,1fr);gap:24px;align-items:start;}'
+    // The assistant's chat docked on the right (chat-pane.js; owner 2026-11-05, as on the Website tab):
+    // a third column on a wide screen, a panel over the right edge on a narrower one.
+    + '.bs-grid.bs-chat-on{grid-template-columns:300px minmax(0,1fr) minmax(340px,400px);}'
+    + '#bms-blog-backdrop.bs-page .bms-blog-panel.bs-chat-wide{max-width:1760px;}'
+    + '.bs-chat-col{position:sticky;top:12px;height:calc(100vh - 150px);min-height:460px;}'
+    + '.bs-chat-host{height:100%;}'
+    + '@media (max-width:1279px){.bs-grid.bs-chat-on{grid-template-columns:300px minmax(0,1fr);}'
+    + '.bs-chat-col{position:fixed;right:12px;top:76px;bottom:12px;height:auto;min-height:0;width:min(420px,calc(100vw - 24px));z-index:6;box-shadow:0 18px 50px rgba(0,0,0,.25);border-radius:16px;}}'
+    + '@media (max-width:860px){.bs-grid.bs-chat-on{grid-template-columns:minmax(0,1fr);}}'
+    // "Select": click a paragraph, heading or list to talk about it in the chat.
+    + '.bs-selecting .bmsme-block{cursor:crosshair;}'
+    + '.bs-selecting .bmsme-block:hover{outline:2px solid #db2777;outline-offset:2px;background:rgba(219,39,119,.06);}'
     // Eight sections now live on the left (publishing controls included), so on a narrow screen the
     // two columns stack rather than crushing the editor.
     + '@media (max-width:860px){.bs-grid{grid-template-columns:minmax(0,1fr);}}'
@@ -377,7 +389,8 @@
     + '  <nav id="bs-crumbs" class="bs-crumbs" aria-label="Breadcrumb"></nav>'
     + '  <div class="bs-row" style="justify-content:space-between;margin-bottom:16px;padding-right:40px;">'
     + '    <h1 id="bs-dialog-title" style="font-size:20px;font-weight:700;">Blog Studio</h1>'
-    + '    <span id="bs-save-status" class="bs-status"></span>'
+    + '    <span class="bs-row" style="gap:10px;"><span id="bs-save-status" class="bs-status"></span>'
+    + '      <button type="button" id="bs-chat-toggle" class="bs-btn bs-btn-sm bs-btn-assist bs-hidden" aria-pressed="false" title="Show or hide the chat beside your article">\uD83D\uDCAC <span data-bs-assistant-label="chat">Chat</span></button></span>'
     + '  </div>'
     // The old "Start a new post" brief screen is gone: opening Blog Studio drops straight into the
     // editor on a fresh draft. AI drafting from a topic now lives inline in the editor (bs-ai-draft).
@@ -682,6 +695,8 @@
     // Up here with the other things the assistant does to the draft, not stranded under it.
     + '          <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost bs-btn-sm"'
     + '            title="Write three alternative headlines and openings, then let your readers pick the winner">Test 3 headlines</button>'
+    + '          <button type="button" id="bs-select" class="bs-btn bs-btn-ghost bs-btn-sm bs-hidden" aria-pressed="false"'
+    + '            title="Click a paragraph, heading or list to ask your assistant to change it">\uD83C\uDFAF Select</button>'
     + '        </div>'
     + '      </div>'
     + '      <input id="bs-title" class="bs-title-input" placeholder="Post title">'
@@ -713,6 +728,7 @@
     + '        <div id="bs-hooks-list"></div>'
     + '      </div>'
     + '    </div>'
+    + '    <aside id="bs-chat-col" class="bs-chat-col bs-hidden" aria-label="Chat with your assistant"><div id="bs-chat-host" class="bs-chat-host"></div></aside>'
     + '  </div>'
     + '</div>';
 
@@ -737,6 +753,7 @@
     stock: function (n) { return 'Ask ' + n + ' to search stock'; },
     generate: function (n) { return 'Ask ' + n + ' to generate'; },
     pictures: function (n) { return 'Ask ' + n + ' to add pictures'; },
+    chat: function (n) { return 'Chat with ' + n; },
   };
 
   function assistantName() {
@@ -766,7 +783,11 @@
     if (state.assistantName === '') { applyAssistantNaming(); return Promise.resolve(); }
     return resolveBlogWriter().then(function (a) {
       state.assistantName = (a && a.name) || '';
+      // Opened from the Calendar or the standalone page (no assistantId): the docked chat talks to
+      // the workspace's Blog Writer.
+      state.chatAssistantId = (a && a.id) || null;
       applyAssistantNaming();
+      syncChatPane();
     });
   }
 
@@ -807,7 +828,9 @@
     var saved = (state.postId && (md || title)) ? flushDraft() : Promise.resolve();
     Promise.all([saved, resolveAssistantMeta(state.assistantId)]).then(function (res) {
       var meta = res[1];
-      var session = window.openAssistantChatModal(state.assistantId, meta.name, meta.role, meta.roleKey);
+      // With the chat docked beside the article, ask there rather than in a pop-up.
+      var docked = state.chatPane && state.chatPane.session && el('bs-chat-toggle').getAttribute('aria-pressed') === 'true';
+      var session = docked ? state.chatPane.session : window.openAssistantChatModal(state.assistantId, meta.name, meta.role, meta.roleKey);
       if (!md && !title) return;   // nothing to critique yet — just open the chat
       var seed = state.postId
         ? 'Please improve my article #' + state.postId + (title ? ' “' + title + '”' : '') + ' and give me a stronger version I can use.'
@@ -815,6 +838,158 @@
       setTimeout(function () { try { if (session) session.sendMessage(seed); } catch (_) {} }, 60);
     });
   }
+
+
+  // ── The chat docked beside the article (chat-pane.js) ─────────────────────────────────────────
+  // Owner, 2026-11-05: "loving the chat pane on the right" on the Website tab — the same here. The
+  // article's own conversation (remembered per article in this browser); every change still arrives
+  // as a card the author approves. "Select" puts a paragraph, heading or list on the chat's chip.
+  var CHAT_ON_KEY = 'bms-blog-chat-on';
+  var chatAssistant = function () { return state.assistantId != null ? state.assistantId : (state.chatAssistantId || null); };
+  function chatPaneAvailable() { return !!(window.ChatPane && window.ChatPane.available && window.ChatPane.available()) && chatAssistant() != null; }
+  function chatWanted() {
+    try { var v = localStorage.getItem(CHAT_ON_KEY); if (v === '1' || v === '0') return v === '1'; } catch (_) { /* private window */ }
+    return window.innerWidth >= 1280;   // on by default where it fits beside the article
+  }
+  function setChatWanted(on) { try { localStorage.setItem(CHAT_ON_KEY, on ? '1' : '0'); } catch (_) { /* private window */ } }
+  function destroyChatPane() {
+    if (state.chatPane) { try { state.chatPane.destroy(); } catch (_) { /* gone */ } }
+    state.chatPane = null; state.chatPaneFor = null;
+  }
+  function syncChatPane() {
+    var can = chatPaneAvailable() && state.postId != null;
+    var on = can && chatWanted();
+    el('bs-chat-toggle').classList.toggle('bs-hidden', !can);
+    el('bs-chat-toggle').setAttribute('aria-pressed', on ? 'true' : 'false');
+    el('bs-select').classList.toggle('bs-hidden', !can);
+    el('bs-workspace').classList.toggle('bs-chat-on', on);
+    el('bs-chat-col').classList.toggle('bs-hidden', !on);
+    var panel = el('bms-blog-backdrop') && el('bms-blog-backdrop').querySelector('.bms-blog-panel');
+    if (panel) panel.classList.toggle('bs-chat-wide', on);
+    if (!on) return Promise.resolve();
+    var key = chatAssistant() + ':' + state.postId;
+    if (state.chatPane && state.chatPaneFor === key) return state.chatPane.ready || Promise.resolve();
+    destroyChatPane();
+    state.chatPaneFor = key;
+    var forKey = key;
+    var who = chatAssistant();
+    return resolveAssistantMeta(who).then(function (meta) {
+      if (state.chatPaneFor !== forKey || !el('bs-chat-host').isConnected) return null;
+      var n = state.postId;
+      state.chatPane = window.ChatPane.mount(el('bs-chat-host'), {
+        assistantId: who, assistantName: meta.name, roleKey: meta.roleKey || BLOG_WRITER_ROLE,
+        rememberKey: 'bms-blog-chat:' + forKey,
+        placeholder: 'Ask for a change to this article, or 🎯 Select a part of it…',
+        starterPrompts: [
+          'Make the opening of article #' + n + ' punchier.',
+          'Add pictures to article #' + n + ' where they help the reader.',
+          'What would make article #' + n + ' more useful to my customers?',
+        ],
+        composerRows: 4,
+      });
+      return state.chatPane.ready;
+    });
+  }
+  function toggleChat() {
+    var on = !(el('bs-chat-toggle').getAttribute('aria-pressed') === 'true');
+    setChatWanted(on);
+    syncChatPane().then(function () { if (on && state.chatPane) state.chatPane.focus(); });
+  }
+
+  // "Select": click a block to put it on the chat's chip. Clicking a block normally opens it for
+  // typing; while selecting, the click is taken here first (capture) and never reaches the editor.
+  function blockKind(raw) {
+    var t = String(raw || '').trim();
+    if (/^#{1,6}\s/.test(t)) return 'heading';
+    if (/^(?:[-*+]|\d+[.)])\s/.test(t)) return 'list';
+    if (/^>/.test(t)) return 'quote';
+    if (/^:::media|^!\[/.test(t)) return 'picture';
+    if (/^:::/.test(t)) return 'block';
+    return 'paragraph';
+  }
+  function setSelecting(on) {
+    state.selecting = !!on;
+    el('bs-select').setAttribute('aria-pressed', on ? 'true' : 'false');
+    el('bs-select').textContent = on ? '🎯 Click a part… (Esc to stop)' : '🎯 Select';
+    el('bs-editor').classList.toggle('bs-selecting', !!on);
+  }
+  function onEditorSelect(e) {
+    if (!state.selecting || !state.editor) return;
+    var blockEl = e.target.closest && e.target.closest('.bmsme-block');
+    if (!blockEl) return;
+    e.preventDefault(); e.stopPropagation();
+    var b = state.editor.getBlock && state.editor.getBlock(blockEl.getAttribute('data-block-id'));
+    setSelecting(false);
+    if (!b) return;
+    var kind = blockKind(b.raw);
+    var text = String(b.raw).trim();
+    var short = text.replace(/\s+/g, ' ').replace(/^#{1,6}\s+/, '');
+    var ref = {
+      label: kind.charAt(0).toUpperCase() + kind.slice(1) + ' “' + (short.length > 48 ? short.slice(0, 47) + '…' : short) + '”',
+      // The whole block, word for word: the assistant's blog_block_edit card must quote it back exactly.
+      message: 'About this part of my article #' + state.postId + ': the ' + kind + ' “' + text.slice(0, 2500) + '”.',
+    };
+    if (el('bs-chat-toggle').getAttribute('aria-pressed') !== 'true') setChatWanted(true);
+    syncChatPane().then(function () { if (state.chatPane) state.chatPane.setReference(ref); });
+  }
+
+  // The chat's blog_block_edit card, applied HERE when this article is open (chat-session.js
+  // dispatches it): through the editor, so what is on screen and what is saved stay one thing.
+  function isOpenHere(postId) {
+    return !!state.editor && Number(postId) === Number(state.postId) && !!el('bms-blog-backdrop') && el('bms-blog-backdrop').classList.contains('bs-open');
+  }
+  document.addEventListener('blog:applyBlockEdit', function (e) {
+    var d = e.detail || {};
+    if (!isOpenHere(d.postId)) return;
+    d.handled = true;
+    if (state.aiDraftJobId || state.chatRewriting) { d.respond({ ok: false, error: 'Your assistant is still working on this article — try again when that has finished.' }); return; }
+    if (!state.editor.replaceBlockText(d.find, d.replace)) { d.respond({ ok: false, error: 'That part has changed since — select it again and ask once more.' }); return; }
+    // Saved now rather than on the autosave's debounce, so the card only says done once it is.
+    var live = state.postStatus === 'published';
+    flushDraft().then(function (res) {
+      d.respond(res && res.ok
+        ? { ok: true, message: live ? 'Done — it\u2019s changed, and live on your blog now.' : undefined }
+        : { ok: false, error: 'It\u2019s changed on screen, but couldn\u2019t be saved just now — check your connection.' });
+    });
+  });
+
+  // A Revise, Shorter, Longer or Add pictures card pressed in the chat (chat-session.js) while this
+  // article is open. The worker writes its body on the server, so as with this studio's own buttons:
+  // save what is on screen first, lock the editor meanwhile, and reload it afterwards. Without this the
+  // editor's next autosave silently put the old words back over the rewrite.
+  document.addEventListener('blog:rewriteStarting', function (e) {
+    var d = e.detail || {};
+    if (!isOpenHere(d.postId)) return;
+    if (state.aiDraftJobId || state.chatRewriting) { d.busy = true; return; }
+    d.open = true;
+    setSelecting(false);
+    state.chatRewriting = state.postId;
+    aiDraftBusy(true);
+    setBanner('bs-action-status', 'Your assistant is working on this article\u2026 about a minute.', 'info');
+    d.ready = flushDraft();
+  });
+  document.addEventListener('blog:rewriteFinished', function (e) {
+    var d = e.detail || {};
+    if (state.chatRewriting == null || Number(d.postId) !== Number(state.chatRewriting)) return;
+    // Still running: stays locked, because the worker has yet to write. Closing the article releases it.
+    if (d.outcome === 'running') { setBanner('bs-action-status', 'Still working \u2014 close this article and reopen it in a minute to see the new version.', 'info'); return; }
+    var postId = state.chatRewriting;
+    state.chatRewriting = null;
+    if (d.outcome !== 'done') { aiDraftBusy(false); setBanner('bs-action-status', '', 'info'); return; }
+    api('blog-posts?id=' + encodeURIComponent(postId), { method: 'GET' }).then(function (p) {
+      if (!isOpenHere(postId)) return;
+      aiDraftBusy(false);
+      var md = p.ok && p.body.post ? (p.body.post.bodyMarkdown || '') : '';
+      if (!md) { setBanner('bs-action-status', 'Done, but the new version could not be loaded. Reopen this post to see it.', 'info'); return; }
+      state.editor.setMarkdown(md);
+      refreshReadout(md);
+      loadFeature();                           // any new pictures' preview URLs
+      setBanner('bs-action-status', '', 'info');
+      state.contentChanged = false;
+      notifyChanged();
+    });
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && state.selecting) { e.preventDefault(); setSelecting(false); } }, true);
 
   function loadAssistants() {
     return api('blog-tone', { method: 'GET' }).then(function (res) {
@@ -876,6 +1051,9 @@
     // has not started yet, and saying it is live would be a plain lie about what readers are seeing.
     state.postStatus = (post && post.status) || null;
     renderHooks(post);
+    setSelecting(false);
+    if (state.chatRewriting && Number(state.chatRewriting) !== Number(postId)) { state.chatRewriting = null; aiDraftBusy(false); }
+    syncChatPane();
     return state.editor;
   }
 
@@ -2120,6 +2298,10 @@
     });
 
     el('bs-swan-improve').addEventListener('click', askSwanImprove);
+    el('bs-chat-toggle').addEventListener('click', toggleChat);
+    el('bs-select').addEventListener('click', function () { setSelecting(!state.selecting); });
+    el('bs-editor').addEventListener('click', onEditorSelect, true);
+    el('bs-editor').addEventListener('mousedown', function (e) { if (state.selecting && e.target.closest && e.target.closest('.bmsme-block')) { e.preventDefault(); e.stopPropagation(); } }, true);
 
     // Inline AI draft: reveal the topic form, draft into the editor, or cancel.
     el('bs-ai-draft').addEventListener('click', function () {
@@ -3029,7 +3211,10 @@
     // lost. The editor's own destroy() flushes the body for the same reason.
     if (state.flushWidgetSettings) state.flushWidgetSettings();
     stopAiDraftPoll();   // see the note on stopAiDraftPoll: the job survives, the timer must not
+    state.chatRewriting = null;
     if (state.editor && state.editor.destroy) { state.editor.destroy(); state.editor = null; }
+    destroyChatPane();
+    setSelecting(false);
     el('bms-blog-backdrop').classList.remove('bs-open');
     window.ScrollLock.release('blog-studio');
     // Edits that never moved the post between lifecycle columns still change what the list behind

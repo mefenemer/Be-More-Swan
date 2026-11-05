@@ -44,7 +44,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
   <link rel="stylesheet" href="/style.css"></head><body class="bg-gray-50">
   <div class="page-wide p-4"><div id="site-editor-host" data-site-host="website"></div></div>
   <script src="/src/components/scroll-lock.js"></script><script src="/dialogs.js"></script>
-  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script>
+  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/chat-pane.js"></script>
   <script src="/src/components/media-picker.js"></script>
   <script src="/src/components/assistant-site-editor.js"></script>
   <script>AssistantSiteEditor.init({ assistantId: 7, assistantName: 'Wren' }); AssistantSiteEditor.activate('website');</script>

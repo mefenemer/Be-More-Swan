@@ -3765,6 +3765,51 @@
   }
   register('site_picture', renderSitePictureCard);
 
+  // { type: 'blog_block_edit', postId, find, replace, summary }
+  // ONE part of an article — the paragraph, heading or list the author selected in the Blog Studio
+  // ("Select") — rewritten, shown before and after. "Use this" swaps exactly that part (the Blog
+  // Studio's editor when the article is open there, else blog-block-edit.ts); the rest is untouched.
+  function renderBlogBlockEditCard(ui, esc) {
+    const postId = Number(ui.postId);
+    const find = typeof ui.find === 'string' ? ui.find.trim().slice(0, 6000) : '';
+    const replace = typeof ui.replace === 'string' ? ui.replace.trim().slice(0, 6000) : '';
+    if (!Number.isInteger(postId) || postId <= 0 || !find || !replace) return null;
+    const md = (t) => (window.marked && window.DOMPurify ? window.DOMPurify.sanitize(window.marked.parse(t)) : `<p>${esc(t).replace(/\n/g, '<br>')}</p>`);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change to article #${esc(postId)}</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <p class="text-xs font-bold text-gray-500 mt-3">Now</p>
+      <div class="text-sm text-gray-500 bg-white border border-gray-200 rounded-lg px-3 py-2 mt-1 line-through decoration-gray-300" style="max-height:160px;overflow:auto">${md(find)}</div>
+      <p class="text-xs font-bold text-gray-700 mt-3">Instead</p>
+      <div class="text-sm text-gray-900 bg-white border border-indigo-200 rounded-lg px-3 py-2 mt-1" style="max-height:220px;overflow:auto">${md(replace)}</div>
+      <p class="text-xs text-gray-600 mt-2">Only this part changes — the rest of the article stays word for word.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-bb-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Use this</button>
+        <button type="button" data-bb-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-bb-status></p>`;
+    const status = el.querySelector('[data-bb-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-bb-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-bb-go]')) return;
+      setBusy(true);
+      say('Changing it…');
+      el.dispatchEvent(new CustomEvent('blog:blockEdit', {
+        bubbles: true,
+        detail: { postId, find, replace, respond({ ok, error, message }) {
+          if (!ok) { setBusy(false); say(error || 'That couldn\'t be changed.', 'error'); return; }
+          say(message || 'Done — it\'s changed in your article.');
+        } },
+      }));
+    });
+    return el;
+  }
+  register('blog_block_edit', renderBlogBlockEditCard);
+
   // { type: 'listing_decisions', summary, decisions: [{ listingId, decision: 'approve' | 'decline' }] }
   // Visitors' entries waiting for the owner (site-listings.ts PATCH { id, decision }, the Listings tab's buttons).
   function renderListingDecisionsCard(ui, esc) {

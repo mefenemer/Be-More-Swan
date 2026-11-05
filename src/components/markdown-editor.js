@@ -1570,8 +1570,34 @@
     renderAll();
     syncFormatBar();   // paint the bar's initial state before the author touches anything
 
+    // Whitespace-blind comparison: what the chat quotes back may differ in spacing or line breaks.
+    const sameText = (x, y) => String(x || '').replace(/\s+/g, ' ').trim() === String(y || '').replace(/\s+/g, ' ').trim();
     return {
       getMarkdown,
+      /** One block's raw Markdown by its data-block-id — the Blog Studio's "Select" (blog-studio-modal.js). */
+      getBlock(id) { const b = blocks.find((x) => x.id === id); return b ? { id: b.id, raw: b.raw } : null; },
+      /**
+       * Replace ONE block's text (the chat's blog_block_edit card): the block whose text is `find`, or
+       * failing that the one block containing it. Only that block is redrawn; the change autosaves.
+       * Returns false when `find` is not in exactly one block (nothing changes).
+       */
+      replaceBlockText(find, replace) {
+        let hit = blocks.filter((b) => sameText(b.raw, find));
+        if (hit.length !== 1) {
+          // Part of a block: matched whitespace-blind, replaced in place so the rest keeps its line breaks.
+          const needle = String(find || '').replace(/\s+/g, ' ').trim();
+          const part = needle ? new RegExp(needle.split(' ').map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+')) : null;
+          hit = part ? blocks.filter((b) => part.test(b.raw)) : [];
+          if (hit.length !== 1) return false;
+          hit[0].raw = hit[0].raw.replace(part, () => String(replace)).trim();
+        } else {
+          hit[0].raw = String(replace).trim();
+        }
+        if (editing && editing.blockId === hit[0].id) editing = null;
+        renderOneBlock(hit[0].id);
+        scheduleSave();
+        return true;
+      },
       setMarkdown(md) {
         editing = null;   // whatever was open refers to blocks that no longer exist
         blocks = splitBlocks(md).map((raw) => ({ id: uid(), raw }));

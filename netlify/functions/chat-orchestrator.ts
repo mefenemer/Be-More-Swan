@@ -27,7 +27,7 @@ import { adaptForModel, replyText } from '../../src/config/model-options';
 import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
+import { aiAssistants, assistantRecords, blogPosts, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { appendFooter } from '../../src/utils/disclosure-footer';
 import { resolvePostFooter } from '../../src/utils/post-disclosure';
@@ -107,6 +107,7 @@ import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { confirmCardReply, missingCardReply, pictureReply } from '../../src/utils/confirm-card-reply';
+import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
 import { LOSS_REASONS } from '../../src/config/revenue-events';
@@ -866,7 +867,10 @@ function blogSurfaces(): string {
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or Blog Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
-EXISTING ARTICLES — you can act on the articles listed below, each named by its "#" number, in eight ways: approve one in "Review" (you pick the time, from its posting schedule), book one for a time the user names (in "Review", "Scheduled" or "Needs attention"), take one in "Scheduled" off the schedule (it goes back to a draft), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), or make one shorter or longer (action "shorter" or "longer" — the article is rewritten to the new length and saved, keeping its pictures, links, title and schedule; not for a live article, which must be unpublished first), or revise one to the user's instruction (action "revise" with "instruction" — "improve it", "bring it up to date with what we know now", "make the opening punchier": the article is rewritten in the background to that instruction and saved in place, using the business knowledge for anything new, keeping its pictures, links, title and schedule; same rule about live articles), or add pictures to one (action "pictures" — up to 3 pictures placed where they help the reader, or as the user describes in "instruction"; stock photos by default, "source": "ai" for AI images, which use tasks; the words are not changed; same rule about live articles). When the user asks you to update, improve, refresh or rework an article that already exists, ALWAYS use "revise" — never write the whole article out again in your reply, and never answer it with a new draft unless they asked for a separate new article. To do any of them, emit a blog_action_proposal naming the article's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say an article HAS been approved, scheduled, unscheduled, rejected, removed, shortened, lengthened, revised or given pictures — say the card is there to confirm. One article per reply. If you cannot tell which one they mean, ask, quoting the candidates. You cannot publish one immediately, and apart from shorter, longer, revise and pictures you cannot edit an existing article's words: for those, tell them which column of the "Blogs" tab it is in so they can open it in Blog Studio. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN start a new version as a separate new article (a blog_batch_proposal) if they want one.`;
+EXISTING ARTICLES — you can act on the articles listed below, each named by its "#" number, in eight ways: approve one in "Review" (you pick the time, from its posting schedule), book one for a time the user names (in "Review", "Scheduled" or "Needs attention"), take one in "Scheduled" off the schedule (it goes back to a draft), reject and redraft one (say what is wrong; a replacement is written, and the user can also keep the reason as a rule), remove one they simply don't want (it moves to "Archived"; nothing is learned and no replacement is written — if it is wrong rather than unwanted, offer reject and redraft instead), or make one shorter or longer (action "shorter" or "longer" — the article is rewritten to the new length and saved, keeping its pictures, links, title and schedule; not for a live article, which must be unpublished first), or revise one to the user's instruction (action "revise" with "instruction" — "improve it", "bring it up to date with what we know now", "make the opening punchier": the article is rewritten in the background to that instruction and saved in place, using the business knowledge for anything new, keeping its pictures, links, title and schedule; same rule about live articles), or add pictures to one (action "pictures" — up to 3 pictures placed where they help the reader, or as the user describes in "instruction"; stock photos by default, "source": "ai" for AI images, which use tasks; the words are not changed; same rule about live articles). When the user asks you to update, improve, refresh or rework an article that already exists, ALWAYS use "revise" — never write the whole article out again in your reply, and never answer it with a new draft unless they asked for a separate new article. To do any of them, emit a blog_action_proposal naming the article's number. You never do it yourself: the user confirms on the card, and only that click changes anything. So never say an article HAS been approved, scheduled, unscheduled, rejected, removed, shortened, lengthened, revised or given pictures — say the card is there to confirm. One article per reply. If you cannot tell which one they mean, ask, quoting the candidates. You cannot publish one immediately, and apart from shorter, longer, revise and pictures you cannot edit an existing article's words: for those, tell them which column of the "Blogs" tab it is in so they can open it in Blog Studio. To remove several at once, they can tick them in the "Review" column and press Remove. You CAN start a new version as a separate new article (a blog_batch_proposal) if they want one.
+
+A PART THEY SELECTED — in Blog Studio the user can "Select" one paragraph, heading or list; their message then starts "About this part of my article #N: the paragraph “…”." followed by what they want. Change ONLY that part with a blog_block_edit card: {"type":"blog_block_edit","postId":N,"find":"<that part EXACTLY as quoted between “ and ”, character for character, Markdown included>","replace":"<the new version, in the same kind of Markdown — a heading stays a heading (same # level), a list stays a list>","summary":"<one sentence: what changes>"}. Keep their facts; invent nothing (no new numbers, names, prices or claims). Never rewrite the rest of the article or use "revise" for a selected part; never paste the whole article. Say the card shows the change for them to use — never that it has been changed. For a picture in that place, use action "pictures" with an instruction naming where.
+In Blog Studio this chat can sit beside the article ("Chat" button), and "Select" is the button above the article.`;
 }
 
 function emailSurfaces(): string {
@@ -2689,7 +2693,10 @@ OR, to act on an article that already exists (see EXISTING ARTICLES), uiElement 
   "when": "<schedule only: the time exactly as the user said it, e.g. 'Friday at 9am'>" | null,
   "instruction": "<revise: what should change, in the user's words, under 500 characters; pictures: which pictures they want, or null to let you decide>" | null,
   "source": "<pictures only: \"stock\" (free, the default) or \"ai\" when they ask for AI or generated images>" | null
-}`,
+}
+
+OR, for A PART THEY SELECTED, uiElement is instead:
+{ "type": "blog_block_edit", "postId": <N>, "find": "<the selected part, exactly as quoted>", "replace": "<the new version>", "summary": "<what changes>" }`,
         ].filter(Boolean).join('\n\n'),
         parseResponse: parseStructuredReply,
     },
@@ -3847,6 +3854,16 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 content = 'I couldn’t find that article among this assistant’s articles, so I haven’t set anything up. Which one do you mean? You can also open it on the "Blogs" tab.';
             }
         }
+        // A part of an article they selected in Blog Studio: rebuilt here, and only for their own article.
+        let blogBlockEdit: BlogBlockEditCard | null = null;
+        const blogBlockReq = route === ROUTES.blog_writer ? blogBlockEditFromUiElement(uiElement) : null;
+        if (blogBlockReq) {
+            const [post] = await db.select({ id: blogPosts.id }).from(blogPosts)
+                .where(and(eq(blogPosts.id, blogBlockReq.postId), eq(blogPosts.organisationId, orgId))).limit(1);
+            blogBlockEdit = post ? blogBlockReq : null;
+            uiElement = blogBlockEdit;
+            if (!post) content = 'I couldn’t find that article, so nothing has changed. Which one do you mean? You can also open it on the "Blogs" tab.';
+        }
         // And the Email Marketing assistant's (src/utils/chat-email-action.ts), the same way.
         let emailAction: EmailActionCard | null = null;
         const emailActionReq = route === ROUTES.newsletter_editor ? emailActionFromUiElement(uiElement) : null;
@@ -3956,7 +3973,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             // An action card on an existing article was already checked and rebuilt above — keep it.
             uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft }
                 : blogBatch ? { ...blogBatch, assistantId: session.aiAssistantId }
-                : blogAction ?? profileCard;
+                : blogAction ?? blogBlockEdit ?? profileCard;
         }
 
         // Same contract for the newsletter route, and the same reason: uiElementJson is persisted
@@ -4035,7 +4052,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // persists), so the only unbacked claim available to it is claiming an article it did not
         // write — which is the identical bug: a confident reply about a post that does not exist.
         // An action card is the thing a "scheduled" reply is about, so it is not an unbacked claim.
-        if (route === ROUTES.blog_writer && !blogDraft && !blogBatch && !blogAction && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.blog_writer && !blogDraft && !blogBatch && !blogAction && !blogBlockEdit && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
@@ -4047,7 +4064,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // does that, and a refused card's reply says it was refused (src/utils/confirm-card-reply.ts).
         // The voiceover actions on a post too: "I've added a voiceover" over a card nobody pressed.
         const voicePostCard = !!postAction && uiElement === postAction && ['voiceover', 'captions', 'time_text'].includes(postAction.action);
-        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || voicePostCard)) {
+        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || voicePostCard)) {
             content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
         }
         // The Website Assistant can't make, find or place a picture in a reply — only its site_picture
