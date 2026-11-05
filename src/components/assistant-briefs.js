@@ -1053,82 +1053,37 @@
   // Owner, 2026-11-05: the Website tab's pane, for the Brand Designer. One conversation for the tab, because
   // it is a list of briefs and the chat already knows them all (buildBriefsSnapshot). "Select" is a button on
   // each option rather than a mode: there is nothing to pick from but the options, and this way it is there
-  // at any scroll position, on a phone too. The layout is built here, around #briefs-host, which render()
-  // replaces the contents of. Below 1280 the chat goes over the right edge, with its own ✕.
-  const CHAT_ON_KEY = 'bms-brief-chat-on';
-  const chat = { pane: null, on: false };
+  // at any scroll position, on a phone too. The layout is ChatPane.dock's.
+  let chatDock = null;
   const chatPaneAvailable = () => !!window.ChatPane?.available?.() && !!state.assistantId;
-  const chatIsOn = () => chat.on;
-  function chatWanted() {
-    try { const v = localStorage.getItem(CHAT_ON_KEY); if (v === '1' || v === '0') return v === '1'; } catch { /* private window */ }
-    return window.innerWidth >= 1440;   // on by default where the options keep their room beside it
-  }
-  function chatDestroy() {
-    if (chat.pane) { try { chat.pane.destroy(); } catch { /* gone */ } }
-    chat.pane = null;
-  }
-  function chatLayout() {
+  const chatIsOn = () => !!chatDock && chatDock.isOn();
+  function getChatDock() {
     const host = document.getElementById('briefs-host');
-    if (!host) return null;
-    if (!document.getElementById('briefs-chat-css')) {
-      const css = document.createElement('style');
-      css.id = 'briefs-chat-css';
-      css.textContent = `
-        #briefs-chat-col { display: none; }
-        #briefs-layout.briefs-chat-on #briefs-chat-col { display: block; }
-        #briefs-chat-host { height: 100%; }
-        @media (min-width: 1280px) {
-          #briefs-layout.briefs-chat-on { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
-          #briefs-layout.briefs-chat-on #briefs-chat-col { position: sticky; top: 76px; height: calc(100vh - 92px); }
-        }
-        @media (max-width: 1279px) {
-          #briefs-layout.briefs-chat-on #briefs-chat-col { position: fixed; top: 76px; right: 12px; bottom: 12px; z-index: 40; width: min(420px, calc(100vw - 24px)); box-shadow: 0 18px 50px rgba(0,0,0,.25); border-radius: 16px; }
-        }`;
-      document.head.appendChild(css);
-    }
-    let layout = document.getElementById('briefs-layout');
-    if (!layout) {
-      layout = document.createElement('div');
-      layout.id = 'briefs-layout';
-      host.parentNode.insertBefore(layout, host);
-      layout.appendChild(host);
-      host.classList.add('min-w-0');
-      const col = document.createElement('aside');
-      col.id = 'briefs-chat-col';
-      col.setAttribute('aria-label', 'Chat with your assistant');
-      col.innerHTML = '<div id="briefs-chat-host"></div>';
-      layout.appendChild(col);
-    }
-    return layout;
-  }
-  function setChatOn(on, remember) {
-    const layout = chatLayout();
-    if (!layout || !chatPaneAvailable()) return;
-    chat.on = !!on;
-    if (remember) { try { localStorage.setItem(CHAT_ON_KEY, on ? '1' : '0'); } catch { /* private window */ } }
-    layout.classList.toggle('briefs-chat-on', chat.on);
-    const toggle = document.querySelector('[data-brief-chat-toggle]');
-    if (toggle) toggle.setAttribute('aria-pressed', chat.on ? 'true' : 'false');
-    state.painted.toolbar = toolbarHtml();
-    if (!chat.on || chat.pane) { if (chat.on) chat.pane.focus(); return; }
-    chat.pane = window.ChatPane.mount(document.getElementById('briefs-chat-host'), {
-      assistantId: state.assistantId, assistantName: name(), roleKey: 'brand_designer',
-      rememberKey: `bms-brief-chat:${state.assistantId}`,
-      placeholder: 'Ask for a picture or a flyer, or 🎯 Select an option…',
-      starterPrompts: ['I need a picture for a post.', 'Make me a printed flyer.', 'Which of these options would you choose?'],
-      composerRows: 3,
-      onClose: () => setChatOn(false, true),
+    if (!host || !chatPaneAvailable()) return null;
+    if (chatDock && chatDock.connected()) return chatDock;
+    chatDock = window.ChatPane.dock(host, {
+      prefix: 'briefs', storageKey: 'bms-brief-chat-on',
+      onToggle: (on) => {
+        document.querySelector('[data-brief-chat-toggle]')?.setAttribute('aria-pressed', on ? 'true' : 'false');
+        state.painted.toolbar = toolbarHtml();
+      },
+      pane: () => ({
+        assistantId: state.assistantId, assistantName: name(), roleKey: 'brand_designer',
+        rememberKey: `bms-brief-chat:${state.assistantId}`,
+        placeholder: 'Ask for a picture or a flyer, or 🎯 Select an option…',
+        starterPrompts: ['I need a picture for a post.', 'Make me a printed flyer.', 'Which of these options would you choose?'],
+        composerRows: 3,
+      }),
     });
+    return chatDock;
   }
-  function chatRefer(ref) {
-    setChatOn(true, !chat.on);
-    chat.pane?.setReference(ref);
-  }
+  function setChatOn(on, remember) { getChatDock()?.setOn(on, remember); }
+  function chatRefer(ref) { getChatDock()?.refer(ref); }
 
   window.AssistantBriefs = {
     init({ assistantId, assistantName }) {
-      chatDestroy();
-      chat.on = false;
+      chatDock?.destroy();
+      chatDock = null;
       state.assistantId = assistantId;
       state.assistantName = assistantName || null;
       state.rendered = false;
@@ -1144,7 +1099,8 @@
       if (state.rendered) return;
       state.rendered = true;
       render();
-      if (chatPaneAvailable() && chatWanted()) setChatOn(true, false);
+      const dock = getChatDock();
+      if (dock && dock.wanted()) dock.setOn(true, false);
     },
   };
 })();

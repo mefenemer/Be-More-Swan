@@ -860,6 +860,14 @@
         return data;
       });
     }
+    // "Change the scene" on a video_scene_edit card: `edit_scene`, the action behind "Change" on the scene.
+    function onVideoSceneEdit(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      videoProjectsCall({ action: 'edit_scene', id: d.projectId, sceneId: d.sceneId, patch: d.patch })
+        .then(() => respond({ ok: true }))
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
     function onVideoCreate(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -2426,6 +2434,7 @@
     container.addEventListener('brief:create', onBriefCreate);
     container.addEventListener('video:create', onVideoCreate);
     container.addEventListener('video:replan', onVideoReplan);
+    container.addEventListener('video:sceneEdit', onVideoSceneEdit);
     container.addEventListener('post:action', onPostAction);
     container.addEventListener('blog:action', onBlogAction);
     container.addEventListener('email:action', onEmailAction);
@@ -2536,6 +2545,7 @@
         container.removeEventListener('brief:create', onBriefCreate);
         container.removeEventListener('video:create', onVideoCreate);
         container.removeEventListener('video:replan', onVideoReplan);
+        container.removeEventListener('video:sceneEdit', onVideoSceneEdit);
         container.removeEventListener('post:action', onPostAction);
         container.removeEventListener('blog:action', onBlogAction);
         container.removeEventListener('email:action', onEmailAction);

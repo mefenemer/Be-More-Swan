@@ -4451,6 +4451,53 @@
   }
   register('post_picture', renderPostPictureCard);
 
+  // { type: 'video_scene_edit', projectId, scene, sceneId, summary, patch, now } (src/utils/chat-video-scene.ts)
+  // One scene of a storyboard. It only changes the plan: making the video stays the button on the video,
+  // which states its cost. chat-session.js → video-projects.ts `edit_scene`, as "Change" on the scene.
+  const VIDEO_SCENE_SOURCES = { stock_video: 'Stock footage', stock_photo: 'Stock photo', brand_card: 'Branded card', ai_image: 'AI picture', ai_video: 'AI clip' };
+  function renderVideoSceneEditCard(ui, esc) {
+    const patch = ui.patch && typeof ui.patch === 'object' ? ui.patch : null;
+    if (!patch || !Number.isInteger(Number(ui.projectId)) || !ui.sceneId || !Object.keys(patch).length) return null;
+    const now = ui.now || {};
+    const box = (t, cls) => `<p class="text-sm bg-white border rounded-lg px-3 py-2 mt-1 whitespace-pre-line ${cls}">${esc(t)}</p>`;
+    const change = (label, before, after) => `<p class="text-xs font-bold text-gray-700 mt-3">${esc(label)}</p>
+      ${before ? box(before, 'text-gray-500 border-gray-200 line-through decoration-gray-300') : ''}${box(after || '(none)', 'text-gray-900 border-indigo-200')}`;
+    const words = patch.prompt != null ? patch.prompt : patch.keywords;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change scene ${esc(Number(ui.scene))}</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      ${patch.voiceover != null ? change('Voiceover', now.voiceover, patch.voiceover) : ''}
+      ${patch.onScreenText != null ? change('On-screen text', now.onScreenText, patch.onScreenText) : ''}
+      ${patch.source != null ? change('Picture from', '', VIDEO_SCENE_SOURCES[patch.source] || patch.source) : ''}
+      ${words != null ? change('What to show', '', words) : ''}
+      <p class="text-xs text-gray-600 mt-2">This only changes the plan. Nothing is made until you press “Make the video”, which says what it uses.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vse-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Change the scene</button>
+        <button type="button" data-vse-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vse-status></p>`;
+    const status = el.querySelector('[data-vse-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vse-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-vse-go]')) return;
+      setBusy(true);
+      say('Changing it…');
+      el.dispatchEvent(new CustomEvent('video:sceneEdit', {
+        bubbles: true,
+        detail: { projectId: Number(ui.projectId), sceneId: ui.sceneId, patch, respond({ ok, error }) {
+          if (!ok) { setBusy(false); say(error || 'That couldn\'t be changed.', 'error'); return; }
+          say('Done. The scene is changed in your storyboard.');
+        } },
+      }));
+    });
+    return el;
+  }
+  register('video_scene_edit', renderVideoSceneEditCard);
+
   // { type: 'visual_brief_edit', briefId, message?, mood?, mustInclude?, mustAvoid?, summary }
   // A change to what a brief asks for (src/utils/chat-brief-edit.ts). It only saves: making options, the
   // part that can cost, stays the button on the brief. chat-session.js → brand-briefs.ts `edit`.

@@ -27,7 +27,7 @@ import { adaptForModel, replyText } from '../../src/config/model-options';
 import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, blogPosts, newsletterIssues, visualBriefs, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
+import { aiAssistants, assistantRecords, blogPosts, newsletterIssues, videoProjects, visualBriefs, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { appendFooter } from '../../src/utils/disclosure-footer';
 import { resolvePostFooter } from '../../src/utils/post-disclosure';
@@ -109,6 +109,8 @@ import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { confirmCardReply, missingCardReply, pictureReply, replyClaimsPicture } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
+import { videoSceneCard, videoSceneRequestFromUiElement, VIDEO_SCENE_EDIT_TYPE, type VideoSceneCard } from '../../src/utils/chat-video-scene';
+import type { Storyboard } from '../../src/lib/storyboard';
 import { briefEditFromUiElement, VISUAL_BRIEF_EDIT_TYPE, type BriefEditCard } from '../../src/utils/chat-brief-edit';
 import { postPartCardFromUiElement, POST_PICTURE_TYPE, POST_TEXT_EDIT_TYPE, type PostPartCard } from '../../src/utils/chat-post-parts';
 import { isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX } from '../../src/config/lead-recipient';
@@ -1786,7 +1788,7 @@ AUTOPILOT. ${perWeek > 0 ? `It is ON: you plan ${perWeek} storyboard${perWeek ==
 
 OTHER WAYS A VIDEO STARTS. "Make a video version" on one of their posts in the Review Queue plans a storyboard from that post ("From one of your posts"); the Campaign Assistant can commission one for a campaign ("For a campaign"). Both arrive on the "Videos" tab as storyboards for them to check, like any other.
 
-CHANGING A STORYBOARD. When the user wants a planned video done differently, emit a video_replan_proposal with the video's id from the list above and their notes. Approving it plans the storyboard again with those notes (free). To change a single scene, tell them to press "Change" on that scene on the "Videos" tab.
+CHANGING A STORYBOARD. When the user wants a planned video done differently, emit a video_replan_proposal with the video's id from the list above and their notes. Approving it plans the storyboard again with those notes (free). To change ONE scene, emit { "type": "video_scene_edit", "projectId": <its id>, "scene": <the scene's number>, "voiceover": "<only if it changes, at most 240 characters>", "onScreenText": "<only if it changes, at most 60 characters, \"\" to take it off>", "source": "stock_video" | "stock_photo" | "ai_video" | "ai_image" | "brand_card" (only if it changes), "picture": "<only if it changes: what to show or search for, under 120 characters>", "summary": "<one sentence: what changes>" }. The user may have selected it: their message then starts "About this scene of my video N". Keep their facts; invent nothing. It only changes the plan: nothing is made or spent until they press "Make the video", so tell them that, and never say the scene has been changed. An AI source there costs more when they do. You cannot put their own clip or picture in a scene from here: for that they press "Change" on it. The voice belongs to the whole video, not one scene, so a different voice means a new video.
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the two shapes below, or null:
 {
@@ -3971,6 +3973,18 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             }
         }
 
+        // One scene of a storyboard (src/utils/chat-video-scene.ts): found in the stored row, this workspace's
+        // own, and only while it can still be changed. edit_scene refuses a video past that as well.
+        let sceneEdit: VideoSceneCard | null = null;
+        if (route === ROUTES.video_producer && (uiElement as { type?: unknown } | null)?.type === VIDEO_SCENE_EDIT_TYPE) {
+            const req = videoSceneRequestFromUiElement(uiElement);
+            const [project] = req ? await db.select({ status: videoProjects.status, storyboard: videoProjects.storyboard }).from(videoProjects)
+                .where(and(eq(videoProjects.id, req.projectId), eq(videoProjects.organisationId, orgId))).limit(1) : [];
+            sceneEdit = req && project && ['planned', 'failed'].includes(project.status) ? videoSceneCard(req, project.storyboard as Storyboard | null) : null;
+            uiElement = sceneEdit;
+            if (!sceneEdit) content = 'I couldn’t set that up on the scene, so nothing has changed. Which video and scene do you mean? You can also press “Change” on the scene, on the "Videos" tab.';
+        }
+
         // "More like this one": a change to a brief (src/utils/chat-brief-edit.ts), for this workspace's own.
         let briefEdit: BriefEditCard | null = null;
         if (route === ROUTES.brand_designer && (uiElement as { type?: unknown } | null)?.type === VISUAL_BRIEF_EDIT_TYPE) {
@@ -4138,7 +4152,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // does that, and a refused card's reply says it was refused (src/utils/confirm-card-reply.ts).
         // The voiceover actions on a post too: "I've added a voiceover" over a card nobody pressed.
         const voicePostCard = !!postAction && uiElement === postAction && ['voiceover', 'captions', 'time_text'].includes(postAction.action);
-        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || (!!emailPartCard && uiElement === emailPartCard) || (!!briefEdit && uiElement === briefEdit) || voicePostCard)) {
+        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || (!!emailPartCard && uiElement === emailPartCard) || (!!briefEdit && uiElement === briefEdit) || (!!sceneEdit && uiElement === sceneEdit) || voicePostCard)) {
             content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
         }
         // The Website Assistant can't make, find or place a picture in a reply — only its site_picture

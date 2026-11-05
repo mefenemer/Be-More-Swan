@@ -2,7 +2,7 @@
  * src/components/chat-pane.js — an assistant's chat DOCKED beside what it works on (owner, 2026-11-05:
  * "loving the chat pane on the right"). First built inside the Website tab; shared here so every
  * assistant's editor can have one: the Website tab (assistant-site-editor.js), the Blog Studio
- * (blog-studio-modal.js), the post editor (workspace.html), the Email Studio (newsletter.js) and the Brand Designer's Briefs tab.
+ * (blog-studio-modal.js), the post editor (workspace.html), the Email Studio (newsletter.js), and through dock() below the Briefs and Videos tabs.
  *
  *   const pane = window.ChatPane.mount(container, {
  *     assistantId, assistantName, roleKey,
@@ -99,5 +99,79 @@
     return api;
   }
 
-  window.ChatPane = { mount, available };
+  /**
+   * A tab that is a LIST of things (the Brand Designer's Briefs, the Video Producer's Videos): the list on the
+   * left, the chat on the right, built around `host`, whose contents the tab keeps replacing. Sticky beside it
+   * from 1280px; over the right edge below that, with its own ✕ because it covers the tab's toggle.
+   *
+   *   const d = ChatPane.dock(host, { prefix, storageKey, pane: () => mount options, onToggle?(on) });
+   *   d.wanted(); d.isOn(); d.setOn(on, remember); d.refer({ label, message }); d.destroy();
+   */
+  function dock(host, opts) {
+    if (!document.getElementById('chatpane-dock-css')) {
+      const css = document.createElement('style');
+      css.id = 'chatpane-dock-css';
+      css.textContent = `
+        .chatpane-dock-col { display: none; }
+        .chatpane-dock.is-on > .chatpane-dock-col { display: block; }
+        .chatpane-dock-col > div { height: 100%; }
+        @media (min-width: 1280px) {
+          .chatpane-dock.is-on { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
+          .chatpane-dock.is-on > .chatpane-dock-col { position: sticky; top: 76px; height: calc(100vh - 92px); }
+        }
+        @media (max-width: 1279px) {
+          .chatpane-dock.is-on > .chatpane-dock-col { position: fixed; top: 76px; right: 12px; bottom: 12px; z-index: 40; width: min(420px, calc(100vw - 24px)); box-shadow: 0 18px 50px rgba(0,0,0,.25); border-radius: 16px; }
+        }`;
+      document.head.appendChild(css);
+    }
+    const layoutId = `${opts.prefix}-layout`;
+    let layout = document.getElementById(layoutId);
+    if (!layout) {
+      layout = document.createElement('div');
+      layout.id = layoutId;
+      layout.className = 'chatpane-dock';
+      host.parentNode.insertBefore(layout, host);
+      layout.appendChild(host);
+      host.classList.add('min-w-0');
+      const col = document.createElement('aside');
+      col.id = `${opts.prefix}-chat-col`;
+      col.className = 'chatpane-dock-col';
+      col.setAttribute('aria-label', 'Chat with your assistant');
+      col.innerHTML = `<div id="${opts.prefix}-chat-host"></div>`;
+      layout.appendChild(col);
+    }
+    layout.classList.remove('is-on');
+    let on = false;
+    let pane = null;
+    const api = {
+      wanted() {
+        try { const v = localStorage.getItem(opts.storageKey); if (v === '1' || v === '0') return v === '1'; } catch { /* private window */ }
+        return window.innerWidth >= 1440;   // on by default where the list keeps its room beside it
+      },
+      isOn: () => on,
+      setOn(next, remember) {
+        on = !!next;
+        if (remember) { try { localStorage.setItem(opts.storageKey, on ? '1' : '0'); } catch { /* private window */ } }
+        layout.classList.toggle('is-on', on);
+        if (opts.onToggle) opts.onToggle(on);
+        if (!on) return;
+        if (pane) { pane.focus(); return; }
+        pane = mount(document.getElementById(`${opts.prefix}-chat-host`), { ...opts.pane(), onClose: () => api.setOn(false, true) });
+      },
+      refer(ref) {
+        if (!on) api.setOn(true, true);
+        if (pane) pane.setReference(ref);
+      },
+      destroy() {
+        if (pane) { try { pane.destroy(); } catch { /* gone */ } }
+        pane = null; on = false;
+        layout.classList.remove('is-on');
+      },
+      /** False once the page holding it has been replaced. */
+      connected: () => layout.isConnected,
+    };
+    return api;
+  }
+
+  window.ChatPane = { mount, available, dock };
 })();
