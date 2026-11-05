@@ -56,14 +56,14 @@ check('connectors named as working are Live on connections.html, and the Coming-
     for (const name of ['Facebook', 'Instagram', 'LinkedIn', 'X', 'Gmail', 'Outlook', 'Google Search Console', 'Canva']) {
         assert.ok(live(name), `${name} is Live on connections.html`);
     }
+    // YouTube: Google approved the project's verification on 2026-11-05, so both YouTube cards are Live again.
+    assert.strictEqual((conn.match(/<h4>YouTube<\/h4><span class="cx-pill cx-live">/g) || []).length, 2, 'both YouTube cards are Live');
+    assert.ok(!/<h4>YouTube<\/h4><span class="cx-pill cx-soon">/.test(conn), 'no YouTube card is Coming soon');
     // Slack and Notion only run for the Minute Taker, which is itself coming soon.
     for (const name of ['Slack', 'Notion']) {
         assert.ok(!live(name), `${name} is not Live on connections.html`);
         assert.ok(!faq.includes(name), `${name} is not named as working in the FAQ`);
     }
-    // YouTube's Google project is still in Testing, so customers cannot connect it.
-    assert.ok(!live('YouTube'), 'YouTube is not Live on connections.html');
-    assert.ok(!faq.includes('YouTube'), 'YouTube is not named as working in the FAQ');
     assert.ok(faq.includes('HubSpot, Salesforce and Xero are coming soon'));
     // Nor anywhere else on the homepage: Cat's customer story used to say she used "a connected Notion pad".
     if (!live('Notion')) assert.ok(!/\bNotion\b/.test(read('index.html')), 'the homepage names Notion only once it is Live');
