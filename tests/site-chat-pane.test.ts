@@ -80,6 +80,21 @@ check('a draft in progress is visible, and the chat is told when it lands', () =
     assert.ok(chat.includes('NEVER emit another site_draft_request'));
 });
 
+check('the first question is whether to bring over their current site, named when we know it', () => {
+    const rule = chat.slice(chat.indexOf('ASK STEP BY STEP BEFORE YOU BUILD.'), chat.indexOf('WHAT THEY SELECTED ON THE PAGE.'));
+    assert.ok(rule.includes('the FIRST question is always whether to bring over their current website'));
+    const store = read('src/utils/site-store.ts');
+    assert.ok(store.includes('await currentWebsiteLine(db, orgId, assistantId, site.slug),'));
+    assert.ok(store.includes("'Their website before this one: not known — ask.'"));
+});
+
+check('full screen: one button in, the same button (or Esc) out', () => {
+    assert.ok(editor.includes("if (t('[data-site-editor-full]')) { setEditorFull(!state.editorFull); return; }"));
+    assert.ok(editor.includes("'Exit full screen'") || editor.includes('Exit full screen'));
+    assert.ok(editor.includes("if (e.key !== 'Escape' || e.defaultPrevented || !state.editorFull"));
+    assert.ok(editor.includes("window.ScrollLock.release('site-editor-full')"));
+});
+
 check('"Select" only describes what was clicked — it never changes the site', () => {
     const pick = slice(editor, '// ── "Select"', '/** The preview full screen');
     for (const w of ["action: 'apply'", 'apply(', 'post(', 'fetch(']) assert.ok(!pick.includes(w), `picker must not ${w}`);

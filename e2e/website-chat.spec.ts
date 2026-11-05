@@ -191,3 +191,21 @@ test('a draft being written shows moving dots over the preview, and the chat hea
     await expect(page.locator('[data-sb-chat]').getByText('Your draft is ready')).toBeVisible();
     expect(pageErrors).toEqual([]);
 });
+
+test('full screen: the editor fills the window, and the button or Esc puts it back', async ({ page, pageErrors }) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.goto('/e2e-website-chat.html');
+    await page.getByRole('button', { name: /Full screen/ }).click();
+    const host = page.locator('[data-site-host="website"]');
+    await expect(host).toHaveAttribute('data-sb-editor-full', '');
+    const box = await host.boundingBox();
+    expect(box!.x).toBe(0);
+    expect(box!.width).toBe(1400);
+    await page.screenshot({ path: 'test-results/website-chat-fullscreen.png' });
+    await page.getByRole('button', { name: /Exit full screen/ }).click();
+    await expect(host).not.toHaveAttribute('data-sb-editor-full', '');
+    await page.getByRole('button', { name: /Full screen/ }).click();
+    await page.keyboard.press('Escape');
+    await expect(host).not.toHaveAttribute('data-sb-editor-full', '');
+    expect(pageErrors).toEqual([]);
+});

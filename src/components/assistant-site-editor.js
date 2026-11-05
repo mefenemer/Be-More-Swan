@@ -354,6 +354,9 @@
       '@keyframes sb-dot { 0%, 80%, 100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: scale(1); } }',
       '.sb-dots { display: inline-flex; gap: 4px; vertical-align: middle; } .sb-dots i { width: 7px; height: 7px; border-radius: 9999px; background: currentColor; animation: sb-dot 1.2s infinite ease-in-out; } .sb-dots i:nth-child(2) { animation-delay: .15s; } .sb-dots i:nth-child(3) { animation-delay: .3s; }',
       '[data-sb-drafting] { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.72); border-radius: 8px; z-index: 2; }',
+      // Full screen (owner, 2026-11-05): the whole Website tab over the page, for more room to work.
+      '[data-sb-editor-full] { position: fixed; inset: 0; z-index: 10400; background: #f9fafb; overflow: auto; padding: 16px; }',
+      '@media (min-width: 1024px) { [data-sb-editor-full] [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(400px, 520px) !important; } [data-sb-editor-full] iframe[data-site-preview] { height: calc(100vh - 140px) !important; } [data-sb-editor-full] [data-sb-chatbox] { height: calc(100vh - 32px - 56px); } }',
       '[data-sb-full] { position: fixed; inset: 0; z-index: 10500; background: #fff; overflow: auto; }',
       '[data-sb-full] > div { height: 100%; display: flex; flex-direction: column; padding: 8px !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }',
       '[data-sb-full] [data-sb-frame-box] { flex: 1; min-height: 0; }',
@@ -1284,7 +1287,7 @@
   function previewHeadHtml(showImport) {
     return `<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
         <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${showImport ? 'your imported site (not your draft yet)' : state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
-        <div class="flex flex-wrap gap-1">${!showImport && chatAvailable() ? btn(`data-site-pick aria-pressed="${!!picker.on}" title="Click any part of the preview to ask ${esc(state.assistantName || 'your assistant')} to change it"`, `<span aria-hidden="true">🎯</span> ${picker.on ? 'Click a part… (Esc to stop)' : 'Select'}`, picker.on) : ''}<span class="flex gap-1" data-sb-wide-only>${btn(`data-site-device="desktop" aria-pressed="${state.device === 'desktop'}"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile" aria-pressed="${state.device === 'mobile'}"`, 'Phone', state.device === 'mobile')}</span></div>
+        <div class="flex flex-wrap gap-1">${!showImport && chatAvailable() ? btn(`data-site-pick aria-pressed="${!!picker.on}" title="Click any part of the preview to ask ${esc(state.assistantName || 'your assistant')} to change it"`, `<span aria-hidden="true">🎯</span> ${picker.on ? 'Click a part… (Esc to stop)' : 'Select'}`, picker.on) : ''}<span class="flex gap-1" data-sb-wide-only>${btn(`data-site-device="desktop" aria-pressed="${state.device === 'desktop'}"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile" aria-pressed="${state.device === 'mobile'}"`, 'Phone', state.device === 'mobile')}${state.previewFull ? '' : btn(`data-site-editor-full aria-pressed="${!!state.editorFull}" title="${state.editorFull ? 'Back to the normal view (Esc)' : 'Use the whole window for your website and chat'}"`, state.editorFull ? '<span aria-hidden="true">⤡</span> Exit full screen' : '<span aria-hidden="true">⤢</span> Full screen')}</span></div>
         ${state.previewFull ? btn('data-site-preview-close', 'Close preview', true) : ''}
       </div>`;
   }
@@ -1489,7 +1492,7 @@
     if (on && frame) attachPicker(frame);
     rerender();
   }
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && picker.on) setPicker(false); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && picker.on) { e.preventDefault(); setPicker(false); } });
   /** A selected part (or a section's swan) onto the chip above the docked chat's message box. */
   function giveToChat(ref) {
     if (!chatAvailable()) {
@@ -1508,6 +1511,23 @@
     };
     tryGive(0);
   }
+
+  /** The whole Website tab full screen (wide screens) — and back. Esc leaves it. */
+  function setEditorFull(on) {
+    if (!!state.editorFull === !!on) return;
+    state.editorFull = !!on;
+    const host = document.querySelector('[data-site-host="website"]');
+    if (host) host.toggleAttribute('data-sb-editor-full', state.editorFull);
+    if (window.ScrollLock) { if (on) window.ScrollLock.lock('site-editor-full'); else window.ScrollLock.release('site-editor-full'); }
+    else document.body.style.overflow = on ? 'hidden' : '';
+    rerender();
+    host?.querySelector('[data-site-editor-full]')?.focus();
+  }
+  document.addEventListener('keydown', (e) => {
+    // Esc stops "Select" first, closes a dialog or the phone preview first, then leaves full screen.
+    if (e.key !== 'Escape' || e.defaultPrevented || !state.editorFull || picker.on || state.previewFull || document.querySelector('[role="dialog"][aria-modal="true"]:not([hidden])')) return;
+    setEditorFull(false);
+  });
 
   /** The preview full screen (narrow screens, where it sits below everything else) — and back. */
   let previewRelease = null;
@@ -2147,6 +2167,7 @@
       state.pageId = pg.dataset.sitePage; state.previewPath = pathOf(page()); render(); return;
     }
     if (t('[data-site-pick]')) { setPicker(!picker.on); return; }
+    if (t('[data-site-editor-full]')) { setEditorFull(!state.editorFull); return; }
     if (t('[data-sb-chat-new]')) { storeChat(null); unmountChat(); render(); return; }
     if (t('[data-site-preview-full]')) { setPreviewFull(true); return; }
     if (t('[data-site-preview-close]')) { setPreviewFull(false); return; }
@@ -2693,6 +2714,7 @@
       picker.on = false;
       if (picker.off) { picker.off(); picker.off = null; }
       if (chatPane.assistantId !== assistantId) unmountChat();
+      setEditorFull(false);
       Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
         importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false, wasDrafting: false });
@@ -2702,6 +2724,7 @@
     // each its own tab. A list re-reads every time its tab is opened.
     activate(surface) {
       setPreviewFull(false);
+      setEditorFull(false);
       if (picker.on && (surface || 'website') !== 'website') { picker.on = false; if (picker.off) { picker.off(); picker.off = null; } }
       // Leaving the Website tab keeps an open section form, with what was typed, for coming back.
       if (state.surface === 'website') keepEditing();

@@ -373,6 +373,22 @@ const clip = (s: unknown, n: number) => {
  * The site as the chat needs it, read per turn: every page and section with its id, so a change
  * card can name exactly what it changes, and nothing the editor does not also show.
  */
+/** Their website from before this one — their set-up answer, else Business Information — so the chat's
+ *  first question can name it ("bring over yoursite.co.uk?"). Never this site's own address. */
+async function currentWebsiteLine(db: Db, orgId: number, assistantId: number, slug: string | null): Promise<string> {
+    const [[a], [o]] = await Promise.all([
+        db.select({ ctx: aiAssistants.onboardingContext }).from(aiAssistants).where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1),
+        db.select({ url: organisations.websiteUrl }).from(organisations).where(eq(organisations.id, orgId)).limit(1),
+    ]);
+    const ctx = (a?.ctx && typeof a.ctx === 'object' ? a.ctx : {}) as Record<string, unknown>;
+    const answer = typeof ctx[SITE_SETUP_KEYS.currentSite] === 'string' ? String(ctx[SITE_SETUP_KEYS.currentSite]).trim().slice(0, 300) : '';
+    const fromBi = (o?.url || '').trim().slice(0, 300);
+    const own = (u: string) => !!slug && u.toLowerCase().includes(`${slug.toLowerCase()}.`);
+    if (answer && !own(answer)) return `Their website before this one (their set-up answer to "Do you already have a website?"): ${answer}`;
+    if (fromBi && !own(fromBi)) return `Their website before this one (from Business Information): ${fromBi}`;
+    return 'Their website before this one: not known — ask.';
+}
+
 export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: number): Promise<string> {
     const [site] = await db.select().from(sites).where(and(eq(sites.aiAssistantId, assistantId), eq(sites.organisationId, orgId))).limit(1);
     if (!site) return 'YOUR SITE RIGHT NOW: not started. The first time the Website tab opens it starts from their business details; or propose a site_draft_request to draft the whole site.';
@@ -390,6 +406,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         `Can they press Publish now: ${(() => { const b = publishBlocker(site, d); return b ? `NO — ${b}` : 'yes'; })()}`,
         `Pages: ${d.pages.length} (no plan limits pages). Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
+        await currentWebsiteLine(db, orgId, assistantId, site.slug),
         d.settings.features
             ? `What this website does (their choice): ${d.settings.features.map((f) => FEATURE_LABELS[f]).join('; ') || 'only the basics'}. Switched OFF — never propose these kinds of section: ${SITE_FEATURES.filter((f) => !d.settings.features!.includes(f)).map((f) => FEATURE_LABELS[f]).join('; ') || 'nothing'}. To switch one on or off, propose set_settings with the full "features" list (${SITE_FEATURES.join(', ')}).`
             : `What this website does: not chosen yet — every kind of section is offered. When you discuss the site, help them choose and propose set_settings {"features":[…]} from ${SITE_FEATURES.join(', ')}, so what they don't need is hidden.`,
