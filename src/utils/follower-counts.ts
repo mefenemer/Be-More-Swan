@@ -18,6 +18,7 @@
 import { and, eq } from 'drizzle-orm';
 import { systemConnections, workspaceIntegrations } from '../../db/schema';
 import { getSecret } from './vault';
+import { getFreshAccessToken, isIntegrationProvider } from './workspace-integrations';
 import { normalizePlatform } from '../config/platform-formats';
 
 // Platforms whose token lives in workspace_integrations (not system_connections).
@@ -245,6 +246,16 @@ export async function refreshOrgFollowerCounts(
             meta,
             w.tenantId,
             async () => {
+                // ⚠️ Go through getFreshAccessToken, never the raw stored token. A Google access token
+                // dies after 1 hour, so reading the vault directly made YouTube show "—" ("fetch
+                // failed": a 401) whenever no publish had refreshed it in the last hour, which is
+                // most of the time. poll-goal-telemetry.ts already did this; this path didn't.
+                // Found 2026-11-05 checking the Google OAuth reviewer account.
+                if (isIntegrationProvider(w.provider)) {
+                    try {
+                        return (await getFreshAccessToken(db, organisationId, w.provider)).accessToken;
+                    } catch { /* fall through to the stored token: no worse than before */ }
+                }
                 if (!w.vaultRefKey) return null;
                 const secret = await getSecret(db, w.vaultRefKey).catch(() => null);
                 return (secret?.accessToken as string | undefined) ?? (secret?.token as string | undefined) ?? null;
