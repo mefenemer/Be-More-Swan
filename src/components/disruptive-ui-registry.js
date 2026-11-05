@@ -3589,7 +3589,7 @@
   }
   register('listings_add', renderListingsAddCard);
 
-  // { type: 'site_picture', pageId, sectionId, sectionLabel, place: 'in' | 'after', source: 'ai' | 'stock', description, alt }
+  // { type: 'site_picture', pageId, sectionId, sectionLabel, place: 'in' | 'after', kind: 'picture' | 'video', source: 'ai' | 'stock', description, alt }
   // A picture for one section, found or made RIGHT HERE (owner, 2026-11-05: the chat said "I'm generating
   // it now" and nothing ever came back — a reply can't make a picture; this card does, on a click).
   // Stock (pexels-search.ts, free) or AI (generate-ai-image.ts, charges as it says; blank = the business
@@ -3604,15 +3604,24 @@
     const label = str(ui.sectionLabel, 120) || 'this section';
     const place = ui.place === 'after' ? 'after' : 'in';
     let source = ui.source === 'stock' ? 'stock' : 'ai';
+    // Picture or video (owner, 2026-11-05: "do the same for videos"). A video plays silently on a loop
+    // with a pause button, in a hero, a text section or a gallery (site-definition.ts markVideos).
+    let kind = ui.kind === 'video' ? 'video' : 'picture';
+    let caps = null;
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
     el.innerHTML = `
-      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">A picture ${place === 'after' ? 'after' : 'for'} “${esc(label)}”</p>
-      <label class="block text-xs font-bold text-gray-700 mt-2">What should it show? <span class="font-normal text-gray-500">(optional)</span>
-        <textarea data-sp-desc rows="2" maxlength="600" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="Leave blank and your assistant decides from your business">${esc(str(ui.description, 600))}</textarea></label>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase" data-sp-title></p>
+        <div class="inline-flex gap-1" role="group" aria-label="Picture or video">
+          <button type="button" data-sp-kind="picture" class="px-2.5 py-1 text-xs font-bold rounded-lg border">Picture</button>
+          <button type="button" data-sp-kind="video" class="px-2.5 py-1 text-xs font-bold rounded-lg border">Video</button></div>
+      </div>
+      <label class="block text-xs font-bold text-gray-700 mt-2"><span data-sp-desc-label></span>
+        <textarea data-sp-desc rows="2" maxlength="600" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1">${esc(str(ui.description, 600))}</textarea></label>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-sp-go="ai" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Create with AI</button>
-        <button type="button" data-sp-go="stock" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Find stock photos (free)</button>
+        <button type="button" data-sp-go="stock" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50" data-sp-stock-label></button>
       </div>
       <p data-sp-cost class="text-xs text-gray-500 mt-1"></p>
       <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sp-status role="status"></p>
@@ -3622,67 +3631,118 @@
     const status = $('[data-sp-status]');
     const grid = $('[data-sp-grid]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
-    const paintSource = () => el.querySelectorAll('[data-sp-go]').forEach((b) => { b.className = `${b.dataset.spGo === source ? 'btn-primary' : 'btn-secondary'} px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50`; });
-    paintSource();
-    const setBusy = (b) => el.querySelectorAll('button, textarea').forEach((x) => { x.disabled = b; });
+    const unit = (n) => (caps && caps.unit === 'tasks' ? `${n} ${n === 1 ? 'task' : 'tasks'}` : `${n} ${n === 1 ? 'credit' : 'credits'}`);
+    function paint() {
+      const video = kind === 'video';
+      $('[data-sp-title]').textContent = `A ${video ? 'video' : 'picture'} ${place === 'after' ? 'after' : 'for'} “${label}”`;
+      $('[data-sp-desc-label]').innerHTML = video ? 'What should it show?' : 'What should it show? <span class="font-normal text-gray-500">(optional)</span>';
+      $('[data-sp-desc]').placeholder = video ? 'Describe it, e.g. steam rising from a fresh cup of coffee, slow and calm' : 'Leave blank and your assistant decides from your business';
+      $('[data-sp-stock-label]').textContent = video ? 'Find stock videos (free)' : 'Find stock photos (free)';
+      el.querySelectorAll('[data-sp-kind]').forEach((b) => { b.className = `${b.dataset.spKind === kind ? 'btn-primary' : 'btn-secondary'} px-2.5 py-1 text-xs font-bold rounded-lg border`; b.setAttribute('aria-pressed', String(b.dataset.spKind === kind)); });
+      const aiBtn = el.querySelector('[data-sp-go="ai"]');
+      const canAi = !caps ? true : video ? !!(caps.assistantCanVideo && caps.tierCanVideo) : !!caps.canImage;
+      aiBtn.disabled = !canAi;
+      aiBtn.title = canAi ? '' : video ? (caps && caps.assistantCanVideo ? 'AI video is on the Busywork Buster and Digital Employee plans' : 'None of your assistants can create videos') : 'None of your assistants can create pictures';
+      if (!canAi && source === 'ai') source = 'stock';
+      el.querySelectorAll('[data-sp-go]').forEach((b) => { b.className = `${b.dataset.spGo === source ? 'btn-primary' : 'btn-secondary'} px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50`; });
+      const cost = caps && (video ? caps.videoCost : caps.imageCost);
+      $('[data-sp-cost]').textContent = !caps || !canAi || !cost ? (video ? 'Stock videos are free.' : 'Stock photos are free.')
+        : video ? `Creating uses ${unit(cost)} for a 6-second clip, ready in a few minutes. Stock videos are free.`
+        : `Creating uses ${unit(cost)} and gives four to choose from. Stock photos are free.`;
+    }
+    // Re-enabling repaints, so a "Create with AI" this plan can't use stays switched off.
+    const setBusy = (b) => { el.querySelectorAll('button, textarea').forEach((x) => { x.disabled = b; }); if (!b) paint(); };
     const working = (on, what) => document.dispatchEvent(new CustomEvent('site:pictureWorking', { detail: { pageId, sectionId, place, on, label: what || '' } }));
-    const call = async (name, body) => {
-      const r = await fetch(`/.netlify/functions/${name}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const call = async (name, body, method = 'POST') => {
+      const r = await fetch(`/.netlify/functions/${name}`, { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
       return { ok: r.ok, body: await r.json().catch(() => ({})) };
     };
-    // What AI pictures cost here, said before the click (get-ai-credit-balance; the endpoint is the real gate).
-    fetch('/.netlify/functions/get-ai-credit-balance', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((c) => {
-      if (!c || !el.isConnected) return;
-      const btn = el.querySelector('[data-sp-go="ai"]');
-      if (!c.canImage) { btn.disabled = true; btn.title = 'None of your assistants can create pictures'; if (source === 'ai') { source = 'stock'; paintSource(); } return; }
-      if (c.imageCost) $('[data-sp-cost]').textContent = `Creating uses ${c.imageCost} ${c.unit === 'tasks' ? (c.imageCost === 1 ? 'task' : 'tasks') : (c.imageCost === 1 ? 'credit' : 'credits')} and gives four to choose from. Stock photos are free.`;
-    }).catch(() => {});
+    // What AI pictures and videos cost here, said before the click (the endpoints are the real gate).
+    fetch('/.netlify/functions/get-ai-credit-balance', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((c) => { caps = c; if (el.isConnected) paint(); }).catch(() => {});
+    paint();
+    const tile = (url, i, key, aria) => `<button type="button" data-sp-pick="${key}" class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400 bg-white" aria-label="${esc(aria)}">${kind === 'video'
+      ? `<video src="${esc(url)}" muted loop playsinline preload="metadata" style="width:100%;height:96px;object-fit:cover;display:block;background:#111"></video>`
+      : `<img src="${esc(url)}" alt="" style="width:100%;height:96px;object-fit:cover;display:block">`}</button>`;
+    el.addEventListener('mouseover', (e) => { const v = e.target.closest && e.target.closest('video'); if (v) v.play().catch(() => {}); });
+    el.addEventListener('mouseout', (e) => { const v = e.target.closest && e.target.closest('video'); if (v) v.pause(); });
     let stock = { keywords: '', shown: [], candidates: [] };
     let job = null;
+    let made = null;   // an AI video, once ready: { assetId, url }
+    let run = 0;       // a newer search or a kind switch abandons an older one
     async function find(again) {
       const desc = $('[data-sp-desc]').value.trim();
-      setBusy(true); grid.innerHTML = ''; $('[data-sp-more]').innerHTML = '';
-      working(true, source === 'ai' ? 'Creating a picture' : 'Finding a picture');
+      const video = kind === 'video';
+      if (video && source === 'ai' && !desc) { say('Describe what the video should show first.', 'error'); return; }
+      const mine = ++run;
+      setBusy(true); grid.innerHTML = ''; $('[data-sp-more]').innerHTML = ''; made = null;
+      working(true, source === 'ai' ? (video ? 'Creating a video — a few minutes' : 'Creating a picture') : (video ? 'Finding a video' : 'Finding a picture'));
       try {
         if (source === 'stock') {
           const topic = desc || label;
-          say('Looking for photos…');
-          const res = await call('pexels-search', again && stock.keywords ? { topic, mediaType: 'image', dedup: false, keywords: stock.keywords, exclude: stock.shown } : { topic, mediaType: 'image', dedup: false });
+          const mediaType = video ? 'video' : 'image';
+          say(video ? 'Looking for videos…' : 'Looking for photos…');
+          const res = await call('pexels-search', again && stock.keywords ? { topic, mediaType, dedup: false, keywords: stock.keywords, exclude: stock.shown } : { topic, mediaType, dedup: false });
+          if (mine !== run) return;
           if (!res.ok) throw new Error((res.body && res.body.error) || 'The search didn\'t work.');
           stock = { keywords: res.body.keywords || '', candidates: (res.body.candidates || []).slice(0, 6), shown: [...new Set([...(again ? stock.shown : []), ...(res.body.candidates || []).map((c) => c.providerAssetId)])] };
-          if (!stock.candidates.length) { say('Nothing matched — try different words.'); working(false); return; }
-          say('Choose one — photos by Pexels creators.');
-          grid.innerHTML = stock.candidates.map((c, i) => `<button type="button" data-sp-pick="s${i}" class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400 bg-white" aria-label="Use photo ${i + 1}${c.photographer ? ` by ${esc(c.photographer)}` : ''}"><img src="${esc(c.url)}" alt="" style="width:100%;height:96px;object-fit:cover;display:block"></button>`).join('');
+          if (!stock.candidates.length) { say('Nothing matched — try different words.'); working(false); setBusy(false); return; }
+          say(`Choose one — ${video ? 'videos' : 'photos'} by Pexels creators.`);
+          grid.innerHTML = stock.candidates.map((c, i) => tile(c.url, i, `s${i}`, `Use ${video ? 'video' : 'photo'} ${i + 1}${c.photographer ? ` by ${c.photographer}` : ''}`)).join('');
           $('[data-sp-more]').innerHTML = '<button type="button" data-sp-again class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Show different ones</button>';
-        } else {
+        } else if (!video) {
           say('Creating four for you to choose from — about half a minute…');
           const res = await call('generate-ai-image', { prompt: desc, aspectRatio: '16:9' });
+          if (mine !== run) return;
           if (!res.ok) throw new Error(res.body && res.body.error === 'insufficient_credits' ? 'Your monthly tasks are used up — they reset on the 1st.' : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be created.');
           job = res.body.jobId;
           say('Choose the one you like.');
-          grid.innerHTML = (res.body.images || []).map((im, i) => `<button type="button" data-sp-pick="a${im.index}" class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400 bg-white" aria-label="Use picture ${i + 1}"><img src="${esc(im.url)}" alt="" style="width:100%;height:96px;object-fit:cover;display:block"></button>`).join('');
+          grid.innerHTML = (res.body.images || []).map((im, i) => tile(im.url, i, `a${im.index}`, `Use picture ${i + 1}`)).join('');
           $('[data-sp-more]').innerHTML = '<button type="button" data-sp-again class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Try again</button>';
+        } else {
+          // AI video: started now, ready in a few minutes — this card keeps checking while it is open.
+          say('Your video has started — this takes a few minutes. You can keep chatting; it lands in your library either way.');
+          const res = await call('generate-ai-video', { prompt: desc, aspectRatio: '16:9', durationSeconds: 6 });
+          if (mine !== run) return;
+          if (!res.ok) throw new Error(res.body && res.body.error === 'insufficient_credits' ? 'Your monthly tasks are used up — they reset on the 1st.' : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be started.');
+          const jobId = res.body.jobId;
+          for (;;) {
+            await new Promise((r) => setTimeout(r, 5000));
+            if (mine !== run || !el.isConnected) return;
+            const st = await call(`generate-ai-video?jobId=${encodeURIComponent(jobId)}`, null, 'GET');
+            if (mine !== run) return;
+            if (!st.ok) throw new Error((st.body && st.body.error) || 'Lost track of the video — it will be in your library when it\'s ready.');
+            if (st.body.status === 'completed' && st.body.assetId) {
+              made = { assetId: st.body.assetId, url: st.body.videoUrl || '' };
+              say('Ready — choose it to put it on your page.');
+              grid.innerHTML = tile(made.url, 0, 'v0', 'Use this video');
+              break;
+            }
+            if (st.body.status === 'failed' || st.body.status === 'flagged') throw new Error(st.body.errorMessage || 'The video couldn\'t be made. Nothing was charged.');
+          }
         }
-      } catch (err) { say(err.message, 'error'); working(false); }
-      setBusy(false);
+      } catch (err) { if (mine === run) { say(err.message, 'error'); working(false); } }
+      if (mine === run) setBusy(false);
     }
     async function choose(key) {
       setBusy(true);
       say('Saving it and putting it on your page…');
+      const video = kind === 'video';
       try {
         let assetId; let alt = str(ui.alt, 150) || $('[data-sp-desc]').value.trim().slice(0, 150);
         if (key[0] === 's') {
           const c = stock.candidates[Number(key.slice(1))];
-          const res = await call('pexels-search', { action: 'save', candidate: c, mediaType: 'image' });
+          const res = await call('pexels-search', { action: 'save', candidate: c, mediaType: video ? 'video' : 'image' });
           if (!res.ok || !res.body.assetId) throw new Error((res.body && res.body.error) || 'It couldn\'t be saved.');
           assetId = res.body.assetId; alt = alt || c.title || label;
+        } else if (key[0] === 'v') {
+          assetId = made.assetId; alt = alt || `A video for ${label}`;
         } else {
           const res = await call('generate-ai-image', { action: 'select', jobId: Number(job), index: Number(key.slice(1)), words: false });
           if (!res.ok || !res.body.assetId) throw new Error((res.body && res.body.error) || 'It couldn\'t be saved.');
           assetId = res.body.assetId; alt = alt || `A picture for ${label}`;
         }
         await new Promise((resolve, reject) => el.dispatchEvent(new CustomEvent('site:picturePlace', {
-          bubbles: true, detail: { pageId, sectionId, place, assetId, alt, respond: ({ ok, error }) => (ok ? resolve() : reject(new Error(error || 'It couldn\'t be placed.'))) },
+          bubbles: true, detail: { pageId, sectionId, place, assetId, alt, video, respond: ({ ok, error }) => (ok ? resolve() : reject(new Error(error || 'It couldn\'t be placed.'))) },
         })));
         grid.innerHTML = ''; $('[data-sp-more]').innerHTML = '';
         say(`Done — it's ${place === 'after' ? 'after' : 'in'} “${label}” in your draft. Nothing is live until you publish.`);
@@ -3693,8 +3753,10 @@
       setBusy(false);
     }
     el.addEventListener('click', (e) => {
+      const k = e.target.closest('[data-sp-kind]');
+      if (k) { if (k.dataset.spKind !== kind) { kind = k.dataset.spKind; run++; grid.innerHTML = ''; $('[data-sp-more]').innerHTML = ''; status.className = 'hidden'; working(false); setBusy(false); paint(); } return; }
       const go = e.target.closest('[data-sp-go]');
-      if (go) { source = go.dataset.spGo; paintSource(); find(false); return; }
+      if (go) { source = go.dataset.spGo; paint(); find(false); return; }
       if (e.target.closest('[data-sp-again]')) { find(true); return; }
       const pick = e.target.closest('[data-sp-pick]');
       if (pick) choose(pick.dataset.spPick);

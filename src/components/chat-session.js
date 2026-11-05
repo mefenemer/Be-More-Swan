@@ -1969,7 +1969,7 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
-    // A site_picture card's chosen picture → sites.ts apply. IN a section that holds one picture (hero,
+    // A site_picture card's chosen picture or video → sites.ts apply. IN a section that holds one picture (hero,
     // text, sign-up) it becomes that picture; in a gallery it is added; anywhere else, or place
     // 'after', it goes in a new picture section straight after this one. Read fresh, so ids are real.
     async function onSitePicturePlace(e) {
@@ -1982,8 +1982,9 @@
         const at = pg ? pg.sections.findIndex((x) => x.id === d.sectionId) : -1;
         if (!pg || at < 0) throw new Error('That section isn\'t on your site any more.');
         const sec = pg.sections[at];
-        const img = { assetId: Number(d.assetId), url: '', alt: String(d.alt || 'A picture').slice(0, 150) };
-        const holdsOne = ['hero', 'text', 'signup'].includes(sec.type);
+        const img = { assetId: Number(d.assetId), url: '', alt: String(d.alt || (d.video ? 'A video' : 'A picture')).slice(0, 150), ...(d.video ? { video: true } : {}) };
+        // A video plays in a hero, a text section or a gallery — never on a sign-up form (markVideos).
+        const holdsOne = (d.video ? ['hero', 'text'] : ['hero', 'text', 'signup']).includes(sec.type);
         const ops = d.place !== 'after' && holdsOne ? [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { image: img } }]
           : d.place !== 'after' && sec.type === 'gallery' ? [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { images: [...(sec.props.images || []), { ...img, caption: null }] } }]
           : [{ op: 'add_section', pageId: pg.id, index: at + 1, section: { type: 'gallery', props: { heading: null, intro: null, layout: 'natural', images: [{ ...img, caption: null }] } } }];
