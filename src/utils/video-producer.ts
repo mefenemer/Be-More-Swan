@@ -678,6 +678,10 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         const cost = sb && (r.status === 'planned' || r.status === 'failed') ? ` · would use ${n} ${unit} to make` : '';
         const note = r.note ? ` · note: ${r.note.slice(0, 160)}` : '';
         const from = ORIGIN_LABELS[r.origin] ? ` · ${ORIGIN_LABELS[r.origin]}` : '';
-        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${from}) — ${WAITING[r.status] ?? r.status}${cost}${note}`;
+        // Its scenes, once it can still be changed: "make the opening punchier" needs the words.
+        const lines = sb && (r.status === 'planned' || r.status === 'failed')
+            ? sb.scenes.map((s, i) => `\n    • scene ${i + 1} (${s.beat}, ${s.source}): voiceover "${(s.voiceover || '').slice(0, 240)}"${s.onScreenText ? `; on screen "${s.onScreenText}"` : ''}`).join('')
+            : '';
+        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${from}) — ${WAITING[r.status] ?? r.status}${cost}${note}${lines}`;
     })].join('\n');
 }

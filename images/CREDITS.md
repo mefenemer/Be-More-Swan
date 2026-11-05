@@ -61,7 +61,7 @@ matching `<img>` in `index.html` — they are what stop the page shifting as ima
 
 Added 2026-11-03. Real output made by the Brand Designer on staging for made-up businesses, shown
 on `assistant.html?role=brand_designer` (`SAMPLE_WORK`). The AI images (FLUX.2 Pro) and the
-branded cards are our own output. The Brightside flyer's top photo (`brightside-flyer-photo-top.jpg`
-and `brightside-flyer-a5.pdf`) is Pexels photo 30871194 by
+branded cards are our own output. The Brightside flyer's photo (`brightside-flyer-photo-top.jpg`,
+`brightside-flyer-framed-photo.jpg` and `brightside-flyer-a5.pdf`) is Pexels photo 30871194 by
 [Esra Erdem](https://www.pexels.com/@esrakorkmaz), under the Pexels licence. Its phone number,
 01632 960418, is in Ofcom's drama range and reaches no one.

@@ -195,6 +195,15 @@ export function shouldExtractBrandKit(kit: BrandKit, now = new Date()): boolean 
     return ageMs >= EXTRACT_RETRY_DAYS * 24 * 60 * 60 * 1000;
 }
 
+/**
+ * The kit after a website read that found no brand colour. The attempt is stamped and the site's font
+ * fills a font the kit has not got. The colours and `source` stay as they were: this is not a brand
+ * colour read, so nothing downstream may treat it as one. A font already in the kit is never replaced.
+ */
+export function kitWithNoColourFound(stored: BrandKit, fontFamily: string | null, now = new Date()): BrandKit {
+    return { ...stored, fontFamily: stored.fontFamily ?? fontFamily, lastExtractAttemptAt: now.toISOString() };
+}
+
 // ── Contrast ──────────────────────────────────────────────────────────────────────────────────
 // Moved to src/public/brand-contrast.js and re-exported at the top of this file — the newsletter
 // canvas needs the identical answers in the browser. The reasoning that used to live here (why

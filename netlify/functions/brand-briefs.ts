@@ -22,7 +22,7 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
-import { aiAssistants, visualBriefs } from '../../db/schema';
+import { aiAssistants, organisations, visualBriefs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { getBalance } from '../../src/utils/ai-credits';
@@ -34,6 +34,10 @@ import {
     sweepStuckRounds, videoUnavailableReason, type BriefRow,
 } from '../../src/utils/visual-briefs';
 import { readBrandGuidelines } from '../../src/utils/brand-guidelines';
+import { normalizeBrandKit } from '../../src/utils/brand-kit';
+import { applyDesignCard, openDesign, saveDesign } from '../../src/utils/design-options';
+import { DESIGN_EDIT_TYPE, designEditFromUiElement } from '../../src/utils/design-doc';
+import { FlyerFitError } from '../../src/lib/flyer';
 import { triggerBriefRound } from '../../src/utils/trigger-brief-round';
 import { contactDefaults, draftFlyerWords, offerLine } from '../../src/utils/flyer-words';
 import { loadIntroOffer } from '../../src/utils/intro-offer';
@@ -106,7 +110,7 @@ export default withLambda(async (event) => {
         const designer = await requireDesigner(body.assistantId);
         if (!designer) return json(404, { error: 'Assistant not found.' });
         await sweepStuckRounds(db, orgId);
-        const [briefs, balance, aiAvailable, guidelines, videoBlocked, flyerDefaults] = await Promise.all([
+        const [briefs, balance, aiAvailable, guidelines, videoBlocked, flyerDefaults, brandKit] = await Promise.all([
             listBriefs(db, orgId, designer.id),
             getBalance(db, orgId).catch(() => null),
             orgHasAssistantFeature(db, orgId, 'ai_image_generation').catch(() => false),
@@ -117,6 +121,8 @@ export default withLambda(async (event) => {
             loadIntroOffer(db, orgId).catch(() => null)
                 .then(async (intro) => ({ ...await contactDefaults(db, orgId, intro), offer: offerLine(intro) }))
                 .catch(() => null),
+            db.select({ kit: organisations.brandKit }).from(organisations).where(eq(organisations.id, orgId)).limit(1)
+                .then(([o]) => normalizeBrandKit(o?.kit)).catch(() => null),
         ]);
         return json(200, {
             briefs,
@@ -135,6 +141,8 @@ export default withLambda(async (event) => {
             // The workspace's picture guidelines — shown on the tab so the user can see what every
             // round is told. null = could not be read (said as such), not "none set".
             guidelines,
+            // The colours and font, for the brand style panel. null = could not be read.
+            brandKit,
             flyerDefaults,
         });
     }
@@ -262,6 +270,31 @@ export default withLambda(async (event) => {
         const brief = await requireBrief(body.briefId);
         if (!brief) return json(404, { error: 'Brief not found.' });
         return generate(brief);
+    }
+
+    // The studio: an option as an editable design (src/utils/design-options.ts).
+    if (action === 'open_design' || action === 'save_design' || action === 'apply_design_edit') {
+        try {
+            const optionId = Number(body.optionId);
+            if (action !== 'apply_design_edit' && (!Number.isInteger(optionId) || optionId <= 0)) return json(400, { error: 'Option not found.' });
+            if (action === 'open_design') {
+                const r = await openDesign(db, orgId, optionId);
+                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl }) : json(r.status, { error: r.error });
+            }
+            if (action === 'save_design') {
+                const other = Number(body.usePhotoFromOption);
+                const r = await saveDesign(db, { orgId, optionId, design: body.design, finish: body.finish === true, usePhotoFromOption: Number.isInteger(other) && other > 0 ? other : null });
+                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl }) : json(r.status, { error: r.error });
+            }
+            // Rebuilt from what the card says, however it got here.
+            const card = designEditFromUiElement({ ...(body.card as Record<string, unknown>), type: DESIGN_EDIT_TYPE });
+            if (!card) return json(400, { error: 'That change could not be read.' });
+            const r = await applyDesignCard(db, { orgId, card });
+            return r.ok ? json(200, { ok: true, optionId: card.optionId, design: r.design, photoUrl: r.photoUrl }) : json(r.status, { error: r.error });
+        } catch (err) {
+            console.error('[brand-briefs] design failed:', action, err instanceof Error ? err.message : err);
+            return json(err instanceof FlyerFitError ? 409 : 500, { error: err instanceof FlyerFitError ? err.message : 'That could not be done just now. Please try again.' });
+        }
     }
 
     if (action === 'decide') {

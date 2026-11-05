@@ -511,6 +511,7 @@
           ? { chatSessionId, message }
           : { aiAssistantId: assistantId, message };
         if (attachments.length) body.attachments = attachments;
+        if (typeof props.turnContext === 'function') Object.assign(body, props.turnContext() || {});
         if (opts && opts.approvedHandoff) body.approvedHandoff = opts.approvedHandoff;
         // The post the user has open in the editor, when this chat was opened from there
         // (window.ChatDraftTarget, set by whoever opened it). Sent on EVERY turn, not just the
@@ -563,6 +564,11 @@
           return;
         }
         appendMessage(data.message);
+        // The questions are done and the design is being made: the Briefs tab opens the studio on it.
+        const startedUi = data.message.uiElement || data.message.uiElementJson;
+        if (startedUi && startedUi.type === 'design_started') {
+          document.dispatchEvent(new CustomEvent('brief:openStudio', { detail: { assistantId, briefId: startedUi.briefId } }));
+        }
       } catch (err) {
         console.error('[ChatSession] send failed:', err);
         showError('Connection problem — please check your internet and try again.');
@@ -859,6 +865,14 @@
         return data;
       });
     }
+    // "Change the scene" on a video_scene_edit card: `edit_scene`, the action behind "Change" on the scene.
+    function onVideoSceneEdit(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      videoProjectsCall({ action: 'edit_scene', id: d.projectId, sceneId: d.sceneId, patch: d.patch })
+        .then(() => respond({ ok: true }))
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
     function onVideoCreate(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1112,6 +1126,11 @@
         catch { return new Date(iso).toLocaleString('en-GB', opts); }
       };
       try {
+        // This email may be open in the Email Studio (newsletter.js): anything unsaved lands first, and
+        // if it can't, this stops here rather than approving the version before it.
+        const studio = { issueId: d.issueId, ready: null };
+        document.dispatchEvent(new CustomEvent('email:actionStarting', { detail: studio }));
+        if (studio.ready) await studio.ready;
         let message = 'Done.';
         if (d.action === 'approve') {
           await postActionCall('newsletter-issues', { action: 'approve', id: d.issueId });
@@ -1126,6 +1145,7 @@
         } else {
           throw new Error('Unknown action.');
         }
+        document.dispatchEvent(new CustomEvent('email:actionFinished', { detail: { issueId: d.issueId } }));
         respond({ ok: true, message });
       } catch (err) {
         respond({ ok: false, error: err.message });
@@ -2106,6 +2126,38 @@
 
     // "Save guidelines" on a brand_guideline_proposal card — brand-kit.ts `save_guidelines`, the same
     // save as Business Information ▸ Brand Assets ▸ Picture guidelines.
+    // "Save my brand style" on a brand_style_proposal card: brand-kit.ts PATCH, the pop-up's own save.
+    async function onBrandSaveStyle(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const res = await fetch('/.netlify/functions/brand-kit', {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify(d.fields || {}),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `Save failed (HTTP ${res.status}).`);
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('brief:changed', { detail: { assistantId } }));
+      } catch (err) { respond({ ok: false, error: err.message }); }
+    }
+
+    // "Change it" on a design_edit card: brand-briefs.ts `apply_design_edit`. The studio shows it at once.
+    async function onDesignApply(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const res = await fetch('/.netlify/functions/brand-briefs', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ action: 'apply_design_edit', card: d.card }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That couldn’t be changed (HTTP ${res.status}).`);
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('design:changed', { detail: { assistantId, optionId: data.optionId, design: data.design, photoUrl: data.photoUrl } }));
+      } catch (err) { respond({ ok: false, error: err.message }); }
+    }
+
     function onBrandSaveGuidelines(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -2145,6 +2197,22 @@
       }
       respond({ results });
       document.dispatchEvent(new CustomEvent('brief:changed', { detail: { assistantId } }));
+    }
+
+    // "Save the change" on a visual_brief_edit card: brand-briefs.ts `edit`, the Briefs tab's own action.
+    async function onBriefEdit(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const res = await fetch('/.netlify/functions/brand-briefs', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ action: 'edit', briefId: d.briefId, ...d.fields }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That couldn’t be saved (HTTP ${res.status}).`);
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('brief:changed', { detail: { assistantId } }));
+      } catch (err) { respond({ ok: false, error: err.message }); }
     }
 
     // "Save these changes" on a campaign_edit_proposal card. Sends ONLY the descriptive fields,
@@ -2403,6 +2471,7 @@
     container.addEventListener('brief:create', onBriefCreate);
     container.addEventListener('video:create', onVideoCreate);
     container.addEventListener('video:replan', onVideoReplan);
+    container.addEventListener('video:sceneEdit', onVideoSceneEdit);
     container.addEventListener('post:action', onPostAction);
     container.addEventListener('blog:action', onBlogAction);
     container.addEventListener('email:action', onEmailAction);
@@ -2416,7 +2485,10 @@
     container.addEventListener('platforms:change', onPlatformsChange);
     container.addEventListener('library:add', onLibraryAdd);
     container.addEventListener('brief:review', onBriefReview);
+    container.addEventListener('brief:edit', onBriefEdit);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
+    container.addEventListener('brand:saveStyle', onBrandSaveStyle);
+    container.addEventListener('design:apply', onDesignApply);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
     container.addEventListener('siteaudit:save', onSiteAuditSave);
     container.addEventListener('siteaudit:fix', onSiteAuditFix);
@@ -2512,6 +2584,7 @@
         container.removeEventListener('brief:create', onBriefCreate);
         container.removeEventListener('video:create', onVideoCreate);
         container.removeEventListener('video:replan', onVideoReplan);
+        container.removeEventListener('video:sceneEdit', onVideoSceneEdit);
         container.removeEventListener('post:action', onPostAction);
         container.removeEventListener('blog:action', onBlogAction);
         container.removeEventListener('email:action', onEmailAction);
@@ -2525,7 +2598,10 @@
         container.removeEventListener('platforms:change', onPlatformsChange);
         container.removeEventListener('library:add', onLibraryAdd);
         container.removeEventListener('brief:review', onBriefReview);
+        container.removeEventListener('brief:edit', onBriefEdit);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
+        container.removeEventListener('brand:saveStyle', onBrandSaveStyle);
+        container.removeEventListener('design:apply', onDesignApply);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);
         container.removeEventListener('siteaudit:save', onSiteAuditSave);
         container.removeEventListener('siteaudit:fix', onSiteAuditFix);

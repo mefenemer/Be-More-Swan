@@ -1,0 +1,245 @@
+// The Brand Designer's editor (owner, 2026-11-05): the design on the left, the chat on the right, drag and change
+// anything on it, full screen, and approve from it. The tab's real modules on a bare page, with every function stubbed.
+
+import { test, expect, type ApiStub } from './fixtures';
+import type { Page } from '@playwright/test';
+
+const PICTURE = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="560"><rect width="400" height="560" fill="#8a9a8f"/></svg>')}`;
+
+const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/style.css"></head><body class="bg-gray-50">
+  <div class="page-wide p-4"><div id="maintab-briefs"><div id="briefs-host"></div></div></div>
+  <script src="/src/components/scroll-lock.js"></script><script src="/dialogs.js"></script>
+  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/chat-pane.js"></script>
+  <script src="/src/generated/platform-constants.js"></script><script src="/src/components/font-picker.js"></script><script src="/src/components/brand-style-dialog.js"></script>
+  <script src="/src/components/design-studio.js"></script><script src="/src/components/assistant-briefs.js"></script>
+  <script>AssistantBriefs.init({ assistantId: 4, assistantName: 'Mira' }); setTimeout(() => AssistantBriefs.activate(), 50);</script>
+</body></html>`;
+
+const design = () => ({
+    v: 1, kind: 'flyer', pageW: 148, pageH: 210, paperSize: 'A5', pageColor: '#f2aa00', photo: null,
+    layers: [
+        { id: 'headline', kind: 'text', role: 'headline', text: 'Launch party', x: 0.1, y: 0.3, w: 0.8, fontFamily: null, fontSizePct: 0.06, bold: true, align: 'left', color: '#14243a', boxFill: null, boxOpacity: 1 },
+        { id: 'contact', kind: 'text', role: 'contact', text: '01632 960418', x: 0.1, y: 0.9, w: 0.5, fontFamily: null, fontSizePct: 0.015, bold: false, align: 'left', color: '#14243a', boxFill: null, boxOpacity: 1 },
+    ],
+});
+
+function stubBriefs(api: ApiStub) {
+    const store = {
+        saves: [] as Array<{ design: ReturnType<typeof design>; finish?: boolean }>,
+        decided: [] as unknown[],
+        applied: [] as unknown[],
+        design: design(),
+        brief: {
+            id: 12, assistantId: 4, title: 'Launch party flyer', purpose: 'flyer', status: 'options_ready', aspectRatio: null, message: 'Our launch', headline: null, mood: 'Calm and natural',
+            mustInclude: null, mustAvoid: null, sources: [], rounds: 1, maxRounds: 5, picturesNeeded: 1, picturesApproved: 0, dueDate: null,
+            options: [{ id: 77, round: 1, source: 'flyer', status: 'proposed', url: PICTURE, width: 400, height: 560, mimeType: 'image/png', prompt: null, flyer: { layout: 'type_only', paperSize: 'A5', lowResPhoto: false, photoDpi: null } }],
+        } as Record<string, unknown>,
+    };
+    api.set('brand-briefs', (_route, body) => {
+        const b = (body || {}) as Record<string, unknown>;
+        if (b.action === 'list') {
+            return { briefs: [store.brief], vocab: { purposes: [], sources: [], aspectRatios: [], rejectReasons: [{ key: 'style', label: 'Wrong style' }], maxRounds: 5, flyer: null }, credits: 10, unit: 'tasks', aiAvailable: true, defaultSources: ['stock'], guidelines: null };
+        }
+        if (b.action === 'open_design') return { ok: true, design: store.design, photoUrl: null };
+        if (b.action === 'save_design') {
+            store.saves.push({ design: JSON.parse(JSON.stringify(b.design)), finish: b.finish as boolean });
+            store.design = b.design as ReturnType<typeof design>;
+            return { ok: true, design: store.design, photoUrl: null };
+        }
+        if (b.action === 'apply_design_edit') {
+            store.applied.push(b.card);
+            store.design = { ...store.design, pageColor: '#ffe4e1' };
+            return { ok: true, optionId: 77, design: store.design, photoUrl: null };
+        }
+        if (b.action === 'decide') {
+            store.decided.push(b);
+            store.brief = { ...store.brief, status: 'complete', options: [{ ...(store.brief.options as Record<string, unknown>[])[0], status: 'approved' }] };
+            return { ok: true };
+        }
+        return { ok: true };
+    });
+    return store;
+}
+
+async function openStudio(page: Page) {
+    await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+    await page.goto('/e2e-studio.html');
+    // The tab opens on "Not started" (owner 2026-11-05); a brief with options waiting is under "To review".
+    await page.locator('[data-brief-tab="review"]').click();
+    await page.locator('[data-brief-open-studio="77"]').click();
+    await expect(page.locator('[data-design-studio]')).toBeVisible();
+    await expect(layer(page, 'headline')).toBeVisible();
+}
+const layer = (page: Page, id: string) => page.locator(`[data-ds-page] [data-ds-id="${id}"]`);
+const lastSave = (store: ReturnType<typeof stubBriefs>) => store.saves[store.saves.length - 1]?.design;
+const headline = (d: ReturnType<typeof design> | undefined) => d?.layers.find((l) => l.id === 'headline');
+
+test.describe('wide screen', () => {
+    test.use({ viewport: { width: 1600, height: 950 } });
+
+    test('"Open in editor" shows the design on the left and the chat on the right', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        await openStudio(page);
+        const pageBox = await page.locator('[data-ds-page]').boundingBox();
+        const chat = await page.locator('#briefs-chat-host [data-chat-input]').boundingBox();
+        expect(pageBox && chat).toBeTruthy();
+        expect(pageBox!.x + pageBox!.width).toBeLessThanOrEqual(chat!.x);
+        await expect(layer(page, 'headline')).toContainText('Launch party');
+        await page.screenshot({ path: 'test-results/design-studio.png' });
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('drag the headline, give it a see-through background, then undo — each saved', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        await openStudio(page);
+        // The page is sized to the window once it has drawn: measure after it settles.
+        await layer(page, 'headline').hover();
+        let box: { x: number; y: number; width: number; height: number } | null = null;
+        await expect.poll(async () => (box = await layer(page, 'headline').boundingBox()) !== null).toBe(true);
+        box = box!;
+        await page.mouse.move(box.x + 20, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.mouse.move(box.x + 20, box.y + box.height / 2 + 120, { steps: 6 });
+        await page.mouse.up();
+        await expect.poll(() => headline(lastSave(store))?.y ?? 0, { timeout: 10000 }).toBeGreaterThan(0.35);
+
+        await page.locator('[data-ds-tools] [data-ds-boxon]').check();
+        await page.locator('[data-ds-tools] [data-ds-boxop]').fill('40');
+        // The slider says how see-through it is: 40% see-through is 0.6 strength.
+        await expect.poll(() => headline(lastSave(store))?.boxOpacity, { timeout: 10000 }).toBe(0.6);
+        // Dark words get a white box, not one in the page's own yellow, which would not show.
+        expect(headline(lastSave(store))?.boxFill).toBe('#ffffff');
+        await page.screenshot({ path: 'test-results/design-studio-edited.png' });
+
+        await page.locator('[data-ds-undo]').click();
+        await page.locator('[data-ds-undo]').click();
+        await page.locator('[data-ds-undo]').click();
+        await expect.poll(() => headline(lastSave(store))?.y, { timeout: 10000 }).toBe(0.3);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('full screen covers the page, and Esc leaves it', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        await openStudio(page);
+        await page.locator('[data-ds-full]').first().click();
+        const dock = page.locator('.chatpane-dock[data-ds-full]');
+        await expect(dock).toHaveCount(1);
+        const b = (await dock.boundingBox())!;
+        expect(b.width).toBeGreaterThanOrEqual(1580);
+        await page.mouse.move(5, 900);
+        const exit = page.locator('[data-ds-full].ds-btn');
+        await expect(exit).toHaveText('Exit full screen');
+        // Pressed reads as on: dark, with white words (owner saw it look disabled mid-fade in a screenshot).
+        await expect.poll(() => exit.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(31, 41, 55)');
+        await expect(exit).toHaveCSS('color', 'rgb(255, 255, 255)');
+        await page.screenshot({ path: 'test-results/design-studio-full.png' });
+        await page.keyboard.press('Escape');
+        await expect(dock).toHaveCount(0);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a "Change this design" card from the chat changes the open design', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        api.set('chat-orchestrator', { chatSessionId: 3, message: { id: 1, role: 'assistant', content: 'Here is a softer page.', uiElement: {
+            type: 'design_edit', briefId: 12, optionId: 77, summary: 'A soft pink page.', pageColor: '#ffe4e1', changes: [],
+        } } });
+        await openStudio(page);
+        const input = page.locator('#briefs-chat-host [data-chat-input]');
+        await input.fill('Make the page soft pink');
+        await input.press('Enter');
+        await page.getByRole('button', { name: 'Change it' }).click();
+        await expect(page.getByText('Done. Undo in the editor takes it back.')).toBeVisible();
+        expect(store.applied).toHaveLength(1);
+        await expect.poll(() => page.locator('[data-ds-page]').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(255, 228, 225)');
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('"Use this design" saves, approves and goes to Approved', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        await openStudio(page);
+        await page.locator('[data-ds-approve]').click();
+        await expect.poll(() => store.decided.length, { timeout: 10000 }).toBe(1);
+        expect(store.decided[0]).toMatchObject({ action: 'decide', optionId: 77, decision: 'approve' });
+        await expect(page.locator('[data-design-studio]')).toHaveCount(0);
+        await expect(page.locator('[data-brief-tab="approved"]')).toHaveAttribute('aria-selected', 'true');
+        expect(pageErrors).toEqual([]);
+    });
+});
+
+test.describe('the questions go straight to the editor', () => {
+    test.use({ viewport: { width: 1600, height: 950 } });
+
+    test('a design_started reply opens the editor on the new brief, with no card to confirm', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        api.set('chat-orchestrator', { chatSessionId: 3, message: { id: 1, role: 'assistant', content: 'A calm A5 flyer suits a launch evening.', uiElement: {
+            type: 'design_started', briefId: 12, title: 'Launch party flyer', note: null,
+        } } });
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        const input = page.locator('#briefs-chat-host [data-chat-input]');
+        await input.fill('My answers:\nWhat do you need it for?: A printed flyer or poster');
+        await input.press('Enter');
+        await expect(page.locator('[data-design-studio]')).toBeVisible();
+        await expect(page.getByText('Save flyer')).toHaveCount(0);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a video clip goes to its brief, not to an editor with nothing to edit', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        store.brief = { ...store.brief, purpose: 'social', status: 'generating', sources: ['stock_video'], options: [] };
+        api.set('chat-orchestrator', { chatSessionId: 3, message: { id: 1, role: 'assistant', content: 'A short clip suits this.', uiElement: {
+            type: 'design_started', briefId: 12, title: 'Launch clip', note: null,
+        } } });
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        const input = page.locator('#briefs-chat-host [data-chat-input]');
+        await input.fill('My answers:\nWhat do you need it for?: A short video clip');
+        await input.press('Enter');
+        await expect(page.locator('[data-brief-tab="making"]')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('[data-brief-card="12"]')).toBeVisible();
+        await expect(page.locator('[data-design-studio], [data-brief-studio-wait]')).toHaveCount(0);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('New brief always starts a new conversation, never the one on screen', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        api.set('chat-orchestrator', { chatSessionId: 9, message: { id: 1, role: 'assistant', content: 'A few quick questions.', uiElement: null } });
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-new]').click();
+        await expect(page.getByText('A few quick questions.')).toHaveCount(1);
+        await page.locator('[data-brief-new]').click();
+        await expect.poll(() => api.called('chat-orchestrator').length).toBe(2);
+        const second = api.called('chat-orchestrator')[1].body as { chatSessionId?: number; message: string };
+        expect(second.message).toBe('I need a new brief.');
+        expect(second.chatSessionId ?? null).toBeNull();
+        await expect(page.getByText('A few quick questions.')).toHaveCount(1);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a flyer with no words: Edit flyer starts from its title, "Save and make the flyer" goes to the editor while it is made', async ({ page, api, pageErrors }) => {
+        // The usual stub's handler, wrapped: edit and generate move this brief along.
+        let base: ((route: unknown, body: unknown) => unknown) | null = null;
+        const store = stubBriefs({ set: (_n: string, h: typeof base) => { base = h; } } as unknown as ApiStub);
+        store.brief = { ...store.brief, status: 'open', rounds: 0, options: [], flyerContent: null, paperSize: 'A5', title: 'Marmalade Productions launch party' };
+        const calls: string[] = [];
+        api.set('brand-briefs', (route, body) => {
+            const b = (body || {}) as Record<string, unknown>;
+            calls.push(String(b.action));
+            if (b.action === 'edit') { store.brief = { ...store.brief, flyerContent: b.flyerContent }; return { ok: true }; }
+            if (b.action === 'generate') { store.brief = { ...store.brief, status: 'generating', rounds: 1 }; return { ok: true, briefId: 12, round: 1 }; }
+            return base!(route, body);
+        });
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await expect(page.locator('[data-brief-generate="12"]')).toHaveText('Make the flyer');
+        await page.locator('[data-brief-edit="12"]').first().click();
+        await expect(page.locator('[data-flyer-form] input[name="headline"]')).toHaveValue('Marmalade Productions launch party');
+        await page.getByRole('button', { name: 'Save and make the flyer' }).click();
+        await expect.poll(() => calls.includes('generate')).toBe(true);
+        expect(calls.indexOf('edit')).toBeLessThan(calls.indexOf('generate'));
+        await expect(page.locator('[data-brief-studio-wait]')).toContainText('is making');
+        expect(pageErrors).toEqual([]);
+    });
+});

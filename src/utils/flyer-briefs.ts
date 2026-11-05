@@ -5,7 +5,8 @@
 //
 // ── A round ─────────────────────────────────────────────────────────────────────────────────────
 // At most one stock photo and one AI photo, then three pages drawn from the brief's saved words:
-//   photo at the top (the first photo) · full-page photo (the last photo) · words only.
+//   photo at the top (the first photo) · framed photo (the last photo) · words only.
+// Words never sit on a photo, and each page takes its colour from flyerColours below.
 // A layout the words do not fit is left out with the reason (FlyerFitError's message) — never drawn
 // with words missing. Each option is a PREVIEW PNG; nothing is print-rendered until it is approved.
 //
@@ -16,9 +17,12 @@
 import { contentAssets, mediaGenerationJobs } from '../../db/schema';
 import type { getDb } from '../../db/client';
 import { FalContentPolicyError, falConfigured, generateImages, IMAGE_MODEL } from '../lib/fal-gateway';
-import { FlyerFitError, MIN_PHOTO_DPI, PREVIEW_DPI, renderFlyer, renderFlyerPdfs, type FlyerPhoto } from '../lib/flyer';
+import { FlyerFitError, MIN_PHOTO_DPI, PREVIEW_DPI, flyerPageStyle, renderFlyer, renderFlyerPdfs, type FlyerPageStyle, type FlyerPhoto } from '../lib/flyer';
 import { persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
 import { normalizeBrandKit, type BrandKit } from './brand-kit';
+import { renderDesignPdfs } from '../lib/design-render';
+import type { Design } from './design-doc';
+import { isAccentCandidate } from './brand-extract';
 import { PexelsRateLimitError, searchUniqueImages } from './pexels';
 import { resolveAssetDisplayUrl } from './social-publish';
 import {
@@ -35,6 +39,7 @@ export const FLYER_PROVIDER = 'flyer';
 /** Widest stock photo we ask Pexels for: an A4 page at 300 dpi is 2480 px across. */
 const STOCK_PRINT_WIDTH = 2480;
 const MAX_PHOTO_BYTES = 15 * 1024 * 1024;
+const BRAND_KIT_PLACE = 'Business Information ▸ Brand Assets ▸ Brand style';
 
 /** Where a flyer's photo lives — kept on the option so approve can fetch the same photo again. */
 export interface FlyerPhotoRef {
@@ -61,6 +66,43 @@ export interface FlyerRenderParams {
     /** The photo's printed dpi in this layout, and whether that prints soft. */
     photoDpi: number | null;
     lowResPhoto: boolean;
+    /** The page's colours. Absent on a page drawn before they were stored. */
+    style?: FlyerPageStyle;
+    /** Set once the page has been opened in the studio (design-options.ts); what the PDFs are then drawn from. */
+    design?: Design;
+    /** The preview redrawn after studio changes. */
+    previewKey?: string;
+}
+
+/** The business's own real colours: black, white and grey do not count, they are what an unset kit holds. */
+export function brandPageColours(kit: BrandKit, secondaryColors: string[]): string[] {
+    return [...new Set([kit.primaryColor, ...secondaryColors, kit.backgroundColor])].filter(isAccentCandidate);
+}
+
+export interface FlyerColours {
+    colours: string[];
+    /** brand: their own. look: the look this brief asks for. suggested: chosen, because they have none set. none: nothing known. */
+    from: 'brand' | 'look' | 'suggested' | 'none';
+}
+
+/**
+ * Which colours a round's pages use. The look the user asked for on this brief comes first, then the
+ * business's own colours. Only when it has neither does the designer's suggestion count, so a suggestion
+ * can never replace a real brand colour unasked.
+ */
+export function flyerColours(args: { brand: string[]; mood: string | null | undefined; picks: string[] | undefined }): FlyerColours {
+    const picks = args.picks ?? [];
+    if (args.mood && picks.length) return { colours: [...new Set([...picks, ...args.brand])], from: 'look' };
+    if (args.brand.length) return { colours: args.brand, from: 'brand' };
+    if (picks.length) return { colours: picks, from: 'suggested' };
+    return { colours: [], from: 'none' };
+}
+
+/** One colour per page, so the three pages are three different looks when there are colours to spare. */
+export function colourForPage(colours: string[], layout: FlyerLayout): string | null {
+    if (!colours.length) return null;
+    const i = layout === 'photo_framed' ? 1 : layout === 'type_only' ? 2 : 0;
+    return colours[i % colours.length];
 }
 
 /**
@@ -81,7 +123,7 @@ export function pexelsPrintUrl(url: string, width = STOCK_PRINT_WIDTH): string {
 }
 
 /** The photo's bytes, from R2 (ours) or the stock CDN. Null on any failure — that layout is skipped. */
-export async function fetchFlyerPhoto(ref: FlyerPhotoRef): Promise<FlyerPhoto | null> {
+export async function fetchFlyerPhoto(ref: Pick<FlyerPhotoRef, 'storageKey' | 'externalUrl' | 'mimeType' | 'width' | 'height'>): Promise<FlyerPhoto | null> {
     try {
         const url = ref.storageKey
             ? await resolveAssetDisplayUrl({ assetType: 'image', storageKey: ref.storageKey })
@@ -191,15 +233,20 @@ export async function flyerRoundOptions(db: Db, args: {
     const plan: Array<{ layout: FlyerLayout; p: { ref: FlyerPhotoRef; photo: FlyerPhoto } | null }> = [];
     if (photos.length) {
         plan.push({ layout: 'photo_top', p: photos[0] });
-        plan.push({ layout: 'photo_full', p: photos[photos.length - 1] });
+        plan.push({ layout: 'photo_framed', p: photos[photos.length - 1] });
     }
     plan.push({ layout: 'type_only', p: null });
+
+    const { colours, from } = flyerColours({ brand: brandPageColours(ctx.kit, ctx.guidelines.secondaryColors), mood: brief.mood, picks: ad.flyerColours });
+    if (from === 'suggested') notes.push(`Your brand kit only has black and white, so these colours were chosen to suit your business and this flyer. Set your own under ${BRAND_KIT_PLACE} and every flyer will use them.`);
+    if (from === 'none') notes.push(`Your brand kit only has black and white, so these pages do too. Set your colours under ${BRAND_KIT_PLACE}, or say the look you want on this flyer.`);
 
     const options: OptionValues[] = [];
     const fitNotes = new Set<string>();
     for (const { layout, p } of plan) {
         try {
-            const r = await renderFlyer({ content, kit: ctx.kit, paperSize, layout, photo: p?.photo ?? null, orgName: ctx.orgName, dpi: PREVIEW_DPI });
+            const style = flyerPageStyle(layout, colourForPage(colours, layout), ctx.kit);
+            const r = await renderFlyer({ content, kit: ctx.kit, paperSize, layout, photo: p?.photo ?? null, orgName: ctx.orgName, dpi: PREVIEW_DPI, style });
             const { storageKey } = await persistBufferToR2({ orgId: brief.organisationId, bytes: r.png, contentType: 'image/png', folder: 'briefs' });
             // Pixels per inch of PAPER, so the same at any render dpi.
             const lowResPhoto = r.photoDpi !== null && r.photoDpi < MIN_PHOTO_DPI;
@@ -210,7 +257,7 @@ export async function flyerRoundOptions(db: Db, args: {
                 attributionName: p?.ref.attributionName ?? null, attributionUrl: p?.ref.attributionUrl ?? null,
                 renderParams: {
                     kind: 'flyer', layout, paperSize, content, kit: ctx.kit, orgName: ctx.orgName,
-                    photo: p?.ref ?? null, photoDpi: r.photoDpi, lowResPhoto,
+                    photo: p?.ref ?? null, photoDpi: r.photoDpi, lowResPhoto, style,
                 },
             });
         } catch (err) {
@@ -244,10 +291,16 @@ export async function approveFlyerOption(db: Db, args: {
     const photo = p.photo ? await fetchFlyerPhoto(p.photo) : null;
     if (p.photo && !photo) throw new Error('flyer_photo_unavailable');
 
-    const { home, printShop } = await renderFlyerPdfs({
-        content: n.content, kit: normalizeBrandKit(p.kit), paperSize, layout: p.layout, photo,
-        orgName: p.orgName, title: args.title, bleedMm: PRINT_BLEED_MM,
-    });
+    // Changed in the studio: the PDFs are drawn from that design, words moved and all. Never opened: as the round drew it.
+    const design = p.design ?? null;
+    const designPhoto = design && design.photo ? await fetchFlyerPhoto(design.photo.ref) : null;
+    if (design && design.photo && !designPhoto) throw new Error('flyer_photo_unavailable');
+    const { home, printShop } = design
+        ? await renderDesignPdfs({ design, photo: designPhoto, title: args.title, bleedMm: PRINT_BLEED_MM })
+        : await renderFlyerPdfs({
+            content: n.content, kit: normalizeBrandKit(p.kit), paperSize, layout: p.layout, photo,
+            orgName: p.orgName, title: args.title, bleedMm: PRINT_BLEED_MM, style: p.style ?? null,
+        });
     const [homeObj, shopObj] = await Promise.all([
         persistBufferToR2({ orgId: args.orgId, bytes: home, contentType: 'application/pdf', folder: 'flyers' }),
         persistBufferToR2({ orgId: args.orgId, bytes: printShop, contentType: 'application/pdf', folder: 'flyers' }),
@@ -262,7 +315,7 @@ export async function approveFlyerOption(db: Db, args: {
         attributionName: p.photo?.attributionName ?? null, attributionUrl: p.photo?.attributionUrl ?? null,
         renderParams: {
             ...p,
-            previewKey: args.option.storageKey,
+            previewKey: p.previewKey ?? args.option.storageKey,
             printShopKey: shopObj.storageKey,
             printShopFileSize: shopObj.fileSize,
             bleedMm: PRINT_BLEED_MM,

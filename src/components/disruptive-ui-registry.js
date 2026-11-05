@@ -3963,6 +3963,104 @@
 
   register('brand_guideline_proposal', renderBrandGuidelineProposalCard);
 
+  // { type: 'brand_style_proposal', primaryColor?, backgroundColor?, textColor?, fontFamily?, summary? }
+  // The chat twin of Save in the brand style pop-up (src/utils/chat-brand-style.ts). Shown as colours and the
+  // font written in itself, because a code means nothing to most people. chat-session.js → brand-kit.ts PATCH.
+  function renderBrandStyleCard(ui, esc) {
+    const hex = (v) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : null);
+    const rows = [['primaryColor', 'Main colour'], ['backgroundColor', 'Background'], ['textColor', 'Text']].filter(([k]) => hex(ui[k]));
+    const font = typeof ui.fontFamily === 'string' && /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/.test(ui.fontFamily) ? ui.fontFamily : null;
+    if (!rows.length && !font) return null;
+    if (font) window.FontPicker?.loadFamily(font);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Your brand style</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      ${rows.length ? `<div class="flex flex-wrap gap-3 mt-3">${rows.map(([k, label]) => `<span class="inline-flex items-center gap-2 text-xs font-bold text-gray-700"><span class="inline-block w-7 h-7 rounded-full border border-gray-300" style="background:${esc(ui[k])}"></span>${esc(label)}</span>`).join('')}</div>` : ''}
+      ${font ? `<div class="bg-white border border-indigo-200 rounded-lg px-3 py-2 mt-3" style="font-family:'${esc(font)}', system-ui, sans-serif"><p class="text-lg font-bold text-gray-900 break-words">${esc(font)}</p><p class="text-sm text-gray-700">Your words, in this font.</p></div>` : ''}
+      <p class="text-xs text-gray-600 mt-3">Everything your assistants design from now on uses this. What is already made stays as it is.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-bss-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save my brand style</button>
+        <button type="button" data-bss-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-bss-status></p>`;
+    const status = el.querySelector('[data-bss-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-bss-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-bss-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      const fields = Object.fromEntries(rows.map(([k]) => [k, ui[k]]));
+      if (font) fields.fontFamily = font;
+      el.dispatchEvent(new CustomEvent('brand:saveStyle', {
+        bubbles: true,
+        detail: { fields, respond({ ok, error }) {
+          if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
+          say('Saved. New designs will use this.');
+        } },
+      }));
+    });
+    return el;
+  }
+  register('brand_style_proposal', renderBrandStyleCard);
+
+  // { type: 'design_started', briefId, title, note } — the questions are done and the design is being made
+  // (src/utils/brief-from-chat.ts). The studio opens by itself on the turn it happens; this button is for afterwards.
+  function renderDesignStartedCard(ui, esc) {
+    const briefId = Number(ui.briefId);
+    if (!Number.isInteger(briefId) || briefId <= 0) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Your design</p>
+      <p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.title || 'Your design').slice(0, 120))}</p>
+      ${ui.note ? `<p class="text-xs text-gray-700 mt-1">${esc(String(ui.note).slice(0, 300))}</p>` : ''}
+      <button type="button" data-ds-open class="btn-primary px-4 py-2 mt-3 text-sm font-bold rounded-lg">Open in editor</button>`;
+    el.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-ds-open]')) return;
+      document.dispatchEvent(new CustomEvent('brief:openStudioAny', { detail: { briefId } }));
+    });
+    return el;
+  }
+  register('design_started', renderDesignStartedCard);
+
+  // { type: 'design_edit', briefId, optionId, summary, pageColor?, photoOpacity?, font?, changes: [...], add: [...] }
+  // A change to a design, asked for in chat (src/utils/design-doc.ts). Costs nothing. chat-session.js → brand-briefs.ts.
+  function renderDesignEditCard(ui, esc) {
+    if (!Number.isInteger(Number(ui.optionId)) || !(Array.isArray(ui.changes) || ui.pageColor || ui.font || ui.photoOpacity !== undefined)) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change this design</p>
+      <p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary || 'A change to your design').slice(0, 300))}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-de-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Change it</button>
+        <button type="button" data-de-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-de-status></p>`;
+    const status = el.querySelector('[data-de-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-de-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-de-go]')) return;
+      setBusy(true);
+      say('Changing it…');
+      el.dispatchEvent(new CustomEvent('design:apply', {
+        bubbles: true,
+        detail: { card: ui, respond({ ok, error }) {
+          if (!ok) { setBusy(false); say(error || 'That couldn\'t be changed.', 'error'); return; }
+          say('Done. Undo in the editor takes it back.');
+        } },
+      }));
+    });
+    return el;
+  }
+  register('design_edit', renderDesignEditCard);
+
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):
   // { type: 'action_item_assignment', meetingSummary, decisionsMade?: string[],
@@ -4450,6 +4548,165 @@
     return el;
   }
   register('post_picture', renderPostPictureCard);
+
+  // { type: 'video_scene_edit', projectId, scene, sceneId, summary, patch, now } (src/utils/chat-video-scene.ts)
+  // One scene of a storyboard. It only changes the plan: making the video stays the button on the video,
+  // which states its cost. chat-session.js → video-projects.ts `edit_scene`, as "Change" on the scene.
+  const VIDEO_SCENE_SOURCES = { stock_video: 'Stock footage', stock_photo: 'Stock photo', brand_card: 'Branded card', ai_image: 'AI picture', ai_video: 'AI clip' };
+  function renderVideoSceneEditCard(ui, esc) {
+    const patch = ui.patch && typeof ui.patch === 'object' ? ui.patch : null;
+    if (!patch || !Number.isInteger(Number(ui.projectId)) || !ui.sceneId || !Object.keys(patch).length) return null;
+    const now = ui.now || {};
+    const box = (t, cls) => `<p class="text-sm bg-white border rounded-lg px-3 py-2 mt-1 whitespace-pre-line ${cls}">${esc(t)}</p>`;
+    const change = (label, before, after) => `<p class="text-xs font-bold text-gray-700 mt-3">${esc(label)}</p>
+      ${before ? box(before, 'text-gray-500 border-gray-200 line-through decoration-gray-300') : ''}${box(after || '(none)', 'text-gray-900 border-indigo-200')}`;
+    const words = patch.prompt != null ? patch.prompt : patch.keywords;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change scene ${esc(Number(ui.scene))}</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      ${patch.voiceover != null ? change('Voiceover', now.voiceover, patch.voiceover) : ''}
+      ${patch.onScreenText != null ? change('On-screen text', now.onScreenText, patch.onScreenText) : ''}
+      ${patch.source != null ? change('Picture from', '', VIDEO_SCENE_SOURCES[patch.source] || patch.source) : ''}
+      ${words != null ? change('What to show', '', words) : ''}
+      <p class="text-xs text-gray-600 mt-2">This only changes the plan. Nothing is made until you press “Make the video”, which says what it uses.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vse-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Change the scene</button>
+        <button type="button" data-vse-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vse-status></p>`;
+    const status = el.querySelector('[data-vse-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vse-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-vse-go]')) return;
+      setBusy(true);
+      say('Changing it…');
+      el.dispatchEvent(new CustomEvent('video:sceneEdit', {
+        bubbles: true,
+        detail: { projectId: Number(ui.projectId), sceneId: ui.sceneId, patch, respond({ ok, error }) {
+          if (!ok) { setBusy(false); say(error || 'That couldn\'t be changed.', 'error'); return; }
+          say('Done. The scene is changed in your storyboard.');
+        } },
+      }));
+    });
+    return el;
+  }
+  register('video_scene_edit', renderVideoSceneEditCard);
+
+  // { type: 'visual_brief_edit', briefId, message?, mood?, mustInclude?, mustAvoid?, summary }
+  // A change to what a brief asks for (src/utils/chat-brief-edit.ts). It only saves: making options, the
+  // part that can cost, stays the button on the brief. chat-session.js → brand-briefs.ts `edit`.
+  function renderVisualBriefEditCard(ui, esc) {
+    const briefId = Number(ui.briefId);
+    const rows = [['message', 'What it should show'], ['mood', 'The look'], ['mustInclude', 'Must include'], ['mustAvoid', 'Must avoid']]
+      .filter(([k]) => typeof ui[k] === 'string' && ui[k].trim());
+    // A flyer's words: the server merged the change into its saved words, so this is the whole set.
+    const fw = ui.flyerContent && typeof ui.flyerContent === 'object' && typeof ui.flyerContent.headline === 'string' ? ui.flyerContent : null;
+    const fwRows = fw ? [['Headline', fw.headline], ['Subheading', fw.subheading], ...(Array.isArray(fw.points) ? fw.points.map((p, i) => [i ? '' : 'Points', p]) : []), ['Call to action', fw.callToAction], ['Date or times', fw.dateLine]].filter(([, v]) => typeof v === 'string' && v.trim()) : [];
+    if (!Number.isInteger(briefId) || briefId <= 0 || (!rows.length && !fw)) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change this brief</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      ${rows.map(([k, label]) => `<p class="text-xs font-bold text-gray-700 mt-3">${esc(label)}</p>
+        <p class="text-sm text-gray-900 bg-white border border-indigo-200 rounded-lg px-3 py-2 mt-1 whitespace-pre-line">${esc(ui[k].trim())}</p>`).join('')}
+      ${fw ? `<p class="text-xs font-bold text-gray-700 mt-3">The words on the flyer</p><div class="text-sm text-gray-900 bg-white border border-indigo-200 rounded-lg px-3 py-2 mt-1">${fwRows.map(([l, v]) => `<p>${l ? `<span class="text-xs font-bold text-gray-600">${esc(l)}:</span> ` : ''}${esc(v)}</p>`).join('')}</div>` : ''}
+      <p class="text-xs text-gray-600 mt-2">This only saves the brief. Nothing is made until you ask for more options on it.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vbe-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save the change</button>
+        <button type="button" data-vbe-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vbe-status></p>`;
+    const status = el.querySelector('[data-vbe-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vbe-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-vbe-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('brief:edit', {
+        bubbles: true,
+        detail: { briefId, fields: { ...Object.fromEntries(rows.map(([k]) => [k, ui[k].trim()])), ...(fw ? { flyerContent: fw } : {}) }, respond({ ok, error }) {
+          if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
+          say('Saved. Ask for more options on the brief when you\'re ready; it says there what that costs.');
+        } },
+      }));
+    });
+    return el;
+  }
+  register('visual_brief_edit', renderVisualBriefEditCard);
+
+  // The Email Studio's cards (src/utils/chat-email-parts.ts). Each one asks the open Studio to act
+  // (newsletter.js), which says what happened; with the email not open, nothing can happen.
+  function emailStudioCard(ui, esc, opts) {
+    const issueId = Number(ui.issueId);
+    if (!Number.isInteger(issueId) || issueId <= 0) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${esc(opts.head)}</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      ${opts.body || ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-es-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">${esc(opts.go)}</button>
+        <button type="button" data-es-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-es-status></p>`;
+    const status = el.querySelector('[data-es-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-es-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-es-go]')) return;
+      setBusy(true);
+      const detail = { ...opts.detail, issueId, handled: false, respond({ ok, error, message }) {
+        if (!ok) { setBusy(false); say(error || 'That couldn\'t be done.', 'error'); return; }
+        say(message || 'Done.');
+      } };
+      document.dispatchEvent(new CustomEvent(opts.event, { detail }));
+      if (!detail.handled) detail.respond({ ok: false, error: 'Open this email in the Email Studio to use this.' });
+    });
+    return el;
+  }
+  register('email_edit', (ui, esc) => {
+    const find = typeof ui.find === 'string' ? ui.find.trim() : '';
+    const replace = typeof ui.replace === 'string' ? ui.replace.trim() : '';
+    if (!find || !replace) return null;
+    const box = (t, cls) => `<p class="text-sm bg-white border rounded-lg px-3 py-2 mt-1 whitespace-pre-line ${cls}" style="max-height:200px;overflow:auto">${esc(t)}</p>`;
+    return emailStudioCard(ui, esc, {
+      head: ui.part === 'subject' ? 'Change to the subject line' : ui.part === 'preheader' ? 'Change to the preview line' : 'Change to this email',
+      go: 'Use this', event: 'email:partEdit', detail: { part: ui.part, find, replace },
+      body: `<p class="text-xs font-bold text-gray-500 mt-3">Now</p>${box(find, 'text-gray-500 border-gray-200 line-through decoration-gray-300')}
+        <p class="text-xs font-bold text-gray-700 mt-3">Instead</p>${box(replace, 'text-gray-900 border-indigo-200')}`,
+    });
+  });
+  register('email_block_add', (ui, esc) => {
+    const text = typeof ui.text === 'string' ? ui.text.trim() : '';
+    if (!text) return null;
+    const noun = ui.kind === 'button' ? 'button' : ui.kind === 'heading' ? 'heading' : 'paragraph';
+    return emailStudioCard(ui, esc, {
+      head: `Add a ${noun}`, go: `Add the ${noun}`, event: 'email:blockAdd', detail: { kind: ui.kind, text },
+      body: `<p class="text-sm text-gray-900 bg-white border border-indigo-200 rounded-lg px-3 py-2 mt-3 whitespace-pre-line">${esc(text)}</p>
+        ${ui.kind === 'button' ? '<p class="text-xs text-gray-600 mt-2">It goes in with no link: add where it should go, in the panel beside the email.</p>' : ''}`,
+    });
+  });
+  register('email_picture', (ui, esc) => emailStudioCard(ui, esc, {
+    head: 'Choose a picture', go: 'Choose a picture', event: 'email:pictureAsk', detail: {},
+    body: '<p class="text-sm text-gray-700 mt-2">Opens your library, where you can pick one or upload your own.</p>',
+  }));
+  register('email_refine', (ui, esc) => {
+    const instruction = typeof ui.instruction === 'string' ? ui.instruction.trim() : '';
+    if (!instruction) return null;
+    return emailStudioCard(ui, esc, {
+      head: 'Rewrite this email', go: 'Write the new version', event: 'email:refineAsk', detail: { instruction },
+      body: `<p class="text-sm text-gray-700 mt-2">${esc(instruction)}</p><p class="text-xs text-gray-600 mt-2">Uses 1 task. You read the new version before anything changes.</p>`,
+    });
+  });
 
   // ── Built-in: Post Action Proposal Card (Social Media chat) ────────────────
   // { type: 'post_action_proposal', action: 'approve'|'reject'|'retry'|'reschedule'|'remove'|'shorter'|'longer'|'video_version'

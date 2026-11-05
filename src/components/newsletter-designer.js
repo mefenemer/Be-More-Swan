@@ -7,7 +7,8 @@
  * email in the product that could not carry a picture.
  *
  *   window.NewsletterDesigner.mount({ host, design, assistantName, onChange })
- *     → { getDesign(), setDesign(design), destroy() }
+ *     → { getDesign(), setDesign(design), destroy(), blockInfo(id), replaceWords(from, to, preferId),
+ *         insertBlock(kind, words, afterId), openPicker(id) }
  *
  * `onChange(design)` fires on every edit. The HOST owns persistence — this component never talks to
  * newsletter-issues, so the same canvas serves an issue and a sequence step without knowing which.
@@ -742,6 +743,44 @@
         });
     }
 
+    // ── For the docked chat (newsletter.js) ─────────────────────────────────────────────────────
+    var WORDS_FIELD = { heading: 'text', text: 'markdown', button: 'label' };
+    var flat = function (t) { return String(t || '').replace(/\s+/g, ' ').trim(); };
+    /** What one block is, for "Select". Null when it is gone. */
+    function blockInfo(id) {
+      var e = find(id);
+      if (!e) return null;
+      var field = WORDS_FIELD[e.block.type];
+      return { type: e.block.type, text: field ? String(e.block[field] || '') : '' };
+    }
+    /** Replace one block's words: the block that IS `from` (the selected one first if several are), or
+     *  failing that the one block containing it. False, and nothing changed, when that isn't exactly one. */
+    function replaceWords(from, to, preferId) {
+      var needle = flat(from);
+      if (!needle) return false;
+      var words = walk().filter(function (e) { return WORDS_FIELD[e.block.type]; });
+      var whole = words.filter(function (e) { return flat(e.block[WORDS_FIELD[e.block.type]]) === needle; });
+      if (whole.length > 1) whole = whole.filter(function (e) { return e.block.id === preferId; });
+      if (whole.length === 1) { var w = {}; w[WORDS_FIELD[whole[0].block.type]] = to; patch(whole[0].block.id, w); return true; }
+      var part = new RegExp(needle.split(' ').map(function (x) { return x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }).join('\\s+'));
+      var some = words.filter(function (e) { return part.test(e.block[WORDS_FIELD[e.block.type]] || ''); });
+      if (some.length !== 1) return false;
+      var f = WORDS_FIELD[some[0].block.type], v = {};
+      v[f] = some[0].block[f].replace(part, function () { return to; });
+      patch(some[0].block.id, v);
+      return true;
+    }
+    /** A new block with these words, after `afterId` (a block inside a column: after the columns). */
+    function insertBlock(kind, words, afterId) {
+      if (!WORDS_FIELD[kind] || state.design.blocks.length >= MAX_BLOCKS) return false;
+      state.selected = afterId && find(afterId) ? { blockId: afterId } : null;
+      addBlock(kind);
+      var fields = {};
+      fields[WORDS_FIELD[kind]] = words;
+      patch(state.selected.blockId, fields);
+      return true;
+    }
+
     function uploadAsset(file) {
       // The workspace's own uploader when we are inside it — one code path for library writes, one
       // place where the moderation rejection is handled. The fallback keeps this component usable
@@ -820,6 +859,10 @@
 
     return {
       getDesign: function () { return state.design; },
+      blockInfo: blockInfo,
+      replaceWords: replaceWords,
+      insertBlock: insertBlock,
+      openPicker: openPicker,
       setDesign: function (d) { state.design = normalise(d); state.selected = null; render(); },
       setAssistantName: function (n) { state.assistantName = n || ''; },
       destroy: function () { host.innerHTML = ''; },

@@ -1,7 +1,8 @@
 # Google OAuth verification — YouTube project (218009229183)
 
 Reply to the "[Action Needed] Your Google APIs Verification Request" email of 2026-11-05.
-Send it only once the four fixes in "Before you reply" are done. The reply says they are.
+Send it only once everything in "Before you reply" is done. The reply says it is. In particular,
+it says the demo video shows the subscriber count, which isn't true until the clip in item 3 is added.
 
 ## What this project actually requests (checked against the code, 2026-11-05)
 
@@ -20,7 +21,7 @@ scope, so **no CASA assessment is needed**.
 1. **Scope match.** ✅ Checked 2026-11-05: Data Access lists exactly `youtube.readonly` and
    `youtube.upload` as sensitive, with nothing non-sensitive or restricted. The justification is
    filled in (874/1000 characters).
-2. **Privacy policy.** ✅ Done 2026-11-05: privacy.html section 13 now has a "YouTube API Services" subsection (anchor `#youtube-api-services`). Deploy it to prod before replying. It says:
+2. **Privacy policy.** ✅ Done 2026-11-05: privacy.html section 13 now has a "YouTube API Services" subsection (anchor `#youtube-api-services`). Live on prod, rechecked 2026-11-05. It says:
    - Be More Swan uses YouTube API Services, with links to the YouTube Terms of Service
      (https://www.youtube.com/t/terms) and the Google Privacy Policy
      (https://policies.google.com/privacy).
@@ -53,6 +54,10 @@ scope, so **no CASA assessment is needed**.
    likely objection. Fix: add a ~15-second clip showing the assistant's Results tab → Autopilot card → "Audience"
    chart with the YouTube subscriber count, then cut to YouTube Studio → Dashboard showing the same
    number. Re-upload and replace the link.
+   Joined 2026-11-05 as new Steps 13–16 (from 3:33, 26 s, real screen captures with captions, no
+   live motion): Felix's connection and YouTube Studio both show channel "BMS Test User", and both
+   show 0 subscribers. The full 3:59 video is not uploaded yet. Upload it as unlisted, then replace
+   the link in the draft reply below.
    Minor: the consent screen names the app "staging--bemoreswan.netlify.app" rather than "Be More
    Swan". That is expected while branding is unverified, and isn't a reason to re-record.
 4. **Reviewer access.** ✅ Checked 2026-11-05:
@@ -63,12 +68,25 @@ scope, so **no CASA assessment is needed**.
    - The redirect URI is `https://staging--bemoreswan.netlify.app/api/oauth/youtube/callback`
      (`${BASE_URL}/api/oauth/youtube/callback`). The video shows a successful connect on staging,
      so it is registered on the YouTube client.
-   - **Not checked (needs a staging DB read):** whether the reviewer's workspace (org 58) still
-     contains only made-up data. Earlier notes say only the Lead Generator was ever cleaned, and
-     the video shows Felix with 50 posts waiting. Click through Felix's Review tab as the reviewer
-     before sending.
-   - Sign in once with the password yourself before sending it. Nobody has yet confirmed it works
-     end to end.
+   - ✅ Signed in end to end with the password sent to Google (2026-11-05). It lands on
+     workspace.html as Marmalade Productions (staging org 58), with 8 assistants.
+   - ✅ Workspace data checked as the reviewer: Audience has 0 contacts; Ember has one lead ("Test
+     Lead for Gmail") and forum suggestions from public Reddit threads; Felix's 72 drafts are about
+     Marmalade's own films. Nothing about a real customer.
+   - ⚠️ **Bug found and fixed (commit 24bfd1cf, staging):** Felix's Results tab → Audience showed
+     YouTube "—". `get-follower-counts` returned `fetch failed` because `src/utils/follower-counts.ts`
+     read the stored Google access token, which expires after 1 hour, without refreshing it. It now
+     uses `getFreshAccessToken`, as goal telemetry already did. Until this fix reached the reviewer's
+     staging, a reviewer could not see `youtube.readonly` reading the subscriber count. It needs a
+     staging→main PR to reach prod.
+   - ✅ Fix confirmed on staging as the reviewer (06:35 UTC, 2026-11-05): `get-follower-counts`
+     returns YouTube `count: 0, available: true`. The 0 is a real API value, because hidden or
+     missing counts come back as unavailable. Check that YouTube Studio shows the same number on the
+     clip. If it doesn't, the connected channel isn't the one in Studio. X still returns
+     `fetch failed` in the same chart, which is a separate problem and not part of this verification.
+5. **Sender check.** ✅ Done 2026-11-05: Gmail's Show original gives SPF PASS (IP 209.85.220.73),
+   DKIM PASS with domain google.com, and DMARC PASS. The email really came from Google. Optional
+   extra: Cloud Console → Google Auth Platform → Verification Center should show the same request.
 
 ---
 

@@ -27,7 +27,7 @@ import { adaptForModel, replyText } from '../../src/config/model-options';
 import { loadRoleModel, withRoleModel } from '../../src/utils/assistant-model';
 import { and, desc, eq, inArray, notInArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, blogPosts, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
+import { aiAssistants, assistantRecords, blogPosts, newsletterIssues, videoProjects, visualBriefs, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { appendFooter } from '../../src/utils/disclosure-footer';
 import { resolvePostFooter } from '../../src/utils/post-disclosure';
@@ -106,8 +106,15 @@ import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsPr
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
-import { confirmCardReply, missingCardReply, pictureReply } from '../../src/utils/confirm-card-reply';
+import { confirmCardReply, missingCardReply, pictureReply, replyClaimsPicture } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
+import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
+import { videoSceneCard, videoSceneRequestFromUiElement, VIDEO_SCENE_EDIT_TYPE, type VideoSceneCard } from '../../src/utils/chat-video-scene';
+import type { Storyboard } from '../../src/lib/storyboard';
+import { mergeFlyerWords, briefEditFromUiElement, VISUAL_BRIEF_EDIT_TYPE, type BriefEditCard } from '../../src/utils/chat-brief-edit';
+import { BRAND_STYLE_TYPE, brandStyleFromUiElement, type BrandStyleCard } from '../../src/utils/chat-brand-style';
+import { DESIGN_EDIT_TYPE, designEditFromUiElement, type DesignEditCard } from '../../src/utils/design-doc';
+import { AI_PICTURE_ANSWER, startDesignFromChat, userChoseAiPicture } from '../../src/utils/brief-from-chat';
 import { postPartCardFromUiElement, POST_PICTURE_TYPE, POST_TEXT_EDIT_TYPE, type PostPartCard } from '../../src/utils/chat-post-parts';
 import { isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
@@ -741,7 +748,7 @@ PROPOSING A CAMPAIGN — when the user gives you an objective, emit the campaign
 
 function brandDesignerSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
-- "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Ask <your name> for options" / "Ask <your name> for more options" (the cost of a round costs), "Edit brief" and "Cancel brief". "New brief" at the top writes one without chatting, and "New flyer" starts a printed flyer. Everything you can do here, the user can also do there by hand.
+- "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Ask <your name> for options" / "Ask <your name> for more options" (the cost of a round costs), "Edit brief" and "Archive brief". The briefs sit on tabs, in the order they move through: "Not started", "Being made", "To review", "Approved", "Archived". "New brief" at the top asks them your questions here in this chat (it covers pictures, printed flyers and video alike), and answering them opens the editor with the design being made. There is no form to fill in instead: this chat is the way in. The editor shows the design on the left and this chat on the right: they can click, drag and change anything on it, with Undo, "🎯 Select" and "Full screen". "Open in editor" on any option waiting goes there too. "Use this design" approves it. "Select" lets them point at an option or brief to talk about it. "View or change" opens their brand style and picture guidelines in a pop-up. Everything you can do here, the user can also do there by hand.
 - Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles. An approved flyer is there too, with "Print", "PDF for home printing" and "PDF for a print shop". Every flyer is also listed on the "Briefs" tab, where "Preview" shows its page large, an approved one has "Print", and "Change this flyer" starts a new version with its words filled in.`;
 }
 
@@ -1109,6 +1116,20 @@ function draftTargetPromptBlock(target: { id: number; platform: string | null; c
 - "the text box": change ONLY that box with { "type": "post_text_edit", "postId": N, "find": "<its words EXACTLY as quoted>", "replace": "<the new words, about as short>", "summary": "<one sentence: what changes>" }.
 - "the picture" or "the video", when they want a different one: { "type": "post_picture", "postId": N, "kind": "image" | "video", "description": "<what it should show, in a sentence, or \"\" to leave it to them>" }. You cannot make, find or place a picture yourself: the card opens the post's picture step, and they choose there.
 For either card, say the card is there for them to use. Never say it has been changed, and never say you are making or finding a picture.`,
+    ].join('\n\n');
+}
+
+/** The email open beside the Email Studio's docked chat. Same job as draftTargetPromptBlock. */
+function emailTargetPromptBlock(t: { id: number; subject: string | null; preheader: string | null; bodyMarkdown: string | null }): string {
+    return [
+        `IMPORTANT — this conversation sits beside email #${t.id}, which the user has open in the Email Studio. When they say "it" or "this", they mean this email. A change to it is one of the cards below, never a new email: a newsletter_issue_draft is only for when they ask for a separate new one.`,
+        `THE EMAIL AS SAVED:\nSubject: ${String(t.subject || '').slice(0, 200) || '(none yet)'}\nPreview line: ${String(t.preheader || '').slice(0, 200) || '(none yet)'}\n---\n${String(t.bodyMarkdown || '').slice(0, 5000) || '(nothing written yet)'}\n---`,
+        `A PART THEY SELECTED — their message may start "About this part of my email #${t.id}:" followed by what they want.
+- The subject line, the preview line, or a heading, paragraph or button: change ONLY that with { "type": "email_edit", "issueId": ${t.id}, "part": "subject" | "preheader" | "block", "find": "<its words EXACTLY as quoted>", "replace": "<the new words, the same kind of thing>", "summary": "<one sentence: what changes>" }. Keep their facts; invent nothing (no new numbers, names, prices or claims). Keep any {{merge}} tags and links exactly as they are.
+- To add something after the part they selected (or at the end, if none): { "type": "email_block_add", "issueId": ${t.id}, "kind": "button" | "text" | "heading", "text": "<a button's label, or the words>", "summary": "<what it adds>" }. A button goes in with no link; never invent a URL. Tell them to add its link.
+- A picture, when they want a different one: { "type": "email_picture", "issueId": ${t.id} }. You cannot make, find or place a picture: the card opens their library and they choose.
+A change to the whole email ("make it shorter", "warmer"): { "type": "email_refine", "issueId": ${t.id}, "instruction": "<what should change, in their words>", "summary": "<one sentence>" }. They read the new version before it is used.
+For any of these, say the card is there for them to use. Never say it has been changed, and never paste the whole email into your reply.`,
     ].join('\n\n');
 }
 
@@ -1677,9 +1698,23 @@ BRIEFS FROM CAMPAIGNS. The Campaign Assistant can commission a brief from you; t
 
 CHOOSING. When the user says which options they want or do not want, emit a visual_option_review naming option ids from the list above — only ids listed there, never invented, and only options listed as waiting. Turning one down needs a reason; the next round reads it. Approving puts the picture in their library, where every assistant can use it.
 
+A PART THEY SELECTED. On the "Briefs" tab this chat sits beside their briefs, and the user can select an option or a brief. Their message may then start "About this option on my brief N" or "About my brief N". For "more like this one, but brighter" or any other change to what a brief asks for, emit { "type": "visual_brief_edit", "briefId": N, "message": "<the whole new text, only if it changes>", "mood": "<only if it changes>", "mustInclude": "<only if it changes>", "mustAvoid": "<only if it changes>", "flyerWords": { "headline": "...", "subheading": "...", "points": ["..."], "callToAction": "...", "dateLine": "..." }, "summary": "<one sentence: what changes>" }, working what they liked about that option into the words: you cannot show a designer a picture, only describe it. Keep the rest of what the brief says; invent nothing. "flyerWords" is only for a flyer, with only the words that change, and never a phone number, email or web address. A flyer's colours and feel go in "mood". It only saves the brief: nothing is made and nothing is spent until they press the button on the brief for more options, so tell them that, and never say the change has been made. Not for a flyer with an approved page: that takes a new flyer brief, as below.
+
+STARTING A NEW DESIGN. When they say they need a new brief or design, or ask for something without saying enough to choose the right design, do NOT list questions in your reply and do not propose yet. Emit ONE chat_questions card, leaving out anything they have already told you. Ask these, in this order and in these words:
+1. "What do you need it for?" with options: {"label":"A social media post"}, {"label":"A printed flyer or poster","description":"You print it or send it to a print shop"}, {"label":"A picture for my website or blog"}, {"label":"A picture for an email"}, {"label":"An advert"}, {"label":"A short video clip"}
+2. "What is it about?" with no options of its own beyond: "A product or service", "An event or a date", "A special offer", "Our business in general" (they can type the details)
+3. "How should it feel?" with options: "Bright and playful", "Calm and natural", "Bold and eye-catching", "Elegant and premium", "My usual brand style"
+4. "What should it be made from?" with options: "${AI_PICTURE_ANSWER}" EXACTLY in those words, "A stock photo (free)", "Just words and colours (free)", "You choose what works best (free)"
+5. "What words should be on it?" with options: "You write them", and ONLY when it is not a printed flyer or poster, "No words" (they can type their own). A flyer is made of words, so for a flyer write them yourself if they leave it to you: always a headline, from what it is about
+ONE CARD ONLY. Once they have answered, or asked you to skip the questions, DO NOT ask anything more, do not check what you understood, and do not question who the business is: BUSINESS above is who they are, and it is always their own design. Write the missing words yourself from what they said and what the business has recorded, keeping every fact they gave and inventing none. Then emit a visual_brief_proposal with "go": true, and it starts at once: there is no card to confirm, and they land in the editor. Choose the design yourself, and say in one sentence in your reply why it suits, never that it is finished. A printed flyer or poster: "purpose": "flyer" with "flyerContent" and the "paperSize" that suits it (A5 for a handout, A4 for a poster, A6 for a postcard, DL for through letterboxes). Anything else: the matching "purpose" and the "aspectRatio" that place needs. "sources" follows what they chose: "${AI_PICTURE_ANSWER}" is "ai_image" (a flyer may add "stock"); "A stock photo" is "stock"; "Just words and colours" is "brand_card", or for a flyer an empty list; "You choose" is whichever free one suits; a short video clip is "stock_video". Their feel goes in "mood". If what they first say is already clear and complete, skip the questions and emit it with "go": true straight away; it starts on free sources unless they answered "${AI_PICTURE_ANSWER}".
+
+CHANGING A DESIGN. The user works on a design in the editor, beside this chat, and can select a part of it: their message may then start "About the headline (layer "headline") on option N of my brief B". For a change to words, colours, fonts, sizes or positions on an option still waiting, emit { "type": "design_edit", "briefId": B, "optionId": N, "summary": "<one sentence: what changes>", "pageColor": "#rrggbb", "photoOpacity": 0.6, "font": "<a Google Fonts family for all the words>", "changes": [ { "layer": "<a layer id or role from the list: headline, subheading, points, offer, callToAction, dateLine, contact, wordmark>", "text": "...", "color": "#rrggbb", "fontFamily": "...", "fontSizePct": 0.05, "bold": true, "align": "left"|"center"|"right", "boxFill": "#rrggbb" or null for no background, "boxOpacity": 0.7, "x": 0.1, "y": 0.2, "w": 0.8, "remove": true } ], "add": [ { "text": "...", "x": 0.1, "y": 0.5, "w": 0.8 } ] } with only what changes. x, y and w are shares of the page's width and height from the top left; fontSizePct is a share of its height; boxOpacity 1 is solid. It costs nothing, and saying it is done is the click's job, so never say it has changed. Never put a phone number, email or web address they did not give you into a design. A change to what the picture itself shows is a visual_brief_edit and more options, not this.
+
+THEIR BRAND STYLE. The colours and font are listed above, and everything every assistant designs starts from them. You can talk them through: what suits the business and its customers, and two or three combinations described in plain words, never only as codes. If they want help choosing, emit ONE chat_questions card first (how they want to come across, colours they love or hate, a classic or a modern look). When they have settled on something, or ask you to pick, emit { "type": "brand_style_proposal", "primaryColor": "#rrggbb", "backgroundColor": "#rrggbb", "textColor": "#rrggbb", "fontFamily": "<a Google Fonts family name>", "summary": "<one sentence>" } with only what changes. The card shows the colours and the font itself, and saving it is their click, so never say it has been saved. A kit listed as not chosen yet is only our black and white default: never describe that as their brand. Extra colours go in a brand_guideline_proposal. They can also press "View or change" on the Briefs tab, which opens the same settings in a pop-up.
+
 PICTURE GUIDELINES. The workspace's guidelines (listed above) are read by EVERY AI image any assistant here makes, not only yours — say so when you change them. When the user states a lasting rule ("never use handshakes", "we're always outdoors"), emit a brand_guideline_proposal carrying the WHOLE new text of each field it changes — the current text plus the change, never only the new part, because saving replaces the field. Stock photo search cannot filter by these: say so if they ask. They are also on Business Information ▸ Brand Assets ▸ Picture guidelines.
 
-PRINTED FLYERS. You make printable flyers too (A5, A4, A6 postcard or DL leaflet, portrait, one side). Emit a visual_brief_proposal with "purpose": "flyer", a "paperSize", and "flyerContent" with the words: "headline" (max 80 characters), "subheading", up to three short "points", a "callToAction", and a "dateLine" only for a date or opening times the user gave you. NEVER put a phone number, email, street address, web address, QR link or offer in flyerContent — those are filled in from what the business recorded, and the user checks them on the "Edit flyer" form before printing. A flyer's photo comes from "stock" or "ai_image" only (or none, for a words-only flyer). A round draws up to three pages from exactly those words (photo at the top, full-page photo, words only) and the pages themselves are free. Approving one makes a print-ready PDF in My Content, which they can print at home or send to a print shop (that file has a 3 mm bleed). You cannot print or post it for them. If the words are too long for the paper, the round says which field to shorten. A flyer with an approved page is finished and cannot be changed in place: to change one, emit a new visual_brief_proposal for a flyer carrying ALL its words from the brief list above with the change made. The approved PDF stays in My Content, and the user asks for pages on the new brief.
+PRINTED FLYERS. You make printable flyers too (A5, A4, A6 postcard or DL leaflet, portrait, one side). Emit a visual_brief_proposal with "purpose": "flyer", a "paperSize", and "flyerContent" with the words: "headline" (max 80 characters), "subheading", up to three short "points", a "callToAction", and a "dateLine" only for a date or opening times the user gave you. NEVER put a phone number, email, street address, web address, QR link or offer in flyerContent — those are filled in from what the business recorded, and the user checks them on the "Edit flyer" form before printing. A flyer's photo comes from "stock" or "ai_image" only (or none, for a words-only flyer). A round draws up to three pages from exactly those words (photo at the top, framed photo, words only) and the pages themselves are free. Words never sit on the photo. Pages use their brand colours; if they describe a look or colours for the flyer, put it in "mood" and the pages follow it. If their brand kit has no real colours, the pages use colours chosen to suit the business, and the round tells them so. To change the look of a flyer not yet approved, put the new "mood" in a visual_brief_edit; for an approved one, a new visual_brief_proposal carrying ALL its words and the new "mood". Approving one makes a print-ready PDF in My Content, which they can print at home or send to a print shop (that file has a 3 mm bleed). You cannot print or post it for them. If the words are too long for the paper, the round says which field to shorten. A flyer with an approved page is finished and cannot be changed in place: to change one, emit a new visual_brief_proposal for a flyer carrying ALL its words from the brief list above with the change made. A flyer with no approved page yet changes with a visual_brief_edit, as above. The approved PDF stays in My Content, and the user asks for pages on the new brief.
 
 MORE OPTIONS. If none fit, say they can press "Ask <your name> for more options" on the brief, or set "remake": true on the review card so the user can start the next round with one click. A round with AI images uses ${SOURCE_SPECS.ai_image.tasks} task from their monthly allowance, and AI video ${SOURCE_SPECS.ai_video.tasks} more; stock photos, stock videos and branded cards use none. Say so before they click.
 
@@ -1700,9 +1735,18 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of
     "waitingOn": "<who on their team is making it — omit unless the user said>",
     "dueDate": "<YYYY-MM-DD, only if the user gave one>",
     "paperSize": "A5" | "A4" | "A6" | "DL",   // flyer only
-    "flyerContent": { "headline": "...", "subheading": "...", "points": ["..."], "callToAction": "...", "dateLine": "..." }   // flyer only — never contact details or an offer
+    "flyerContent": { "headline": "...", "subheading": "...", "points": ["..."], "callToAction": "...", "dateLine": "..." },   // flyer only — never contact details or an offer
+    "go": true   // after the new-design questions, or a clear request: starts it now and opens the editor. Leave it out only for a change to a brief they are comparing, or a campaign's picture
   }
 }
+
+or, to ask step by step before you propose:
+{"type":"chat_questions","intro":"<optional: one short line>","questions":[{"question":"<short question>","options":["<answer>",{"label":"<answer>","description":"<what it means>"}],"multiple":false}]}
+(as the "uiElement", at most 5 questions)
+
+or, to change the colours or font: the brand_style_proposal above, as the "uiElement".
+
+or, to change a design in the editor: the design_edit above, as the "uiElement".
 
 or, to change the workspace's picture guidelines:
 {
@@ -1768,7 +1812,7 @@ AUTOPILOT. ${perWeek > 0 ? `It is ON: you plan ${perWeek} storyboard${perWeek ==
 
 OTHER WAYS A VIDEO STARTS. "Make a video version" on one of their posts in the Review Queue plans a storyboard from that post ("From one of your posts"); the Campaign Assistant can commission one for a campaign ("For a campaign"). Both arrive on the "Videos" tab as storyboards for them to check, like any other.
 
-CHANGING A STORYBOARD. When the user wants a planned video done differently, emit a video_replan_proposal with the video's id from the list above and their notes. Approving it plans the storyboard again with those notes (free). To change a single scene, tell them to press "Change" on that scene on the "Videos" tab.
+CHANGING A STORYBOARD. When the user wants a planned video done differently, emit a video_replan_proposal with the video's id from the list above and their notes. Approving it plans the storyboard again with those notes (free). To change ONE scene, emit { "type": "video_scene_edit", "projectId": <its id>, "scene": <the scene's number>, "voiceover": "<only if it changes, at most 240 characters>", "onScreenText": "<only if it changes, at most 60 characters, \"\" to take it off>", "source": "stock_video" | "stock_photo" | "ai_video" | "ai_image" | "brand_card" (only if it changes), "picture": "<only if it changes: what to show or search for, under 120 characters>", "summary": "<one sentence: what changes>" }. The user may have selected it: their message then starts "About this scene of my video N". Keep their facts; invent nothing. It only changes the plan: nothing is made or spent until they press "Make the video", so tell them that, and never say the scene has been changed. An AI source there costs more when they do. You cannot put their own clip or picture in a scene from here: for that they press "Change" on it. The voice belongs to the whole video, not one scene, so a different voice means a new video.
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the two shapes below, or null:
 {
@@ -2889,6 +2933,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
          *  caption is offered to that post instead of being saved as a new one. See
          *  draftTarget below. */
         forPostId?: number;
+        /** The email open beside the Email Studio's docked chat. See emailTarget below. */
+        forIssueId?: number;
         /** Pictures (library assetIds) and documents (base64) — chat-attachments.ts. */
         attachments?: unknown;
         /** A note the user just sent this assistant on the Team page (team.ts `send`, reply:'model').
@@ -3058,6 +3104,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // open), degrades to ordinary behaviour rather than failing the turn: the conversation stays
     // usable, the draft is saved as a new post, and its review link says where it went. Failing here
     // would kill the conversation over a post the user may have stopped caring about.
+    // The same for the Email Studio. Tenant-scoped; an email that has gone out degrades to ordinary chat.
+    const forIssueId = Number(body.forIssueId);
+    const [issueRow] = Number.isInteger(forIssueId) && forIssueId > 0
+        ? await db.select({ id: newsletterIssues.id, status: newsletterIssues.status, subject: newsletterIssues.subject, preheader: newsletterIssues.preheader, bodyMarkdown: newsletterIssues.bodyMarkdown })
+            .from(newsletterIssues)
+            .where(and(eq(newsletterIssues.id, forIssueId), eq(newsletterIssues.organisationId, orgId))).limit(1)
+        : [];
+    const emailTarget = issueRow && !['sending', 'sent'].includes(issueRow.status ?? '') ? issueRow : null;
+
     const draftTarget = targetRow && EDITABLE_POST_STATUSES.includes(targetRow.status ?? '')
         ? { id: targetRow.id, platform: targetRow.platform ?? null, caption: targetRow.caption ?? null, hashtags: targetRow.hashtags ?? null }
         : null;
@@ -3341,7 +3396,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
         // which is exactly what must NOT happen when the user is editing a post already.
-        draftTarget ? `${promptWithRules}\n\n${draftTargetPromptBlock(draftTarget)}` : promptWithRules,
+        draftTarget ? `${promptWithRules}\n\n${draftTargetPromptBlock(draftTarget)}`
+            : emailTarget && route === ROUTES.newsletter_editor ? `${promptWithRules}\n\n${emailTargetPromptBlock(emailTarget)}`
+            : promptWithRules,
         assistantRow.onboardingContext,
     );
     // The Mentor's reply format, restated LAST. Twenty blocks follow its role prompt, and on long turns the
@@ -3884,6 +3941,14 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
         // And the Audience cards (src/utils/chat-audience.ts): a rule-based segment, or one contact.
         let audienceCard: SegmentProposalCard | ContactProposalCard | null = null;
+        // The Email Studio's cards (src/utils/chat-email-parts.ts): only for the email open beside this chat.
+        let emailPartCard: EmailPartCard | null = null;
+        if (route === ROUTES.newsletter_editor && isEmailPartType((uiElement as { type?: unknown } | null)?.type)) {
+            const req = emailPartCardFromUiElement(uiElement);
+            emailPartCard = req && emailTarget && req.issueId === emailTarget.id ? req : null;
+            uiElement = emailPartCard;
+            if (!emailPartCard) content = 'I can only do that with the email open in front of you. Open it in the Email Studio and ask me again; nothing has changed.';
+        }
         const segmentReq = route === ROUTES.newsletter_editor ? segmentProposalFromUiElement(uiElement) : null;
         const contactReq = route === ROUTES.newsletter_editor && !segmentReq ? contactProposalFromUiElement(uiElement) : null;
         if (segmentReq || contactReq) {
@@ -3930,6 +3995,65 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (!postAction) {
                 content = 'I couldn’t find that post among this assistant’s posts, so I haven’t set anything up. Which one do you mean? You can also open it on the "Posts" tab.';
             }
+        }
+
+        // One scene of a storyboard (src/utils/chat-video-scene.ts): found in the stored row, this workspace's
+        // own, and only while it can still be changed. edit_scene refuses a video past that as well.
+        let sceneEdit: VideoSceneCard | null = null;
+        if (route === ROUTES.video_producer && (uiElement as { type?: unknown } | null)?.type === VIDEO_SCENE_EDIT_TYPE) {
+            const req = videoSceneRequestFromUiElement(uiElement);
+            const [project] = req ? await db.select({ status: videoProjects.status, storyboard: videoProjects.storyboard }).from(videoProjects)
+                .where(and(eq(videoProjects.id, req.projectId), eq(videoProjects.organisationId, orgId))).limit(1) : [];
+            sceneEdit = req && project && ['planned', 'failed'].includes(project.status) ? videoSceneCard(req, project.storyboard as Storyboard | null) : null;
+            uiElement = sceneEdit;
+            if (!sceneEdit) content = 'I couldn’t set that up on the scene, so nothing has changed. Which video and scene do you mean? You can also press “Change” on the scene, on the "Videos" tab.';
+        }
+
+        // "More like this one": a change to a brief (src/utils/chat-brief-edit.ts), for this workspace's own.
+        let briefEdit: BriefEditCard | null = null;
+        if (route === ROUTES.brand_designer && (uiElement as { type?: unknown } | null)?.type === VISUAL_BRIEF_EDIT_TYPE) {
+            const req = briefEditFromUiElement(uiElement);
+            const [brief] = req ? await db.select({ purpose: visualBriefs.purpose, status: visualBriefs.status, flyerContent: visualBriefs.flyerContent }).from(visualBriefs)
+                .where(and(eq(visualBriefs.id, req.briefId), eq(visualBriefs.organisationId, orgId))).limit(1) : [];
+            const isFlyer = brief?.purpose === 'flyer';
+            // A flyer's words go through the merge, on top of what is saved; a finished flyer takes no change here.
+            const flyerContent = isFlyer ? mergeFlyerWords(brief.flyerContent, (uiElement as { flyerWords?: unknown }).flyerWords) : null;
+            briefEdit = req && brief && brief.status !== 'cancelled' && !(isFlyer && brief.status === 'approved') ? { ...req, ...(flyerContent ? { flyerContent } : {}) } : null;
+            if (briefEdit && !flyerContent && !['message', 'mood', 'mustInclude', 'mustAvoid'].some((f) => briefEdit![f as 'message'])) briefEdit = null;
+            uiElement = briefEdit;
+            if (!briefEdit) content = 'I couldn’t set that up on the brief, so nothing has changed. Which brief do you mean? You can also press Edit on it, on the "Briefs" tab.';
+        }
+
+        // A change to a design (src/utils/design-doc.ts), rebuilt, for this workspace's own brief.
+        let designEdit: DesignEditCard | null = null;
+        if (route === ROUTES.brand_designer && (uiElement as { type?: unknown } | null)?.type === DESIGN_EDIT_TYPE) {
+            const req = designEditFromUiElement(uiElement);
+            const [brief] = req ? await db.select({ id: visualBriefs.id }).from(visualBriefs)
+                .where(and(eq(visualBriefs.id, req.briefId), eq(visualBriefs.organisationId, orgId))).limit(1) : [];
+            designEdit = req && brief ? req : null;
+            uiElement = designEdit;
+            if (!designEdit) content = 'I couldn’t set that up on the design, so nothing has changed. Which part do you mean? You can also click it on the design and change it there.';
+        }
+
+        // The questions are answered: start the design and go to the studio, with no card to confirm first
+        // (src/utils/brief-from-chat.ts). An AI picture only if the user's own answer chose it.
+        if (route === ROUTES.brand_designer && (uiElement as { type?: unknown; go?: unknown } | null)?.type === 'visual_brief_proposal' && (uiElement as { go?: unknown }).go === true) {
+            try {
+                const started = await startDesignFromChat(db, {
+                    orgId, userId, assistantId: assistantRow.id,
+                    proposal: uiElement as Record<string, unknown>,
+                    aiChosen: userChoseAiPicture(history, message),
+                });
+                if (started) uiElement = started;
+            } catch (err) { console.error('[chat-orchestrator] design start failed:', err instanceof Error ? err.message : err); }
+        }
+
+        // The colours and font, talked through in chat (src/utils/chat-brand-style.ts).
+        let brandStyle: BrandStyleCard | null = null;
+        if (route === ROUTES.brand_designer && (uiElement as { type?: unknown } | null)?.type === BRAND_STYLE_TYPE) {
+            brandStyle = brandStyleFromUiElement(uiElement);
+            uiElement = brandStyle;
+            if (!brandStyle) content = 'I couldn’t set that up as a brand style, so nothing has changed. Which colours or font would you like? You can also press “View or change” on the Briefs tab.';
         }
 
         // The cards behind "Select" on a text box or a picture (src/utils/chat-post-parts.ts): rebuilt
@@ -4026,7 +4150,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 : formDraft ? { type: AUDIENCE_FORM_DRAFT_TYPE, ...formDraft }
                 // An action card on an existing email, or an Audience card, was already checked and
                 // rebuilt above — keep it.
-                : emailAction ?? audienceCard ?? reviewsCard ?? profileCard;
+                : emailAction ?? emailPartCard ?? audienceCard ?? reviewsCard ?? profileCard;
         }
 
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
@@ -4088,7 +4212,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // does that, and a refused card's reply says it was refused (src/utils/confirm-card-reply.ts).
         // The voiceover actions on a post too: "I've added a voiceover" over a card nobody pressed.
         const voicePostCard = !!postAction && uiElement === postAction && ['voiceover', 'captions', 'time_text'].includes(postAction.action);
-        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || voicePostCard)) {
+        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || (!!emailPartCard && uiElement === emailPartCard) || (!!briefEdit && uiElement === briefEdit) || (!!brandStyle && uiElement === brandStyle) || (!!designEdit && uiElement === designEdit) || (!!sceneEdit && uiElement === sceneEdit) || voicePostCard)) {
             content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
         }
         // The Website Assistant can't make, find or place a picture in a reply — only its site_picture
@@ -4097,12 +4221,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             content = pictureReply(content, !!uiElement && (uiElement as { type?: unknown }).type === 'site_picture');
         }
         if (postPartCard?.type === POST_PICTURE_TYPE) content = pictureReply(content, true);
+        if (emailPartCard?.type === EMAIL_PICTURE_TYPE && replyClaimsPicture(content)) content = 'Here it is: press the button on the card below to choose a picture. Nothing changes until you do.';
 
         // And the newsletter route's. Identical shape: it never persists on the turn, so the only
         // unbacked claim available to it is claiming an issue it did not write.
         // !emailAction / !audienceCard: a "booked for Tuesday" or "here's the segment" reply describes
         // its card, not an unbacked claim.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !audienceCard && !reviewsCard && !profileCard) {
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !emailPartCard && !audienceCard && !reviewsCard && !profileCard) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );

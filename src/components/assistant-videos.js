@@ -202,6 +202,7 @@
           <p class="text-[11px] font-bold text-gray-500">Scene ${i + 1} · ${esc(BEAT[s.beat] || s.beat)} · about ${esc(s.targetS)}s · ${esc(SOURCE[s.source] || s.source)}</p>
           ${s.voiceover ? `<p class="text-sm text-gray-900 mt-0.5 break-words">“${esc(s.voiceover)}”</p>` : ''}
           ${s.onScreenText ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">On screen:</span> ${esc(s.onScreenText)}</p>` : ''}
+          ${editable && chatPaneAvailable() ? `<button type="button" data-vid-act="select-scene" data-id="${v.id}" data-index="${i}" title="Ask ${who()} about this scene" class="mt-1 mr-3 text-xs font-bold text-indigo-700 hover:underline">🎯 Select</button>` : ''}
           ${editable ? `<button type="button" data-vid-act="edit-scene" data-id="${v.id}" data-scene="${esc(s.id)}" class="mt-1 text-xs font-bold text-indigo-700 hover:underline cursor-pointer">Change</button>` : ''}
         </div>
       </li>`;
@@ -225,6 +226,7 @@
             ${v.note ? `<p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mt-1.5">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
+          ${chatPaneAvailable() ? `<button type="button" data-vid-act="talk" data-id="${v.id}" class="text-xs font-bold text-indigo-700 hover:underline shrink-0 whitespace-nowrap">Talk it through</button>` : ''}
           ${v.status === 'built' ? `<button type="button" data-vid-act="open-review" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg shrink-0">Open the Review Queue</button>` : ''}
         </div>
         ${Array.isArray(v.changes) && v.changes.length && (v.status === 'planned' || v.status === 'failed')
@@ -261,6 +263,7 @@
     el.innerHTML = `
       <div class="flex items-center justify-between gap-3 mb-4">
         <p class="text-sm text-gray-600">Short vertical videos for Reels, Shorts and Facebook — planned, voiced and captioned by ${who()}.</p>
+        ${chatPaneAvailable() ? `<button type="button" data-vid-act="chat-toggle" aria-pressed="${chatDock && chatDock.isOn() ? 'true' : 'false'}" title="Show or hide the chat beside your videos" class="btn-assistant border px-4 py-2 text-sm font-bold rounded-lg shrink-0">💬 Chat with ${who()}</button>` : ''}
         ${state.form ? '' : '<button type="button" data-vid-act="new" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg shrink-0">New video</button>'}
       </div>
       ${formHtml()}
@@ -310,6 +313,24 @@
         break;
       }
       case 'close-form': state.form = false; render(); break;
+      case 'chat-toggle': { const d = getChatDock(); if (d) d.setOn(!d.isOn(), true); break; }
+      case 'talk': {
+        const v = state.videos.find((x) => x.id === id);
+        if (v) getChatDock()?.refer({ label: `Video “${v.title}”`, message: `About my video ${v.id} “${v.title}”.` });
+        break;
+      }
+      case 'select-scene': {
+        const v = state.videos.find((x) => x.id === id);
+        const i = Number(b.dataset.index);
+        const s = v && v.storyboard && v.storyboard.scenes[i];
+        if (!s) break;
+        const onScreen = s.onScreenText ? `, on screen “${s.onScreenText}”` : '';
+        getChatDock()?.refer({
+          label: `Scene ${i + 1} of “${v.title}”`,
+          message: `About this scene of my video ${v.id} “${v.title}”: scene ${i + 1} (${BEAT[s.beat] || s.beat}), voiceover “${s.voiceover || ''}”${onScreen}, picture from ${SOURCE[s.source] || s.source}.`,
+        });
+        break;
+      }
       case 'edit-scene': state.editing = { id, sceneId: b.dataset.scene }; render(); break;
       case 'cancel-edit': state.editing = null; render(); break;
       case 'replan': state.replanning = id; render(); break;
@@ -368,8 +389,33 @@
   // A card approved in chat changes this list.
   document.addEventListener('video:changed', () => { if (state.assistantId) load(); });
 
+  // ── The chat docked beside the videos (ChatPane.dock) ────────────────────────────────────────────
+  // Owner, 2026-11-05: the Website tab's pane, for the Video Producer. As on the Briefs tab: one conversation
+  // for the tab, and "Select" is a button on each scene rather than a mode.
+  let chatDock = null;
+  const chatPaneAvailable = () => !!window.ChatPane?.available?.() && !!state.assistantId;
+  function getChatDock() {
+    const el = host();
+    if (!el || !chatPaneAvailable()) return null;
+    if (chatDock && chatDock.connected()) return chatDock;
+    chatDock = window.ChatPane.dock(el, {
+      prefix: 'videos', storageKey: 'bms-video-chat-on',
+      onToggle: (on) => document.querySelector('[data-vid-act="chat-toggle"]')?.setAttribute('aria-pressed', on ? 'true' : 'false'),
+      pane: () => ({
+        assistantId: state.assistantId, assistantName: state.assistantName || 'your Video Producer', roleKey: 'video_producer',
+        rememberKey: `bms-video-chat:${state.assistantId}`,
+        placeholder: 'Ask for a video, or 🎯 Select a scene…',
+        starterPrompts: ['Plan me a 30-second video about what we do.', 'Make the opening of my video grab attention.', 'What would make this video work better?'],
+        composerRows: 3,
+      }),
+    });
+    return chatDock;
+  }
+
   window.AssistantVideos = {
     init({ assistantId, assistantName, setup }) {
+      chatDock?.destroy();
+      chatDock = null;
       state.assistantId = assistantId;
       state.assistantName = assistantName || null;
       state.setup = setup && typeof setup === 'object' ? setup : {};
@@ -380,6 +426,8 @@
       if (state.rendered) return;
       state.rendered = true;
       render();
+      const dock = getChatDock();
+      if (dock && dock.wanted()) dock.setOn(true, false);
     },
   };
 })();

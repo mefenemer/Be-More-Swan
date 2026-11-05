@@ -276,7 +276,8 @@ function findWordmark($: cheerio.CheerioAPI): string | null {
 
 function findFontFamily($: cheerio.CheerioAPI, css: string): string | null {
     // A Google Fonts <link> names the display family explicitly and unambiguously.
-    const gf = $('link[href*="fonts.googleapis.com"]').attr('href');
+    // The one naming a family: Google's own snippet puts a bare preconnect to the same host first.
+    const gf = $('link[href*="fonts.googleapis.com"][href*="family="]').attr('href');
     if (gf) {
         const fam = /family=([^:&]+)/.exec(gf)?.[1];
         const cleaned = cleanFontFamily(decodeURIComponent(fam ?? '').replace(/\+/g, ' '));

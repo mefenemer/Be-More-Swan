@@ -109,7 +109,7 @@ async function main() {
 
     await check('the newsletter route keeps a checked review card, and the clicks already exist', () => {
         const orch = read('netlify/functions/chat-orchestrator.ts');
-        assert.ok(orch.includes('emailAction ?? audienceCard ?? reviewsCard ?? profileCard'));
+        assert.ok(orch.includes('emailAction ?? emailPartCard ?? audienceCard ?? reviewsCard ?? profileCard'));
         assert.ok(orch.includes('resolveReviewsCard(db, orgId, uiElement)'));
         const session = read('src/components/chat-session.js');
         assert.ok(session.includes("addEventListener('site:reviewsAdd', onReviewsAdd)") && session.includes("addEventListener('site:reviewDecisions', onReviewDecisions)"));

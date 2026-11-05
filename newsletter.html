@@ -18,6 +18,34 @@
        every pixel it took beyond that came off the email.
      - The header's actions stay on one row beside the title on a laptop and up, instead of
        stranding "New email" on a second line under the others. */
+  /* The assistant's chat docked on the right of the email (owner 2026-11-05, as on the Website tab). The
+     list gives up its column while it is open, because the email needs the room ("All emails" brings it
+     back); only a very wide screen has space for all three. Over the right edge below 1280. */
+  .nl-chat-col { display: none; }
+  /* Stays on screen: the email's body is a long way below it, and Select is for the body. Under the
+     workspace's 64px header. */
+  #nl-editor-bar { position: sticky; top: 64px; z-index: 20; background: #fff; margin-top: -8px; padding: 8px 0; }
+  #nl-page.nl-chat-on { max-width: 1760px; }
+  #nl-page.nl-chat-on #nl-grid { grid-template-columns: minmax(0, 1fr); }
+  #nl-page.nl-chat-on #nl-list-col { display: none; }
+  #nl-page.nl-chat-on .nl-chat-col { display: block; }
+  #nl-page:not(.nl-chat-on) #nl-all-emails { display: none; }
+  #nl-chat-host { height: 100%; }
+  @media (min-width: 1280px) {
+    #nl-page.nl-chat-on #nl-grid { grid-template-columns: minmax(0, 1fr) 380px; }
+    #nl-page.nl-chat-on .nl-chat-col { position: sticky; top: 76px; height: calc(100vh - 92px); align-self: start; }
+  }
+  @media (min-width: 1800px) {
+    #nl-page.nl-chat-on #nl-grid { grid-template-columns: 280px minmax(0, 1fr) 380px; }
+    #nl-page.nl-chat-on #nl-list-col { display: block; }
+    #nl-page:not(.x) #nl-all-emails { display: none; }
+  }
+  @media (max-width: 1279px) {
+    #nl-page.nl-chat-on .nl-chat-col { position: fixed; top: 76px; right: 12px; bottom: 12px; z-index: 40; width: min(420px, calc(100vw - 24px)); box-shadow: 0 18px 50px rgba(0,0,0,.25); border-radius: 16px; }
+    #nl-page.nl-chat-on .nl-chat-col.nl-chat-aside { display: none; }
+  }
+  .nl-selecting #nl-subject, .nl-selecting #nl-preheader, .nl-selecting #nl-body, .nl-selecting [data-nld-block] { cursor: crosshair !important; }
+  .nl-selecting #nl-subject:hover, .nl-selecting #nl-preheader:hover, .nl-selecting #nl-body:hover, .nl-selecting [data-nld-block]:hover { outline: 2px solid #db2777; outline-offset: 2px; background: rgba(219,39,119,.06); }
   @media (min-width: 1024px) {
     #nl-grid { grid-template-columns: 320px minmax(0, 1fr); }
     #nl-head { flex-wrap: nowrap; }
@@ -70,7 +98,7 @@
   <div id="nl-grid" class="grid grid-cols-1 gap-6">
 
     <!-- Issue list -->
-    <div class="min-w-0">
+    <div id="nl-list-col" class="min-w-0">
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
         <div class="px-4 py-3 border-b border-gray-100">
           <p class="text-sm font-bold text-gray-900">Emails</p>
@@ -100,15 +128,21 @@
       </div>
 
       <div id="nl-editor" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6" style="display:none">
-        <div class="flex items-center justify-between gap-2 mb-4">
-          <div class="flex items-center gap-2 min-w-0">
+        <div id="nl-editor-bar" class="flex items-center justify-between gap-2 mb-4">
+          <div class="flex flex-wrap items-center gap-2 min-w-0">
             <span id="nl-status" class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border bg-gray-100 text-gray-600 border-gray-200">Draft</span>
             <!-- What this email is FOR. A terms notice and a monthly round-up are different jobs,
                  and the chip is also the control: clicking it changes the brief the assistant is
                  given. See src/config/newsletter-purposes.ts. -->
+            <!-- Select and Chat on this side: on a narrower screen the open chat covers the other. -->
+            <button type="button" id="nl-select" aria-pressed="false" title="Click the subject, the preview line or a part of the email to ask your assistant to change it"
+              class="hidden btn-secondary px-2.5 py-1 text-xs font-bold border rounded-lg cursor-pointer whitespace-nowrap" style="display:none">🎯 <span id="nl-select-label">Select</span></button>
+            <button type="button" id="nl-chat-toggle" aria-pressed="false" title="Show or hide the chat beside your email"
+              class="hidden btn-assistant px-2.5 py-1 text-xs font-bold border rounded-lg cursor-pointer whitespace-nowrap" style="display:none">💬 <span id="nl-chat-toggle-label">Chat</span></button>
+            <button type="button" id="nl-all-emails" class="btn-secondary px-2 py-0.5 text-[11px] font-bold rounded-full border cursor-pointer whitespace-nowrap">‹ All emails</button>
             <button type="button" id="nl-purpose" class="btn-secondary inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full border cursor-pointer hover:brightness-95"></button>
           </div>
-          <span id="nl-saved" class="text-xs text-gray-400"></span>
+          <span id="nl-saved" class="text-xs text-gray-400 shrink-0"></span>
         </div>
 
         <!-- Where this issue came from, when it was not started by hand. A draft that appeared on
@@ -249,6 +283,7 @@
         </div>
       </div>
     </div>
+    <aside id="nl-chat-col" class="nl-chat-col" aria-label="Chat with your assistant"><div id="nl-chat-host"></div></aside>
   </div>
 
   <!-- Automatic emails: the welcome sequence, and the pointer to how the OTHER scenarios are sent.

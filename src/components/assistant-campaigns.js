@@ -46,6 +46,8 @@
 
   const state = {
     assistantId: null,
+    /** For the docked chat's title and toggle ("Chat with …"). */
+    assistantName: null,
     cfg: null,
     /** Server rows. Never mutated in place — a failed write must not leave a lying row on screen. */
     campaigns: [],
@@ -227,6 +229,7 @@
                 <span class="block text-gray-600 break-words">${esc(String(w.text).replace(/[.\s]*$/, '.'))}${w.holding ? ` ${esc(String(w.holding))} ${w.holding === 1 ? 'item waits' : 'items wait'} on this.` : ''}</span>
               </span>
               <span class="flex items-center gap-2 shrink-0">
+                ${chatPaneAvailable() ? `<button type="button" data-cmp-select-work="${esc(String(w.orderId))}" data-cmp-campaign="${esc(String(c.id))}" title="Ask about this piece of work in the chat" class="text-xs font-bold text-indigo-700 hover:underline">🎯 Select</button>` : ''}
                 ${w.state === 'waiting_you' || w.state === 'done' ? workLinkBtn(w.link, 'btn-secondary border') : ''}
                 ${w.canStartNow && c.status !== 'paused' ? `<button type="button" data-cmp-start-now="${esc(String(w.orderId))}" data-cmp-campaign="${esc(String(c.id))}"
                   class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Start now</button>` : ''}
@@ -444,6 +447,7 @@
         ${state.teamOpen.has(Number(c.id)) ? `<div class="mt-3 border border-gray-200 rounded-xl p-3" data-cmp-team-host="${esc(String(c.id))}"></div>` : ''}
 
         <div class="flex flex-wrap items-center gap-3 mt-3">
+          ${chatPaneAvailable() ? `<button type="button" data-cmp-select="${esc(String(c.id))}" title="Ask about this campaign in the chat" class="text-xs font-bold text-indigo-700 hover:underline">🎯 Select</button>` : ''}
           <button type="button" data-cmp-toggle-team="${esc(String(c.id))}"
             class="text-xs font-bold text-gray-500 hover:text-gray-700 underline transition">
             ${state.teamOpen.has(Number(c.id)) ? 'Hide conversation' : 'Conversation'}
@@ -1001,6 +1005,7 @@
                 ${t.status === 'blocked' ? 'Not started — waiting for earlier work. ' : ''}${t.dueDate ? `${overdue ? 'Overdue — was due' : 'Due'} ${esc(t.dueDate)}. ` : ''}${t.waiting ? `${esc(String(t.waiting))} ${t.waiting === 1 ? 'piece' : 'pieces'} of work waiting on this. ` : ''}${t.assigneeEmail ? `Tell them at ${esc(t.assigneeEmail)} — nothing is sent automatically.` : 'Nothing is sent to them automatically.'}
               </p>
               ${ticketLine(t, c)}
+              ${chatPaneAvailable() ? `<button type="button" data-cmp-select-task="${id}" data-cmp-task-campaign="${esc(String(c.id))}" title="Ask about this task in the chat" class="block mt-1 text-xs font-bold text-indigo-700 hover:underline">🎯 Select</button>` : ''}
             </div>
             ${t.status === 'issued' ? `
               <div class="flex items-center gap-2 shrink-0">
@@ -1446,11 +1451,13 @@
     if (state.form) return '';
     return `
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <p class="text-sm font-bold text-gray-900 mr-auto" data-explain="campaign">Your campaigns</p>
+        <p class="text-sm font-bold text-gray-900 mr-auto" style="margin-right:auto" data-explain="campaign">Your campaigns</p>
         <!-- The chat route to a campaign, where the user lands. "Set an Objective" lived only on the
              Orders tab, as a full page load, beside a header Chat button that opened a pop-up
              (review, 2026-10-22). Both now open the same pop-up. -->
-        <button type="button" data-cmp-chat class="btn-assistant min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">Set an objective in chat</button>
+        ${chatPaneAvailable()
+          ? `<button type="button" data-cmp-chat-toggle aria-pressed="${chatDock && chatDock.isOn() ? 'true' : 'false'}" title="Show or hide the chat beside your campaigns" class="btn-assistant min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">💬 Chat with ${esc(whoChat())}</button>`
+          : '<button type="button" data-cmp-chat class="btn-assistant min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">Set an objective in chat</button>'}
         <button type="button" data-cmp-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New campaign</button>
       </div>`;
   }
@@ -2611,6 +2618,17 @@
       window.openAssistantChat?.({ assistantId: state.assistantId });
       return;
     }
+    if (e.target.closest('[data-cmp-chat-toggle]')) {
+      const d = getChatDock();
+      if (d) d.setOn(!d.isOn(), true);
+      return;
+    }
+    const selBtn = e.target.closest('[data-cmp-select], [data-cmp-select-work], [data-cmp-select-task]');
+    if (selBtn) {
+      const ref = selectionRef(selBtn);
+      if (ref) getChatDock()?.refer(ref);
+      return;
+    }
     const newBtn = e.target.closest('[data-cmp-new]');
     const editBtn = e.target.closest('[data-cmp-edit]');
     const save = e.target.closest('[data-cmpf-save]');
@@ -3112,10 +3130,72 @@
     timeline.host.innerHTML = timelineHtml();
   });
 
+  // ── The chat docked beside the campaigns (ChatPane.dock) ────────────────────
+  // Owner, 2026-11-05: the Website tab's pane, for the Campaign Orchestrator. As on Briefs and Videos: one
+  // conversation for the tab, and "Select" is a button on a campaign, a piece of its work or a person's
+  // task rather than a mode. It needs no card of its own: the chat already sees every campaign (with its
+  // campaignId and task orderIds) and has a card for each change — campaign_edit_proposal, more work on
+  // a campaign, campaign_task_update, campaign_decision_restore, campaign_learning_proposal. Those save or
+  // file; none starts a campaign or places an order, so the pane never spends (plan §1.3, §9.0).
+  let chatDock = null;
+  const chatPaneAvailable = () => !!window.ChatPane?.available?.() && !!state.assistantId;
+  const whoChat = () => state.assistantName || 'your assistant';
+  const clip = (s, n) => { const t = String(s || '').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
+  function getChatDock() {
+    const el = document.getElementById('campaigns-host');
+    if (!el || !chatPaneAvailable()) return null;
+    if (chatDock && chatDock.connected()) return chatDock;
+    chatDock = window.ChatPane.dock(el, {
+      prefix: 'campaigns', storageKey: 'bms-campaign-chat-on',
+      onToggle: (on) => document.querySelector('[data-cmp-chat-toggle]')?.setAttribute('aria-pressed', on ? 'true' : 'false'),
+      pane: () => ({
+        assistantId: state.assistantId, assistantName: state.assistantName || 'your Campaign Orchestrator', roleKey: 'campaign_orchestrator',
+        rememberKey: `bms-campaign-chat:${state.assistantId}`,
+        placeholder: 'Set an objective, or 🎯 Select a campaign…',
+        starterPrompts: ['Plan a campaign to get more sign-ups this month.', 'How are my campaigns doing?', 'What should my next campaign be?'],
+        composerRows: 3,
+      }),
+    });
+    return chatDock;
+  }
+  // What a Select button puts into the chat. The ids are the ones the chat's own list uses, so its card
+  // can name the right campaign or task without guessing.
+  function selectionRef(btn) {
+    const byId = (id) => state.campaigns.find((x) => Number(x.id) === Number(id));
+    if (btn.dataset.cmpSelect) {
+      const c = byId(btn.dataset.cmpSelect);
+      if (!c) return null;
+      return { label: `Campaign “${clip(c.objective, 60)}”`, message: `About my campaign ${c.id} “${clip(c.objective, 300)}”.` };
+    }
+    if (btn.dataset.cmpSelectWork) {
+      const c = byId(btn.dataset.cmpCampaign);
+      const w = c && (c.work || []).find((x) => String(x.orderId) === btn.dataset.cmpSelectWork);
+      if (!w) return null;
+      const chip = (WORK_CHIPS[w.state] || [w.state])[0];
+      return {
+        label: `${clip(w.label, 40)} on “${clip(c.objective, 40)}”`,
+        message: `About this piece of work on my campaign ${c.id} “${clip(c.objective, 200)}”: item ${w.position}, ${w.label} — ${clip(w.text, 400)} Its state: ${chip}.`,
+      };
+    }
+    if (btn.dataset.cmpSelectTask) {
+      const c = byId(btn.dataset.cmpTaskCampaign);
+      const t = c && (c.humanTasks || []).find((x) => String(x.orderId) === btn.dataset.cmpSelectTask);
+      if (!t) return null;
+      return {
+        label: `${clip(t.assignee || 'Task', 30)}’s task on “${clip(c.objective, 40)}”`,
+        message: `About this task for a person on my campaign ${c.id} “${clip(c.objective, 200)}”: orderId ${t.orderId}, ${t.assignee || 'someone on my team'} — “${clip(t.task, 400)}”${t.dueDate ? `, due ${t.dueDate}` : ''}.`,
+      };
+    }
+    return null;
+  }
+
   // ── Public API ─────────────────────────────────────────────────────────────
   window.AssistantCampaigns = {
-    init({ assistantId, cfg }) {
+    init({ assistantId, cfg, assistantName }) {
+      chatDock?.destroy();
+      chatDock = null;
       state.assistantId = assistantId;
+      state.assistantName = assistantName || null;
       state.cfg = cfg || null;
       state.rendered = false;
       // Loaded eagerly even though the panel is lazy: the count drives the tab badge and the
@@ -3132,6 +3212,8 @@
       if (state.rendered) { load(); return; }
       state.rendered = true;
       render();
+      const dock = getChatDock();
+      if (dock && dock.wanted()) dock.setOn(true, false);
     },
     /**
      * Open the plan editor from elsewhere — the Decisions card's "Edit this plan". Reloads first so

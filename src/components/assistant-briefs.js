@@ -53,7 +53,14 @@
     rejecting: null,
     /** Brief ids with their per-brief message line, e.g. a refusal from the server. */
     notes: {},
-    showCancelled: false,
+    /** The brand kit, for the style panel; null until loaded or if unreadable. */
+    brandKit: null,
+    /** The open tab (TABS below). null until the first load picks the one that needs the user. */
+    tab: null,
+    /** The design open in the studio: { briefId, optionId }, optionId null while its options are being made. */
+    studio: null,
+    /** "Select" is on: the next option or brief clicked goes onto the chat's chip. */
+    picking: false,
     pollTimer: null,
     /** The HTML each brief card and the toolbar were last painted with — what a poll diffs against. */
     painted: { cards: new Map(), toolbar: '' },
@@ -111,6 +118,7 @@
       state.aiVideoUnavailable = data.aiVideoUnavailable || null;
       state.defaultSources = Array.isArray(data.defaultSources) ? data.defaultSources : null;
       state.guidelines = data.guidelines === undefined ? undefined : data.guidelines;
+      state.brandKit = data.brandKit || null;
       state.flyerDefaults = data.flyerDefaults || null;
       state.loadError = null;
     } catch (err) {
@@ -158,11 +166,48 @@
   }
 
   // ── Pieces ─────────────────────────────────────────────────────────────────
+  // ── Tabs ───────────────────────────────────────────────────────────────
+  // Left to right, the order a brief moves through, each named for where it is. Every brief is in exactly
+  // one, and the count on each shows where the work is without opening it (owner, 2026-11-05).
+  const TABS = [
+    { key: 'todo', label: 'Not started', help: 'Ask for options on a brief to get it going.', empty: 'Nothing waiting to start. Press "New brief" to begin one.' },
+    { key: 'making', label: 'Being made', help: 'Nothing to do here. Options move to "To review" when they are ready.', empty: 'Nothing is being made right now.' },
+    { key: 'review', label: 'To review', help: 'Choose "Use this" on the one you like, or "Not this" and say why.', empty: 'Nothing is waiting for you to review.' },
+    { key: 'approved', label: 'Approved', help: 'Finished, and in My Content for your assistants to use.', empty: 'Nothing approved yet.' },
+    { key: 'archived', label: 'Archived', help: 'Briefs you stopped. Anything you had approved stays in My Content.', empty: 'Nothing archived.' },
+  ];
+  function tabOf(b) {
+    if (b.status === 'cancelled') return 'archived';
+    if (b.status === 'generating') return 'making';
+    if (b.status === 'approved' || progress(b).done) return 'approved';
+    return b.options.some((o) => o.status === 'proposed') ? 'review' : 'todo';
+  }
+  const inTab = (key) => state.briefs.filter((b) => tabOf(b) === key);
+  function tabsHtml() {
+    return `
+      <div role="tablist" aria-label="Briefs by stage" class="flex overflow-x-auto gap-1 border-b border-gray-200 mb-4" data-brief-tabs>
+        ${TABS.map((t) => {
+          const n = inTab(t.key).length;
+          const on = state.tab === t.key;
+          const urgent = t.key === 'review' && n > 0;
+          return `<button type="button" role="tab" id="brief-tab-${t.key}" aria-selected="${on}" aria-controls="brief-tab-panel" tabindex="${on ? 0 : -1}" data-brief-tab="${t.key}"
+            class="flex-shrink-0 min-h-[44px] px-3 py-2 text-sm font-bold whitespace-nowrap border-b-2 -mb-px transition ${on ? 'border-emerald-700 text-gray-900' : 'border-transparent text-gray-600 hover:text-gray-900'}">
+            ${esc(t.label)} <span class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center ${urgent ? 'bg-amber-100 text-amber-900' : 'bg-gray-100 text-gray-700'}">${n}</span>
+          </button>`;
+        }).join('')}
+      </div>`;
+  }
+  function openTab(key, focus) {
+    state.tab = key;
+    render();
+    if (focus) document.getElementById(`brief-tab-${key}`)?.focus();
+  }
+
   function chip(b) {
     const base = 'inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold border';
     const waiting = b.options.filter((o) => o.status === 'proposed').length;
     if (b.status === 'generating') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Making options</span>`;
-    if (b.status === 'cancelled') return `<span class="${base} bg-gray-50 text-gray-500 border-gray-200">Cancelled</span>`;
+    if (b.status === 'cancelled') return `<span class="${base} bg-gray-50 text-gray-500 border-gray-200">Archived</span>`;
     if (b.status === 'approved') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Approved</span>`;
     if (waiting) return `<span class="${base} bg-amber-50 text-amber-800 border-amber-200">Needs you</span>`;
     return `<span class="${base} bg-gray-50 text-gray-600 border-gray-200">Not started</span>`;
@@ -233,6 +278,7 @@
   // The button names who does the work; the cost sits on its own line under the buttons (owner,
   // 2026-10-14: "1 AI Credit" on the button itself read as part of the action's name).
   function roundButtonLabel(b) {
+    if (b.purpose === 'flyer') return b.rounds > 0 ? 'Make different versions' : 'Make the flyer';
     return b.rounds > 0 ? `Ask ${name()} for more options` : `Ask ${name()} for options`;
   }
 
@@ -248,6 +294,10 @@
       ? `Each round uses ${n} task${n === 1 ? '' : 's'}, for the ${paid.map((s) => s.label).join(' and ')}. Stock photos and branded cards use none.`
       : `Each round uses ${n} AI credit${n === 1 ? '' : 's'}, for the ${paid.map((s) => s.label).join(' and ')}. Stock photos and branded cards are free.`;
   }
+
+  const isVideoBrief = (b) => Array.isArray(b.sources) && b.sources.length > 0 && b.sources.every((s) => /video/.test(String(s)));
+  /** What the studio can work on: a picture or flyer page still to be decided. A video has its own tools. */
+  const canEdit = (o) => o.status === 'proposed' && !String(o.mimeType || '').startsWith('video/') && !!window.DesignStudio;
 
   function optionTile(b, o) {
     // A flyer page is the paper's shape, not the brief's photo shape.
@@ -292,11 +342,13 @@
         </div>`;
     }
     return `
-      <div class="bg-white border ${o.status === 'approved' ? 'border-emerald-700' : 'border-gray-200'} rounded-xl p-2">
+      <div class="bg-white border ${o.status === 'approved' ? 'border-emerald-700' : 'border-gray-200'} rounded-xl p-2" data-brief-option="${o.id}" data-brief-option-brief="${b.id}">
         <div class="relative rounded-lg overflow-hidden bg-gray-100" style="aspect-ratio:${esc(ratio)}">${o.flyer && o.url
           ? `<button type="button" data-brief-preview="${o.id}" aria-label="${esc(`Preview ${o.prompt || 'this flyer'} larger`)}" class="block w-full h-full" style="cursor:zoom-in">${img}</button>`
           : img}</div>
         <p class="text-[11px] font-bold text-gray-600 mt-1">${o.flyer ? esc(o.prompt || 'Flyer') : esc(sourceLabel(o.source).replace(/s$/, ''))} · round ${o.round}</p>
+        ${chatPaneAvailable() ? `<button type="button" data-brief-select="${o.id}" data-brief="${b.id}" title="Ask ${esc(name())} about this one" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">🎯 Select</button>` : ''}
+        ${canEdit(o) ? `<button type="button" data-brief-open-studio="${o.id}" data-brief="${b.id}" class="btn-primary w-full min-h-[44px] sm:min-h-0 px-2 py-1.5 mt-1 text-xs font-bold rounded-lg">Open in editor</button>` : ''}
         ${o.flyer && o.url ? `<button type="button" data-brief-preview="${o.id}" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">Preview</button>` : ''}
         ${o.flyer && o.flyer.lowResPhoto ? '<p class="text-[11px] text-amber-700 mt-1">This photo may look soft when printed — try a smaller paper size or another round.</p>' : ''}
         ${credit}
@@ -425,7 +477,7 @@
             <button type="button" data-brief-chat="${b.id}"
               class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1.5 text-xs font-bold">Talk it through with ${esc(name())}</button>
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
-              class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Cancel brief</button>
+              class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Archive brief</button>
           </div>
           ${progress(b).done ? '' : `<p class="text-[11px] text-gray-500 mt-1">${esc(flyer ? flyerCostLine(b) : roundCostLine(b))}</p>
           ${flyer ? '' : videoOfferHtml(b)}`}` : ''}
@@ -448,7 +500,8 @@
     const v = editing || { title: '', message: '', paperSize: F.defaultPaperSize, sources: (state.defaultSources || ['stock']).filter((k) => F.photoSources.includes(k)), flyerContent: null };
     // A flyer with no words yet starts from the business's recorded details (last flyer, website, offer).
     const d = state.flyerDefaults || {};
-    const c = v.flyerContent || { offer: d.offer || '' };
+    // No words yet on a saved flyer: its title starts as the headline, so Save works, and the user sees it to change.
+    const c = v.flyerContent || { offer: d.offer || '', headline: editing ? (v.title || '') : '' };
     const contact = c.contact || d.contact || {};
     const qr = c.qr || (v.flyerContent ? {} : d.qr) || {};
     const points = (c.points || []).concat(['', '', '']).slice(0, L.points || 3);
@@ -470,6 +523,7 @@
         <p class="text-xs text-gray-500">${esc(name())} draws the pages in your brand. When you approve one, a print-ready PDF goes into My Content — print it at home, or send it to a print shop.</p>
         ${field('Name', input('title', v.title, 'e.g. November open day flyer', 120))}
         ${field('What is the flyer for?', `<textarea data-keep="${k('message')}" name="message" maxlength="1000" rows="2" placeholder="e.g. Bring new local customers in for our first-visit offer — hand out at the farmers' market" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">${esc(v.message || '')}</textarea>`)}
+        ${field('The look you want (optional)', input('mood', v.mood, 'e.g. bright and playful, pink and teal', 300), 'Colours or a feel. Leave it empty to use your brand colours.')}
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           ${field('Paper', `<select data-keep="${k('paperSize')}" name="paperSize" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">
             ${F.paperSizes.map((p) => `<option value="${esc(p.key)}" ${p.key === (v.paperSize || F.defaultPaperSize) ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}
@@ -513,7 +567,7 @@
         <p class="text-xs text-red-600 font-semibold hidden" data-brief-form-error></p>
         <div class="flex flex-wrap gap-2">
           ${editing
-            ? `<button type="submit" data-brief-submit="generate" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save and ask ${esc(name())} for pages</button>
+            ? `<button type="submit" data-brief-submit="generate" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Save and make the flyer</button>
                <button type="submit" data-brief-submit="save" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Just save</button>`
             : `<button type="submit" data-brief-submit="draft" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Next: draft the words for me${draftCost}</button>
                <button type="submit" data-brief-submit="save" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Next: I'll write the words</button>`}
@@ -546,7 +600,7 @@
           ${field('Must avoid (optional)', input('mustAvoid', v.mustAvoid, 'e.g. handshakes, suits', 500))}
           ${field('Someone on my team is making it (optional)', input('waitingOn', v.waitingOn, 'e.g. Sam (designer)', 120), 'brand-brief-own')}
           ${field('What is it for?', `<select data-keep="brief-purpose" name="purpose" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">
-            ${V().purposes.filter((p) => p.key !== 'flyer').map((p) => `<option value="${esc(p.key)}" ${p.key === v.purpose ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}
+            ${V().purposes.filter((p) => p.key !== 'flyer' || !editing).map((p) => `<option value="${esc(p.key)}" ${p.key === v.purpose ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select>`)}
           ${field('Shape', `<select data-keep="brief-aspectRatio" name="aspectRatio" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">
             <option value="">Best for what it is for</option>
             ${V().aspectRatios.map((a) => `<option value="${esc(a.key)}" ${editing && a.key === v.aspectRatio ? 'selected' : ''}>${esc(a.label)}</option>`).join('')}</select>`)}
@@ -580,36 +634,47 @@
       <div class="flex flex-wrap items-center justify-between gap-3 mb-4" data-brief-toolbar>
         <div>
           <h2 class="text-base font-bold text-gray-900"><span data-explain="brand-briefs">Briefs</span></h2>
-          <p class="text-xs text-gray-500">Say what a picture or printed flyer is for. Approve the option that fits — it goes into your library for every assistant to use. Your flyers are listed here too.</p>
+          <p class="text-xs text-gray-500">Say what you need, whether a picture, a printed flyer or a video. Approve the option that fits and it goes into your library for every assistant to use.</p>
         </div>
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-3">
           ${credits}
-          ${state.form ? '' : `${V().flyer ? '<button type="button" data-brief-new-flyer class="btn-secondary border min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New flyer</button>' : ''}
-          <button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
+          ${chatPaneAvailable() ? `<button type="button" data-brief-pick aria-pressed="${state.picking ? 'true' : 'false'}" title="Choose an option or a brief to talk about" class="${state.picking ? 'btn-primary' : 'btn-secondary border'} min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">🎯 ${state.picking ? 'Selecting…' : 'Select'}</button>` : ''}
+          ${chatPaneAvailable() && !chatIsOn() ? `<button type="button" data-brief-chat-toggle aria-pressed="false" title="Show the chat beside your briefs" class="btn-assistant border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">Chat with ${esc(name())}</button>` : ''}
+          ${state.form ? '' : `<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
         </div>
       </div>`;
   }
 
   /**
-   * What every round is told, on top of the brief — the workspace's picture guidelines. Edited on
-   * Business Information ▸ Brand Assets, or from chat; read by EVERY assistant's AI images.
+   * What every round starts from: the brand kit and the picture guidelines, both changed in a pop-up here
+   * (brand-style-dialog.js) or in chat, so nobody has to leave the Brand Designer to see or change them.
    */
-  function guidelinesHtml() {
+  function styleHtml() {
     const g = state.guidelines;
     if (g === undefined) return '';
-    const link = '<a href="#" data-brief-edit-guidelines class="font-bold underline">Edit</a>';
-    if (g === null) return `<p class="text-xs text-gray-500 mb-4">Your picture guidelines could not be read just now. ${link}</p>`;
+    const kit = state.brandKit;
+    const link = '<button type="button" data-brief-edit-style class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-1.5 text-xs font-bold rounded-lg flex-shrink-0">View or change</button>';
+    if (g === null || !kit) return `<div class="flex items-center justify-between gap-3 bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4"><p class="text-xs text-gray-600">Your brand style could not be read just now.</p>${link}</div>`;
+    const unset = kit.source !== 'manual' && kit.source !== 'website';
+    const swatch = (c, label) => `<span title="${esc(label)}: ${esc(c)}" class="inline-block w-6 h-6 rounded-full border border-gray-300" style="background:${esc(c)}"></span>`;
     const parts = [
       g.photoStyle ? `<span class="font-bold">Style:</span> ${esc(g.photoStyle)}` : '',
       g.mustInclude ? `<span class="font-bold">Include:</span> ${esc(g.mustInclude)}` : '',
       g.mustAvoid ? `<span class="font-bold">Never show:</span> ${esc(g.mustAvoid)}` : '',
-      g.secondaryColors && g.secondaryColors.length ? `<span class="font-bold">Extra colours:</span> ${g.secondaryColors.map(esc).join(', ')}` : '',
     ].filter(Boolean);
+    if (kit.fontFamily) window.FontPicker?.loadFamily(kit.fontFamily);
     return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4">
-        <p class="text-xs font-bold text-gray-700"><span data-explain="brand-guidelines">Picture guidelines</span> · ${link}</p>
-        <p class="text-xs text-gray-600 mt-1">${parts.length ? parts.join(' · ') : 'None set yet. Add a photo style and anything pictures must never show — every round reads them, and so do your other assistants\' AI images.'}</p>
-        ${parts.length && g.mustAvoid ? '<p class="text-[11px] text-gray-500 mt-1">Stock photo search can\'t filter by these — check stock picks yourself.</p>' : ''}
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4" data-brief-style>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-3 min-w-0">
+            <p class="text-xs font-bold text-gray-700"><span data-explain="brand-guidelines">Your brand style</span></p>
+            <span class="inline-flex items-center gap-1">${unset ? '' : `${swatch(kit.primaryColor, 'Main colour')}${swatch(kit.backgroundColor, 'Background')}${swatch(kit.textColor, 'Text')}`}${(g.secondaryColors || []).map((c) => swatch(c, 'Extra colour')).join('')}</span>
+            ${unset ? '<span class="text-xs font-semibold text-amber-900">No brand colours chosen yet</span>' : ''}
+            <span class="text-sm text-gray-900 truncate" ${kit.fontFamily ? `style="font-family:'${esc(kit.fontFamily)}', system-ui, sans-serif"` : ''}>${esc(kit.fontFamily || 'Our standard font')}</span>
+          </div>
+          ${link}
+        </div>
+        <p class="text-xs text-gray-600 mt-2">${parts.length ? parts.join(' · ') : 'No picture guidelines yet. Add a photo style and anything pictures must never show.'}</p>
       </div>`;
   }
 
@@ -617,7 +682,7 @@
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
         <p class="text-sm font-bold text-gray-700">No briefs yet</p>
-        <p class="text-xs text-gray-500 mt-2">Press "New brief", or tell ${esc(state.assistantName || 'your Brand Designer')} in chat what you need — "a square image for our spring offer, warm and bright". Either way, nothing is made until you press "Ask ${esc(name())} for options" on the brief, and nothing is used until you press "Use this".</p>
+        <p class="text-xs text-gray-500 mt-2">Press "New brief" and ${esc(state.assistantName || 'your Brand Designer')} will ask a few quick questions, or just say what you need in the chat. Once you have answered, it starts making the design and opens it here, to change and approve. Only an AI-made picture uses a task, and the question says so.</p>
       </div>`;
   }
 
@@ -637,23 +702,30 @@
       host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-500">Loading briefs…</p></div>';
       return;
     }
+    if (state.studio) { renderStudio(host); return; }
+    closeStudioInstance();
     // The poll re-renders every few seconds while a round runs — carry typed values across it.
     const kept = {};
     host.querySelectorAll('[data-keep]').forEach((el) => { kept[el.dataset.keep] = el.type === 'checkbox' ? el.checked : el.value; });
     const keptNotes = {};
     host.querySelectorAll('[data-brief-reject-note]').forEach((el) => { keptNotes[el.dataset.briefRejectNote] = el.value; });
 
-    const live = state.briefs.filter((b) => b.status !== 'cancelled');
-    const cancelled = state.briefs.filter((b) => b.status === 'cancelled');
+    // Always opens at the start of the row (owner, 2026-11-05). The count on "To review" says when something waits.
+    if (!state.tab) state.tab = 'todo';
+    // The brief being watched is finished: follow it, rather than leaving an empty "Being made".
+    if (state.tab === 'making' && !inTab('making').length && inTab('review').length) state.tab = 'review';
+    const tab = TABS.find((t) => t.key === state.tab);
+    const shown = inTab(state.tab);
     host.innerHTML = `
       ${toolbarHtml()}
-      ${guidelinesHtml()}
+      ${styleHtml()}
       ${formHtml()}
-      ${!live.length && !state.form ? emptyState() : ''}
-      <div class="space-y-4">${live.map(briefCard).join('')}</div>
-      ${cancelled.length ? `
-        <button type="button" data-brief-toggle-cancelled class="mt-4 text-xs text-gray-500 underline">${state.showCancelled ? 'Hide' : 'Show'} cancelled briefs (${cancelled.length})</button>
-        ${state.showCancelled ? `<div class="space-y-4 mt-3">${cancelled.map(briefCard).join('')}</div>` : ''}` : ''}`;
+      ${state.briefs.length || state.form ? tabsHtml() : ''}
+      <div id="brief-tab-panel" role="tabpanel" aria-labelledby="brief-tab-${tab.key}" class="${state.picking ? 'brief-picking' : ''}">
+        ${!state.briefs.length && !state.form ? emptyState() : shown.length ? `<p class="text-xs text-gray-600 mb-3">${esc(tab.help)}</p>` : `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-600">${esc(tab.empty)}</p></div>`}
+        <div class="space-y-4">${shown.map(briefCard).join('')}</div>
+      </div>`;
+    ensurePickCss();
 
     host.querySelectorAll('[data-keep]').forEach((el) => {
       if (!Object.prototype.hasOwnProperty.call(kept, el.dataset.keep)) return;
@@ -668,10 +740,60 @@
   }
 
   /** The brief ids in the order render() lays them out — live first, then cancelled when shown. */
+  // ── The studio ─────────────────────────────────────────────────────────
+  // Making a design happens here; the tabs only say where a brief has got to (owner, 2026-11-05).
+  let studioInstance = null;
+  function closeStudioInstance() {
+    if (studioInstance) { studioInstance.destroy(); studioInstance = null; }
+  }
+  const studioOptions = (b) => b.options.filter(canEdit).map((o) => ({ id: o.id, url: o.url, hasPhoto: !o.flyer || o.flyer.layout !== 'type_only' }));
+  function renderStudio(host) {
+    const b = state.briefs.find((x) => x.id === state.studio.briefId);
+    if (!b) { state.studio = null; closeStudioInstance(); render(); return; }
+    if (studioInstance && studioInstance.briefId === b.id && host.querySelector('[data-design-studio]')) {
+      studioInstance.refreshThumbs();
+      return;
+    }
+    closeStudioInstance();
+    const first = state.studio.optionId || (b.options.filter(canEdit)[0] || {}).id;
+    if (!first) {
+      // Still being made, or the round stopped with nothing to edit: never a blank editor.
+      const making = b.status === 'generating';
+      host.innerHTML = `
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center" data-brief-studio-wait>
+          <p class="text-base font-bold text-gray-900">${making ? `${esc(name())} is making “${esc(b.title)}”` : `Nothing to edit on “${esc(b.title)}” yet`}</p>
+          <p class="text-sm text-gray-600 mt-2">${making ? 'It opens here as soon as it is ready, usually in about a minute.' : esc(b.generationNote || 'Ask for options on the brief to get it going.')}</p>
+          <button type="button" data-brief-studio-back class="btn-secondary border min-h-[44px] sm:min-h-0 px-4 py-2 mt-4 text-sm font-bold rounded-lg">Back to briefs</button>
+        </div>`;
+      return;
+    }
+    state.studio.optionId = first;
+    studioInstance = window.DesignStudio.mount(host, {
+      brief: b, optionId: first, assistantName: name(), chatAvailable: chatPaneAvailable(),
+      options: () => studioOptions(state.briefs.find((x) => x.id === b.id) || b),
+      post,
+      onRefer: (ref) => chatRefer(ref),
+      onClose: () => { state.studio = null; closeStudioInstance(); state.tab = tabOf(state.briefs.find((x) => x.id === b.id) || b); load(); },
+      onMore: () => { state.tab = tabOf(b); render(); },
+      onApprove: async (optionId) => {
+        await post({ action: 'decide', optionId, decision: 'approve' });
+        state.studio = null;
+        closeStudioInstance();
+        state.tab = 'approved';
+        await load();
+      },
+    });
+    studioInstance.briefId = b.id;
+  }
+  function openStudio(briefId, optionId) {
+    state.picking = false;
+    state.studio = { briefId, optionId: optionId || null };
+    render();
+    document.getElementById('briefs-host')?.scrollIntoView({ block: 'start' });
+  }
+
   function paintedOrder() {
-    const live = state.briefs.filter((b) => b.status !== 'cancelled');
-    const cancelled = state.showCancelled ? state.briefs.filter((b) => b.status === 'cancelled') : [];
-    return [...live, ...cancelled].map((b) => String(b.id));
+    return inTab(state.tab).map((b) => String(b.id));
   }
 
   /**
@@ -684,8 +806,10 @@
   function repaintChanged() {
     const host = document.getElementById('briefs-host');
     if (!host) return;
+    if (state.studio) { render(); return; }
     const onScreen = Array.from(host.querySelectorAll('[data-brief-card]')).map((el) => el.dataset.briefCard);
     const wanted = paintedOrder();
+    if (state.tab === 'making' && !wanted.length) { render(); return; }
     if (onScreen.length !== wanted.length || onScreen.some((id, i) => id !== wanted[i])) { render(); return; }
 
     const toolbar = toolbarHtml();
@@ -694,7 +818,9 @@
       if (el) el.outerHTML = toolbar;
       state.painted.toolbar = toolbar;
     }
-    for (const b of state.briefs) {
+    const tabs = host.querySelector('[data-brief-tabs]');
+    if (tabs) tabs.outerHTML = tabsHtml();
+    for (const b of inTab(state.tab)) {
       const html = briefCard(b);
       if (state.painted.cards.get(b.id) === html) continue;
       state.painted.cards.set(b.id, html);
@@ -730,6 +856,10 @@
     try {
       await post({ action: 'generate', briefId });
       say(briefId, null);
+      state.tab = 'making';
+      // Pictures and flyers: watch it being made in the editor, which opens on it when ready. Videos stay on the tabs.
+      const b = state.briefs.find((x) => x.id === briefId);
+      if (b && !isVideoBrief(b) && window.DesignStudio) state.studio = { briefId, optionId: null };
     } catch (err) {
       say(briefId, err.message, 'error');
     } finally {
@@ -743,18 +873,43 @@
     if (!state.assistantId || !e.target.closest('#briefs-host')) return;
     const t = (sel) => e.target.closest(sel);
 
-    if (t('[data-brief-new]')) { state.form = { mode: 'create' }; render(); return; }
-    if (t('[data-brief-new-flyer]')) { state.form = { mode: 'create', flyer: true, gen: Date.now() }; render(); return; }
-    if (t('[data-brief-edit-guidelines]')) {
-      e.preventDefault();
-      // Business Information opens on its profile tab; this hint (read once by assets.html) opens it
-      // on Brand Assets, where the guidelines are.
+    // "Select" is on: this click chooses what to talk about, whatever it landed on.
+    if (state.picking) {
+      const onTool = t('[data-brief-pick]');
+      const tile = t('[data-brief-option]');
+      const card = t('[data-brief-card]');
+      if (!onTool && (tile || card)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const b = state.briefs.find((x) => x.id === Number((tile || card).dataset.briefOptionBrief || (card && card.dataset.briefCard)));
+        setPicking(false);
+        if (!b) return;
+        const o = tile && b.options.find((x) => x.id === Number(tile.dataset.briefOption));
+        if (o) referOption(b, o); else referBrief(b);
+        return;
+      }
+    }
+    if (t('[data-brief-pick]')) { setPicking(!state.picking); return; }
+    const toStudio = t('[data-brief-open-studio]');
+    if (toStudio) { openStudio(Number(toStudio.dataset.brief), Number(toStudio.dataset.briefOpenStudio)); return; }
+    if (t('[data-brief-studio-back]')) { state.studio = null; render(); return; }
+    const tabBtn = t('[data-brief-tab]');
+    if (tabBtn) { openTab(tabBtn.dataset.briefTab, false); return; }
+    if (t('[data-brief-new]')) { startNewBrief(); return; }
+    if (t('[data-brief-edit-style]')) {
+      if (window.BrandStyleDialog && window.FontPicker) {
+        window.BrandStyleDialog.open({
+          assistantName: name(),
+          onSaved: () => load(),
+          onAskChat: chatPaneAvailable() ? () => askChat('Help me choose my brand colours and font. Ask me a few quick questions first.') : null,
+        });
+        return;
+      }
       window._bizinfoInitialTab = 'assets';
       if (window.loadView) window.loadView('assets');
       return;
     }
     if (t('[data-brief-form-close]')) { state.form = null; render(); return; }
-    if (t('[data-brief-toggle-cancelled]')) { state.showCancelled = !state.showCancelled; render(); return; }
     if (t('[data-brief-reject-cancel]')) { state.rejecting = null; render(); return; }
 
     const ownOpen = t('[data-brief-own-open]');
@@ -806,8 +961,8 @@
     const cancel = t('[data-brief-cancel]');
     if (cancel) {
       const id = Number(cancel.dataset.briefCancel);
-      const ok = await window.confirmModal('Options you have not approved are deleted. Anything already in your library stays.', {
-        title: 'Cancel this brief?', confirmLabel: 'Cancel brief', cancelLabel: 'Keep it',
+      const ok = await window.confirmModal('It moves to the Archived tab, and it cannot be started again. Options you have not approved are deleted. Anything already in your library stays.', {
+        title: 'Archive this brief?', confirmLabel: 'Archive brief', cancelLabel: 'Keep it',
       });
       if (!ok) return;
       try { await post({ action: 'cancel', briefId: id }); } catch (err) { say(id, err.message, 'error'); }
@@ -816,9 +971,20 @@
     }
 
     if (t('[data-brief-library]')) { window.loadView?.('my-content'); return; }
+    if (t('[data-brief-chat-toggle]')) { setChatOn(!chatIsOn(), true); return; }
+    const select = t('[data-brief-select]');
+    if (select) {
+      const b = state.briefs.find((x) => x.id === Number(select.dataset.brief));
+      const o = b && b.options.find((x) => x.id === Number(select.dataset.briefSelect));
+      if (!o) return;
+      referOption(b, o);
+      return;
+    }
     const chat = t('[data-brief-chat]');
     if (chat) {
       const b = state.briefs.find((x) => x.id === Number(chat.dataset.briefChat));
+      // With the docked chat here, talk it through there rather than in a pop-up.
+      if (b && chatPaneAvailable()) { referBrief(b); return; }
       window.openAssistantChat?.({ assistantId: state.assistantId, draft: b ? `About the brief "${b.title}": ` : '' });
       return;
     }
@@ -920,6 +1086,25 @@
     return data.asset.id;
   }
 
+  // The one form: choosing a printed flyer swaps to its own fields (paper, words, contact details).
+  document.addEventListener('change', (e) => {
+    if (!e.target.matches || !e.target.matches('[data-brief-form] select[name="purpose"]')) return;
+    if (e.target.value !== 'flyer' || !state.form || state.form.mode !== 'create') return;
+    state.form = { mode: 'create', flyer: true, gen: Date.now() };
+    render();
+  });
+
+  // The tabs' arrow keys, and Escape to stop selecting.
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.picking) { setPicking(false); return; }
+    const tab = e.target.closest && e.target.closest('[data-brief-tab]');
+    if (!tab || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    const at = TABS.findIndex((t) => t.key === tab.dataset.briefTab);
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : (at + (e.key === 'ArrowRight' ? 1 : -1) + TABS.length) % TABS.length;
+    openTab(TABS[next].key, true);
+  });
+
   document.addEventListener('change', async (e) => {
     const input = e.target.closest && e.target.closest('[data-brief-own-file]');
     if (!input || !input.files || !input.files[0]) return;
@@ -963,20 +1148,20 @@
     const fd = new FormData(form);
     const editing = state.form && state.form.mode === 'edit';
     const brief = {
-      purpose: 'flyer', title: fd.get('title'), message: fd.get('message'), paperSize: fd.get('paperSize'),
+      purpose: 'flyer', title: fd.get('title'), message: fd.get('message'), mood: fd.get('mood'), paperSize: fd.get('paperSize'),
       sources: fd.getAll('source'),
       // Only an edit carries words; an empty headline leaves the saved words as they were.
       ...(editing && flyerContentFrom(fd) ? { flyerContent: flyerContentFrom(fd) } : {}),
     };
     if (editing && submitter === 'generate' && !brief.flyerContent) {
-      if (errEl) { errEl.textContent = 'Write a headline first — a page draws exactly the words you save.'; errEl.classList.remove('hidden'); }
+      if (errEl) { errEl.textContent = 'Type a headline first: it is the main line on the flyer, for example "Launch party, 21 December".'; errEl.classList.remove('hidden'); }
       return;
     }
     form.querySelectorAll('button').forEach((b) => { b.disabled = true; });
     try {
       let id = editing ? state.form.id : null;
       if (editing && !state.form.fork) await post({ action: 'edit', briefId: id, ...brief });
-      else id = (await post({ action: 'create', assistantId: state.assistantId, ...brief })).briefId;
+      else { id = (await post({ action: 'create', assistantId: state.assistantId, ...brief })).briefId; state.tab = 'todo'; }
       if (submitter === 'draft') {
         if (errEl) { errEl.textContent = 'Drafting the words…'; errEl.classList.remove('hidden', 'text-red-600'); }
         try { await post({ action: 'draft_flyer_words', briefId: id }); }
@@ -1012,6 +1197,7 @@
         await post({ action: 'edit', briefId: state.form.id, ...brief });
       } else {
         const res = await post({ action: 'create', assistantId: state.assistantId, ...brief, generate: submitter === 'generate' });
+        state.tab = res.roundStarted ? 'making' : 'todo';
         // The brief was saved even when its first round could not start — show why ON the brief, and
         // close the form, so pressing Save again cannot make a second copy.
         if (res.roundError && res.briefId) state.notes[res.briefId] = { text: errorText(res.roundError, 0), tone: 'error' };
@@ -1025,18 +1211,122 @@
   });
 
   // A brief created, or options decided, from the chat (chat-session.js).
-  document.addEventListener('brief:changed', (e) => {
-    const id = e.detail && e.detail.assistantId;
-    if (!state.assistantId || Number(id) !== Number(state.assistantId)) return;
+  // The questions finished and the design is being made (brief-from-chat.ts): go there.
+  document.addEventListener('brief:openStudio', (e) => {
+    const d = e.detail || {};
+    if (!state.assistantId || Number(d.assistantId) !== Number(state.assistantId)) return;
+    load().then(() => {
+      if (!state.rendered) return;
+      const b = state.briefs.find((x) => x.id === Number(d.briefId));
+      // A video has no editor (its options are clips): show its brief where it is being made instead.
+      if (b && isVideoBrief(b)) { state.studio = null; state.tab = tabOf(b); render(); return; }
+      openStudio(Number(d.briefId), null);
+    });
+  });
+  // "Open in editor" on that card, later on: only if it is this assistant's brief, which the list says.
+  document.addEventListener('brief:openStudioAny', (e) => {
+    const id = Number(e.detail && e.detail.briefId);
+    const b = state.rendered ? state.briefs.find((x) => x.id === id) : null;
+    if (!b) return;
+    if (isVideoBrief(b)) { state.studio = null; state.tab = tabOf(b); render(); return; }
+    openStudio(id, null);
+  });
+  // A chat card changed the open design.
+  document.addEventListener('design:changed', (e) => {
+    const d = e.detail || {};
+    if (studioInstance) studioInstance.setDesign(Number(d.optionId), d.design, d.photoUrl);
     load();
   });
 
+  document.addEventListener('brief:changed', (e) => {
+    const id = e.detail && e.detail.assistantId;
+    if (!state.assistantId || Number(id) !== Number(state.assistantId)) return;
+    // A brief just saved from the chat: open the tab it landed on, so it does not seem to vanish.
+    const known = new Set(state.briefs.map((b) => b.id));
+    load().then(() => {
+      const fresh = state.briefs.find((b) => !known.has(b.id));
+      if (fresh && state.rendered) openTab(tabOf(fresh), false);
+    });
+  });
+
+  // ── The chat docked beside the briefs (chat-pane.js) ─────────────────────────────────────────────
+  // Owner, 2026-11-05: the Website tab's pane, for the Brand Designer. One conversation for the tab, because
+  // it is a list of briefs and the chat already knows them all (buildBriefsSnapshot). "Select" is a button on
+  // each option rather than a mode: there is nothing to pick from but the options, and this way it is there
+  // at any scroll position, on a phone too. The layout is ChatPane.dock's.
+  let chatDock = null;
+  const chatPaneAvailable = () => !!window.ChatPane?.available?.() && !!state.assistantId;
+  const chatIsOn = () => !!chatDock && chatDock.isOn();
+  function getChatDock() {
+    const host = document.getElementById('briefs-host');
+    if (!host || !chatPaneAvailable()) return null;
+    if (chatDock && chatDock.connected()) return chatDock;
+    chatDock = window.ChatPane.dock(host, {
+      prefix: 'briefs', storageKey: 'bms-brief-chat-on',
+      onToggle: (on) => {
+        // Only offered while the chat is closed: with it open beside the briefs the button says nothing.
+        const bar = document.querySelector('[data-brief-toolbar]');
+        if (bar) bar.outerHTML = toolbarHtml();
+        state.painted.toolbar = toolbarHtml();
+      },
+      pane: () => ({
+        assistantId: state.assistantId, assistantName: name(), roleKey: 'brand_designer',
+        rememberKey: `bms-brief-chat:${state.assistantId}`,
+        placeholder: 'Ask for a picture or a flyer, or 🎯 Select an option…',
+        starterPrompts: ['I need a picture for a post.', 'Make me a printed flyer.', 'Which of these options would you choose?'],
+        composerRows: 3,
+      }),
+    });
+    return chatDock;
+  }
+  function setChatOn(on, remember) { getChatDock()?.setOn(on, remember); }
+  function chatRefer(ref) { getChatDock()?.refer(ref); }
+  function referOption(b, o) {
+    const what = o.flyer ? (o.prompt || 'Flyer') : sourceLabel(o.source).replace(/s$/, '');
+    const about = o.prompt && !o.flyer ? `, showing: ${String(o.prompt).slice(0, 300)}` : '';
+    chatRefer({
+      label: `${what} on “${b.title}”`,
+      message: `About this option on my brief ${b.id} “${b.title}”: option ${o.id} (${what}, round ${o.round}${about}).`,
+    });
+  }
+  function referBrief(b) { chatRefer({ label: `Brief “${b.title}”`, message: `About my brief ${b.id} “${b.title}”.` }); }
+  /** Opens the chat and says this for them. Nothing is spent: the reply is questions or a card to press. */
+  function askChat(text, opts) { getChatDock()?.ask(text, opts); }
+  /** One button for every kind of brief: the assistant's questions decide what it should be. */
+  // One way in (owner 2026-11-05: "either the chat or one button"). The form only appears when the chat cannot run,
+  // so a brief can still be made in an AI outage.
+  function startNewBrief() {
+    // A new conversation each time (owner 2026-11-05): it never carries on from the chat that was on screen.
+    if (chatPaneAvailable()) { state.studio = null; closeStudioInstance(); askChat('I need a new brief.', { fresh: true }); render(); return; }
+    state.form = { mode: 'create' };
+    render();
+  }
+  function setPicking(on) {
+    state.picking = !!on;
+    render();
+  }
+  function ensurePickCss() {
+    if (document.getElementById('brief-pick-css')) return;
+    const css = document.createElement('style');
+    css.id = 'brief-pick-css';
+    css.textContent = `.brief-picking [data-brief-card], .brief-picking [data-brief-option] { cursor: pointer; }
+      .brief-picking [data-brief-option]:hover, .brief-picking [data-brief-option]:focus-within { outline: 3px solid var(--color-emerald-700, #ff007f); outline-offset: 2px; border-radius: 8px; }
+      .brief-picking [data-brief-card]:not(:has([data-brief-option]:hover)):hover { outline: 2px dashed var(--color-emerald-700, #ff007f); outline-offset: 2px; }`;
+    document.head.appendChild(css);
+  }
+
   window.AssistantBriefs = {
     init({ assistantId, assistantName }) {
+      chatDock?.destroy();
+      chatDock = null;
       state.assistantId = assistantId;
       state.assistantName = assistantName || null;
       state.rendered = false;
       state.form = null;
+      state.tab = null;
+      state.picking = false;
+      state.studio = null;
+      closeStudioInstance();
       state.rejecting = null;
       state.notes = {};
       state.own = { briefId: null, library: null, error: null, selected: new Set(), busy: false, status: '' };
@@ -1048,6 +1338,8 @@
       if (state.rendered) return;
       state.rendered = true;
       render();
+      const dock = getChatDock();
+      if (dock && dock.wanted()) dock.setOn(true, false);
     },
   };
 })();

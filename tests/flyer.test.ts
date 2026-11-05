@@ -16,15 +16,16 @@ import { join } from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 import { PDFDocument } from 'pdf-lib';
 import {
-    FlyerFitError, PRINT_DPI, effectivePhotoDpi, flyerGeometry, pdfCanEmbed, renderFlyer, renderFlyerPdfs,
+    FlyerFitError, PRINT_DPI, effectivePhotoDpi, flyerGeometry, flyerPageStyle, pdfCanEmbed, renderFlyer, renderFlyerPdfs,
 } from '../src/lib/flyer';
 import {
     FLYER_LAYOUTS, PAPER_SIZES, PAPER_SPECS, PRINT_BLEED_MM, cleanQrUrl, normaliseFlyerContent, type FlyerContent,
 } from '../src/config/flyer-vocab';
-import { DEFAULT_BRAND_KIT } from '../src/utils/brand-kit';
+import { DEFAULT_BRAND_KIT, contrastRatio } from '../src/utils/brand-kit';
 import { PICTURE_PURPOSES, normaliseBrief } from '../src/config/visual-brief-vocab';
 import { offerLine, parseDraftedWords } from '../src/utils/flyer-words';
-import { pexelsPrintUrl } from '../src/utils/flyer-briefs';
+import { brandPageColours, colourForPage, flyerColours, pexelsPrintUrl } from '../src/utils/flyer-briefs';
+import { FLYER_COLOUR_RULE, parseArtDirection } from '../src/utils/visual-briefs';
 
 let passed = 0, total = 0;
 async function check(name: string, fn: () => void | Promise<void>) {
@@ -164,6 +165,13 @@ function content(over: Record<string, unknown> = {}): FlyerContent {
                 const g = flyerGeometry(layout, size, r.geometry.dpi);
                 assert.deepStrictEqual([r.width, r.height], [g.canvasWidth, g.canvasHeight]);
                 if (samples) writeFileSync(join(samples, `${size}-${layout}.png`), r.png);
+                if (samples && size === 'A5' && layout !== 'photo_full') {
+                    const colour = colourForPage(['#e8588f', '#17a2a2', '#7b3fa0'], layout);
+                    const styled = await renderFlyer({ content: content(), kit: DEFAULT_BRAND_KIT, paperSize: size, layout, photo: layout === 'type_only' ? null : photo, orgName: 'Northwind', style: flyerPageStyle(layout, colour, DEFAULT_BRAND_KIT) });
+                    writeFileSync(join(samples, `colour-${layout}.png`), styled.png);
+                    const plain = await renderFlyer({ content: content(), kit: DEFAULT_BRAND_KIT, paperSize: size, layout, photo: layout === 'type_only' ? null : photo, orgName: 'Northwind', style: flyerPageStyle(layout, null, DEFAULT_BRAND_KIT) });
+                    writeFileSync(join(samples, `nocolour-${layout}.png`), plain.png);
+                }
             });
         }
     }
@@ -194,6 +202,86 @@ function content(over: Record<string, unknown> = {}): FlyerContent {
             renderFlyer({ content: content({ contact: { email: `${'x'.repeat(100)}@example.com` } }), kit, paperSize: 'DL', layout: 'type_only', photo: null }),
             (e: unknown) => e instanceof FlyerFitError && e.field === 'contact',
         );
+    });
+
+    console.log('Colour, and words clear of the photo (Love Cat Studio, 2026-11-05)');
+    const mono = DEFAULT_BRAND_KIT;
+    await check('an empty kit has no brand colours: its near-black is not a colour', () => {
+        assert.deepStrictEqual(brandPageColours(mono, []), []);
+        assert.deepStrictEqual(brandPageColours({ ...mono, primaryColor: '#c2185b' }, ['#008080', '#000000']), ['#c2185b', '#008080']);
+    });
+    await check('order: the look asked for, then the brand, and a suggestion only when there is no brand colour', () => {
+        const picks = ['#ff6fa8', '#17a2a2'];
+        assert.deepStrictEqual(flyerColours({ brand: [], mood: null, picks }), { colours: picks, from: 'suggested' });
+        assert.deepStrictEqual(flyerColours({ brand: ['#c2185b'], mood: null, picks }), { colours: ['#c2185b'], from: 'brand' });
+        assert.deepStrictEqual(flyerColours({ brand: ['#c2185b'], mood: 'pink and teal', picks }), { colours: [...picks, '#c2185b'], from: 'look' });
+        assert.deepStrictEqual(flyerColours({ brand: [], mood: null, picks: undefined }), { colours: [], from: 'none' });
+    });
+    await check('pages take different colours when there are enough', () => {
+        const c = ['#111199', '#991111', '#119911'];
+        assert.deepStrictEqual(['photo_top', 'photo_framed', 'type_only'].map((l) => colourForPage(c, l as 'photo_top')), c);
+        assert.strictEqual(colourForPage([], 'type_only'), null);
+    });
+    await check('with no colour known, no page is a sheet of near-black', () => {
+        for (const layout of ['photo_top', 'photo_framed', 'type_only'] as const) {
+            assert.strictEqual(flyerPageStyle(layout, null, mono).field, mono.backgroundColor, layout);
+        }
+    });
+    await check('words stay readable on every page, whatever the colour', () => {
+        for (const colour of ['#c2185b', '#ffd400', '#7fd1c7', '#0b2545', '#ff007f', '#ffb6c1']) {
+            for (const layout of ['photo_top', 'photo_framed', 'type_only'] as const) {
+                const s = flyerPageStyle(layout, colour, mono);
+                assert.notStrictEqual(s.field, '#ffffff', `${colour} ${layout} is white`);
+                assert.ok(contrastRatio(s.ink, s.field) >= 3, `${colour} ${layout} ink ${contrastRatio(s.ink, s.field)}`);
+                assert.ok(contrastRatio(s.headline, s.field) >= 3, `${colour} ${layout} headline`);
+                assert.ok(contrastRatio(s.offerInk, s.offerBg) >= 3, `${colour} ${layout} offer`);
+                if (s.decor) assert.ok(contrastRatio(s.ink, s.decor) >= contrastRatio(s.ink, s.field), `${colour} circles fade the words`);
+            }
+        }
+    });
+    await check('small print on a coloured page reads at body-text contrast when any ink can', () => {
+        const s = flyerPageStyle('photo_top', '#e8588f', mono);
+        assert.ok(contrastRatio(s.ink, s.field) >= 4.5, `pink ${contrastRatio(s.ink, s.field)}`);
+    });
+    await check('the framed photo: the words start below it on every paper, and it is inside the trim', () => {
+        for (const size of PAPER_SIZES) {
+            const g = flyerGeometry('photo_framed', size, PRINT_DPI, PRINT_BLEED_MM);
+            assert.ok(g.panel === null);
+            assert.ok(g.text.top >= g.photo!.top + g.photo!.height, `${size} words reach the photo`);
+            assert.ok(g.photo!.left >= g.bleed && g.photo!.top >= g.bleed, `${size} photo in the bleed`);
+        }
+    });
+    await check('a coloured page is really drawn in its colour, and the PDF layer leaves the photo clear', async () => {
+        const style = flyerPageStyle('photo_framed', '#17a2a2', mono);
+        const c = content();
+        const r = await renderFlyer({ content: c, kit: mono, paperSize: 'A5', layout: 'photo_framed', photo, style });
+        const words = await renderFlyer({ content: c, kit: mono, paperSize: 'A5', layout: 'photo_framed', photo, style, drawPhoto: false });
+        assert.notStrictEqual(r.png.length, words.png.length);
+        const pdfs = await renderFlyerPdfs({ content: c, kit: mono, paperSize: 'A5', layout: 'photo_framed', photo, orgName: 'x', title: 't', bleedMm: PRINT_BLEED_MM, style });
+        assert.ok(pdfs.home.length > 0);
+    });
+    await check('a page drawn before colours were stored keeps its old look, so its PDF matches its preview', async () => {
+        const opts = { content: content(), kit, paperSize: 'A6' as const, layout: 'type_only' as const, photo: null };
+        const old = await renderFlyer(opts);
+        const stored = await renderFlyer({ ...opts, style: flyerPageStyle('type_only', kit.primaryColor, kit) });
+        assert.ok(!old.png.equals(stored.png), 'the circles are new');
+    });
+    await check('a new round never draws the full-page panel', () => {
+        const round = readFileSync('src/utils/flyer-briefs.ts', 'utf8');
+        assert.ok(!round.includes("layout: 'photo_full'") && round.includes("layout: 'photo_framed'"));
+    });
+    await check('the art director\'s colours: real colours only, at most three, and only asked for on a flyer', () => {
+        const fb = { imagePrompt: 'x'.repeat(30), stockKeywords: 'cats', cardHeadlines: [], by: 'fallback' as const };
+        const ad = parseArtDirection(JSON.stringify({ imagePrompt: 'a calm studio with a cat in the window', flyerColours: ['#FF6FA8', '#000000', '#ffffff', 'pink', '#17a2a2', '#7b3fa0', '#e0a100'] }), fb, null);
+        assert.deepStrictEqual(ad.flyerColours, ['#ff6fa8', '#17a2a2', '#7b3fa0']);
+        assert.ok(FLYER_COLOUR_RULE.includes('flyerColours'));
+        assert.ok(readFileSync('src/utils/visual-briefs.ts', 'utf8').includes('brief.purpose === FLYER_PURPOSE ? `\\n\\n${FLYER_COLOUR_RULE}`'));
+    });
+    await check('the look is on the form, reaches the save, and the chat knows it', () => {
+        const tab = readFileSync('src/components/assistant-briefs.js', 'utf8');
+        assert.ok(tab.includes("input('mood', v.mood,") && tab.includes("mood: fd.get('mood')"));
+        const chat = readFileSync('netlify/functions/chat-orchestrator.ts', 'utf8');
+        assert.ok(chat.includes('photo at the top, framed photo, words only') && chat.includes('put it in "mood"'));
     });
 
     console.log('PDF');

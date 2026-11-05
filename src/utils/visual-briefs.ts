@@ -19,7 +19,7 @@
 // bury the user's real pictures. Options live in visual_brief_options until approved.
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, scheduledPosts, visualBriefOptions, visualBriefs } from '../../db/schema';
+import { aiAssistants, campaigns, contentAssets, mediaGenerationJobs, organisations, scheduledPosts, visualBriefOptions, visualBriefs } from '../../db/schema';
 import type { getDb } from '../../db/client';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
@@ -31,7 +31,7 @@ import {
 } from '../lib/fal-gateway';
 import { renderBrandCard, type CardVariant } from '../lib/brand-card';
 import { deleteR2Object, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
-import type { BrandKit } from './brand-kit';
+import { normalizeBrandKit, type BrandKit } from './brand-kit';
 import { guidelinesPromptLines, hasGuidelines, readBrandGuidelines, type BrandGuidelines } from './brand-guidelines';
 import { fillPrompts } from '../lib/image-prompt';
 import {
@@ -50,7 +50,12 @@ import { PexelsRateLimitError, searchUniqueImages, searchUniqueVideos } from './
 import { BRAND_CARD_PROVIDER } from './brand-card-lifecycle';
 import { resolveAssetDisplayUrl } from './social-publish';
 import { POST_ATTACH_NOTES, attachApprovedToPost, placeOnCampaignPost } from './brief-post-media';
-import { approveFlyerOption, flyerRoundOptions, type FlyerRenderParams } from './flyer-briefs';
+import { bakeImageDesign } from './design-options';
+import { designForChat, type Design } from './design-doc';
+import { approveFlyerOption, brandPageColours, flyerRoundOptions, type FlyerRenderParams } from './flyer-briefs';
+import { resolveBrandKitForOrg } from '../lib/brand-extract-fetch';
+import { isAccentCandidate } from './brand-extract';
+import { normalizeHex } from '../public/brand-contrast.js';
 import { normaliseFlyerContent } from '../config/flyer-vocab';
 
 /** Brief purposes whose pictures belong on social posts (blog and email headers have their own briefs). */
@@ -107,6 +112,8 @@ export interface ArtDirection {
     videoPrompt?: string;
     /** Up to two headlines for branded cards — the brief's own words come first. */
     cardHeadlines: string[];
+    /** A flyer only: up to three page colours the art director chose. Used as flyerColours (flyer-briefs.ts) says. */
+    flyerColours?: string[];
     /** 'model' when Claude wrote it; 'fallback' when it could not and the brief was used as-is. */
     by: 'model' | 'fallback';
 }
@@ -159,6 +166,13 @@ ${ART_DIRECTION_CRAFT}
 Return STRICT JSON only: {"imagePrompt": "...", "imageAlternatives": ["...", "...", "..."], "stockKeywords": "...", "videoPrompt": "...", "cardHeadlines": ["..."]}`;
 }
 
+/** Added to the system prompt for a flyer: its pages are coloured, and an unset kit is not a colour scheme. */
+export const FLYER_COLOUR_RULE = `This brief is a printed flyer, so also return "flyerColours": three hex colours for its page backgrounds, strongest first, chosen to suit this business, its customers and what this flyer is for.
+- If MOOD names colours or a look, follow it.
+- Otherwise use the BRAND COLOURS and extra brand colours, when they are real colours.
+- Black, white and grey brand colours mean none has been set. Then choose a palette that fits the business, and do not steer the pictures towards black, white or grey either.
+- Every one must be a real colour, never black, white or grey, and not so pale that it looks white on paper.`;
+
 export function artDirectionUserPrompt(brief: BriefRow, ctx: BriefContext, rejections: PastRejection[]): string {
     const purpose = PURPOSE_SPECS[brief.purpose as BriefPurpose]?.label ?? brief.purpose;
     return [
@@ -187,6 +201,7 @@ export function parseArtDirection(raw: string, fallback: ArtDirection, exactHead
         .filter((p) => p.length >= 20);
     const stockKeywords = clip(typeof j.stockKeywords === 'string' ? j.stockKeywords.replace(/[^\p{L}\p{N}\s-]/gu, ' ') : '', 80);
     const videoPrompt = clip(typeof j.videoPrompt === 'string' ? withoutColourCodes(j.videoPrompt) : '', 1000);
+    const flyerPicks = (Array.isArray(j.flyerColours) ? j.flyerColours : []).map((c) => normalizeHex(c)).filter((c): c is string => !!c && isAccentCandidate(c)).slice(0, 3);
     let heads = Array.isArray(j.cardHeadlines) ? j.cardHeadlines.filter((h): h is string => typeof h === 'string').map((h) => clip(h, 120)).filter(Boolean) : [];
     // The user's exact words are never paraphrased away, whatever the model returned.
     if (exactHeadline) heads = [clip(exactHeadline, 120), ...heads.filter((h) => h !== clip(exactHeadline, 120))];
@@ -198,6 +213,7 @@ export function parseArtDirection(raw: string, fallback: ArtDirection, exactHead
         stockKeywords: stockKeywords || fallback.stockKeywords,
         videoPrompt: videoPrompt || fallback.videoPrompt,
         cardHeadlines: (heads.length ? heads : fallback.cardHeadlines).slice(0, CARD_VARIANTS.length),
+        ...(flyerPicks.length ? { flyerColours: flyerPicks } : {}),
         by: 'model',
     };
 }
@@ -209,7 +225,7 @@ export async function writeArtDirection(db: Db, brief: BriefRow, ctx: BriefConte
         // block its chat reads. Never throws; null when there are none.
         const rules = await loadAssistantRulesBlock(db, { assistantId: brief.aiAssistantId, organisationId: brief.organisationId });
         const res = await gatewayGenerate({
-            system: artDirectionSystemPrompt() + (rules ? `\n\n${rules}` : ''),
+            system: artDirectionSystemPrompt() + (brief.purpose === FLYER_PURPOSE ? `\n\n${FLYER_COLOUR_RULE}` : '') + (rules ? `\n\n${rules}` : ''),
             messages: [{ role: 'user', content: artDirectionUserPrompt(brief, ctx, rejections) }],
             maxTokens: 1500,
             deadlineMs: 45_000,
@@ -405,7 +421,10 @@ export async function runRound(db: Db, briefId: number, userId: number | null): 
     let artDirection: ArtDirection | null = null;
     const notes: string[] = brief.generationNote ? [brief.generationNote] : [];
     try {
-        const ctx = await readBriefContext(db, brief.organisationId, brief.aiAssistantId);
+        const read = await readBriefContext(db, brief.organisationId, brief.aiAssistantId);
+        // A kit nobody has set is read from their website first, as the drafting path does. Without
+        // this, a workspace whose posts never used a branded card drew every option in black and white.
+        const ctx = { ...read, kit: await resolveBrandKitForOrg(db, brief.organisationId).catch(() => read.kit) };
         const { rejections, shownStockIds } = await pastRejections(db, brief.id);
         const sources = Array.isArray(brief.sources) ? (brief.sources as string[]) : [];
         const base = { organisationId: brief.organisationId, briefId: brief.id, round: brief.rounds };
@@ -417,7 +436,9 @@ export async function runRound(db: Db, briefId: number, userId: number | null): 
                 ? { ...brief, message: [words.content.headline, words.content.subheading].filter(Boolean).join('. ') }
                 : brief;
             const wantPhoto = sources.includes('stock') || sources.includes('ai_image');
-            artDirection = wantPhoto ? await writeArtDirection(db, forArt, ctx, rejections) : fallbackArtDirection(forArt, ctx.kit, ctx.guidelines);
+            // A words-only flyer still needs the art director when there are colours to choose.
+            const needsColours = !!brief.mood || !brandPageColours(ctx.kit, ctx.guidelines.secondaryColors).length;
+            artDirection = wantPhoto || needsColours ? await writeArtDirection(db, forArt, ctx, rejections) : fallbackArtDirection(forArt, ctx.kit, ctx.guidelines);
             const imageHeld = brief.creditHold - brief.creditHoldVideo;
             const r = await flyerRoundOptions(db, {
                 brief, ad: artDirection, ctx, userId, shownStockIds,
@@ -743,19 +764,22 @@ export async function decideOption(db: Db, args: {
             await settleBriefStatus(db, brief.id);
             return { ok: true, contentAssetId: assetId, postNote: 'The flyer is in My Content, ready to print or download as a PDF.', ...await progressOf(db, brief) };
         }
-        const isVideo = (opt.mimeType || '').startsWith('video/');
-        const name = clip(`${brief.title} — ${sourceLabel(opt.source).replace(/s$/, '')}`, 120);
+        // Changed in the studio: what goes in the library is the design as it now looks.
+        const baked = await bakeImageDesign(orgId, opt.renderParams);
+        const o = baked ? { ...opt, ...baked } : opt;
+        const isVideo = (o.mimeType || '').startsWith('video/');
+        const name = clip(`${brief.title} — ${sourceLabel(o.source).replace(/s$/, '')}`, 120);
         const common = {
-            userId, organisationId: orgId, name, assetType: isVideo ? 'video' : 'image', mimeType: opt.mimeType,
-            width: opt.width, height: opt.height, aspectRatio: brief.aspectRatio, status: 'pending',
+            userId, organisationId: orgId, name, assetType: isVideo ? 'video' : 'image', mimeType: o.mimeType,
+            width: o.width, height: o.height, aspectRatio: brief.aspectRatio, status: 'pending',
         };
         const values = opt.source === 'stock' || opt.source === 'stock_video'
-            ? { ...common, externalUrl: opt.externalUrl, provider: 'pexels', providerAssetId: opt.providerAssetId, attributionName: opt.attributionName, attributionUrl: opt.attributionUrl }
+            ? { ...common, storageKey: o.storageKey, externalUrl: o.externalUrl, provider: 'pexels', providerAssetId: opt.providerAssetId, attributionName: opt.attributionName, attributionUrl: opt.attributionUrl }
             : opt.source === 'brand_card'
                 // libraryKeptAt: a card a human approved is not transient media — without it the
                 // 30-day unused-card sweep (brand-card-lifecycle.ts) would delete it from the library.
-                ? { ...common, storageKey: opt.storageKey, externalUrl: opt.externalUrl, provider: BRAND_CARD_PROVIDER, prompt: opt.prompt, renderParams: opt.renderParams, libraryKeptAt: new Date() }
-                : { ...common, storageKey: opt.storageKey, externalUrl: opt.externalUrl, provider: 'fal', prompt: opt.prompt };
+                ? { ...common, storageKey: o.storageKey, externalUrl: o.externalUrl, provider: BRAND_CARD_PROVIDER, prompt: opt.prompt, renderParams: opt.renderParams, libraryKeptAt: new Date() }
+                : { ...common, storageKey: o.storageKey, externalUrl: o.externalUrl, provider: 'fal', prompt: opt.prompt };
         const [asset] = await db.insert(contentAssets).values(values).returning({ id: contentAssets.id });
         await db.update(visualBriefOptions).set({ contentAssetId: asset.id }).where(eq(visualBriefOptions.id, optionId));
         await settleBriefStatus(db, brief.id);
@@ -959,6 +983,8 @@ export interface BriefView {
         prompt: string | null; attributionName: string | null; attributionUrl: string | null; rejectReason: string | null; contentAssetId: number | null;
         /** A flyer page: its layout and whether its photo prints soft. */
         flyer: { layout: string; paperSize: string; lowResPhoto: boolean; photoDpi: number | null } | null;
+        /** The option's design in a few words, once it has been opened in the studio. For the chat. */
+        design: string | null;
     }>;
 }
 
@@ -1009,11 +1035,12 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
         const gone = o.status === 'rejected' && GENERATED_SOURCES.has(o.source);
         const isVideo = (o.mimeType || '').startsWith('video/');
         const url = gone ? null : o.source === OWN_SOURCE ? ownUrls.get(o.contentAssetId ?? -1) ?? null
-            : await resolveAssetDisplayUrl({ assetType: isVideo ? 'video' : 'image', storageKey: o.storageKey, externalUrl: o.externalUrl });
+            : await resolveAssetDisplayUrl({ assetType: isVideo ? 'video' : 'image', storageKey: previewKeyOf(o.renderParams) ?? o.storageKey, externalUrl: o.externalUrl });
         const list = byBrief.get(o.briefId) ?? [];
         list.push({
             id: o.id, round: o.round, source: o.source, status: o.status, url, width: o.width, height: o.height, mimeType: o.mimeType, prompt: o.prompt,
             attributionName: o.attributionName, attributionUrl: o.attributionUrl, rejectReason: o.rejectReason, contentAssetId: o.contentAssetId,
+            design: designOf(o.renderParams) ? designForChat(designOf(o.renderParams)!) : null,
             flyer: o.source === FLYER_SOURCE && o.renderParams
                 ? (({ layout, paperSize, lowResPhoto, photoDpi }: FlyerRenderParams) => ({ layout, paperSize, lowResPhoto: !!lowResPhoto, photoDpi: photoDpi ?? null }))(o.renderParams as FlyerRenderParams)
                 : null,
@@ -1041,6 +1068,9 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
         };
     });
 }
+
+const previewKeyOf = (p: unknown) => (p && typeof p === 'object' ? (p as { previewKey?: string }).previewKey ?? null : null);
+const designOf = (p: unknown) => (p && typeof p === 'object' ? (p as { design?: Design }).design ?? null : null);
 
 /** A flyer's saved words for the chat, so a new version can carry them all, not only the headline. */
 function flyerWordsForChat(content: unknown): string {
@@ -1071,12 +1101,24 @@ export async function buildBriefsSnapshot(db: Db, orgId: number, assistantId: nu
             ? `PICTURE GUIDELINES (current, workspace-wide):\n${guidelinesPromptLines(g).map((l) => `- ${l}`).join('\n')}`
             : 'PICTURE GUIDELINES: none set yet.';
     } catch { /* stated above */ }
+    // The colours and font, so the chat can talk them through and write a change. An unset kit is said to be
+    // unset: its black and white is only our default, and the user must not be told it is their brand.
+    let style = 'BRAND STYLE: could not be read this turn. Do not propose a change to it.';
+    try {
+        const [org] = await db.select({ kit: organisations.brandKit }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+        const kit = normalizeBrandKit(org?.kit);
+        const font = kit.fontFamily ? `font ${kit.fontFamily}` : 'our standard font';
+        style = kit.source === 'default'
+            ? `BRAND STYLE: no brand colours chosen yet, so designs use our black and white default; ${font}.`
+            : `BRAND STYLE (current, ${kit.source === 'manual' ? 'set by them' : 'read from their website'}): main colour ${colourWords(kit.primaryColor)} (${kit.primaryColor}), background ${colourWords(kit.backgroundColor)} (${kit.backgroundColor}), text ${colourWords(kit.textColor)} (${kit.textColor}), ${font}.`;
+    } catch { /* stated above */ }
+    guide = `${style}\n${guide}`;
     if (!briefs.length) return `YOUR BRIEFS: none yet. ${credits}\n${guide}`.trim();
     const lines = briefs.map((b) => {
         const waiting = b.options.filter((o) => o.status === 'proposed');
         const approved = b.options.filter((o) => o.status === 'approved').length;
         const head = `- Brief ${b.id} "${b.title}"${b.campaign ? ` (commissioned by the campaign "${clip(b.campaign.objective, 80)}" — the picture approved joins that campaign)` : ''}${b.scheduledPostId ? ' (raised for a social post with no picture — the picture approved goes onto that post if it still has none)' : ''}${b.purpose === FLYER_PURPOSE ? ` (a printed ${b.paperSize ?? 'A5'} flyer — ${flyerWordsForChat(b.flyerContent)}; approving one makes its print PDFs in My Content)` : ''} — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}${b.waitingOn ? `; waiting on ${clip(b.waitingOn, 60)} to add their own` : ''}.`;
-        const rows = waiting.map((o, i) => `    • option ${o.id} (#${i + 1} waiting) — ${sourceLabel(o.source).replace(/s$/, '').toLowerCase()}${o.prompt ? `: ${clip(o.prompt, 90)}` : ''}`);
+        const rows = waiting.map((o, i) => `    • option ${o.id} (#${i + 1} waiting) — ${sourceLabel(o.source).replace(/s$/, '').toLowerCase()}${o.prompt ? `: ${clip(o.prompt, 90)}` : ''}${o.design ? `\n      in the editor: ${clip(o.design, 900)}` : ''}`);
         return [head, ...rows].join('\n');
     });
     return `YOUR BRIEFS (newest first; option ids are the only ones you may name):\n${lines.join('\n')}\n${credits}\n${guide}`.trim();
