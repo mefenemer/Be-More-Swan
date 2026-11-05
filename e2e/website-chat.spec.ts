@@ -67,10 +67,21 @@ test('preview on the left, the chat docked on the right and open first', async (
     const f = await frame.boundingBox();
     const c = await input.boundingBox();
     expect(f!.x).toBeLessThan(c!.x);
+    // No swans in the preview beside a docked chat; a bigger message box.
+    await expect(page.frameLocator('iframe[data-site-preview]').locator('#hero h1')).toBeVisible();
+    await expect(page.frameLocator('iframe[data-site-preview]').locator('[data-bms-ask]')).toHaveCount(0);
+    await expect(input).toHaveAttribute('rows', '4');
+    // The chat pane ends level with the preview.
+    const previewCard = await page.locator('[data-sb-preview-col] > div').boundingBox();
+    const chatBox = await page.locator('[data-sb-chatbox]').boundingBox();
+    expect(Math.abs((previewCard!.y + previewCard!.height) - (chatBox!.y + chatBox!.height))).toBeLessThan(3);
+    const paneWidth = (await page.locator('[data-sb-pane]').boundingBox())!.width;
     // Another sub-tab swaps the chat for its panel; coming back finds the same chat, not a new one.
     await input.fill('kept while I look at Pages');
     await page.getByRole('tab', { name: 'Pages' }).click();
     await expect(input).toBeHidden();
+    // Every sub-tab keeps the same pane width.
+    expect((await page.locator('[data-sb-pane]').boundingBox())!.width).toBeCloseTo(paneWidth, 0);
     await chatTab.click();
     await expect(input).toHaveValue('kept while I look at Pages');
     await page.screenshot({ path: 'test-results/website-chat-layout.png' });
@@ -117,6 +128,9 @@ test('the assistant asks step by step; the answers go back as the user\'s messag
     expect(sent.chatSessionId).toBe(55);
     expect(sent.message).toBe('My answers:\n• What should visitors do first? — Get a quote\n• Which pages do you want? — Home, Wholesale\n• How should it feel? — Calm, a bit premium');
     await expect(page.getByText('Your answers')).toBeVisible();
+    // Shown once, on the card — not again as a bubble.
+    await expect(page.getByText('My answers:', { exact: false })).toHaveCount(0);
+    await expect(page.locator('[data-sb-chat]').getByText('Home, Wholesale')).toHaveCount(1);
     // The thread is remembered for next time.
     expect(await page.evaluate(() => localStorage.getItem('bms-site-chat:7'))).toBe('55');
     expect(pageErrors).toEqual([]);
@@ -160,5 +174,20 @@ test('phone width: the chat comes first; selecting in the full-screen preview re
     await expect(page.locator('[data-sb-full]')).toHaveCount(0);
     await expect(page.locator('[data-sb-chat] [data-chat-ref]')).toContainText('Questions › heading');
     await page.screenshot({ path: 'test-results/website-chat-phone.png' });
+    expect(pageErrors).toEqual([]);
+});
+
+test('a draft being written shows moving dots over the preview, and the chat hears when it lands', async ({ page, api, pageErrors }) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    let drafting = true;
+    api.set('sites', () => ({ ...siteView, site: { ...siteView.site, drafting } }));
+    await page.goto('/e2e-website-chat.html');
+    await expect(page.locator('[data-sb-drafting]')).toContainText('Wren is writing your site');
+    await expect(page.locator('[data-sb-drafting] .sb-dots i')).toHaveCount(3);
+    await page.screenshot({ path: 'test-results/website-chat-drafting.png' });
+    drafting = false;
+    await page.evaluate(() => document.dispatchEvent(new CustomEvent('site:changed', { detail: { assistantId: 7 } })));
+    await expect(page.locator('[data-sb-drafting]')).toHaveCount(0);
+    await expect(page.locator('[data-sb-chat]').getByText('Your draft is ready')).toBeVisible();
     expect(pageErrors).toEqual([]);
 });

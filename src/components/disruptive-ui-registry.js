@@ -2147,6 +2147,19 @@
           respond({ ok, error }) {
             if (!ok) { setBusy(false); say(error || 'Could not start the draft.', 'error'); return; }
             say('Drafting your site — it appears on the Website tab in a minute or two, and you\'ll be notified.');
+            // Moving dots while it works (the preview says when it's done).
+            if (!document.getElementById('cq-dots-style')) {
+              const st = document.createElement('style');
+              st.id = 'cq-dots-style';
+              st.textContent = '@keyframes cq-dot{0%,80%,100%{opacity:.25}40%{opacity:1}}.cq-dots i{display:inline-block;width:6px;height:6px;margin-left:3px;border-radius:9999px;background:currentColor;animation:cq-dot 1.2s infinite}.cq-dots i:nth-child(2){animation-delay:.15s}.cq-dots i:nth-child(3){animation-delay:.3s}';
+              document.head.appendChild(st);
+            }
+            status.insertAdjacentHTML('beforeend', ' <span class="cq-dots" aria-hidden="true"><i></i><i></i><i></i></span>');
+            // The Website tab says when the draft has landed (site:drafted); stop the dots then.
+            document.addEventListener('site:drafted', (ev) => {
+              const ok = !(ev.detail && ev.detail.error);
+              say(ok ? 'Done — your new draft is in the preview.' : (ev.detail.error || 'The draft didn\'t finish.'), ok ? '' : 'error');
+            }, { once: true });
           },
         },
       }));
@@ -2210,14 +2223,24 @@
         </div>
         <p class="hidden mt-2 text-xs font-semibold text-red-600" data-cq-status></p>`;
     }
-    function done(answeredHere) {
+    function done(answeredHere, sentText) {
       el.removeAttribute('data-questions-open');
+      // A reload: fill the answers back in from the message that sent them ("• question — answer").
+      if (sentText) {
+        sentText.split('\n').slice(1).forEach((line, i) => {
+          const head = qs[i] ? `• ${qs[i].question} — ` : null;
+          if (!head || !line.startsWith(head)) return;
+          const v = line.slice(head.length);
+          answers[i] = { picked: [], other: v === '(skipped)' ? '' : v };
+        });
+        answeredHere = true;
+      }
       const rows = qs.map((q, i) => `<li class="text-xs text-gray-700"><span class="font-bold">${esc(q.question)}</span><br>${esc(answerText(answers[i]) || 'Skipped')}</li>`).join('');
       el.innerHTML = answeredHere
         ? `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">Your answers</p><ul class="mt-2 space-y-2">${rows}</ul>`
         : `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">A few quick questions</p><p class="text-xs text-gray-500 mt-1">Answered in the chat.</p>`;
     }
-    el.addEventListener('questions:closed', () => done(sent));
+    el.addEventListener('questions:closed', (e) => done(sent, !sent && e.detail && e.detail.answers));
     el.addEventListener('input', (e) => {
       if (!e.target.matches('[data-cq-other]')) return;
       answers[at].other = e.target.value;

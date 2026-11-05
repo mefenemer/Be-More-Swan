@@ -220,6 +220,21 @@
       state.loadError = err.message;
     }
     // The drafting poll re-reads every 5s: repaint (and reload the preview) only when something changed.
+    // A draft just finished: say so in the docked chat too (shown here only, not saved to the thread),
+    // so "are you done?" is answered before it is asked.
+    const nowDrafting = !!(state.data && state.data.site.drafting);
+    if (state.wasDrafting && !nowDrafting && state.data && chatPane.session && chatPane.assistantId === state.assistantId) {
+      const imp = state.data.import;
+      chatPane.session.appendMessage({ role: 'assistant', content: state.data.site.draftNote
+        ? `The draft didn't finish: ${state.data.site.draftNote}`
+        : imp && imp.status === 'ready' ? 'Your current site has been read — have a look at it on the Set up tab, then choose whether to use it as your draft.'
+        : imp && imp.status === 'failed' ? (imp.message || 'The import didn\'t work.')
+        : 'Your draft is ready — it\'s in the preview on the left. Tell me what to change, or use 🎯 Select to point at any part of it.' });
+    }
+    if (state.wasDrafting && !nowDrafting && state.data) {
+      document.dispatchEvent(new CustomEvent('site:drafted', { detail: { assistantId: state.assistantId, error: state.data.site.draftNote || null } }));
+    }
+    state.wasDrafting = nowDrafting;
     const sig = state.loadError || JSON.stringify(state.data);
     const same = state.loaded && sig === state.dataSig;
     state.dataSig = sig;
@@ -327,9 +342,18 @@
       'iframe[data-site-preview] { max-width: 100%; }',
       // Preview on the left, the pane (Chat or one of the sub-tabs) on the right — narrow screens keep
       // the pane first, with the preview a button away (owner, 2026-11-04, after trying Lovable).
-      '@media (min-width: 1024px) { [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) !important; } [data-site-layout][data-sb-mode="chat"] { grid-template-columns: minmax(0, 1fr) minmax(360px, 440px) !important; } [data-sb-preview-col] { order: 1; } [data-sb-pane] { order: 2; } }',
+      // One pane width on every sub-tab, so the preview never jumps when the tab changes (owner, 2026-11-05).
+      '@media (min-width: 1024px) { [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(380px, 460px) !important; } [data-sb-preview-col] { order: 1; } [data-sb-pane] { order: 2; } }',
       '[data-sb-chatbox] { height: clamp(460px, calc(100vh - 150px), 880px); }',
-      '@media (min-width: 1024px) { [data-sb-mode="chat"] iframe[data-site-preview] { height: clamp(408px, calc(100vh - 202px), 828px) !important; } }',
+      // Wide screens: the preview sets the height and the chat fills the pane to exactly match it.
+      '@media (min-width: 1024px) { iframe[data-site-preview] { height: clamp(408px, calc(100vh - 202px), 828px) !important; }',
+      '  [data-sb-mode="chat"] [data-sb-pane] { display: flex; flex-direction: column; }',
+      '  [data-sb-mode="chat"] [data-sb-chat]:not([hidden]) { flex: 1; min-height: 0; display: flex; flex-direction: column; }',
+      '  [data-sb-mode="chat"] [data-sb-chatbox] { height: auto; flex: 1; min-height: 0; } }',
+      // Drafting: three dots that pulse, said in words beside them for screen readers.
+      '@keyframes sb-dot { 0%, 80%, 100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: scale(1); } }',
+      '.sb-dots { display: inline-flex; gap: 4px; vertical-align: middle; } .sb-dots i { width: 7px; height: 7px; border-radius: 9999px; background: currentColor; animation: sb-dot 1.2s infinite ease-in-out; } .sb-dots i:nth-child(2) { animation-delay: .15s; } .sb-dots i:nth-child(3) { animation-delay: .3s; }',
+      '[data-sb-drafting] { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.72); border-radius: 8px; z-index: 2; }',
       '[data-sb-full] { position: fixed; inset: 0; z-index: 10500; background: #fff; overflow: auto; }',
       '[data-sb-full] > div { height: 100%; display: flex; flex-direction: column; padding: 8px !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }',
       '[data-sb-full] [data-sb-frame-box] { flex: 1; min-height: 0; }',
@@ -1270,7 +1294,7 @@
     let frame = slot.querySelector('iframe[data-site-preview]');
     if (!frame) {
       slot.innerHTML = card(`<div data-site-preview-head></div>
-      <div data-sb-frame-box class="bg-gray-100 rounded-lg p-2" style="overflow:auto"><iframe data-site-preview title="Preview of your website" style="display:block;margin:0 auto;height:min(720px, 70vh);border:0;background:#fff;border-radius:8px"></iframe></div>`);
+      <div data-sb-frame-box class="bg-gray-100 rounded-lg p-2" style="overflow:auto;position:relative"><iframe data-site-preview title="Preview of your website" style="display:block;margin:0 auto;height:min(720px, 70vh);border:0;background:#fff;border-radius:8px"></iframe></div>`);
       frame = slot.querySelector('iframe[data-site-preview]');
     }
     slot.toggleAttribute('data-sb-full', !!state.previewFull);
@@ -1281,6 +1305,15 @@
     if (head._html !== headHtml) { head.innerHTML = headHtml; head._html = headHtml; }
     // Phone: 390px wide, or the whole box on a screen narrower than that (no sideways scroll).
     frame.style.width = state.device === 'mobile' ? 'min(390px, 100%)' : '100%';
+    // Drafting: say so over the preview, with dots that move, until the new draft is there.
+    const box = slot.querySelector('[data-sb-frame-box]');
+    let veil = box.querySelector('[data-sb-drafting]');
+    const drafting = !!state.data.site.drafting && !showImport;
+    if (drafting && !veil) {
+      box.insertAdjacentHTML('beforeend', `<div data-sb-drafting role="status"><div class="bg-white rounded-xl shadow-sm border border-gray-200 px-5 py-4 text-center" style="max-width:320px">
+        <p class="text-sm font-black text-gray-900">${esc(state.assistantName || 'Your assistant')} is writing your site <span class="sb-dots text-emerald-700" aria-hidden="true"><i></i><i></i><i></i></span></p>
+        <p class="text-xs text-gray-500 mt-1">This takes a minute or two. It appears here when it's ready.</p></div></div>`);
+    } else if (!drafting && veil) veil.remove();
     if (frame.dataset.src !== src) { frame.dataset.src = src; frame.src = src; }
   }
 
@@ -1348,6 +1381,8 @@
         'What do you already know about my business?',
       ] : null,
       onSession: (id) => { if (state.assistantId === forId) storeChat(id); },
+      // A bigger box to describe a site in (owner, 2026-11-05).
+      composerRows: 4,
     });
     chatPane.assistantId = forId;
     chatPane.mountEl = mountEl;
@@ -1560,7 +1595,7 @@
   function draftCard(where) {
     const s = state.data.site;
     if (s.drafting && state.data.import && state.data.import.status === 'reading') return '';
-    if (s.drafting) return card('<p class="text-sm font-semibold text-emerald-800">Drafting your whole site — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
+    if (s.drafting) return card('<p class="text-sm font-semibold text-emerald-800">Drafting your whole site <span class="sb-dots" aria-hidden="true"><i></i><i></i><i></i></span> — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
     const who = esc(state.assistantName || 'Your Website Assistant');
     const form = `
       <textarea data-site-draft-request rows="2" class="${inputCls} mt-3" placeholder="Anything to include? e.g. a page for each service, a friendly tone, mention free delivery"></textarea>
@@ -1978,7 +2013,9 @@
   // The preview's swans: `load` does not bubble, so listen in the capture phase.
   document.addEventListener('load', (e) => {
     if (e.target && e.target.matches && e.target.matches('iframe[data-site-preview]')) {
-      swanThePreview(e.target);
+      // With the chat docked, "Select" does what the preview's swans did — two ways to one thing
+      // confused people (owner, 2026-11-05), so the swans stay only where there is no docked chat.
+      if (!chatAvailable()) swanThePreview(e.target);
       if (picker.on) attachPicker(e.target);
     }
   }, true);
@@ -2658,7 +2695,7 @@
       if (chatPane.assistantId !== assistantId) unmountChat();
       Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
-        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false });
+        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false, wasDrafting: false });
       load();
     },
     // surface: 'website' (pages, design, details, preview) or 'enquiries' | 'orders' | 'bookings',

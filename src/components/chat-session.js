@@ -167,7 +167,7 @@
               <span aria-hidden="true">📎</span><span class="sr-only">Attach pictures or documents</span>
               <input type="file" multiple hidden data-chat-attach accept="image/*,.docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
             </label>` : ''}
-            <textarea rows="1" placeholder="${escapeHtml(props.placeholder || (canAttach ? 'Type your message, or attach pictures and documents…' : 'Type your message…'))}" maxlength="${MAX_MESSAGE_CHARS}"
+            <textarea rows="${Number(props.composerRows) > 1 ? Number(props.composerRows) : 1}" placeholder="${escapeHtml(props.placeholder || (canAttach ? 'Type your message, or attach pictures and documents…' : 'Type your message…'))}" maxlength="${MAX_MESSAGE_CHARS}"
               class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm bg-white resize-none max-h-40"
               data-chat-input></textarea>
             <button type="submit"
@@ -185,6 +185,15 @@
     const errorEl = container.querySelector('[data-chat-error]');
     const chipsEl = container.querySelector('[data-chat-chips]');
     const refEl = container.querySelector('[data-chat-ref]');
+    // A tall message box (props.composerRows > 1, the Website tab's chat pane) takes the full width,
+    // with the paperclip and Send on a row under it.
+    if (formEl && Number(props.composerRows) > 1) {
+      formEl.style.cssText = 'display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"text text text" "clip . send";gap:8px;align-items:center';
+      inputEl.style.gridArea = 'text';
+      sendBtn.style.gridArea = 'send';
+      const clip = formEl.querySelector('label');
+      if (clip) clip.style.gridArea = 'clip';
+    }
 
     // ── A reference to something on screen (the Website tab's "Select" picker) ──
     // { label: '<short, shown on the chip>', message: '<what the assistant is told it refers to>' }.
@@ -296,7 +305,12 @@
       const isUser = message.role === 'user';
       // A step-by-step question card (chat_questions) is answered by the next thing they send —
       // from the card itself or typed instead — so it closes then, live or when a thread reloads.
-      if (isUser) scrollEl.querySelectorAll('[data-questions-open]').forEach((q) => q.dispatchEvent(new CustomEvent('questions:closed')));
+      // Their answers ("My answers:" + one line each) are shown ON the card as its summary, not again
+      // as a bubble under it (owner, 2026-11-05) — on a reload too, where the card is rebuilt open.
+      const openCards = isUser ? [...scrollEl.querySelectorAll('[data-questions-open]')] : [];
+      const answersText = isUser && openCards.length && /^My answers:\n/.test(message.content) ? message.content : null;
+      openCards.forEach((q) => q.dispatchEvent(new CustomEvent('questions:closed', { detail: { answers: answersText } })));
+      if (answersText) { scrollToBottom(); return; }
       const row = document.createElement('div');
       row.className = `flex flex-col gap-2 ${isUser ? 'items-end' : 'items-start'}`;
 
@@ -563,7 +577,7 @@
 
     function onInput() {
       inputEl.style.height = 'auto';
-      inputEl.style.height = `${Math.min(inputEl.scrollHeight, 160)}px`;
+      inputEl.style.height = `${Math.min(inputEl.scrollHeight, Number(props.composerRows) > 1 ? 280 : 160)}px`;
     }
 
     // HITL handoff approvals bubble up from HandoffProposalCard (disruptive-ui-registry.js).

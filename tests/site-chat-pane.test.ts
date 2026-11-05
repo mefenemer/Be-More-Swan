@@ -45,7 +45,8 @@ check('the chat sends a card\'s answers as the user\'s own turn and closes open 
     const h = slice(session, 'function onCardSend(', 'function onSubmit(');
     assert.ok(h.includes('if (readOnly)') && h.includes("sendMessage(String(d.text || ''), { noReference: true })"));
     const append = slice(session, 'function appendMessage(', 'const bubble = ');
-    assert.ok(append.includes("if (isUser) scrollEl.querySelectorAll('[data-questions-open]')"));
+    assert.ok(append.includes("scrollEl.querySelectorAll('[data-questions-open]')") && append.includes("new CustomEvent('questions:closed', { detail: { answers: answersText } })"));
+    assert.ok(append.includes('if (answersText) { scrollToBottom(); return; }'), 'the answers show on the card, not twice');
 });
 
 check('a selected part rides in front of the next message, visibly, then clears', () => {
@@ -67,6 +68,16 @@ check('the pane: Chat first, preview on the left, the chat mounted once and kept
     assert.ok(mount.includes("roleKey: 'website_assistant'"));
     // The chat's own cards still refresh the preview.
     assert.match(editor, /document\.addEventListener\('site:changed'/);
+});
+
+check('the preview has no swans beside a docked chat ("Select" does that job)', () => {
+    assert.ok(editor.includes('if (!chatAvailable()) swanThePreview(e.target);'));
+});
+
+check('a draft in progress is visible, and the chat is told when it lands', () => {
+    assert.ok(editor.includes('<div data-sb-drafting role="status">') && editor.includes('sb-dots'));
+    assert.ok(editor.includes("new CustomEvent('site:drafted'") && cards.includes("document.addEventListener('site:drafted'"));
+    assert.ok(chat.includes('NEVER emit another site_draft_request'));
 });
 
 check('"Select" only describes what was clicked — it never changes the site', () => {
