@@ -25,7 +25,7 @@ scope, so **no CASA assessment is needed**.
    - Be More Swan uses YouTube API Services, with links to the YouTube Terms of Service
      (https://www.youtube.com/t/terms) and the Google Privacy Policy
      (https://policies.google.com/privacy).
-   - What we access: channel ID, title and thumbnail, subscriber count, and the
+   - What we access: channel ID, name and subscriber count, and the
      videos the user uploads through us.
    - What we use it for, who we share it with (nobody beyond hosting sub-processors), how it is
      protected (AES-256-GCM encrypted tokens, TLS), and how long we keep it.
@@ -65,7 +65,7 @@ scope, so **no CASA assessment is needed**.
 >    `youtube` or `youtube.force-ssl` because we never edit, delete or comment on existing content.
 > 2. `https://www.googleapis.com/auth/youtube.readonly`: we call channels.list (mine=true) to show
 >    the connected channel's name on the connection card, so the user knows which channel will be
->    published to. We also show its subscriber, view and video counts on the assistant's Results
+>    published to. We also show its subscriber count on the assistant's Results
 >    tab, so the user can see how their channel is growing. youtube.upload does not authorise
 >    channels.list, and no narrower scope returns channel statistics.
 >
