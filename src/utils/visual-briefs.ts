@@ -50,6 +50,8 @@ import { PexelsRateLimitError, searchUniqueImages, searchUniqueVideos } from './
 import { BRAND_CARD_PROVIDER } from './brand-card-lifecycle';
 import { resolveAssetDisplayUrl } from './social-publish';
 import { POST_ATTACH_NOTES, attachApprovedToPost, placeOnCampaignPost } from './brief-post-media';
+import { bakeImageDesign } from './design-options';
+import { designForChat, type Design } from './design-doc';
 import { approveFlyerOption, brandPageColours, flyerRoundOptions, type FlyerRenderParams } from './flyer-briefs';
 import { resolveBrandKitForOrg } from '../lib/brand-extract-fetch';
 import { isAccentCandidate } from './brand-extract';
@@ -762,19 +764,22 @@ export async function decideOption(db: Db, args: {
             await settleBriefStatus(db, brief.id);
             return { ok: true, contentAssetId: assetId, postNote: 'The flyer is in My Content, ready to print or download as a PDF.', ...await progressOf(db, brief) };
         }
-        const isVideo = (opt.mimeType || '').startsWith('video/');
-        const name = clip(`${brief.title} — ${sourceLabel(opt.source).replace(/s$/, '')}`, 120);
+        // Changed in the studio: what goes in the library is the design as it now looks.
+        const baked = await bakeImageDesign(orgId, opt.renderParams);
+        const o = baked ? { ...opt, ...baked } : opt;
+        const isVideo = (o.mimeType || '').startsWith('video/');
+        const name = clip(`${brief.title} — ${sourceLabel(o.source).replace(/s$/, '')}`, 120);
         const common = {
-            userId, organisationId: orgId, name, assetType: isVideo ? 'video' : 'image', mimeType: opt.mimeType,
-            width: opt.width, height: opt.height, aspectRatio: brief.aspectRatio, status: 'pending',
+            userId, organisationId: orgId, name, assetType: isVideo ? 'video' : 'image', mimeType: o.mimeType,
+            width: o.width, height: o.height, aspectRatio: brief.aspectRatio, status: 'pending',
         };
         const values = opt.source === 'stock' || opt.source === 'stock_video'
-            ? { ...common, externalUrl: opt.externalUrl, provider: 'pexels', providerAssetId: opt.providerAssetId, attributionName: opt.attributionName, attributionUrl: opt.attributionUrl }
+            ? { ...common, storageKey: o.storageKey, externalUrl: o.externalUrl, provider: 'pexels', providerAssetId: opt.providerAssetId, attributionName: opt.attributionName, attributionUrl: opt.attributionUrl }
             : opt.source === 'brand_card'
                 // libraryKeptAt: a card a human approved is not transient media — without it the
                 // 30-day unused-card sweep (brand-card-lifecycle.ts) would delete it from the library.
-                ? { ...common, storageKey: opt.storageKey, externalUrl: opt.externalUrl, provider: BRAND_CARD_PROVIDER, prompt: opt.prompt, renderParams: opt.renderParams, libraryKeptAt: new Date() }
-                : { ...common, storageKey: opt.storageKey, externalUrl: opt.externalUrl, provider: 'fal', prompt: opt.prompt };
+                ? { ...common, storageKey: o.storageKey, externalUrl: o.externalUrl, provider: BRAND_CARD_PROVIDER, prompt: opt.prompt, renderParams: opt.renderParams, libraryKeptAt: new Date() }
+                : { ...common, storageKey: o.storageKey, externalUrl: o.externalUrl, provider: 'fal', prompt: opt.prompt };
         const [asset] = await db.insert(contentAssets).values(values).returning({ id: contentAssets.id });
         await db.update(visualBriefOptions).set({ contentAssetId: asset.id }).where(eq(visualBriefOptions.id, optionId));
         await settleBriefStatus(db, brief.id);
@@ -978,6 +983,8 @@ export interface BriefView {
         prompt: string | null; attributionName: string | null; attributionUrl: string | null; rejectReason: string | null; contentAssetId: number | null;
         /** A flyer page: its layout and whether its photo prints soft. */
         flyer: { layout: string; paperSize: string; lowResPhoto: boolean; photoDpi: number | null } | null;
+        /** The option's design in a few words, once it has been opened in the studio. For the chat. */
+        design: string | null;
     }>;
 }
 
@@ -1028,11 +1035,12 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
         const gone = o.status === 'rejected' && GENERATED_SOURCES.has(o.source);
         const isVideo = (o.mimeType || '').startsWith('video/');
         const url = gone ? null : o.source === OWN_SOURCE ? ownUrls.get(o.contentAssetId ?? -1) ?? null
-            : await resolveAssetDisplayUrl({ assetType: isVideo ? 'video' : 'image', storageKey: o.storageKey, externalUrl: o.externalUrl });
+            : await resolveAssetDisplayUrl({ assetType: isVideo ? 'video' : 'image', storageKey: previewKeyOf(o.renderParams) ?? o.storageKey, externalUrl: o.externalUrl });
         const list = byBrief.get(o.briefId) ?? [];
         list.push({
             id: o.id, round: o.round, source: o.source, status: o.status, url, width: o.width, height: o.height, mimeType: o.mimeType, prompt: o.prompt,
             attributionName: o.attributionName, attributionUrl: o.attributionUrl, rejectReason: o.rejectReason, contentAssetId: o.contentAssetId,
+            design: designOf(o.renderParams) ? designForChat(designOf(o.renderParams)!) : null,
             flyer: o.source === FLYER_SOURCE && o.renderParams
                 ? (({ layout, paperSize, lowResPhoto, photoDpi }: FlyerRenderParams) => ({ layout, paperSize, lowResPhoto: !!lowResPhoto, photoDpi: photoDpi ?? null }))(o.renderParams as FlyerRenderParams)
                 : null,
@@ -1060,6 +1068,9 @@ export async function listBriefs(db: Db, orgId: number, assistantId: number, lim
         };
     });
 }
+
+const previewKeyOf = (p: unknown) => (p && typeof p === 'object' ? (p as { previewKey?: string }).previewKey ?? null : null);
+const designOf = (p: unknown) => (p && typeof p === 'object' ? (p as { design?: Design }).design ?? null : null);
 
 /** A flyer's saved words for the chat, so a new version can carry them all, not only the headline. */
 function flyerWordsForChat(content: unknown): string {
@@ -1107,7 +1118,7 @@ export async function buildBriefsSnapshot(db: Db, orgId: number, assistantId: nu
         const waiting = b.options.filter((o) => o.status === 'proposed');
         const approved = b.options.filter((o) => o.status === 'approved').length;
         const head = `- Brief ${b.id} "${b.title}"${b.campaign ? ` (commissioned by the campaign "${clip(b.campaign.objective, 80)}" — the picture approved joins that campaign)` : ''}${b.scheduledPostId ? ' (raised for a social post with no picture — the picture approved goes onto that post if it still has none)' : ''}${b.purpose === FLYER_PURPOSE ? ` (a printed ${b.paperSize ?? 'A5'} flyer — ${flyerWordsForChat(b.flyerContent)}; approving one makes its print PDFs in My Content)` : ''} — ${b.status === 'generating' ? 'making options now' : b.status.replace('_', ' ')}; ${b.rounds} round${b.rounds === 1 ? '' : 's'}; ${approved} approved; sources: ${b.sources.join(', ')}${b.dueDate ? `; due ${b.dueDate}` : ''}${b.waitingOn ? `; waiting on ${clip(b.waitingOn, 60)} to add their own` : ''}.`;
-        const rows = waiting.map((o, i) => `    • option ${o.id} (#${i + 1} waiting) — ${sourceLabel(o.source).replace(/s$/, '').toLowerCase()}${o.prompt ? `: ${clip(o.prompt, 90)}` : ''}`);
+        const rows = waiting.map((o, i) => `    • option ${o.id} (#${i + 1} waiting) — ${sourceLabel(o.source).replace(/s$/, '').toLowerCase()}${o.prompt ? `: ${clip(o.prompt, 90)}` : ''}${o.design ? `\n      in the editor: ${clip(o.design, 900)}` : ''}`);
         return [head, ...rows].join('\n');
     });
     return `YOUR BRIEFS (newest first; option ids are the only ones you may name):\n${lines.join('\n')}\n${credits}\n${guide}`.trim();

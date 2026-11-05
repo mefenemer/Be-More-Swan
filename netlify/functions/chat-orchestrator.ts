@@ -113,6 +113,8 @@ import { videoSceneCard, videoSceneRequestFromUiElement, VIDEO_SCENE_EDIT_TYPE, 
 import type { Storyboard } from '../../src/lib/storyboard';
 import { mergeFlyerWords, briefEditFromUiElement, VISUAL_BRIEF_EDIT_TYPE, type BriefEditCard } from '../../src/utils/chat-brief-edit';
 import { BRAND_STYLE_TYPE, brandStyleFromUiElement, type BrandStyleCard } from '../../src/utils/chat-brand-style';
+import { DESIGN_EDIT_TYPE, designEditFromUiElement, type DesignEditCard } from '../../src/utils/design-doc';
+import { AI_PICTURE_ANSWER, startDesignFromChat, userChoseAiPicture } from '../../src/utils/brief-from-chat';
 import { postPartCardFromUiElement, POST_PICTURE_TYPE, POST_TEXT_EDIT_TYPE, type PostPartCard } from '../../src/utils/chat-post-parts';
 import { isInOutreachReview, leadAssistantStep, LEAD_NEXT_STEP_BULK_MAX } from '../../src/config/lead-recipient';
 import { leadOutreachState } from '../../src/config/lead-outreach-state';
@@ -746,7 +748,7 @@ PROPOSING A CAMPAIGN — when the user gives you an objective, emit the campaign
 
 function brandDesignerSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
-- "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Ask <your name> for options" / "Ask <your name> for more options" (the cost of a round costs), "Edit brief" and "Archive brief". The briefs sit on tabs, in the order they move through: "Not started", "Being made", "To review", "Approved", "Archived". "New brief" at the top asks them your questions here in this chat (it covers pictures, printed flyers and video alike), and "Use a form instead" beside it writes one without chatting. "Select" lets them point at an option or brief to talk about it. "View or change" opens their brand style and picture guidelines in a pop-up. Everything you can do here, the user can also do there by hand.
+- "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Ask <your name> for options" / "Ask <your name> for more options" (the cost of a round costs), "Edit brief" and "Archive brief". The briefs sit on tabs, in the order they move through: "Not started", "Being made", "To review", "Approved", "Archived". "New brief" at the top asks them your questions here in this chat (it covers pictures, printed flyers and video alike), and answering them opens the editor with the design being made. There is no form to fill in instead: this chat is the way in. The editor shows the design on the left and this chat on the right: they can click, drag and change anything on it, with Undo, "🎯 Select" and "Full screen". "Open in editor" on any option waiting goes there too. "Use this design" approves it. "Select" lets them point at an option or brief to talk about it. "View or change" opens their brand style and picture guidelines in a pop-up. Everything you can do here, the user can also do there by hand.
 - Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles. An approved flyer is there too, with "Print", "PDF for home printing" and "PDF for a print shop". Every flyer is also listed on the "Briefs" tab, where "Preview" shows its page large, an approved one has "Print", and "Change this flyer" starts a new version with its words filled in.`;
 }
 
@@ -1698,13 +1700,15 @@ CHOOSING. When the user says which options they want or do not want, emit a visu
 
 A PART THEY SELECTED. On the "Briefs" tab this chat sits beside their briefs, and the user can select an option or a brief. Their message may then start "About this option on my brief N" or "About my brief N". For "more like this one, but brighter" or any other change to what a brief asks for, emit { "type": "visual_brief_edit", "briefId": N, "message": "<the whole new text, only if it changes>", "mood": "<only if it changes>", "mustInclude": "<only if it changes>", "mustAvoid": "<only if it changes>", "flyerWords": { "headline": "...", "subheading": "...", "points": ["..."], "callToAction": "...", "dateLine": "..." }, "summary": "<one sentence: what changes>" }, working what they liked about that option into the words: you cannot show a designer a picture, only describe it. Keep the rest of what the brief says; invent nothing. "flyerWords" is only for a flyer, with only the words that change, and never a phone number, email or web address. A flyer's colours and feel go in "mood". It only saves the brief: nothing is made and nothing is spent until they press the button on the brief for more options, so tell them that, and never say the change has been made. Not for a flyer with an approved page: that takes a new flyer brief, as below.
 
-STARTING A NEW BRIEF. When they say they need a new brief, or ask for something without saying enough to choose the right design, do NOT list questions in your reply and do not propose yet. Emit ONE chat_questions card, leaving out anything they have already told you. Ask these, in this order and in these words:
+STARTING A NEW DESIGN. When they say they need a new brief or design, or ask for something without saying enough to choose the right design, do NOT list questions in your reply and do not propose yet. Emit ONE chat_questions card, leaving out anything they have already told you. Ask these, in this order and in these words:
 1. "What do you need it for?" with options: {"label":"A social media post"}, {"label":"A printed flyer or poster","description":"You print it or send it to a print shop"}, {"label":"A picture for my website or blog"}, {"label":"A picture for an email"}, {"label":"An advert"}, {"label":"A short video clip"}
-2. "What is it about?" with options: "A product or service", "An event or a date", "A special offer", "Our business in general"
+2. "What is it about?" with no options of its own beyond: "A product or service", "An event or a date", "A special offer", "Our business in general" (they can type the details)
 3. "How should it feel?" with options: "Bright and playful", "Calm and natural", "Bold and eye-catching", "Elegant and premium", "My usual brand style"
-4. "What should it be made from?" with options: "A real photo", "An AI-made picture", "Just words and colours", "You choose what works best"
+4. "What should it be made from?" with options: "${AI_PICTURE_ANSWER}" EXACTLY in those words, "A stock photo (free)", "Just words and colours (free)", "You choose what works best (free)"
 5. "What words should be on it?" with options: "You write them", "No words" (they can type their own)
-When the answers come back, or they ask you to skip the questions, choose the design yourself and emit a visual_brief_proposal, with one sentence in your reply saying why that design suits it. A printed flyer or poster: "purpose": "flyer" with "flyerContent" and the "paperSize" that suits it (A5 for a handout, A4 for a poster, A6 for a postcard, DL for through letterboxes), and ask in chat only if a date is needed and missing. Anything else: the matching "purpose", the "aspectRatio" that place needs, and "sources" that fit what it should be made from ("Just words and colours" is "brand_card"; a short video clip is "stock_video" and, where they can have it, "ai_video"; "You choose" is whichever suits). Their feel goes in "mood". If they have only a rough idea, this is still the way in. If what they say is already clear and complete, skip the questions and propose straight away.
+ONE CARD ONLY. Once they have answered, or asked you to skip the questions, DO NOT ask anything more, do not check what you understood, and do not question who the business is: BUSINESS above is who they are, and it is always their own design. Write the missing words yourself from what they said and what the business has recorded, keeping every fact they gave and inventing none. Then emit a visual_brief_proposal with "go": true, and it starts at once: there is no card to confirm, and they land in the editor. Choose the design yourself, and say in one sentence in your reply why it suits, never that it is finished. A printed flyer or poster: "purpose": "flyer" with "flyerContent" and the "paperSize" that suits it (A5 for a handout, A4 for a poster, A6 for a postcard, DL for through letterboxes). Anything else: the matching "purpose" and the "aspectRatio" that place needs. "sources" follows what they chose: "${AI_PICTURE_ANSWER}" is "ai_image" (a flyer may add "stock"); "A stock photo" is "stock"; "Just words and colours" is "brand_card", or for a flyer an empty list; "You choose" is whichever free one suits; a short video clip is "stock_video". Their feel goes in "mood". If what they first say is already clear and complete, skip the questions and emit it with "go": true straight away; it starts on free sources unless they answered "${AI_PICTURE_ANSWER}".
+
+CHANGING A DESIGN. The user works on a design in the editor, beside this chat, and can select a part of it: their message may then start "About the headline (layer "headline") on option N of my brief B". For a change to words, colours, fonts, sizes or positions on an option still waiting, emit { "type": "design_edit", "briefId": B, "optionId": N, "summary": "<one sentence: what changes>", "pageColor": "#rrggbb", "photoOpacity": 0.6, "font": "<a Google Fonts family for all the words>", "changes": [ { "layer": "<a layer id or role from the list: headline, subheading, points, offer, callToAction, dateLine, contact, wordmark>", "text": "...", "color": "#rrggbb", "fontFamily": "...", "fontSizePct": 0.05, "bold": true, "align": "left"|"center"|"right", "boxFill": "#rrggbb" or null for no background, "boxOpacity": 0.7, "x": 0.1, "y": 0.2, "w": 0.8, "remove": true } ], "add": [ { "text": "...", "x": 0.1, "y": 0.5, "w": 0.8 } ] } with only what changes. x, y and w are shares of the page's width and height from the top left; fontSizePct is a share of its height; boxOpacity 1 is solid. It costs nothing, and saying it is done is the click's job, so never say it has changed. Never put a phone number, email or web address they did not give you into a design. A change to what the picture itself shows is a visual_brief_edit and more options, not this.
 
 THEIR BRAND STYLE. The colours and font are listed above, and everything every assistant designs starts from them. You can talk them through: what suits the business and its customers, and two or three combinations described in plain words, never only as codes. If they want help choosing, emit ONE chat_questions card first (how they want to come across, colours they love or hate, a classic or a modern look). When they have settled on something, or ask you to pick, emit { "type": "brand_style_proposal", "primaryColor": "#rrggbb", "backgroundColor": "#rrggbb", "textColor": "#rrggbb", "fontFamily": "<a Google Fonts family name>", "summary": "<one sentence>" } with only what changes. The card shows the colours and the font itself, and saving it is their click, so never say it has been saved. A kit listed as not chosen yet is only our black and white default: never describe that as their brand. Extra colours go in a brand_guideline_proposal. They can also press "View or change" on the Briefs tab, which opens the same settings in a pop-up.
 
@@ -1731,7 +1735,8 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of
     "waitingOn": "<who on their team is making it — omit unless the user said>",
     "dueDate": "<YYYY-MM-DD, only if the user gave one>",
     "paperSize": "A5" | "A4" | "A6" | "DL",   // flyer only
-    "flyerContent": { "headline": "...", "subheading": "...", "points": ["..."], "callToAction": "...", "dateLine": "..." }   // flyer only — never contact details or an offer
+    "flyerContent": { "headline": "...", "subheading": "...", "points": ["..."], "callToAction": "...", "dateLine": "..." },   // flyer only — never contact details or an offer
+    "go": true   // after the new-design questions, or a clear request: starts it now and opens the editor. Leave it out only for a change to a brief they are comparing, or a campaign's picture
   }
 }
 
@@ -1740,6 +1745,8 @@ or, to ask step by step before you propose:
 (as the "uiElement", at most 5 questions)
 
 or, to change the colours or font: the brand_style_proposal above, as the "uiElement".
+
+or, to change a design in the editor: the design_edit above, as the "uiElement".
 
 or, to change the workspace's picture guidelines:
 {
@@ -4017,6 +4024,30 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (!briefEdit) content = 'I couldn’t set that up on the brief, so nothing has changed. Which brief do you mean? You can also press Edit on it, on the "Briefs" tab.';
         }
 
+        // A change to a design (src/utils/design-doc.ts), rebuilt, for this workspace's own brief.
+        let designEdit: DesignEditCard | null = null;
+        if (route === ROUTES.brand_designer && (uiElement as { type?: unknown } | null)?.type === DESIGN_EDIT_TYPE) {
+            const req = designEditFromUiElement(uiElement);
+            const [brief] = req ? await db.select({ id: visualBriefs.id }).from(visualBriefs)
+                .where(and(eq(visualBriefs.id, req.briefId), eq(visualBriefs.organisationId, orgId))).limit(1) : [];
+            designEdit = req && brief ? req : null;
+            uiElement = designEdit;
+            if (!designEdit) content = 'I couldn’t set that up on the design, so nothing has changed. Which part do you mean? You can also click it on the design and change it there.';
+        }
+
+        // The questions are answered: start the design and go to the studio, with no card to confirm first
+        // (src/utils/brief-from-chat.ts). An AI picture only if the user's own answer chose it.
+        if (route === ROUTES.brand_designer && (uiElement as { type?: unknown; go?: unknown } | null)?.type === 'visual_brief_proposal' && (uiElement as { go?: unknown }).go === true) {
+            try {
+                const started = await startDesignFromChat(db, {
+                    orgId, userId, assistantId: assistantRow.id,
+                    proposal: uiElement as Record<string, unknown>,
+                    aiChosen: userChoseAiPicture(history, message),
+                });
+                if (started) uiElement = started;
+            } catch (err) { console.error('[chat-orchestrator] design start failed:', err instanceof Error ? err.message : err); }
+        }
+
         // The colours and font, talked through in chat (src/utils/chat-brand-style.ts).
         let brandStyle: BrandStyleCard | null = null;
         if (route === ROUTES.brand_designer && (uiElement as { type?: unknown } | null)?.type === BRAND_STYLE_TYPE) {
@@ -4181,7 +4212,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // does that, and a refused card's reply says it was refused (src/utils/confirm-card-reply.ts).
         // The voiceover actions on a post too: "I've added a voiceover" over a card nobody pressed.
         const voicePostCard = !!postAction && uiElement === postAction && ['voiceover', 'captions', 'time_text'].includes(postAction.action);
-        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || (!!emailPartCard && uiElement === emailPartCard) || (!!briefEdit && uiElement === briefEdit) || (!!brandStyle && uiElement === brandStyle) || (!!sceneEdit && uiElement === sceneEdit) || voicePostCard)) {
+        if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || (!!postPartCard && uiElement === postPartCard) || (!!emailPartCard && uiElement === emailPartCard) || (!!briefEdit && uiElement === briefEdit) || (!!brandStyle && uiElement === brandStyle) || (!!designEdit && uiElement === designEdit) || (!!sceneEdit && uiElement === sceneEdit) || voicePostCard)) {
             content = confirmCardReply(content, uiElement as { blocked?: unknown; settled?: unknown });
         }
         // The Website Assistant can't make, find or place a picture in a reply — only its site_picture

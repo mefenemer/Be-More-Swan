@@ -20,6 +20,8 @@ import { FalContentPolicyError, falConfigured, generateImages, IMAGE_MODEL } fro
 import { FlyerFitError, MIN_PHOTO_DPI, PREVIEW_DPI, flyerPageStyle, renderFlyer, renderFlyerPdfs, type FlyerPageStyle, type FlyerPhoto } from '../lib/flyer';
 import { persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
 import { normalizeBrandKit, type BrandKit } from './brand-kit';
+import { renderDesignPdfs } from '../lib/design-render';
+import type { Design } from './design-doc';
 import { isAccentCandidate } from './brand-extract';
 import { PexelsRateLimitError, searchUniqueImages } from './pexels';
 import { resolveAssetDisplayUrl } from './social-publish';
@@ -66,6 +68,10 @@ export interface FlyerRenderParams {
     lowResPhoto: boolean;
     /** The page's colours. Absent on a page drawn before they were stored. */
     style?: FlyerPageStyle;
+    /** Set once the page has been opened in the studio (design-options.ts); what the PDFs are then drawn from. */
+    design?: Design;
+    /** The preview redrawn after studio changes. */
+    previewKey?: string;
 }
 
 /** The business's own real colours: black, white and grey do not count, they are what an unset kit holds. */
@@ -117,7 +123,7 @@ export function pexelsPrintUrl(url: string, width = STOCK_PRINT_WIDTH): string {
 }
 
 /** The photo's bytes, from R2 (ours) or the stock CDN. Null on any failure — that layout is skipped. */
-export async function fetchFlyerPhoto(ref: FlyerPhotoRef): Promise<FlyerPhoto | null> {
+export async function fetchFlyerPhoto(ref: Pick<FlyerPhotoRef, 'storageKey' | 'externalUrl' | 'mimeType' | 'width' | 'height'>): Promise<FlyerPhoto | null> {
     try {
         const url = ref.storageKey
             ? await resolveAssetDisplayUrl({ assetType: 'image', storageKey: ref.storageKey })
@@ -285,10 +291,16 @@ export async function approveFlyerOption(db: Db, args: {
     const photo = p.photo ? await fetchFlyerPhoto(p.photo) : null;
     if (p.photo && !photo) throw new Error('flyer_photo_unavailable');
 
-    const { home, printShop } = await renderFlyerPdfs({
-        content: n.content, kit: normalizeBrandKit(p.kit), paperSize, layout: p.layout, photo,
-        orgName: p.orgName, title: args.title, bleedMm: PRINT_BLEED_MM, style: p.style ?? null,
-    });
+    // Changed in the studio: the PDFs are drawn from that design, words moved and all. Never opened: as the round drew it.
+    const design = p.design ?? null;
+    const designPhoto = design && design.photo ? await fetchFlyerPhoto(design.photo.ref) : null;
+    if (design && design.photo && !designPhoto) throw new Error('flyer_photo_unavailable');
+    const { home, printShop } = design
+        ? await renderDesignPdfs({ design, photo: designPhoto, title: args.title, bleedMm: PRINT_BLEED_MM })
+        : await renderFlyerPdfs({
+            content: n.content, kit: normalizeBrandKit(p.kit), paperSize, layout: p.layout, photo,
+            orgName: p.orgName, title: args.title, bleedMm: PRINT_BLEED_MM, style: p.style ?? null,
+        });
     const [homeObj, shopObj] = await Promise.all([
         persistBufferToR2({ orgId: args.orgId, bytes: home, contentType: 'application/pdf', folder: 'flyers' }),
         persistBufferToR2({ orgId: args.orgId, bytes: printShop, contentType: 'application/pdf', folder: 'flyers' }),
@@ -303,7 +315,7 @@ export async function approveFlyerOption(db: Db, args: {
         attributionName: p.photo?.attributionName ?? null, attributionUrl: p.photo?.attributionUrl ?? null,
         renderParams: {
             ...p,
-            previewKey: args.option.storageKey,
+            previewKey: p.previewKey ?? args.option.storageKey,
             printShopKey: shopObj.storageKey,
             printShopFileSize: shopObj.fileSize,
             bleedMm: PRINT_BLEED_MM,

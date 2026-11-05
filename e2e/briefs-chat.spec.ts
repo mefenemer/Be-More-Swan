@@ -46,6 +46,8 @@ function stubBriefs(api: ApiStub) {
 async function openTab(page: Page) {
     await page.route('**/e2e-briefs.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
     await page.goto('/e2e-briefs.html');
+    // The tab opens on "Not started" (owner 2026-11-05); a brief with options waiting is under "To review".
+    await page.locator('[data-brief-tab="review"]').click();
     await expect(page.locator('[data-brief-card="12"]')).toBeVisible();
 }
 
@@ -156,13 +158,16 @@ test.describe('Love Cat feedback (2026-11-05)', () => {
         await expect(page.locator('[data-brief-tabs]')).toBeVisible();
     }
 
-    test('tabs run left to right with counts, open on what needs the user, and each brief is in one', async ({ page, api, pageErrors }) => {
+    test('tabs run left to right with counts, always open on Not started, and each brief is in one', async ({ page, api, pageErrors }) => {
         stubStages(api);
         await open(page);
         const tabs = page.getByRole('tab');
         await expect(tabs).toHaveText([/Not started\s*1/, /Being made\s*1/, /To review\s*1/, /Approved\s*1/, /Archived\s*1/]);
-        await expect(page.getByRole('tab', { name: /To review/ })).toHaveAttribute('aria-selected', 'true');
+        // Owner 2026-11-05: "the default tab should be Not Started"; To review's count says when something waits.
+        await expect(page.getByRole('tab', { name: /Not started/ })).toHaveAttribute('aria-selected', 'true');
         await expect(page.locator('[data-brief-card]')).toHaveCount(1);
+        await expect(page.locator('[data-brief-card="1"]')).toBeVisible();
+        await page.getByRole('tab', { name: /To review/ }).click();
         await expect(page.locator('[data-brief-card="3"]')).toBeVisible();
         await page.screenshot({ path: 'test-results/brief-tabs.png' });
         await page.getByRole('tab', { name: /Archived/ }).click();
@@ -173,7 +178,7 @@ test.describe('Love Cat feedback (2026-11-05)', () => {
         expect(pageErrors).toEqual([]);
     });
 
-    test('one New brief button: it asks in the chat and spends nothing; the form still covers a flyer', async ({ page, api, pageErrors }) => {
+    test('one New brief button and nothing beside it: it asks in the chat and spends nothing', async ({ page, api, pageErrors }) => {
         stubStages(api);
         api.set('chat-orchestrator', { chatSessionId: 9, message: { id: 1, role: 'assistant', content: 'A few quick questions.', uiElement: { type: 'chat_questions', questions: [{ question: 'What do you need it for?', options: ['A social media post', 'A printed flyer or poster'] }] } } });
         await open(page);
@@ -181,9 +186,10 @@ test.describe('Love Cat feedback (2026-11-05)', () => {
         await page.locator('[data-brief-new]').click();
         await expect(page.getByText('What do you need it for?')).toBeVisible();
         expect((api.called('chat-orchestrator')[0].body as { message: string }).message).toBe('I need a new brief.');
-        await page.locator('[data-brief-new-form]').click();
-        await page.locator('[data-brief-form] select[name="purpose"]').selectOption('flyer');
-        await expect(page.locator('[data-flyer-form]')).toBeVisible();
+        // Owner 2026-11-05: "either the chat or one button" — no "Use a form instead" beside it.
+        await expect(page.locator('[data-brief-new-form]')).toHaveCount(0);
+        await expect(page.getByText('Use a form instead')).toHaveCount(0);
+        await expect(page.locator('[data-brief-form]')).toHaveCount(0);
         expect(pageErrors).toEqual([]);
     });
 
@@ -194,6 +200,7 @@ test.describe('Love Cat feedback (2026-11-05)', () => {
         await expect(page.locator('[data-brief-pick]')).toHaveAttribute('aria-pressed', 'true');
         await page.keyboard.press('Escape');
         await expect(page.locator('[data-brief-pick]')).toHaveAttribute('aria-pressed', 'false');
+        await page.getByRole('tab', { name: /To review/ }).click();
         await page.locator('[data-brief-pick]').click();
         await page.locator('[data-brief-option="31"] img').click();
         await expect(page.locator('#briefs-chat-host').getByText(/Waiting for you/)).toBeVisible();

@@ -157,9 +157,10 @@ check('Business Information ▸ Brand Assets has the section and saves through t
     assert.match(page, /const wanted = window\._bizinfoInitialTab;\s*window\._bizinfoInitialTab = null;/, 'the deep link is one-shot');
 });
 
-check('the Briefs tab shows them and links straight to Brand Assets', () => {
+check('the Briefs tab shows them, in its brand style panel; Brand Assets only if the pop-up is missing', () => {
     const tab = read('src/components/assistant-briefs.js');
-    assert.match(tab, /function guidelinesHtml\(\)/);
+    assert.match(tab, /function styleHtml\(\)/);
+    assert.match(tab, /window\.BrandStyleDialog\.open\(/);
     assert.match(tab, /window\._bizinfoInitialTab = 'assets';\s*if \(window\.loadView\) window\.loadView\('assets'\)/);
     assert.match(code(read('netlify/functions/brand-briefs.ts')), /readBrandGuidelines\(db, orgId\)\.catch\(\(\) => null\)/);
 });
@@ -168,7 +169,7 @@ check('the chat sees the current text and its card replaces whole fields through
     const engine = code(read('src/utils/visual-briefs.ts'));
     const snap = span(engine, 'export async function buildBriefsSnapshot', '\n}\n', 'buildBriefsSnapshot');
     assert.match(snap, /readBrandGuidelines\(db, orgId\)/);
-    assert.ok((snap.match(/\$\{guide\}/g) || []).length === 2, 'both the empty and the full snapshot carry the guidelines');
+    assert.ok(snap.includes('none yet. ${credits}\\n${guide}') && snap.includes('${lines.join(\'\\n\')}\\n${credits}\\n${guide}'), 'both the empty and the full snapshot carry the guidelines');
     const orch = read('netlify/functions/chat-orchestrator.ts');
     assert.match(orch, /"type": "brand_guideline_proposal"/);
     assert.match(orch, /the WHOLE new text of each field it changes/);

@@ -4007,6 +4007,60 @@
   }
   register('brand_style_proposal', renderBrandStyleCard);
 
+  // { type: 'design_started', briefId, title, note } — the questions are done and the design is being made
+  // (src/utils/brief-from-chat.ts). The studio opens by itself on the turn it happens; this button is for afterwards.
+  function renderDesignStartedCard(ui, esc) {
+    const briefId = Number(ui.briefId);
+    if (!Number.isInteger(briefId) || briefId <= 0) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Your design</p>
+      <p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.title || 'Your design').slice(0, 120))}</p>
+      ${ui.note ? `<p class="text-xs text-gray-700 mt-1">${esc(String(ui.note).slice(0, 300))}</p>` : ''}
+      <button type="button" data-ds-open class="btn-primary px-4 py-2 mt-3 text-sm font-bold rounded-lg">Open in editor</button>`;
+    el.addEventListener('click', (e) => {
+      if (!e.target.closest('[data-ds-open]')) return;
+      document.dispatchEvent(new CustomEvent('brief:openStudioAny', { detail: { briefId } }));
+    });
+    return el;
+  }
+  register('design_started', renderDesignStartedCard);
+
+  // { type: 'design_edit', briefId, optionId, summary, pageColor?, photoOpacity?, font?, changes: [...], add: [...] }
+  // A change to a design, asked for in chat (src/utils/design-doc.ts). Costs nothing. chat-session.js → brand-briefs.ts.
+  function renderDesignEditCard(ui, esc) {
+    if (!Number.isInteger(Number(ui.optionId)) || !(Array.isArray(ui.changes) || ui.pageColor || ui.font || ui.photoOpacity !== undefined)) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change this design</p>
+      <p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary || 'A change to your design').slice(0, 300))}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-de-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Change it</button>
+        <button type="button" data-de-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-de-status></p>`;
+    const status = el.querySelector('[data-de-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-de-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-de-go]')) return;
+      setBusy(true);
+      say('Changing it…');
+      el.dispatchEvent(new CustomEvent('design:apply', {
+        bubbles: true,
+        detail: { card: ui, respond({ ok, error }) {
+          if (!ok) { setBusy(false); say(error || 'That couldn\'t be changed.', 'error'); return; }
+          say('Done. Undo in the editor takes it back.');
+        } },
+      }));
+    });
+    return el;
+  }
+  register('design_edit', renderDesignEditCard);
+
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):
   // { type: 'action_item_assignment', meetingSummary, decisionsMade?: string[],

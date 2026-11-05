@@ -60,8 +60,8 @@ check('the server refuses a finished flyer, and a card with nothing valid in it'
 
 console.log('the prompt and the surfaces');
 const prompt = read('netlify/functions/chat-orchestrator.ts');
-check('the questions decide the design, then the usual card proposes it', () => {
-    for (const s of ['STARTING A NEW BRIEF', 'What do you need it for?', 'A printed flyer or poster', 'A short video clip', 'What should it be made from?', 'choose the design yourself and emit a visual_brief_proposal']) assert.ok(prompt.includes(s), s);
+check('the questions decide the design, which then starts with no card to confirm (owner 2026-11-05)', () => {
+    for (const s of ['STARTING A NEW DESIGN', 'What do you need it for?', 'A printed flyer or poster', 'A short video clip', 'What should it be made from?', 'emit a visual_brief_proposal with "go": true', 'Choose the design yourself']) assert.ok(prompt.includes(s), s);
 });
 check('the chat talks style through, never calls an unset kit their brand, and never says it saved', () => {
     assert.ok(prompt.includes('THEIR BRAND STYLE') && prompt.includes('never describe that as their brand') && prompt.includes('so never say it has been saved'));

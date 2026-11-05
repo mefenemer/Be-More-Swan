@@ -57,6 +57,8 @@
     brandKit: null,
     /** The open tab (TABS below). null until the first load picks the one that needs the user. */
     tab: null,
+    /** The design open in the studio: { briefId, optionId }, optionId null while its options are being made. */
+    studio: null,
     /** "Select" is on: the next option or brief clicked goes onto the chat's chip. */
     picking: false,
     pollTimer: null,
@@ -181,10 +183,6 @@
     return b.options.some((o) => o.status === 'proposed') ? 'review' : 'todo';
   }
   const inTab = (key) => state.briefs.filter((b) => tabOf(b) === key);
-  /** Where the page opens: what needs the user first, then what is under way, then anything at all. */
-  function firstTab() {
-    return ['review', 'todo', 'making', 'approved', 'archived'].find((k) => inTab(k).length) || 'todo';
-  }
   function tabsHtml() {
     return `
       <div role="tablist" aria-label="Briefs by stage" class="flex overflow-x-auto gap-1 border-b border-gray-200 mb-4" data-brief-tabs>
@@ -296,6 +294,10 @@
       : `Each round uses ${n} AI credit${n === 1 ? '' : 's'}, for the ${paid.map((s) => s.label).join(' and ')}. Stock photos and branded cards are free.`;
   }
 
+  const isVideoBrief = (b) => Array.isArray(b.sources) && b.sources.length > 0 && b.sources.every((s) => /video/.test(String(s)));
+  /** What the studio can work on: a picture or flyer page still to be decided. A video has its own tools. */
+  const canEdit = (o) => o.status === 'proposed' && !String(o.mimeType || '').startsWith('video/') && !!window.DesignStudio;
+
   function optionTile(b, o) {
     // A flyer page is the paper's shape, not the brief's photo shape.
     const ratio = o.flyer && o.width && o.height ? `${o.width} / ${o.height}` : String(b.aspectRatio || '1:1').replace(':', ' / ');
@@ -345,6 +347,7 @@
           : img}</div>
         <p class="text-[11px] font-bold text-gray-600 mt-1">${o.flyer ? esc(o.prompt || 'Flyer') : esc(sourceLabel(o.source).replace(/s$/, ''))} · round ${o.round}</p>
         ${chatPaneAvailable() ? `<button type="button" data-brief-select="${o.id}" data-brief="${b.id}" title="Ask ${esc(name())} about this one" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">🎯 Select</button>` : ''}
+        ${canEdit(o) ? `<button type="button" data-brief-open-studio="${o.id}" data-brief="${b.id}" class="btn-primary w-full min-h-[44px] sm:min-h-0 px-2 py-1.5 mt-1 text-xs font-bold rounded-lg">Open in editor</button>` : ''}
         ${o.flyer && o.url ? `<button type="button" data-brief-preview="${o.id}" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">Preview</button>` : ''}
         ${o.flyer && o.flyer.lowResPhoto ? '<p class="text-[11px] text-amber-700 mt-1">This photo may look soft when printed — try a smaller paper size or another round.</p>' : ''}
         ${credit}
@@ -635,7 +638,7 @@
           ${credits}
           ${chatPaneAvailable() ? `<button type="button" data-brief-pick aria-pressed="${state.picking ? 'true' : 'false'}" title="Choose an option or a brief to talk about" class="${state.picking ? 'btn-primary' : 'btn-secondary border'} min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">🎯 ${state.picking ? 'Selecting…' : 'Select'}</button>` : ''}
           ${chatPaneAvailable() && !chatIsOn() ? `<button type="button" data-brief-chat-toggle aria-pressed="false" title="Show the chat beside your briefs" class="btn-assistant border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">Chat with ${esc(name())}</button>` : ''}
-          ${state.form ? '' : `${chatPaneAvailable() ? '<button type="button" data-brief-new-form class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold">Use a form instead</button>' : ''}<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
+          ${state.form ? '' : `<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
         </div>
       </div>`;
   }
@@ -697,13 +700,16 @@
       host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-500">Loading briefs…</p></div>';
       return;
     }
+    if (state.studio) { renderStudio(host); return; }
+    closeStudioInstance();
     // The poll re-renders every few seconds while a round runs — carry typed values across it.
     const kept = {};
     host.querySelectorAll('[data-keep]').forEach((el) => { kept[el.dataset.keep] = el.type === 'checkbox' ? el.checked : el.value; });
     const keptNotes = {};
     host.querySelectorAll('[data-brief-reject-note]').forEach((el) => { keptNotes[el.dataset.briefRejectNote] = el.value; });
 
-    if (!state.tab) state.tab = firstTab();
+    // Always opens at the start of the row (owner, 2026-11-05). The count on "To review" says when something waits.
+    if (!state.tab) state.tab = 'todo';
     // The brief being watched is finished: follow it, rather than leaving an empty "Being made".
     if (state.tab === 'making' && !inTab('making').length && inTab('review').length) state.tab = 'review';
     const tab = TABS.find((t) => t.key === state.tab);
@@ -732,6 +738,58 @@
   }
 
   /** The brief ids in the order render() lays them out — live first, then cancelled when shown. */
+  // ── The studio ─────────────────────────────────────────────────────────
+  // Making a design happens here; the tabs only say where a brief has got to (owner, 2026-11-05).
+  let studioInstance = null;
+  function closeStudioInstance() {
+    if (studioInstance) { studioInstance.destroy(); studioInstance = null; }
+  }
+  const studioOptions = (b) => b.options.filter(canEdit).map((o) => ({ id: o.id, url: o.url, hasPhoto: !o.flyer || o.flyer.layout !== 'type_only' }));
+  function renderStudio(host) {
+    const b = state.briefs.find((x) => x.id === state.studio.briefId);
+    if (!b) { state.studio = null; closeStudioInstance(); render(); return; }
+    if (studioInstance && studioInstance.briefId === b.id && host.querySelector('[data-design-studio]')) {
+      studioInstance.refreshThumbs();
+      return;
+    }
+    closeStudioInstance();
+    const first = state.studio.optionId || (b.options.filter(canEdit)[0] || {}).id;
+    if (!first) {
+      // Still being made, or the round stopped with nothing to edit: never a blank editor.
+      const making = b.status === 'generating';
+      host.innerHTML = `
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center" data-brief-studio-wait>
+          <p class="text-base font-bold text-gray-900">${making ? `${esc(name())} is making “${esc(b.title)}”` : `Nothing to edit on “${esc(b.title)}” yet`}</p>
+          <p class="text-sm text-gray-600 mt-2">${making ? 'It opens here as soon as it is ready, usually in about a minute.' : esc(b.generationNote || 'Ask for options on the brief to get it going.')}</p>
+          <button type="button" data-brief-studio-back class="btn-secondary border min-h-[44px] sm:min-h-0 px-4 py-2 mt-4 text-sm font-bold rounded-lg">Back to briefs</button>
+        </div>`;
+      return;
+    }
+    state.studio.optionId = first;
+    studioInstance = window.DesignStudio.mount(host, {
+      brief: b, optionId: first, assistantName: name(), chatAvailable: chatPaneAvailable(),
+      options: () => studioOptions(state.briefs.find((x) => x.id === b.id) || b),
+      post,
+      onRefer: (ref) => chatRefer(ref),
+      onClose: () => { state.studio = null; closeStudioInstance(); state.tab = tabOf(state.briefs.find((x) => x.id === b.id) || b); load(); },
+      onMore: () => { state.tab = tabOf(b); render(); },
+      onApprove: async (optionId) => {
+        await post({ action: 'decide', optionId, decision: 'approve' });
+        state.studio = null;
+        closeStudioInstance();
+        state.tab = 'approved';
+        await load();
+      },
+    });
+    studioInstance.briefId = b.id;
+  }
+  function openStudio(briefId, optionId) {
+    state.picking = false;
+    state.studio = { briefId, optionId: optionId || null };
+    render();
+    document.getElementById('briefs-host')?.scrollIntoView({ block: 'start' });
+  }
+
   function paintedOrder() {
     return inTab(state.tab).map((b) => String(b.id));
   }
@@ -746,6 +804,7 @@
   function repaintChanged() {
     const host = document.getElementById('briefs-host');
     if (!host) return;
+    if (state.studio) { render(); return; }
     const onScreen = Array.from(host.querySelectorAll('[data-brief-card]')).map((el) => el.dataset.briefCard);
     const wanted = paintedOrder();
     if (state.tab === 'making' && !wanted.length) { render(); return; }
@@ -826,10 +885,12 @@
       }
     }
     if (t('[data-brief-pick]')) { setPicking(!state.picking); return; }
+    const toStudio = t('[data-brief-open-studio]');
+    if (toStudio) { openStudio(Number(toStudio.dataset.brief), Number(toStudio.dataset.briefOpenStudio)); return; }
+    if (t('[data-brief-studio-back]')) { state.studio = null; render(); return; }
     const tabBtn = t('[data-brief-tab]');
     if (tabBtn) { openTab(tabBtn.dataset.briefTab, false); return; }
     if (t('[data-brief-new]')) { startNewBrief(); return; }
-    if (t('[data-brief-new-form]')) { state.form = { mode: 'create' }; render(); return; }
     if (t('[data-brief-edit-style]')) {
       if (window.BrandStyleDialog && window.FontPicker) {
         window.BrandStyleDialog.open({
@@ -1145,6 +1206,33 @@
   });
 
   // A brief created, or options decided, from the chat (chat-session.js).
+  // The questions finished and the design is being made (brief-from-chat.ts): go there.
+  document.addEventListener('brief:openStudio', (e) => {
+    const d = e.detail || {};
+    if (!state.assistantId || Number(d.assistantId) !== Number(state.assistantId)) return;
+    load().then(() => {
+      if (!state.rendered) return;
+      const b = state.briefs.find((x) => x.id === Number(d.briefId));
+      // A video has no editor (its options are clips): show its brief where it is being made instead.
+      if (b && isVideoBrief(b)) { state.studio = null; state.tab = tabOf(b); render(); return; }
+      openStudio(Number(d.briefId), null);
+    });
+  });
+  // "Open in editor" on that card, later on: only if it is this assistant's brief, which the list says.
+  document.addEventListener('brief:openStudioAny', (e) => {
+    const id = Number(e.detail && e.detail.briefId);
+    const b = state.rendered ? state.briefs.find((x) => x.id === id) : null;
+    if (!b) return;
+    if (isVideoBrief(b)) { state.studio = null; state.tab = tabOf(b); render(); return; }
+    openStudio(id, null);
+  });
+  // A chat card changed the open design.
+  document.addEventListener('design:changed', (e) => {
+    const d = e.detail || {};
+    if (studioInstance) studioInstance.setDesign(Number(d.optionId), d.design, d.photoUrl);
+    load();
+  });
+
   document.addEventListener('brief:changed', (e) => {
     const id = e.detail && e.detail.assistantId;
     if (!state.assistantId || Number(id) !== Number(state.assistantId)) return;
@@ -1200,6 +1288,8 @@
   /** Opens the chat and says this for them. Nothing is spent: the reply is questions or a card to press. */
   function askChat(text) { getChatDock()?.ask(text); }
   /** One button for every kind of brief: the assistant's questions decide what it should be. */
+  // One way in (owner 2026-11-05: "either the chat or one button"). The form only appears when the chat cannot run,
+  // so a brief can still be made in an AI outage.
   function startNewBrief() {
     if (chatPaneAvailable()) { askChat('I need a new brief.'); return; }
     state.form = { mode: 'create' };
@@ -1229,6 +1319,8 @@
       state.form = null;
       state.tab = null;
       state.picking = false;
+      state.studio = null;
+      closeStudioInstance();
       state.rejecting = null;
       state.notes = {};
       state.own = { briefId: null, library: null, error: null, selected: new Set(), busy: false, status: '' };

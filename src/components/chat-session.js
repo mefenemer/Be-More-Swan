@@ -564,6 +564,11 @@
           return;
         }
         appendMessage(data.message);
+        // The questions are done and the design is being made: the Briefs tab opens the studio on it.
+        const startedUi = data.message.uiElement || data.message.uiElementJson;
+        if (startedUi && startedUi.type === 'design_started') {
+          document.dispatchEvent(new CustomEvent('brief:openStudio', { detail: { assistantId, briefId: startedUi.briefId } }));
+        }
       } catch (err) {
         console.error('[ChatSession] send failed:', err);
         showError('Connection problem — please check your internet and try again.');
@@ -2137,6 +2142,22 @@
       } catch (err) { respond({ ok: false, error: err.message }); }
     }
 
+    // "Change it" on a design_edit card: brand-briefs.ts `apply_design_edit`. The studio shows it at once.
+    async function onDesignApply(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const res = await fetch('/.netlify/functions/brand-briefs', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+          body: JSON.stringify({ action: 'apply_design_edit', card: d.card }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That couldn’t be changed (HTTP ${res.status}).`);
+        respond({ ok: true });
+        document.dispatchEvent(new CustomEvent('design:changed', { detail: { assistantId, optionId: data.optionId, design: data.design, photoUrl: data.photoUrl } }));
+      } catch (err) { respond({ ok: false, error: err.message }); }
+    }
+
     function onBrandSaveGuidelines(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -2467,6 +2488,7 @@
     container.addEventListener('brief:edit', onBriefEdit);
     container.addEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
     container.addEventListener('brand:saveStyle', onBrandSaveStyle);
+    container.addEventListener('design:apply', onDesignApply);
     container.addEventListener('siteaudit:check', onSiteAuditCheck);
     container.addEventListener('siteaudit:save', onSiteAuditSave);
     container.addEventListener('siteaudit:fix', onSiteAuditFix);
@@ -2579,6 +2601,7 @@
         container.removeEventListener('brief:edit', onBriefEdit);
         container.removeEventListener('brand:saveGuidelines', onBrandSaveGuidelines);
         container.removeEventListener('brand:saveStyle', onBrandSaveStyle);
+        container.removeEventListener('design:apply', onDesignApply);
         container.removeEventListener('siteaudit:check', onSiteAuditCheck);
         container.removeEventListener('siteaudit:save', onSiteAuditSave);
         container.removeEventListener('siteaudit:fix', onSiteAuditFix);

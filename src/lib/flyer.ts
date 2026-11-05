@@ -248,7 +248,7 @@ function dataUri(bytes: Buffer, mimeType: string): string {
 }
 
 /** The colours of a page drawn before they were stored: its PDF must still match its preview. */
-function olderPageStyle(layout: FlyerLayout, kit: BrandKit): FlyerPageStyle {
+export function olderPageStyle(layout: FlyerLayout, kit: BrandKit): FlyerPageStyle {
     const light = layout === 'photo_top';
     const palette = resolveCardPalette(kit, light ? 'light' : 'bold');
     const offerBg = light ? kit.primaryColor : kit.backgroundColor;

@@ -70,7 +70,7 @@
             placeholder="Search, or type any Google font" class="w-full px-3 py-2 text-sm border-b border-gray-200 rounded-t-lg outline-none">
           <ul id="${id}" role="listbox" aria-label="Fonts" data-fp-list class="max-h-64 overflow-y-auto py-1"></ul>
         </div>
-        <div data-fp-sample class="mt-2 px-3 py-3 bg-gray-50 border border-gray-200 rounded-lg" aria-live="polite"></div>
+        ${o.sample === false ? '' : '<div data-fp-sample class="mt-2 px-3 py-3 bg-gray-50 border border-gray-200 rounded-lg" aria-live="polite"></div>'}
       </div>`;
     const q = (sel) => host.querySelector(sel);
     const panel = q('[data-fp-panel]');
@@ -85,7 +85,8 @@
       cur.textContent = value || 'Our standard font';
       cur.style.fontFamily = stack(value);
       loadFamily(value);
-      q('[data-fp-sample]').innerHTML = `
+      const sample = q('[data-fp-sample]');
+      if (sample) sample.innerHTML = `
         <p class="text-xs font-bold text-gray-500">Example</p>
         <div style="font-family:${esc(stack(value))}">
           <p class="text-xl font-bold text-gray-900 mt-1 break-words">${esc(SAMPLE_HEADLINE)}</p>
