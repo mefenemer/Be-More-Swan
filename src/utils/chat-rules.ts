@@ -71,7 +71,7 @@ export async function buildRulesListBlock(db: Db, organisationId: number, aiAssi
         const own = rows.filter((r) => r.assistantId === aiAssistantId);
         const shared = rows.filter((r) => r.assistantId == null);
         return [
-            'YOUR DO’S AND DON’TS (Assistant Profile ▸ Do’s and don’ts), by "#" number, read this turn. ON rules are the ones you follow; OFF rules are kept but switched off:',
+            'YOUR DO’S AND DON’TS (Assistant Settings ▸ Do’s and don’ts), by "#" number, read this turn. ON rules are the ones you follow; OFF rules are kept but switched off:',
             own.length ? own.map(line).join('\n') : '- none yet',
             shared.length ? `Workspace-wide rules (they apply to every assistant, and are not changed from this chat):\n${shared.map(line).join('\n')}` : '',
         ].filter(Boolean).join('\n');

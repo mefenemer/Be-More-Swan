@@ -392,7 +392,7 @@ check('the alert is governed by Approvals, not the General fallback', () => {
 
 check('the alert is attributed to an assistant, or the Approvals toggle is unreachable', () => {
     // 'approvals' is scope:'assistant'. Account Settings filters assistant-scope rows out
-    // (workspace.html), so the ONLY surface for this toggle is the Assistant Profile drawer, and
+    // (workspace.html), so the ONLY surface for this toggle is the Assistant Settings drawer, and
     // the drawer writes a per-assistant override resolved from notifications.assistant_id. Drop the
     // attribution and the row resolves to the workspace-wide value, which no UI can set — the alert
     // would be permanently on, which is worse than sitting in the wrong bucket.

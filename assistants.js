@@ -4231,8 +4231,8 @@ window._detailRqRecordAct = async function (btn, action) {
                 : action === 'backToEnrichment' ? `Moved to ${_rqHubTabLabel()}. It has left the Outreach columns — move it back when it's ready to be emailed. Nothing was looked up: "Send back for enrichment" is the button that researches a lead.`
                 : action === 'reject' && patch.feedback
                     ? (patchResult.feedbackSaved === false
-                        ? 'Rejected, but your note couldn’t be saved. Add it under Do’s and don’ts in Assistant Profile instead.'
-                        : 'Rejected. Your assistant will follow that from now on — it’s listed under Learned Directives in Do’s and don’ts, in Assistant Profile.')
+                        ? 'Rejected, but your note couldn’t be saved. Add it under Do’s and don’ts in Assistant Settings instead.'
+                        : 'Rejected. Your assistant will follow that from now on — it’s listed under Learned Directives in Do’s and don’ts, in Assistant Settings.')
                 : action === 'reject' ? 'Rejected.' : 'Updated.';
             window.showToast?.(toast);
         }
@@ -4805,7 +4805,7 @@ window._detailRqBlogAct = async function (btn, action) {
             } else if (!sent.length) {
                 // The case that started all this: nothing connected, so nothing happened, and the
                 // old code path said nothing at all.
-                showErr('No other platforms are connected — add one in Assistant Profile ▸ Connections first.');
+                showErr('No other platforms are connected — add one in Assistant Settings ▸ Connections first.');
             } else {
                 window.showToast?.(`Sent to ${sent.map((d) => d.label).join(', ')}.`);
             }
@@ -4888,7 +4888,7 @@ window._detailRqToggleGroup = function(key) {
 // File card index) and one panel per section (#tab-problem, #tab-operation, …).
 // _openProfileDrawer lands on home; clicking a card calls _openBriefDrawer(section),
 // which swaps panels in place and reveals a back arrow. It is reached from the header
-// "Assistant Profile" button — there is no longer a setup tab in the main nav.
+// "Assistant Settings" button — there is no longer a setup tab in the main nav.
 
 // Show exactly one drawer panel by element id (CSS hides all .detail-tab-content
 // unless they carry .active-drawer-tab while the drawer is open).
@@ -4896,6 +4896,91 @@ function _briefShowPanel(panelId) {
     document.querySelectorAll('.detail-tab-content').forEach(c => c.classList.remove('active-drawer-tab'));
     const panel = document.getElementById(panelId);
     if (panel) panel.classList.add('active-drawer-tab');
+    _syncRightMenuActive(panelId);
+}
+
+// ── Right-hand profile menu (compactHeader roles) ─────────────────────────────
+// The Assistant Settings' sections as a side menu that mirrors the left one: icons when closed (the
+// default), labels when open, remembered per browser. Built from the drawer's own Operating File
+// cards so a role's renamed sections ("Brand Knowledge", "When and how I work") read the same here.
+const _RM_ICONS = {
+    'profile-home': 'M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+    problem: 'M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+    operation: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+    strategy: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z',
+    platforms: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1',
+    rules: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
+    guardrails: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
+    notifications: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',
+};
+function _syncRightMenuActive(panelId) {
+    document.querySelectorAll('#rm-items .rm-item').forEach((b) => {
+        b.classList.toggle('is-active', !!panelId && `tab-${b.dataset.rmTab}` === panelId);
+    });
+}
+function _applyRightMenuOpen(open) {
+    const menu = document.getElementById('detail-right-menu');
+    const btn = document.getElementById('rm-toggle');
+    if (!menu) return;
+    menu.classList.toggle('is-open', open);
+    if (btn) {
+        const label = open ? 'Collapse settings menu' : 'Expand settings menu';
+        btn.setAttribute('aria-expanded', String(open));
+        btn.setAttribute('aria-label', label);
+        btn.title = label;
+        document.getElementById('rm-toggle-chevron')?.setAttribute('d', open ? 'M7 10l2 2-2 2' : 'M9 10l-2 2 2 2');
+    }
+    menu.querySelectorAll('.rm-item').forEach((b) => {
+        if (open) b.removeAttribute('title'); else b.title = b.querySelector('.nav-label')?.textContent.trim() || '';
+    });
+}
+function _renderRightMenu() {
+    const menu = document.getElementById('detail-right-menu');
+    const list = document.getElementById('rm-items');
+    if (!menu || !list) return;
+    const icon = (k) => `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${_RM_ICONS[k] || _RM_ICONS['profile-home']}"/></svg>`;
+    const items = [{ tab: 'profile-home', label: 'Overview' }];
+    document.querySelectorAll('#tab-profile-home .detail-tab-btn[data-tab]').forEach((card) => {
+        if (card.classList.contains('hidden') || card.style.display === 'none') return;
+        const label = card.querySelector('p')?.textContent.trim();
+        if (label) items.push({ tab: card.dataset.tab, label });
+    });
+    list.innerHTML = items.map((it) => `
+        <button type="button" class="rm-item" data-rm-tab="${it.tab}">${icon(it.tab)}<span class="nav-label">${_escapeHtml(it.label)}</span></button>`).join('');
+    list.onclick = (e) => {
+        const b = e.target.closest('.rm-item');
+        if (!b) return;
+        if (b.dataset.rmTab === 'profile-home') window._openProfileDrawer();
+        else window._openBriefDrawer(b.dataset.rmTab);
+    };
+    const btn = document.getElementById('rm-toggle');
+    if (btn) btn.onclick = () => {
+        const open = !menu.classList.contains('is-open');
+        _applyRightMenuOpen(open);
+        try { localStorage.setItem('bms.rightMenuOpen', open ? '1' : '0'); } catch (e) {}
+        // Pages that measure their width re-measure on resize (same as the left menu's toggle).
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 220);
+    };
+    let open = false;
+    try { open = localStorage.getItem('bms.rightMenuOpen') === '1'; } catch (e) {}
+    _applyRightMenuOpen(open);
+}
+
+// compactHeader (registry): hero at just under half width with the "Needs you" strip beside it, the
+// header's Chat / Assistant Settings buttons gone (CSS), and the profile as the right-hand menu.
+// The view is re-injected on every load, so nothing here needs undoing for the next assistant.
+function _applyCompactHeader(cfg) {
+    const root = document.getElementById('assistant-detail-content');
+    if (!root) return;
+    const on = !!(cfg && cfg.compactHeader);
+    root.classList.toggle('detail-v2', on);
+    if (!on) return;
+    const row = document.getElementById('detail-top-row');
+    const strip = document.getElementById('detail-needs-you');
+    if (row && strip && strip.parentNode !== row) row.appendChild(strip);
+    // The button goes under the list (heading, what happens next, the briefs, then the one action).
+    const go = document.getElementById('needs-you-go');
+    if (strip && go && go.parentNode !== strip) strip.appendChild(go);
 }
 
 // Run the open animation/backdrop/scroll-lock. Idempotent: safe to call when the
@@ -4930,7 +5015,7 @@ function _briefOpenChrome() {
 window._openProfileDrawer = function() {
     _briefShowPanel('tab-profile-home');
     const titleEl = document.getElementById('brief-drawer-title');
-    if (titleEl) titleEl.textContent = window._assistantProfileTitle || 'Assistant Profile';
+    if (titleEl) titleEl.textContent = window._assistantProfileTitle || 'Assistant Settings';
     const backBtn = document.getElementById('brief-drawer-back');
     if (backBtn) backBtn.hidden = true;
     _briefOpenChrome();
@@ -4968,7 +5053,7 @@ window._openBriefDrawer = function(tabKey) {
     _briefOpenChrome();
 };
 
-// ── Assistant Profile › Notifications panel ───────────────────────────────────
+// ── Assistant Settings › Notifications panel ───────────────────────────────────
 // Renders the scope:'assistant' categories of the unified notification preference
 // matrix (Approvals, Assistant Tasks, Content & Publishing, Connections) for THIS
 // assistant. Values come from /notification-preferences?assistantId=N — the
@@ -5147,6 +5232,7 @@ window._closeBriefDrawer = function() {
     const drawer = document.getElementById('brief-drawer');
     const backdrop = document.getElementById('brief-drawer-backdrop');
     if (drawer) drawer.style.transform = 'translateX(100%)';
+    _syncRightMenuActive(null);
     if (backdrop) { backdrop.style.opacity = '0'; setTimeout(() => { backdrop.style.display = 'none'; }, 250); }
     document.body.classList.remove('brief-drawer-open');
     window.ScrollLock.release('brief-drawer');
@@ -5205,6 +5291,12 @@ window._setNeedsYouCount = function(n) {
     window._renderStatusPill?.();
     window._renderNeedsYou();
 };
+// What is waiting, by name, for the compact header's Needs-you card: [{ id, label, sub }]. Only the
+// Brand Designer's Briefs feed it so far; with none, the card shows the count and the button alone.
+window._setNeedsYouItems = function(items) {
+    window._detailNeedsYouItems = Array.isArray(items) ? items : [];
+    window._renderNeedsYou();
+};
 window._setNextUp = function(text) {
     window._detailNextUp = text ? String(text) : null;
     window._renderNeedsYou();
@@ -5245,7 +5337,9 @@ window._renderNeedsYou = function() {
     const source = window._detailNeedsYouSource;   // 'review' | 'briefs' | null
     const landing = window._detailDefaultMainTab || 'datahub';
     const onLanding = document.querySelector('.main-tab-btn.active-tab')?.dataset.maintab === landing;
-    if (!source || !onLanding) { strip.classList.add('hidden'); return; }
+    // In the compact header the strip sits beside the hero, above every tab, so it stays on all tabs.
+    const inHeader = strip.parentNode?.id === 'detail-top-row';
+    if (!source || (!onLanding && !inHeader)) { strip.classList.add('hidden'); return; }
 
     const reviewN = window._detailOpSignals?.pendingReview || 0;
     const reviewLabel = (window._detailReviewQueue || {}).label || 'Review';
@@ -5266,14 +5360,33 @@ window._renderNeedsYou = function() {
         text.textContent = n ? `Needs you: ${n} waiting in ${where}` : 'Nothing needs you right now.';
     }
     // A button only when the waiting things are on ANOTHER tab — on the landing tab they are below.
-    const showGo = n > 0 && targetTab !== landing;
+    // In the compact header the button is always there while something waits (a primary one), since
+    // the card is the page's call to action; on the landing tab strip, only when the work is elsewhere.
+    const showGo = n > 0 && (inHeader || targetTab !== landing);
+    const openTarget = (id) => {
+        if (source === 'briefs' && window.AssistantBriefs?.openReview) { window.AssistantBriefs.openReview(id); return; }
+        window._activateMainTab(targetTab);
+        if (targetTab === 'review-queue') window.detailRqOpenStatus?.('review');
+    };
     if (go) {
         go.classList.toggle('hidden', !showGo);
         go.style.display = showGo ? '' : 'none';
-        go.textContent = `Open ${where}`;
-        go.onclick = () => {
-            window._activateMainTab(targetTab);
-            if (targetTab === 'review-queue') window.detailRqOpenStatus?.('review');
+        go.className = `${showGo ? '' : 'hidden '}${inHeader ? 'btn-primary px-4 py-2 text-sm' : 'btn-secondary px-3 py-1.5 border text-xs'} min-h-[44px] sm:min-h-0 font-bold rounded-lg transition`;
+        go.textContent = inHeader && source === 'briefs' ? `Review ${n} brief${n === 1 ? '' : 's'} →` : `Open ${where}${inHeader ? ' →' : ''}`;
+        go.onclick = () => openTarget(null);
+    }
+    const list = document.getElementById('needs-you-list');
+    if (list) {
+        const items = inHeader && n > 0 ? (window._detailNeedsYouItems || []) : [];
+        list.classList.toggle('hidden', !items.length);
+        list.innerHTML = items.map((it) => `
+            <li><button type="button" class="ny-item" data-ny-id="${_escapeHtml(String(it.id))}">
+              <span class="ny-title">${_escapeHtml(it.label)}</span><span class="ny-sub">${_escapeHtml(it.sub || '')}</span>
+            </button></li>`).join('')
+            + (n > items.length && items.length ? `<li class="ny-more">and ${n - items.length} more</li>` : '');
+        list.onclick = (e) => {
+            const b = e.target.closest('.ny-item');
+            if (b) openTarget(b.dataset.nyId);
         };
     }
     if (next) {
@@ -6757,7 +6870,9 @@ function _applyDashboardRegistry(data) {
     // review-only count said "Nothing needs you" over two waiting storyboards — staging, 2026-10-31),
     // or nothing for a role with none. Its figures are reset per assistant.
     window._detailNeedsYouSource = cfg.videosTab ? 'videos' : !cfg.hideReviewQueue ? 'review' : (cfg.briefsTab ? 'briefs' : null);
+    _applyCompactHeader(cfg);
     window._detailNeedsYouOverride = 0;
+    window._detailNeedsYouItems = [];
     window._detailNextUp = null;
     // Results sits right after the landing tab: "your work, then how it is going". It was near the
     // end of a 6–8 tab row, past the fade on a phone (review, 2026-10-22). Moved in the DOM, so
@@ -8609,9 +8724,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             }
         }
 
-        // Assistant Profile slide-over title — "[Name]'s Profile" (header button keeps its
-        // static "Assistant Profile" label; the personalised title shows on the drawer home).
-        window._assistantProfileTitle = (currentData.name || 'Your Assistant') + "'s Profile";
+        // Assistant Settings slide-over title — "[Name]'s Profile" (header button keeps its
+        // static "Assistant Settings" label; the personalised title shows on the drawer home).
+        window._assistantProfileTitle = (currentData.name || 'Your Assistant') + "'s Settings";
         const homeTitleEl = document.getElementById('brief-drawer-title');
         if (homeTitleEl && !document.body.classList.contains('brief-drawer-open')) {
             homeTitleEl.textContent = window._assistantProfileTitle;
@@ -8813,6 +8928,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         _hydrateAutonomousToggle(currentData);
         window._renderAutopilotCard(currentData);
         attachAutoSave();
+        if (document.getElementById('assistant-detail-content')?.classList.contains('detail-v2')) _renderRightMenu();
         _wirePostingSchedule();
         _renderKickOff(assistantId);
 
@@ -9581,16 +9697,27 @@ async function _renderAssistantTaskShare(assistantId) {
         // Use that rounds to 0 reads as "under 1%", never as nothing used.
         const label = (v) => (v > 0 && pct(v) === 0 ? 'under 1%' : `${Math.min(100, pct(v))}%`);
         const name = document.getElementById('detail-name-input')?.value?.trim() || 'This assistant';
-        document.getElementById('task-share-pct').textContent = `${label(mine)} of your allowance`;
+        // Compact header: the headline is the whole bar (every assistant's use), and the note is its key —
+        // "0% of your allowance" over a bar 4% full read as a contradiction (UX review, 2026-11-05).
+        const compact = !!document.querySelector('.detail-v2');
+        document.getElementById('task-share-pct').textContent = compact ? `${label(total)} of allowance used` : `${label(mine)} of your allowance`;
         document.getElementById('task-share-mine').style.width = `${minePct}%`;
         document.getElementById('task-share-others').style.width = `${othersPct}%`;
         document.getElementById('task-share-bar').setAttribute('aria-label', `${name} used ${minePct}% of the monthly task allowance; all assistants together ${Math.min(100, pct(total))}%`);
         // Bonus tasks sit on top of the allowance, and other screens count them in "tasks left" —
         // so a Briefs tab said 11,252 left under a strip that said "of 10,500" (SWAN-8).
         const bonus = Number(cap.bonusTasks) || 0;
-        document.getElementById('task-share-note').textContent =
-            `${name}: ${n(mine)} task${mine === 1 ? '' : 's'} · all assistants: ${n(total)} of ${n(limit)} (${label(total)})`
-            + (bonus > 0 ? ` · plus ${n(bonus)} bonus task${bonus === 1 ? '' : 's'}` : '');
+        const noteEl = document.getElementById('task-share-note');
+        if (compact) {
+            const others = Math.max(0, total - mine);
+            noteEl.innerHTML = `<span class="ts-key"><span class="ts-dot" style="background:#ec4899"></span>${_escapeHtml(name)}: ${n(mine)} task${mine === 1 ? '' : 's'}</span>`
+                + `<span class="ts-key"><span class="ts-dot" style="background:#fbcfe8"></span>Other assistants: ${n(others)}</span>`
+                + `<span class="ts-key">${n(total)} of ${n(limit)} this month${bonus > 0 ? ` · plus ${n(bonus)} bonus` : ''}</span>`;
+        } else {
+            noteEl.textContent =
+                `${name}: ${n(mine)} task${mine === 1 ? '' : 's'} · all assistants: ${n(total)} of ${n(limit)} (${label(total)})`
+                + (bonus > 0 ? ` · plus ${n(bonus)} bonus task${bonus === 1 ? '' : 's'}` : '');
+        }
         strip.classList.remove('hidden');
     } catch { /* the strip just stays hidden */ }
 }
@@ -9855,7 +9982,7 @@ async function _fetchAndRenderBlogDestinations() {
         // own blog first. A reader seeing "0 connected" should not conclude nothing gets published.
         setFooter(connectedCount
             ? 'Every published post goes to your own blog first, then syndicates to the platforms above.'
-            : 'Published posts go to your own blog. Add more in <span class="font-semibold">Assistant Profile ▸ Connections</span> to syndicate them further.');
+            : 'Published posts go to your own blog. Add more in <span class="font-semibold">Assistant Settings ▸ Connections</span> to syndicate them further.');
     } catch (err) {
         console.error('[blog-destinations] load failed:', err);
         // Its own copy, for the same reason the KPI cards keep error and no-data apart: a network

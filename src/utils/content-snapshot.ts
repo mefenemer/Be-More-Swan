@@ -126,7 +126,7 @@ const POST_WORDS: Record<string, string> = {
     approved: 'booked',
     scheduled: 'booked',
     publishing: 'publishing right now',
-    paused: 'paused — the account it posts to needs reconnecting (Assistant Profile ▸ Connections)',
+    paused: 'paused — the account it posts to needs reconnecting (Assistant Settings ▸ Connections)',
     // The X park: our task allowance (a link post costs 10), a pre-cutover X credit allowance, or
     // X's own API quota. All three resume on the 1st; the post's failure_reason says which.
     paused_credits: 'paused — X posting is limited until the 1st (the post\'s note says why)',

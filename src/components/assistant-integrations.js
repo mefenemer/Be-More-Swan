@@ -1,5 +1,5 @@
 // src/components/assistant-integrations.js
-// Assistant Profile › Connections › "Synced actions" — surfaces the Integration Scenario
+// Assistant Settings › Connections › "Synced actions" — surfaces the Integration Scenario
 // Library (netlify/functions/integration-scenarios.ts) INSIDE the assistant detail Connections
 // tab, scoped to this assistant and filtered to the recipes relevant to its role. The workspace
 // hub (integrations.html) shows every recipe for a picked assistant; this embeds just the ones
@@ -172,7 +172,7 @@
 
   function openModal(s) {
     editing = s;
-    // This list is rendered inside the Assistant Profile slide-over, which would otherwise
+    // This list is rendered inside the Assistant Settings slide-over, which would otherwise
     // stay open over the top of this modal (the drawer sits at z-9001, this at z-60).
     if (document.body.classList.contains('brief-drawer-open')) window._closeBriefDrawer?.();
     const m = ensureModal();

@@ -1,7 +1,7 @@
 // src/utils/operational-setup.ts
 // The onboarding wizard's Operational Setup answers (step 3), turned into generation directives.
 //
-// Two questions are captured at onboarding and stay editable in the Assistant Profile:
+// Two questions are captured at onboarding and stay editable in the Assistant Settings:
 //   trigger_type    — 'on_demand' | 'reactive' | 'scheduled'
 //   content_source  — 'client_provided' | 'assistant_generated' | 'hybrid'
 //

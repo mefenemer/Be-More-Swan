@@ -1,6 +1,6 @@
 // src/utils/chat-schedule.ts
 // The posting schedule — how often, which days, what times, which timezone — as the chat sees it, and
-// a card to change it, for the roles whose Assistant Profile shows the Posting Schedule card (the
+// a card to change it, for the roles whose Assistant Settings shows the Posting Schedule card (the
 // Social Media and Blog Writer assistants; Email Marketing's cadence lives in its setup answers).
 //
 // ── Why ──────────────────────────────────────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ export function isTimezone(tz: string): boolean {
 export function schedulePromptBlock(roleKey: string | null | undefined, onboardingContext: unknown): string | null {
     if (!hasPostingSchedule(roleKey)) return null;
     const s = currentSchedule(onboardingContext);
-    return `YOUR POSTING SCHEDULE (Assistant Profile ▸ When and how I ${roleKey === 'blog_writer' ? 'work' : 'post'} ▸ Posting Schedule), right now: ${describeSchedule(s)}.
+    return `YOUR POSTING SCHEDULE (Assistant Settings ▸ When and how I ${roleKey === 'blog_writer' ? 'work' : 'post'} ▸ Posting Schedule), right now: ${describeSchedule(s)}.
 CHANGING IT — when the user asks to post more or less often, on other days, at other times, or in another timezone, put this in "uiElement" instead of anything else, with ONLY the parts that change:
 { "type": "schedule_proposal", "frequency": ${POSTING_CADENCES.map((c) => `"${c.label}"`).join(' | ')}, "days": ["mon" … "sun"], "times": ["HH:MM", …], "timezone": "<IANA name, e.g. Europe/London>" }
 Times are 24-hour, in the schedule's timezone; at most ${MAX_TIMES} a day. "days" is the full new list of days, not the ones to add. If the frequency and the days would disagree (3 times a week on 5 days), say which it will follow. You never change it yourself: the user confirms on the card, and only that click saves it. So never say the schedule HAS changed — say the card is there to confirm.`;

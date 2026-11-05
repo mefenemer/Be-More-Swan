@@ -1,6 +1,6 @@
 // src/utils/chat-platforms.ts
 // Which connected platforms this assistant posts to — the "Use for this assistant" switches in the
-// Assistant Profile's Connections card — as the chat sees them, and a card to turn them on or off.
+// Assistant Settings' Connections card — as the chat sees them, and a card to turn them on or off.
 //
 // ── Why ──────────────────────────────────────────────────────────────────────────────────────────
 // Every capability is meant to be reachable from the GUI and from chat, through the same server
@@ -119,9 +119,9 @@ export async function buildPlatformsBlock(db: Db, organisationId: number, userId
         const drafting = !effective
             ? 'No switch is on, so this assistant drafts for EVERY connected platform.'
             : `This assistant drafts for: ${names([...effective])}.`;
-        return `WHERE YOU POST — the "Use for this assistant" switches in Assistant Profile ▸ Connections, for each social account connected right now:
+        return `WHERE YOU POST — the "Use for this assistant" switches in Assistant Settings ▸ Connections, for each social account connected right now:
 ${lines}
-${drafting} A platform not listed above is not connected; connecting one is done in Assistant Profile ▸ Connections, never from here.
+${drafting} A platform not listed above is not connected; connecting one is done in Assistant Settings ▸ Connections, never from here.
 CHANGING THEM — when the user asks to start or stop posting to a connected platform, put this in "uiElement" instead of anything else:
 { "type": "platforms_proposal", "turnOn": ["instagram", …], "turnOff": ["facebook", …] }
 Use the platform names above, lower case. Only a platform listed above has a switch: if they name one that is not listed, do not emit a card — say it is not connected and where to connect it. Turning off the last switch that is on does NOT stop posting — with none on, the assistant drafts for every platform — so if the user wants to stop posting altogether, offer to pause the assistant instead. Posts already drafted or booked for a platform keep their place; this changes what is drafted from now on. You never change a switch yourself: the user confirms on the card, and only that click saves it. So never say a switch HAS changed — say the card is there to confirm.`;
@@ -197,7 +197,7 @@ export function buildPlatformsCard(aiAssistantId: number, live: LiveConnection[]
         blocked: null,
     };
     if (req.unknown.length) card.blocked = `“${req.unknown.join('”, “')}” isn’t a platform this assistant can post to.`;
-    else if (notConnected.length) card.blocked = `${names(notConnected)} ${notConnected.length === 1 ? 'isn’t' : 'aren’t'} connected — connect ${notConnected.length === 1 ? 'it' : 'them'} in Assistant Profile ▸ Connections first.`;
+    else if (notConnected.length) card.blocked = `${names(notConnected)} ${notConnected.length === 1 ? 'isn’t' : 'aren’t'} connected — connect ${notConnected.length === 1 ? 'it' : 'them'} in Assistant Settings ▸ Connections first.`;
     else if (!changes.length) card.blocked = 'The switches already say exactly that.';
     else if (!card.afterOn.length) card.blocked = 'With every switch off, this assistant would draft for every platform, not none. To stop posting, pause the assistant instead.';
     return card;

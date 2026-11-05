@@ -69,7 +69,7 @@ Profile (My Account ▸ Profile Information): name ${name}; email ${a.email || '
 Sounds (My Account ▸ Sounds): ${SOUND_LABELS.map(([k, l]) => `"${l}" ${onOff(p[k] !== false)}`).join('; ')}.
 Notifications about their account (My Account ▸ Notification Preferences):
 ${account.join('\n')}
-Notifications about this assistant's work (Assistant Profile ▸ Notifications on this assistant's page):
+Notifications about this assistant's work (Assistant Settings ▸ Notifications on this assistant's page):
 ${mine.join('\n')}
 Phone/browser alerts also need "Push notifications on this device" allowed in My Account ▸ Notification Preferences, on each device — you cannot see whether they have. "Always on" ones cannot be turned off.`;
 }

@@ -35,7 +35,7 @@ export type PrefChannel = 'inApp' | 'email' | 'push';
 
 // Where a category's toggles are surfaced:
 //   'account'   → Account Settings › Notification Preferences (BMS customer-level alerts)
-//   'assistant' → the Assistant Profile drawer (alerts produced by assistants doing their work)
+//   'assistant' → the Assistant Settings drawer (alerts produced by assistants doing their work)
 // Scope only controls WHERE the toggle renders — storage and delivery gating are
 // unchanged (per-user, workspace-wide), so both UIs share the same endpoint and keys.
 export type PrefScope = 'account' | 'assistant';
@@ -170,7 +170,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // no-op for every existing user. A future move of a live type deserves the same count.
             // ⚠️ This only buys the user a real toggle because the notification is ATTRIBUTED to an
             // assistant. 'approvals' is scope:'assistant', and assistant-scope rows render only in
-            // the Assistant Profile drawer (workspace.html filters them out of Account Settings),
+            // the Assistant Settings drawer (workspace.html filters them out of Account Settings),
             // where the toggle writes a per-assistant override keyed on notifications.assistant_id.
             // An unattributed row resolves to the workspace-wide value, which has no UI at all — so
             // it would have become permanently ON, strictly worse than the wrong bucket. The

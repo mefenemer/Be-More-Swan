@@ -5073,7 +5073,7 @@ function formatCurrency(amount, currency) {
         const { categories } = await res.json();
 
         // Account settings shows customer-level categories only; assistant-scoped
-        // categories render in the Assistant Profile drawer (assistants.js).
+        // categories render in the Assistant Settings drawer (assistants.js).
         const accountCategories = categories.filter(cat => cat.scope !== 'assistant');
 
         bodyEl.innerHTML = accountCategories.map(cat => {

@@ -1,6 +1,6 @@
 // tests/chat-assistant-settings.test.ts
 // Every assistant's chat knows its own status, settings and goals, and can propose a change to them
-// through a card the user confirms — which calls the same endpoint as the Assistant Profile.
+// through a card the user confirms — which calls the same endpoint as the Assistant Settings.
 //
 // WHY THIS EXISTS. The parity audit of 2026-10-22 found the chat blind to its own row: "are you
 // paused?" and "how far ahead are you drafting?" got a guess, and "pause for a week" could only be
@@ -144,7 +144,7 @@ async function main() {
     await check('social snapshot lists status and the three settings', async () => {
         const block = await buildAssistantSettingsSnapshot(fakeDb([row({ autonomousMediaEnabled: true })]), 1, 5, 'social_media_manager');
         assert.match(block, /Status: working/);
-        assert.match(block, /"Generate posts ahead" \(Assistant Profile ▸ When and how I post\): 7 days/);
+        assert.match(block, /"Generate posts ahead" \(Assistant Settings ▸ When and how I post\): 7 days/);
         assert.match(block, /"Review alerts".*Immediate/);
         assert.match(block, /Autonomous Content Suggestions.*on, up to 20/);
     });
@@ -186,7 +186,7 @@ async function main() {
         assert.ok(read('src/utils/chat-card-refresh.ts').includes('refreshSettingsCards(db, organisationId, aiAssistantId, roleKey, out)'));
         assert.ok(read('netlify/functions/get-chat-session.ts').includes('refreshStoredCards(db, orgId, session.aiAssistantId, session.roleKey, messages)'));
     });
-    await check('the click calls the Assistant Profile\'s endpoints with their methods', () => {
+    await check('the click calls the Assistant Settings\'s endpoints with their methods', () => {
         const src = read('src/components/chat-session.js');
         const start = src.indexOf('async function onSettingsChange');
         assert.ok(start >= 0, 'onSettingsChange exists');

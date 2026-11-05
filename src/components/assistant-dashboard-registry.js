@@ -536,6 +536,10 @@
     // defaults to the SOCIAL post queue; this role puts nothing in it, and its own review surface is
     // the option grid on the Briefs tab. hideDataHub likewise: there is no record type to list.
     brand_designer: {
+      // Compact header pilot (owner, 2026-11-05): hero at just under half width with "Needs you"
+      // beside it, no Chat / Assistant Settings buttons, and the profile as a right-hand menu.
+      // To roll out, add this flag to each role (assistant-detail.html CSS + _applyCompactHeader).
+      compactHeader: true,
       // Fed by brand-briefs.ts `performance` (routed by metricsSource in assistants.js), NOT the
       // shared post_insights endpoint, which would report hasData:false for ever — this assistant
       // publishes nothing.

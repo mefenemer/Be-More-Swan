@@ -778,10 +778,10 @@
 
           <!-- AI Disclosure (EU AI Act Art. 50) — captured here so the assistant ships with a
                disclosure already set, removing the Kick Off Meeting blocker. Editable later in the
-               Assistant Profile → Brand Safety & Legal. -->
+               Assistant Settings → Brand Safety & Legal. -->
           <div class="mt-8 border-t border-gray-200 pt-6">
             <label class="block text-sm font-bold text-gray-700 mb-1" for="onboarding_ai_disclosure" data-explain="ai-disclosure">AI Disclosure</label>
-            <p class="text-xs text-gray-500 mb-3">How your assistant labels its output as AI-generated, as required by the EU AI Act's transparency rules. You can fine-tune this any time in your Assistant Profile.</p>
+            <p class="text-xs text-gray-500 mb-3">How your assistant labels its output as AI-generated, as required by the EU AI Act's transparency rules. You can fine-tune this any time in your Assistant Settings.</p>
 
             <div class="mb-3 flex flex-col gap-2">
               <button type="button" onclick="applyDisclosureSuggestion('Some content on this account is created with the help of Be More Swan AI.')" class="text-left text-sm bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg p-3 hover:bg-emerald-100 hover:border-emerald-300 transition shadow-sm cursor-pointer">
@@ -1569,7 +1569,7 @@
    * Step 3's Operational Setup answers, as the RADIO VALUES rather than the labels shown on screen.
    *
    * Only the labels used to be submitted (triggerText/sourceText, scraped out of the DOM), which
-   * made the answers unreadable to everything downstream: the Assistant Profile matches its radios
+   * made the answers unreadable to everything downstream: the Assistant Settings matches its radios
    * on value keys, so "On a Schedule" never matched `scheduled` and "I will provide the raw inputs"
    * never matched `client_provided` — the Operational Setup section came up blank for five of the
    * six options. The free-text follow-ups (timezone, and where the assistant should look for
@@ -1787,7 +1787,7 @@
       sourceText,
       // The same two answers as stable keys. triggerText/sourceText stay because
       // compileServerSideBrief prints them as prose; these are what anything matching on a
-      // value (the Assistant Profile's radios) needs.
+      // value (the Assistant Settings' radios) needs.
       ...collectOperationalSetup(),
       platforms,
       platform_strategy: platformStrategy,
@@ -1922,7 +1922,7 @@
       primary_platforms: extractedPlatforms,
       problem_statement: document.getElementById('user_story_problem')?.value || null,
       // Reference style link + per-platform hashtag/algorithm strategy — stored structurally so
-      // they surface (and stay editable) in the Assistant Profile, not just compiled into rules.
+      // they surface (and stay editable) in the Assistant Settings, not just compiled into rules.
       reference_style_url: document.getElementById('val_reference')?.value || null,
       platform_strategy: collectOnboardingPlatformStrategy(extractedPlatforms)
     };
@@ -2049,7 +2049,7 @@
   function applyDisclosureSuggestion(t) { const el = document.getElementById('onboarding_ai_disclosure'); if (!el) return; el.value = t; autoExpandTextareas(); triggerAutoSave(); }
 
   // Snapshot the Platform Algorithm Helper toggles into a structured object (keyed by platform
-  // code) for the selected platforms only. Mirrors the shape read back in the Assistant Profile
+  // code) for the selected platforms only. Mirrors the shape read back in the Assistant Settings
   // (_hydratePlatformStrategy in assistants.js), so hashtags/format prefs stay editable post-setup.
   function collectOnboardingPlatformStrategy(selected) {
     const val = (id) => document.getElementById(id)?.value || '';

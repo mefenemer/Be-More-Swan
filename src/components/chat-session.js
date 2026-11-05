@@ -1208,7 +1208,7 @@
     const LEAD_FINAL = new Set(['draft_changed', 'personal_inbox_unconfirmed', 'no_recipient', 'suppressed', 'unsubscribed', 'paused', 'do_not_contact', 'no_postal_address', 'generator_declined']);
     const leadWhy = (r) => r.detail || LEAD_NOT_SENT[r.reason] || `Not sent (${String(r.reason || 'unknown').replace(/_/g, ' ')}).`;
 
-    // Settings cards → the endpoint the Assistant Profile uses for that setting, with its method, so
+    // Settings cards → the endpoint the Assistant Settings uses for that setting, with its method, so
     // its gates apply unchanged (owner/admin to pause, Kick Off's readiness checks to start, 1–30
     // days). Then `assistant:settingsChanged` on document repaints the page behind the chat.
     async function onSettingsChange(e) {

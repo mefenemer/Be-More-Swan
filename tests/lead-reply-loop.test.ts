@@ -63,7 +63,7 @@ check('a recorded reply notifies the tenant', () => {
 });
 
 check('the notification is attributed to the assistant, or its toggle has no home', () => {
-    // `approvals` is scope:'assistant', so the row renders its toggle in the Assistant Profile drawer
+    // `approvals` is scope:'assistant', so the row renders its toggle in the Assistant Settings drawer
     // and keys the override on notifications.assistant_id — stamped by the trigger from metadata.
     // Without the id the row falls back to the workspace-wide value, which has NO UI, and the alert
     // becomes permanently on.

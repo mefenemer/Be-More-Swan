@@ -55,7 +55,7 @@ check('that category is LOCKED on in-app', () => {
 });
 
 check('it is account-scope, so the toggle actually renders somewhere', () => {
-    // assistant-scope rows render only in the Assistant Profile drawer and key their override on
+    // assistant-scope rows render only in the Assistant Settings drawer and key their override on
     // notifications.assistant_id. An ad-hoc message has no assistant, so it would have no UI.
     assert.strictEqual(categoryForType(ADMIN_MESSAGE_TYPE).scope, 'account');
 });

@@ -827,7 +827,7 @@ Everything you can do here, the user can also do there by hand.`;
 // Same purpose as leadGeneratorSurfaces(). The social prompt used to say only "never describe
 // dashboard steps, tools, or sections to visit", so when a user asked where something WAS the model
 // had no names to give and made some up: it asked for "content brief information", then said the
-// app had no "content brief section" — the real one is Assistant Profile ▸ Creative Brief.
+// app had no "content brief section" — the real one is Assistant Settings ▸ Creative Brief.
 // ⚠️ These labels are copied from assistant-detail.html and the social_media_manager entry in
 // src/components/assistant-dashboard-registry.js (reviewQueue label 'Posts', inspoTab, myContentTab).
 // Rename a tab there and this string must change with it; tests/content-prompt-surfaces.test.ts
@@ -840,7 +840,7 @@ function socialSurfaces(): string {
 - "My Content" tab — the pictures and videos the user has uploaded or approved, which posts can use.
 - "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, the "Autopilot" card (whether it is drafting on a schedule, with "Adjust schedule"; how many posts are created, scheduled and published; posts per platform; and audience size), and the goals themselves (set or change one here).
 - "Activity" tab — a log of what this assistant has done.
-- "Assistant Profile" button (top of the page) — this assistant's settings, as cards: "What I do" (the job it was hired for), "When and how I post" (how posts are triggered, where content comes from, and the posting schedule), "What I post about" (objective, audience, voice and content pillars), "Connections" (the social accounts it posts to — reconnect an account here), "Do’s and don’ts" (its rules), "Safety and legal" (AI disclosure and brand safety) and "Notifications".
+- "Assistant Settings" button (top of the page) — this assistant's settings, as cards: "What I do" (the job it was hired for), "When and how I post" (how posts are triggered, where content comes from, and the posting schedule), "What I post about" (objective, audience, voice and content pillars), "Connections" (the social accounts it posts to — reconnect an account here), "Do’s and don’ts" (its rules), "Safety and legal" (AI disclosure and brand safety) and "Notifications".
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
@@ -871,7 +871,7 @@ function blogSurfaces(): string {
 - "My Content" tab — the pictures the user has uploaded or approved, which articles can use.
 - "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, the "Autopilot" card (its drafting schedule, with "Adjust schedule", and how many articles are created, scheduled and published), and the goals themselves (set or change one here).
 - "Activity" tab — a log of what this assistant has done.
-- "Assistant Profile" button (top of the page) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
+- "Assistant Settings" button (top of the page) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or Blog Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
@@ -888,7 +888,7 @@ function emailSurfaces(): string {
 - "Calendar" tab — the same emails laid out by date.
 - "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, and the goals themselves (set or change one here).
 - "Activity" tab — a log of what this assistant has done.
-- "Assistant Profile" button (top of the page) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
+- "Assistant Settings" button (top of the page) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
 - Outside this page: the "Audience" page holds subscribers, segments and sign-up forms.
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or the Email Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
@@ -3797,7 +3797,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             settingsCard = await resolveSettingsProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, settingsReq);
             uiElement = settingsCard;
             if (!settingsCard) {
-                content = 'I couldn’t read my settings just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
+                content = 'I couldn’t read my settings just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Settings.';
             }
         }
         // A change to its own Do's and don'ts (src/utils/chat-rules.ts) — any structured route. Rebuilt
@@ -3808,7 +3808,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             ruleCard = await resolveRuleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, ruleReq);
             uiElement = ruleCard;
             if (!ruleCard) {
-                content = 'I couldn’t read your Do’s and don’ts just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
+                content = 'I couldn’t read your Do’s and don’ts just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Settings.';
             }
         }
         // A goal set, changed or deleted (src/utils/chat-goals.ts) — checked with manage-goals.ts's own
@@ -3839,7 +3839,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (scheduleReq) {
             scheduleCard = await resolveScheduleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, scheduleReq);
             uiElement = scheduleCard;
-            if (!scheduleCard) content = 'I couldn’t read your posting schedule just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Profile.';
+            if (!scheduleCard) content = 'I couldn’t read your posting schedule just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Settings.';
         }
         // Which connected platforms it posts to (src/utils/chat-platforms.ts) — the click saves through
         // update-assistant-context.ts exactly as the "Use for this assistant" switch does.
@@ -3848,7 +3848,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (platformsReq) {
             platformsCard = await resolvePlatformsProposal(db, orgId, userId, session.aiAssistantId, platformsReq);
             uiElement = platformsCard;
-            if (!platformsCard) content = 'I couldn’t read your connections just now, so I haven’t changed anything. Please try again in a moment, or use Assistant Profile ▸ Connections.';
+            if (!platformsCard) content = 'I couldn’t read your connections just now, so I haven’t changed anything. Please try again in a moment, or use Assistant Settings ▸ Connections.';
         }
         // An addition to its Knowledge Base or Inspo (src/utils/chat-library.ts) — the click POSTs to
         // kb-articles.ts / inspo-items.ts, as the tab's own Save does.

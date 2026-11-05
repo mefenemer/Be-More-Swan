@@ -50,7 +50,7 @@ console.log('\n──── every role reaches Connections the same way ──�
 // Owner, 2026-10-22: no "Manage connections" button on the Overview, for any role. It used to sit
 // in a hero strip on some roles and inside the Audience list on others, decided per role by
 // _syncManageConnectionsPlacement — so two assistants showed it and the rest did not. Connections
-// are managed in Assistant Profile ▸ Connections, which every role has. What these pin is that the
+// are managed in Assistant Settings ▸ Connections, which every role has. What these pin is that the
 // one remaining route is always there (the Lead Generator once had none at all — see 1. above).
 
 const DETAIL = read('assistant-detail.html');
@@ -62,14 +62,14 @@ check('there is no Manage connections button on the assistant page, and nothing 
     assert.ok(!INT.includes('_renderConnectionsStatusCard'), 'and so is the strip renderer');
 });
 
-check('Assistant Profile has a Connections card, and no role hides it', () => {
+check('Assistant Settings has a Connections card, and no role hides it', () => {
     const home = DETAIL.slice(landmark(DETAIL, 'id="tab-profile-home"'), landmark(DETAIL, '/tab-profile-home'));
     assert.match(home, /data-tab="platforms" class="detail-tab-btn brief-card[^"]*"[\s\S]{0,400}Connections<\/p>/,
         'the profile index must offer Connections — it is now the only route there');
     assert.ok(!/\[data-tab="platforms"\][^\n]*classList\.add\('hidden'\)/.test(SHELL), 'no role may hide it');
 });
 
-check('help text points at Assistant Profile ▸ Connections, not a button that no longer exists', () => {
+check('help text points at Assistant Settings ▸ Connections, not a button that no longer exists', () => {
     const studio = read('src/components/blog-studio-modal.js');
     for (const [name, src] of [['assistants.js', SHELL], ['blog-studio-modal.js', studio]] as const) {
         assert.ok(!src.includes('Manage connections'), `${name} still names the removed button`);

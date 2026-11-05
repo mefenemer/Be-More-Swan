@@ -5307,7 +5307,7 @@
             <ol class="mt-1 space-y-1.5">
               ${f.steps.map((st) => `<li class="text-xs text-gray-700"><span class="font-bold text-gray-900">Day ${esc(String(st.daysAfterOpener))}:</span> ${esc(st.brief)}</li>`).join('')}
             </ol>
-            <p class="text-xs text-gray-500 mt-1.5">These aren’t written yet — each one is written when it’s due, from the brief above, and they stop the moment they reply. To send one email only, change “Chase leads who do not reply?” in Assistant Profile.</p>
+            <p class="text-xs text-gray-500 mt-1.5">These aren’t written yet — each one is written when it’s due, from the brief above, and they stop the moment they reply. To send one email only, change “Chase leads who do not reply?” in Assistant Settings.</p>
           </div>`;
       } else if (f && !f.enabled) {
         followHtml = '<p class="mt-3 text-xs text-gray-600">No follow-ups: this assistant is set to send one email only.</p>';
@@ -5517,7 +5517,7 @@
   //   monthlyCap, blocked, settled? }
   // A change to the assistant's OWN settings. Every fact on it was read from its row by the
   // orchestrator (src/utils/chat-assistant-settings.ts). The click dispatches `settings:change`;
-  // chat-session.js calls the endpoint the Assistant Profile uses for that setting.
+  // chat-session.js calls the endpoint the Assistant Settings uses for that setting.
   const SETTINGS_COPY = {
     pause: { head: 'Pause this assistant', button: 'Yes, pause', busy: 'Pausing…', danger: true },
     resume: { head: 'Start this assistant', button: 'Start it', busy: 'Starting…' },

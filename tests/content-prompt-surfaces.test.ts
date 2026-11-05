@@ -125,7 +125,7 @@ for (const r of ROLES) {
             assert.ok(surfaces.includes(`"${tab}" tab`), `${r.helper}() no longer mentions the "${tab}" tab`);
             assert.ok(TAB_ON_PAGE[tab](reg), `the "${tab}" tab is named in ${r.helper}() but is not on the page for ${r.role}`);
         }
-        assert.ok(page.includes('<span id="profile-btn-label">Assistant Profile</span>') && surfaces.includes('"Assistant Profile" button'));
+        assert.ok(page.includes('<span id="profile-btn-label">Assistant Settings</span>') && surfaces.includes('"Assistant Settings" button'));
     });
 
     check('every column and Profile card it names is on the page', () => {
@@ -135,7 +135,7 @@ for (const r of ROLES) {
         }
         for (const card of r.profile) {
             assert.ok(surfaces.includes(`"${card}"`), `${r.helper}() no longer names the "${card}" card`);
-            assert.ok(PROFILE_ON_PAGE(card), `the "${card}" card is not in the Assistant Profile`);
+            assert.ok(PROFILE_ON_PAGE(card), `the "${card}" card is not in the Assistant Settings`);
         }
     });
 
