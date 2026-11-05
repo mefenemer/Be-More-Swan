@@ -43,6 +43,9 @@ export type SiteRow = typeof sites.$inferSelect;
 
 /** A draft in flight longer than this is assumed dead (the worker never answered); a new one may start. */
 export const DRAFT_TIMEOUT_MS = 10 * 60 * 1000;
+/** Each try at the model for a whole-site draft or an import — long writing, in a background function.
+ *  The SDK makes up to 3 tries, so 3 × this must stay inside DRAFT_TIMEOUT_MS (the claim's life). */
+export const SITE_WRITE_DEADLINE_MS = 180_000;
 /** Set-up keys (assistant-onboarding-schemas.js → website_assistant), read by the AI draft. */
 export const SITE_SETUP_KEYS = { goal: 'siteGoal', pages: 'pagesWanted', style: 'siteStyle', currentSite: 'currentWebsite' } as const;
 
@@ -184,6 +187,9 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
             usage: { workspaceId: site.organisationId, assistantId: site.aiAssistantId },
             // The Website role's model (Admin ▸ Assistants ▸ Model & rules). Background: full thinking.
             ...(await gatewayRoleModel(db, 'website_assistant')),
+            // A background job writing thousands of words: 3 minutes a try, not the gateway's 24s
+            // (the background function itself may run 15 minutes).
+            deadlineMs: SITE_WRITE_DEADLINE_MS,
         });
         let drafted: { definition: SiteDefinition } | null;
         if (fromTemplate) {
@@ -192,7 +198,12 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
         } else {
             drafted = siteFromDraftReply(parseModelJson(res.text), current, maxPages);
         }
-        if (!drafted) { await endDraft(db, site.id, 'The draft couldn\'t be completed this time — your site is unchanged and nothing was charged. Try again in a few minutes.'); return; }
+        if (!drafted) {
+            // Say why in the log: a reply cut off at maxTokens reads very differently from one that wasn't JSON.
+            console.error('[site-store] draft reply unusable', { siteId, model: res.model, stopReason: res.stopReason, outputTokens: res.tokensOutput, fromTemplate, start: res.text.slice(0, 200) });
+            await endDraft(db, site.id, 'The draft couldn\'t be completed this time — your site is unchanged and nothing was charged. Try again in a few minutes.');
+            return;
+        }
 
         // The success latch: saved only if this draft still holds the claim.
         const [saved] = await db.update(sites).set({ draft: drafted.definition, draftingAt: null, draftNote: null, updatedAt: new Date() })
