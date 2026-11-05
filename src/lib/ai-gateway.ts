@@ -142,14 +142,18 @@ async function callModel(model: string, req: GatewayRequest): Promise<Anthropic.
         system: sanitizeForModel(req.system),
         messages: sanitizeForModel(req.messages),
     };
+    // A caller's deadline applies to EVERY model (2026-11-05). It used to reach thinking models only, so a
+    // whole-site draft on any other model — or with no role model chosen — kept the client's 24s and
+    // died at 3 × 24s ("Request timed out.") before the model could finish writing ~8k tokens.
+    const deadline = req.deadlineMs ? { timeout: req.deadlineMs } : undefined;
     // Only a role's chosen model is adapted; PRIMARY/FALLBACK calls go out exactly as before.
-    if (model !== req.model) return client.messages.create(params);
+    if (model !== req.model) return client.messages.create(params, deadline);
     // A thinking model gets the caller's deadline, or 2 minutes in background work (no deadline),
     // rather than the client's 24s: the head-to-head measured Opus 5.5 at up to 22.6s on short
     // prompts, and drafts carry ~8k tokens. Request paths pass a deadline (gatewayRoleModel).
     const thinks = modelOption(model)?.thinking !== 'none';
     return client.messages.create(adaptForModel(params, model, req.thinking) as Anthropic.MessageCreateParamsNonStreaming,
-        thinks ? { timeout: req.deadlineMs ?? 120_000 } : undefined);
+        thinks ? { timeout: req.deadlineMs ?? 120_000 } : deadline);
 }
 
 function isRequestRefusal(err: unknown): boolean {

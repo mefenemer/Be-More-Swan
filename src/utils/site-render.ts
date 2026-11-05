@@ -20,6 +20,7 @@ import type { SiteRenderReview, SiteRenderReviews } from './reviews';
 import type { SiteRenderSocialFeed, SiteRenderSocialPost } from './site-social-feed';
 import type { SiteBlogCard, SiteBlogIndex, SiteBlogPost, SiteRenderBlog } from './site-blog';
 import type { SessionView } from './class-sessions';
+import { LISTING_PATH, listingLd, listingsFor, type SiteRenderListing, type SiteRenderListings } from './site-listings';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
 import type { WeeklyHours } from './booking-availability';
 import { BLOG_MENU_ID, BLOG_PATH, blogOn, buttonInk, menuOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
@@ -56,6 +57,8 @@ export const BOOK_PATH = '/_book';
 
 /** A customer's review page (site-review.ts): the link in a review request email. Its form posts to FORM_ACTION. */
 export const REVIEW_PATH = '/_review';
+/** "Post your event" — a visitor's form for a listings section (site-listing-post.ts); posts to /_form. */
+export const LISTING_POST_PATH = '/_post';
 
 // ── Classes and events (site-classes.ts) — drawn here so the page section and /_book share it. ──
 /** /_book link to one session of this section (also used in the waitlist email). */
@@ -126,6 +129,10 @@ export interface RenderContext {
     socialFeed?: SiteRenderSocialFeed | null;
     /** The Blog Assistant's newest posts (site-blog.ts loadSiteBlogLatest); null = no blog_posts section on. */
     blog?: SiteRenderBlog | null;
+    /** The workspace's published listings (site-listings.ts loadSiteListings); null = no listings section. */
+    listings?: SiteRenderListings | null;
+    /** The page's query string (without '?') on the live site — a listings section's ?category= filter. */
+    query?: string;
     /** "Now", for the Open-now badge (tests pass a fixed time). */
     now?: Date;
     /**
@@ -238,6 +245,9 @@ video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r)
 .fm{display:grid;gap:14px;margin-top:20px;max-width:560px}.fm label{display:grid;gap:4px;font-weight:600;font-size:.95rem}.fm .opt{display:flex;gap:8px;align-items:flex-start;font-weight:400}
 .fm input:not([type=checkbox]):not([type=radio]),.fm textarea,.fm select{font:inherit;color:var(--t);background:var(--b);border:1px solid rgba(0,0,0,.25);border-radius:var(--r);padding:10px 12px;width:100%}
 .fm fieldset{border:0;padding:0;margin:0;display:grid;gap:6px}.fm legend{font-weight:600;font-size:.95rem;margin-bottom:4px}.fm .help,.fm .fine{font-size:.85rem;opacity:.8;font-weight:400;margin:0}
+.lf{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0}.lf a{border:1px solid rgba(0,0,0,.18);border-radius:999px;padding:6px 14px;text-decoration:none;color:var(--t);font-size:.92rem}.lf a[aria-current]{background:var(--p);color:var(--ink);border-color:var(--p)}.lcat{text-transform:uppercase;letter-spacing:.06em;font-weight:700}.when{font-weight:700}
+.ls{list-style:none;padding:0;margin:24px 0 0;display:grid;gap:14px}.lr{display:flex;gap:16px;align-items:flex-start;border-bottom:1px solid rgba(0,0,0,.08);padding-bottom:14px}.lr img{width:112px;aspect-ratio:4/3;object-fit:cover;border-radius:var(--r);flex-shrink:0}.lr h2,.lr h3{margin:0;font-size:1.15rem}.lr p{margin:4px 0 0}.lr h2 a,.lr h3 a{color:var(--t)}
+.li .facts{display:grid;gap:6px;margin:16px 0 20px;padding:16px 18px;border-radius:var(--r);background:rgba(0,0,0,.04)}.li .facts p{margin:0}
 .fm button{border:0;cursor:pointer;font:inherit;justify-self:start}.fm button[disabled]{opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}`;
 }
 
@@ -270,6 +280,9 @@ function logoSrc(theme: SiteTheme): string {
 let reviewsData: SiteRenderReviews | null = null;
 /** Set per render call — the social posts a social_feed section may show. */
 let socialFeedData: SiteRenderSocialFeed | null = null;
+/** Set per render call — the listings a listings section may show, and the category picked in its filter. */
+let listingsData: SiteRenderListings | null = null;
+let listingPicked: string | null = null;
 /** Set per render call — the blog posts a blog_posts section may show, and whether the blog is on. */
 let blogData: { latest: SiteRenderBlog | null; on: boolean } = { latest: null, on: false };
 /** Which posts a social_feed section shows: those that went to one of its platforms (none ticked = all), newest first. */
@@ -326,6 +339,16 @@ function blogCardHtml(post: SiteBlogCard, tag: 'h2' | 'h3' = 'h3'): string {
     const link = href(`${BLOG_PATH}/${encodeURIComponent(post.slug)}`);
     const img = post.imageUrl ? `<a href="${esc(link)}" tabindex="-1" aria-hidden="true"><img src="${esc(post.imageUrl)}" alt="" loading="lazy"></a>` : '';
     return `<article class="card bp">${img}<div class="bpb">${post.publishedAt ? `<p class="fine">${esc(shortDate(post.publishedAt))}</p>` : ''}<${tag}><a href="${esc(link)}">${esc(post.title)}</a></${tag}>${post.excerpt ? `<p>${esc(post.excerpt)}</p>` : ''}<a class="more" href="${esc(link)}" aria-label="Read ${esc(post.title)}">Read more</a></div></article>`;
+}
+
+/** One listing as a card (layout cards) or a row (layout list) — each links to its own page. */
+function listingCardHtml(l: SiteRenderListing, tag: 'h2' | 'h3', layout: 'cards' | 'list'): string {
+    const link = href(`${LISTING_PATH}/${encodeURIComponent(l.slug)}`);
+    const src = l.imageAssetId ? assetUrlOf(l.imageAssetId) || '' : '';
+    const meta = [l.when ? `<span class="when">${esc(l.when)}</span>` : '', l.location ? `<span>${esc(l.location)}</span>` : ''].filter(Boolean).join(' · ');
+    const inner = `${l.category ? `<p class="fine lcat">${esc(l.category)}</p>` : ''}<${tag}><a href="${esc(link)}">${esc(l.title)}</a></${tag}>${meta ? `<p class="fine">${meta}</p>` : ''}${l.summary ? `<p>${esc(l.summary)}</p>` : ''}`;
+    if (layout === 'list') return `<li class="lr">${src ? `<a href="${esc(link)}" tabindex="-1" aria-hidden="true"><img src="${esc(src)}" alt="" loading="lazy"></a>` : ''}<div>${inner}</div></li>`;
+    return `<article class="card bp">${src ? `<a href="${esc(link)}" tabindex="-1" aria-hidden="true"><img src="${esc(src)}" alt="" loading="lazy"></a>` : ''}<div class="bpb">${inner}<a class="more" href="${esc(link)}" aria-label="More about ${esc(l.title)}">More</a></div></article>`;
 }
 
 /** One section. `h1` is true for the single section that carries the page's main heading. */
@@ -454,6 +477,24 @@ ${formButton(p.buttonLabel)}
             const posts = (blogData.latest?.posts ?? []).slice(0, p.count);
             if (!posts.length) return note('nothing published by your Blog Assistant yet.');
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid">${posts.map((x) => blogCardHtml(x, h1 ? 'h2' : 'h3')).join('')}</div><p><a class="btn s" href="${esc(href(BLOG_PATH))}">See all posts</a></p></div></section>`;
+        }
+        case 'listings': {
+            // The workspace's own listings (the Listings tab), read when the page is drawn.
+            const p = s.props;
+            const ofKind = listingsFor(listingsData, { ...p, count: 1000 });
+            const cats = p.categories.length ? p.categories : [...new Set(ofKind.map((l) => l.category).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b)).slice(0, 20);
+            const picked = p.filter && listingPicked && cats.some((c) => c.toLowerCase() === listingPicked!.toLowerCase()) ? listingPicked : null;
+            const items = listingsFor(listingsData, p, picked);
+            const here = (q: string) => `${href(`${formState.path}${q}`)}#${encodeURIComponent(s.id)}`;
+            const filter = p.filter && cats.length > 1
+                ? `<nav class="lf" aria-label="Show by category"><a href="${esc(here(''))}"${picked ? '' : ' aria-current="true"'}>All</a>${cats.map((c) => `<a href="${esc(here(`?category=${encodeURIComponent(c)}`))}"${picked && picked.toLowerCase() === c.toLowerCase() ? ' aria-current="true"' : ''}>${esc(c)}</a>`).join('')}</nav>` : '';
+            const post = p.allowPosts ? `<p><a class="btn s" href="${esc(href(`${LISTING_POST_PATH}?s=${encodeURIComponent(s.id)}&p=${encodeURIComponent(formState.path)}`))}">${esc(p.postLabel)}</a></p>` : '';
+            const tag = h1 ? 'h2' : 'h3';
+            const none = p.kind === 'event' ? (picked ? `Nothing coming up in ${esc(picked)} just now.` : 'Nothing coming up just now — check back soon.') : 'Nothing listed yet.';
+            const list = items.length
+                ? (p.layout === 'list' ? `<ul class="ls">${items.map((l) => listingCardHtml(l, tag, 'list')).join('')}</ul>` : `<div class="grid">${items.map((l) => listingCardHtml(l, tag, 'cards')).join('')}</div>`)
+                : `<p>${none}${formState.preview && !listingsData?.all.length ? ' <span class="fine">(Add listings on the Listings tab — this note is only in your preview.)</span>' : ''}</p>`;
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${filter}${list}${post}</div></section>`;
         }
         case 'gallery': {
             const p = s.props;
@@ -681,6 +722,9 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
     reviewsData = ctx.reviews ?? null;
     socialFeedData = ctx.socialFeed ?? null;
     blogData = { latest: ctx.blog ?? null, on: blogOn(def) };
+    listingsData = ctx.listings ?? null;
+    // ?category= reaches here inside the path (the preview) or as the live site's query string.
+    try { listingPicked = new URLSearchParams(path.includes('?') ? path.split('?')[1].split('#')[0] : (ctx.query || '')).get('category')?.slice(0, 40) || null; } catch { listingPicked = null; }
     business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
     formState = { preview: ctx.preview, forms: ctx.forms ?? {}, renderedAt: ctx.renderedAt ?? Date.now(), path: page ? (page.slug ? `/${page.slug}` : '/') : '/', canSell: ctx.canSell === true, products: ctx.products ?? {}, booking: ctx.booking ?? null };
     if (!page) {
@@ -783,14 +827,50 @@ ${post.tags.length ? `<ul class="tags">${post.tags.map((t) => `<li>${esc(t)}</li
     });
 }
 
+/** /listings/<slug> — one listing's own page, in the site's own look. */
+export function renderSiteListing(def: SiteDefinition, ctx: RenderContext, l: SiteRenderListing): string {
+    startRender(def, ctx);
+    const s = def.settings;
+    const pageUrl = `${ctx.origin}${LISTING_PATH}/${encodeURIComponent(l.slug)}`;
+    const img = l.imageAssetId ? assetUrlOf(l.imageAssetId) || '' : '';
+    // Back to the page whose listings section shows this kind (the first one), else home.
+    const back = def.pages.find((p) => p.sections.some((x) => x.type === 'listings' && x.props.kind === l.kind));
+    const backPath = back ? (back.slug ? `/${back.slug}` : '/') : '/';
+    const facts = [
+        l.when ? `<p><strong>When:</strong> ${esc(l.when)}</p>` : '',
+        l.location ? `<p><strong>Where:</strong> ${esc(l.location)}</p>` : '',
+        l.category ? `<p><strong>Category:</strong> ${esc(l.category)}</p>` : '',
+    ].filter(Boolean).join('');
+    const buttons = [
+        l.linkUrl ? `<a class="btn" href="${esc(l.linkUrl)}" rel="noopener">${esc(l.linkLabel || (l.kind === 'event' ? 'Find out more' : 'Visit'))}</a>` : '',
+        l.kind === 'event' && l.startsOn ? `<a class="btn s" href="${esc(href(`${LISTING_PATH}/${encodeURIComponent(l.slug)}.ics`))}" download>Add to calendar</a>` : '',
+    ].filter(Boolean).join('');
+    const body = `<article><section><div class="w art li">
+<p class="meta"><a href="${esc(href(backPath))}">← ${esc(back ? back.title : 'Home')}</a></p>
+<h1>${esc(l.title)}</h1>
+${img ? `<img class="hero-img" src="${esc(img)}" alt="${esc(l.imageAlt || '')}">` : ''}
+${facts ? `<div class="facts">${facts}</div>` : ''}
+${l.summary ? `<p class="sub">${esc(l.summary)}</p>` : ''}
+${l.body ? `<div class="body">${paragraphs(l.body)}</div>` : ''}
+${buttons ? `<p>${buttons}</p>` : ''}
+</div></section></article>`;
+    return documentHtml(def, null, ctx, body, {
+        title: `${l.title}${l.when ? ` — ${l.when}` : ''} | ${s.siteName}`,
+        description: l.summary || (l.body ? l.body.replace(/\s+/g, ' ').slice(0, 160) : null),
+        canonical: pageUrl, pageUrl, robots: null, ogType: 'website', image: img || null, menuId: back?.id ?? '',
+        ld: [listingLd(l, s.siteName, pageUrl, img || null)],
+    });
+}
+
 /** `blog`: the blog's own addresses when it is on — only posts whose canonical is this site belong here. */
-export function renderSitemap(def: SiteDefinition, origin: string, blog: Array<{ slug: string; lastmod: string | null }> = []): string {
+export function renderSitemap(def: SiteDefinition, origin: string, blog: Array<{ slug: string; lastmod: string | null }> = [], listings: Array<{ slug: string; lastmod: string | null }> = []): string {
     const blogUrls = blogOn(def)
         ? [`  <url><loc>${esc(`${origin}${BLOG_PATH}`)}</loc></url>`, ...blog.map((b) => `  <url><loc>${esc(`${origin}${BLOG_PATH}/${encodeURIComponent(b.slug)}`)}</loc>${b.lastmod ? `<lastmod>${esc(b.lastmod.slice(0, 10))}</lastmod>` : ''}</url>`)]
         : [];
     return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${[...def.pages.map((p) => `  <url><loc>${esc(`${origin}${p.slug ? `/${p.slug}` : '/'}`)}</loc></url>`), ...blogUrls].join('\n')}
+${[...def.pages.map((p) => `  <url><loc>${esc(`${origin}${p.slug ? `/${p.slug}` : '/'}`)}</loc></url>`), ...blogUrls,
+    ...listings.map((l) => `  <url><loc>${esc(`${origin}${LISTING_PATH}/${encodeURIComponent(l.slug)}`)}</loc>${l.lastmod ? `<lastmod>${esc(l.lastmod.slice(0, 10))}</lastmod>` : ''}</url>`)].join('\n')}
 </urlset>
 `;
 }

@@ -1092,6 +1092,7 @@ window._activateMainTab = function(name) {
     if (name === 'siteenquiries') siteEditor((ed) => ed.activate('enquiries'));
     if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));
     if (name === 'sitebookings') siteEditor((ed) => ed.activate('bookings'));
+    if (name === 'sitelistings') siteEditor((ed) => ed.activate('listings'));
     // Strategy resolved its gate (and loaded) on init — activation only paints.
     if (name === 'strategy') window.AssistantStrategy?.activate();
     // A hub whose rows change in the background (the Campaign Assistant's Orders) re-reads on open.
@@ -5216,8 +5217,14 @@ window._setNextUp = function(text) {
 function _scheduleAssistantNudges(data) {
     if (!window.AssistantBubbles || !data || data.lifecycleStatus === 'archived') return;
     const id = Number(data.id);
-    setTimeout(() => {
+    setTimeout(async () => {
         if (Number(window._currentAssistantId) !== id) return;     // the user has moved on
+        // Wait for this assistant's own waiting count — the pop-up used to quote a stale total.
+        const ready = window._detailRqBadgeReady;
+        if (ready && ready.assistantId === id) {
+            await Promise.race([ready.done, new Promise((r) => setTimeout(r, 8000))]).catch(() => {});
+            if (Number(window._currentAssistantId) !== id) return;
+        }
         const items = [];
         const n = window._detailOpSignals?.pendingReview || 0;
         const where = (window._detailReviewQueue || {}).label || 'Review';
@@ -7153,6 +7160,8 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-siteenquiries', !!siteEditorTab);
     toggle('maintab-btn-siteorders', !!siteEditorTab);
     toggle('maintab-btn-sitebookings', !!siteEditorTab);
+    // Listings: shown by the editor once the site lists things (the feature, or a listings section).
+    toggle('maintab-btn-sitelistings', false);
     if (siteEditorTab) {
         setText('sitebuilder-tab-label', siteEditorTab.label || 'Website');
         siteEditor((ed) => ed.init({ assistantId: data.id, assistantName: data.name }));
@@ -9274,7 +9283,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // await _fetchAndRenderRelationshipChecklist(assistantId);
 
     // ── Review Queue tab — prefetch pending count so the badge shows without opening the tab ──
-    _prefetchDetailRqBadge(assistantId);
+    // Kept as a promise so the assistant's pop-up waits for THIS assistant's count rather than
+    // reading whatever the signal held when its timer fired (0, or the previous assistant's).
+    window._detailRqBadgeReady = { assistantId: Number(assistantId), done: _prefetchDetailRqBadge(assistantId) };
 
     // allSettled, not all: in the old sequence a throw in one loader stopped every loader after
     // it. Running together, one failure must not hide the others — log it and let the rest paint.
@@ -9305,9 +9316,14 @@ async function _prefetchDetailRqBadge(assistantId) {
             if (!res.ok) return;
             count = ((await res.json()).issues || []).filter((i) => _RQ_NEWSLETTER_WAITING.includes(i.status)).length;
         } else {
-            const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}`);
+            // ⚠️ Paged (limit=1) so the server returns `total` counted in POSTS. Unpaged, this counted
+            // ROWS — one per platform, capped at 50 — so a post going to three platforms counted
+            // three, and the assistant's pop-up ("N things are waiting") disagreed with the Review
+            // tab it pointed at (2026-11-04).
+            const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}&limit=1&offset=0`);
             if (!res.ok) return;
-            count = ((await res.json()).drafts || []).length;
+            const j = await res.json();
+            count = typeof j.total === 'number' ? j.total : (j.drafts || []).length;
         }
         _setDetailRqTabBadge(count);
         window._setPendingReviewCount?.(count);

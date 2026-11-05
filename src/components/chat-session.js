@@ -109,9 +109,10 @@
     const hasHistory = (props.initialMessages || []).some(
       (m) => m && m.role !== 'system' && typeof m.content === 'string'
     );
-    const starterPrompts = !hasHistory && window.AssistantStarterPrompts
-      ? window.AssistantStarterPrompts.get(props.roleKey)
-      : null;
+    // props.starterPrompts: a surface's own first prompts (the Website tab's chat pane on a new site).
+    const starterPrompts = hasHistory ? null
+      : Array.isArray(props.starterPrompts) && props.starterPrompts.length ? props.starterPrompts
+      : window.AssistantStarterPrompts ? window.AssistantStarterPrompts.get(props.roleKey) : null;
 
     // Read-only: an ARCHIVED conversation. chat-orchestrator.ts 409s on a non-active session, so
     // a composer here would only ever produce an error — the transcript is still worth reading,
@@ -160,12 +161,13 @@
         <div class="border-t border-gray-200 bg-white px-4 sm:px-6 py-4">
           <div class="hidden mb-2 text-sm text-red-600 font-semibold" data-chat-error role="alert"></div>
           ${canAttach ? '<div class="hidden flex-wrap gap-2 mb-2" data-chat-chips></div>' : ''}
+          <div class="mb-2" data-chat-ref style="display:none"></div>
           <form class="flex items-end gap-3" data-chat-form>
-            ${canAttach ? `<label class="btn-secondary border px-3 py-3 rounded-lg cursor-pointer shrink-0 text-sm" title="Attach pictures or documents (Word, PDF, text)">
+            ${canAttach ? `<label class="btn-secondary border px-3 py-3 rounded-lg cursor-pointer shrink-0 text-sm" title="Add pictures — upload, your library, find stock or create one — or attach a document">
               <span aria-hidden="true">📎</span><span class="sr-only">Attach pictures or documents</span>
               <input type="file" multiple hidden data-chat-attach accept="image/*,.docx,.pdf,.txt,.md,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain">
             </label>` : ''}
-            <textarea rows="1" placeholder="${canAttach ? 'Type your message, or attach pictures and documents…' : 'Type your message…'}" maxlength="${MAX_MESSAGE_CHARS}"
+            <textarea rows="${Number(props.composerRows) > 1 ? Number(props.composerRows) : 1}" placeholder="${escapeHtml(props.placeholder || (canAttach ? 'Type your message, or attach pictures and documents…' : 'Type your message…'))}" maxlength="${MAX_MESSAGE_CHARS}"
               class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm bg-white resize-none max-h-40"
               data-chat-input></textarea>
             <button type="submit"
@@ -182,7 +184,38 @@
     const sendBtn = container.querySelector('[data-chat-send]');
     const errorEl = container.querySelector('[data-chat-error]');
     const chipsEl = container.querySelector('[data-chat-chips]');
+    const refEl = container.querySelector('[data-chat-ref]');
+    // A tall message box (props.composerRows > 1, the Website tab's chat pane) takes the full width,
+    // with the paperclip and Send on a row under it.
+    if (formEl && Number(props.composerRows) > 1) {
+      formEl.style.cssText = 'display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"text text text" "clip . send";gap:8px;align-items:center';
+      inputEl.style.gridArea = 'text';
+      sendBtn.style.gridArea = 'send';
+      const clip = formEl.querySelector('label');
+      if (clip) clip.style.gridArea = 'clip';
+    }
+
+    // ── A reference to something on screen (the Website tab's "Select" picker) ──
+    // { label: '<short, shown on the chip>', message: '<what the assistant is told it refers to>' }.
+    // Shown as a chip above the composer; the next message is sent with `message` in front of what
+    // they typed, then the chip clears. The user's own bubble shows the whole thing, so nothing is
+    // sent that they could not see.
+    let reference = null;
+    function setReference(ref) {
+      reference = ref && typeof ref.message === 'string' && ref.message.trim()
+        ? { label: String(ref.label || ref.message).slice(0, 140), message: String(ref.message).slice(0, 600) } : null;
+      if (!refEl) return;
+      refEl.style.display = reference ? '' : 'none';
+      refEl.innerHTML = reference ? `
+        <span class="inline-flex items-center gap-2 max-w-full rounded-lg pl-3 pr-1 py-1 text-xs font-semibold" style="background:#fdf2f8;border:1px solid #fbcfe8;color:#831843">
+          <span aria-hidden="true">🎯</span><span class="truncate" title="${escapeHtml(reference.label)}">${escapeHtml(reference.label)}</span>
+          <button type="button" data-chat-ref-clear class="px-1.5 font-black" style="color:#be185d;background:none;border:0;cursor:pointer" aria-label="Remove the selected part">×</button>
+        </span>` : '';
+      if (reference && inputEl) inputEl.focus();
+    }
+    function onRefClick(e) { if (e.target.closest('[data-chat-ref-clear]')) setReference(null); }
     const attachInput = container.querySelector('[data-chat-attach]');
+    const attachLabel = attachInput ? attachInput.closest('label') : null;
 
     // ── Attachments (only where canAttach) ──
     function renderChips() {
@@ -191,8 +224,8 @@
       chipsEl.style.display = pending.length ? 'flex' : 'none';
       chipsEl.innerHTML = pending.map((p, i) => `
         <span class="inline-flex items-center gap-1 bg-gray-100 border border-gray-200 rounded-full pl-3 pr-1 py-1 text-xs text-gray-800">
-          ${p.kind === 'image' ? '🖼️' : '📄'} ${escapeHtml(p.file.name)}
-          <button type="button" data-chat-chip-remove="${i}" class="px-1 text-gray-500 hover:text-gray-900" aria-label="Remove ${escapeHtml(p.file.name)}">×</button>
+          ${p.kind === 'image' ? '🖼️' : '📄'} ${escapeHtml(p.asset ? p.asset.name || 'Picture' : p.file.name)}
+          <button type="button" data-chat-chip-remove="${i}" class="px-1 text-gray-500 hover:text-gray-900" aria-label="Remove ${escapeHtml(p.asset ? p.asset.name || 'picture' : p.file.name)}">×</button>
         </span>`).join('');
     }
     function addFiles(files) {
@@ -217,6 +250,8 @@
     async function prepareAttachments(items) {
       const out = [];
       for (const p of items) {
+        // Already in the library (chosen, found or created in the picture window): just its id.
+        if (p.asset) { out.push({ kind: 'image', assetId: p.asset.id, name: p.asset.name || 'Picture' }); continue; }
         if (p.kind === 'image') {
           if (!window.MediaPicker || typeof window.MediaPicker.upload !== 'function') throw new Error('Pictures can\'t be attached on this page — add them on the Website tab instead.');
           const asset = await window.MediaPicker.upload(p.file);
@@ -228,6 +263,25 @@
       return out;
     }
     function onAttachChange() { addFiles(Array.from(attachInput.files || [])); attachInput.value = ''; }
+    // The paperclip opens the same picture window the Website tab uses (media-picker.js): upload, your
+    // library, "Ask … to find stock", "Ask … to create one" (description optional) — and documents.
+    // Without that window on the page it falls back to the computer's own file chooser.
+    function onAttachClick(e) {
+      if (!window.MediaPicker || typeof window.MediaPicker.open !== 'function') return;
+      e.preventDefault();
+      window.MediaPicker.open({
+        title: 'Add to your message', multiple: true, assistantName: props.assistantName,
+        onPickMany: (assets) => {
+          for (const a of assets) {
+            if (pending.length >= ATTACH_MAX) { showError(`Attach up to ${ATTACH_MAX} files at a time.`); break; }
+            if (!pending.some((p) => p.asset && p.asset.id === a.id)) pending.push({ kind: 'image', asset: a });
+          }
+          renderChips();
+          inputEl.focus();
+        },
+        documents: { onFiles: (files) => { addFiles(files); inputEl.focus(); } },
+      });
+    }
     function onChipsClick(e) {
       const b = e.target.closest('[data-chat-chip-remove]');
       if (!b) return;
@@ -271,6 +325,14 @@
       emptyEl?.remove();
 
       const isUser = message.role === 'user';
+      // A step-by-step question card (chat_questions) is answered by the next thing they send —
+      // from the card itself or typed instead — so it closes then, live or when a thread reloads.
+      // Their answers ("My answers:" + one line each) are shown ON the card as its summary, not again
+      // as a bubble under it (owner, 2026-11-05) — on a reload too, where the card is rebuilt open.
+      const openCards = isUser ? [...scrollEl.querySelectorAll('[data-questions-open]')] : [];
+      const answersText = isUser && openCards.length && /^My answers:\n/.test(message.content) ? message.content : null;
+      openCards.forEach((q) => q.dispatchEvent(new CustomEvent('questions:closed', { detail: { answers: answersText } })));
+      if (answersText) { scrollToBottom(); return; }
       const row = document.createElement('div');
       row.className = `flex flex-col gap-2 ${isUser ? 'items-end' : 'items-start'}`;
 
@@ -417,11 +479,15 @@
      * Shape: { targetRoleKey, targetAssistantName, payloadToPass }.
      */
     async function sendMessage(text, opts) {
-      const message = String(text ?? '').trim();
+      const typed = String(text ?? '').trim();
       const files = canAttach ? pending.slice() : [];
       // An archived conversation is read-only end to end: the orchestrator would 409 anyway,
       // so a programmatic send must not append an optimistic user bubble that never gets a reply.
-      if (readOnly || (!message && !files.length) || sending) return;
+      if (readOnly || (!typed && !files.length) || sending) return;
+      // A part of the page they selected goes in front of what they typed (setReference).
+      const withRef = reference && typed && !(opts && opts.noReference);
+      const message = withRef ? `${reference.message}\n\n${typed}` : typed;
+      if (withRef) setReference(null);
       if (message.length > MAX_MESSAGE_CHARS) {
         showError(`Message too long (max ${MAX_MESSAGE_CHARS} characters).`);
         return;
@@ -436,7 +502,7 @@
         pending = [];
         renderChips();
       }
-      appendMessage({ role: 'user', content: [message, files.length ? `📎 Attached: ${files.map((f) => f.file.name).join(', ')}` : ''].filter(Boolean).join('\n\n') });
+      appendMessage({ role: 'user', content: [message, files.length ? `📎 Attached: ${files.map((f) => (f.asset ? f.asset.name || 'Picture' : f.file.name)).join(', ')}` : ''].filter(Boolean).join('\n\n') });
       setSending(true);
       const skeleton = showTypingSkeleton();
 
@@ -470,7 +536,11 @@
 
         // The orchestrator creates the session before the LLM call — keep its id even
         // on failure so a retry continues the same conversation.
-        if (data.chatSessionId) chatSessionId = data.chatSessionId;
+        if (data.chatSessionId && data.chatSessionId !== chatSessionId) {
+          chatSessionId = data.chatSessionId;
+          // A surface that keeps its own thread (the Website tab's chat pane) remembers which one.
+          if (typeof props.onSession === 'function') { try { props.onSession(chatSessionId); } catch { /* the surface's problem */ } }
+        }
 
         if (!res.ok || !data.message) {
           // Over plan limit: render the upgrade paywall as a native chat bubble.
@@ -501,6 +571,17 @@
       }
     }
 
+    // A card that answers for the user (chat_questions' "Send answers") — sent as their own message,
+    // exactly as if typed, with no on-screen reference in front of it.
+    function onCardSend(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      if (readOnly) { respond({ ok: false, error: 'This conversation is archived.' }); return; }
+      if (sending) { respond({ ok: false, error: 'Wait for the reply, then send again.' }); return; }
+      respond({ ok: true });
+      sendMessage(String(d.text || ''), { noReference: true });
+    }
+
     function onSubmit(e) {
       e.preventDefault();
       const text = inputEl.value;
@@ -518,7 +599,7 @@
 
     function onInput() {
       inputEl.style.height = 'auto';
-      inputEl.style.height = `${Math.min(inputEl.scrollHeight, 160)}px`;
+      inputEl.style.height = `${Math.min(inputEl.scrollHeight, Number(props.composerRows) > 1 ? 280 : 160)}px`;
     }
 
     // HITL handoff approvals bubble up from HandoffProposalCard (disruptive-ui-registry.js).
@@ -948,12 +1029,14 @@
           if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
           if (!(data.archivedIds || []).length) throw new Error('It is live, publishing, or already archived.');
           message = 'Removed — it’s in the "Archived" column.';
-        } else if (d.action === 'shorter' || d.action === 'longer' || d.action === 'revise') {
+        } else if (d.action === 'shorter' || d.action === 'longer' || d.action === 'revise' || d.action === 'pictures') {
           // Blog Studio's buttons: the same queued resize job, polled until it lands (about a minute).
           // "Revise" is that job steered by the user's instruction (src/utils/blog-resize.ts).
           const q = await postActionCall('generate-blog', d.action === 'revise'
             ? { blogPostId: d.postId, revise: d.instruction }
-            : { blogPostId: d.postId, resize: d.action });
+            : d.action === 'pictures'
+              ? { blogPostId: d.postId, addImages: { source: d.source === 'ai' ? 'ai' : 'stock', instruction: d.instruction || undefined } }
+              : { blogPostId: d.postId, resize: d.action });
           const started = Date.now();
           let job = null;
           while (Date.now() - started < 180000) {
@@ -964,11 +1047,15 @@
             if (job && (job.status === 'completed' || job.status === 'failed')) break;
           }
           if (!job || job.status === 'queued' || job.status === 'processing') {
-            message = 'Still rewriting — open the article in Blog Studio in a minute to read the new version.';
+            message = d.action === 'pictures'
+              ? 'Still finding pictures — open the article in Blog Studio in a minute to see them.'
+              : 'Still rewriting — open the article in Blog Studio in a minute to read the new version.';
           } else if (job.status === 'failed') {
             throw new Error(job.errorMessage || 'That didn’t work. Your article is unchanged.');
           } else {
-            message = `${d.action === 'shorter' ? 'Shorter' : d.action === 'longer' ? 'Longer' : 'Rewritten'} — saved. Open it in Blog Studio to read it.`;
+            message = d.action === 'pictures'
+              ? `Pictures added — open it in Blog Studio to see them.${job.errorMessage ? ' ' + job.errorMessage : ''}`
+              : `${d.action === 'shorter' ? 'Shorter' : d.action === 'longer' ? 'Longer' : 'Rewritten'} — saved. Open it in Blog Studio to read it.`;
           }
         } else {
           throw new Error('Unknown action.');
@@ -1882,6 +1969,66 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // A site_picture card's chosen picture → sites.ts apply. IN a section that holds one picture (hero,
+    // text, sign-up) it becomes that picture; in a gallery it is added; anywhere else, or place
+    // 'after', it goes in a new picture section straight after this one. Read fresh, so ids are real.
+    async function onSitePicturePlace(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const data = await sitePost({ action: 'get', assistantId });
+        const pages = (data.definition && data.definition.pages) || [];
+        const pg = pages.find((x) => x.id === d.pageId);
+        const at = pg ? pg.sections.findIndex((x) => x.id === d.sectionId) : -1;
+        if (!pg || at < 0) throw new Error('That section isn\'t on your site any more.');
+        const sec = pg.sections[at];
+        const img = { assetId: Number(d.assetId), url: '', alt: String(d.alt || 'A picture').slice(0, 150) };
+        const holdsOne = ['hero', 'text', 'signup'].includes(sec.type);
+        const ops = d.place !== 'after' && holdsOne ? [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { image: img } }]
+          : d.place !== 'after' && sec.type === 'gallery' ? [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { images: [...(sec.props.images || []), { ...img, caption: null }] } }]
+          : [{ op: 'add_section', pageId: pg.id, index: at + 1, section: { type: 'gallery', props: { heading: null, intro: null, layout: 'natural', images: [{ ...img, caption: null }] } } }];
+        let r;
+        try { r = await sitePost({ action: 'apply', assistantId, ops }); }
+        catch (err) {
+          // A new picture section can be refused (the site's "gallery" is switched off): beside the
+          // section's own words instead, where it holds a picture.
+          if (ops[0].op !== 'add_section' || !holdsOne) throw err;
+          r = await sitePost({ action: 'apply', assistantId, ops: [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { image: img } }] });
+        }
+        respond({ ok: true, warnings: r.warnings || [] });
+        siteChanged();
+      } catch (err) { respond({ ok: false, error: err.message }); }
+    }
+
+    // "Add these" on a listings_add card → site-listings.ts POST { listings } (the Listings tab's "Add a listing").
+    function onListingsAdd(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      fetch('/.netlify/functions/site-listings', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listings: Array.isArray(d.listings) ? d.listings : [] }),
+      })
+        .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'They couldn\'t be added.'); })
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+    // "Do it" on a listing_decisions card → site-listings.ts PATCH { id, decision }, one at a time.
+    async function onListingDecisions(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      let done = 0;
+      try {
+        for (const x of (Array.isArray(d.decisions) ? d.decisions : [])) {
+          const r = await fetch('/.netlify/functions/site-listings', { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: x.listingId, decision: x.decision }) });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(`Listing ${x.listingId}: ${j.error || 'couldn\'t be saved.'}`);
+          done++;
+        }
+        respond({ ok: true, done });
+        siteChanged();
+      } catch (err) { respond({ ok: false, error: `${done ? `${done} saved, then: ` : ''}${err.message}` }); }
+    }
+
     // "Read my site" on a site_import_request card — sites.ts `import`, the Website tab's same button.
     function onSiteImport(e) {
       const d = e.detail || {};
@@ -2183,6 +2330,7 @@
       inputEl.addEventListener('input', onInput);
       if (canAttach) {
         attachInput.addEventListener('change', onAttachChange);
+        attachLabel?.addEventListener('click', onAttachClick);
         chipsEl.addEventListener('click', onChipsClick);
         container.addEventListener('dragover', onDragOver);
         container.addEventListener('drop', onDrop);
@@ -2192,6 +2340,11 @@
     container.addEventListener('handoff:response', onHandoffResponse);
     container.addEventListener('discovery:create', onDiscoveryCreate);
     container.addEventListener('campaign:create', onCampaignCreate);
+    container.addEventListener('chat:send', onCardSend);
+    container.addEventListener('site:listingsAdd', onListingsAdd);
+    container.addEventListener('site:picturePlace', onSitePicturePlace);
+    container.addEventListener('site:listingDecisions', onListingDecisions);
+    if (refEl) refEl.addEventListener('click', onRefClick);
     container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
     container.addEventListener('campaign:edit', onCampaignEdit);
     container.addEventListener('campaign:taskUpdate', onCampaignTaskUpdate);
@@ -2275,6 +2428,8 @@
     return {
       sendMessage,
       appendMessage,
+      setReference,
+      focus() { if (inputEl) inputEl.focus(); },
       getSessionId: () => chatSessionId,
       destroy() {
         if (!readOnly) {
@@ -2283,6 +2438,7 @@
           inputEl.removeEventListener('input', onInput);
           if (canAttach) {
             attachInput.removeEventListener('change', onAttachChange);
+            attachLabel?.removeEventListener('click', onAttachClick);
             chipsEl.removeEventListener('click', onChipsClick);
             container.removeEventListener('dragover', onDragOver);
             container.removeEventListener('drop', onDrop);
@@ -2292,6 +2448,11 @@
         container.removeEventListener('handoff:response', onHandoffResponse);
         container.removeEventListener('discovery:create', onDiscoveryCreate);
         container.removeEventListener('campaign:create', onCampaignCreate);
+        container.removeEventListener('chat:send', onCardSend);
+        container.removeEventListener('site:listingsAdd', onListingsAdd);
+        container.removeEventListener('site:picturePlace', onSitePicturePlace);
+        container.removeEventListener('site:listingDecisions', onListingDecisions);
+        if (refEl) refEl.removeEventListener('click', onRefClick);
         container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);
         container.removeEventListener('campaign:edit', onCampaignEdit);
         container.removeEventListener('campaign:taskUpdate', onCampaignTaskUpdate);

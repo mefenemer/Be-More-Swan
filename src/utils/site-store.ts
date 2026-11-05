@@ -11,6 +11,7 @@ import { bookableSessions } from './class-sessions';
 import { socialFeedForPrompt } from './site-social-feed';
 import { siteBlogForPrompt } from './site-blog';
 import { reviewsForPrompt } from './reviews';
+import { listingsForPrompt } from './site-listings';
 import { and, desc, eq, inArray, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { describeOfferProfile, loadOfferProfile } from './offer-profile';
@@ -42,6 +43,9 @@ export type SiteRow = typeof sites.$inferSelect;
 
 /** A draft in flight longer than this is assumed dead (the worker never answered); a new one may start. */
 export const DRAFT_TIMEOUT_MS = 10 * 60 * 1000;
+/** Each try at the model for a whole-site draft or an import — long writing, in a background function.
+ *  The SDK makes up to 3 tries, so 3 × this must stay inside DRAFT_TIMEOUT_MS (the claim's life). */
+export const SITE_WRITE_DEADLINE_MS = 180_000;
 /** Set-up keys (assistant-onboarding-schemas.js → website_assistant), read by the AI draft. */
 export const SITE_SETUP_KEYS = { goal: 'siteGoal', pages: 'pagesWanted', style: 'siteStyle', currentSite: 'currentWebsite' } as const;
 
@@ -183,6 +187,9 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
             usage: { workspaceId: site.organisationId, assistantId: site.aiAssistantId },
             // The Website role's model (Admin ▸ Assistants ▸ Model & rules). Background: full thinking.
             ...(await gatewayRoleModel(db, 'website_assistant')),
+            // A background job writing thousands of words: 3 minutes a try, not the gateway's 24s
+            // (the background function itself may run 15 minutes).
+            deadlineMs: SITE_WRITE_DEADLINE_MS,
         });
         let drafted: { definition: SiteDefinition } | null;
         if (fromTemplate) {
@@ -191,7 +198,12 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
         } else {
             drafted = siteFromDraftReply(parseModelJson(res.text), current, maxPages);
         }
-        if (!drafted) { await endDraft(db, site.id, 'The draft couldn\'t be completed this time — your site is unchanged and nothing was charged. Try again in a few minutes.'); return; }
+        if (!drafted) {
+            // Say why in the log: a reply cut off at maxTokens reads very differently from one that wasn't JSON.
+            console.error('[site-store] draft reply unusable', { siteId, model: res.model, stopReason: res.stopReason, outputTokens: res.tokensOutput, fromTemplate, start: res.text.slice(0, 200) });
+            await endDraft(db, site.id, 'The draft couldn\'t be completed this time — your site is unchanged and nothing was charged. Try again in a few minutes.');
+            return;
+        }
 
         // The success latch: saved only if this draft still holds the claim.
         const [saved] = await db.update(sites).set({ draft: drafted.definition, draftingAt: null, draftNote: null, updatedAt: new Date() })
@@ -373,6 +385,22 @@ const clip = (s: unknown, n: number) => {
  * The site as the chat needs it, read per turn: every page and section with its id, so a change
  * card can name exactly what it changes, and nothing the editor does not also show.
  */
+/** Their website from before this one — their set-up answer, else Business Information — so the chat's
+ *  first question can name it ("bring over yoursite.co.uk?"). Never this site's own address. */
+async function currentWebsiteLine(db: Db, orgId: number, assistantId: number, slug: string | null): Promise<string> {
+    const [[a], [o]] = await Promise.all([
+        db.select({ ctx: aiAssistants.onboardingContext }).from(aiAssistants).where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1),
+        db.select({ url: organisations.websiteUrl }).from(organisations).where(eq(organisations.id, orgId)).limit(1),
+    ]);
+    const ctx = (a?.ctx && typeof a.ctx === 'object' ? a.ctx : {}) as Record<string, unknown>;
+    const answer = typeof ctx[SITE_SETUP_KEYS.currentSite] === 'string' ? String(ctx[SITE_SETUP_KEYS.currentSite]).trim().slice(0, 300) : '';
+    const fromBi = (o?.url || '').trim().slice(0, 300);
+    const own = (u: string) => !!slug && u.toLowerCase().includes(`${slug.toLowerCase()}.`);
+    if (answer && !own(answer)) return `Their website before this one (their set-up answer to "Do you already have a website?"): ${answer}`;
+    if (fromBi && !own(fromBi)) return `Their website before this one (from Business Information): ${fromBi}`;
+    return 'Their website before this one: not known — ask.';
+}
+
 export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: number): Promise<string> {
     const [site] = await db.select().from(sites).where(and(eq(sites.aiAssistantId, assistantId), eq(sites.organisationId, orgId))).limit(1);
     if (!site) return 'YOUR SITE RIGHT NOW: not started. The first time the Website tab opens it starts from their business details; or propose a site_draft_request to draft the whole site.';
@@ -390,6 +418,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         `Can they press Publish now: ${(() => { const b = publishBlocker(site, d); return b ? `NO — ${b}` : 'yes'; })()}`,
         `Pages: ${d.pages.length} (no plan limits pages). Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
+        await currentWebsiteLine(db, orgId, assistantId, site.slug),
         d.settings.features
             ? `What this website does (their choice): ${d.settings.features.map((f) => FEATURE_LABELS[f]).join('; ') || 'only the basics'}. Switched OFF — never propose these kinds of section: ${SITE_FEATURES.filter((f) => !d.settings.features!.includes(f)).map((f) => FEATURE_LABELS[f]).join('; ') || 'nothing'}. To switch one on or off, propose set_settings with the full "features" list (${SITE_FEATURES.join(', ')}).`
             : `What this website does: not chosen yet — every kind of section is offered. When you discuss the site, help them choose and propose set_settings {"features":[…]} from ${SITE_FEATURES.join(', ')}, so what they don't need is hidden.`,
@@ -405,7 +434,8 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
             const lk = s.look && (s.look.background !== 'auto' || s.look.columns !== 'auto' || s.look.menuLabel)
                 ? ` · look: ${[s.look.background !== 'auto' ? `${s.look.background} background` : '', s.look.columns !== 'auto' ? `${s.look.columns} columns` : '', s.look.menuLabel ? `menu label "${s.look.menuLabel}"` : ''].filter(Boolean).join(', ')}` : '';
             const feed = s.type === 'social_feed' ? ` · ${s.props.enabled ? 'ON' : 'SWITCHED OFF'}, ${s.props.count} newest from ${s.props.platforms.length ? s.props.platforms.join(', ') : 'every platform'}`
-                : s.type === 'blog_posts' ? ` · ${s.props.enabled ? 'ON' : 'SWITCHED OFF'}, ${s.props.count} newest blog posts` : '';
+                : s.type === 'blog_posts' ? ` · ${s.props.enabled ? 'ON' : 'SWITCHED OFF'}, ${s.props.count} newest blog posts`
+                : s.type === 'listings' ? ` · ${s.props.kind === 'event' ? 'events' : 'entries'}${s.props.categories.length ? ` in ${s.props.categories.join(', ')}` : ''}, ${s.props.show === 'all' ? 'all' : 'upcoming only'}, up to ${s.props.count}, ${s.props.layout}${s.props.allowPosts ? `, visitors may send one in ("${s.props.postLabel}")` : ''}` : '';
             lines.push(`    · ${s.type} (sectionId ${s.id})${main ? `: "${clip(main, 90)}"` : ''}${items}${typeof pr.body === 'string' ? ` · "${clip(pr.body, 80)}"` : ''}${feed}${lk}`);
         }
     }
@@ -434,6 +464,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     lines.push(await reviewsForPrompt(db, orgId).catch(() => 'Their reviews could not be read this turn.'));
     lines.push(await socialFeedForPrompt(db, orgId).catch(() => 'Their published social posts could not be read this turn.'));
     lines.push(await siteBlogForPrompt(db, orgId, d).catch(() => 'Their blog posts could not be read this turn.'));
+    lines.push(await listingsForPrompt(db, orgId).catch(() => 'Their listings could not be read this turn.'));
     const forms = await listSignupForms(db, orgId).catch(() => []);
     lines.push(forms.length
         ? `Their sign-up forms (for a signup section's formId): ${forms.map((f) => `${f.name} (formId ${f.id}${f.download ? `, emails a free download: "${f.download}"` : ''}${f.active ? '' : ', switched off'})`).join('; ')}.`

@@ -95,7 +95,9 @@ export default withLambda(async (event) => {
             declaredFacts,
         });
         const finishedAt = new Date().toISOString();
-        verification = result.outcome === 'records'
+        verification = result.outcome === 'declared'
+            ? { status: 'declared', reason: result.reason, fixWhere: result.fixWhere, searchCount: result.searchCount, finishedAt }
+            : result.outcome === 'records'
             ? { status: 'records', reason: result.reason, fixWhere: result.fixWhere, before: result.after ? caption : null, after: result.after, searchCount: result.searchCount, finishedAt }
             : result.outcome === 'sourced'
             ? { status: 'sourced', sourceUrl: result.sourceUrl, note: result.note, searchCount: result.searchCount, finishedAt }

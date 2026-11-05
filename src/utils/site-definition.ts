@@ -85,16 +85,17 @@ export const DEFAULT_BLOG_LABEL = 'Blog';
 /** Whether this site shows the Blog Assistant's posts at /blog. */
 export const blogOn = (def: Pick<SiteDefinition, 'settings'>): boolean => def.settings.blog?.enabled === true;
 
-export const SITE_FEATURES = ['shop', 'bookings', 'menu', 'hours', 'gallery', 'reviews', 'signup', 'faq'] as const;
+export const SITE_FEATURES = ['shop', 'bookings', 'menu', 'hours', 'gallery', 'reviews', 'signup', 'faq', 'listings'] as const;
 export type SiteFeature = typeof SITE_FEATURES[number];
 /** The kinds of section each feature brings. Everything not listed is always offered. */
 export const FEATURE_SECTIONS: Record<SiteFeature, SectionType[]> = {
     shop: ['products'], bookings: ['booking'], menu: ['menu'], hours: ['hours'],
-    gallery: ['gallery'], reviews: ['reviews'], signup: ['signup'], faq: ['faq'],
+    gallery: ['gallery'], reviews: ['reviews'], signup: ['signup'], faq: ['faq'], listings: ['listings'],
 };
 export const FEATURE_LABELS: Record<SiteFeature, string> = {
     shop: 'Sell things (shop and Buy buttons)', bookings: 'Take bookings (appointments, tables, classes)', menu: 'A food or drinks menu',
     hours: 'Opening hours', gallery: 'A picture gallery', reviews: 'Customer reviews', signup: 'Email sign-up and free downloads', faq: 'Questions and answers',
+    listings: 'Listings — an events calendar, a directory or another list',
 };
 /** The feature a kind of section belongs to, or null when it is always offered. */
 export function featureOf(type: SectionType): SiteFeature | null {
@@ -214,6 +215,14 @@ export interface SocialFeedProps { heading: string | null; intro: string | null;
  * switches the site's blog on (applyOperation).
  */
 export interface BlogPostsProps { heading: string | null; intro: string | null; count: number; enabled: boolean; }
+/**
+ * Listings (site-listings.ts, the Listings tab): the workspace's own events (dated) or entries
+ * (places, people, jobs…), read when the page is drawn — the section holds no entries, only which
+ * kind, which categories ([] = all), upcoming only or all, how many, and whether visitors may send
+ * one in ("Post your event" — it waits for the owner's approval before it appears). `filter` draws a
+ * category filter (plain links, no script). Each entry has its own page at /listings/<slug>.
+ */
+export interface ListingsProps { heading: string | null; intro: string | null; kind: 'event' | 'entry'; categories: string[]; show: 'upcoming' | 'all'; count: number; layout: 'cards' | 'list'; filter: boolean; allowPosts: boolean; postLabel: string; }
 export interface HoursProps { heading: string | null; intro: string | null; showHours: boolean; showContact: boolean; showAddress: boolean; }
 /** 'class': classes and events — dated sessions with places (class-sessions.ts), not times from opening hours. */
 export type BookingSectionKind = 'appointment' | 'consultation' | 'table' | 'class';
@@ -248,9 +257,10 @@ export type SectionBody =
     | { id: string; type: 'gallery'; props: GalleryProps }
     | { id: string; type: 'reviews'; props: ReviewsProps }
     | { id: string; type: 'social_feed'; props: SocialFeedProps }
-    | { id: string; type: 'blog_posts'; props: BlogPostsProps };
+    | { id: string; type: 'blog_posts'; props: BlogPostsProps }
+    | { id: string; type: 'listings'; props: ListingsProps };
 export type SectionType = SectionBody['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts', 'listings'];
 
 export interface SitePageDef {
     id: string;
@@ -289,7 +299,7 @@ export const LIMITS = {
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
     features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
     buttonLabel: 40, products: 12, productName: 80, productDescription: 400,
-    menuGroups: 12, menuItems: 100, menuNote: 300, galleryImages: 24, caption: 150, reviewsShown: 12, socialPosts: 12, blogPosts: 12,
+    menuGroups: 12, menuItems: 100, menuNote: 300, galleryImages: 24, caption: 150, reviewsShown: 12, socialPosts: 12, blogPosts: 12, listingsShown: 60, listingCategories: 20, listingCategory: 40,
     /** Pence. Stripe's GBP minimum is 30p; the ceiling is a sanity bound for a small-business shop. */
     minPrice: 30, maxPrice: 1_000_000,
 } as const;
@@ -317,7 +327,8 @@ export const DEFAULT_MAX_PAGES = 100;
 /** Below this, body text on the background is hard to read (WCAG AA for body text). */
 export const MIN_TEXT_CONTRAST = 4.5;
 /** Page addresses we serve ourselves, which a page may never take. */
-export const RESERVED_SLUGS = new Set(['sitemap.xml', 'robots.txt', 'api', 'preview', 'assets', 'favicon.ico', '_bms', 'report']);
+// 'listings': each listing's own page is /listings/<slug> (site-listings.ts LISTING_PATH).
+export const RESERVED_SLUGS = new Set(['sitemap.xml', 'robots.txt', 'api', 'preview', 'assets', 'favicon.ico', '_bms', 'report', 'listings']);
 
 export const DEFAULT_THEME: SiteTheme = {
     primaryColor: '#1f2937', textColor: '#1f2937', backgroundColor: '#ffffff', font: 'sans', radius: 'medium', logoUrl: null,
@@ -531,6 +542,21 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 enabled: p.enabled !== false,
             } };
         }
+        case 'listings': {
+            const count = Number(p.count);
+            const cats = [...new Set((Array.isArray(p.categories) ? p.categories : []).map((c) => cleanText(c, LIMITS.listingCategory)).filter(Boolean))];
+            return { type: 'listings', props: {
+                heading: textOrNull(p.heading, LIMITS.headline) ?? (p.kind === 'entry' ? 'Directory' : 'What\'s on'), intro: textOrNull(p.intro, LIMITS.intro, true),
+                kind: p.kind === 'entry' ? 'entry' : 'event',
+                categories: cats.slice(0, LIMITS.listingCategories),
+                show: p.show === 'all' ? 'all' : 'upcoming',
+                count: Number.isInteger(count) && count >= 1 && count <= LIMITS.listingsShown ? count : 12,
+                layout: p.layout === 'list' ? 'list' : 'cards',
+                filter: p.filter !== false,
+                allowPosts: p.allowPosts === true,
+                postLabel: cleanText(p.postLabel, LIMITS.buttonLabel) || (p.kind === 'entry' ? 'Add a listing' : 'Post your event'),
+            } };
+        }
         case 'gallery': {
             const raw = Array.isArray(p.images) ? p.images : [];
             const images = raw.map((x) => {
@@ -600,7 +626,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
 }
 
 /** A section's look: a closed set of choices, so nothing here can become CSS. */
-export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts'];
+export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts', 'listings'];
 export function cleanLook(raw: unknown, type: SectionType): SectionLook {
     const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' ? o.background : 'auto';

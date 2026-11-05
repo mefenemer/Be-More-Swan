@@ -102,6 +102,7 @@ const SECTION_SCHEMA = `Section types and their props (use ONLY these; any other
 - "testimonials": { "heading", "items": [ { "quote", "name", "detail" } ] }
 - "cta": { "heading", "body", "button": { "label", "href" } }
 - "contact": { "heading", "intro", "askPhone": true | false, "buttonLabel" }  (an enquiry form — put one on the contact page)
+- "listings": { "heading", "intro", "kind": "event" | "entry", "categories": [short category names], "show": "upcoming" | "all", "layout": "cards" | "list", "filter": true | false, "allowPosts": true | false, "postLabel" }  (ONLY for an events calendar or a directory, or when they asked for a list like that: it shows the entries they add on their Listings tab — never write entries yourself. "allowPosts" lets visitors send one in, which waits for the owner's approval)
 Links ("href") may only be "/" (home), "/<slug>" of a page in this site, "#<section-id>", "mailto:…", "tel:…" or an https address.`;
 
 /** The business facts every draft is written from (what they told us, and nothing else). */

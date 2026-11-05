@@ -162,7 +162,7 @@ check('a stalled run cannot spin forever', () => {
 // both came back "Needs your judgement" after four web searches. The web cannot say what a business
 // charges; its records can. These lock the labelled facts and the "fix it here" answer.
 import { composeDeclaredFacts, FACT_LOCATIONS } from '../src/utils/post-quality-review';
-import { recordsOutcome } from '../src/utils/compliance-verification';
+import { recordsOutcome, declaredOutcome } from '../src/utils/compliance-verification';
 
 const SECTIONS = {
     '6-onboarding': { content: { answers: { service_offerings: 'Tier 2 £99/mo', incentive: 'First month free' } } },
@@ -192,6 +192,22 @@ check('a records answer keeps only a real place to fix it, tolerating the tag wo
 check('a records rewrite that changes nothing is dropped', () => {
     assert.strictEqual(recordsOutcome({ rewrittenCaption: 'cap' }, 'cap', 0).after, null);
     assert.strictEqual(recordsOutcome({ rewrittenCaption: 'Now £69' }, 'Now £99', 0).after, 'Now £69');
+});
+
+// 2026-11-04: "Business Mentor Assistant, included on both plans" was flagged as undeclared while
+// the Business Profile said "a Business Mentor on every plan". The verifier saw that but could only
+// answer "records" — "Fix this in your records" about a record that was already right.
+check('a claim the records already cover is "declared", with a clear-it card, not a fix-it card', () => {
+    const d = declaredOutcome({ reason: 'Profile says so', fixWhere: `[Edited in: ${FACT_LOCATIONS.profile}]` }, 0);
+    assert.strictEqual(d.outcome, 'declared');
+    assert.strictEqual(d.fixWhere, FACT_LOCATIONS.profile);
+    assert.strictEqual(declaredOutcome({ fixWhere: 'Somewhere made up' }, 0).fixWhere, null);
+    const src = fs.readFileSync(path.join(__dirname, '..', 'src/utils/compliance-verification.ts'), 'utf8');
+    assert.ok(src.includes(`"outcome": "declared" | "records"`), 'the verifier prompt offers the declared outcome');
+    const ws = fs.readFileSync(path.join(__dirname, '..', 'workspace.html'), 'utf8');
+    assert.ok(ws.includes(`d.status === 'declared'`) && ws.includes('Clear this warning'), 'the panel renders it');
+    const bg = fs.readFileSync(path.join(__dirname, '..', 'netlify/functions/verify-compliance-warning-background.ts'), 'utf8');
+    assert.ok(bg.includes(`status: 'declared'`), 'the worker stores it');
 });
 
 console.log(`\n${passed} passed, 0 failed\n`);

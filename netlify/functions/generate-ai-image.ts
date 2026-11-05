@@ -20,7 +20,7 @@ import crypto from 'crypto';
 import { eq, and } from 'drizzle-orm';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
-import { contentAssets, mediaGenerationJobs } from '../../db/schema';
+import { blogPosts, contentAssets, mediaGenerationJobs, organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/utils/assistant-capabilities';
 import { enforcePromptModeration } from '../../src/utils/moderation';
@@ -72,7 +72,7 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const { userId, organisationId: orgId } = ctx;
 
-    let body: { action?: string; prompt?: string; aspectRatio?: string; jobId?: number; index?: number; words?: boolean };
+    let body: { action?: string; prompt?: string; aspectRatio?: string; jobId?: number; index?: number; words?: boolean; blogPostId?: number };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
 
@@ -82,9 +82,17 @@ export default withLambda(async (event) => {
     }
 
     // ── GENERATE: produce a grid of variations ───────────────────────────────────
-    const prompt = (body.prompt || '').trim();
+    let prompt = (body.prompt || '').trim();
     const aspectRatio = body.aspectRatio as AspectRatio;
-    if (!prompt) return { statusCode: 400, body: JSON.stringify({ error: 'A prompt is required.' }) };
+    // Blank in the Blog Studio means "you decide": the article itself becomes the request, and the
+    // usual visualise step below turns it into scenes (2026-11-04 — Generate used to do nothing
+    // until something was typed). Tenant-scoped: only this workspace's own post is read.
+    if (!prompt && Number.isInteger(Number(body.blogPostId))) {
+        prompt = await blogPostImageRequest(db, orgId, Number(body.blogPostId));
+    }
+    // Blank anywhere else (the chat's paperclip, a website picture): the business itself is the request.
+    if (!prompt) prompt = await businessImageRequest(db, orgId);
+    if (!prompt) return { statusCode: 400, body: JSON.stringify({ error: 'Describe what the picture should show.' }) };
     if (prompt.length > PROMPT_MAX) {
         return { statusCode: 400, body: JSON.stringify({ error: `Prompt must be ${PROMPT_MAX} characters or fewer.` }) };
     }
@@ -274,4 +282,41 @@ async function handleSelect(db: ReturnType<typeof getDb>, orgId: number, userId:
         // back its own address so the page previews what was actually saved.
         body: JSON.stringify({ assetId: asset.id, wordsAdded, url: wordsAdded && storageKey ? await presignR2Get(storageKey).catch(() => null) : null }),
     };
+}
+
+/**
+ * "You decide": a request built from Business Information (name, industry, what they do), for a blank
+ * Create anywhere outside the Blog Studio. '' when there is nothing to go on. Tenant-scoped.
+ */
+export async function businessImageRequest(db: ReturnType<typeof getDb>, orgId: number): Promise<string> {
+    const [org] = await db.select({ name: organisations.name, industry: organisations.industry, description: organisations.businessDescription })
+        .from(organisations).where(eq(organisations.id, orgId)).limit(1);
+    if (!org) return '';
+    const about = [org.industry, org.description].filter(Boolean).join('. ').replace(/\s+/g, ' ').trim().slice(0, 600);
+    if (!about) return '';
+    return `A picture for the website of ${org.name || 'this business'}, showing what they do: ${about}`.slice(0, 900).trim();
+}
+
+/**
+ * "Whatever suits the article": a request built from the post's title and opening, for a blank
+ * Generate in the Blog Studio. Markdown, media directives and links are stripped so the request
+ * describes the subject, not the formatting. '' when the post isn't this workspace's.
+ */
+export async function blogPostImageRequest(db: ReturnType<typeof getDb>, orgId: number, blogPostId: number): Promise<string> {
+    const [post] = await db.select({ title: blogPosts.title, body: blogPosts.bodyMarkdown })
+        .from(blogPosts)
+        .where(and(eq(blogPosts.id, blogPostId), eq(blogPosts.organisationId, orgId)))
+        .limit(1);
+    if (!post) return '';
+    const opening = (post.body || '')
+        .replace(/^:::.*$/gm, ' ')               // :::media / :::columns directive lines
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')   // images
+        .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // links → their text
+        .replace(/[#>*_`|-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 600);
+    const title = (post.title || '').trim();
+    if (!title && !opening) return '';
+    return `A picture that suits a blog article about ${title || 'this subject'}. ${opening}`.slice(0, 900).trim();
 }

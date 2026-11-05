@@ -22,7 +22,7 @@ import { normaliseSiteDefinition, type SiteDefinition } from './site-definition'
 import { fetchSiteHtml } from './site-fetch';
 import { createPageRenderer, type PageRenderer } from './site-js-render';
 import { runImport, type ImportDeps, type ImportReport, type PictureChoice } from './site-import';
-import { claimDraft, definitionOf, endDraft, maxPagesFor, verifySiteAssets, type SiteRow } from './site-store';
+import { claimDraft, definitionOf, endDraft, maxPagesFor, verifySiteAssets, type SiteRow, SITE_WRITE_DEADLINE_MS } from './site-store';
 import { triggerSiteDraft } from './trigger-site-draft';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 
@@ -109,6 +109,9 @@ function liveDeps(db: Db, site: SiteRow, userId: number, renderer: PageRenderer)
                 usage: { workspaceId: site.organisationId, assistantId: site.aiAssistantId },
                 // The Website role's model (Admin ▸ Assistants ▸ Model & rules). Background: full thinking.
                 ...(await gatewayRoleModel(db, 'website_assistant')),
+                // A background job writing thousands of words: 3 minutes a try, not the gateway's 24s
+                // (the background function itself may run 15 minutes).
+                deadlineMs: SITE_WRITE_DEADLINE_MS,
             });
             return parseModelJson(res.text);
         },

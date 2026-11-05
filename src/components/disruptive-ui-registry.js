@@ -2040,7 +2040,7 @@
   // change and refuses the whole batch if any one would break a rule.
 
   // Plain words for each change — never the internal page or section ids the operations carry.
-  const SITE_SECTION_WORDS = { hero: 'top (hero)', features: 'features', steps: 'steps', text: 'text', faq: 'questions', testimonials: 'testimonials', cta: 'call-to-action', social_feed: 'latest social posts', blog_posts: 'latest blog posts' };
+  const SITE_SECTION_WORDS = { hero: 'top (hero)', features: 'features', steps: 'steps', text: 'text', faq: 'questions', testimonials: 'testimonials', cta: 'call-to-action', social_feed: 'latest social posts', blog_posts: 'latest blog posts', listings: 'listings' };
   const SITE_PROP_WORDS = { headline: 'headline', subheadline: 'line under the headline', eyebrow: 'small label', primaryCta: 'main button', secondaryCta: 'second button',
     image: 'picture', heading: 'heading', intro: 'introduction', items: 'items', body: 'text', button: 'button', layout: 'layout',
     platforms: 'platforms shown', count: 'number of posts', enabled: 'on/off' };
@@ -2147,6 +2147,19 @@
           respond({ ok, error }) {
             if (!ok) { setBusy(false); say(error || 'Could not start the draft.', 'error'); return; }
             say('Drafting your site — it appears on the Website tab in a minute or two, and you\'ll be notified.');
+            // Moving dots while it works (the preview says when it's done).
+            if (!document.getElementById('cq-dots-style')) {
+              const st = document.createElement('style');
+              st.id = 'cq-dots-style';
+              st.textContent = '@keyframes cq-dot{0%,80%,100%{opacity:.25}40%{opacity:1}}.cq-dots i{display:inline-block;width:6px;height:6px;margin-left:3px;border-radius:9999px;background:currentColor;animation:cq-dot 1.2s infinite}.cq-dots i:nth-child(2){animation-delay:.15s}.cq-dots i:nth-child(3){animation-delay:.3s}';
+              document.head.appendChild(st);
+            }
+            status.insertAdjacentHTML('beforeend', ' <span class="cq-dots" aria-hidden="true"><i></i><i></i><i></i></span>');
+            // The Website tab says when the draft has landed (site:drafted); stop the dots then.
+            document.addEventListener('site:drafted', (ev) => {
+              const ok = !(ev.detail && ev.detail.error);
+              say(ok ? 'Done — your new draft is in the preview.' : (ev.detail.error || 'The draft didn\'t finish.'), ok ? '' : 'error');
+            }, { once: true });
           },
         },
       }));
@@ -2154,6 +2167,138 @@
     return el;
   }
   register('site_draft_request', renderSiteDraftRequestCard);
+
+  // { type: 'chat_questions', intro?, questions: [{ question, options: [..], multiple?, other? }] }
+  // The step-by-step questions an assistant asks before it builds something (owner 2026-11-04, after
+  // trying Lovable): one question at a time, tap an answer (or type "something else"), Back / Next,
+  // then "Send answers" sends them as the user's own message (chat:send). It changes nothing and spends
+  // nothing itself — the assistant's next reply proposes the work as its usual card. The chat closes
+  // the card (questions:closed) as soon as the user sends anything, so typing instead also answers it.
+  function renderChatQuestionsCard(ui, esc) {
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const qs = (Array.isArray(ui.questions) ? ui.questions : []).slice(0, 6).map((q) => ({
+      question: clean(q && q.question, 200),
+      // An answer is "text", or { label, description } — a line under it saying what it means.
+      options: (Array.isArray(q && q.options) ? q.options : []).map((o) => (o && typeof o === 'object'
+        ? { label: clean(o.label, 80), description: clean(o.description, 160) } : { label: clean(o, 80), description: '' }))
+        .filter((o) => o.label).slice(0, 6),
+      multiple: !!(q && q.multiple),
+      other: !(q && q.other === false),
+    })).filter((q) => q.question && (q.options.length || q.other));
+    if (!qs.length) return null;
+    const intro = clean(ui.intro, 300);
+    const answers = qs.map(() => ({ picked: [], other: '' }));
+    let at = 0;
+    let sent = false;
+    const qid = `cq-${Math.random().toString(36).slice(2, 8)}`;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-gray-200 rounded-xl shadow-sm p-4 w-full max-w-md';
+    el.setAttribute('data-questions-open', '');
+    const pill = (on) => `display:inline-flex;align-items:center;gap:6px;text-align:left;border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;border:1.5px solid ${on ? '#db2777' : '#e5e7eb'};background:${on ? '#fdf2f8' : '#fff'};color:${on ? '#831843' : '#1f2937'}`;
+    const answerText = (a) => [...a.picked, a.other.trim()].filter(Boolean).join(', ');
+    function paint() {
+      const q = qs[at];
+      const a = answers[at];
+      const last = at === qs.length - 1;
+      el.innerHTML = `
+        <div class="flex items-center justify-between gap-2">
+          <p class="text-xs font-bold text-gray-500 tracking-wider uppercase">A few quick questions</p>
+          <p class="text-xs font-semibold text-gray-500">${at + 1} of ${qs.length}</p>
+        </div>
+        <div aria-hidden="true" style="height:4px;background:#f3f4f6;border-radius:9999px;margin-top:8px;overflow:hidden"><div style="height:100%;width:${Math.round(((at + 1) / qs.length) * 100)}%;background:#db2777;border-radius:9999px;transition:width .2s"></div></div>
+        ${at === 0 && intro ? `<p class="text-xs text-gray-600 mt-3">${esc(intro)}</p>` : ''}
+        <p class="text-sm font-bold text-gray-900 mt-3" id="${qid}">${esc(q.question)}</p>
+        ${q.multiple ? '<p class="text-xs text-gray-500 mt-0.5">Choose any that fit.</p>' : ''}
+        <div class="${q.options.some((o) => o.description) ? 'flex flex-col' : 'flex flex-wrap'} gap-2 mt-3" role="group" aria-labelledby="${qid}">${q.options.map((o, i) => {
+          const on = a.picked.includes(o.label);
+          return `<button type="button" data-cq-opt="${i}" aria-pressed="${on}" style="${pill(on)}">${q.multiple ? `<span aria-hidden="true">${on ? '☑' : '☐'}</span>` : ''}<span>${esc(o.label)}${o.description ? `<span style="display:block;font-weight:400;font-size:12px;color:#6b7280;margin-top:2px">${esc(o.description)}</span>` : ''}</span></button>`;
+        }).join('')}</div>
+        ${q.other ? `<input data-cq-other class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-3" placeholder="${q.options.length ? 'Or type something else…' : 'Type your answer…'}" aria-label="${q.options.length ? 'Something else' : 'Your answer'}" value="${esc(a.other)}" maxlength="300">` : ''}
+        <div class="flex flex-wrap items-center justify-between gap-2 mt-4">
+          <div class="flex gap-2">${at > 0 ? '<button type="button" data-cq-back class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Back</button>' : ''}<button type="button" data-cq-skipall class="text-xs font-bold text-gray-500 hover:text-gray-800 px-2" title="Let the assistant decide">Skip all</button></div>
+          <div class="flex gap-2">
+            ${last ? '' : `<button type="button" data-cq-skip class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">${answerText(a) ? 'Next' : 'Skip'}</button>`}
+            ${last ? '<button type="button" data-cq-send class="btn-primary px-4 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Send answers</button>' : ''}
+          </div>
+        </div>
+        <p class="hidden mt-2 text-xs font-semibold text-red-600" data-cq-status></p>`;
+    }
+    function done(answeredHere, sentText) {
+      el.removeAttribute('data-questions-open');
+      // A reload: fill the answers back in from the message that sent them ("• question — answer").
+      if (sentText) {
+        sentText.split('\n').slice(1).forEach((line, i) => {
+          const head = qs[i] ? `• ${qs[i].question} — ` : null;
+          if (!head || !line.startsWith(head)) return;
+          const v = line.slice(head.length);
+          answers[i] = { picked: [], other: v === '(skipped)' ? '' : v };
+        });
+        answeredHere = true;
+      }
+      const rows = qs.map((q, i) => `<li class="text-xs text-gray-700"><span class="font-bold">${esc(q.question)}</span><br>${esc(answerText(answers[i]) || 'Skipped')}</li>`).join('');
+      el.innerHTML = answeredHere
+        ? `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">Your answers</p><ul class="mt-2 space-y-2">${rows}</ul>`
+        : `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">A few quick questions</p><p class="text-xs text-gray-500 mt-1">Answered in the chat.</p>`;
+    }
+    el.addEventListener('questions:closed', (e) => done(sent, !sent && e.detail && e.detail.answers));
+    el.addEventListener('input', (e) => {
+      if (!e.target.matches('[data-cq-other]')) return;
+      answers[at].other = e.target.value;
+      const skip = el.querySelector('[data-cq-skip]');
+      if (skip) skip.textContent = answerText(answers[at]) ? 'Next' : 'Skip';
+    });
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !e.target.matches('[data-cq-other]')) return;
+      e.preventDefault();
+      (el.querySelector('[data-cq-skip]') || el.querySelector('[data-cq-send]'))?.click();
+    });
+    el.addEventListener('click', (e) => {
+      const opt = e.target.closest('[data-cq-opt]');
+      const q = qs[at];
+      const a = answers[at];
+      if (opt) {
+        const o = q.options[Number(opt.dataset.cqOpt)].label;
+        if (q.multiple) { a.picked = a.picked.includes(o) ? a.picked.filter((x) => x !== o) : [...a.picked, o]; paint(); el.querySelector(`[data-cq-opt="${opt.dataset.cqOpt}"]`)?.focus(); return; }
+        a.picked = a.picked[0] === o ? [] : [o];
+        // One answer: picking it moves straight on (the last question waits for "Send answers").
+        if (a.picked.length && at < qs.length - 1) { at++; paint(); el.querySelector('[data-cq-opt], [data-cq-other]')?.focus(); return; }
+        paint();
+        el.querySelector(`[data-cq-opt="${opt.dataset.cqOpt}"]`)?.focus();
+        return;
+      }
+      if (e.target.closest('[data-cq-back]')) { at = Math.max(0, at - 1); paint(); el.querySelector('[data-cq-opt], [data-cq-other]')?.focus(); return; }
+      if (e.target.closest('[data-cq-skip]')) { at = Math.min(qs.length - 1, at + 1); paint(); el.querySelector('[data-cq-opt], [data-cq-other]')?.focus(); return; }
+      const skipAll = !!e.target.closest('[data-cq-skipall]');
+      if (!skipAll && !e.target.closest('[data-cq-send]')) return;
+      if (!skipAll && !answers.some((x) => answerText(x))) {
+        const st = el.querySelector('[data-cq-status]');
+        st.textContent = 'Answer at least one question, or just type in the chat instead.';
+        st.classList.remove('hidden');
+        return;
+      }
+      const lines = qs.map((x, i) => `• ${x.question} — ${answerText(answers[i]) || '(skipped)'}`);
+      const text = skipAll ? 'Skip the questions — use your best judgement from what you know about my business.' : `My answers:\n${lines.join('\n')}`;
+      sent = true;
+      el.querySelectorAll('button, input').forEach((b) => { b.disabled = true; });
+      el.dispatchEvent(new CustomEvent('chat:send', {
+        bubbles: true,
+        detail: {
+          text,
+          respond({ ok, error }) {
+            if (ok) return;
+            sent = false;
+            el.querySelectorAll('button, input').forEach((b) => { b.disabled = false; });
+            const st = el.querySelector('[data-cq-status]');
+            st.textContent = error || 'Could not send your answers.';
+            st.classList.remove('hidden');
+          },
+        },
+      }));
+    });
+    paint();
+    return el;
+  }
+  register('chat_questions', renderChatQuestionsCard);
 
   // { type: 'site_import_request', url } — "Import my current site" (sites.ts `import`, the same action
   // as the Website tab's "Read my site"). The owner confirms the site is theirs and chooses what happens
@@ -3395,6 +3540,209 @@
   }
   register('review_decisions', renderReviewDecisionsCard);
 
+  // { type: 'listings_add', summary, listings: [{ kind, title, category, summary, body, startsOn, startTime, endsOn, endTime, location, linkUrl, linkLabel }] }
+  // The owner's own events or entries, from what they told the chat (site-listings.ts POST { listings },
+  // the Listings tab's "Add a listing"). Shown before anything is saved; one click adds them.
+  function renderListingsAddCard(ui, esc) {
+    const str = (v, n) => (typeof v === 'string' && v.trim() ? v.replace(/\s+/g, ' ').trim().slice(0, n) : null);
+    const list = (Array.isArray(ui.listings) ? ui.listings : []).slice(0, 30).map((x) => ({
+      kind: x && x.kind === 'entry' ? 'entry' : 'event', title: str(x && x.title, 120), category: str(x && x.category, 40),
+      summary: str(x && x.summary, 300), body: typeof (x && x.body) === 'string' ? x.body.slice(0, 5000) : null,
+      startsOn: str(x && x.startsOn, 10), startTime: str(x && x.startTime, 5), endsOn: str(x && x.endsOn, 10), endTime: str(x && x.endTime, 5),
+      location: str(x && x.location, 160), linkUrl: str(x && x.linkUrl, 500), linkLabel: str(x && x.linkLabel, 40),
+    })).filter((x) => x.title);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    const when = (x) => [x.startsOn, x.startTime && `${x.startTime}${x.endTime ? `–${x.endTime}` : ''}`, x.endsOn && x.endsOn !== x.startsOn && `to ${x.endsOn}`].filter(Boolean).join(' ');
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Add to your listings</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="mt-2 space-y-2">${list.map((x) => `<li class="text-xs text-gray-700 bg-white border border-gray-200 rounded-lg p-2">
+        <strong class="text-gray-900">${esc(x.title)}</strong>${x.category ? ` <span class="text-gray-500">· ${esc(x.category)}</span>` : ''}
+        ${x.kind === 'event' ? `<br>${esc(when(x) || 'no date yet')}` : ''}${x.location ? `<br>${esc(x.location)}` : ''}${x.summary ? `<br><span class="text-gray-600">${esc(x.summary)}</span>` : ''}</li>`).join('')}</ul>
+      <p class="text-xs text-gray-600 mt-2">They go on your Listings tab and show on your site wherever you have a listings section. You can edit or remove them there.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-la-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${list.length ? '' : 'disabled'}>Add ${list.length === 1 ? 'it' : `these ${list.length}`}</button>
+        <button type="button" data-la-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-la-status></p>`;
+    const status = el.querySelector('[data-la-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-la-cancel]')) { setBusy(true); say('Nothing added.'); return; }
+      if (!e.target.closest('[data-la-go]')) return;
+      setBusy(true);
+      say('Adding…');
+      el.dispatchEvent(new CustomEvent('site:listingsAdd', {
+        bubbles: true,
+        detail: {
+          listings: list,
+          respond({ ok, error }) {
+            if (!ok) { setBusy(false); say(error || 'They couldn\'t be added.', 'error'); return; }
+            say(`Added — ${list.length === 1 ? 'it\'s' : 'they\'re'} on your Listings tab.`);
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('listings_add', renderListingsAddCard);
+
+  // { type: 'site_picture', pageId, sectionId, sectionLabel, place: 'in' | 'after', source: 'ai' | 'stock', description, alt }
+  // A picture for one section, found or made RIGHT HERE (owner, 2026-11-05: the chat said "I'm generating
+  // it now" and nothing ever came back — a reply can't make a picture; this card does, on a click).
+  // Stock (pexels-search.ts, free) or AI (generate-ai-image.ts, charges as it says; blank = the business
+  // decides). The chosen one is saved to the library, then placed IN the section (its picture) or AFTER
+  // it (a new picture section) by site:picturePlace → sites.ts apply. While it works the Website tab's
+  // preview shows a placeholder where it will go (site:pictureWorking).
+  function renderSitePictureCard(ui, esc) {
+    const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const pageId = str(ui.pageId, 80);
+    const sectionId = str(ui.sectionId, 80);
+    if (!pageId || !sectionId) return null;
+    const label = str(ui.sectionLabel, 120) || 'this section';
+    const place = ui.place === 'after' ? 'after' : 'in';
+    let source = ui.source === 'stock' ? 'stock' : 'ai';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">A picture ${place === 'after' ? 'after' : 'for'} “${esc(label)}”</p>
+      <label class="block text-xs font-bold text-gray-700 mt-2">What should it show? <span class="font-normal text-gray-500">(optional)</span>
+        <textarea data-sp-desc rows="2" maxlength="600" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1" placeholder="Leave blank and your assistant decides from your business">${esc(str(ui.description, 600))}</textarea></label>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sp-go="ai" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Create with AI</button>
+        <button type="button" data-sp-go="stock" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Find stock photos (free)</button>
+      </div>
+      <p data-sp-cost class="text-xs text-gray-500 mt-1"></p>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sp-status role="status"></p>
+      <div data-sp-grid class="grid gap-2 mt-2" style="grid-template-columns:repeat(2,minmax(0,1fr))"></div>
+      <div data-sp-more class="mt-2"></div>`;
+    const $ = (q) => el.querySelector(q);
+    const status = $('[data-sp-status]');
+    const grid = $('[data-sp-grid]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const paintSource = () => el.querySelectorAll('[data-sp-go]').forEach((b) => { b.className = `${b.dataset.spGo === source ? 'btn-primary' : 'btn-secondary'} px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50`; });
+    paintSource();
+    const setBusy = (b) => el.querySelectorAll('button, textarea').forEach((x) => { x.disabled = b; });
+    const working = (on, what) => document.dispatchEvent(new CustomEvent('site:pictureWorking', { detail: { pageId, sectionId, place, on, label: what || '' } }));
+    const call = async (name, body) => {
+      const r = await fetch(`/.netlify/functions/${name}`, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      return { ok: r.ok, body: await r.json().catch(() => ({})) };
+    };
+    // What AI pictures cost here, said before the click (get-ai-credit-balance; the endpoint is the real gate).
+    fetch('/.netlify/functions/get-ai-credit-balance', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((c) => {
+      if (!c || !el.isConnected) return;
+      const btn = el.querySelector('[data-sp-go="ai"]');
+      if (!c.canImage) { btn.disabled = true; btn.title = 'None of your assistants can create pictures'; if (source === 'ai') { source = 'stock'; paintSource(); } return; }
+      if (c.imageCost) $('[data-sp-cost]').textContent = `Creating uses ${c.imageCost} ${c.unit === 'tasks' ? (c.imageCost === 1 ? 'task' : 'tasks') : (c.imageCost === 1 ? 'credit' : 'credits')} and gives four to choose from. Stock photos are free.`;
+    }).catch(() => {});
+    let stock = { keywords: '', shown: [], candidates: [] };
+    let job = null;
+    async function find(again) {
+      const desc = $('[data-sp-desc]').value.trim();
+      setBusy(true); grid.innerHTML = ''; $('[data-sp-more]').innerHTML = '';
+      working(true, source === 'ai' ? 'Creating a picture' : 'Finding a picture');
+      try {
+        if (source === 'stock') {
+          const topic = desc || label;
+          say('Looking for photos…');
+          const res = await call('pexels-search', again && stock.keywords ? { topic, mediaType: 'image', dedup: false, keywords: stock.keywords, exclude: stock.shown } : { topic, mediaType: 'image', dedup: false });
+          if (!res.ok) throw new Error((res.body && res.body.error) || 'The search didn\'t work.');
+          stock = { keywords: res.body.keywords || '', candidates: (res.body.candidates || []).slice(0, 6), shown: [...new Set([...(again ? stock.shown : []), ...(res.body.candidates || []).map((c) => c.providerAssetId)])] };
+          if (!stock.candidates.length) { say('Nothing matched — try different words.'); working(false); return; }
+          say('Choose one — photos by Pexels creators.');
+          grid.innerHTML = stock.candidates.map((c, i) => `<button type="button" data-sp-pick="s${i}" class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400 bg-white" aria-label="Use photo ${i + 1}${c.photographer ? ` by ${esc(c.photographer)}` : ''}"><img src="${esc(c.url)}" alt="" style="width:100%;height:96px;object-fit:cover;display:block"></button>`).join('');
+          $('[data-sp-more]').innerHTML = '<button type="button" data-sp-again class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Show different ones</button>';
+        } else {
+          say('Creating four for you to choose from — about half a minute…');
+          const res = await call('generate-ai-image', { prompt: desc, aspectRatio: '16:9' });
+          if (!res.ok) throw new Error(res.body && res.body.error === 'insufficient_credits' ? 'Your monthly tasks are used up — they reset on the 1st.' : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be created.');
+          job = res.body.jobId;
+          say('Choose the one you like.');
+          grid.innerHTML = (res.body.images || []).map((im, i) => `<button type="button" data-sp-pick="a${im.index}" class="border border-gray-200 rounded-lg overflow-hidden hover:border-gray-400 bg-white" aria-label="Use picture ${i + 1}"><img src="${esc(im.url)}" alt="" style="width:100%;height:96px;object-fit:cover;display:block"></button>`).join('');
+          $('[data-sp-more]').innerHTML = '<button type="button" data-sp-again class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Try again</button>';
+        }
+      } catch (err) { say(err.message, 'error'); working(false); }
+      setBusy(false);
+    }
+    async function choose(key) {
+      setBusy(true);
+      say('Saving it and putting it on your page…');
+      try {
+        let assetId; let alt = str(ui.alt, 150) || $('[data-sp-desc]').value.trim().slice(0, 150);
+        if (key[0] === 's') {
+          const c = stock.candidates[Number(key.slice(1))];
+          const res = await call('pexels-search', { action: 'save', candidate: c, mediaType: 'image' });
+          if (!res.ok || !res.body.assetId) throw new Error((res.body && res.body.error) || 'It couldn\'t be saved.');
+          assetId = res.body.assetId; alt = alt || c.title || label;
+        } else {
+          const res = await call('generate-ai-image', { action: 'select', jobId: Number(job), index: Number(key.slice(1)), words: false });
+          if (!res.ok || !res.body.assetId) throw new Error((res.body && res.body.error) || 'It couldn\'t be saved.');
+          assetId = res.body.assetId; alt = alt || `A picture for ${label}`;
+        }
+        await new Promise((resolve, reject) => el.dispatchEvent(new CustomEvent('site:picturePlace', {
+          bubbles: true, detail: { pageId, sectionId, place, assetId, alt, respond: ({ ok, error }) => (ok ? resolve() : reject(new Error(error || 'It couldn\'t be placed.'))) },
+        })));
+        grid.innerHTML = ''; $('[data-sp-more]').innerHTML = '';
+        say(`Done — it's ${place === 'after' ? 'after' : 'in'} “${label}” in your draft. Nothing is live until you publish.`);
+        el.querySelectorAll('button, textarea').forEach((x) => { x.disabled = true; });
+        working(false);
+        return;
+      } catch (err) { say(err.message, 'error'); }
+      setBusy(false);
+    }
+    el.addEventListener('click', (e) => {
+      const go = e.target.closest('[data-sp-go]');
+      if (go) { source = go.dataset.spGo; paintSource(); find(false); return; }
+      if (e.target.closest('[data-sp-again]')) { find(true); return; }
+      const pick = e.target.closest('[data-sp-pick]');
+      if (pick) choose(pick.dataset.spPick);
+    });
+    return el;
+  }
+  register('site_picture', renderSitePictureCard);
+
+  // { type: 'listing_decisions', summary, decisions: [{ listingId, decision: 'approve' | 'decline' }] }
+  // Visitors' entries waiting for the owner (site-listings.ts PATCH { id, decision }, the Listings tab's buttons).
+  function renderListingDecisionsCard(ui, esc) {
+    const decisions = (Array.isArray(ui.decisions) ? ui.decisions : [])
+      .map((d) => ({ listingId: Number(d && d.listingId), decision: d && d.decision === 'decline' ? 'decline' : d && d.decision === 'approve' ? 'approve' : null }))
+      .filter((d) => Number.isInteger(d.listingId) && d.listingId > 0 && d.decision).slice(0, 30);
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Visitors' listings · Approval needed</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="text-xs text-gray-700 mt-2 space-y-0.5">${decisions.map((d) => `<li>Listing ${esc(d.listingId)}: <strong>${d.decision === 'approve' ? 'approve — it goes on your website' : 'decline — never shown'}</strong></li>`).join('')}</ul>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-ld-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${decisions.length ? '' : 'disabled'}>Do it</button>
+        <button type="button" data-ld-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-ld-status></p>`;
+    const status = el.querySelector('[data-ld-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-ld-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-ld-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent('site:listingDecisions', {
+        bubbles: true,
+        detail: {
+          decisions,
+          respond({ ok, error, done }) {
+            if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
+            say(`Done — ${done} listing${done === 1 ? '' : 's'} updated.`);
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('listing_decisions', renderListingDecisionsCard);
+
   // ── Built-in: Visual Option Review Card (Brand Designer) ───────────────────
   // { type: 'visual_option_review', briefId, decisions: [{ optionId, decision, reason?, note? }], remake? }
   //
@@ -3975,10 +4323,6 @@
           <span>Also keep this as a rule for future posts. A replacement is written either way.</span>
         </label>` : ''}
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">It’s booked into a free slot in your posting schedule.</p>' : ''}
-      ${!blocked && ui.action === 'revise' ? `
-        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">What to change</label>
-        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="3" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
-        <p class="text-xs text-gray-600 mt-2">The article is rewritten and saved in place, using your Business Knowledge for anything new — no invented facts. Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
       ${!blocked && ui.action === 'voiceover' ? `
         <p class="text-xs font-bold text-gray-700 mt-3">What it says</p>
@@ -4074,6 +4418,8 @@
     longer: { head: 'Make this article longer', button: 'Make it longer', busy: 'Rewriting — about a minute…' },
     // The same background rewrite, to the user's own words ("improve it", "bring it up to date").
     revise: { head: 'Revise this article', button: 'Rewrite it', busy: 'Rewriting — about a minute…' },
+    // Blog Studio's "Add pictures".
+    pictures: { head: 'Add pictures to this article', button: 'Add pictures', busy: 'Finding pictures — about a minute…' },
   };
 
   function renderBlogActionProposalCard(ui, esc) {
@@ -4102,6 +4448,18 @@
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">Your assistant books it into the next free slot in its posting schedule. It goes live on your blog then, and to any platforms you’ve connected.</p>' : ''}
       ${!blocked && ui.action === 'unschedule' ? '<p class="text-xs text-gray-600 mt-3">It goes back to a draft in the "Review" column and won’t publish until it’s approved again.</p>' : ''}
       ${!blocked && (ui.action === 'shorter' || ui.action === 'longer') ? `<p class="text-xs text-gray-600 mt-3">${ui.action === 'shorter' ? 'About a third shorter — same message, nothing new added.' : 'About half as long again — it develops what the article already says, with no invented facts.'} Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
+      ${!blocked && ui.action === 'revise' ? `
+        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">What to change</label>
+        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="3" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
+        <p class="text-xs text-gray-600 mt-2">The article is rewritten and saved in place, using your Business Knowledge for anything new — no invented facts. Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
+      ${!blocked && ui.action === 'pictures' ? `
+        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">Anything in particular? (optional)</label>
+        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="2" maxlength="500" placeholder="Leave blank and your assistant decides" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
+        <div class="flex flex-wrap gap-3 mt-2 text-xs text-gray-700">
+          <label class="flex items-center gap-1.5"><input type="radio" name="bap-source-${postId}" data-bap-source value="stock" ${ui.source === 'ai' ? '' : 'checked'}> Stock photos (free)</label>
+          <label class="flex items-center gap-1.5"><input type="radio" name="bap-source-${postId}" data-bap-source value="ai" ${ui.source === 'ai' ? 'checked' : ''}> AI images (uses tasks for each)</label>
+        </div>
+        <p class="text-xs text-gray-600 mt-2">Up to 3 pictures, placed where they help the reader. The words aren’t changed; move or remove any picture in Blog Studio.</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
       ${!blocked && ui.action === 'reject' ? `
         <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-reason-${postId}">What’s wrong with it</label>
@@ -4122,7 +4480,7 @@
       <p class="hidden mt-2 text-xs font-semibold" data-bap-status role="status" aria-live="polite"></p>`;
     const status = el.querySelector('[data-bap-status]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
-    const setBusy = (b) => el.querySelectorAll('[data-bap-go], [data-bap-cancel], [data-bap-reason], [data-bap-instruction], [data-bap-rule], [data-bap-redraft]').forEach((x) => { x.disabled = b; });
+    const setBusy = (b) => el.querySelectorAll('[data-bap-go], [data-bap-cancel], [data-bap-reason], [data-bap-instruction], [data-bap-rule], [data-bap-redraft], [data-bap-source]').forEach((x) => { x.disabled = b; });
     el.addEventListener('change', (e) => {
       if (!e.target.matches('[data-bap-redraft]')) return;
       const go = el.querySelector('[data-bap-go]');
@@ -4142,6 +4500,7 @@
         bubbles: true,
         detail: {
           action: ui.action, postId, scheduleAt: ui.scheduleAt || null, timezone: ui.timezone || null, reason, instruction,
+          source: el.querySelector('[data-bap-source]:checked')?.value === 'ai' ? 'ai' : 'stock',
           applyAsRule: !!el.querySelector('[data-bap-rule]')?.checked,
           redraft: !!el.querySelector('[data-bap-redraft]')?.checked,
           respond({ ok, message, error }) {

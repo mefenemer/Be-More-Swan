@@ -33,6 +33,18 @@ export type InteractiveBlogBrief = {
     /** "Revise it" (src/utils/blog-resize.ts): rewrite the post's EXISTING body to the owner's
      *  instruction ("improve it", "bring it up to date"). Needs no topic. */
     revise?: string;
+    /** "Add pictures" (src/utils/blog-add-images.ts): place pictures in the EXISTING body. Needs no topic.
+     *  `instruction` is optional — blank means the assistant decides. */
+    addImages?: { source: 'stock' | 'ai'; instruction?: string };
+};
+
+const asAddImages = (v: unknown): { source: 'stock' | 'ai'; instruction?: string } | undefined => {
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
+    const o = v as Record<string, unknown>;
+    const source = o.source === 'ai' ? 'ai' : o.source === 'stock' ? 'stock' : undefined;
+    if (!source) return undefined;
+    const instruction = typeof o.instruction === 'string' ? o.instruction.trim().slice(0, MAX_FIELD) : '';
+    return instruction ? { source, instruction } : { source };
 };
 
 const RESIZE = ['shorter', 'longer'] as const;
@@ -56,6 +68,7 @@ export function encodeInteractiveBrief(brief: InteractiveBlogBrief): string {
         articleType: clip(brief.articleType) || undefined,
         resize: asResize(brief.resize),
         revise: clip(brief.revise) || undefined,
+        addImages: asAddImages(brief.addImages),
     });
 }
 
@@ -76,8 +89,9 @@ export function decodeInteractiveBrief(raw: string | null | undefined): Interact
     const topic = clip(obj.topic);
     const resize = asResize(obj.resize);
     const revise = clip(obj.revise) || undefined;
-    // A resize or a revise rewrites what is there, so they are the briefs that need no topic.
-    if (!topic && !resize && !revise) return null;
+    const addImages = asAddImages(obj.addImages);
+    // A resize, a revise or "add pictures" works on what is there, so they need no topic.
+    if (!topic && !resize && !revise && !addImages) return null;
     return {
         topic,
         keywords: clip(obj.keywords) || undefined,
@@ -86,5 +100,6 @@ export function decodeInteractiveBrief(raw: string | null | undefined): Interact
         articleType: clip(obj.articleType) || undefined,
         resize,
         revise,
+        addImages,
     };
 }

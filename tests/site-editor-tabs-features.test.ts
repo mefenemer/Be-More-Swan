@@ -61,7 +61,7 @@ check('Website, Enquiries, Orders, Bookings — each its own tab, in that order,
     const a = read('assistants.js');
     assert.ok(a.includes("if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));"));
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes("const SUBTABS = [['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];") && ed.includes("['templates', templatesCard(false), { keep: true }]"), 'the Website tab keeps only its own panels — Templates its own, or nobody with a site finds it');
+    assert.ok(ed.includes("const SUBTABS_ALL = [['chat', 'Chat'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];") && ed.includes("['templates', templatesCard(false), { keep: true }]"), 'the Website tab keeps only its own panels — Templates its own, or nobody with a site finds it');
     assert.ok(ed.includes("show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings'));"));
     assert.ok(read('netlify/functions/sites.ts').includes('&tab=siteorders&payments=return'), 'back from Stripe on the Orders tab');
     assert.ok(read('notifications.js').includes("site_order_received: ['Open orders', 'siteorders']"));
@@ -126,7 +126,7 @@ check('narrow screens: a Preview button in reach opens it full screen; no device
     const ed = read('src/components/assistant-site-editor.js');
     assert.ok(ed.includes("'Preview my site'") && ed.includes("{ attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;"), 'sticky on the block wrapper, so it stays in reach');
     assert.ok(ed.includes("slot.toggleAttribute('data-sb-full', !!state.previewFull)") && ed.includes("btn('data-site-preview-close', 'Close preview', true)"));
-    assert.ok(/<div class="flex gap-1" data-sb-wide-only>/.test(ed));
+    assert.ok(/<span class="flex gap-1" data-sb-wide-only>/.test(ed));
     assert.ok(ed.includes('height:min(720px, 70vh)'));
     assert.ok(/activate\(surface\) \{\s*setPreviewFull\(false\);/.test(ed), 'leaving the tab never leaves the preview covering the page');
 });

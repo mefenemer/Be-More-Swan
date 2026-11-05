@@ -116,7 +116,7 @@ async function main() {
         assert.ok(g.includes("meterInteraction(db, organisationId, 'helpers')"));
         assert.ok(g.includes("rewrite && (post.status === 'published' || post.status === 'publishing')"));
         const w = read('netlify/functions/process-blog-jobs.ts');
-        assert.ok(w.includes('if (!resize && !revise && job.trigger_type !== \'admin_test\' && !(await hasTaskCapacity('), 'no task check for a helper');
+        assert.ok(w.includes('if (!resize && !revise && !addImages && job.trigger_type !== \'admin_test\' && !(await hasTaskCapacity('), 'no task check for a helper');
         assert.ok(w.indexOf('if (interactive && (resize || revise))') < w.indexOf('await generateBlogBody('), 'resize never drafts a new article');
     });
     await check('Blog Studio has both buttons, through the same queue', () => {

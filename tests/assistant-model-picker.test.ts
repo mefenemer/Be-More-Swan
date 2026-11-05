@@ -133,7 +133,8 @@ async function main() {
         // Social drafting goes through the gateway, which adapts a role's model and reads every text block.
         const gw = read('src/lib/ai-gateway.ts');
         assert.ok(gw.includes('adaptForModel(params, model, req.thinking)') && gw.includes('const text = replyText(response.content);'));
-        assert.ok(gw.includes('thinks ? { timeout: req.deadlineMs ?? 120_000 } : undefined'), 'a thinking model gets the caller\'s deadline or 2 minutes');
+        // Any other model gets the caller's deadline too (2026-11-05, tests/site-draft-deadline.test.ts).
+        assert.ok(gw.includes('thinks ? { timeout: req.deadlineMs ?? 120_000 } : deadline'), 'a thinking model gets the caller\'s deadline or 2 minutes');
         assert.strictEqual(read('netlify/functions/process-content-jobs.ts').match(/\.\.\.roleModel/g)?.length, 3, 'the draft and both re-asks');
     });
     

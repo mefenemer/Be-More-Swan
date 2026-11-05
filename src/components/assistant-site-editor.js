@@ -2,9 +2,10 @@
  * src/components/assistant-site-editor.js
  * The Website Assistant's Website tab — docs/website-assistant-plan.md §5.3, §5.5.
  *
- * Left: the site — Pages (each page's sections: edit, move, remove, add), Design (colours, font,
- * corners, logo) and Details (business details, footer, menu). Right: the live preview, rendered by
- * the real renderer (site-preview.ts) in desktop or phone width. "Write my site" ("Write the words"
+ * Left: the live preview, rendered by the real renderer (site-preview.ts) in desktop or phone width,
+ * with "Select" (click a part of it to talk about it in the chat). Right: the pane — "Chat" (this
+ * assistant's chat, docked; its cards still need the user's click) or a sub-tab: Set up, Design,
+ * Pages (each page's sections: edit, move, remove, add) and Publish. Narrow screens: the pane first. "Write my site" ("Write the words"
  * on a template, "Replace my draft" later) asks the assistant for a complete draft (1 task).
  *
  * Backed by netlify/functions/sites.ts — the SAME actions the chat cards call (chat-session.js →
@@ -30,7 +31,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list', gallery: 'Gallery', reviews: 'Reviews', social_feed: 'Latest social posts', blog_posts: 'Latest blog posts' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list', gallery: 'Gallery', reviews: 'Reviews', social_feed: 'Latest social posts', blog_posts: 'Latest blog posts', listings: 'Listings' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -94,6 +95,18 @@
       { k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'count', kind: 'select', label: 'How many posts', options: [[2, '2 posts'], [3, '3 posts'], [4, '4 posts'], [6, '6 posts'], [9, '9 posts'], [12, '12 posts']] },
       { k: '_page', kind: 'pagePick', label: 'Show it on' }],
+    // Listings (docs/website-types-plan.md §4): the entries on the Listings tab — an events calendar or a
+    // directory. The section only chooses which to show and how; the entries themselves live on that tab.
+    listings: [{ k: '_listingsInfo', kind: 'listingsInfo', label: 'What this shows' },
+      { k: 'kind', kind: 'select', label: 'What it lists', options: [['event', 'Events (with dates) — a what\'s-on calendar'], ['entry', 'Entries (no dates) — a directory of places, people, jobs…']] },
+      { k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'categories', kind: 'csv', label: 'Only these categories (separate with commas; leave empty for all)' },
+      { k: 'show', kind: 'select', label: 'Which events', options: [['upcoming', 'Only what\'s coming up (past events drop off by themselves)'], ['all', 'All of them, past ones too']] },
+      { k: 'count', kind: 'select', label: 'How many at most', options: [[6, '6'], [12, '12'], [24, '24'], [60, '60']] },
+      { k: 'layout', kind: 'select', label: 'Layout', options: [['cards', 'Cards with pictures'], ['list', 'A list']] },
+      { k: 'filter', kind: 'checkbox', label: 'Show category buttons so visitors can pick one' },
+      { k: 'allowPosts', kind: 'checkbox', label: 'Let visitors send one in — it waits for your approval before it appears' },
+      { k: 'postLabel', kind: 'text', label: 'Text on that button' }],
     // Gallery: the owner's own pictures, each with what it shows (needed) and an optional caption.
     gallery: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'layout', kind: 'select', label: 'Layout', options: [['square', 'Even squares (pictures are cropped to fit)'], ['natural', 'Each picture at its own shape']] },
@@ -124,6 +137,7 @@
     social_feed: { enabled: true, heading: 'Latest from us', intro: '', platforms: [], count: 6 },
     blog_posts: { enabled: true, heading: 'From our blog', intro: '', count: 3 },
     gallery: { heading: 'Gallery', intro: '', layout: 'square', images: [] },
+    listings: { kind: 'event', heading: 'What\'s on', intro: '', categories: [], show: 'upcoming', count: 12, layout: 'cards', filter: true, allowPosts: false, postLabel: 'Post your event' },
     menu: { heading: 'Prices', intro: '', groups: [{ title: '', productIds: [] }], showDescriptions: true, showDurations: false, note: '' },
   };
   /** A library picture's thumbnail: picked this session, or the link the server sent with the site. */
@@ -219,6 +233,22 @@
       state.loadError = err.message;
     }
     // The drafting poll re-reads every 5s: repaint (and reload the preview) only when something changed.
+    // A draft just finished: say so in the docked chat too (shown here only, not saved to the thread),
+    // so "are you done?" is answered before it is asked.
+    const nowDrafting = !!(state.data && state.data.site.drafting);
+    if (state.wasDrafting && !nowDrafting && state.data && chatPane.session && chatPane.assistantId === state.assistantId) {
+      const imp = state.data.import;
+      chatPane.session.appendMessage({ role: 'assistant', content: state.data.site.draftNote
+        ? `The draft didn't finish: ${state.data.site.draftNote}`
+        : imp && imp.status === 'ready' ? 'Your current site has been read — have a look at it on the Set up tab, then choose whether to use it as your draft.'
+        : imp && imp.status === 'failed' ? (imp.message || 'The import didn\'t work.')
+        // Where the preview is depends on the width: beside the chat, or behind "Preview my site".
+        : `Your draft is ready — ${window.matchMedia('(min-width: 1024px)').matches ? 'it\'s in the preview on the left' : 'press "Preview my site" to see it'}. Tell me what to change, or use 🎯 Select to point at any part of it.` });
+    }
+    if (state.wasDrafting && !nowDrafting && state.data) {
+      document.dispatchEvent(new CustomEvent('site:drafted', { detail: { assistantId: state.assistantId, error: state.data.site.draftNote || null } }));
+    }
+    state.wasDrafting = nowDrafting;
     const sig = state.loadError || JSON.stringify(state.data);
     const same = state.loaded && sig === state.dataSig;
     state.dataSig = sig;
@@ -324,6 +354,23 @@
       '@media (max-width: 639px) { .sb-tap { min-height: 44px; min-width: 44px; } [data-sb-wide-only] { display: none !important; } }',
       '@media (min-width: 1024px) { [data-sb-narrow-only] { display: none !important; } }',
       'iframe[data-site-preview] { max-width: 100%; }',
+      // Preview on the left, the pane (Chat or one of the sub-tabs) on the right — narrow screens keep
+      // the pane first, with the preview a button away (owner, 2026-11-04, after trying Lovable).
+      // One pane width on every sub-tab, so the preview never jumps when the tab changes (owner, 2026-11-05).
+      '@media (min-width: 1024px) { [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(380px, 460px) !important; } [data-sb-preview-col] { order: 1; } [data-sb-pane] { order: 2; } }',
+      '[data-sb-chatbox] { height: clamp(460px, calc(100vh - 150px), 880px); }',
+      // Wide screens: the preview sets the height and the chat fills the pane to exactly match it.
+      '@media (min-width: 1024px) { iframe[data-site-preview] { height: clamp(408px, calc(100vh - 202px), 828px) !important; }',
+      '  [data-sb-mode="chat"] [data-sb-pane] { display: flex; flex-direction: column; }',
+      '  [data-sb-mode="chat"] [data-sb-chat]:not([hidden]) { flex: 1; min-height: 0; display: flex; flex-direction: column; }',
+      '  [data-sb-mode="chat"] [data-sb-chatbox] { height: auto; flex: 1; min-height: 0; } }',
+      // Drafting: three dots that pulse, said in words beside them for screen readers.
+      '@keyframes sb-dot { 0%, 80%, 100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: scale(1); } }',
+      '.sb-dots { display: inline-flex; gap: 4px; vertical-align: middle; } .sb-dots i { width: 7px; height: 7px; border-radius: 9999px; background: currentColor; animation: sb-dot 1.2s infinite ease-in-out; } .sb-dots i:nth-child(2) { animation-delay: .15s; } .sb-dots i:nth-child(3) { animation-delay: .3s; }',
+      '[data-sb-drafting] { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,.72); border-radius: 8px; z-index: 2; }',
+      // Full screen (owner, 2026-11-05): the whole Website tab over the page, for more room to work.
+      '[data-sb-editor-full] { position: fixed; inset: 0; z-index: 10400; background: #f9fafb; overflow: auto; padding: 16px; }',
+      '@media (min-width: 1024px) { [data-sb-editor-full] [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(400px, 520px) !important; } [data-sb-editor-full] iframe[data-site-preview] { height: calc(100vh - 140px) !important; } [data-sb-editor-full] [data-sb-chatbox] { height: calc(100vh - 32px - 56px); } }',
       '[data-sb-full] { position: fixed; inset: 0; z-index: 10500; background: #fff; overflow: auto; }',
       '[data-sb-full] > div { height: 100%; display: flex; flex-direction: column; padding: 8px !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }',
       '[data-sb-full] [data-sb-frame-box] { flex: 1; min-height: 0; }',
@@ -383,6 +430,11 @@
     if (f.kind === 'textarea') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><textarea name="${name}" rows="${f.rows || 3}" class="${inputCls}"${limitAttr(max)}>${esc(value || '')}</textarea>${limitNote(max)}`;
     if (f.kind === 'select') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><select name="${name}" class="${inputCls}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
     if (f.kind === 'checkbox') return `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" name="${name}" ${value ? 'checked' : ''}> ${esc(f.label)}</label>`;
+    if (f.kind === 'csv') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><input name="${name}" class="${inputCls}" value="${esc((Array.isArray(value) ? value : []).join(', '))}" placeholder="e.g. Music, Food & drink, Family">`;
+    if (f.kind === 'listingsInfo') {
+      const n = (state.listings && state.listings.listings) ? state.listings.listings.filter((x) => x.status === 'published').length : null;
+      return `<p class="text-xs text-gray-600 mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3">The entries themselves are kept on the ${btn('data-site-open-listings', 'Listings tab')}${n != null ? ` (${n} on show)` : ''} — add, edit and approve them there, or ask ${esc(state.assistantName || 'your assistant')} in the chat. Each has its own page on your site.</p>`;
+    }
     if (f.kind === 'formpick') {
       const forms = state.data.forms || [];
       if (!forms.length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</p><p class="text-xs text-gray-500">You have no sign-up forms yet. Make one with your Email Marketing Assistant or in Audience → Forms, then come back.</p><input type="hidden" name="${name}" value="">`;
@@ -566,6 +618,7 @@
       const n = `f-${f.k}`;
       if (f.kind === 'text' || f.kind === 'textarea' || f.kind === 'select') props[f.k] = form.querySelector(`[name="${n}"]`).value;
       else if (f.kind === 'checkbox') props[f.k] = form.querySelector(`[name="${n}"]`).checked;
+      else if (f.kind === 'csv') props[f.k] = form.querySelector(`[name="${n}"]`).value.split(',').map((x) => x.trim()).filter(Boolean);
       else if (f.kind === 'formpick') props[f.k] = Number(form.querySelector(`[name="${n}"]`).value) || null;
       else if (f.kind === 'link') {
         const label = form.querySelector(`[name="${n}-label"]`).value.trim();
@@ -669,6 +722,12 @@
     const sec = pg && pg.sections.find((x) => x.id === sectionId);
     if (!sec) return;
     const label = TYPE_LABEL[sec.type] || sec.type;
+    // With the chat docked beside the preview, the swan selects the section there (as "Select" does).
+    if (chatAvailable()) {
+      const where = def().pages.length > 1 ? ` on the ${pg.title} page` : '';
+      giveToChat({ label: `${label} section${where ? ` (${pg.title})` : ''}`, message: `About this part of my website: the ${label} section${where} (section ${sectionId}).` });
+      return;
+    }
     const text = await window.promptModal(`What would you like to change in the <strong>${esc(label)}</strong> section${def().pages.length > 1 ? ` on ${esc(pg.title)}` : ''}?<br><span style="color:#6b7280">“${esc(String(sectionSummary(sec)).slice(0, 120))}”</span>`,
       { title: `Ask ${esc(state.assistantName || 'your assistant')}`, multiline: true, required: true, confirmLabel: 'Ask', placeholder: 'e.g. make the heading warmer, add our free delivery, use a darker background' });
     if (!text || !text.trim()) return;
@@ -716,6 +775,7 @@
     reviews: ['⭐', 'Quotes from your customer reviews'],
     social_feed: ['📣', 'Your latest posts published through Be More Swan'],
     blog_posts: ['📰', 'Your newest posts from your Blog Assistant'],
+    listings: ['📅', 'An events calendar or a directory, from your Listings tab'],
   };
   function addPickerHtml(here) {
     const types = state.data.vocab.sectionTypes.filter((t) => typeAllowed(t) && FORMS[t]);
@@ -1096,6 +1156,111 @@
       ${list.length > shown.length ? `<div class="mt-3">${btn('data-site-enquiries-more', `Show more (${list.length - shown.length})`)}</div>` : ''}`);
   }
 
+
+  // ── Listings (docs/website-types-plan.md §4; site-listings.ts) ─────────────
+  // The workspace's own events and directory entries, shown by any listings section. Visitors' entries
+  // wait here for "Approve" or "Decline" and never appear on the site before that.
+  const LAPI = '/.netlify/functions/site-listings';
+  async function lcall(method, body, query = '') {
+    const res = await fetch(`${LAPI}${query}`, { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Request failed (HTTP ${res.status}).`);
+    return data;
+  }
+  async function loadListings() {
+    try { state.listings = await lcall('GET'); }
+    catch (err) { state.listings = { listings: [], pending: 0, categories: [], error: err.message }; }
+    paintTabBadges();
+    rerender();
+  }
+  /** The tab shows once the site lists things: the feature chosen, or a listings section on a page. */
+  const listingsOn = () => !!(def() && ((def().settings.features || []).includes('listings') || def().pages.some((p) => p.sections.some((x) => x.type === 'listings'))));
+  const todayUk = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  function whenOf(l) {
+    if (!l.startsOn) return '';
+    const d = (x) => new Date(`${x}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+    if (l.endsOn && l.endsOn !== l.startsOn) return `${d(l.startsOn)}${l.startTime ? `, ${l.startTime}` : ''} – ${d(l.endsOn)}${l.endTime ? `, ${l.endTime}` : ''}`;
+    return `${d(l.startsOn)}${l.startTime ? `, ${l.startTime}${l.endTime ? `–${l.endTime}` : ''}` : ''}`;
+  }
+  function listingRow(l, waiting) {
+    const thumb = l.imageAssetId && thumbOf(l.imageAssetId) ? thumbHtml(thumbOf(l.imageAssetId), false, 56, 42) : '';
+    return `<li class="border ${waiting ? 'border-amber-300 bg-amber-50/40' : 'border-gray-200'} rounded-lg p-3 flex gap-3 items-start">
+      ${thumb}
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-bold text-gray-900">${esc(l.title)}${l.status === 'hidden' ? ' <span class="text-xs font-bold text-gray-500">· Hidden</span>' : ''}</p>
+        <p class="text-xs text-gray-600">${[whenOf(l), l.location, l.category].filter(Boolean).map(esc).join(' · ')}</p>
+        ${l.summary ? `<p class="text-xs text-gray-700 mt-1">${esc(l.summary)}</p>` : ''}
+        ${waiting ? `<p class="text-xs text-gray-500 mt-1">Sent in by ${esc(l.submitterName || 'a visitor')}${l.submitterEmail ? ` · <a class="underline" href="mailto:${esc(l.submitterEmail)}">${esc(l.submitterEmail)}</a>` : ''}</p>` : ''}
+        <div class="mt-2 flex flex-wrap gap-2">${waiting
+          ? `${btn(`data-listing-decide="approve" data-id="${l.id}"`, 'Approve', true)}${btn(`data-listing-decide="decline" data-id="${l.id}"`, 'Decline')}${btn(`data-listing-edit="${l.id}"`, 'Edit')}`
+          : `${btn(`data-listing-edit="${l.id}"`, 'Edit')}${btn(`data-listing-show="${l.status === 'hidden' ? 'published' : 'hidden'}" data-id="${l.id}"`, l.status === 'hidden' ? 'Show' : 'Hide')}${btn(`data-listing-delete="${l.id}"`, 'Delete')}`}</div>
+      </div></li>`;
+  }
+  function listingFormHtml() {
+    const l = state.listingEdit;
+    const event = l.kind !== 'entry';
+    const cats = (state.listings && state.listings.categories) || [];
+    const f = (k) => esc(l[k] == null ? '' : l[k]);
+    const lbl = (t) => `<label class="block text-xs font-bold text-gray-700 mt-3">${t}</label>`;
+    return card(`<form data-listing-form>
+      <div class="flex items-center justify-between"><p class="text-sm font-black text-gray-900">${l.id ? 'Edit' : 'Add a listing'}</p>${btn('data-listing-cancel', 'Cancel')}</div>
+      <fieldset class="mt-2"><legend class="text-xs font-bold text-gray-700">What is it?</legend>
+        <label class="inline-flex items-center gap-2 text-xs mr-4 mt-1"><input type="radio" name="l-kind" value="event" ${event ? 'checked' : ''} data-listing-kind> An event (it has a date)</label>
+        <label class="inline-flex items-center gap-2 text-xs mt-1"><input type="radio" name="l-kind" value="entry" ${event ? '' : 'checked'} data-listing-kind> An entry (a place, a person, a job…)</label></fieldset>
+      ${lbl('Name <span class="text-red-500">*</span>')}<input name="l-title" class="${inputCls}" maxlength="120" value="${f('title')}" required>
+      ${event ? `<div class="grid gap-2 sm:grid-cols-2">
+        <div>${lbl('Date <span class="text-red-500">*</span>')}<input type="date" name="l-startsOn" class="${inputCls}" value="${f('startsOn')}"></div>
+        <div>${lbl('Last day (if it runs over several days)')}<input type="date" name="l-endsOn" class="${inputCls}" value="${f('endsOn')}"></div>
+        <div>${lbl('Starts at')}<input type="time" name="l-startTime" class="${inputCls}" value="${f('startTime')}"></div>
+        <div>${lbl('Ends at')}<input type="time" name="l-endTime" class="${inputCls}" value="${f('endTime')}"></div></div>` : ''}
+      ${lbl('Where')}<input name="l-location" class="${inputCls}" maxlength="160" value="${f('location')}" placeholder="${event ? 'e.g. Ermoupoli harbour' : 'e.g. 12 High Street, Leeds'}">
+      ${lbl('Category')}<input name="l-category" class="${inputCls}" maxlength="40" value="${f('category')}" list="listing-cats" placeholder="e.g. Music"><datalist id="listing-cats">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
+      ${lbl('In a sentence')}<input name="l-summary" class="${inputCls}" maxlength="300" value="${f('summary')}">
+      ${lbl('More about it')}<textarea name="l-body" rows="4" class="${inputCls}" maxlength="5000">${f('body')}</textarea>
+      <div class="grid gap-2 sm:grid-cols-2">
+        <div>${lbl('A link (tickets, website, email)')}<input name="l-linkUrl" class="${inputCls}" maxlength="500" value="${f('linkUrl')}" placeholder="https://…"></div>
+        <div>${lbl('Text on its button')}<input name="l-linkLabel" class="${inputCls}" maxlength="40" value="${f('linkLabel')}" placeholder="${event ? 'Get tickets' : 'Visit'}"></div></div>
+      ${lbl('Picture')}<div class="flex items-center gap-2 mt-1">${l.imageAssetId && thumbOf(l.imageAssetId) ? thumbHtml(thumbOf(l.imageAssetId), false, 64, 48) : ''}
+        ${btn('data-listing-picture', l.imageAssetId ? 'Change picture' : 'Choose picture')}${l.imageAssetId ? btn('data-listing-picture-remove', 'Remove') : ''}</div>
+      ${l.imageAssetId ? `${lbl('What the picture shows <span class="text-red-500">*</span>')}<input name="l-imageAlt" class="${inputCls}" maxlength="200" value="${f('imageAlt')}">` : ''}
+      ${state.listingError ? `<p class="text-xs font-semibold text-red-600 mt-2" role="alert">${esc(state.listingError)}</p>` : ''}
+      <div class="mt-4">${btn('data-listing-save', l.id ? 'Save' : 'Add it', true)}</div>
+    </form>`);
+  }
+  /** What is typed into the listing form, kept across a repaint. */
+  function readListingForm() {
+    const form = document.querySelector('[data-listing-form]');
+    if (!form || !state.listingEdit) return state.listingEdit;
+    const v = (k) => { const el = form.querySelector(`[name="l-${k}"]`); return el ? el.value : undefined; };
+    const kind = (form.querySelector('[name="l-kind"]:checked') || {}).value || state.listingEdit.kind;
+    const out = { ...state.listingEdit, kind };
+    for (const k of ['title', 'startsOn', 'endsOn', 'startTime', 'endTime', 'location', 'category', 'summary', 'body', 'linkUrl', 'linkLabel', 'imageAlt']) { const x = v(k); if (x !== undefined) out[k] = x; }
+    return out;
+  }
+  function listingsPanel() {
+    const L = state.listings;
+    if (!L) return card('<p class="text-sm text-gray-500 text-center">Loading listings…</p>');
+    const all = L.listings || [];
+    const waiting = all.filter((l) => l.status === 'pending');
+    const today = todayUk();
+    const events = all.filter((l) => l.status !== 'pending' && l.kind === 'event');
+    const coming = events.filter((l) => (l.endsOn || l.startsOn || '') >= today).sort((a, b) => `${a.startsOn}${a.startTime || ''}`.localeCompare(`${b.startsOn}${b.startTime || ''}`));
+    const past = events.filter((l) => (l.endsOn || l.startsOn || '') < today);
+    const entries = all.filter((l) => l.status !== 'pending' && l.kind === 'entry').sort((a, b) => a.title.localeCompare(b.title));
+    const section = (title, list, note) => (list.length ? `<p class="text-xs font-black text-gray-700 uppercase tracking-wider mt-4">${title} (${list.length})</p>${note ? `<p class="text-xs text-gray-500">${note}</p>` : ''}<ul class="space-y-2 mt-2">${list.map((l) => listingRow(l, false)).join('')}</ul>` : '');
+    const noSection = !def().pages.some((p) => p.sections.some((x) => x.type === 'listings'));
+    return `${state.listingEdit ? listingFormHtml() : ''}
+      ${card(`<div class="flex flex-wrap items-center justify-between gap-2"><p class="text-sm font-black text-gray-900">Listings</p>${state.listingEdit ? '' : btn('data-listing-new', '+ Add a listing', true)}</div>
+      <p class="text-xs text-gray-500 mt-1">Your events and directory entries. They show on your website wherever a page has a "Listings" section, each with its own page${''} — events also get "Add to calendar". You can ask ${esc(state.assistantName || 'your assistant')} in the chat to add them too.</p>
+      ${noSection ? `<p class="text-xs font-semibold text-amber-800 mt-2">None of your pages has a Listings section yet, so these don't show on your site. Add one on the Website tab (Pages ▸ Add a section ▸ Listings).</p>` : ''}
+      ${L.error ? `<p class="text-xs font-semibold text-red-600 mt-2">${esc(L.error)}</p>` : ''}
+      ${waiting.length ? `<p class="text-xs font-black text-amber-800 uppercase tracking-wider mt-4">Waiting for you (${waiting.length})</p><p class="text-xs text-gray-500">Sent in by visitors. Nothing appears on your site until you approve it.</p><ul class="space-y-2 mt-2">${waiting.map((l) => listingRow(l, true)).join('')}</ul>` : ''}
+      ${section('Coming up', coming)}
+      ${section('Entries', entries)}
+      ${past.length ? `<details class="mt-4"><summary class="text-xs font-black text-gray-700 uppercase tracking-wider cursor-pointer">Past events (${past.length})</summary><p class="text-xs text-gray-500 mt-1">No longer on your site unless a section shows past events too.</p><ul class="space-y-2 mt-2">${past.map((l) => listingRow(l, false)).join('')}</ul></details>` : ''}
+      ${!all.length ? `<p class="text-sm text-gray-500 mt-4">Nothing here yet. Press "Add a listing", or tell ${esc(state.assistantName || 'your assistant')} about your events in the chat.</p>` : ''}`)}`;
+  }
+
   // ── Orders (step 3c) ───────────────────────────────────────────────────────
   const money = (pence, cur) => (String(cur || 'gbp').toLowerCase() === 'gbp' ? `£${(pence / 100).toFixed(2).replace(/\.00$/, '')}` : `${(pence / 100).toFixed(2)} ${String(cur).toUpperCase()}`);
 
@@ -1248,7 +1413,7 @@
   function previewHeadHtml(showImport) {
     return `<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
         <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${showImport ? 'your imported site (not your draft yet)' : state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
-        <div class="flex gap-1" data-sb-wide-only>${btn(`data-site-device="desktop" aria-pressed="${state.device === 'desktop'}"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile" aria-pressed="${state.device === 'mobile'}"`, 'Phone', state.device === 'mobile')}</div>
+        <div class="flex flex-wrap gap-1">${!showImport && chatAvailable() ? btn(`data-site-pick aria-pressed="${!!picker.on}" title="Click any part of the preview to ask ${esc(state.assistantName || 'your assistant')} to change it"`, `<span aria-hidden="true">🎯</span> ${picker.on ? 'Click a part… (Esc to stop)' : 'Select'}`, picker.on) : ''}<span class="flex gap-1" data-sb-wide-only>${btn(`data-site-device="desktop" aria-pressed="${state.device === 'desktop'}"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile" aria-pressed="${state.device === 'mobile'}"`, 'Phone', state.device === 'mobile')}${state.previewFull ? '' : btn(`data-site-editor-full aria-pressed="${!!state.editorFull}" title="${state.editorFull ? 'Back to the normal view (Esc)' : 'Use the whole window for your website and chat'}"`, state.editorFull ? '<span aria-hidden="true">⤡</span> Exit full screen' : '<span aria-hidden="true">⤢</span> Full screen')}</span></div>
         ${state.previewFull ? btn('data-site-preview-close', 'Close preview', true) : ''}
       </div>`;
   }
@@ -1258,7 +1423,7 @@
     let frame = slot.querySelector('iframe[data-site-preview]');
     if (!frame) {
       slot.innerHTML = card(`<div data-site-preview-head></div>
-      <div data-sb-frame-box class="bg-gray-100 rounded-lg p-2" style="overflow:auto"><iframe data-site-preview title="Preview of your website" style="display:block;margin:0 auto;height:min(720px, 70vh);border:0;background:#fff;border-radius:8px"></iframe></div>`);
+      <div data-sb-frame-box class="bg-gray-100 rounded-lg p-2" style="overflow:auto;position:relative"><iframe data-site-preview title="Preview of your website" style="display:block;margin:0 auto;height:min(720px, 70vh);border:0;background:#fff;border-radius:8px"></iframe></div>`);
       frame = slot.querySelector('iframe[data-site-preview]');
     }
     slot.toggleAttribute('data-sb-full', !!state.previewFull);
@@ -1269,8 +1434,275 @@
     if (head._html !== headHtml) { head.innerHTML = headHtml; head._html = headHtml; }
     // Phone: 390px wide, or the whole box on a screen narrower than that (no sideways scroll).
     frame.style.width = state.device === 'mobile' ? 'min(390px, 100%)' : '100%';
+    // Drafting: say so over the preview, with dots that move, until the new draft is there.
+    const box = slot.querySelector('[data-sb-frame-box]');
+    let veil = box.querySelector('[data-sb-drafting]');
+    const drafting = !!state.data.site.drafting && !showImport;
+    if (drafting && !veil) {
+      box.insertAdjacentHTML('beforeend', `<div data-sb-drafting role="status"><div class="bg-white rounded-xl shadow-sm border border-gray-200 px-5 py-4 text-center" style="max-width:320px">
+        <p class="text-sm font-black text-gray-900">${esc(state.assistantName || 'Your assistant')} is writing your site <span class="sb-dots text-emerald-700" aria-hidden="true"><i></i><i></i><i></i></span></p>
+        <p class="text-xs text-gray-500 mt-1">This takes a minute or two. It appears here when it's ready.</p></div></div>`);
+    } else if (!drafting && veil) veil.remove();
     if (frame.dataset.src !== src) { frame.dataset.src = src; frame.src = src; }
   }
+
+
+  // ── The chat pane (the "Chat" sub-tab) ─────────────────────────────────────
+  // The same conversation as the chat pop-up (chat-session.js), docked beside the preview so a change
+  // the user approves on a card shows in the preview straight away (site:changed → load). Its thread
+  // is remembered per assistant in this browser, so coming back carries on; "New chat" starts again.
+  const chatPane = { session: null, assistantId: null, mountEl: null, loading: false };
+  const chatKey = () => `bms-site-chat:${state.assistantId}`;
+  const storedChat = () => { try { return Number(localStorage.getItem(chatKey())) || null; } catch { return null; } };
+  const storeChat = (id) => { try { if (id) localStorage.setItem(chatKey(), String(id)); else localStorage.removeItem(chatKey()); } catch { /* private window */ } };
+  function unmountChat() {
+    if (chatPane.session && chatPane.session.destroy) { try { chatPane.session.destroy(); } catch { /* already gone */ } }
+    chatPane.session = null; chatPane.mountEl = null; chatPane.assistantId = null;
+  }
+  function paintChat(box) {
+    if (!box) return;
+    const show = state.panel === 'chat' && chatAvailable();
+    box.hidden = !show;
+    if (!show) return;
+    if (chatPane.loading) return;
+    if (chatPane.session && chatPane.assistantId === state.assistantId && chatPane.mountEl && box.contains(chatPane.mountEl)) return;
+    mountChat(box, storedChat());
+  }
+  async function mountChat(box, sessionId) {
+    unmountChat();
+    const who = esc(state.assistantName || 'your assistant');
+    box.innerHTML = `<div data-sb-chatbox class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
+        <div class="flex items-center justify-between gap-2 px-4 py-2 border-b border-gray-200" style="flex-shrink:0">
+          <p class="text-sm font-black text-gray-900 truncate">Chat with ${who}</p>
+          ${btn('data-sb-chat-new title="Start a new conversation"', 'New chat')}
+        </div>
+        <div style="position:relative;flex:1;min-height:0"><div data-sb-chat-mount style="position:absolute;inset:0"><p class="text-sm text-gray-500 text-center p-8">Loading the chat…</p></div></div>
+      </div>`;
+    const mountEl = box.querySelector('[data-sb-chat-mount]');
+    const forId = state.assistantId;
+    chatPane.loading = true;
+    let initialMessages = [];
+    let chatSessionId = null;
+    if (sessionId) {
+      // Carry on the remembered thread — unless it is archived, gone or someone else's.
+      try {
+        const r = await fetch(`/.netlify/functions/get-chat-session?chatSessionId=${encodeURIComponent(sessionId)}`, { credentials: 'same-origin' });
+        const d = r.ok ? await r.json() : null;
+        if (d && d.session && Number(d.session.aiAssistantId) === Number(forId) && d.session.status !== 'archived') {
+          chatSessionId = sessionId; initialMessages = d.messages || [];
+        } else storeChat(null);
+      } catch { /* start a new one */ }
+    }
+    chatPane.loading = false;
+    if (forId !== state.assistantId || !mountEl.isConnected) return;
+    const fresh = state.data && isFresh();
+    chatPane.session = window.ChatSession.mount({
+      container: mountEl,
+      assistantId: forId,
+      chatSessionId,
+      assistantName: state.assistantName,
+      roleKey: 'website_assistant',
+      initialMessages,
+      placeholder: fresh ? 'Describe the website you’d like…' : 'Ask for a change…',
+      starterPrompts: fresh ? [
+        'Build me a website — ask me a few quick questions first.',
+        'Bring over my current website so I can start from what I have.',
+        'What do you already know about my business?',
+      ] : null,
+      onSession: (id) => { if (state.assistantId === forId) storeChat(id); },
+      // A bigger box to describe a site in (owner, 2026-11-05).
+      composerRows: 4,
+    });
+    chatPane.assistantId = forId;
+    chatPane.mountEl = mountEl;
+  }
+
+  // ── "Select": pick a part of the preview to talk about ────────────────────
+  // Hover outlines the part under the pointer (a heading, a paragraph, a button, a picture — or the
+  // whole section); a click puts it on a chip above the chat's message box and stops selecting. The
+  // preview is same-origin with no scripts of its own, so all of this is added from here.
+  const picker = { on: false, frame: null, off: null };
+  const PART_KIND = { H1: 'heading', H2: 'heading', H3: 'heading', H4: 'heading', H5: 'heading', H6: 'heading', P: 'text', A: 'button or link', BUTTON: 'button', IMG: 'picture', PICTURE: 'picture', FIGURE: 'picture', VIDEO: 'video', LI: 'item', BLOCKQUOTE: 'quote', DT: 'question', DD: 'answer', SUMMARY: 'question', LABEL: 'form field', INPUT: 'form field', TEXTAREA: 'form field', SELECT: 'form field', TABLE: 'table' };
+  const PART_SEL = Object.keys(PART_KIND).join(',').toLowerCase();
+  /** The page the preview is showing — it may not be the one open on Pages (links inside it navigate). */
+  function previewPage(frame) {
+    let path = state.previewPath;
+    try { path = new URL(frame.contentWindow.location.href).searchParams.get('path') || path; } catch { /* keep */ }
+    const d = def();
+    return d && (d.pages.find((x) => pathOf(x) === String(path).split('#')[0]) || page());
+  }
+  /** What the pointer is over: { el (to outline), label (the chip), message (what the assistant is told) }. */
+  function describePart(doc, target, pg) {
+    if (!target || !target.closest || !pg) return null;
+    const ids = new Set(pg.sections.map((x) => x.id));
+    let secEl = target;
+    while (secEl && secEl !== doc.body && !(secEl.id && ids.has(secEl.id))) secEl = secEl.parentElement;
+    const where = def().pages.length > 1 ? ` on the ${pg.title} page` : '';
+    const words = (el) => String((el.tagName === 'IMG' ? el.getAttribute('alt') : el.textContent) || '').replace(/\s+/g, ' ').trim();
+    const short = (t, n) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+    if (!secEl || secEl === doc.body) {
+      const band = target.closest('header, nav') ? ['the menu at the top', 'Menu at the top'] : target.closest('footer') ? ['the footer', 'Footer'] : null;
+      const el = band && target.closest(band[0] === 'the footer' ? 'footer' : 'header, nav');
+      return el ? { el, label: band[1], message: `About this part of my website: ${band[0]}${where}.` } : null;
+    }
+    const sec = pg.sections.find((x) => x.id === secEl.id);
+    const typeLabel = TYPE_LABEL[sec.type] || sec.type;
+    const part = target.closest(PART_SEL);
+    if (part && part !== secEl && secEl.contains(part) && !part.closest('[data-bms-ask]')) {
+      const kind = PART_KIND[part.tagName] || 'part';
+      const t = words(part);
+      return { el: part,
+        label: `${typeLabel} › ${kind}${t ? ` “${short(t, 40)}”` : ''}`,
+        message: `About this part of my website: the ${typeLabel} section${where} (section ${sec.id}) — the ${kind}${t ? ` “${short(t, 160)}”` : ''}.` };
+    }
+    return { el: secEl, label: `${typeLabel} section${where ? ` (${pg.title})` : ''}`,
+      message: `About this part of my website: the ${typeLabel} section${where} (section ${sec.id}).` };
+  }
+  function attachPicker(frame) {
+    if (picker.off) picker.off();
+    picker.off = null;
+    let doc;
+    try { doc = frame.contentDocument; } catch { return; }
+    if (!doc || !doc.body) return;
+    picker.frame = frame;
+    const style = doc.createElement('style');
+    style.textContent = '*{cursor:crosshair !important}';
+    doc.head.appendChild(style);
+    const box = doc.createElement('div');
+    box.style.cssText = 'position:fixed;z-index:2147483646;pointer-events:none;border:2px solid #db2777;background:rgba(219,39,119,.08);border-radius:6px;display:none;transition:all .06s';
+    const tag = doc.createElement('div');
+    tag.style.cssText = 'position:absolute;left:-2px;top:-24px;background:#db2777;color:#fff;font:600 12px/1 system-ui,sans-serif;padding:5px 8px;border-radius:6px;white-space:nowrap;max-width:320px;overflow:hidden;text-overflow:ellipsis';
+    box.appendChild(tag);
+    doc.body.appendChild(box);
+    let last = null;
+    const show = (hit) => {
+      last = hit;
+      if (!hit) { box.style.display = 'none'; return; }
+      const r = hit.el.getBoundingClientRect();
+      Object.assign(box.style, { display: 'block', left: `${r.left}px`, top: `${r.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+      tag.textContent = hit.label;
+      tag.style.top = r.top < 26 ? '2px' : '-24px';
+      tag.style.left = r.top < 26 ? '2px' : '-2px';
+    };
+    const pg = () => previewPage(frame);
+    const onMove = (e) => show(describePart(doc, e.target, pg()));
+    const onScroll = () => { if (last) show(last); };
+    const stop = (e) => { e.preventDefault(); e.stopPropagation(); };
+    const onClick = (e) => {
+      stop(e);
+      const hit = describePart(doc, e.target, pg());
+      if (!hit) return;
+      setPicker(false);
+      giveToChat(hit);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { stop(e); setPicker(false); } };
+    doc.addEventListener('mousemove', onMove, true);
+    doc.addEventListener('click', onClick, true);
+    doc.addEventListener('submit', stop, true);
+    doc.addEventListener('keydown', onKey, true);
+    doc.defaultView.addEventListener('scroll', onScroll, true);
+    picker.off = () => {
+      doc.removeEventListener('mousemove', onMove, true);
+      doc.removeEventListener('click', onClick, true);
+      doc.removeEventListener('submit', stop, true);
+      doc.removeEventListener('keydown', onKey, true);
+      try { doc.defaultView.removeEventListener('scroll', onScroll, true); } catch { /* frame gone */ }
+      style.remove(); box.remove();
+    };
+  }
+  function setPicker(on) {
+    picker.on = !!on;
+    if (!on && picker.off) { picker.off(); picker.off = null; }
+    const host = document.querySelector('[data-site-host="website"]');
+    const frame = host && host.querySelector('iframe[data-site-preview]');
+    if (on && frame) attachPicker(frame);
+    rerender();
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && picker.on) { e.preventDefault(); setPicker(false); } });
+  /** A selected part (or a section's swan) onto the chip above the docked chat's message box. */
+  function giveToChat(ref) {
+    if (!chatAvailable()) {
+      window.openAssistantChat?.({ assistantId: state.assistantId, draft: `${ref.message}\n\n` });
+      return;
+    }
+    if (state.previewFull) setPreviewFull(false);
+    if (state.panel !== 'chat') { keepEditing(); state.panel = 'chat'; render(); }
+    const tryGive = (n) => {
+      if (chatPane.session && chatPane.assistantId === state.assistantId) {
+        chatPane.session.setReference(ref);
+        chatPane.mountEl?.closest('[data-sb-chat]')?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if (n < 40) setTimeout(() => tryGive(n + 1), 100);
+    };
+    tryGive(0);
+  }
+
+
+  // ── A picture being found or made from the chat (site_picture card) ────────
+  // A placeholder in the preview where it will go — over the section's own picture, or as a new block
+  // after the section — with the swan and moving dots, until the picture lands (the preview reloads)
+  // or the card stops. Drawn into the same-origin preview, like Select's outline.
+  function paintPictureWorking(frame) {
+    let doc;
+    try { doc = frame && frame.contentDocument; } catch { return; }
+    if (!doc || !doc.body) return;
+    doc.querySelectorAll('[data-bms-picture-working]').forEach((x) => x.remove());
+    const w = state.pictureWorking;
+    if (!w) return;
+    const sec = doc.getElementById(w.sectionId);
+    if (!sec) return;
+    if (!doc.getElementById('bms-pw-style')) {
+      const st = doc.createElement('style');
+      st.id = 'bms-pw-style';
+      st.textContent = '@keyframes bmsPw{0%{background-position:100% 0}100%{background-position:-100% 0}}@keyframes bmsDot{0%,80%,100%{opacity:.25}40%{opacity:1}}'
+        + '[data-bms-picture-working]{border-radius:12px;overflow:hidden;background:linear-gradient(90deg,#fdf2f8 25%,#fce7f3 50%,#fdf2f8 75%);background-size:200% 100%;animation:bmsPw 1.6s linear infinite;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#9d174d;font:600 14px/1.3 system-ui,sans-serif;text-align:center;padding:16px;box-sizing:border-box}'
+        + '[data-bms-picture-working] i{display:inline-block;width:7px;height:7px;margin:0 2px;border-radius:9999px;background:#db2777;animation:bmsDot 1.2s infinite}[data-bms-picture-working] i:nth-child(2){animation-delay:.15s}[data-bms-picture-working] i:nth-child(3){animation-delay:.3s}';
+      doc.head.appendChild(st);
+    }
+    const box = doc.createElement('div');
+    box.setAttribute('data-bms-picture-working', '');
+    box.setAttribute('role', 'status');
+    box.innerHTML = `<img src="${SWAN}" alt="" style="width:44px;height:44px;object-fit:contain"><span>${esc(state.assistantName || 'Your assistant')}: ${esc(w.label || 'working on a picture')}<br><span><i></i><i></i><i></i></span></span>`;
+    const own = w.place !== 'after' && sec.querySelector('img, video');
+    if (own) {
+      const r = own.getBoundingClientRect();
+      box.style.cssText = `position:absolute;left:${own.offsetLeft}px;top:${own.offsetTop}px;width:${r.width}px;height:${r.height}px;z-index:40`;
+      if (doc.defaultView.getComputedStyle(own.offsetParent || sec).position === 'static') (own.offsetParent || sec).style.position = 'relative';
+      (own.offsetParent || sec).appendChild(box);
+    } else {
+      box.style.cssText = 'width:min(640px,calc(100% - 32px));aspect-ratio:16/9;margin:8px auto 32px';
+      sec.insertAdjacentElement(w.place === 'after' ? 'afterend' : 'beforeend', box);
+    }
+    box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  document.addEventListener('site:pictureWorking', (e) => {
+    const d = e.detail || {};
+    state.pictureWorking = d.on ? { sectionId: d.sectionId, pageId: d.pageId, place: d.place, label: d.label } : null;
+    const frame = document.querySelector('[data-site-host="website"] iframe[data-site-preview]');
+    if (!frame) return;
+    // Showing another page: bring up the section's page first; the load handler paints it there.
+    const pg = d.on && def() && def().pages.find((x) => x.id === d.pageId);
+    if (pg && pathOf(pg) !== state.previewPath.split('#')[0] && !(previewPage(frame) && previewPage(frame).id === pg.id)) { state.previewPath = pathOf(pg); rerender(); return; }
+    paintPictureWorking(frame);
+  });
+
+  /** The whole Website tab full screen (wide screens) — and back. Esc leaves it. */
+  function setEditorFull(on) {
+    if (!!state.editorFull === !!on) return;
+    state.editorFull = !!on;
+    const host = document.querySelector('[data-site-host="website"]');
+    if (host) host.toggleAttribute('data-sb-editor-full', state.editorFull);
+    if (window.ScrollLock) { if (on) window.ScrollLock.lock('site-editor-full'); else window.ScrollLock.release('site-editor-full'); }
+    else document.body.style.overflow = on ? 'hidden' : '';
+    rerender();
+    host?.querySelector('[data-site-editor-full]')?.focus();
+  }
+  document.addEventListener('keydown', (e) => {
+    // Esc stops "Select" first, closes a dialog or the phone preview first, then leaves full screen.
+    if (e.key !== 'Escape' || e.defaultPrevented || !state.editorFull || picker.on || state.previewFull || document.querySelector('[role="dialog"][aria-modal="true"]:not([hidden])')) return;
+    setEditorFull(false);
+  });
 
   /** The preview full screen (narrow screens, where it sits below everything else) — and back. */
   let previewRelease = null;
@@ -1299,8 +1731,12 @@
   // site is made: Set up (what it does, business details, bring your site, start again) → Design
   // (template, layout, look) → Pages (the words and sections) → Publish (address, domain, versions).
   // The preview stays beside whichever is open. Arrow keys move between them (assistants.js).
-  const SUBTABS = [['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];
+  // "Chat" (2026-11-04): this assistant's chat, docked beside the preview, first because it is the
+  // quickest way to build — every change it proposes still waits for the user's click on its card.
+  const chatAvailable = () => !!(window.ChatSession && typeof window.ChatSession.mount === 'function');
+  const SUBTABS_ALL = [['chat', 'Chat'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];
   function siteSubtabsHtml() {
+    const SUBTABS = SUBTABS_ALL.filter(([k]) => k !== 'chat' || chatAvailable());
     const s = state.data.site;
     const brackets = (state.data.placeholders || []).length;
     // What a tab is waiting on, said on the tab so the owner needn't open each to find out.
@@ -1354,7 +1790,7 @@
   function draftCard(where) {
     const s = state.data.site;
     if (s.drafting && state.data.import && state.data.import.status === 'reading') return '';
-    if (s.drafting) return card('<p class="text-sm font-semibold text-emerald-800">Drafting your whole site — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
+    if (s.drafting) return card('<p class="text-sm font-semibold text-emerald-800">Drafting your whole site <span class="sb-dots" aria-hidden="true"><i></i><i></i><i></i></span> — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
     const who = esc(state.assistantName || 'Your Website Assistant');
     const form = `
       <textarea data-site-draft-request rows="2" class="${inputCls} mt-3" placeholder="Anything to include? e.g. a page for each service, a friendly tone, mention free delivery"></textarea>
@@ -1675,16 +2111,19 @@
     if (state.loadError && !state.data) { host.innerHTML = card(`<p class="text-sm font-bold text-gray-700 text-center">Could not load your website</p><p class="text-xs text-gray-500 mt-2 text-center">${esc(state.loadError)}</p><div class="mt-3 text-center">${btn('data-site-retry', 'Try again', true)}</div>`); return; }
     paintTabBadges();
     if (state.surface !== 'website') {
-      const body = state.surface === 'enquiries' ? enquiriesPanel() : state.surface === 'orders' ? ordersPanel() : bookingsPanel();
+      // What was typed into the listing form survives the repaint.
+      if (state.surface === 'listings' && state.listingEdit && document.querySelector('[data-listing-form]')) state.listingEdit = readListingForm();
+      const body = state.surface === 'enquiries' ? enquiriesPanel() : state.surface === 'orders' ? ordersPanel() : state.surface === 'listings' ? listingsPanel() : bookingsPanel();
       if (!host.querySelector(':scope > [data-site-surface]')) host.innerHTML = '<div data-site-surface class="max-w-4xl space-y-4"></div>';
       paintBlocks(host.firstElementChild, [['note', noteHtml(), { live: true }], ['body', body]]);
       afterPaint(host);
       return;
     }
     if (!host.querySelector(':scope > [data-site-layout]')) {
-      host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div class="space-y-4 min-w-0"></div><div class="min-w-0"></div></div>';
+      host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div data-sb-pane class="min-w-0"><div data-sb-blocks class="space-y-4"></div><div data-sb-chat class="mt-4"></div></div><div data-sb-preview-col class="min-w-0"></div></div>';
     }
     const layout = host.firstElementChild;
+    const blocksEl = layout.querySelector('[data-sb-blocks]');
     const s = state.data.site;
     const fresh = isFresh();
     const step = fresh ? setupStep() : 0;
@@ -1692,14 +2131,16 @@
     // Which sub-tab. A new site (or one whose imported draft is waiting to be looked at) opens on
     // Set up, where its steps are; a site under way opens on Pages. Finishing set-up moves on to
     // Pages once, so the words just written are what the owner sees next.
-    if (!state.panel) state.panel = fresh || (imp && imp.status === 'ready') ? 'setup' : 'pages';
+    // With the chat available it opens first (an imported draft waiting still opens on Set up).
+    if (state.panel === 'chat' && !chatAvailable()) state.panel = null;
+    if (!state.panel) state.panel = imp && imp.status === 'ready' ? 'setup' : chatAvailable() ? 'chat' : fresh ? 'setup' : 'pages';
     if (state.wasFresh && !fresh && state.panel === 'setup') state.panel = 'pages';
     state.wasFresh = fresh;
     const tabbar = siteSubtabsHtml();
     // During set-up the other tabs are for looking around: their buttons give way to the step's.
     quietPrimary = fresh && !state.editing && state.panel !== 'setup';
     const P = state.panel;
-    const blocks = P === 'setup' ? (fresh ? [
+    const blocks = P === 'chat' ? [] : P === 'setup' ? (fresh ? [
       ['setup', setupStepsHtml(step)],
       ['features', step === 1 ? featuresCard(true) : ''],
       ['templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true }],
@@ -1726,7 +2167,8 @@
     // Drafting takes a minute or two and can be started from more than one tab: say it on all of them.
     const drafting = s.drafting && !blocks.some(([k, h]) => (k === 'draft') && h) ? draftCard('start') : '';
     quietPrimary = false;
-    paintBlocks(layout.firstElementChild, [
+    layout.setAttribute('data-sb-mode', P === 'chat' ? 'chat' : 'edit');
+    paintBlocks(blocksEl, [
       ['tabs', tabbar],
       ['note', noteHtml(), { live: true }],
       ['drafting', drafting],
@@ -1736,6 +2178,7 @@
       ['preview-jump', btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site'),
         { attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
     ]);
+    paintChat(layout.querySelector('[data-sb-chat]'));
     paintPreview(layout.lastElementChild);
     afterPaint(host);
   }
@@ -1753,7 +2196,8 @@
     // Orders and Bookings tabs follow what the website does.
     const show = (id, on) => { const b = document.getElementById(id); if (b) { b.classList.toggle('hidden', !on); b.style.display = on ? '' : 'none'; } };
     // The Calendar tab is this assistant's bookings calendar (assistant-calendar.js), so it goes with them.
-    if (state.data) { show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings')); show('maintab-btn-calendar', featureOn('bookings')); }
+    if (state.data) { show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings')); show('maintab-btn-calendar', featureOn('bookings')); show('maintab-btn-sitelistings', listingsOn()); }
+    set('site-listings-badge', (state.listings && state.listings.pending) || 0);
     set('site-enquiries-badge', d.newEnquiries || 0);
     set('site-orders-badge', d.newOrders || 0);
     set('site-bookings-badge', (d.booking && d.booking.waiting) || 0);
@@ -1766,7 +2210,14 @@
   // ── Events (bound once) ────────────────────────────────────────────────────
   // The preview's swans: `load` does not bubble, so listen in the capture phase.
   document.addEventListener('load', (e) => {
-    if (e.target && e.target.matches && e.target.matches('iframe[data-site-preview]')) swanThePreview(e.target);
+    if (e.target && e.target.matches && e.target.matches('iframe[data-site-preview]')) {
+      // With the chat docked, "Select" does what the preview's swans did — two ways to one thing
+      // confused people (owner, 2026-11-05), so the swans stay only where there is no docked chat.
+      if (!chatAvailable()) swanThePreview(e.target);
+      if (picker.on) attachPicker(e.target);
+      // A picture still being made: its placeholder again (a reload that isn't the picture landing).
+      if (state.pictureWorking) paintPictureWorking(e.target);
+    }
   }, true);
   document.addEventListener('submit', async (e) => {
     const form = e.target.closest && e.target.closest('[data-site-section-form]');
@@ -1844,6 +2295,67 @@
       render();
       return;
     }
+    // ── Listings tab ──
+    if (t('[data-site-open-listings]')) { window._activateMainTab?.('sitelistings'); return; }
+    if (t('[data-listing-new]')) { state.listingEdit = { kind: 'event' }; state.listingError = null; render(); document.querySelector('[data-listing-form] [name="l-title"]')?.focus(); return; }
+    if (t('[data-listing-cancel]')) { state.listingEdit = null; state.listingError = null; render(); return; }
+    const lEdit = t('[data-listing-edit]');
+    if (lEdit) {
+      const l = (state.listings.listings || []).find((x) => x.id === Number(lEdit.dataset.listingEdit));
+      if (l) { state.listingEdit = { ...l }; state.listingError = null; render(); document.querySelector('[data-listing-form]')?.scrollIntoView({ block: 'start' }); }
+      return;
+    }
+    if (t('[data-listing-picture]')) {
+      state.listingEdit = readListingForm();
+      window.MediaPicker.open({ title: 'Choose a picture', assistantName: state.assistantName, topic: state.listingEdit.title || '', onPick: (asset) => {
+        state.thumbs[asset.id] = asset.url;
+        state.listingEdit = { ...state.listingEdit, imageAssetId: asset.id, imageAlt: state.listingEdit.imageAlt || altFromName(asset.name || asset.title || '') };
+        render();
+      } });
+      return;
+    }
+    if (t('[data-listing-picture-remove]')) { state.listingEdit = { ...readListingForm(), imageAssetId: null, imageAlt: null }; render(); return; }
+    if (t('[data-listing-save]')) {
+      const l = readListingForm();
+      const fields = { kind: l.kind, title: l.title, category: l.category, summary: l.summary, body: l.body, location: l.location, linkUrl: l.linkUrl || null, linkLabel: l.linkLabel,
+        imageAssetId: l.imageAssetId || null, imageAlt: l.imageAlt || null,
+        ...(l.kind === 'event' ? { startsOn: l.startsOn || null, endsOn: l.endsOn || null, startTime: l.startTime || null, endTime: l.endTime || null } : { startsOn: null, endsOn: null, startTime: null, endTime: null }) };
+      state.listingEdit = l;
+      try {
+        if (l.id) await lcall('PATCH', { id: l.id, ...fields }); else await lcall('POST', fields);
+        state.listingEdit = null; state.listingError = null;
+        state.note = { text: l.id ? 'Saved.' : 'Added.', tone: 'ok' };
+        state.version++;
+      } catch (err) { state.listingError = err.message; }
+      await loadListings();
+      return;
+    }
+    const lDecide = t('[data-listing-decide]');
+    if (lDecide) {
+      try { await lcall('PATCH', { id: Number(lDecide.dataset.id), decision: lDecide.dataset.listingDecide }); state.note = { text: lDecide.dataset.listingDecide === 'approve' ? 'Approved — it now shows in your listings.' : 'Declined — it won\'t be shown.', tone: 'ok' }; state.version++; }
+      catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      await loadListings();
+      return;
+    }
+    const lShow = t('[data-listing-show]');
+    if (lShow) {
+      try { await lcall('PATCH', { id: Number(lShow.dataset.id), status: lShow.dataset.listingShow }); state.version++; }
+      catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      await loadListings();
+      return;
+    }
+    const lDel = t('[data-listing-delete]');
+    if (lDel) {
+      const l = (state.listings.listings || []).find((x) => x.id === Number(lDel.dataset.listingDelete));
+      const ok = typeof window.confirmModal === 'function'
+        ? await window.confirmModal(`Delete <strong>${esc(l ? l.title : 'this listing')}</strong> for good? Its page on your site stops working. To take it off your site for now, choose Hide instead.`, { title: 'Delete this listing?', confirmLabel: 'Delete', cancelLabel: 'Keep it' })
+        : true;
+      if (!ok) return;
+      try { await lcall('DELETE', null, `?id=${encodeURIComponent(lDel.dataset.listingDelete)}`); state.note = { text: 'Deleted.', tone: 'ok' }; state.version++; }
+      catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      await loadListings();
+      return;
+    }
     const enq = t('[data-site-enquiry]');
     if (enq) {
       try {
@@ -1895,6 +2407,9 @@
       if (pg.dataset.sitePage !== p.id) state.editing = null;
       state.pageId = pg.dataset.sitePage; state.previewPath = pathOf(page()); render(); return;
     }
+    if (t('[data-site-pick]')) { setPicker(!picker.on); return; }
+    if (t('[data-site-editor-full]')) { setEditorFull(!state.editorFull); return; }
+    if (t('[data-sb-chat-new]')) { storeChat(null); unmountChat(); render(); return; }
     if (t('[data-site-preview-full]')) { setPreviewFull(true); return; }
     if (t('[data-site-preview-close]')) { setPreviewFull(false); return; }
     const dev = t('[data-site-device]');
@@ -2405,6 +2920,7 @@
   });
   // A product ticked in one menu group is greyed out in the others: redraw the form on each tick.
   document.addEventListener('change', (e) => {
+    if (e.target.matches && e.target.matches('[data-listing-kind]')) { state.listingEdit = readListingForm(); render(); return; }
     // A booking section switching to or from "Classes and events" offers a different service list.
     const kindSel = e.target.closest && e.target.closest('select[name="f-kind"]');
     if (kindSel && state.editing && state.editing.type === 'booking') { syncEditing(kindSel.closest('form')); render(); return; }
@@ -2430,21 +2946,32 @@
   document.addEventListener('site:changed', (e) => {
     const id = e.detail && e.detail.assistantId;
     if (!state.assistantId || Number(id) !== Number(state.assistantId)) return;
+    state.pictureWorking = null;
     load();
+    if (state.listings || state.surface === 'listings') loadListings();
   });
 
   window.AssistantSiteEditor = {
     init({ assistantId, assistantName }) {
       clearTimeout(state.pollTimer);
+      // Another assistant's page: its own chat thread, and no part of the old preview still selecting.
+      picker.on = false;
+      if (picker.off) { picker.off(); picker.off = null; }
+      if (chatPane.assistantId !== assistantId) unmountChat();
+      setEditorFull(false);
       Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
-        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false });
+        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false, wasDrafting: false, listings: null, listingEdit: null, listingError: null });
       load();
+      // The Listings tab's badge (visitors' entries waiting) is visible from every tab.
+      loadListings();
     },
     // surface: 'website' (pages, design, details, preview) or 'enquiries' | 'orders' | 'bookings',
     // each its own tab. A list re-reads every time its tab is opened.
     activate(surface) {
       setPreviewFull(false);
+      setEditorFull(false);
+      if (picker.on && (surface || 'website') !== 'website') { picker.on = false; if (picker.off) { picker.off(); picker.off = null; } }
       // Leaving the Website tab keeps an open section form, with what was typed, for coming back.
       if (state.surface === 'website') keepEditing();
       // A note ("Saved.") belongs to the tab it was said on.
@@ -2454,6 +2981,7 @@
       if (state.surface === 'enquiries') { state.enquiries = null; state.enquiryShown = 20; loadEnquiries(); }
       if (state.surface === 'orders') { state.orders = null; state.orderShown = 20; loadOrders(); }
       if (state.surface === 'bookings') { state.bookings = null; loadBookings(); }
+      if (state.surface === 'listings') loadListings();
       render();
     },
   };
