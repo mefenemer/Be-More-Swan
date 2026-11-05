@@ -242,7 +242,8 @@
         ? `The draft didn't finish: ${state.data.site.draftNote}`
         : imp && imp.status === 'ready' ? 'Your current site has been read — have a look at it on the Set up tab, then choose whether to use it as your draft.'
         : imp && imp.status === 'failed' ? (imp.message || 'The import didn\'t work.')
-        : 'Your draft is ready — it\'s in the preview on the left. Tell me what to change, or use 🎯 Select to point at any part of it.' });
+        // Where the preview is depends on the width: beside the chat, or behind "Preview my site".
+        : `Your draft is ready — ${window.matchMedia('(min-width: 1024px)').matches ? 'it\'s in the preview on the left' : 'press "Preview my site" to see it'}. Tell me what to change, or use 🎯 Select to point at any part of it.` });
     }
     if (state.wasDrafting && !nowDrafting && state.data) {
       document.dispatchEvent(new CustomEvent('site:drafted', { detail: { assistantId: state.assistantId, error: state.data.site.draftNote || null } }));
