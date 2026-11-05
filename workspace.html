@@ -21382,7 +21382,7 @@ async function _pceChatSync() {
         pane: window.ChatPane.mount(document.getElementById('pce-chat-host'), {
             assistantId: post.assistantId, assistantName: meta.name, roleKey: meta.roleKey,
             rememberKey: `bms-post-chat:${key}`,
-            placeholder: 'Ask for a change to this post, or 🎯 Select a part of it…',
+            placeholder: 'Ask for a change to this post…',
             starterPrompts: editable
                 ? ['Make this post punchier.', 'Give it a stronger opening line.', 'What would make this post do better?']
                 : null,

@@ -404,7 +404,7 @@
       pane: () => ({
         assistantId: state.assistantId, assistantName: state.assistantName || 'your Video Producer', roleKey: 'video_producer',
         rememberKey: `bms-video-chat:${state.assistantId}`,
-        placeholder: 'Ask for a video, or 🎯 Select a scene…',
+        placeholder: 'Ask for a video…',
         starterPrompts: ['Plan me a 30-second video about what we do.', 'Make the opening of my video grab attention.', 'What would make this video work better?'],
         composerRows: 3,
       }),

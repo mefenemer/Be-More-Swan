@@ -3151,7 +3151,7 @@
       pane: () => ({
         assistantId: state.assistantId, assistantName: state.assistantName || 'your Campaign Orchestrator', roleKey: 'campaign_orchestrator',
         rememberKey: `bms-campaign-chat:${state.assistantId}`,
-        placeholder: 'Set an objective, or 🎯 Select a campaign…',
+        placeholder: 'Set an objective…',
         starterPrompts: ['Plan a campaign to get more sign-ups this month.', 'How are my campaigns doing?', 'What should my next campaign be?'],
         composerRows: 3,
       }),

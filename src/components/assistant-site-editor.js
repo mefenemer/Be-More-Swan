@@ -1484,6 +1484,7 @@
         'What do you already know about my business?',
       ] : null,
       // A bigger box to describe a site in (owner, 2026-11-05).
+      tallComposer: true,
       composerRows: 4,
     });
     chatPane.assistantId = state.assistantId;

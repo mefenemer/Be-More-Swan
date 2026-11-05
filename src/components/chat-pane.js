@@ -7,7 +7,8 @@
  *   const pane = window.ChatPane.mount(container, {
  *     assistantId, assistantName, roleKey,
  *     rememberKey,        // localStorage key for "carry on this thread here" (e.g. 'bms-site-chat:63')
- *     placeholder?, starterPrompts?, composerRows? (default 4), title?,
+ *     placeholder?, starterPrompts?, title?,
+ *     tallComposer?, composerRows?   // a tall message box (the Website tab); otherwise one line that grows
  *     draftTarget?        // () => the post this chat is about, or null: see chat-session.js
  *     turnContext?        // () => extra fields sent with every turn (the Email Studio's forIssueId)
  *     onClose?            // a ✕ on the pane: for where it covers the page and its own toggle
@@ -34,10 +35,17 @@
     let session = null;
     let destroyed = false;
     let pendingRef = null;
+    // The assistant's own icon (the colour and letter it has on its card), so the pane reads as THAT assistant.
+    const AC = window.AssistantColors;
+    const avatarColor = AC && AC.colorFor ? AC.colorFor(opts.assistantId) : '#10b981';
+    const avatarLetter = AC && AC.letterFor ? AC.letterFor(opts.assistantId, opts.assistantName) : (String(opts.assistantName || 'A').trim()[0] || 'A').toUpperCase();
     container.innerHTML = `<div data-chatpane class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col" style="height:100%">
         <div class="flex items-center justify-between gap-2 px-4 py-2 border-b border-gray-200" style="flex-shrink:0">
-          <p class="text-sm font-black text-gray-900 truncate">${esc(opts.title || `Chat with ${opts.assistantName || 'your assistant'}`)}</p>
-          <span class="flex items-center gap-1" style="flex-shrink:0"><button type="button" data-chatpane-new title="Start a new conversation" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">New chat</button>${opts.onClose ? '<button type="button" data-chatpane-close aria-label="Close the chat" class="px-2 py-1 text-lg leading-none text-gray-500 hover:text-gray-900">&times;</button>' : ''}</span>
+          <span class="flex items-center gap-2 min-w-0">
+            <span aria-hidden="true" data-chatpane-avatar style="position:relative;flex-shrink:0;width:28px;height:28px;border-radius:9999px;background:${esc(avatarColor)};color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:800">${esc(avatarLetter)}<span style="position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:9999px;background:#22c55e;border:2px solid #fff"></span></span>
+            <p class="text-sm font-black text-gray-900 truncate">${esc(opts.title || `Chat with ${opts.assistantName || 'your assistant'}`)}</p>
+          </span>
+          <span class="flex items-center gap-1" style="flex-shrink:0"><button type="button" data-chatpane-new title="Start a new conversation" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg" style="background:none;border:0;cursor:pointer"><span aria-hidden="true">+</span> New chat</button>${opts.onClose ? '<button type="button" data-chatpane-close aria-label="Close the chat" class="px-2 py-1 text-lg leading-none text-gray-500 hover:text-gray-900">&times;</button>' : ''}</span>
         </div>
         <div style="position:relative;flex:1;min-height:0"><div data-chatpane-mount style="position:absolute;inset:0"><p class="text-sm text-gray-500 text-center p-8">Loading the chat…</p></div></div>
       </div>`;
@@ -67,7 +75,10 @@
         initialMessages,
         placeholder: opts.placeholder,
         starterPrompts: chatSessionId ? null : opts.starterPrompts || null,
-        composerRows: opts.composerRows || 4,
+        // A docked pane is narrow and short: one line that grows as they type, Send inside it. Only the
+        // Website tab keeps a tall box to describe a site in (owner, 2026-11-05): tallComposer.
+        compactComposer: !opts.tallComposer,
+        composerRows: opts.tallComposer ? opts.composerRows || 4 : 1,
         draftTarget: opts.draftTarget,
         turnContext: opts.turnContext,
         onSession: (id) => { if (key && !destroyed) write(key, id); },

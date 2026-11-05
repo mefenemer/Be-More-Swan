@@ -611,7 +611,7 @@
       pane: () => ({
         assistantId: state.assistantId, assistantName: state.assistantName, roleKey: 'business_mentor',
         rememberKey: `bms-mentorplan-chat:${state.assistantId}`,
-        placeholder: 'Ask about your plans, or 🎯 Select a part…',
+        placeholder: 'Ask about your plans…',
         starterPrompts: ['Which part of my business plan is weakest?', 'Challenge my riskiest assumption.', 'Help me write my marketing plan.'],
         composerRows: 3,
       }),

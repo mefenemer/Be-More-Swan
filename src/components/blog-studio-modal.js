@@ -881,7 +881,7 @@
       state.chatPane = window.ChatPane.mount(el('bs-chat-host'), {
         assistantId: who, assistantName: meta.name, roleKey: meta.roleKey || BLOG_WRITER_ROLE,
         rememberKey: 'bms-blog-chat:' + forKey,
-        placeholder: 'Ask for a change to this article, or 🎯 Select a part of it…',
+        placeholder: 'Ask for a change to this article…',
         starterPrompts: [
           'Make the opening of article #' + n + ' punchier.',
           'Add pictures to article #' + n + ' where they help the reader.',

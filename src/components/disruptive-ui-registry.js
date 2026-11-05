@@ -2192,7 +2192,8 @@
     let sent = false;
     const qid = `cq-${Math.random().toString(36).slice(2, 8)}`;
     const el = document.createElement('div');
-    el.className = 'bg-white border-2 border-gray-200 rounded-xl shadow-sm p-4 w-full max-w-md';
+    const openClass = 'bg-white border-2 border-gray-200 rounded-xl shadow-sm p-4 w-full max-w-md';
+    el.className = openClass;
     el.setAttribute('data-questions-open', '');
     const pill = (on) => `display:inline-flex;align-items:center;gap:6px;text-align:left;border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;border:1.5px solid ${on ? '#db2777' : '#e5e7eb'};background:${on ? '#fdf2f8' : '#fff'};color:${on ? '#831843' : '#1f2937'}`;
     const answerText = (a) => [...a.picked, a.other.trim()].filter(Boolean).join(', ');
@@ -2235,10 +2236,29 @@
         });
         answeredHere = true;
       }
-      const rows = qs.map((q, i) => `<li class="text-xs text-gray-700"><span class="font-bold">${esc(q.question)}</span><br>${esc(answerText(answers[i]) || 'Skipped')}</li>`).join('');
-      el.innerHTML = answeredHere
-        ? `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">Your answers</p><ul class="mt-2 space-y-2">${rows}</ul>`
-        : `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">A few quick questions</p><p class="text-xs text-gray-500 mt-1">Answered in the chat.</p>`;
+      // What THEY said, so it sits on their side like their own messages, in their colour, with the
+      // answers (not the questions) as the thing to read at a glance.
+      const rows = qs.map((q, i) => {
+        const v = answerText(answers[i]);
+        return `<li><p style="font-size:0.75rem;line-height:1.1rem" class="text-gray-500">${esc(q.question)}</p><p style="font-size:0.875rem" class="font-bold ${v ? 'text-gray-900' : 'text-gray-400'}">${esc(v || 'Skipped')}</p></li>`;
+      }).join('');
+      if (answeredHere) {
+        el.className = 'rounded-2xl rounded-br-md shadow-sm px-4 py-3';
+        el.style.cssText = 'align-self:flex-end;width:85%;max-width:24rem;background:var(--color-emerald-50,#fdf2f8);border:1px solid var(--color-emerald-100,#fbcfe8)';
+        el.innerHTML = `<div class="flex items-center justify-between gap-2"><p class="text-xs font-bold text-gray-500 tracking-wider uppercase">Your answers</p><button type="button" data-cq-change class="text-xs font-bold text-emerald-800 hover:underline" style="background:none;border:0;cursor:pointer" title="Go through the questions again and send new answers">Change answers</button></div><ul class="mt-2 space-y-2">${rows}</ul>`;
+      } else {
+        el.innerHTML = `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">A few quick questions</p><p class="text-xs text-gray-500 mt-1">Answered in the chat.</p>`;
+      }
+    }
+    // "Change answers": the questions again, filled in with what they said; sending sends new answers.
+    function reopen() {
+      sent = false;
+      at = 0;
+      el.className = openClass;
+      el.style.cssText = '';
+      el.setAttribute('data-questions-open', '');
+      paint();
+      el.querySelector('[data-cq-opt], [data-cq-other]')?.focus();
     }
     el.addEventListener('questions:closed', (e) => done(sent, !sent && e.detail && e.detail.answers));
     el.addEventListener('input', (e) => {
@@ -2266,6 +2286,7 @@
         el.querySelector(`[data-cq-opt="${opt.dataset.cqOpt}"]`)?.focus();
         return;
       }
+      if (e.target.closest('[data-cq-change]')) { reopen(); return; }
       if (e.target.closest('[data-cq-back]')) { at = Math.max(0, at - 1); paint(); el.querySelector('[data-cq-opt], [data-cq-other]')?.focus(); return; }
       if (e.target.closest('[data-cq-skip]')) { at = Math.min(qs.length - 1, at + 1); paint(); el.querySelector('[data-cq-opt], [data-cq-other]')?.focus(); return; }
       const skipAll = !!e.target.closest('[data-cq-skipall]');

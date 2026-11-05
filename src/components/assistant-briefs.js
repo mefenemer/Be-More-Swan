@@ -1336,7 +1336,7 @@
       pane: () => ({
         assistantId: state.assistantId, assistantName: name(), roleKey: 'brand_designer',
         rememberKey: `bms-brief-chat:${state.assistantId}`,
-        placeholder: 'Ask for a picture or a flyer, or 🎯 Select an option…',
+        placeholder: 'Ask for a picture or a flyer…',
         starterPrompts: ['I need a picture for a post.', 'Make me a printed flyer.', 'Which of these options would you choose?'],
         composerRows: 3,
       }),
