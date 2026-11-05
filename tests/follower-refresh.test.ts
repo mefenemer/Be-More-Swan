@@ -185,4 +185,19 @@ check('a thrown fetch degrades to an unavailable row rather than failing the swe
     },
 ));
 
+check('YouTube/Threads counts use a refreshed token, never the raw stored one', async () => {
+    // A Google access token lasts 1 hour. Reading it straight from the vault made the YouTube
+    // Audience row "—" ("fetch failed") most of the time (2026-11-05). Source scan of the
+    // workspace_integrations branch: getFreshAccessToken must be tried before the vault fallback.
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('../src/utils/follower-counts.ts', import.meta.url), 'utf8');
+    const start = src.indexOf('workspace_integrations platforms (Threads / YouTube)');
+    assert.ok(start > -1, 'workspace_integrations branch marker missing');
+    const branch = src.slice(start);
+    const fresh = branch.indexOf('getFreshAccessToken(db, organisationId, w.provider)');
+    const raw = branch.indexOf('getSecret(db, w.vaultRefKey)');
+    assert.ok(fresh > -1, 'the workspace branch must call getFreshAccessToken');
+    assert.ok(raw === -1 || fresh < raw, 'getFreshAccessToken must come before the raw vault read');
+});
+
 process.on('exit', () => { if (!process.exitCode) console.log(`\n${passed} checks passed.`); });

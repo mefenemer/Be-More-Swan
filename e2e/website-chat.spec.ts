@@ -44,7 +44,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
   <link rel="stylesheet" href="/style.css"></head><body class="bg-gray-50">
   <div class="page-wide p-4"><div id="site-editor-host" data-site-host="website"></div></div>
   <script src="/src/components/scroll-lock.js"></script><script src="/dialogs.js"></script>
-  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script>
+  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/chat-pane.js"></script>
   <script src="/src/components/media-picker.js"></script>
   <script src="/src/components/assistant-site-editor.js"></script>
   <script>AssistantSiteEditor.init({ assistantId: 7, assistantName: 'Wren' }); AssistantSiteEditor.activate('website');</script>
@@ -269,5 +269,67 @@ test('a picture from the chat: the card finds options, the preview shows where i
     await expect(page.getByText(/Done — it's after “How wholesale works”/)).toBeVisible();
     expect(applied).toEqual([{ op: 'add_section', pageId: 'home', index: 2, section: { type: 'gallery', props: { heading: null, intro: null, layout: 'natural', images: [{ assetId: 77, url: '', alt: 'Coffee being roasted', caption: null }] } } }]);
     await expect(placeholder).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+});
+
+test('a video from the chat: the card switches to Video, finds stock videos and places one where it can play', async ({ page, api, pageErrors }) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    api.set('chat-orchestrator', { chatSessionId: 59, message: { id: 6, role: 'assistant', content: 'Choose one on the card below.', uiElement: {
+        type: 'site_picture', pageId: 'home', sectionId: 'hero', sectionLabel: 'Fresh-roasted coffee', place: 'in', kind: 'video', source: 'stock', description: 'coffee pouring', alt: 'Coffee pouring' } } });
+    api.set('get-ai-credit-balance', { canImage: true, imageCost: 1, assistantCanVideo: true, tierCanVideo: false, videoCost: 4, unit: 'tasks' });
+    const searched: unknown[] = [];
+    api.set('pexels-search', (_route, body) => {
+        const b = body as { action?: string; mediaType?: string };
+        searched.push(b);
+        if (b.action === 'save') return { assetId: 88 };
+        return { keywords: 'coffee pour', candidates: [1, 2].map((i) => ({ providerAssetId: `v${i}`, url: `https://example.invalid/${i}.mp4`, title: `Pour ${i}` })) };
+    });
+    await page.route('https://example.invalid/**', (r) => r.fulfill({ status: 404, body: '' }));
+    const applied: unknown[] = [];
+    api.set('sites', (_route, body) => { const b = body as { action: string; ops?: unknown[] }; if (b.action === 'apply') applied.push(...(b.ops || [])); return siteView; });
+    await page.goto('/e2e-website-chat.html');
+    const input = page.locator('[data-sb-chat] [data-chat-input]');
+    await input.fill('A video in the hero');
+    await input.press('Enter');
+    await expect(page.getByRole('button', { name: 'Video', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByRole('button', { name: 'Create with AI' })).toBeDisabled();   // this plan has no AI video
+    await page.getByRole('button', { name: 'Find stock videos (free)' }).click();
+    await page.getByRole('button', { name: 'Use video 1' }).click();
+    await expect(page.getByText(/Done — it's in “Fresh-roasted coffee”/)).toBeVisible();
+    expect(searched[0]).toMatchObject({ topic: 'coffee pouring', mediaType: 'video' });
+    expect(searched[1]).toMatchObject({ action: 'save', mediaType: 'video' });
+    expect(applied).toEqual([{ op: 'update_section', pageId: 'home', sectionId: 'hero', props: { image: { assetId: 88, url: '', alt: 'Coffee pouring', video: true } } }]);
+    expect(pageErrors).toEqual([]);
+});
+
+test('an AI video: needs a description, keeps checking until it is ready, then places it', async ({ page, api, pageErrors }) => {
+    test.setTimeout(30000);
+    await page.setViewportSize({ width: 1400, height: 900 });
+    api.set('chat-orchestrator', { chatSessionId: 60, message: { id: 7, role: 'assistant', content: 'Choose on the card below.', uiElement: {
+        type: 'site_picture', pageId: 'home', sectionId: 'how', sectionLabel: 'How wholesale works', place: 'after', kind: 'video', source: 'ai', description: '', alt: '' } } });
+    api.set('get-ai-credit-balance', { canImage: true, imageCost: 1, assistantCanVideo: true, tierCanVideo: true, videoCost: 4, unit: 'tasks' });
+    let polls = 0;
+    api.set('generate-ai-video', (route) => {
+        if (route.request().method() === 'POST') return { jobId: 9 };
+        polls++;
+        return polls < 2 ? { status: 'processing' } : { status: 'completed', assetId: 99, videoUrl: 'https://example.invalid/v.mp4' };
+    });
+    await page.route('https://example.invalid/**', (r) => r.fulfill({ status: 404, body: '' }));
+    const applied: unknown[] = [];
+    api.set('sites', (_route, body) => { const b = body as { action: string; ops?: unknown[] }; if (b.action === 'apply') applied.push(...(b.ops || [])); return siteView; });
+    await page.goto('/e2e-website-chat.html');
+    const input = page.locator('[data-sb-chat] [data-chat-input]');
+    await input.fill('Make me a video after this');
+    await input.press('Enter');
+    await expect(page.getByText(/Creating uses 4 tasks for a 6-second clip/)).toBeVisible();
+    await page.getByRole('button', { name: 'Create with AI' }).click();
+    await expect(page.getByText('Describe what the video should show first.')).toBeVisible();
+    await page.locator('[data-sp-desc]').fill('steam rising from a cup');
+    await page.getByRole('button', { name: 'Create with AI' }).click();
+    await expect(page.frameLocator('iframe[data-site-preview]').locator('[data-bms-picture-working]')).toContainText('Creating a video');
+    await page.getByRole('button', { name: 'Use this video' }).click({ timeout: 15000 });
+    await expect(page.getByText(/Done — it's after “How wholesale works”/)).toBeVisible();
+    expect(api.called('generate-ai-video')[0].body).toMatchObject({ prompt: 'steam rising from a cup', durationSeconds: 6 });
+    expect(applied).toEqual([{ op: 'add_section', pageId: 'home', index: 2, section: { type: 'gallery', props: { heading: null, intro: null, layout: 'natural', images: [{ assetId: 99, url: '', alt: 'steam rising from a cup', video: true, caption: null }] } } }]);
     expect(pageErrors).toEqual([]);
 });

@@ -57,6 +57,7 @@ import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { aiAssistants, organisations } from '../../db/schema';
+import { visitStats } from '../../src/utils/site-visits';
 import { requireTenant } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
@@ -343,6 +344,17 @@ export default withLambda(async (event) => {
     }
 
     if (action === 'versions') return json(200, { versions: await listSiteVersions(db, site.id), publishedVersion: site.publishedVersion });
+
+    // The Results tab: who visited the live site in the last 30 days (site-visits.ts — counted at the
+    // edge, no cookies), and what the site brought in over the same days.
+    if (action === 'visits') {
+        const stats = await visitStats(db, site.id);
+        const count = async (q: Promise<Array<{ n: number }>>) => Number((await q)[0]?.n ?? 0);
+        const enquiries = await count(db.select({ n: sql<number>`count(*)::int` }).from(siteEnquiries).where(and(eq(siteEnquiries.siteId, site.id), sql`${siteEnquiries.createdAt} >= now() - interval '30 days'`)));
+        const orders = await count(db.select({ n: sql<number>`count(*)::int` }).from(siteOrders).where(and(eq(siteOrders.siteId, site.id), sql`${siteOrders.createdAt} >= now() - interval '30 days'`)));
+        const booked = await count(db.select({ n: sql<number>`count(*)::int` }).from(bookings).where(and(eq(bookings.siteId, site.id), sql`${bookings.createdAt} >= now() - interval '30 days'`)));
+        return json(200, { live: site.status === 'published', stats, brought: { enquiries, orders, bookings: booked } });
+    }
 
     if (action === 'enquiries') {
         // Every enquiry, newest first — the list pages itself in the browser.

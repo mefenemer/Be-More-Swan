@@ -203,7 +203,7 @@
     let reference = null;
     function setReference(ref) {
       reference = ref && typeof ref.message === 'string' && ref.message.trim()
-        ? { label: String(ref.label || ref.message).slice(0, 140), message: String(ref.message).slice(0, 600) } : null;
+        ? { label: String(ref.label || ref.message).slice(0, 140), message: String(ref.message).slice(0, 2700) } : null;   // a whole paragraph (Blog Studio's Select), under the 4,000-character message limit
       if (!refEl) return;
       refEl.style.display = reference ? '' : 'none';
       refEl.innerHTML = reference ? `
@@ -1032,30 +1032,49 @@
         } else if (d.action === 'shorter' || d.action === 'longer' || d.action === 'revise' || d.action === 'pictures') {
           // Blog Studio's buttons: the same queued resize job, polled until it lands (about a minute).
           // "Revise" is that job steered by the user's instruction (src/utils/blog-resize.ts).
-          const q = await postActionCall('generate-blog', d.action === 'revise'
-            ? { blogPostId: d.postId, revise: d.instruction }
-            : d.action === 'pictures'
-              ? { blogPostId: d.postId, addImages: { source: d.source === 'ai' ? 'ai' : 'stock', instruction: d.instruction || undefined } }
-              : { blogPostId: d.postId, resize: d.action });
-          const started = Date.now();
-          let job = null;
-          while (Date.now() - started < 180000) {
-            await new Promise((r) => setTimeout(r, Date.now() - started < 15000 ? 2000 : 5000));
-            const res = await fetch(`/.netlify/functions/generate-blog?jobId=${encodeURIComponent(q.jobId)}`, { credentials: 'same-origin' });
-            if (!res.ok) continue;
-            job = await res.json().catch(() => null);
-            if (job && (job.status === 'completed' || job.status === 'failed')) break;
-          }
-          if (!job || job.status === 'queued' || job.status === 'processing') {
-            message = d.action === 'pictures'
-              ? 'Still finding pictures — open the article in Blog Studio in a minute to see them.'
-              : 'Still rewriting — open the article in Blog Studio in a minute to read the new version.';
-          } else if (job.status === 'failed') {
-            throw new Error(job.errorMessage || 'That didn’t work. Your article is unchanged.');
-          } else {
-            message = d.action === 'pictures'
-              ? `Pictures added — open it in Blog Studio to see them.${job.errorMessage ? ' ' + job.errorMessage : ''}`
-              : `${d.action === 'shorter' ? 'Shorter' : d.action === 'longer' ? 'Longer' : 'Rewritten'} — saved. Open it in Blog Studio to read it.`;
+          // ⚠️ If this article is open in the Blog Studio, its editor must save what is on screen first,
+          // lock while the worker writes, and reload afterwards — or its next autosave puts the old
+          // words back over the rewrite. blog:rewriteStarting / blog:rewriteFinished, blog-studio-modal.js.
+          const rewrite = { postId: d.postId, open: false, busy: false, ready: null };
+          document.dispatchEvent(new CustomEvent('blog:rewriteStarting', { detail: rewrite }));
+          if (rewrite.busy) throw new Error('Your assistant is already working on this article — try again when that has finished.');
+          if (rewrite.ready) await rewrite.ready;
+          let outcome = 'failed';
+          try {
+            const q = await postActionCall('generate-blog', d.action === 'revise'
+              ? { blogPostId: d.postId, revise: d.instruction }
+              : d.action === 'pictures'
+                ? { blogPostId: d.postId, addImages: { source: d.source === 'ai' ? 'ai' : 'stock', instruction: d.instruction || undefined } }
+                : { blogPostId: d.postId, resize: d.action });
+            const started = Date.now();
+            let job = null;
+            while (Date.now() - started < 180000) {
+              await new Promise((r) => setTimeout(r, Date.now() - started < 15000 ? 2000 : 5000));
+              const res = await fetch(`/.netlify/functions/generate-blog?jobId=${encodeURIComponent(q.jobId)}`, { credentials: 'same-origin' });
+              if (!res.ok) continue;
+              job = await res.json().catch(() => null);
+              if (job && (job.status === 'completed' || job.status === 'failed')) break;
+            }
+            if (!job || job.status === 'queued' || job.status === 'processing') {
+              outcome = 'running';
+              message = rewrite.open
+                ? 'Still working — close this article and reopen it in a minute to see the new version.'
+                : d.action === 'pictures'
+                  ? 'Still finding pictures — open the article in Blog Studio in a minute to see them.'
+                  : 'Still rewriting — open the article in Blog Studio in a minute to read the new version.';
+            } else if (job.status === 'failed') {
+              throw new Error(job.errorMessage || 'That didn’t work. Your article is unchanged.');
+            } else {
+              outcome = 'done';
+              const what = d.action === 'pictures' ? 'Pictures added' : `${d.action === 'shorter' ? 'Shorter' : d.action === 'longer' ? 'Longer' : 'Rewritten'} — saved`;
+              message = rewrite.open
+                ? `${what}. It’s in the article beside this chat.${d.action === 'pictures' && job.errorMessage ? ' ' + job.errorMessage : ''}`
+                : d.action === 'pictures'
+                  ? `Pictures added — open it in Blog Studio to see them.${job.errorMessage ? ' ' + job.errorMessage : ''}`
+                  : `${what}. Open it in Blog Studio to read it.`;
+            }
+          } finally {
+            document.dispatchEvent(new CustomEvent('blog:rewriteFinished', { detail: { postId: d.postId, outcome } }));
           }
         } else {
           throw new Error('Unknown action.');
@@ -1969,7 +1988,7 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
-    // A site_picture card's chosen picture → sites.ts apply. IN a section that holds one picture (hero,
+    // A site_picture card's chosen picture or video → sites.ts apply. IN a section that holds one picture (hero,
     // text, sign-up) it becomes that picture; in a gallery it is added; anywhere else, or place
     // 'after', it goes in a new picture section straight after this one. Read fresh, so ids are real.
     async function onSitePicturePlace(e) {
@@ -1982,8 +2001,9 @@
         const at = pg ? pg.sections.findIndex((x) => x.id === d.sectionId) : -1;
         if (!pg || at < 0) throw new Error('That section isn\'t on your site any more.');
         const sec = pg.sections[at];
-        const img = { assetId: Number(d.assetId), url: '', alt: String(d.alt || 'A picture').slice(0, 150) };
-        const holdsOne = ['hero', 'text', 'signup'].includes(sec.type);
+        const img = { assetId: Number(d.assetId), url: '', alt: String(d.alt || (d.video ? 'A video' : 'A picture')).slice(0, 150), ...(d.video ? { video: true } : {}) };
+        // A video plays in a hero, a text section or a gallery — never on a sign-up form (markVideos).
+        const holdsOne = (d.video ? ['hero', 'text'] : ['hero', 'text', 'signup']).includes(sec.type);
         const ops = d.place !== 'after' && holdsOne ? [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { image: img } }]
           : d.place !== 'after' && sec.type === 'gallery' ? [{ op: 'update_section', pageId: pg.id, sectionId: sec.id, props: { images: [...(sec.props.images || []), { ...img, caption: null }] } }]
           : [{ op: 'add_section', pageId: pg.id, index: at + 1, section: { type: 'gallery', props: { heading: null, intro: null, layout: 'natural', images: [{ ...img, caption: null }] } } }];
@@ -1998,6 +2018,23 @@
         respond({ ok: true, warnings: r.warnings || [] });
         siteChanged();
       } catch (err) { respond({ ok: false, error: err.message }); }
+    }
+
+    // "Use this" on a blog_block_edit card: the Blog Studio applies it in its editor when the article
+    // is open there (blog:applyBlockEdit sets handled); otherwise blog-block-edit.ts on the server.
+    function onBlogBlockEdit(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const ask = { postId: d.postId, find: d.find, replace: d.replace, handled: false, respond };
+      document.dispatchEvent(new CustomEvent('blog:applyBlockEdit', { detail: ask }));
+      if (ask.handled) return;
+      fetch('/.netlify/functions/blog-block-edit', {
+        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: d.postId, find: d.find, replace: d.replace }),
+      })
+        .then(async (r) => { const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'That couldn\'t be changed.'); })
+        .then(() => respond({ ok: true }))
+        .catch((err) => respond({ ok: false, error: err.message }));
     }
 
     // "Add these" on a listings_add card → site-listings.ts POST { listings } (the Listings tab's "Add a listing").
@@ -2343,6 +2380,7 @@
     container.addEventListener('chat:send', onCardSend);
     container.addEventListener('site:listingsAdd', onListingsAdd);
     container.addEventListener('site:picturePlace', onSitePicturePlace);
+    container.addEventListener('blog:blockEdit', onBlogBlockEdit);
     container.addEventListener('site:listingDecisions', onListingDecisions);
     if (refEl) refEl.addEventListener('click', onRefClick);
     container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
@@ -2451,6 +2489,7 @@
         container.removeEventListener('chat:send', onCardSend);
         container.removeEventListener('site:listingsAdd', onListingsAdd);
         container.removeEventListener('site:picturePlace', onSitePicturePlace);
+        container.removeEventListener('blog:blockEdit', onBlogBlockEdit);
         container.removeEventListener('site:listingDecisions', onListingDecisions);
         if (refEl) refEl.removeEventListener('click', onRefClick);
         container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);

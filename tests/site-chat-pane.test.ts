@@ -61,11 +61,12 @@ check('the pane: Chat first, preview on the left, the chat mounted once and kept
     assert.ok(editor.includes("const SUBTABS_ALL = [['chat', 'Chat'], ['setup', 'Set up']"));
     assert.ok(editor.includes("[data-sb-preview-col] { order: 1; } [data-sb-pane] { order: 2; }"));
     assert.ok(editor.includes("const blocks = P === 'chat' ? [] :"));
-    const paint = slice(editor, 'function paintChat(', 'async function mountChat(');
+    const paint = slice(editor, 'function paintChat(', 'function mountChat(');
     assert.ok(paint.includes('box.contains(chatPane.mountEl)) return;'), 'a repaint must not remount the chat');
-    const mount = slice(editor, 'async function mountChat(', '// ── "Select"');
-    assert.ok(mount.includes("d.session.status !== 'archived'") && mount.includes('Number(d.session.aiAssistantId) === Number(forId)'), 'only carries on its own, live thread');
-    assert.ok(mount.includes("roleKey: 'website_assistant'"));
+    assert.ok(editor.includes("chatPane.session = window.ChatPane.mount(host, {") && editor.includes("roleKey: 'website_assistant',"), 'the shared pane');
+    const pane = read('src/components/chat-pane.js');
+    assert.ok(pane.includes("d.session.status !== 'archived'") && pane.includes('Number(d.session.aiAssistantId) === Number(opts.assistantId)'), 'only carries on its own, live thread');
+    assert.ok(read('workspace.html').includes('<script src="/src/components/chat-pane.js"></script>'));
     // The chat's own cards still refresh the preview.
     assert.match(editor, /document\.addEventListener\('site:changed'/);
 });

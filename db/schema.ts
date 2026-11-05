@@ -5548,6 +5548,33 @@ export const orgReviews = pgTable("org_reviews", {
   check("org_reviews_status_check", sql`${t.status} IN ('published','hidden','pending','declined')`),
 ]);
 
+// ── Website visitor counts (db/z-site-visits.sql; src/utils/site-visits.ts) ──────────────────────
+// Daily totals only; no IPs, user agents or cookies. site_visit_seen holds a one-way daily hash per
+// visitor so each counts once a day, and is deleted after two days.
+export const siteVisitDays = pgTable("site_visit_days", {
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  day: date().notNull(),
+  views: integer().notNull().default(0),
+  visitors: integer().notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.siteId, t.day] })]);
+export const siteVisitPages = pgTable("site_visit_pages", {
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  day: date().notNull(),
+  path: text().notNull(),
+  views: integer().notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.siteId, t.day, t.path] })]);
+export const siteVisitRefs = pgTable("site_visit_refs", {
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  day: date().notNull(),
+  refHost: text("ref_host").notNull(),
+  visits: integer().notNull().default(0),
+}, (t) => [primaryKey({ columns: [t.siteId, t.day, t.refHost] })]);
+export const siteVisitSeen = pgTable("site_visit_seen", {
+  siteId: integer("site_id").notNull().references(() => sites.id, { onDelete: "cascade" }),
+  day: date().notNull(),
+  visitor: text().notNull(),
+}, (t) => [primaryKey({ columns: [t.siteId, t.day, t.visitor] })]);
+
 // ── Listings (db/z-site-listings.sql; src/utils/site-listings.ts) ───────────────────────────────
 // A workspace's own lists shown on its website: events (dated) and entries (places, people, jobs…).
 // Dates/times kept as typed (no timezone maths). 'pending' = sent in by a visitor, never shown until approved.

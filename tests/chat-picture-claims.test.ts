@@ -17,6 +17,7 @@ check('the staging reply that promised a picture nobody made is caught', () => {
     assert.ok(replyClaimsPicture('I\'m generating an image of a dramatic film scene for that section now. Once it\'s created, I\'ll add it to your site.'));
     assert.ok(replyClaimsPicture('I\'ll create a picture for the Stories section and add it.'));
     assert.ok(replyClaimsPicture('I\'ve added a photo of a film set to the About page.'));
+    assert.ok(replyClaimsPicture('I\'m creating a short video of the harbour for your hero now.'), 'videos too');
 });
 
 check('ordinary replies are kept', () => {

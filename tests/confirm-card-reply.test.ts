@@ -52,7 +52,7 @@ check('a settled card, or no card, leaves the words alone', () => {
 
 check('the orchestrator applies it to profile and review cards', () => {
     const src = readFileSync(path.join(ROOT, 'netlify/functions/chat-orchestrator.ts'), 'utf8');
-    assert.ok(src.includes('if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || voicePostCard)) {'));
+    assert.ok(src.includes('if (uiElement && (uiElement === profileCard || uiElement === reviewsCard || uiElement === blogBlockEdit || voicePostCard)) {'));
     assert.ok(src.includes('content = confirmCardReply(content, uiElement as'));
 });
 

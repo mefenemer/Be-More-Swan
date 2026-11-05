@@ -178,7 +178,7 @@ check('a finished draft refreshes the list behind the modal', () => {
 check('closing after an ordinary edit refreshes too', () => {
     // Renaming a post, or writing its body, changes what the card renders without moving a status.
     const close = modal.slice(landmark(modal, 'function closeBlogStudio()'));
-    assert.ok(/state\.contentChanged/.test(close.slice(0, 1200)), 'a plain edit closes without a refresh');
+    assert.ok(/state\.contentChanged/.test(close.slice(0, landmark(close, 'window._blogStudioCopy'))), 'a plain edit closes without a refresh');
     // Firing before teardown would repaint the list while the modal still covers it.
     assert.ok(landmark(close, 'state.editor.destroy') < landmark(close, 'notifyChanged()'),
         'the host is refreshed before the modal is torn down');
