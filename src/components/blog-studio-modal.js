@@ -206,6 +206,7 @@
     + '.bs-chat-col{position:fixed;right:12px;top:76px;bottom:12px;height:auto;min-height:0;width:min(420px,calc(100vw - 24px));z-index:6;box-shadow:0 18px 50px rgba(0,0,0,.25);border-radius:16px;}}'
     + '@media (max-width:860px){.bs-grid.bs-chat-on{grid-template-columns:minmax(0,1fr);}}'
     // "Select": click a paragraph, heading or list to talk about it in the chat.
+    + '@media (max-width:1279px){.bs-chat-col.bs-chat-aside{display:none;}}'   // over the article there, so it steps aside
     + '.bs-selecting .bmsme-block{cursor:crosshair;}'
     + '.bs-selecting .bmsme-block:hover{outline:2px solid #db2777;outline-offset:2px;background:rgba(219,39,119,.06);}'
     // Eight sections now live on the left (publishing controls included), so on a narrow screen the
@@ -390,6 +391,9 @@
     + '  <div class="bs-row" style="justify-content:space-between;margin-bottom:16px;padding-right:40px;">'
     + '    <h1 id="bs-dialog-title" style="font-size:20px;font-weight:700;">Blog Studio</h1>'
     + '    <span class="bs-row" style="gap:10px;"><span id="bs-save-status" class="bs-status"></span>'
+    // Up here, not above the article: on a narrower screen the open chat covers that.
+    + '      <button type="button" id="bs-select" class="bs-btn bs-btn-ghost bs-btn-sm bs-hidden" aria-pressed="false"'
+    + '        title="Click a paragraph, heading or list to ask your assistant to change it">\uD83C\uDFAF Select</button>'
     + '      <button type="button" id="bs-chat-toggle" class="bs-btn bs-btn-sm bs-btn-assist bs-hidden" aria-pressed="false" title="Show or hide the chat beside your article">\uD83D\uDCAC <span data-bs-assistant-label="chat">Chat</span></button></span>'
     + '  </div>'
     // The old "Start a new post" brief screen is gone: opening Blog Studio drops straight into the
@@ -695,8 +699,6 @@
     // Up here with the other things the assistant does to the draft, not stranded under it.
     + '          <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost bs-btn-sm"'
     + '            title="Write three alternative headlines and openings, then let your readers pick the winner">Test 3 headlines</button>'
-    + '          <button type="button" id="bs-select" class="bs-btn bs-btn-ghost bs-btn-sm bs-hidden" aria-pressed="false"'
-    + '            title="Click a paragraph, heading or list to ask your assistant to change it">\uD83C\uDFAF Select</button>'
     + '        </div>'
     + '      </div>'
     + '      <input id="bs-title" class="bs-title-input" placeholder="Post title">'
@@ -912,6 +914,7 @@
     el('bs-select').setAttribute('aria-pressed', on ? 'true' : 'false');
     el('bs-select').textContent = on ? '🎯 Click a part… (Esc to stop)' : '🎯 Select';
     el('bs-editor').classList.toggle('bs-selecting', !!on);
+    el('bs-chat-col').classList.toggle('bs-chat-aside', !!on);
   }
   function onEditorSelect(e) {
     if (!state.selecting || !state.editor) return;

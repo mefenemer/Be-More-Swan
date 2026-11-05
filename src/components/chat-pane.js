@@ -2,12 +2,13 @@
  * src/components/chat-pane.js — an assistant's chat DOCKED beside what it works on (owner, 2026-11-05:
  * "loving the chat pane on the right"). First built inside the Website tab; shared here so every
  * assistant's editor can have one: the Website tab (assistant-site-editor.js), the Blog Studio
- * (blog-studio-modal.js), and next the post and email editors.
+ * (blog-studio-modal.js), the post editor (workspace.html), and next the email designer.
  *
  *   const pane = window.ChatPane.mount(container, {
  *     assistantId, assistantName, roleKey,
  *     rememberKey,        // localStorage key for "carry on this thread here" (e.g. 'bms-site-chat:63')
- *     placeholder?, starterPrompts?, composerRows? (default 4), title?
+ *     placeholder?, starterPrompts?, composerRows? (default 4), title?,
+ *     draftTarget?        // () => the post this chat is about, or null: see chat-session.js
  *   });
  *   pane.setReference({ label, message })   — "Select": a part of the page on a chip above the box
  *   pane.focus();  pane.ready (Promise);  pane.destroy();
@@ -65,6 +66,7 @@
         placeholder: opts.placeholder,
         starterPrompts: chatSessionId ? null : opts.starterPrompts || null,
         composerRows: opts.composerRows || 4,
+        draftTarget: opts.draftTarget,
         onSession: (id) => { if (key && !destroyed) write(key, id); },
       });
       if (pendingRef) { session.setReference(pendingRef); pendingRef = null; }

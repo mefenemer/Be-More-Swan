@@ -253,7 +253,7 @@ check('nothing still calls the deleted panel actions', () => {
 
 check('closing the editor refreshes the calendar', () => {
     const close = workspace.slice(landmark(workspace, 'function closePostReview()'));
-    assert.match(close.slice(0, 1600), /window\._calRefreshAfterEdit\?\.\(\)/,
+    assert.match(close.slice(0, landmark(close, 'let _chatModalSession')), /window\._calRefreshAfterEdit\?\.\(\)/,
         'the calendar\'s posts are stale once the editor has saved — closing it must ask for a reload');
     assert.match(calendarJs, /window\._calRefreshAfterEdit\s*=/,
         'calendar.js must expose the refresh hook closePostReview calls');
