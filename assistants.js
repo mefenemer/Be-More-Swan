@@ -7103,7 +7103,7 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-campaigns', !!campaignsTab);
     if (campaignsTab) {
         setText('campaigns-tab-label', campaignsTab.label || 'Campaigns');
-        window.AssistantCampaigns?.init({ assistantId: data.id, cfg: campaignsTab });
+        window.AssistantCampaigns?.init({ assistantId: data.id, cfg: campaignsTab, assistantName: data.name });
     } else {
         // The strip lives outside the tab, so hiding the tab button is not enough to hide it. Every
         // other role must never see a capacity meter for a feature it does not have.
