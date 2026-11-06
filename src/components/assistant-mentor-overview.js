@@ -1,24 +1,27 @@
 /**
  * src/components/assistant-mentor-overview.js
- * The Business Mentor's Overview tab — docs/business-mentor-plan.md §14 and the approved mockup
- * (docs/mockups/business-mentor-mockup.html). The screen twins of what the Mentor does in chat:
+ * The Business Mentor's Overview tab — what needs the user now — and the panels of its other screens that
+ * read the same data (docs/business-mentor-plan.md §14, redesigned 2026-11-06). Screen twins of what the
+ * Mentor does in chat:
  *
+ * Overview (#mentor-overview-host)
+ *   Commitments            — this week's, painted by mentor-commitments.js into #mentor-commitments-now
+ *   Suggestions            — one card, one pill per stage:
+ *     Waiting              — the open ones, "Review all" (mentor-review-all.js, the same list as the chat
+ *                            card and Inbox "Needs you"; nothing pre-ticked), and n of 3 this week (§3.13)
+ *     Accepted             — accepted suggestions and what changed SINCE (mentor-outcomes.ts)
+ *     Dismissed            — what the user dismissed from a card, with the reason; "Bring back"
  *   Set-up checklist       — the same gaps it raises as cards (mentor-snapshot.ts setupChecklist);
  *                            each opens its Business Information tab
- *   What I can see         — generated from src/config/mentor-data-inventory.ts, the list its prompt reads
- *   Dismissed suggestions  — what the user dismissed from a card, with the reason; "Bring back"
- *   Suggestions this week  — n of 3 (§3.13)
- *   Suggestions waiting    — the open ones, with "Review all" (mentor-review-all.js, the same list as the
- *                            chat card and Inbox "Needs you"; nothing pre-ticked)
  *   Recommended next       — who to hire next (mentor-hire.ts — the same list as the chat card and the
  *                            catalogue's "Recommended" badge); "See this assistant" opens the catalogue
- *   Get feedback           — paste a draft (or open a .txt/.md file) and get the Mentor's critique inline
- *                            (mentor.ts action 'feedback' → mentor-feedback.ts, the same craft as chat)
+ * Results tab (#mentor-results-host)
  *   Reviews (Phase 3)      — every weekly review, its suggestions and what was answered; "Review my week now"
  *                            (mentor.ts review_now, owners and admins); its day and on/off are on the profile
- *   Track record           — accepted suggestions and what changed SINCE (mentor-outcomes.ts)
  *   Customers (Phase 3b)   — quiet customers, deals, reviews and tickets, only from active assistants
  *                            (mentor-customers.ts, the same summary the Mentor reads)
+ * Assistant Settings (#mentor-sees-host)
+ *   What I can see         — generated from src/config/mentor-data-inventory.ts, the list its prompt reads
  *
  * Backed by netlify/functions/mentor.ts, the SAME action a card's Dismiss calls (chat-session.js →
  * mentor:decide). A save from a card dispatches `mentor:changed` / `bizinfo:*Changed`, which reload this
@@ -27,15 +30,19 @@
 (function () {
   const API = '/.netlify/functions/mentor';
   const state = { assistantId: null, assistantName: 'Your Mentor', data: null, error: null, loading: false, notes: {},
-    feedback: { text: '', busy: false, result: null, error: null },
+    stage: 'waiting',
     reviews: null, customers: null, reviewBusy: false, reviewNote: null, poll: null };
-  const FEEDBACK_MAX = 12000;
+  const STAGES = ['waiting', 'accepted', 'dismissed'];
 
   function esc(v) {
     return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
   const host = () => document.getElementById('mentor-overview-host');
+  const resultsHost = () => document.getElementById('mentor-results-host');
+  const seesHost = () => document.getElementById('mentor-sees-host');
+  /** A click in any of the three places this module paints. */
+  const isOurs = (el) => [host(), resultsHost(), seesHost()].some((h) => h && h.contains(el));
   const ukDate = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Europe/London' });
 
   async function getJson(url) {
@@ -132,17 +139,18 @@
   }
 
   const VERDICT = { up: 'text-green-700', down: 'text-red-700', same: 'text-gray-700', too_early: 'text-gray-500', too_small: 'text-gray-500', no_measure: 'text-gray-500', drafted: 'text-gray-500' };
-  function trackRecordHtml() {
+  function acceptedPane() {
     const r = state.reviews;
-    if (!r || r.error || !r.trackReady) return '';
+    if (!r) return '<p class="text-sm text-gray-400 animate-pulse">Loading…</p>';
+    if (r.error) return `<p class="text-sm text-red-600">${esc(r.error)}</p>`;
+    if (!r.trackReady) return '<p class="text-sm text-gray-600">I can’t follow accepted suggestions in this workspace yet.</p>';
     const list = r.trackRecord || [];
+    if (!list.length) return '<p class="text-sm text-gray-500">Nothing yet. When you accept a suggestion, I follow what happens next here.</p>';
     const items = list.map((t) => `<li class="py-2 border-b border-gray-100 last:border-0"><p class="text-xs break-words ${VERDICT[t.verdict] || 'text-gray-700'}">${esc(t.line)}</p>${t.target ? `<p class="text-[11px] text-gray-500">${esc(t.target)}</p>` : ''}</li>`).join('');
     // Said once, not on every row (it repeated four times on staging, 27 Oct).
     const early = list.some((t) => t.verdict === 'too_early');
-    return card(`
-      <h2 class="text-base font-bold text-gray-900">Track record</h2>
-      <p class="text-xs text-gray-500 mt-1">Suggestions you accepted and what changed since. “Since”, not “because” — other things change too.${early ? ' I look at each one again a week after you accept it.' : ''}</p>
-      ${items ? `<ul class="mt-1">${items}</ul>` : '<p class="text-sm text-gray-500 mt-2">Nothing yet. When you accept a suggestion, I follow what happens next here.</p>'}`, 'data-mentor-panel="track-record"');
+    return `<p class="text-xs text-gray-500">Suggestions you accepted and what changed since. “Since”, not “because” — other things change too.${early ? ' I look at each one again a week after you accept it.' : ''}</p>
+      <ul class="mt-1">${items}</ul>`;
   }
 
   function customersHtml() {
@@ -179,7 +187,12 @@
   }
 
   function checklistHtml(items) {
+    if (!items.length) return '';
     const done = items.filter((i) => i.done).length;
+    if (done === items.length) {
+      return card(`<p class="flex items-center gap-2 text-sm text-gray-700"><span class="w-5 h-5 shrink-0 rounded-md bg-green-600 text-white flex items-center justify-center text-xs font-bold" aria-hidden="true">✓</span><span><strong class="text-gray-900">Set-up checklist</strong> · All ${items.length} done</span></p>`, 'data-mentor-panel="checklist" data-no-fold');
+    }
+    const pct = Math.round((done / items.length) * 100);
     const rows = items.map((i) => `
       <li class="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0">
         <span class="mt-0.5 w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center text-xs font-bold ${i.done ? 'border-green-500 bg-green-600 text-white' : 'border-gray-300'}" aria-hidden="true">${i.done ? '✓' : ''}</span>
@@ -193,27 +206,31 @@
           ${i.done ? '' : `<p class="text-xs text-gray-500 mt-0.5">${esc(i.why)}</p>`}
         </div>
       </li>`).join('');
+    // The bar is in the heading row, so it still shows when the card is closed (fold.js).
     return card(`
-      <div class="flex items-center justify-between gap-2">
-        <h2 class="text-base font-bold text-gray-900">Set-up checklist</h2>
-        <span class="text-xs font-semibold text-gray-500 shrink-0">${done} of ${items.length} done</span>
+      <div>
+        <div class="flex items-center justify-between gap-2">
+          <h2 class="text-base font-bold text-gray-900">Set-up checklist</h2>
+          <span class="text-xs font-semibold text-gray-500 shrink-0">${done} of ${items.length} done</span>
+        </div>
+        <div class="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden" role="progressbar" aria-label="Set-up checklist" aria-valuemin="0" aria-valuemax="${items.length}" aria-valuenow="${done}"><div class="h-full rounded-full bg-green-600" style="width:${pct}%"></div></div>
       </div>
-      <p class="text-xs text-gray-500 mt-1 mb-2">The same gaps I raise in chat. Each opens its place in Business Information.</p>
+      <p class="text-xs text-gray-500 mb-2">The same gaps I raise in chat. Each opens its place in Business Information.</p>
       <ul>${rows}</ul>`, 'data-mentor-panel="checklist"');
   }
 
   function visibilityHtml(v) {
     const list = (xs) => `<ul class="mt-1 space-y-1">${xs.map((x) => `<li class="text-sm text-gray-700 flex gap-2"><span aria-hidden="true" class="text-gray-400">•</span><span class="min-w-0">${esc(x)}</span></li>`).join('')}</ul>`;
     return card(`
-      <h2 class="text-base font-bold text-gray-900">What I can see</h2>
-        <p class="text-xs text-gray-500 mt-2">I work from this list, and never change anything without your click.</p>
-        <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Sees</h3>
-        ${list(v.sees || [])}
-        <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Never sees</h3>
-        ${list(v.never || [])}`, 'data-mentor-panel="visibility"');
+      <h3 class="text-lg font-bold text-gray-900">What I can see</h3>
+      <p class="text-sm text-gray-500 mt-1">I work from this list, and never change anything without your click.</p>
+      <h4 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-4">Sees</h4>
+      ${list(v.sees || [])}
+      <h4 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-4">Never sees</h4>
+      ${list(v.never || [])}`, 'data-mentor-panel="visibility"');
   }
 
-  function dismissedHtml(rows) {
+  function dismissedPane(rows) {
     const items = rows.map((d) => {
       const back = d.reason === 'not_now' && d.snoozedUntil && new Date(d.snoozedUntil) > new Date() ? ` · back on ${esc(ukDate(d.snoozedUntil))}` : '';
       return `<li class="py-2 border-b border-gray-100 last:border-0">
@@ -227,32 +244,39 @@
         </div>
       </li>`;
     }).join('');
-    return card(`
-      <h2 class="text-base font-bold text-gray-900">Dismissed suggestions (${rows.length})</h2>
-        ${rows.length
-          ? `<p class="text-xs text-gray-500 mt-2">I won’t suggest these again. "Bring back" lets me.</p><ul class="mt-1">${items}</ul>`
-          : `<p class="text-sm text-gray-500 mt-2">Nothing dismissed. When you dismiss a suggestion in chat, it’s listed here with your reason.</p>`}`, 'data-mentor-panel="dismissed"');
+    return rows.length
+      ? `<p class="text-xs text-gray-500">I won’t suggest these again. "Bring back" lets me.</p><ul class="mt-1">${items}</ul>`
+      : '<p class="text-sm text-gray-500">Nothing dismissed. When you dismiss a suggestion in chat, it’s listed here with your reason.</p>';
   }
 
-  function weekHtml(week) {
+  function waitingPane(open, week) {
     const used = week && week.used != null ? week.used : null;
-    return card(`
-      <h2 class="text-base font-bold text-gray-900">Suggestions this week</h2>
-      <p class="text-sm text-gray-700 mt-1">${used == null ? 'Not available just now.' : `${Math.min(used, week.cap)} of ${week.cap} used since Monday`}</p>
-      <p class="text-xs text-gray-500 mt-1">I make at most ${week ? week.cap : 3} suggestions a week, picking the ones with the most evidence. Anything you ask for in chat doesn’t count, and nor does answering one from an earlier week.</p>`, 'data-mentor-panel="week"');
+    const list = open.length
+      ? `<p class="text-xs text-gray-500">My suggestions you haven’t answered yet. Review them together and tick the ones you want.</p>
+        <ul class="mt-1">${open.map((s) => `<li class="text-sm text-gray-900 py-2 border-b border-gray-100 last:border-0 break-words">${esc(s.title || 'A suggestion')}</li>`).join('')}</ul>
+        <button type="button" data-mentor-review-all class="btn-primary mt-2 px-4 py-2 text-sm font-bold rounded-lg transition">Review all</button>`
+      : '<p class="text-sm text-gray-500">Nothing waiting for you.</p>';
+    return `${list}
+      <div class="mt-3 pt-3 border-t border-gray-100">
+        <p class="text-xs font-semibold text-gray-700">Suggestions this week: ${used == null ? 'not available just now' : `${Math.min(used, week.cap)} of ${week.cap} used since Monday`}</p>
+        <p class="text-xs text-gray-500 mt-0.5">I make at most ${week ? week.cap : 3} suggestions a week, picking the ones with the most evidence. Anything you ask for in chat doesn’t count, and nor does answering one from an earlier week.</p>
+      </div>`;
   }
 
-  function waitingHtml(open) {
-    if (!open.length) return '';
-    // Not folded: it is one line and its button, and it is why the Needs-you card sent them here.
+  /** Stages of one suggestion, as pills like the Review and Briefs tabs. Never folded: it's why they came here. */
+  function suggestionsHtml(d) {
+    const open = d.open || [];
+    const dismissed = d.dismissed || [];
+    const accepted = state.reviews?.trackRecord || [];
+    const pills = [['waiting', 'Waiting', open.length], ['accepted', 'Accepted', accepted.length], ['dismissed', 'Dismissed', dismissed.length]].map(([key, label, n]) => {
+      const on = state.stage === key;
+      return `<button type="button" role="tab" id="mentor-stage-${key}" aria-controls="mentor-stage-panel" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-mentor-stage="${key}" class="text-sm whitespace-nowrap">${label}${n ? ` <span class="text-xs font-semibold text-gray-500">${n}</span>` : ''}</button>`;
+    }).join('');
+    const pane = state.stage === 'accepted' ? acceptedPane() : state.stage === 'dismissed' ? dismissedPane(dismissed) : waitingPane(open, d.week);
     return card(`
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="min-w-0">
-          <h2 class="text-base font-bold text-gray-900">Suggestions waiting (${open.length})</h2>
-          <p class="text-xs text-gray-500 mt-0.5">My suggestions you haven’t answered yet. Review them together and tick the ones you want.</p>
-        </div>
-        <button type="button" data-mentor-review-all class="btn-primary shrink-0 px-4 py-2 text-sm font-bold rounded-lg transition">Review all</button>
-      </div>`, 'data-mentor-panel="waiting" data-no-fold');
+      <h2 class="text-base font-bold text-gray-900">Suggestions</h2>
+      <div class="stage-pills tab-scroller mt-3" style="margin-left:0;margin-right:0;margin-bottom:.75rem;max-width:100%" role="tablist" aria-label="Suggestions by stage">${pills}</div>
+      <div id="mentor-stage-panel" role="tabpanel" aria-labelledby="mentor-stage-${esc(state.stage)}" tabindex="0">${pane}</div>`, 'data-mentor-panel="suggestions" data-no-fold');
   }
 
   function recommendedHtml(rec) {
@@ -274,61 +298,38 @@
       ${cap.note ? `<p class="mt-2 text-xs rounded-lg px-2.5 py-1.5 ${cap.needsUpgrade ? 'border border-amber-200 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-700'}">${esc(cap.note)}</p>` : ''}`, 'data-mentor-panel="recommended"');
   }
 
-  function feedbackHtml() {
-    const f = state.feedback;
-    return card(`
-      <h2 class="text-base font-bold text-gray-900">Get feedback</h2>
-      <p class="text-xs text-gray-500 mt-1">Paste something you wrote — a sales email, a post, a flyer — and I’ll say what works and what to change, for your customers. Nothing is saved or changed.</p>
-      <label for="mentor-feedback-text" class="sr-only">Your draft</label>
-      <textarea id="mentor-feedback-text" data-mentor-feedback-text rows="6" maxlength="${FEEDBACK_MAX}" class="mt-2 w-full rounded-lg border border-gray-300 p-2.5 text-sm" placeholder="Paste your draft here…" ${f.busy ? 'disabled' : ''}>${esc(f.text)}</textarea>
-      <div class="flex flex-wrap items-center gap-2 mt-2">
-        <button type="button" data-mentor-feedback-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${f.busy ? 'disabled' : ''}>${f.busy ? 'Reading…' : 'Get feedback'}</button>
-        <label class="btn-secondary px-3 py-2 border text-xs font-bold rounded-lg transition cursor-pointer">
-          Open a text file<input type="file" accept=".txt,.md,text/plain,text/markdown" data-mentor-feedback-file class="sr-only">
-        </label>
-        <span class="text-[11px] text-gray-500" data-mentor-feedback-count>${f.text.length.toLocaleString('en-GB')} / ${FEEDBACK_MAX.toLocaleString('en-GB')}</span>
-      </div>
-      ${f.error ? `<p class="mt-2 text-xs font-semibold text-red-600" role="alert">${esc(f.error)}</p>` : ''}
-      ${f.result ? `<div class="mt-3 rounded-lg border border-pink-200 bg-pink-50 p-3" data-mentor-feedback-result role="status" aria-live="polite"><p class="text-xs font-bold text-pink-800 uppercase tracking-wide">${esc(state.assistantName)}’s feedback</p><p class="text-sm text-gray-800 mt-1 whitespace-pre-line break-words">${esc(f.result)}</p></div>` : ''}`, 'data-mentor-panel="feedback"');
-  }
-
-  async function getFeedback() {
-    const f = state.feedback;
-    if (f.busy) return;
-    if (f.text.trim().length < 20) { f.error = 'Paste a little more of your draft so there’s something to judge.'; render(); return; }
-    f.busy = true; f.error = null; f.result = null; render();
-    try {
-      const res = await fetch(API, {
-        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'feedback', text: f.text }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || 'Your Mentor couldn’t read that just now — please try again.');
-      f.result = body.feedback;
-    } catch (err) {
-      f.error = err.message;
+  /**
+   * The Overview's panels repaint; the Commitments slot above them belongs to mentor-commitments.js and doesn't,
+   * so a repaint here never takes the caret out of its "Add one" box.
+   */
+  function overviewPanels(el) {
+    let panels = el.querySelector('[data-mentor-overview-panels]');
+    if (!panels) {
+      el.insertAdjacentHTML('afterbegin', '<div id="mentor-commitments-now" class="mb-4 min-w-0"></div><div data-mentor-overview-panels class="space-y-4 min-w-0"></div>');
+      panels = el.querySelector('[data-mentor-overview-panels]');
+      window.MentorCommitments?.paint();
     }
-    f.busy = false;
-    render();
+    return panels;
   }
 
   function render() {
+    const results = resultsHost();
+    if (results) results.innerHTML = state.data || state.reviews ? `<div class="space-y-4 min-w-0">${reviewsHtml()}${customersHtml()}</div>` : '';
+    const sees = seesHost();
+    if (sees) sees.innerHTML = state.data ? visibilityHtml(state.data.visibility || { sees: [], never: [] }) : card('<p class="text-sm text-gray-400 animate-pulse">Loading…</p>');
     const el = host();
     if (!el) return;
+    const panels = overviewPanels(el);
     if (state.error && !state.data) {
-      el.innerHTML = card(`<p class="text-sm text-red-600">${esc(state.error)}</p>
+      panels.innerHTML = card(`<p class="text-sm text-red-600">${esc(state.error)}</p>
         <button type="button" data-mentor-retry class="btn-secondary mt-3 px-3 py-1.5 border text-xs font-bold rounded-lg">Try again</button>`);
       return;
     }
-    if (!state.data) { el.innerHTML = card('<p class="text-sm text-gray-400 animate-pulse">Loading…</p>'); return; }
+    if (!state.data) { panels.innerHTML = card('<p class="text-sm text-gray-400 animate-pulse">Loading…</p>'); return; }
     const d = state.data;
-    el.innerHTML = `
-      <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
-        <div class="space-y-4 min-w-0 lg:col-span-2">${waitingHtml(d.open || [])}${reviewsHtml()}${checklistHtml(d.checklist || [])}${customersHtml()}${feedbackHtml()}${dismissedHtml(d.dismissed || [])}</div>
-        <div class="space-y-4 min-w-0">${recommendedHtml(d.recommended)}${weekHtml(d.week)}${trackRecordHtml()}${visibilityHtml(d.visibility || { sees: [], never: [] })}
-          ${card(`<p class="text-xs text-gray-600">Need help with Be More Swan? Ask me in chat, or use <button type="button" data-mentor-help class="font-semibold text-pink-700 hover:underline">Help &amp; Support</button>.</p>`)}
-        </div>
-      </div>`;
+    panels.innerHTML = `
+      ${suggestionsHtml(d)}${checklistHtml(d.checklist || [])}${recommendedHtml(d.recommended)}
+      <p class="text-xs text-gray-600 px-1">Need help with Be More Swan? Ask me in chat, or use <button type="button" data-mentor-help class="font-semibold text-pink-700 hover:underline">Help &amp; Support</button>.</p>`;
   }
 
   async function bringBack(id) {
@@ -352,7 +353,14 @@
   // ── Handlers: bound once, to document ──────────────────────────────────────
   document.addEventListener('click', (e) => {
     const t = e.target;
-    if (!(t instanceof Element) || !host()?.contains(t)) return;
+    if (!(t instanceof Element) || !isOurs(t)) return;
+    const stage = t.closest('[data-mentor-stage]');
+    if (stage) {
+      state.stage = stage.getAttribute('data-mentor-stage');
+      render();
+      document.getElementById(`mentor-stage-${state.stage}`)?.focus();   // the repaint replaced the pill
+      return;
+    }
     const open = t.closest('[data-mentor-open-field]');
     if (open) {
       window._bizinfoInitialTab = open.getAttribute('data-mentor-open-field');
@@ -365,31 +373,20 @@
     if (t.closest('[data-mentor-review-all]')) { window.MentorReviewAll?.openDialog(); return; }
     const see = t.closest('[data-mentor-see-role]');
     if (see) { window.MentorOpenCatalogue?.(see.getAttribute('data-mentor-see-role')); return; }
-    if (t.closest('[data-mentor-feedback-go]')) { getFeedback(); return; }
     if (t.closest('[data-mentor-review-now]')) { reviewNow(); return; }
     const openReview = t.closest('[data-mentor-open-review]');
     if (openReview) { window.openAssistantChat?.({ assistantId: state.assistantId, sessionId: Number(openReview.getAttribute('data-mentor-open-review')) }); return; }
     if (t.closest('[data-mentor-help]') && window.loadView) window.loadView('help');
   });
-  // The draft is kept as it is typed, so a repaint (a card saved in chat) never loses it.
-  document.addEventListener('input', (e) => {
+  // The pills, by keyboard, as every other row of tabs on this page.
+  document.addEventListener('keydown', (e) => {
     const t = e.target;
-    if (!(t instanceof Element) || !t.matches('[data-mentor-feedback-text]') || !host()?.contains(t)) return;
-    state.feedback.text = t.value.slice(0, FEEDBACK_MAX);
-    const n = host().querySelector('[data-mentor-feedback-count]');
-    if (n) n.textContent = `${state.feedback.text.length.toLocaleString('en-GB')} / ${FEEDBACK_MAX.toLocaleString('en-GB')}`;
-  });
-  document.addEventListener('change', (e) => {
-    const t = e.target;
-    if (!(t instanceof Element) || !t.matches('[data-mentor-feedback-file]') || !host()?.contains(t)) return;
-    const file = t.files && t.files[0];
-    if (!file) return;
-    if (file.size > 200000) { state.feedback.error = 'That file is too big — paste the part you want feedback on instead.'; render(); return; }
-    file.text().then((txt) => {
-      state.feedback.text = String(txt).slice(0, FEEDBACK_MAX);
-      state.feedback.error = txt.length > FEEDBACK_MAX ? `Only the first ${FEEDBACK_MAX.toLocaleString('en-GB')} characters were kept.` : null;
-      render();
-    }, () => { state.feedback.error = 'That file couldn’t be read — paste the text instead.'; render(); });
+    if (!(t instanceof Element) || !t.matches('[data-mentor-stage]') || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    const at = STAGES.indexOf(state.stage);
+    state.stage = e.key === 'Home' ? STAGES[0] : e.key === 'End' ? STAGES[STAGES.length - 1] : STAGES[(at + (e.key === 'ArrowRight' ? 1 : -1) + STAGES.length) % STAGES.length];
+    render();
+    document.getElementById(`mentor-stage-${state.stage}`)?.focus();
   });
   // A card applied or dismissed in chat, or Business Information saved: repaint from the server.
   ['mentor:changed', 'bizinfo:profileChanged', 'bizinfo:productsChanged', 'assistant:settingsChanged'].forEach((ev) =>
@@ -421,8 +418,7 @@
       chatDock = null;
       state.assistantId = assistantId;
       state.assistantName = assistantName || 'Your Mentor';
-      state.data = null; state.error = null; state.notes = {};
-      state.feedback = { text: '', busy: false, result: null, error: null };
+      state.data = null; state.error = null; state.notes = {}; state.stage = 'waiting';
       state.reviews = null; state.customers = null; state.reviewNote = null; clearTimeout(state.poll);
       render();
       load();

@@ -122,6 +122,7 @@ import { LOSS_REASONS } from '../../src/config/revenue-events';
 import { parseScheduleInstruction } from '../../src/utils/parse-schedule-instruction';
 import { attachmentLine, buildAttachmentsBlock, readAttachments, saveAttachments, type AcceptedAttachment } from '../../src/utils/chat-attachments';
 import { enforcePromptModeration } from '../../src/utils/moderation';
+import { chargeChatMessage } from '../../src/utils/basic-work';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 import { asksForACall, callbackOfferElement } from '../../src/utils/callback-request';
@@ -778,8 +779,8 @@ function websiteAssistantSurfaces(): string {
 Everything you can change here, the user can also change there by hand.`;
 }
 
-// ⚠️ Name only screens that exist (docs/business-mentor-plan.md §14). The Overview tab's three panels
-// are the screen twins of its gap cards, "what can you see?" and Dismiss: tests/mentor-page.test.ts
+// ⚠️ Name only screens that exist (docs/business-mentor-plan.md §14). The panels on its page are the
+// screen twins of its gap cards, "what can you see?" and Dismiss: tests/mentor-page.test.ts
 // checks each name here against assistant-detail.html and assistants.js.
 function businessMentorSurfaces(): string {
     return `WHERE THINGS LIVE — pages inside this platform, never outside tools:
@@ -792,18 +793,17 @@ Your own page has an "Overview" tab, a "Plan" tab, a "Results" tab and an "Activ
   - "Look this up" — a question box (1 task, about two minutes) and the "Research" list of past answers with their links. Each section of a plan has a "Look this up" link too.
   - "Break-even calculator" — price of one sale, cost per sale, fixed costs, marketing spend and how many leads become a sale, each with "A guess"; "Work it out".
   - "The playbook I'm using" — the reviewed playbook for their kind of business, or that there isn't one yet.
-The "Overview" tab holds:
-  - "Set-up checklist" — the same Business Information gaps you see, ticked when done; each opens its field.
-  - "What I can see" — what you can and can never see (the list under WHAT YOU CAN SEE).
-  - "Dismissed suggestions" — suggestions they dismissed, with the reason, each with "Bring back".
-  - "Suggestions this week" — how many of your 3 a week you have used.
-  - "Suggestions waiting" — your suggestions they haven't answered yet, with "Review all" (shown only when there are some).
-  - "Recommended next" — who you'd hire next and why (the same list as WHO TO HIRE NEXT), each with "See this assistant".
   - "Get feedback" — they paste a draft (or "Open a text file") and press "Get feedback" to get your critique on the page.
+The "Overview" tab holds what needs them now:
+  - "Commitments this week" — this week's 1–3 things for each person (theirs first), with the same buttons as on the "Results" tab, and "Add one for this week".
+  - "Suggestions" — one card with three pills. "Waiting": your suggestions they haven't answered yet, with "Review all", and "Suggestions this week" (how many of your 3 a week you have used). "Accepted": suggestions they accepted and what changed since. "Dismissed": suggestions they dismissed, with the reason, each with "Bring back".
+  - "Set-up checklist" — the same Business Information gaps you see, ticked when done; each opens its field.
+  - "Recommended next" — who you'd hire next and why (the same list as WHO TO HIRE NEXT), each with "See this assistant".
+The "Results" tab holds:
+  - "Commitments" — this week's 1–3 things for each person (theirs first), each with "Done", "Missed…" (pick why) and "Drop", "Add one for this week", and "Earlier weeks".
   - "Reviews" — every weekly review you wrote, with its suggestions and whether each was accepted, and "Open in chat"; "Review my week now" (owners and admins, 1 task).
   - "Customers" — won customers not heard from lately, deals won and lost and why, reviews and support tickets — only from their active assistants, names and dates only — and "What I can't see".
-  - "Track record" — suggestions they accepted and what changed since.
-The "Results" tab holds "Commitments" — this week's 1–3 things for each person (theirs first), each with "Done", "Missed…" (pick why) and "Drop", "Add one for this week", and "Earlier weeks".
+Your Assistant Settings (the menu down the right of your page; an "Assistant Settings" button on a phone) also hold "What I can see" — what you can and can never see (the list under WHAT YOU CAN SEE).
 "Review all" opens every waiting suggestion together, each with its own tick (none ticked); "Apply … ticked" applies only those. It is also at the top of "Notifications" ▸ "Needs you" when suggestions are waiting.
 The assistant catalogue ("Hire a New Assistant") marks the roles you recommend with a "Recommended" badge.
 Each suggestion card has "Dismiss…", which asks why: "Not relevant", "Already done", "Disagree" or "Not now" (not now = back in two weeks).
@@ -4288,6 +4288,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         await db.update(chatSessions).set({ updatedAt: new Date() }).where(eq(chatSessions.id, session.id));
 
         await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords);
+
+        // Off until the switch (docs/basic-work-charging.md). Help-only Mentor replies with no plan stay free. Never throws.
+        if (!mentorNoPlan) await chargeChatMessage(db, orgId, session.aiAssistantId);
 
         // A Team note's answer goes back under the note (team-messages.ts postTeamChatReply), pointing at
         // this chat message, whose card the Team feed shows in place. Never throws.

@@ -127,8 +127,8 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
 };
 
 /**
- * What the customer is told the Mentor sees and never sees: the "What I can see" panel on its Overview
- * tab (netlify/functions/mentor.ts) and the same list in its prompt, so chat and page say the same.
+ * What the customer is told the Mentor sees and never sees: the "What I can see" section of its Assistant
+ * Settings (netlify/functions/mentor.ts) and the same list in its prompt, so chat and page say the same.
  * `sees` is only what it reads today (`always`); other workspaces and other assistants' chats are never
  * tables of this workspace, so they are added in words.
  */
@@ -144,7 +144,7 @@ export function mentorVisibility(): { sees: string[]; never: string[] } {
 /** The same list for the Mentor's prompt, so "what can you see?" in chat matches the panel. */
 export function mentorVisibilityPromptBlock(): string {
     const v = mentorVisibility();
-    return `WHAT YOU CAN SEE — if asked, answer from this list only (the same list is on your Overview tab, under "What I can see"):
+    return `WHAT YOU CAN SEE — if asked, answer from this list only (the same list is in your Assistant Settings, under "What I can see"):
 Sees: ${v.sees.join('; ')}.
 Never sees: ${v.never.join('; ')}.`;
 }

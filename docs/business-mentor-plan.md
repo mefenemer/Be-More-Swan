@@ -681,7 +681,7 @@ changes that didn't help and about results too small to judge (the minimum-sampl
   Swan's own billing**, not the business's invoices, so it is `never`; overdue invoices come from the
   Accounts Receivable assistant's `assistant_records` instead. A check-in for a quiet customer is a message
   the Mentor drafts in chat for the user to send (no Email Marketing hand-off yet).
-- **Screens:** Overview tab — Reviews, Track record, Customers; Results tab — Commitments.
+- **Screens (as redesigned 2026-11-06):** Results tab — Commitments, Reviews, Customers; Overview tab — this week's Commitments and, under Suggestions, Accepted (the track record). Get feedback is on the Plan tab; What I can see is in Assistant Settings.
 
 **Done when:** a staging workspace with real activity gets a review whose proposals each apply
 correctly through the GUI endpoint; a workspace with no activity gets an honest "not enough yet"; a

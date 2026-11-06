@@ -1,6 +1,8 @@
 /**
  * src/components/mentor-commitments.js
- * The Business Mentor's Commitments list — top of its Results tab (docs/business-mentor-plan.md §5.1, §14).
+ * The Business Mentor's Commitments list — top of its Results tab (docs/business-mentor-plan.md §5.1, §14),
+ * with this week's also at the top of its Overview tab (#mentor-commitments-now, made by
+ * assistant-mentor-overview.js): one list and one set of handlers, painted in both.
  * The 1–3 things each person will do this week, their own first (§2.5); "Done", "Missed…" (why, from the
  * same closed list as the chat's end-of-week card) and "Drop"; earlier weeks below with their reasons.
  *
@@ -18,6 +20,8 @@
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
   const host = () => document.getElementById('mentor-commitments-host');
+  const nowHost = () => document.getElementById('mentor-commitments-now');
+  const isOurs = (el) => [host(), nowHost()].some((h) => h && h.contains(el));
   const ukDate = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Europe/London' });
   const STATUS = { open: ['To do', 'bg-amber-50 text-amber-800 border border-amber-200'], done: ['Done', 'bg-green-50 text-green-800 border border-green-200'], missed: ['Missed', 'bg-red-50 text-red-700 border border-red-200'], dropped: ['Dropped', 'bg-gray-100 text-gray-600'] };
 
@@ -34,7 +38,8 @@
     render();
   }
 
-  function rowHtml(c, d) {
+  // `at` keeps ids unique while the same row is on two tabs.
+  function rowHtml(c, d, at = 'all') {
     const [label, cls] = STATUS[c.status] || STATUS.open;
     const canClose = c.status === 'open' && (c.ownerUserId === d.me || d.canManage);
     const reasons = Object.entries(d.missReasons || {});
@@ -52,18 +57,54 @@
         <button type="button" data-mcl-close="dropped" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${state.busy ? 'disabled' : ''}>Drop</button>
       </div>
       ${state.openMiss === c.id ? `<div class="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-2.5">
-        <label for="mcl-reason-${Number(c.id)}" class="text-xs font-semibold text-gray-700">Why was it missed?</label>
-        <select id="mcl-reason-${Number(c.id)}" data-mcl-reason class="mt-1 w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm">
+        <label for="mcl-reason-${at}-${Number(c.id)}" class="text-xs font-semibold text-gray-700">Why was it missed?</label>
+        <select id="mcl-reason-${at}-${Number(c.id)}" data-mcl-reason class="mt-1 w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm">
           <option value="">Pick one…</option>${reasons.map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join('')}
         </select>
-        <label for="mcl-note-${Number(c.id)}" class="sr-only">A few words</label>
-        <input id="mcl-note-${Number(c.id)}" data-mcl-note type="text" maxlength="500" placeholder="A few words (needed for Other)" class="mt-2 w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm">
+        <label for="mcl-note-${at}-${Number(c.id)}" class="sr-only">A few words</label>
+        <input id="mcl-note-${at}-${Number(c.id)}" data-mcl-note type="text" maxlength="500" placeholder="A few words (needed for Other)" class="mt-2 w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm">
         <button type="button" data-mcl-close="missed" class="btn-primary mt-2 px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50" ${state.busy ? 'disabled' : ''}>Save</button>
       </div>` : ''}` : ''}
     </li>`;
   }
 
+  function addBoxHtml(room, at) {
+    if (!room) return '';
+    return `<div class="mt-3" data-mcl-add-box>
+        <label for="mcl-add-${at}" class="text-xs font-semibold text-gray-700">Add one for this week</label>
+        <div class="flex flex-wrap gap-2 mt-1">
+          <input id="mcl-add-${at}" data-mcl-add type="text" maxlength="200" value="${esc(state.draft[0])}" placeholder="e.g. Call three past customers" class="min-w-0 flex-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm">
+          <button type="button" data-mcl-add-go class="btn-primary shrink-0 px-3 py-1.5 text-sm font-bold rounded-lg transition disabled:opacity-50" ${state.busy ? 'disabled' : ''}>Add</button>
+        </div>
+        <p class="text-[11px] text-gray-500 mt-1">${room} more this week.</p>
+      </div>`;
+  }
+
+  function noteHtml() {
+    return state.note ? `<p class="mt-2 text-xs font-semibold ${state.note.error ? 'text-red-600' : 'text-pink-700'}" role="status" aria-live="polite">${esc(state.note.text)}</p>` : '';
+  }
+
+  /** This week's, at the top of the Overview. Never folded: it's the one real to-do list on the page. */
+  function paintNow() {
+    const el = nowHost();
+    if (!el) return;
+    const d = state.data;
+    if (!d || !d.ready) { el.innerHTML = ''; return; }
+    const thisWeek = (d.commitments || []).filter((c) => c.weekStart === d.week);
+    const mine = thisWeek.filter((c) => c.ownerUserId === d.me && c.status !== 'dropped' && c.status !== 'missed').length;
+    el.innerHTML = `<section class="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 sm:p-5 min-w-0" data-mentor-panel="commitments-now" data-no-fold>
+      <div class="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 class="text-base font-bold text-gray-900">Commitments this week</h2>
+        <button type="button" data-mcl-see-all class="btn-swan-link px-0 py-0.5 text-xs font-bold">Earlier weeks</button>
+      </div>
+      ${thisWeek.length ? `<ul class="mt-1">${thisWeek.map((c) => rowHtml(c, d, 'now')).join('')}</ul>` : '<p class="text-sm text-gray-500 mt-1">Nothing set yet this week.</p>'}
+      ${addBoxHtml(Math.max(0, (d.maxPerWeek || 3) - mine), 'now')}
+      ${noteHtml()}
+    </section>`;
+  }
+
   function render() {
+    paintNow();
     const el = host();
     if (!el) return;
     const wrap = (inner) => `<section class="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 sm:p-6 min-w-0" data-mentor-panel="commitments">${inner}</section>`;
@@ -82,15 +123,8 @@
       <p class="text-sm text-gray-500 mt-1">Up to ${d.maxPerWeek || 3} things each person will do this week. ${esc(state.assistantName)} asks how they went at the end of the week — and learns from why one was missed.</p>
       <h4 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-4">This week (from ${esc(ukDate(d.week))})</h4>
       ${thisWeek.length ? `<ul class="mt-1">${thisWeek.map((c) => rowHtml(c, d)).join('')}</ul>` : '<p class="text-sm text-gray-500 mt-1">Nothing set yet this week.</p>'}
-      ${room ? `<div class="mt-3">
-        <label for="mcl-add" class="text-xs font-semibold text-gray-700">Add one for this week</label>
-        <div class="flex flex-wrap gap-2 mt-1">
-          <input id="mcl-add" data-mcl-add type="text" maxlength="200" value="${esc(state.draft[0])}" placeholder="e.g. Call three past customers" class="min-w-0 flex-1 rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm">
-          <button type="button" data-mcl-add-go class="btn-primary shrink-0 px-3 py-1.5 text-sm font-bold rounded-lg transition disabled:opacity-50" ${state.busy ? 'disabled' : ''}>Add</button>
-        </div>
-        <p class="text-[11px] text-gray-500 mt-1">${room} more this week.</p>
-      </div>` : ''}
-      ${state.note ? `<p class="mt-2 text-xs font-semibold ${state.note.error ? 'text-red-600' : 'text-pink-700'}" role="status" aria-live="polite">${esc(state.note.text)}</p>` : ''}
+      ${addBoxHtml(room, 'all')}
+      ${noteHtml()}
       ${weeks.length ? `<details class="mt-4"><summary class="cursor-pointer text-sm font-semibold text-gray-700">Earlier weeks</summary>
         ${weeks.map((w) => `<h4 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Week of ${esc(ukDate(w))}</h4><ul class="mt-1">${earlier.filter((c) => c.weekStart === w).map((c) => rowHtml(c, d)).join('')}</ul>`).join('')}
       </details>` : ''}`);
@@ -114,9 +148,16 @@
 
   document.addEventListener('click', (e) => {
     const t = e.target;
-    if (!(t instanceof Element) || !host()?.contains(t)) return;
+    if (!(t instanceof Element) || !isOurs(t)) return;
+    if (t.closest('[data-mcl-see-all]')) {
+      window._activateMainTab?.('goals');
+      // Results' cards start closed: this one was asked for.
+      const list = host()?.querySelector('[data-mentor-panel="commitments"] summary');
+      if (list) { window.Fold?.reveal(list); list.scrollIntoView({ block: 'center' }); }
+      return;
+    }
     if (t.closest('[data-mcl-add-go]')) {
-      const text = (host().querySelector('[data-mcl-add]')?.value || '').trim();
+      const text = (t.closest('[data-mcl-add-box]')?.querySelector('[data-mcl-add]')?.value || '').trim();
       if (!text) { state.note = { text: 'Write what you’ll do first.', error: true }; render(); return; }
       run((A) => A.commitmentsAdd([text]).then(() => { state.draft[0] = ''; }), 'Added.');
       return;
@@ -140,13 +181,15 @@
   // The add box keeps what is typed across repaints (a card saved in chat reloads this list).
   document.addEventListener('input', (e) => {
     const t = e.target;
-    if (t instanceof Element && t.matches('[data-mcl-add]') && host()?.contains(t)) state.draft[0] = t.value;
+    if (t instanceof Element && t.matches('[data-mcl-add]') && isOurs(t)) state.draft[0] = t.value;
   });
   document.addEventListener('mentor:commitmentsChanged', () => { if (host() && state.data) load(); });
 
   window.MentorCommitments = {
     /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
     rename(name) { state.assistantName = name || state.assistantName; render(); },
+    /** The Overview has just made its slot for this week's. */
+    paint() { paintNow(); },
     init({ assistantName }) {
       state.assistantName = assistantName || 'Your Mentor';
       state.data = null; state.error = null; state.note = null; state.openMiss = null; state.busy = false;

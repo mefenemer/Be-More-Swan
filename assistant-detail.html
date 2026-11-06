@@ -721,8 +721,8 @@
              Without it an empty amber pill shows until the first count lands. -->
         <span id="campaigns-live-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
-      <!-- Overview — Business Mentor only (mentorTab: business_mentor). Set-up checklist, "What I can see",
-           Dismissed suggestions and this week's count: the screen twins of its chat cards
+      <!-- Overview — Business Mentor only (mentorTab: business_mentor). This week's Commitments, Suggestions,
+           the Set-up checklist and Recommended next: the screen twins of its chat cards
            (docs/business-mentor-plan.md §14). assistant-mentor-overview.js → mentor.ts.
            ⚠️ Rename a panel and businessMentorSurfaces() in chat-orchestrator.ts must change too
            (tests/mentor-page.test.ts). -->
@@ -1329,6 +1329,17 @@
         <div>
           <p class="text-sm font-bold text-gray-900">Notifications</p>
           <p class="text-xs text-gray-500 mt-0.5">How you're alerted about this assistant's work</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </button>
+
+    <!-- Business Mentor only: shown by assistants.js where mentorTab is set. -->
+    <button type="button" data-tab="mentorsees" class="detail-tab-btn brief-card w-full text-left hidden" style="display:none">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-bold text-gray-900">What I can see</p>
+          <p class="text-xs text-gray-500 mt-0.5">What your Mentor reads, and what it never sees</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
       </div>
@@ -2150,6 +2161,12 @@
 
   </div>
 
+  <!-- What I can see — Business Mentor only (mentorTab). Painted by assistant-mentor-overview.js from
+       src/config/mentor-data-inventory.ts, the same list its prompt reads. -->
+  <div id="tab-mentorsees" class="detail-tab-content hidden space-y-6">
+    <div id="mentor-sees-host"></div>
+  </div>
+
   <!-- ── TAB: Notifications ────────────────────────────────────────
        Assistant-work notification preferences (Approvals, Tasks, Content,
        Connections) for THIS assistant. Rows are the scope:'assistant'
@@ -2232,6 +2249,8 @@
        Rendered by src/components/mentor-commitments.js → mentor.ts; the chat's mentor_commitments card
        calls the same actions. -->
   <div id="mentor-commitments-host" class="hidden mb-8"></div>
+  <!-- Reviews and Customers — Business Mentor only. Painted by assistant-mentor-overview.js, whose data they share. -->
+  <div id="mentor-results-host" class="hidden mb-8"></div>
 
   <!-- ── Goals (SMART Goals — Feature 1) ───── -->
   <div id="tab-goals" class="space-y-6 mb-8">

@@ -5013,7 +5013,7 @@ const _RM_ICONS = {
     platforms: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1',
     rules: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
     guardrails: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
-    notifications: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',
+    notifications: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',    mentorsees: 'M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z',
 };
 // The settings sections dock beside the right-hand menu when that menu is on screen (compact header, md+).
 function _settingsDocked() {
@@ -5161,7 +5161,7 @@ window._openProfileDrawer = function() {
 // Open (or swap to) a specific section panel, with a back arrow to the home index.
 window._openBriefDrawer = function(tabKey) {
     _briefShowPanel('tab-' + tabKey);
-    const titles = { problem: 'What I do', operation: 'When and how I post', strategy: 'What I post about', brand: 'Your brand', platforms: 'Connections', rules: 'Do’s and don’ts', guardrails: 'Safety and legal', notifications: 'Notifications' };
+    const titles = { mentorsees: 'What I can see', problem: 'What I do', operation: 'When and how I post', strategy: 'What I post about', brand: 'Your brand', platforms: 'Connections', rules: 'Do’s and don’ts', guardrails: 'Safety and legal', notifications: 'Notifications' };
     // The 'strategy' card is the one the role registry RENAMES: roles with hasCreativeBrief:false
     // (every non-social role) lose the marketing cards, so _applyRoleDashboard rewrites the nav
     // card's title to "How I write" (or _syncStrategyCard hides it). Reading that element back keeps
@@ -7426,10 +7426,18 @@ function _applyDashboardRegistry(data) {
         document.getElementById('campaign-control-strip')?.classList.add('hidden');
     }
 
-    // Overview tab — Business Mentor only (mentorTab: business_mentor): set-up checklist, "What I can
-    // see" and Dismissed suggestions (assistant-mentor-overview.js → mentor.ts).
+    // Overview tab — Business Mentor only (mentorTab: business_mentor): commitments, suggestions, set-up
+    // checklist and who to hire next (assistant-mentor-overview.js → mentor.ts). The same module paints
+    // Reviews and Customers on its Results tab, and "What I can see" in its Assistant Settings.
     const mentorTab = cfg.mentorTab;
     toggle('maintab-btn-mentor', !!mentorTab);
+    const mentorResultsHost = document.getElementById('mentor-results-host');
+    const mentorSeesCard = document.querySelector('#tab-profile-home .detail-tab-btn[data-tab="mentorsees"]');
+    [mentorResultsHost, mentorSeesCard].forEach((el) => {
+        if (!el) return;
+        el.classList.toggle('hidden', !mentorTab);
+        el.style.display = mentorTab ? '' : 'none';
+    });
     if (mentorTab) {
         setText('mentor-tab-label', mentorTab.label || 'Overview');
         window.AssistantMentorOverview?.init({ assistantId: data.id, assistantName: data.name });

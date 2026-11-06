@@ -14,6 +14,8 @@
  *   Break-even calculator   — worked out in code (break-even.ts); every input shown, guesses labelled
  *   Look this up / Research — a sourced answer in about two minutes (1 task), and every past answer
  *   The playbook I'm using  — the reviewed playbook for this kind of business, or that there isn't one
+ *   Get feedback            — paste a draft (or open a .txt/.md file) and get the Mentor's critique inline
+ *                             (action 'feedback' → mentor-feedback.ts, the same craft as chat)
  *
  * A chat card saved or approved dispatches `mentor:planChanged`, which reloads this tab; a break-even card's
  * "Open in the calculator" dispatches `mentor:openCalculator`. Handlers are bound to `document` once, at
@@ -28,7 +30,9 @@
     kind: null, edits: {}, notes: {}, busy: {}, ideaStep: 0, showChanges: false, dismissedDrafts: {},
     calc: { inputs: {}, result: null, error: null, busy: false },
     research: { question: '', busy: false, error: null },
+    feedback: { text: '', busy: false, result: null, error: null },
   });
+  const FEEDBACK_MAX = 12000;
   let state = fresh();
   let pollTimer = null;
 
@@ -375,6 +379,39 @@
     `, 'data-mplan-panel="playbook"');
   }
 
+  function feedbackHtml() {
+    const f = state.feedback;
+    return card(`
+      <h2 class="text-base font-bold text-gray-900">Get feedback</h2>
+      <p class="text-xs text-gray-500 mt-1">Paste something you wrote — a sales email, a post, a flyer — and ${esc(state.assistantName)} will say what works and what to change, for your customers. Nothing is saved or changed.</p>
+      <label for="mplan-feedback-text" class="sr-only">Your draft</label>
+      <textarea id="mplan-feedback-text" data-mplan-feedback-text rows="6" maxlength="${FEEDBACK_MAX}" class="mt-2 w-full rounded-lg border border-gray-300 p-2.5 text-sm" placeholder="Paste your draft here…" ${f.busy ? 'disabled' : ''}>${esc(f.text)}</textarea>
+      <div class="flex flex-wrap items-center gap-2 mt-2">
+        <button type="button" data-mplan-feedback-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${f.busy ? 'disabled' : ''}>${f.busy ? 'Reading…' : 'Get feedback'}</button>
+        <label class="btn-secondary px-3 py-2 border text-xs font-bold rounded-lg transition cursor-pointer">
+          Open a text file<input type="file" accept=".txt,.md,text/plain,text/markdown" data-mplan-feedback-file class="sr-only">
+        </label>
+        <span class="text-[11px] text-gray-500" data-mplan-feedback-count>${f.text.length.toLocaleString('en-GB')} / ${FEEDBACK_MAX.toLocaleString('en-GB')}</span>
+      </div>
+      ${f.error ? `<p class="mt-2 text-xs font-semibold text-red-600" role="alert" data-fold-open>${esc(f.error)}</p>` : ''}
+      ${f.result ? `<div class="mt-3 rounded-lg border border-pink-200 bg-pink-50 p-3" data-mplan-feedback-result data-fold-open role="status" aria-live="polite"><p class="text-xs font-bold text-pink-800 uppercase tracking-wide">${esc(state.assistantName)}’s feedback</p><p class="text-sm text-gray-800 mt-1 whitespace-pre-line break-words">${esc(f.result)}</p></div>` : ''}`, 'data-mentor-panel="feedback"');
+  }
+
+  async function getFeedback() {
+    const f = state.feedback;
+    if (f.busy) return;
+    if (f.text.trim().length < 20) { f.error = 'Paste a little more of your draft so there’s something to judge.'; render(); return; }
+    f.busy = true; f.error = null; f.result = null; render();
+    try {
+      const body = await call({ action: 'feedback', text: f.text });
+      f.result = body.feedback;
+    } catch (err) {
+      f.error = err.message || 'Your Mentor couldn’t read that just now — please try again.';
+    }
+    f.busy = false;
+    render();
+  }
+
   function render() {
     const el = host();
     if (!el) return;
@@ -388,10 +425,10 @@
     // …and the caret or selection inside it (a repaint just after clicking into a box must not move it).
     let caret = [];
     try { if (active && el.contains(active) && typeof active.selectionStart === 'number') caret = [active.selectionStart, active.selectionEnd]; } catch (e) { /* number inputs */ }
-    const focusKey = active && el.contains(active) ? (active.getAttribute('data-mplan-field') || active.getAttribute('data-mplan-assumption') || active.getAttribute('data-mplan-calc') || (active.hasAttribute('data-mplan-research-q') ? 'research' : null)) : null;
+    const focusKey = active && el.contains(active) ? (active.getAttribute('data-mplan-field') || active.getAttribute('data-mplan-assumption') || active.getAttribute('data-mplan-calc') || (active.hasAttribute('data-mplan-research-q') ? 'research' : active.hasAttribute('data-mplan-feedback-text') ? 'feedback' : null)) : null;
     el.innerHTML = `
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
-        <div class="space-y-4 min-w-0 lg:col-span-2">${plansHtml()}${researchHtml()}</div>
+        <div class="space-y-4 min-w-0 lg:col-span-2">${plansHtml()}${researchHtml()}${feedbackHtml()}</div>
         <div class="space-y-4 min-w-0">${calcHtml()}${playbookHtml()}
           ${card(chatPaneAvailable()
             ? `<p class="text-xs text-gray-600">Prefer to talk it through? 🎯 Select a part of a plan and ask ${esc(state.assistantName)} — “challenge this”, “make it shorter”. It changes the same plans, and nothing is saved without your click.</p>`
@@ -399,7 +436,7 @@
         </div>
       </div>`;
     if (focusKey) {
-      const sel = focusKey === 'research' ? '[data-mplan-research-q]' : `[data-mplan-field="${focusKey}"],[data-mplan-assumption="${focusKey}"],[data-mplan-calc="${focusKey}"]`;
+      const sel = focusKey === 'research' ? '[data-mplan-research-q]' : focusKey === 'feedback' ? '[data-mplan-feedback-text]' : `[data-mplan-field="${focusKey}"],[data-mplan-assumption="${focusKey}"],[data-mplan-calc="${focusKey}"]`;
       const again = el.querySelector(sel);
       if (again) { again.focus(); try { const n = again.value.length; again.setSelectionRange(Math.min(caret[0] ?? n, n), Math.min(caret[1] ?? n, n)); } catch (e) { /* number inputs */ } }
     }
@@ -468,6 +505,7 @@
   document.addEventListener('click', (e) => {
     const t = e.target;
     if (!(t instanceof Element) || !host()?.contains(t)) return;
+    if (t.closest('[data-mplan-feedback-go]')) { getFeedback(); return; }
     const sel = t.closest('[data-mplan-select], [data-mplan-select-assumption]');
     if (sel) { const ref = selectionRef(sel); if (ref) getChatDock()?.refer(ref); return; }
     const k = t.closest('[data-mplan-kind]');
@@ -544,11 +582,28 @@
       return;
     }
     if (t.matches('[data-mplan-research-q]')) state.research.question = t.value;
+    // The draft is kept as it is typed, so a repaint (a card saved in chat) never loses it.
+    if (t.matches('[data-mplan-feedback-text]')) {
+      state.feedback.text = t.value.slice(0, FEEDBACK_MAX);
+      const n = host().querySelector('[data-mplan-feedback-count]');
+      if (n) n.textContent = `${state.feedback.text.length.toLocaleString('en-GB')} / ${FEEDBACK_MAX.toLocaleString('en-GB')}`;
+    }
   });
   // Status pills and buttons follow the edits once the field is left (a full repaint on every key would be noisy).
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (!(t instanceof Element) || !host()?.contains(t)) return;
+    if (t.matches('[data-mplan-feedback-file]')) {
+      const file = t.files && t.files[0];
+      if (!file) return;
+      if (file.size > 200000) { state.feedback.error = 'That file is too big — paste the part you want feedback on instead.'; render(); return; }
+      file.text().then((txt) => {
+        state.feedback.text = String(txt).slice(0, FEEDBACK_MAX);
+        state.feedback.error = txt.length > FEEDBACK_MAX ? `Only the first ${FEEDBACK_MAX.toLocaleString('en-GB')} characters were kept.` : null;
+        render();
+      }, () => { state.feedback.error = 'That file couldn’t be read — paste the text instead.'; render(); });
+      return;
+    }
     const g = t.getAttribute('data-mplan-calc-guess');
     if (g) {
       const prev = state.calc.inputs[g] || {};

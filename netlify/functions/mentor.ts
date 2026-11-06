@@ -5,8 +5,8 @@
 //
 // GET                                               → { checklist, visibility, dismissed, week, open, recommended }
 //     checklist  — the "Set-up checklist": the same gaps the Mentor raises (mentor-snapshot.ts setupChecklist)
-//     visibility — "What I can see", generated from src/config/mentor-data-inventory.ts
-//     dismissed  — "Dismissed suggestions", each with "Bring back"
+//     visibility — "What I can see" (Assistant Settings), generated from src/config/mentor-data-inventory.ts
+//     dismissed  — "Dismissed" under Suggestions, each with "Bring back"
 //     week       — { used, cap }: suggestions shown since Monday (direct asks don't count)
 //     open       — suggestions still waiting, for "Review all" (mentor-review-all.js: chat, Overview, Inbox)
 //     recommended — "Recommended next": who to hire next (mentor-hire.ts, the same list as the chat card)
@@ -29,7 +29,7 @@
 // POST { action: 'research', question, chatSessionId? }            → { job }  "Look this up" (1 task, background)
 // POST { action: 'break_even', inputs }                            → { result }  the calculator (break-even.ts, in code)
 //
-// Phase 3 — the weekly review (§5): the Overview tab's Reviews, Track record and Customers panels, the
+// Phase 3 — the weekly review (§5): Reviews and Customers on the Results tab, Accepted on the Overview, the
 // Results tab's Commitments list (mentor-commitments.js) and the chat's commitments card (mentor-apply.js):
 // GET ?reviews=1                                    → { ready, reviews, settings, canRun, trackRecord, trackReady }
 // GET ?customers=1                                  → { customers }  (mentor-customers.ts: active assistants only, names and dates only)

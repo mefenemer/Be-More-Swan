@@ -15,7 +15,7 @@
 //
 // ⚠️ Not churn.ts / churn-signals.ts: those are about Be More Swan's customers leaving Be More Swan.
 //
-// One function for the Customers panel on the Mentor's Overview tab (mentor.ts ?customers=1), the weekly
+// One function for the Customers panel on the Mentor's Results tab (mentor.ts ?customers=1), the weekly
 // review and the chat (when the user asks about their customers). Never throws on a missing table.
 
 import { and, desc, eq, gte, inArray, isNotNull, sql } from 'drizzle-orm';

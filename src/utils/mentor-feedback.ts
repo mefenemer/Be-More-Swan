@@ -65,7 +65,7 @@ ${MENTOR_FEEDBACK_CRAFT}
 
 - Never invent anything about the business: only what is listed above. If something the draft says isn't above, say you can't check it.
 - No statistic or benchmark unless you can say where it comes from; otherwise call it your own judgement.
-- This is the "Get feedback" box on your Overview tab: nothing is saved or changed, so never say you have changed anything.
+- This is the "Get feedback" box on your Plan tab: nothing is saved or changed, so never say you have changed anything.
 
 ${SPECIAL_CATEGORY_RULE}`;
 }

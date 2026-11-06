@@ -181,9 +181,35 @@ test('the Overview tab exists on the page, and the prompt names it and its panel
         assert.ok(surfaces.includes(`"${name}"`), `prompt names ${name}`);
         assert.ok(tab.includes(name), `page shows ${name}`);
     }
-    assert.ok(surfaces.includes('"Dismissed suggestions"') && tab.includes('Dismissed suggestions ('));
+    assert.ok(surfaces.includes('"Dismissed"') && tab.includes("['dismissed', 'Dismissed',"));
     for (const r of ['Not relevant', 'Already done', 'Disagree', 'Not now']) assert.ok(surfaces.includes(`"${r}"`), r);
     assert.ok(surfaces.includes('"Dismiss…"') && read('src/components/disruptive-ui-registry.js').includes('>Dismiss…</button>'));
+});
+
+test('each panel is where the prompt says it is: Overview now, Results, Plan and Assistant Settings (2026-11-06)', () => {
+    const o = read('netlify/functions/chat-orchestrator.ts');
+    const surfaces = o.slice(o.indexOf('function businessMentorSurfaces'), o.indexOf('function mysteryShopperSurfaces'));
+    const section = (from: string, to: string) => surfaces.slice(surfaces.indexOf(from), surfaces.indexOf(to));
+    const plan = section('The "Plan" tab holds', 'The "Overview" tab holds');
+    const overview = section('The "Overview" tab holds', 'The "Results" tab holds');
+    const results = section('The "Results" tab holds', 'Your Assistant Settings');
+    for (const n of ['Get feedback']) assert.ok(plan.includes(`"${n}"`), `Plan: ${n}`);
+    for (const n of ['Commitments this week', 'Suggestions', 'Waiting', 'Accepted', 'Dismissed', 'Set-up checklist', 'Recommended next']) assert.ok(overview.includes(`"${n}"`), `Overview: ${n}`);
+    for (const n of ['Commitments', 'Reviews', 'Customers']) assert.ok(results.includes(`"${n}"`), `Results: ${n}`);
+    for (const n of ['Reviews', 'Customers', 'Get feedback', 'What I can see']) assert.ok(!overview.includes(`"${n}"`), `no longer on Overview: ${n}`);
+
+    const tab = read('src/components/assistant-mentor-overview.js');
+    const painted = tab.slice(tab.indexOf('function render()'), tab.indexOf('async function bringBack'));
+    assert.match(painted, /results\.innerHTML = [^\n]*reviewsHtml\(\)\}\$\{customersHtml\(\)/);
+    assert.match(painted, /sees\.innerHTML = [^\n]*visibilityHtml\(/);
+    assert.match(painted, /suggestionsHtml\(d\)\}\$\{checklistHtml\([^)]*\)\}\$\{recommendedHtml\(/);
+    assert.ok(!tab.includes('Get feedback'), 'Get feedback is the Plan tab\'s');
+    assert.ok(read('src/components/assistant-mentor-plan.js').includes('${plansHtml()}${researchHtml()}${feedbackHtml()}'));
+
+    const html = read('assistant-detail.html');
+    assert.ok(html.indexOf('id="mentor-commitments-host"') < html.indexOf('id="mentor-results-host"'));
+    assert.ok(html.includes('data-tab="mentorsees"') && html.includes('id="tab-mentorsees"') && html.includes('id="mentor-sees-host"'));
+    assert.ok(/mentorsees: 'What I can see'/.test(read('assistants.js')), 'the settings pane says its name');
 });
 
 test('Admin ▸ Assistants ▸ Business Mentor ▸ Activity: the four success measures', () => {

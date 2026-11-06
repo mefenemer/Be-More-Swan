@@ -25,7 +25,7 @@ export const MENTOR_HONESTY_RULES = `HONESTY RULES (never break these).
 
 /**
  * Feedback on the user's own draft (docs/business-mentor-plan.md §3.6). The SAME text in chat (when
- * they paste something) and behind the "Get feedback" box on the Overview tab (src/utils/mentor-feedback.ts),
+ * they paste something) and behind the "Get feedback" box on the Plan tab (src/utils/mentor-feedback.ts),
  * so the two give the same kind of critique. Rubric R1, R3, R6, R11.
  */
 export const MENTOR_FEEDBACK_CRAFT = `FEEDBACK ON THEIR OWN WORK. When the user shares something they wrote (a sales email, a post, a flyer, a page, a pitch):

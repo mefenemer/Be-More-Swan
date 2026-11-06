@@ -8,7 +8,7 @@
 //   - Dismiss with a reason. "Not now" snoozes that kind of suggestion for SNOOZE_DAYS; "Disagree" and
 //     "Not relevant" stop it until the user brings it back; "Already done" stops nothing (the gap has
 //     closed, so the Mentor won't raise it).
-//   - Dismissed suggestions are listed on the Mentor's Overview tab with "Bring back".
+//   - Dismissed suggestions are listed on the Mentor's Overview tab, a pill of "Suggestions", with "Bring back".
 //   - Never suggested again once ACCEPTED (ACCEPTED_HOLD_DAYS): the change is made. Staging, 27 Oct: the
 //     review re-drew "add an email signature to Zaphod's outreach" the day after "Catherine's signature on
 //     Zaphod's outreach" was accepted — the gate only knew about dismissals. Accepting one also expires
@@ -108,7 +108,7 @@ export function gateSuggestion(input: { kind: string; fields: string[]; asked: b
     if (held) {
         return { ok: false, why: 'dismissed', note: held.reason === 'not_now' && held.snoozedUntil
             ? `I've left out a suggestion card: you said "not now" to that until ${ukDate(held.snoozedUntil)}. Ask me for it and I'll draw it.`
-            : 'I\'ve left out a suggestion card: you dismissed that kind of suggestion. Bring it back from "Dismissed suggestions" on my Overview tab, or ask me for it directly.' };
+            : 'I\'ve left out a suggestion card: you dismissed that kind of suggestion. Bring it back from "Dismissed" under "Suggestions" on my Overview tab, or ask me for it directly.' };
     }
     if (state.usedThisWeek >= WEEKLY_CAP) {
         return { ok: false, why: 'cap', note: `I've left out a suggestion card: that's my ${WEEKLY_CAP} suggestions for this week. Ask me for it directly and I'll draw it.` };
@@ -218,7 +218,7 @@ export function isSameChange(a: { kind: string; payload: unknown }, b: { kind: s
 }
 
 /**
- * Once one is accepted, any other card still open for the same change is expired — "Suggestions waiting"
+ * Once one is accepted, any other card still open for the same change is expired — "Waiting"
  * must not list a change that is already made. Never throws.
  */
 async function expireSameChange(db: Db, orgId: number, acceptedId: number): Promise<void> {

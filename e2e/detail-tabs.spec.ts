@@ -13,7 +13,7 @@ async function open(page: Page) {
     await page.evaluate(() => (window as any).loadView('assistant-detail', 9));
     await expect(page.locator('#assistant-detail-content')).toBeVisible();
 }
-const mentorData = { checklist: [{ key: 'a', label: 'Your customers', done: false }], visibility: { sees: ['Your plan'], never: ['Passwords'] }, dismissed: [], open: [{ id: 5, kind: 'x', title: 'Post more often' }], week: { used: 1, cap: 3 }, recommended: { picks: [], capacity: {} } };
+const mentorData = { checklist: [{ key: 'a', label: 'Your customers', done: false }], visibility: { sees: ['Your plan'], never: ['Passwords'] }, dismissed: [], open: [{ id: 5, kind: 'x', title: 'Post more often' }], week: { used: 1, cap: 3 }, recommended: { picks: [], capacity: {} }, customers: {} };
 
 test.describe('wide screen', () => {
     test.use({ viewport: { width: 1600, height: 1000 } });
@@ -29,16 +29,52 @@ test.describe('wide screen', () => {
         expect(hero!.x + hero!.width).toBeLessThanOrEqual((await strip.boundingBox())!.x);
         await expect(page.locator('#mentoroverview-chat-host [data-chat-input]')).toBeVisible();
 
-        const week = page.locator('details[data-fold*="Suggestions this week"]');
-        await expect(week).toHaveCount(1);
-        await expect(week).not.toHaveAttribute('open', '');
-        await expect(week.getByText('of 3 used')).toBeHidden();
-        await week.locator('summary').click();
-        await expect(week.getByText('of 3 used')).toBeVisible();
+        const list = page.locator('details[data-fold*="Set-up checklist"]');
+        await expect(list).toHaveCount(1);
+        await expect(list).not.toHaveAttribute('open', '');
+        await expect(list.getByText('Your customers')).toBeHidden();
+        await list.locator('summary').click();
+        await expect(list.getByText('Your customers')).toBeVisible();
         await page.evaluate(() => (window as any).AssistantMentorOverview.activate());   // a repaint
-        await expect(page.locator('details[data-fold*="Suggestions this week"]').getByText('of 3 used')).toBeVisible();
-        await page.locator('details[data-fold*="Suggestions this week"] summary').click();
-        await expect(page.getByText('of 3 used')).toBeHidden();
+        await expect(page.locator('details[data-fold*="Set-up checklist"]').getByText('Your customers')).toBeVisible();
+        await page.locator('details[data-fold*="Set-up checklist"] summary').click();
+        await expect(list.getByText('Your customers')).toBeHidden();
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('the Mentor: Suggestions is one open card with a pill per stage, and the other panels moved tab', async ({ page, api, signedIn, pageErrors }) => {
+        stubRole(api, 'business_mentor');
+        api.set('mentor', mentorData);
+        await open(page);
+        const card = page.locator('#maintab-mentor [data-mentor-panel="suggestions"]');
+        await expect(card.getByText('Post more often')).toBeVisible();
+        await expect(card.getByRole('button', { name: 'Review all' })).toBeVisible();
+        await expect(card.getByText('1 of 3 used since Monday')).toBeVisible();
+        await card.getByRole('tab', { name: /^Dismissed/ }).click();
+        await expect(card.getByText('Nothing dismissed.')).toBeVisible();
+        await expect(card.getByRole('tab', { name: /^Dismissed/ })).toHaveAttribute('aria-selected', 'true');
+        await expect(card.getByRole('tab', { name: /^Dismissed/ })).toBeFocused();
+        await page.keyboard.press('ArrowLeft');
+        await expect(card.getByRole('tab', { name: /^Accepted/ })).toBeFocused();
+        await expect(card.getByText('Post more often')).toBeHidden();
+
+        const tab = page.locator('#maintab-mentor');
+        for (const moved of ['Reviews', 'Customers', 'Get feedback', 'What I can see']) await expect(tab.getByRole('heading', { name: moved, exact: true })).toHaveCount(0);
+        await expect(page.locator('#mentor-results-host [data-mentor-panel="reviews"]')).toHaveCount(1);
+        await expect(page.locator('#mentor-results-host [data-mentor-panel="customers"]')).toHaveCount(1);
+        await expect(page.locator('#mentor-plan-host [data-mentor-panel="feedback"]')).toHaveCount(1);
+        await expect(page.locator('#rm-items .rm-item', { hasText: 'What I can see' })).toHaveCount(1);
+        await page.locator('#rm-items [data-rm-tab="mentorsees"]').click();
+        await expect(page.locator('#brief-drawer-title')).toHaveText('What I can see');
+        await expect(page.locator('#mentor-sees-host').getByText('Passwords')).toBeVisible();
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('another role has none of the Mentor\'s panels', async ({ page, api, signedIn, pageErrors }) => {
+        stubRole(api, 'video_producer');
+        await open(page);
+        await expect(page.locator('#mentor-results-host')).toBeHidden();
+        await expect(page.locator('#rm-items [data-rm-tab="mentorsees"]')).toHaveCount(0);
         expect(pageErrors).toEqual([]);
     });
 
