@@ -142,7 +142,7 @@ export default withLambda(async () => {
                 .where(eq(newsletterIssues.id, issue.id))
                 .returning({ subject: newsletterIssues.subject });
             // One task per issue, charged now the draft exists (never throws).
-            await recordCompletedWork(db, a.organisationId, 'email_issue', 1, issue.id);
+            await recordCompletedWork(db, a.organisationId, 'email_issue', { ref: issue.id, assistantId: a.id });
 
             // ⚠️ THE POINT OF THE WHOLE CRON. Nothing here sends, so an issue nobody is told about
             // is an issue nobody approves — this function drafted in complete silence until

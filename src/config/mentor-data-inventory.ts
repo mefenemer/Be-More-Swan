@@ -49,7 +49,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('always', 'Its morning summaries (docs/morning-summary-plan.md): the newest sent in the last two days', ['mentor_mornings'], 'Its morning summaries'),
     ...group('always', 'Commitments and why a missed one was missed (§5.1), with each owner\'s name', ['mentor_commitments'], 'What you and your team committed to each week, and why any were missed'),
     ...group('always', 'Its track record: accepted suggestions and what happened since (§5.3)', ['mentor_outcomes'], 'What changed since you accepted its suggestions'),
-    ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus']),
+    ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus', 'chat_task_tally']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),
     ...group('on_request', 'Results: goal measurements and post performance', ['goal_telemetry', 'post_insights', 'manual_follower_counts']),
     // Phase 3b (§5.2): read by src/utils/mentor-customers.ts — in chat when the user asks about their

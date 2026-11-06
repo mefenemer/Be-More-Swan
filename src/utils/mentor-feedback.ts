@@ -21,6 +21,7 @@ import { meterInteraction } from './task-credit';
 import { logAiUsage } from './ai-usage';
 import { sanitizeForModel } from './text-safe';
 import { isGlobalAiDisabled } from './platform-config';
+import { chargeHelper } from './basic-work';
 
 type Db = any;
 
@@ -108,5 +109,6 @@ export async function mentorDraftFeedback(db: Db, orgId: number, userId: number,
     });
     const feedback = replyText(response.content).trim();
     if (!feedback) return { ok: false, status: 502, error: 'Your Mentor didn’t come back with anything — please try again.' };
+    await chargeHelper(db, orgId, null, 'mentor-feedback');
     return { ok: true, feedback };
 }

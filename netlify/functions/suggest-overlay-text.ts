@@ -29,6 +29,7 @@ import { displayCaption } from '../../src/utils/model-json';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { stripCodeFences } from '../../src/utils/model-json';
 import { isUpstreamBlocked } from '../../src/lib/ai-gateway';
+import { chargeHelper } from '../../src/utils/basic-work';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 /** What fits on a still at a readable size. The overlay renderer shrinks past this, it does not wrap well. */
@@ -113,6 +114,7 @@ export default withLambda(async (event: HandlerEvent) => {
             id: scheduledPosts.id,
             caption: scheduledPosts.caption,
             platform: scheduledPosts.platform,
+            assistantId: scheduledPosts.assistantId,
         })
         .from(scheduledPosts)
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, ctx.organisationId)))
@@ -173,6 +175,7 @@ export default withLambda(async (event: HandlerEvent) => {
             outputTokens: response.usage?.output_tokens ?? 0,
         });
 
+        await chargeHelper(db, ctx.organisationId, post.assistantId, `overlay-post-${post.id}`);
         return json(200, { text });
     } catch (error) {
         console.error('[suggest-overlay-text] error:', error);

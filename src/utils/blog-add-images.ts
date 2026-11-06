@@ -125,7 +125,7 @@ export async function addImagesToBlog(
     opts: { blogPostId: number; organisationId: number; userId: number; source: BlogImageSource; instruction?: string },
 ): Promise<AddImagesResult> {
     const [post] = await db
-        .select({ id: blogPosts.id, title: blogPosts.title, body: blogPosts.bodyMarkdown })
+        .select({ id: blogPosts.id, title: blogPosts.title, body: blogPosts.bodyMarkdown, assistantId: blogPosts.assistantId })
         .from(blogPosts)
         .where(and(eq(blogPosts.id, opts.blogPostId), eq(blogPosts.organisationId, opts.organisationId)))
         .limit(1);
@@ -192,7 +192,7 @@ export async function addImagesToBlog(
                 const id = await generateAndPersistImage(db, {
                     orgId: opts.organisationId, userId: opts.userId, prompt: p.scene, aspectRatio: '16:9',
                 });
-                await settleHold(db, { orgId: opts.organisationId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: opts.userId });
+                await settleHold(db, { orgId: opts.organisationId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: opts.userId, assistantId: post.assistantId });
                 const existingPos = await db.select({ position: blogPostAssets.position })
                     .from(blogPostAssets).where(eq(blogPostAssets.blogPostId, post.id));
                 const nextPos = existingPos.reduce((max, r) => Math.max(max, r.position + 1), 0);

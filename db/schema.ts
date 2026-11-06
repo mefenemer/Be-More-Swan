@@ -3092,6 +3092,14 @@ export const aiCreditLedger = pgTable("ai_credit_ledger", {
   index("ai_credit_ledger_assistant_idx").on(t.organisationId, t.assistantId, t.createdAt),
 ]);
 
+// Delivered chat replies per month, for 1 task per 10 (db/z-chat-task-tally.sql, src/utils/basic-work.ts).
+export const chatTaskTally = pgTable("chat_task_tally", {
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  periodStart: timestamp("period_start").notNull(),
+  messages: integer().notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [primaryKey({ columns: [t.organisationId, t.periodStart] })]);
+
 // One task allowance (db/task-ledger.sql, docs/task-metering.md): what every task paid for.
 // usage_counters.task_count is the fast counter; this is the itemised breakdown behind it.
 export const taskLedger = pgTable("task_ledger", {

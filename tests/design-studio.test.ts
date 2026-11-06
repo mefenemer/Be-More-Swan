@@ -613,11 +613,11 @@ check('a see-through download has no page colour; a normal one and the print do'
     assert.deepStrictEqual(await corner(solid.png), [255, 0, 0], 'solid');
 });
 
-check('Remove background is a free helper under the fair-use limit, and the chat can ask for it', () => {
-    const route = read('netlify/functions/brand-briefs.ts');
-    const at = route.indexOf("action === 'remove_background') {");
-    assert.ok(at > 0 && route.indexOf("checkFairUse(db, orgId, 'helpers')", at) > at);
-    assert.ok(!read('src/utils/design-options.ts').includes('holdCredits'), 'no task is touched');
+check('Remove background costs 1 task, asked before the provider and charged after the save, and the chat can ask for it', () => {
+    const src = read('src/utils/design-options.ts');
+    const fn = src.slice(src.indexOf('export async function removePictureBackground'), src.indexOf('export async function downloadDesignPng'));
+    assert.ok(fn.indexOf('hasTaskCapacity(') > -1 && fn.indexOf('hasTaskCapacity(') < fn.indexOf('removeImageBackground('), 'asked first');
+    assert.ok(fn.indexOf("recordCompletedWork(db, args.orgId, 'background_removal'") > fn.indexOf('db.update(visualBriefOptions)'), 'a failure costs nothing');
     const c = designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, removeBackground: 'p1' })!;
     assert.strictEqual(c.removeBackground, 'p1');
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"removeBackground"'));

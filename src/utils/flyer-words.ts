@@ -167,6 +167,6 @@ export async function draftFlyerWords(db: Db, args: { orgId: number; brief: Brie
     await db.update(visualBriefs).set({ flyerContent: n.content, updatedAt: new Date() })
         .where(and(eq(visualBriefs.id, brief.id), eq(visualBriefs.organisationId, orgId)));
     // AFTER the success — a failed draft costs nothing (work-metering.ts).
-    await recordCompletedWork(db, orgId, 'flyer_words', { ref: `flyer-brief-${brief.id}` });
+    await recordCompletedWork(db, orgId, 'flyer_words', { ref: `flyer-brief-${brief.id}`, assistantId: brief.aiAssistantId });
     return { ok: true, content: n.content };
 }

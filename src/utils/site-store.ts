@@ -210,7 +210,7 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
         const [saved] = await db.update(sites).set({ draft: drafted.definition, draftingAt: null, draftNote: null, updatedAt: new Date() })
             .where(and(eq(sites.id, site.id), sql`${sites.draftingAt} IS NOT NULL`)).returning({ id: sites.id });
         if (!saved) return;
-        await recordCompletedWork(db, site.organisationId, 'site_draft', 1, site.id);
+        await recordCompletedWork(db, site.organisationId, 'site_draft', { ref: site.id, assistantId: site.aiAssistantId });
 
         if (assistant) {
             await createNotification(db, 'site_draft_ready', {
@@ -371,7 +371,7 @@ export async function proposeOwnWords(db: Db, site: SiteRow, opts: { pageId: str
     // No plan at all: still nothing is lost — the words go at the end of the page, in order.
     const proposal = assemblePlacement(def, page.id, blocks, plan ?? { summary: '', changes: [] });
     if ('error' in proposal) return { ok: false, status: 400, error: proposal.error };
-    await recordCompletedWork(db, site.organisationId, 'site_words', 1, site.id);
+    await recordCompletedWork(db, site.organisationId, 'site_words', { ref: site.id, assistantId: site.aiAssistantId });
     return { ok: true, proposal, blocks: blocks.length };
 }
 

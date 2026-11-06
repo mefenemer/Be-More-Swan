@@ -36,7 +36,6 @@ import {
 import { readBrandGuidelines } from '../../src/utils/brand-guidelines';
 import { normalizeBrandKit } from '../../src/utils/brand-kit';
 import { applyDesignCard, openDesign, saveDesign, copyDesignAtSize, downloadDesignPng, removePictureBackground, saveAsTemplate, useTemplate, downloadDesignPdf } from '../../src/utils/design-options';
-import { checkFairUse, fairUseResponse } from '../../src/utils/fair-use';
 import { PRINT_BLEED_MM } from '../../src/config/flyer-vocab';
 import { deleteDesignTemplate, listDesignTemplates } from '../../src/utils/design-templates';
 import { presignR2Attachment } from '../../src/utils/social-publish';
@@ -46,6 +45,8 @@ import { triggerBriefRound } from '../../src/utils/trigger-brief-round';
 import { contactDefaults, draftFlyerWords, offerLine } from '../../src/utils/flyer-words';
 import { loadIntroOffer } from '../../src/utils/intro-offer';
 import { normaliseFlyerContent } from '../../src/config/flyer-vocab';
+import { chargeFinishedDesign, finishedDesignCapacity } from '../../src/utils/basic-work';
+import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -295,19 +296,22 @@ export default withLambda(async (event) => {
                 return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls }) : json(r.status, { error: r.error });
             }
             if (action === 'remove_background') {
-                const fair = await checkFairUse(db, orgId, 'helpers');
-                if (!fair.allowed) return fairUseResponse(fair);
                 const r = await removePictureBackground(db, { orgId, userId, optionId, design: body.design, target: String(body.target ?? ''), side: body.side === 'back' ? 'back' : null });
                 return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls, addedId: r.addedId }) : json(r.status, { error: r.error });
+            }
+            if ((action === 'download_pdf' || action === 'download_png') && !(await finishedDesignCapacity(db, orgId, optionId))) {
+                return json(402, { error: TASK_LIMIT_MESSAGE, code: 'task_limit' });
             }
             if (action === 'download_pdf') {
                 const r = await downloadDesignPdf(db, { orgId, optionId, design: body.design, bleedMm: body.printShop === true ? PRINT_BLEED_MM : 0, title: String(body.title ?? '').slice(0, 200) || 'Design' });
                 if (!r.ok) return json(r.status, { error: r.error });
+                await chargeFinishedDesign(db, orgId, optionId);
                 return json(200, { ok: true, url: await presignR2Attachment(r.storageKey, body.printShop === true ? 'design-print-shop.pdf' : 'design.pdf') });
             }
             if (action === 'download_png') {
                 const r = await downloadDesignPng(db, { orgId, optionId, design: body.design, seeThrough: body.seeThrough === true, side: body.side === 'back' ? 'back' : null });
                 if (!r.ok) return json(r.status, { error: r.error });
+                await chargeFinishedDesign(db, orgId, optionId);
                 // Saved, not opened: a browser ignores the `download` attribute on another site's address.
                 return json(200, { ok: true, url: await presignR2Attachment(r.storageKey, 'design.png') });
             }

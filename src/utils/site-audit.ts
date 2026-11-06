@@ -505,7 +505,7 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
         if (!latched) return;   // swept as stuck meanwhile — not charged, not reported
         await confirmPassedChecks(db, audit.id, audit.url, runId, outcome.score.outcomes);
 
-        await recordCompletedWork(db, orgId, 'site_audit', 1, runId);
+        await recordCompletedWork(db, orgId, 'site_audit', { ref: runId, assistantId: audit.aiAssistantId });
 
         // The goal (plan §4.5): reaching the target moves the audit to 'goal_met' — the weekly checks
         // carry on (defence), and the Website tab proposes the next page. Once, not every week.

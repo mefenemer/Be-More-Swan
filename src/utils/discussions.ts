@@ -39,6 +39,7 @@ import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work
 import { meterInteraction } from './task-credit';
 import { isGlobalAiDisabled } from './platform-config';
 import { resolveBaseUrl } from './base-url';
+import { chargeHelper } from './basic-work';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -476,6 +477,7 @@ export async function suggestTopicWording(
     const [sender, roleKey] = await Promise.all([loadDiscussionSender(db, organisationId, assistantId), roleKeyOfAssistant(db, assistantId)]);
     const modelChoice = await loadRoleModel(db, roleKey ?? 'lead_qualifier');
     const suggestions = await improveTopicWording(list, sender, w.sites.map((s) => sourceInfo(s).label), modelChoice, { workspaceId: organisationId, assistantId });
+    if (suggestions) await chargeHelper(db, organisationId, assistantId, `topic-wording-${assistantId}`);
     return suggestions ? { ok: true, suggestions } : { ok: false, status: 502, error: 'I couldn’t suggest new wording just now — please try again.' };
 }
 

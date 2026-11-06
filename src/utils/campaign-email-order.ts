@@ -291,7 +291,7 @@ export async function draftEmailCampaignForOrder(db: Db, orderId: number): Promi
     });
 
     // One task for the campaign's emails, however many are in it (never throws).
-    await recordCompletedWork(db, order.organisationId, 'email_campaign', 1, orderId);
+    await recordCompletedWork(db, order.organisationId, 'email_campaign', { ref: orderId, assistantId: target.id });
     return { ok: true, orderId, emails: emails.length, artefactKind, artefactId };
 }
 

@@ -18,6 +18,7 @@ import {
 } from '../../src/utils/post-quality-review';
 import { meterInteraction } from '../../src/utils/task-credit';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { chargeHelper } from '../../src/utils/basic-work';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -136,6 +137,7 @@ export default withLambda(async (event) => {
             hashtags: post.hashtags as string | null,
             platform: post.platform,
         }, { withSuggestions: includeSuggestions, previous: cached });
+        if (includeSuggestions) await chargeHelper(db, post.organisationId!, post.assistantId, `quality-review-post-${post.id}`);
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },

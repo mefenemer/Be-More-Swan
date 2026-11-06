@@ -39,6 +39,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { displayCaption, stripCodeFences } from '../../src/utils/model-json';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { chargeHelper } from '../../src/utils/basic-work';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -279,6 +280,7 @@ export default withLambda(async (event) => {
                     caption, platform, limit, publishDate, userId, orgId,
                 });
                 if (fitted) { finalCaption = fitted; captionReworded = true; }
+                if (fitted) await chargeHelper(db, orgId, source.assistantId, `shorten-caption-${platform}`);
             }
         }
 

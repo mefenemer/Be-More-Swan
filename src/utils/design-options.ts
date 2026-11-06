@@ -4,6 +4,8 @@
 
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { contentAssets, organisations, visualBriefOptions, visualBriefs } from '../../db/schema';
+import { TASK_WEIGHTS } from '../config/task-weights';
+import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 import type { getDb } from '../../db/client';
 import { normaliseFlyerContent, paperSizeOf } from '../config/flyer-vocab';
 import { FLYER_SOURCE } from '../config/visual-brief-vocab';
@@ -161,8 +163,8 @@ function swapPicture(design: Design, target: string, ref: DesignPhotoRef, keepCr
 }
 
 /**
- * Take the background out of a picture: a free editing helper under the daily fair-use limit, like the other helpers
- * (src/config/task-weights.ts). The file it sends and the file it keeps are the design's own, by name only.
+ * Take the background out of a picture: 1 task (src/config/task-weights.ts), asked before the provider call and
+ * charged only once the cut-out is saved on the design, here so the editor and the chat card charge alike. The file it sends and the file it keeps are the design's own, by name only.
  */
 export async function removePictureBackground(db: Db, args: { orgId: number; userId: number | null; optionId: number; design?: unknown; target: string; side?: 'back' | null }) {
     if (!falConfigured()) return { ok: false as const, status: 503, error: 'Removing a background is not available just now.' };
@@ -177,6 +179,7 @@ export async function removePictureBackground(db: Db, args: { orgId: number; use
     if (!from) return { ok: false as const, status: 400, error: 'That picture is not on this design any more.' };
     const imageUrl = await resolveAssetDisplayUrl({ assetType: 'image', storageKey: from.storageKey, externalUrl: from.externalUrl });
     if (!imageUrl) return { ok: false as const, status: 400, error: 'That picture could not be read just now. Please try again.' };
+    if (!(await hasTaskCapacity(db, args.orgId, TASK_WEIGHTS.background_removal))) return { ok: false as const, status: 402, error: TASK_LIMIT_MESSAGE };
     let bytes: Buffer;
     try {
         const cut = await removeImageBackground({ imageUrl, usage: { workspaceId: args.orgId, userId: args.userId } });
@@ -194,6 +197,10 @@ export async function removePictureBackground(db: Db, args: { orgId: number; use
     if (!swapped) return { ok: false as const, status: 400, error: 'That picture is not on this design any more.' };
     const result = onBack ? withBack(opened.design, swapped.design) : swapped.design;
     await db.update(visualBriefOptions).set({ renderParams: { ...params(opened.option), design: result } }).where(eq(visualBriefOptions.id, opened.option.id));
+    // A failed lookup must not lose the charge: it is then just unattributed.
+    const brief = (await db.select({ assistantId: visualBriefs.aiAssistantId }).from(visualBriefs)
+        .where(eq(visualBriefs.id, opened.option.briefId)).limit(1).catch(() => []))[0];
+    await recordCompletedWork(db, args.orgId, 'background_removal', { ref: `design-option-${opened.option.id}`, assistantId: brief?.assistantId ?? null });
     return { ok: true as const, design: result, photoUrl: await photoUrlOf(result), pictureUrls: await pictureUrlsOf(result), addedId: swapped.newId };
 }
 

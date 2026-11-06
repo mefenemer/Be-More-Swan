@@ -157,7 +157,7 @@ function _mcApplyUnitLabels(d) {
     set('vid-insufficient-unit', 'tasks left this month');
     const info = document.getElementById('mc-credit-info');
     if (info) {
-        const t = 'Your monthly tasks cover all finished work. An AI image uses 1, an AI video 20 — uploads, stock and brand cards are free.';
+        const t = 'Your monthly tasks cover all finished work. A set of AI images uses 1, an AI video 20 — uploads, stock and brand cards are free.';
         info.title = t; info.setAttribute('aria-label', t);
     }
     const pill = document.getElementById('mc-credit-pill');

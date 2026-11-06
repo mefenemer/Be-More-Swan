@@ -436,7 +436,7 @@
       return `
         <button type="button" class="ds-btn" data-ds-crop>Crop</button>
         ${replace}
-        <button type="button" class="ds-btn" data-ds-cutout title="Free">Remove background</button>
+        <button type="button" class="ds-btn" data-ds-cutout title="Uses 1 task from your monthly allowance, only once the background is removed">Remove background (1 task)</button>
         <label class="ds-tool">Transparency <input type="range" ${isMain ? 'data-ds-photoop' : 'data-ds-picop'} min="0" max="100" value="${pct(target.opacity)}"></label>
         ${isMain ? '<button type="button" class="ds-btn" data-ds-unbg>Make a normal picture</button>' : '<button type="button" class="ds-btn" data-ds-bg>Set as background</button>'}
         ${isMain ? '' : orderTool()}${duplicateButton()}${isMain ? '' : ungroupButton(target)}
@@ -1029,7 +1029,7 @@
         showSaved('');
         showError(err.message || 'The background could not be removed. Please try again.');
         btn.disabled = false;
-        btn.textContent = 'Remove background';
+        btn.textContent = 'Remove background (1 task)';
       }
     }
     async function downloadFile(choice, select) {

@@ -16,6 +16,8 @@ import { atomicCapCheck } from './atomic-cap-check';
 import { effectiveLimit, type FeatureOverrides } from './plan-features';
 import { checkFairUse, type FairUseKind } from './fair-use';
 import { isUnifiedTaskMetering } from './task-metering-flag';
+import { basicWorkCharged } from '../config/task-weights';
+import { hasTaskCapacity, TASK_LIMIT_MESSAGE } from './work-metering';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -95,6 +97,9 @@ export async function meterInteraction(
         return { allowed: false, failed: true, limitMessage: 'We could not check your plan just now. Please try again.' };
     }
     if (!hasPlan) return { allowed: false, noPlan: true, limitMessage: NO_PLAN_MESSAGE };
+
+    // Once chat and helpers cost tasks (docs/basic-work-charging.md), an empty allowance stops them too.
+    if (basicWorkCharged() && !(await hasTaskCapacity(db, organisationId))) return { allowed: false, limitMessage: TASK_LIMIT_MESSAGE };
 
     const fair = await checkFairUse(db, organisationId, kind);
     if (!fair.allowed) return { allowed: false, fairUse: true, limitMessage: fair.message };

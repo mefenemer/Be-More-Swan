@@ -146,9 +146,9 @@ check('a round is settled in ONE statement that reads the old hold and only matc
     const fn = span(engine, 'export async function endRound', '\n}\n', 'endRound');
     assert.match(fn, /FOR UPDATE\) old/);
     assert.match(fn, /b\.status = 'generating'/);
-    assert.match(fn, /RETURNING b\.organisation_id, old\.held/, 'RETURNING the NEW hold would always be 0 and nothing would ever be settled');
+    assert.match(fn, /RETURNING b\.organisation_id, b\.ai_assistant_id, old\.held/, 'RETURNING the NEW hold would always be 0 and nothing would ever be settled');
     const run = span(engine, 'export async function runRound', '\n}\n', 'runRound');
-    assert.match(run, /\} finally \{\s*await endRound\(/, 'every exit from a round ends it');
+    assert.match(run, /\} finally \{\s*const ended = await endRound\(/, 'every exit from a round ends it');
 });
 
 check('every AI attempt is recorded where the platform-wide failure alert reads', () => {

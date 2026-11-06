@@ -81,7 +81,7 @@ export default withLambda(async (event) => {
         // never under 12 s (its budget is 10 s), which keeps room to store the picture afterwards.
         const timeoutMs = Math.min(18_000, Math.max(12_000, 23_000 - (Date.now() - startedAt)));
         assetId = await generateAndPersistImage(db, { orgId, userId, prompt, aspectRatio: '4:5', timeoutMs });
-        await settleHold(db, { orgId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId });
+        await settleHold(db, { orgId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId, assistantId: post.assistantId });
     } catch (err) {
         await settleHold(db, { orgId, amount: IMAGE_CREDIT_COST, success: false, mediaType: 'image', userId });
         if (err instanceof FalContentPolicyError) {

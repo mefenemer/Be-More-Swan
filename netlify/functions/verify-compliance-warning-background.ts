@@ -30,6 +30,7 @@ import {
     runWarningVerification,
 } from '../../src/utils/compliance-verification';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { chargeHelper } from '../../src/utils/basic-work';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -66,6 +67,7 @@ export default withLambda(async (event) => {
             caption: scheduledPosts.caption,
             platform: scheduledPosts.platform,
             assistantId: scheduledPosts.assistantId,
+            organisationId: scheduledPosts.organisationId,
             qualityReview: scheduledPosts.qualityReview,
         })
         .from(scheduledPosts)
@@ -122,5 +124,7 @@ export default withLambda(async (event) => {
         return json(200, { ok: true, skipped: 'caption_changed' });
     }
 
+    // The check came back with an answer: this is the helper being delivered, so a failed run costs nothing.
+    if (verification.status !== 'failed' && post.organisationId) await chargeHelper(db, post.organisationId, post.assistantId, `compliance-check-post-${post.id}`);
     return json(200, { ok: true, status: verification.status });
 });

@@ -10,10 +10,10 @@ AI media credits and X posting credits are retired.
 
   | Work | Tasks |
   |---|---|
-  | Social post, blog article, lead search, email issue, email campaign, outreach email, site audit / draft / words | 1 |
-  | AI image | 1 |
+  | Social post, blog article, lead search, email issue, email campaign, outreach email, site audit / draft / words, flyer words, AI voiceover, background removal, Mentor research / plan draft / weekly review | 1 |
+  | A set of AI images (up to 4 options) | 1 |
   | AI video, AI music | 20 (a shared track is 12) |
-  | X post with a link | 10 (X charges us about $0.20 per post) |
+  | X post with a link | 10 on top of the post's own 1 (X charges us about $0.20 per post) |
   | X text post | 0 (part of the post's own task) |
 
 - **Chat and editing helpers cost no tasks.** That covers chat turns, rewrite, overlay text,
@@ -25,6 +25,8 @@ AI media credits and X posting credits are retired.
 - **Bonus tasks** (`task_bonus`) never expire. They are spent only after the monthly allowance is
   used up. They come from the cutover conversion, admin grants, and late X-pack webhooks.
 - **The limit is a hard stop.** Work pauses and is never billed. Don't use the word "unlimited".
+
+Chat, helpers, free Brand Designer rounds and finished designs start costing tasks only once `BASIC_WORK_CHARGED_FROM` takes effect: see [basic-work-charging.md](./basic-work-charging.md). Until then the rules above hold.
 
 ## Code map
 

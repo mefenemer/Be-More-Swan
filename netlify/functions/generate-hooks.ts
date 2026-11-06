@@ -19,6 +19,8 @@ import { excerpt } from '../../src/utils/markdown-render';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJsonArray } from '../../src/utils/model-json';
+import { chargeHelper, helperCapacity } from '../../src/utils/basic-work';
+import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -40,7 +42,7 @@ export default withLambda(async (event: HandlerEvent) => {
     if (!Number.isFinite(id)) return { statusCode: 400, body: JSON.stringify({ error: 'blogPostId is required.' }) };
 
     const [post] = await db
-        .select({ id: blogPosts.id, title: blogPosts.title, bodyMarkdown: blogPosts.bodyMarkdown })
+        .select({ id: blogPosts.id, title: blogPosts.title, bodyMarkdown: blogPosts.bodyMarkdown, assistantId: blogPosts.assistantId })
         .from(blogPosts)
         .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, ctx.organisationId)))
         .limit(1);
@@ -49,6 +51,7 @@ export default withLambda(async (event: HandlerEvent) => {
     // An editing helper: free, but counted against the daily fair-use limit (src/utils/fair-use.ts).
     const fair = await checkFairUse(db, ctx.organisationId, 'helpers');
     if (!fair.allowed) return fairUseResponse(fair);
+    if (!(await helperCapacity(db, ctx.organisationId))) return { statusCode: 403, body: JSON.stringify({ error: TASK_LIMIT_MESSAGE, upgradeRequired: true }) };
 
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -87,6 +90,7 @@ export default withLambda(async (event: HandlerEvent) => {
             .set({ hookVariants, abState: 'testing', updatedAt: new Date() })
             .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, ctx.organisationId)));
 
+        await chargeHelper(db, ctx.organisationId, post.assistantId, `hooks-blog-${post.id}`);
         return { statusCode: 200, body: JSON.stringify({ hookVariants }) };
     } catch (error) {
         console.error('[generate-hooks] error:', error);

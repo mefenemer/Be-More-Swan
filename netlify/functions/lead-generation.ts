@@ -98,6 +98,7 @@ import { classifyEmailKind } from '../../src/config/lead-email-kind';
 import { voiceDirective } from '../../src/utils/voice-profile';
 import { loadAssistantRulesBlock } from '../../src/utils/assistant-rules-prompt';
 import { withLambda } from '@netlify/aws-lambda-compat';import { addWonCustomerToAudience } from '../../src/utils/won-customer-audience';
+import { chargeHelper } from '../../src/utils/basic-work';
 
 
 /** Chase reminder for an approved+contacted lead: 3 days out at 09:00, nudged off weekends. */
@@ -2007,6 +2008,7 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
             if (!preview) {
                 return json(422, { error: 'Your assistant wouldn’t write this one for this lead — usually because the conversation says they shouldn’t be contacted. Nothing was sent.' });
             }
+            await chargeHelper(db, orgId, assistant.id, `follow-up-preview-${thread.id}`);
             return json(200, {
                 ...preview,
                 position,
