@@ -177,7 +177,7 @@
     enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
     thumbs: {}, bookings: null, timetable: null,
     words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
-    importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false,
+    importForm: { url: null, own: false, pictures: null, error: null }, draftMedia: { images: null, videos: null }, previewImport: false,
     dataSig: null, noteShown: null, focusSection: null, focusEditor: false, setupStep: null, setupSkipped: false, adding: null, previewFull: false, focusSel: null, busy: false, trigger: null, noteAt: null, refocus: null, undo: null,
   };
 
@@ -238,15 +238,18 @@
     const nowDrafting = !!(state.data && state.data.site.drafting);
     if (state.wasDrafting && !nowDrafting && state.data && chatPane.session && chatPane.session.session && chatPane.assistantId === state.assistantId) {
       const imp = state.data.import;
-      chatPane.session.session.appendMessage({ role: 'assistant', content: state.data.site.draftNote
+      chatPane.session.session.appendMessage({ role: 'assistant', content: draftFailed()
         ? `The draft didn't finish: ${state.data.site.draftNote}`
+        : state.data.site.draftNote ? state.data.site.draftNote
         : imp && imp.status === 'ready' ? 'Your current site has been read — have a look at it on the Set up tab, then choose whether to use it as your draft.'
         : imp && imp.status === 'failed' ? (imp.message || 'The import didn\'t work.')
         // Where the preview is depends on the width: beside the chat, or behind "Preview my site".
         : `Your draft is ready — ${window.matchMedia('(min-width: 1024px)').matches ? 'it\'s in the preview on the left' : 'press "Preview my site" to see it'}. Tell me what to change, or use 🎯 Select to point at any part of it.` });
     }
     if (state.wasDrafting && !nowDrafting && state.data) {
-      document.dispatchEvent(new CustomEvent('site:drafted', { detail: { assistantId: state.assistantId, error: state.data.site.draftNote || null } }));
+      document.dispatchEvent(new CustomEvent('site:drafted', { detail: { assistantId: state.assistantId, error: draftFailed() ? state.data.site.draftNote : null, note: draftFailed() ? null : state.data.site.draftNote || null } }));
+      // Ready, but some media didn't arrive: said on the tab too, as the draft card may be folded away.
+      if (state.data.site.draftNote && !draftFailed()) { state.note = { text: state.data.site.draftNote, tone: 'warn' }; state.noteAt = null; }
     }
     state.wasDrafting = nowDrafting;
     const sig = state.loadError || JSON.stringify(state.data);
@@ -1767,21 +1770,66 @@
   // A new site: nothing written yet beyond the starter (never published, two sections at most).
   const isFresh = () => !state.data.site.publishedVersion && def().pages.reduce((n, p) => n + p.sections.length, 0) <= 2;
 
+  // A note on the draft usually means it failed; "your draft is ready, but…" doesn't (site-draft-media.ts).
+  function draftFailed() {
+    const site = state.data && state.data.site;
+    return !!(site && site.draftNote && site.draftNoteIsFailure !== false);
+  }
+
+  // ── Placeholder pictures and videos for a draft (site-draft-media.ts) ─────
+  // The chat's site_draft_request card asks the same two questions. Costs come from the server.
+  const taskWord = (n) => `${n} task${n === 1 ? '' : 's'}`;
+  function draftMediaValue(kind, where) {
+    const o = state.data.draftMedia;
+    const fresh = where === 'start' && !def().settings.template;
+    const fallback = kind === 'images' && fresh ? 'stock' : 'none';
+    const chosen = state.draftMedia[kind] || (o && o.answers && o.answers[kind]) || fallback;
+    return chosen === 'ai' && !(o && o[kind].aiAllowed) ? fallback : chosen;
+  }
+  function draftMediaFields(where) {
+    const o = state.data.draftMedia;
+    const template = !!def().settings.template;
+    const select = (kind, label, stock, none, ai) => {
+      const v = draftMediaValue(kind, where);
+      const opt = (value, text, off) => `<option value="${value}"${v === value ? ' selected' : ''}${off ? ' disabled' : ''}>${esc(text)}</option>`;
+      return `<label class="block text-xs font-bold text-gray-700">${esc(label)}
+        <select data-site-draft-${kind} class="${inputCls} mt-1 font-normal">${opt('stock', stock)}${o ? opt('ai', ai.text, !o[kind].aiAllowed) : ''}${opt('none', none)}</select></label>`;
+    };
+    const aiImages = !o ? {} : { text: o.images.aiAllowed ? `AI-made: ${taskWord(o.images.aiTasksEach)} each, up to ${taskWord(o.images.aiTasksEach * o.images.aiMax)}` : 'AI-made: not on your workspace' };
+    const aiVideos = !o ? {} : { text: o.videos.aiAllowed ? `AI-made: ${taskWord(o.videos.aiTasksEach * o.videos.aiMax)} for one clip` : 'AI-made: not on your plan' };
+    const why = o && [o.images.aiAllowed ? '' : o.images.aiWhyNot, o.videos.aiAllowed ? '' : o.videos.aiWhyNot].filter(Boolean).join(' ');
+    return `<div class="grid gap-3 sm:grid-cols-2 mt-3" data-site-draft-media>
+        ${select('images', 'Placeholder pictures', 'Stock photos (free)', template ? 'Keep the template\'s pictures' : 'No pictures', aiImages)}
+        ${select('videos', 'Placeholder videos', 'Stock videos (free)', 'No videos', aiVideos)}
+      </div>
+      <p class="text-xs text-gray-500 mt-1">Saved to your library and placed in your sections, ready to swap for your own.${why ? ` ${esc(why)}` : ''}</p>`;
+  }
+  /** What the chosen media adds to the 1 task, for the confirmation. Empty when it adds nothing. */
+  function draftMediaCostText(images, videos) {
+    const o = state.data.draftMedia;
+    if (!o) return '';
+    const bits = [];
+    if (images === 'ai') bits.push(`up to ${taskWord(o.images.aiTasksEach * o.images.aiMax)} for AI pictures`);
+    if (videos === 'ai') bits.push(`${taskWord(o.videos.aiTasksEach * o.videos.aiMax)} for an AI video`);
+    return bits.length ? `, plus ${bits.join(' and ')} (only what is made is charged)` : '';
+  }
+
   // The AI writing every page from the business's details. Up front on a new site (Pages); on a site
   // that has been worked on it is "Start again", folded away at the end of Details — it replaces the
   // whole draft, so it should never sit under every panel looking like a next step (owner, 2026-10-16).
   function draftCard(where) {
     const s = state.data.site;
     if (s.drafting && state.data.import && state.data.import.status === 'reading') return '';
-    if (s.drafting) return card('<p class="text-sm font-semibold text-emerald-800">Drafting your whole site <span class="sb-dots" aria-hidden="true"><i></i><i></i><i></i></span> — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
+    if (s.drafting) return card(`<p class="text-sm font-semibold text-emerald-800">${s.draftNote ? esc(s.draftNote) : 'Drafting your whole site'} <span class="sb-dots" aria-hidden="true"><i></i><i></i><i></i></span> — this takes a few minutes. You can leave this page; you'll be notified when it's ready.</p>`);
     const who = esc(state.assistantName || 'Your Website Assistant');
     const form = `
       <textarea data-site-draft-request rows="2" class="${inputCls} mt-3" placeholder="Anything to include? e.g. a page for each service, a friendly tone, mention free delivery"></textarea>
+      ${draftMediaFields(where)}
       ${s.draftNote ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(s.draftNote)}</p>` : ''}`;
     if (where === 'start') {
       return card(`
         ${def().settings.template ? `<p class="text-sm font-black text-gray-900">Let ${who} write the words</p>
-        <p class="text-xs text-gray-500 mt-1">It rewrites every section of your template for your business, from your details, products and set-up answers — the layout, pictures and design stay as they are. Anything it doesn't know stays in [square brackets] for you. Uses 1 task.</p>`
+        <p class="text-xs text-gray-500 mt-1">It rewrites every section of your template for your business, from your details, products and set-up answers — the layout and design stay as they are, and so do its pictures unless you choose others below. Anything it doesn't know stays in [square brackets] for you. Uses 1 task.</p>`
         : `<p class="text-sm font-black text-gray-900">Let ${who} write your site</p>
         <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you chose for your website. You then change anything you like. Uses 1 task.</p>`}
         ${form}
@@ -2868,16 +2916,22 @@
       return;
     }
     if (t('[data-site-draft]')) {
+      const form = hostOf(e);
+      const mediaImages = form.querySelector('[data-site-draft-images]');
+      const mediaVideos = form.querySelector('[data-site-draft-videos]');
+      const media = { images: mediaImages ? mediaImages.value : 'none', videos: mediaVideos ? mediaVideos.value : 'none' };
+      const costs = draftMediaCostText(media.images, media.videos);
+      const keepsPictures = media.images === 'none' && media.videos === 'none';
       const ok = typeof window.confirmModal === 'function'
         ? await window.confirmModal(def().settings.template
-            ? `Your Website Assistant rewrites the words in every section for your business. The layout, pictures and design stay. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task.`
-            : `Your Website Assistant writes every page again, replacing your current draft. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task.`,
+            ? `Your Website Assistant rewrites the words in every section for your business. The layout and design stay${keepsPictures ? ', and so do the pictures' : ''}. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task${costs}.`
+            : `Your Website Assistant writes every page again, replacing your current draft. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task${costs}.`,
           { title: def().settings.template ? 'Write the words?' : 'Draft your whole site?', confirmLabel: def().settings.template ? 'Write the words' : 'Draft my site', cancelLabel: 'Not now' })
         : true;
       if (!ok || state.busy) return;
       const release = markBusy();
       try {
-        state.data = await post({ action: 'draft', assistantId: state.assistantId, request: hostOf(e).querySelector('[data-site-draft-request]').value });
+        state.data = await post({ action: 'draft', assistantId: state.assistantId, request: form.querySelector('[data-site-draft-request]').value, media });
         state.note = null;
       } catch (err) {
         // Out of tasks (402): said straight away, with the way to more.
@@ -2901,6 +2955,12 @@
   }
   document.addEventListener('input', (e) => { if (e.target.closest && e.target.closest('[data-site-import-url]')) keepImportForm(hostOf(e)); });
   document.addEventListener('change', (e) => { if (e.target.closest && e.target.closest('[data-site-import-own], input[name="site-import-pictures"]')) keepImportForm(hostOf(e)); });
+  // Their picture and video choice, kept across re-renders (a poll redraws the tab).
+  document.addEventListener('change', (e) => {
+    if (!e.target.closest) return;
+    if (e.target.closest('[data-site-draft-images]')) state.draftMedia.images = e.target.value;
+    if (e.target.closest('[data-site-draft-videos]')) state.draftMedia.videos = e.target.value;
+  });
 
   // The words file: picked, or dropped on the box (bound once, like every handler here).
   document.addEventListener('change', (e) => {
@@ -2954,7 +3014,7 @@
       setEditorFull(false);
       Object.assign(state, { assistantId, assistantName: assistantName || null, landed: false, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
-        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false, wasDrafting: false, listings: null, listingEdit: null, listingError: null });
+        importForm: { url: null, own: false, pictures: null, error: null }, draftMedia: { images: null, videos: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false, wasDrafting: false, listings: null, listingEdit: null, listingError: null });
       load();
       // The Listings tab's badge (visitors' entries waiting) is visible from every tab.
       loadListings();

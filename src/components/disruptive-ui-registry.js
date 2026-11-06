@@ -2118,7 +2118,9 @@
   }
   register('site_changes', renderSiteChangesCard);
 
-  // { type: 'site_draft_request', request }
+  // { type: 'site_draft_request', request, images?, videos? } — images and videos: 'stock' | 'ai' | 'none',
+  // the placeholder media they chose. What AI costs and who may have it comes from the server
+  // (site:draftOptions → sites.ts draft_options), so a card reopened later still states the true price.
   function renderSiteDraftRequestCard(ui, esc) {
     const request = typeof ui.request === 'string' ? ui.request.replace(/\s+/g, ' ').trim().slice(0, 2000) : '';
     const el = document.createElement('div');
@@ -2127,6 +2129,13 @@
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Draft your whole site</p>
       ${request ? `<p class="text-xs text-gray-700 mt-2"><span class="font-bold">Your wishes:</span> ${esc(request)}</p>` : ''}
       <p class="text-xs text-gray-600 mt-2">Writes every page again, replacing your current draft. Nothing is live. Uses 1 task from your monthly allowance.</p>
+      <div class="grid gap-2 mt-3">
+        <label class="block text-xs font-bold text-gray-700">Placeholder pictures
+          <select data-sd-images class="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal bg-white"></select></label>
+        <label class="block text-xs font-bold text-gray-700">Placeholder videos
+          <select data-sd-videos class="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal bg-white"></select></label>
+      </div>
+      <p class="hidden mt-1 text-xs text-gray-500" data-sd-why></p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-sd-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Draft my whole site</button>
         <button type="button" data-sd-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2134,19 +2143,42 @@
       <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sd-status></p>`;
     const status = el.querySelector('[data-sd-status]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
-    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    const setBusy = (b) => el.querySelectorAll('button, select').forEach((x) => { x.disabled = b; });
+    const words = (n) => `${n} task${n === 1 ? '' : 's'}`;
+    const fillChoices = (o) => {
+      const fill = (select, kind, given, fallback, stock, none, aiText) => {
+        const allowed = !!(o && o[kind] && o[kind].aiAllowed);
+        const answer = o && o.answers && o.answers[kind];
+        const want = given || answer || fallback;
+        select.innerHTML = `<option value="stock">${stock}</option>${allowed ? `<option value="ai">${esc(aiText(o[kind]))}</option>` : ''}<option value="none">${none}</option>`;
+        select.value = want === 'ai' && !allowed ? fallback : want;
+      };
+      fill(el.querySelector('[data-sd-images]'), 'images', ui.images, 'stock', 'Stock photos (free)', 'No pictures', (x) => `AI-made: ${words(x.aiTasksEach)} each, up to ${words(x.aiTasksEach * x.aiMax)}`);
+      fill(el.querySelector('[data-sd-videos]'), 'videos', ui.videos, 'none', 'Stock videos (free)', 'No videos', (x) => `AI-made: ${words(x.aiTasksEach * x.aiMax)} for one clip`);
+      const why = o ? [o.images.aiAllowed ? '' : o.images.aiWhyNot, o.videos.aiAllowed ? '' : o.videos.aiWhyNot].filter(Boolean).join(' ') : '';
+      const whyEl = el.querySelector('[data-sd-why]');
+      whyEl.textContent = why;
+      whyEl.classList.toggle('hidden', !why);
+    };
+    fillChoices(null);
+    // The card is rendered before it is in the page, so ask once it has been added.
+    setTimeout(() => {
+      el.dispatchEvent(new CustomEvent('site:draftOptions', { bubbles: true, detail: { respond: (o) => { if (o) fillChoices(o); } } }));
+    }, 0);
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-sd-cancel]')) { setBusy(true); say('Not started.'); return; }
       if (!e.target.closest('[data-sd-go]')) return;
+      const media = { images: el.querySelector('[data-sd-images]').value, videos: el.querySelector('[data-sd-videos]').value };
       setBusy(true);
       say('Starting…');
       el.dispatchEvent(new CustomEvent('site:draft', {
         bubbles: true,
         detail: {
           request,
+          media,
           respond({ ok, error }) {
             if (!ok) { setBusy(false); say(error || 'Could not start the draft.', 'error'); return; }
-            say('Drafting your site — it appears on the Website tab in a minute or two, and you\'ll be notified.');
+            say('Drafting your site — it appears on the Website tab in a few minutes, and you\'ll be notified.');
             // Moving dots while it works (the preview says when it's done).
             if (!document.getElementById('cq-dots-style')) {
               const st = document.createElement('style');
@@ -2158,7 +2190,7 @@
             // The Website tab says when the draft has landed (site:drafted); stop the dots then.
             document.addEventListener('site:drafted', (ev) => {
               const ok = !(ev.detail && ev.detail.error);
-              say(ok ? 'Done — your new draft is in the preview.' : (ev.detail.error || 'The draft didn\'t finish.'), ok ? '' : 'error');
+              say(ok ? (ev.detail && ev.detail.note) || 'Done — your new draft is in the preview.' : (ev.detail.error || 'The draft didn\'t finish.'), ok ? '' : 'error');
             }, { once: true });
           },
         },

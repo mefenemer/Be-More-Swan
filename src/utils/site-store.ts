@@ -38,6 +38,10 @@ import { KEEP_VERSIONS, sameDefinition, siteOrigin, siteSlugProblem, slugFromHos
 import { assemblePlacement, buildPlacementPrompt, MAX_WORDS_CHARS, readPlan, tidyWords, wordsToBlocks, type WordsPlan, type WordsProposal } from './site-words';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 import { describeImportForChat, importView, loadImport } from './site-import-store';
+import {
+    DRAFT_NOTE_ADDING_MEDIA, DRAFT_NOTE_MEDIA_STOPPED, draftMediaPromptLine, mediaSlots, NO_DRAFT_MEDIA, placeMedia, wantsDraftMedia, type DraftMediaChoice, type MediaPlanBrief, type MediaSlot,
+} from './site-draft-media';
+import { draftMediaOptions } from './site-draft-media-options';
 
 type Db = ReturnType<typeof getDb>;
 export type SiteRow = typeof sites.$inferSelect;
@@ -48,7 +52,7 @@ export const DRAFT_TIMEOUT_MS = 10 * 60 * 1000;
  *  The SDK makes up to 3 tries, so 3 × this must stay inside DRAFT_TIMEOUT_MS (the claim's life). */
 export const SITE_WRITE_DEADLINE_MS = 180_000;
 /** Set-up keys (assistant-onboarding-schemas.js → website_assistant), read by the AI draft. */
-export const SITE_SETUP_KEYS = { goal: 'siteGoal', pages: 'pagesWanted', style: 'siteStyle', currentSite: 'currentWebsite' } as const;
+export const SITE_SETUP_KEYS = { goal: 'siteGoal', pages: 'pagesWanted', style: 'siteStyle', currentSite: 'currentWebsite', pictures: 'sitePictures', videos: 'siteVideos' } as const;
 
 // The page ceiling and the published read live in site-published.ts (light imports, for readers
 // that don't need the rest of this module); re-exported so existing callers are unchanged.
@@ -152,11 +156,42 @@ export async function endDraft(db: Db, siteId: number, note: string | null): Pro
     await db.update(sites).set({ draftingAt: null, draftNote: note, updatedAt: new Date() }).where(eq(sites.id, siteId));
 }
 
+/** Inside the worker's 15-minute ceiling, whatever the model took. */
+const WORKER_CEILING_MS = 13.5 * 60 * 1000;
+
+/**
+ * The media stage of a draft whose words are already saved: find or make it, then put it on the site as
+ * it is NOW, so changes made meanwhile stay. Always ends the draft; a failure here leaves the words.
+ */
+async function addMediaToDraft(db: Db, site: SiteRow, ctx: {
+    choice: DraftMediaChoice; slots: MediaSlot[]; brief: MediaPlanBrief; userId: number; maxPages: number; startedAt: number;
+}): Promise<void> {
+    try {
+        // Loaded here, in the background worker only: nothing else that reads a site needs it.
+        const { DRAFT_MEDIA_BUDGET_MS, liveDraftMediaDeps, sourceDraftMedia } = await import('./site-draft-media-run');
+        const deadlineAt = Math.min(Date.now() + DRAFT_MEDIA_BUDGET_MS, ctx.startedAt + WORKER_CEILING_MS);
+        const deps = liveDraftMediaDeps(db, { orgId: site.organisationId, userId: ctx.userId, assistantId: site.aiAssistantId, slots: ctx.slots, brief: ctx.brief, deadlineAt });
+        const { placements, note } = await sourceDraftMedia(ctx.choice, ctx.slots, deps);
+        const [now] = await db.select().from(sites).where(eq(sites.id, site.id)).limit(1);
+        if (!now?.draftingAt) return;
+        const placed = placeMedia(definitionOf(now, ctx.maxPages).definition, placements, ctx.maxPages);
+        const checked = await verifySiteAssets(db, site.organisationId, placed);
+        await db.update(sites).set({ draft: checked.definition, draftingAt: null, draftNote: note, updatedAt: new Date() })
+            .where(and(eq(sites.id, site.id), sql`${sites.draftingAt} IS NOT NULL`));
+    } catch (err) {
+        console.error('[site-store] draft media failed', { siteId: site.id, message: err instanceof Error ? err.message : String(err) });
+        await endDraft(db, site.id, DRAFT_NOTE_MEDIA_STOPPED).catch(() => {});
+    }
+}
+
 /**
  * The worker's job (draft-site-background.ts): write the whole site with the model, through the
- * gate, and save it as the new draft. One task, charged after the draft is saved. Never throws.
+ * gate, and save it as the new draft. One task, charged after the draft is saved. With placeholder
+ * media chosen, the words are saved first and the media follows, so media can never cost them the
+ * draft. Never throws.
  */
-export async function runSiteDraft(db: Db, siteId: number, request: string | null): Promise<void> {
+export async function runSiteDraft(db: Db, siteId: number, request: string | null, media: DraftMediaChoice = NO_DRAFT_MEDIA): Promise<void> {
+    const startedAt = Date.now();
     const [site] = await db.select().from(sites).where(eq(sites.id, siteId)).limit(1);
     if (!site) return;
     try {
@@ -178,6 +213,7 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
             productsBlock, rulesBlock, maxPages,
             goal: str(SITE_SETUP_KEYS.goal), pagesWanted: str(SITE_SETUP_KEYS.pages), style: str(SITE_SETUP_KEYS.style),
             request: request?.trim().slice(0, 2000) || null,
+            mediaWanted: wantsDraftMedia(media),
         };
         // Started from a template: write the words INTO its layout (site-template-fill.ts) — the
         // pages, sections, pictures and design stay as they are. Otherwise, a whole new site.
@@ -206,11 +242,24 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
             return;
         }
 
-        // The success latch: saved only if this draft still holds the claim.
-        const [saved] = await db.update(sites).set({ draft: drafted.definition, draftingAt: null, draftNote: null, updatedAt: new Date() })
+        // Where the chosen media can go. A template keeps its layout: only its sample pictures are swapped.
+        const slots = wantsDraftMedia(media) && assistant?.userId ? mediaSlots(drafted.definition, { onlyReplace: fromTemplate }) : [];
+
+        // The success latch: saved only if this draft still holds the claim. With media to come, the
+        // claim is renewed and kept, so the Website tab keeps showing that work is going on.
+        const [saved] = await db.update(sites).set(slots.length
+            ? { draft: drafted.definition, draftingAt: new Date(), draftNote: DRAFT_NOTE_ADDING_MEDIA, updatedAt: new Date() }
+            : { draft: drafted.definition, draftingAt: null, draftNote: null, updatedAt: new Date() })
             .where(and(eq(sites.id, site.id), sql`${sites.draftingAt} IS NOT NULL`)).returning({ id: sites.id });
         if (!saved) return;
         await recordCompletedWork(db, site.organisationId, 'site_draft', { ref: site.id, assistantId: site.aiAssistantId });
+
+        if (slots.length && assistant) {
+            await addMediaToDraft(db, site, {
+                choice: media, slots, maxPages, startedAt, userId: assistant.userId,
+                brief: { name: brief.business.name, industry: brief.business.industry, description: brief.business.description, request: brief.request },
+            });
+        }
 
         if (assistant) {
             await createNotification(db, 'site_draft_ready', {
@@ -402,6 +451,16 @@ async function currentWebsiteLine(db: Db, orgId: number, assistantId: number, sl
     return 'Their website before this one: not known — ask.';
 }
 
+/** What placeholder media a draft can have and costs, from the live weights, so the chat quotes the card's numbers. */
+async function draftMediaLine(db: Db, orgId: number, assistantId: number): Promise<string> {
+    try {
+        const [a] = await db.select({ ctx: aiAssistants.onboardingContext }).from(aiAssistants).where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1);
+        return draftMediaPromptLine(await draftMediaOptions(db, orgId, a?.ctx));
+    } catch {
+        return 'Placeholder pictures and videos for a whole-site draft: their cost could not be read this turn, so do not state one; the card shows it.';
+    }
+}
+
 export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: number): Promise<string> {
     const [site] = await db.select().from(sites).where(and(eq(sites.aiAssistantId, assistantId), eq(sites.organisationId, orgId))).limit(1);
     if (!site) return 'YOUR SITE RIGHT NOW: not started. The first time the Website tab opens it starts from their business details; or propose a site_draft_request to draft the whole site.';
@@ -417,6 +476,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
                 : `private draft — not published${site.slug ? ` (address chosen: ${siteOrigin(site.slug)})` : ''}`}${drafting ? '; an AI draft of the whole site is being written right now' : ''}.`,
         'Publishing, taking the site offline, choosing its address and connecting a domain they own (like yourbusiness.co.uk — they add one or two DNS settings where they bought it, and the card shows exactly what) are buttons on the Website tab only — you cannot do them from chat; point them to the Publish card there.',
         `Can they press Publish now: ${(() => { const b = publishBlocker(site, d); return b ? `NO — ${b}` : 'yes'; })()}`,
+        await draftMediaLine(db, orgId, assistantId),
         `Pages: ${d.pages.length} (no plan limits pages). Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
         await currentWebsiteLine(db, orgId, assistantId, site.slug),

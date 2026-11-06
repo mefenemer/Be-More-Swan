@@ -58,7 +58,7 @@ check('both Kling models are priced, so the margin view never logs them at $0', 
 
 check('the synchronous endpoint hands frame drawing to the worker', () => {
     const fn = readFileSync(join(root, 'netlify/functions/generate-ai-video.ts'), 'utf8');
-    assert.ok(fn.includes('imageToVideoEnabled() && !startImageUrl'), 'no-picture jobs must be queued for the worker, not drawn here');
+    assert.ok(readFileSync(join(root, 'src/utils/ai-video-job.ts'), 'utf8').includes('imageToVideoEnabled() && !startImageUrl'), 'no-picture jobs must be queued for the worker, not drawn here');
     assert.ok(fn.includes('eq(contentAssets.organisationId, orgId)'), 'a picture to animate must belong to the workspace');
     const worker = readFileSync(join(root, 'netlify/functions/process-media-job-background.ts'), 'utf8');
     assert.ok(worker.includes('submitFramedVideo('), 'the worker must submit queued image-to-video jobs');

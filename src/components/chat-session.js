@@ -2147,9 +2147,14 @@
     function onSiteDraft(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      sitePost({ action: 'draft', assistantId, request: d.request || '' })
+      sitePost({ action: 'draft', assistantId, request: d.request || '', media: d.media })
         .then(() => { respond({ ok: true }); siteChanged(); })
         .catch((err) => respond({ ok: false, error: err.message }));
+    }
+    // What the draft card may offer, and the live cost of AI media (sites.ts draft_options).
+    function onSiteDraftOptions(e) {
+      const respond = (e.detail && e.detail.respond) || (() => {});
+      sitePost({ action: 'draft_options', assistantId }).then(respond).catch(() => respond(null));
     }
 
     // "Save guidelines" on a brand_guideline_proposal card — brand-kit.ts `save_guidelines`, the same
@@ -2526,6 +2531,7 @@
     container.addEventListener('siteaudit:handoff', onSiteAuditHandoff);
     container.addEventListener('site:apply', onSiteApply);
     container.addEventListener('site:draft', onSiteDraft);
+    container.addEventListener('site:draftOptions', onSiteDraftOptions);
     container.addEventListener('site:import', onSiteImport);
     container.addEventListener('site:importDecision', onSiteImportDecision);
     container.addEventListener('site:words', onSiteWords);
@@ -2647,6 +2653,7 @@
         container.removeEventListener('siteaudit:handoff', onSiteAuditHandoff);
         container.removeEventListener('site:apply', onSiteApply);
         container.removeEventListener('site:draft', onSiteDraft);
+        container.removeEventListener('site:draftOptions', onSiteDraftOptions);
         container.removeEventListener('site:import', onSiteImport);
         container.removeEventListener('site:importDecision', onSiteImportDecision);
         container.removeEventListener('site:words', onSiteWords);
