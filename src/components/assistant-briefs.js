@@ -524,20 +524,8 @@
     document.querySelector('[data-brief-full]')?.focus();
   }
 
-  // ── "Your brand style" in the profile's Brand Knowledge section (owner 2026-11-05: not above the briefs) ──
-  // Added from here because init() only ever runs for a Brand Designer, so no other role's profile gets it.
-  function mountProfileStyle() {
-    const section = document.getElementById('tab-strategy');
-    if (!section || !window.BrandStyleCard) return;
-    let el = document.getElementById('module-brand-style');
-    if (!el) {
-      el = document.createElement('div');
-      el.id = 'module-brand-style';
-      el.className = 'bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8';
-      section.prepend(el);
-    }
-    window.BrandStyleCard.mount(el, { assistantName: state.assistantName });
-  }
+  // "Your brand style" is in every assistant's "Your brand" section now (2026-11-06), mounted by
+  // assistants.js (_fetchAndRenderWorkspaceDefaults), so the Brand Designer no longer adds its own.
 
   // ── "It is being made" pop-up (owner 2026-11-05: half see-through, over the page, not a screen of its own) ──
   function makingNotice(b) {
@@ -756,7 +744,7 @@
    * What every round starts from: the brand kit and the picture guidelines, both changed in a pop-up here
    * (brand-style-dialog.js) or in chat, so nobody has to leave the Brand Designer to see or change them.
    */
-  // "Your brand style" moved to the profile's Brand Knowledge section: src/components/brand-style-card.js.
+  // "Your brand style" is in the profile's "Your brand" section: src/components/brand-style-card.js.
 
   function emptyState() {
     return `
@@ -1441,7 +1429,6 @@
       state.own = { briefId: null, library: null, error: null, selected: new Set(), busy: false, status: '' };
       // Eager: the count drives the tab badge, visible from every tab.
       load();
-      mountProfileStyle();
     },
     /** The Needs-you card's buttons: the Briefs tab on "To review", one brief opened and in view. */
     openReview(briefId) {

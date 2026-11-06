@@ -783,7 +783,7 @@ Everything you can change here, the user can also change there by hand.`;
 // checks each name here against assistant-detail.html and assistants.js.
 function businessMentorSurfaces(): string {
     return `WHERE THINGS LIVE — pages inside this platform, never outside tools:
-- "Business Information" — the business description, who the customers are, tone of voice, Brand Knowledge documents and links, and the "Products & Services" tab.
+- "Business Information" — the business description, who the customers are, tone of voice, the "Products & Services" tab, and "Brand Assets" (brand style, picture guidelines, files and links). Brand Assets is also on every assistant's settings as "Your brand" — the same thing, so a change in either place is the change in both.
 - Each assistant's own page — its settings, set-up answers, goals ("Results" tab) and rules. Only mention assistants listed as active below.
 - "My Account" — its "Billing & Subscription" tab (the plan, payments, resubscribing and changing plan), tasks used, notifications and "Your data". Always say "My Account ▸ Billing & Subscription", never "the Billing page".
 - "Help & Support" — Help Centre articles, contacting support, and "Report an Issue".
@@ -840,7 +840,7 @@ function socialSurfaces(): string {
 - "My Content" tab — the pictures and videos the user has uploaded or approved, which posts can use.
 - "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, the "Autopilot" card (whether it is drafting on a schedule, with "Adjust schedule"; how many posts are created, scheduled and published; posts per platform; and audience size), and the goals themselves (set or change one here).
 - "Activity" tab — a log of what this assistant has done.
-- "Assistant Settings" button (top of the page) — this assistant's settings, as cards: "What I do" (the job it was hired for), "When and how I post" (how posts are triggered, where content comes from, and the posting schedule), "What I post about" (objective, audience, voice and content pillars), "Connections" (the social accounts it posts to — reconnect an account here), "Do’s and don’ts" (its rules), "Safety and legal" (AI disclosure and brand safety) and "Notifications".
+- "Assistant Settings" button (top of the page) — this assistant's settings, as cards: "What I do" (the job it was hired for), "When and how I post" (how posts are triggered, where content comes from, and the posting schedule), "What I post about" (objective, audience, voice and content pillars), "Your brand" (the brand style, picture guidelines, files and links — shared by every assistant and the same as Business Information ▸ Brand Assets, so a change there or here changes both), "Connections" (the social accounts it posts to — reconnect an account here), "Do’s and don’ts" (its rules), "Safety and legal" (AI disclosure and brand safety) and "Notifications".
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
@@ -859,9 +859,9 @@ UPCOMING DRAFTS AFTER A CHANGE — you draft weeks ahead, so a change to your co
 // Same purpose as socialSurfaces(), from the same sources: the blog_writer / newsletter_editor
 // entries in src/components/assistant-dashboard-registry.js (reviewQueue labels 'Blogs' / 'Emails',
 // emailCampaignsTab, inspoTab, myContentTab, hasCreativeBrief:false → the Profile card is retitled
-// "Brand Knowledge") and the column buttons in assistant-detail.html. Pinned by
+// "How I write"; "Your brand" is on every role since 2026-11-06) and the column buttons in assistant-detail.html. Pinned by
 // tests/content-prompt-surfaces.test.ts.
-const PROFILE_CARDS_NON_SOCIAL = `"What I do" (the job it was hired for), "When and how I work" (how and how often it drafts), "Brand Knowledge" (business information and brand context), "Connections", "Do’s and don’ts" (its rules), "Safety and legal" and "Notifications"`;
+const PROFILE_CARDS_NON_SOCIAL = `"What I do" (the job it was hired for), "When and how I work" (how and how often it drafts), "How I write" (its voice and the kinds of piece it writes), "Your brand" (the brand style, picture guidelines, files and links — shared by every assistant and the same as Business Information ▸ Brand Assets, so a change there or here changes both), "Connections", "Do’s and don’ts" (its rules), "Safety and legal" and "Notifications"`;
 
 function blogSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are the tabs and buttons on YOUR page inside this platform, and the only names you may use for places in it:
@@ -3308,7 +3308,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     //    in the next answer. src/utils/team-activity.ts.
     // Both never throw: a failed read is a missing block, not a failed turn.
     const productsBlock = await loadProductsBlock(db, orgId, orgRow?.name ?? null);
-    // Business Information's documents and links — what the Brand Knowledge card says every
+    // Business Information's documents and links — what the "Your brand" card says every
     // assistant applies. The chat never read them before 2026-10-23, so a post or article drafted
     // here ignored the owner's brand guide. Same loader and caps as blueprint §11. Never throws.
     const knowledgeBlock = await loadBusinessKnowledgeBlock(db, orgId);

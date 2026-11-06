@@ -99,7 +99,7 @@ export function renderContentChecksForMentor(i: ContentCheckInputs | null): stri
     if (i.offer) lines.push('- NOTE: the Social set-up answer "Incentive or offer" is NOT the call to action. Never suggest changing it to make the offer the call to action, and never count a change to it as fixing that; the only place that sets it is Business Information ▸ Products & Services ▸ Calls to action (there is no card for it — point them there).');
     if (i.knowledge.length && (i.offer || i.hasApprovedPlan)) {
         lines.push('BRAND KNOWLEDGE (excerpts; the owner\'s documents every assistant drafts from). Compare them with the recorded offer'
-            + `${i.hasApprovedPlan ? ' and the approved plan' : ''}. ONLY if one clearly contradicts it — a different offer, price, length of trial or audience — say which document and what differs, and that they can fix it under Brand Knowledge. If they agree or you can't tell, say nothing about them.`);
+            + `${i.hasApprovedPlan ? ' and the approved plan' : ''}. ONLY if one clearly contradicts it — a different offer, price, length of trial or audience — say which document and what differs, and that they can fix it in Business Information ▸ Brand Assets (also "Your brand" in any assistant\'s settings). If they agree or you can't tell, say nothing about them.`);
         if (i.offer) lines.push(`Recorded offer: ${i.offer}`);
         for (const k of i.knowledge) lines.push(`- "${k.name}": ${k.excerpt}`);
     }
