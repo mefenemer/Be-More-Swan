@@ -47,7 +47,7 @@ Only one answer costs anything: **An AI-made picture (1 task)**. A stock photo, 
 The editor shows your design on the left and the chat on the right.
 
 - **Click** any words, the picture or a shape to change it: the font, size, colour, a background behind the words and how see-through it is, or the picture's strength.
-- **Change the words** on the design itself: click them to select them, then click again and type. With nothing selected, **Change the words** lists every piece of text on the design.
+- **Type** on the design itself to change the words: click them to select them, then click again and type.
 - **Drag** it to move it, or drag its corner to make it bigger or smaller. Pink guide lines show when it lines up with the page or something else on it. Hold Alt while dragging to turn them off.
 - **+ Add picture** adds one of your own, from your library, from stock, or made by AI (which uses a task). Click a picture to **Crop** it, drag it inside its frame and zoom, or to **Replace** it. **Set as background** makes a picture fill the page behind everything else.
 - **+ Add shape** adds a rectangle, circle or line. **Layer order** moves the selected part in front of or behind the others, and **Duplicate** copies it.

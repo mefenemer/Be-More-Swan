@@ -77,8 +77,6 @@
       .ds-group-box .ds-handle { pointer-events: auto; right: -8px; bottom: -8px; cursor: nwse-resize; }
       .ds-marquee { position: absolute; border: 1px solid #ff007f; background: rgba(255,0,127,.12); pointer-events: none; z-index: 6; }
       .ds-page .ds-sel-member { outline: 1px dashed #ff007f; outline-offset: 1px; }
-      .ds-word-list { flex: 1 1 100%; display: flex; align-items: center; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
-      .ds-word-list .ds-btn { flex-shrink: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
       .ds-btn { min-height: 32px; min-width: 32px; padding: 0 10px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; font-size: 13px; font-weight: 700; color: #1f2937; cursor: pointer; }
       .ds-btn[aria-pressed="true"] { background: #1f2937; color: #fff; border-color: #1f2937; }
       .ds-btn:disabled { opacity: .45; cursor: default; }
@@ -405,7 +403,6 @@
         el.innerHTML = `${l.kind === 'shape' ? `<label class="ds-tool">Colour <input type="color" data-ds-shape value="${esc(l.color)}"></label><label class="ds-tool">Transparency <input type="range" data-ds-shapeop min="0" max="100" value="${pct(l.opacity)}"></label>` : ''}${orderTool()}${duplicateButton()}${ungroupButton(l)}${ask}<button type="button" class="ds-btn" data-ds-delete>Delete</button>`;
         return;
       }
-      const words = d.layers.filter((x) => x.kind === 'text');
       el.innerHTML = `
         <label class="ds-tool">Page colour <input type="color" data-ds-page-color value="${esc(d.pageColor)}"></label>
         <label class="ds-tool">Transparency <input type="range" data-ds-page-op min="0" max="100" value="${pct(d.pageOpacity == null ? 1 : d.pageOpacity)}"></label>
@@ -413,8 +410,7 @@
         ${canPick() ? '<button type="button" class="ds-btn" data-ds-add-picture>+ Add picture</button>' : ''}
         <label class="ds-tool"><span class="sr-only">Add a shape</span><select data-ds-add-shape aria-label="Add a shape"><option value="">+ Add shape</option><option value="rectangle">Rectangle</option><option value="circle">Circle</option><option value="line">Line</option></select></label>
         <label class="ds-tool"><span class="sr-only">Resize a copy</span><select data-ds-resize aria-label="Resize a copy"><option value="">Resize a copy</option>${d.kind === 'flyer' ? '<option value="A4">A4 print</option><option value="A5">A5 print</option><option value="A6">A6 print</option><option value="DL">DL print</option>' : ''}<option value="1:1">Square post</option><option value="4:5">Portrait post</option><option value="9:16">Story</option><option value="16:9">Landscape</option></select></label>
-        ${shelfButtons()}
-        ${words.length ? `<div class="ds-word-list"><span class="ds-tool">Change the words:</span>${words.map((x) => `<button type="button" class="ds-btn" data-ds-words="${esc(x.id)}">${esc(x.text.replace(/\s+/g, ' ').trim().slice(0, 40) || ROLE_LABEL[x.role] || 'Empty text box')}</button>`).join('')}</div>` : ''}`;
+        ${shelfButtons()}`;
     }
     /** What came off and can go back on, and a QR code or logo this design could have. */
     function shelfButtons() {
@@ -786,8 +782,6 @@
       if (t('[data-ds-replace]')) { const target = st.selected; pickPicture((asset) => pictureFromLibrary({ replacePicture: { assetId: asset.id, target } }), 'Replace this picture'); return; }
       const back = t('[data-ds-putback]');
       if (back) { putBack(back.dataset.dsPutback); return; }
-      const wordsBtn = t('[data-ds-words]');
-      if (wordsBtn) { startEditing(wordsBtn.dataset.dsWords, 'all'); return; }
       if (t('[data-ds-add]')) {
         change(() => {
           const id = `t${Date.now().toString(36)}`;

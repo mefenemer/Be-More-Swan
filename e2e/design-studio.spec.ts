@@ -176,10 +176,14 @@ test.describe('wide screen', () => {
         await expect(editing).toHaveCount(1);
         await page.keyboard.press('Escape');
 
-        // With nothing selected, every piece of text is listed, the contact details too, ready to type over.
+        // The contact details open the same way as any other words, and there is no separate list of them.
         await stage.click({ position: { x: 3, y: 3 } });
-        await page.locator('[data-ds-words="contact"]').click();
+        await expect(page.locator('[data-ds-words]')).toHaveCount(0);
+        await expect(page.locator('[data-ds-tools]')).not.toContainText('Change the words');
+        await layer(page, 'contact').click();
+        await layer(page, 'contact').click();
         await expect(editing).toBeFocused();
+        await page.keyboard.press('ControlOrMeta+a');
         await page.keyboard.type('01632 960000');
         await page.keyboard.press('Escape');
         await expect(layer(page, 'contact')).toContainText('01632 960000');
