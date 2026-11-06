@@ -122,7 +122,6 @@ import { LOSS_REASONS } from '../../src/config/revenue-events';
 import { parseScheduleInstruction } from '../../src/utils/parse-schedule-instruction';
 import { attachmentLine, buildAttachmentsBlock, readAttachments, saveAttachments, type AcceptedAttachment } from '../../src/utils/chat-attachments';
 import { enforcePromptModeration } from '../../src/utils/moderation';
-import { chargeChatMessage } from '../../src/utils/basic-work';
 import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 import { asksForACall, callbackOfferElement } from '../../src/utils/callback-request';
@@ -4288,9 +4287,6 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         await db.update(chatSessions).set({ updatedAt: new Date() }).where(eq(chatSessions.id, session.id));
 
         await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords);
-
-        // Off until the switch (docs/basic-work-charging.md). Help-only Mentor replies with no plan stay free. Never throws.
-        if (!mentorNoPlan) await chargeChatMessage(db, orgId, session.aiAssistantId);
 
         // A Team note's answer goes back under the note (team-messages.ts postTeamChatReply), pointing at
         // this chat message, whose card the Team feed shows in place. Never throws.
