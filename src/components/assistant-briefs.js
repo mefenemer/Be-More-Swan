@@ -518,7 +518,8 @@
   }
 
   // ── Full screen (owner 2026-11-06: "like the Website assistant") ──────────────────────
-  // The briefs and the docked chat over the whole page; the editor keeps its own Full screen inside it.
+  // The briefs and the docked chat over the whole page. The editor's Full screen shows and leaves this one too
+  // (pageIsFull, leavePageFull), or it offers full screen to someone already in it.
   function setFull(on) {
     state.full = !!on;
     const host = document.getElementById('briefs-host');
@@ -853,6 +854,8 @@
       onOptionsChanged: () => load(),
       onRefer: (ref) => chatRefer(ref),
       onClose: () => leaveStudio(b.id),
+      pageIsFull: () => state.full,
+      leavePageFull: () => setFull(false),
       onApprove: async (optionId) => {
         await post({ action: 'decide', optionId, decision: 'approve' });
         state.studio = null;

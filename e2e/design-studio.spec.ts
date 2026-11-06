@@ -747,6 +747,49 @@ test.describe('wide screen', () => {
         expect(pageErrors).toEqual([]);
     });
 
+    test('opened from the Briefs tab in full screen, the editor says so, the chat ✕ changes nothing, and Exit really leaves', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-tab="todo"]').click();
+        await page.locator('[data-brief-full]').click();
+        await page.locator('[data-brief-open-studio="77"]').click();
+        await expect(layer(page, 'headline')).toBeVisible();
+        const button = page.locator('button[data-ds-full]');
+        const covering = page.locator('[data-briefs-full]');
+        await expect(covering).toHaveCount(1);
+        await expect(button).toHaveText('Exit full screen');
+        await expect(button).toHaveAttribute('aria-pressed', 'true');
+        await page.locator('[data-chatpane-close]').click();
+        await expect(page.locator('.chatpane-dock.is-on')).toHaveCount(0);
+        await expect(button).toHaveText('Exit full screen');
+        await button.click();
+        await expect(covering).toHaveCount(0);
+        await expect(page.locator('.chatpane-dock[data-ds-full]')).toHaveCount(0);
+        await expect(button).toHaveText('Full screen');
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('leaving the editor stays in the full screen the Briefs tab was in, and Esc in the editor leaves it', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-tab="todo"]').click();
+        await page.locator('[data-brief-full]').click();
+        await page.locator('[data-brief-open-studio="77"]').click();
+        await expect(layer(page, 'headline')).toBeVisible();
+        await page.locator('[data-ds-back]').click();
+        await expect(page.locator('[data-design-studio]')).toHaveCount(0);
+        await expect(page.locator('[data-briefs-full]')).toHaveCount(1);
+        await expect(page.locator('[data-brief-full]')).toHaveAttribute('aria-pressed', 'true');
+        await page.locator('[data-brief-open-studio="77"]').click();
+        await expect(layer(page, 'headline')).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(page.locator('[data-briefs-full]')).toHaveCount(0);
+        await expect(page.locator('button[data-ds-full]')).toHaveText('Full screen');
+        expect(pageErrors).toEqual([]);
+    });
+
     test('full screen covers the page, and Esc leaves it', async ({ page, api, pageErrors }) => {
         stubBriefs(api);
         await openStudio(page);

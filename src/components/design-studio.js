@@ -852,7 +852,7 @@
       if (t('[data-ds-redo]')) { restore(st.redo, st.undo); return; }
       if (t('[data-ds-pick]')) { st.picking = !st.picking; st.selected = null; paint(); return; }
       // The button, not just the attribute: in full screen the layout around this editor carries data-ds-full too.
-      if (t('button[data-ds-full]')) { setFull(!st.full); return; }
+      if (t('button[data-ds-full]')) { toggleFull(!st.full); return; }
       if (t('[data-ds-ask]')) { refer(st.selected); return; }
       if (t('[data-ds-bold]')) { const l = selectedLayer(); if (l) change(() => { l.bold = !l.bold; }); return; }
       if (t('[data-ds-italic]')) { const l = selectedLayer(); if (l) change(() => { l.italic = !l.italic; }); return; }
@@ -1198,6 +1198,14 @@
       if (b) { b.setAttribute('aria-pressed', String(st.full)); b.textContent = st.full ? 'Exit full screen' : 'Full screen'; }
       paint();
     }
+    /**
+     * The person pressing Full screen or Esc. The page around the editor has a full screen of its own, and one is all
+     * they can see, so leaving here leaves that too. Leaving the editor (setFull alone) puts them back where they were.
+     */
+    function toggleFull(on) {
+      if (!on && o.pageIsFull?.()) o.leavePageFull?.();
+      setFull(on);
+    }
     async function openOption(optionId) {
       if (st.saveTimer || st.design) await saveNow(true).catch(() => {});
       st.loading = true;
@@ -1255,7 +1263,7 @@
         if (typing) return;
         if (st.picking) { st.picking = false; paint(); return; }
         if (st.cropping) { st.cropping = false; paint(); return; }
-        if (st.full) { setFull(false); return; }
+        if (st.full) { toggleFull(false); return; }
         if (st.selected || st.multi.length) { st.selected = null; st.multi = []; paint(); }
         return;
       }
@@ -1312,6 +1320,8 @@
     }) : null;
     if (ro) ro.observe(q('[data-ds-wrap]'));
 
+    // Opened from a page already in full screen: the button says so, rather than offering what is already on.
+    if (o.pageIsFull?.()) setFull(true);
     openOption(o.optionId);
     loadTemplates();
 
