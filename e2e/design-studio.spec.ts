@@ -76,8 +76,8 @@ test.beforeEach(async ({ page }) => {
 async function openStudio(page: Page) {
     await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
     await page.goto('/e2e-studio.html');
-    // The tab opens on "Not started" (owner 2026-11-05); a brief with options waiting is under "To review".
-    await page.locator('[data-brief-tab="review"]').click();
+    // Everything waiting on the user is under "To do" (owner 2026-11-06).
+    await page.locator('[data-brief-tab="todo"]').click();
     await page.locator('[data-brief-open-studio="77"]').click();
     await expect(page.locator('[data-design-studio]')).toBeVisible();
     await expect(layer(page, 'headline')).toBeVisible();
@@ -130,53 +130,209 @@ test.describe('wide screen', () => {
         expect(pageErrors).toEqual([]);
     });
 
-    test('any words: changed in the Words box, from the list, or by double-clicking them, and the design stays still', async ({ page, api, pageErrors }) => {
-        // Owner 2026-11-06: "no UI option to change the words". The column is narrow enough here for the tools to wrap.
+    test('words are changed on the design itself: click to select, click again to type, and the design stays still', async ({ page, api, pageErrors }) => {
+        // Owner 2026-11-06: "I would like to edit the words in the selected text box directly".
         const store = stubBriefs(api);
         await page.setViewportSize({ width: 1000, height: 950 });
         await openStudio(page);
         const stage = page.locator('[data-ds-page]');
+        const editing = page.locator('[data-ds-page] [contenteditable]');
         await expect.poll(async () => (await stage.boundingBox())?.width ?? 0).toBeGreaterThan(100);
         const before = (await stage.boundingBox())!;
         await layer(page, 'headline').click();
-        await expect(page.locator('[data-ds-text]')).toHaveValue('Launch party');
+        await expect(page.locator('[data-ds-bold]')).toBeVisible();
+        await expect(editing).toHaveCount(0);
         const after = (await stage.boundingBox())!;
         expect(after.y, 'selecting words must not push the design down').toBe(before.y);
         expect(after.width).toBe(before.width);
+        await expect(page.locator('[data-ds-text]'), 'no separate box for the words').toHaveCount(0);
 
-        await page.locator('[data-ds-text]').fill('Opening night');
+        // A second click, and the words are open where they are.
+        await layer(page, 'headline').click();
+        await expect(editing).toHaveCount(1);
+        await expect(editing).toBeFocused();
+        await page.keyboard.press('ControlOrMeta+a');
+        await page.keyboard.type('Opening night');
         await expect(layer(page, 'headline')).toContainText('Opening night');
+        await page.keyboard.press('Escape');
+        await expect(editing).toHaveCount(0);
         await expect.poll(() => headline(lastSave(store))?.text, { timeout: 10000 }).toBe('Opening night');
 
-        // Backspace in the box deletes letters, not the layer.
-        await page.locator('[data-ds-text]').press('End');
-        await page.locator('[data-ds-text]').press('Backspace');
-        await expect(layer(page, 'headline')).toContainText('Opening nigh');
-
-        // Clicking away finishes the box; one Undo takes back all that typing.
-        await page.locator('[data-ds-wrap]').click({ position: { x: 3, y: 3 } });
-        await stage.click({ position: { x: 3, y: 3 } });
-        await expect(page.locator('[data-ds-add]')).toBeVisible();
+        // One Undo takes back all that typing.
         await page.locator('[data-ds-undo]').click();
         await expect(layer(page, 'headline')).toContainText('Launch party');
 
-        // With nothing selected, every piece of text is listed, the contact details too.
+        // Dragging selected words moves them and does not open them.
+        const box = (await layer(page, 'headline').boundingBox())!;
+        await page.mouse.move(box.x + 30, box.y + 10);
+        await page.mouse.down();
+        await page.mouse.move(box.x + 30, box.y + 60, { steps: 4 });
+        await page.mouse.up();
+        await expect(editing).toHaveCount(0);
+
+        // Enter opens them too.
+        await stage.focus();
+        await page.keyboard.press('Enter');
+        await expect(editing).toHaveCount(1);
+        await page.keyboard.press('Escape');
+
+        // With nothing selected, every piece of text is listed, the contact details too, ready to type over.
+        await stage.click({ position: { x: 3, y: 3 } });
         await page.locator('[data-ds-words="contact"]').click();
-        await expect(page.locator('[data-ds-text]')).toHaveValue('01632 960418');
-        await expect(page.locator('[data-ds-text]')).toBeFocused();
-        await page.locator('[data-ds-text]').fill('01632 960000');
+        await expect(editing).toBeFocused();
+        await page.keyboard.type('01632 960000');
+        await page.keyboard.press('Escape');
         await expect(layer(page, 'contact')).toContainText('01632 960000');
 
-        // A double-click from nothing selected opens the words on the design for typing.
+        // A double-click from nothing selected opens them as well.
         await stage.click({ position: { x: 3, y: 3 } });
         await layer(page, 'headline').dblclick();
-        await expect(page.locator('[data-ds-page] [contenteditable]')).toHaveCount(1);
-        await page.keyboard.type(' tonight');
-        await page.locator('[data-ds-page] [contenteditable]').press('Escape');
-        await expect(layer(page, 'headline')).toContainText('Launch party tonight');
-        await expect.poll(() => headline(lastSave(store))?.text, { timeout: 10000 }).toBe('Launch party tonight');
-        await expect(page.locator('[data-ds-text]')).toHaveValue('Launch party tonight');
+        await expect(editing).toHaveCount(1);
+        await page.keyboard.press('Escape');
+
+        // + Add words goes straight to typing.
+        await stage.click({ position: { x: 3, y: 3 } });
+        await page.locator('[data-ds-add]').click();
+        await expect(editing).toBeFocused();
+        await page.keyboard.type('Free entry');
+        await page.keyboard.press('Escape');
+        await expect(page.locator('[data-ds-page]')).toContainText('Free entry');
         await page.screenshot({ path: 'test-results/design-studio-words.png' });
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a picture can be set as the page background, undone, and made a normal picture again', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        await openStudio(page);
+        await page.locator('[data-ds-add-picture]').click();
+        await expect(layer(page, 'p1')).toBeVisible();
+        await page.locator('[data-ds-bg]').click();
+        const bg = layer(page, 'photo');
+        await expect(bg).toBeVisible();
+        await expect(layer(page, 'p1')).toHaveCount(0);
+        const stage = (await page.locator('[data-ds-page]').boundingBox())!;
+        const b = (await bg.boundingBox())!;
+        expect(Math.round(b.width)).toBe(Math.round(stage.width));
+        expect(Math.round(b.height)).toBe(Math.round(stage.height));
+        // It goes behind the words.
+        const ids = () => page.locator('[data-ds-page] [data-ds-id]').evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.dsId));
+        expect((await ids())[0]).toBe('photo');
+        const savedPhoto = () => (lastSave(store) as unknown as { photo?: { id?: string; w?: number } | null } | undefined)?.photo;
+        await expect.poll(() => savedPhoto()?.id, { timeout: 10000 }).toBe('p1');
+        expect(savedPhoto()?.w).toBe(1);
+        await page.screenshot({ path: 'test-results/design-studio-background.png' });
+
+        await page.locator('[data-ds-undo]').click();
+        await expect(layer(page, 'p1')).toBeVisible();
+        await expect(layer(page, 'photo')).toHaveCount(0);
+        await page.locator('[data-ds-redo]').click();
+        await expect(layer(page, 'photo')).toBeVisible();
+
+        await layer(page, 'photo').click({ position: { x: 3, y: 3 } });
+        await page.locator('[data-ds-unbg]').click();
+        await expect(layer(page, 'p1')).toBeVisible();
+        await expect(layer(page, 'photo')).toHaveCount(0);
+        await expect(page.locator('[data-ds-order]')).toBeVisible();
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('several parts can be selected, grouped, moved and resized together, and ungrouped', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        await openStudio(page);
+        const editing = page.locator('[data-ds-page] [contenteditable]');
+        const groups = () => (lastSave(store)?.layers ?? []).map((l) => (l as { group?: string }).group);
+
+        // Shift-click selects both, and Group ties them together.
+        await layer(page, 'headline').click();
+        await layer(page, 'contact').click({ modifiers: ['Shift'] });
+        await expect(page.locator('[data-ds-tools]')).toContainText('2 parts selected');
+        await page.locator('[data-ds-group]').click();
+        await expect.poll(() => groups().filter(Boolean).length, { timeout: 10000 }).toBe(2);
+        expect(new Set(groups()).size).toBe(1);
+        await expect(page.locator('[data-ds-ungroup]')).toBeVisible();
+
+        // Away and back: one click selects the whole group.
+        await page.locator('[data-ds-page]').click({ position: { x: 3, y: 3 } });
+        await expect(page.locator('.ds-group-box')).toHaveCount(0);
+        await layer(page, 'contact').click();
+        await expect(page.locator('[data-ds-tools]')).toContainText('2 parts selected');
+        await page.screenshot({ path: 'test-results/design-studio-group.png' });
+
+        // Dragging moves both by the same amount.
+        const y = (id: string) => lastSave(store)?.layers.find((l) => l.id === id)?.y ?? 0;
+        const c = (await layer(page, 'contact').boundingBox())!;
+        await page.mouse.move(c.x + 5, c.y + 3);
+        await page.mouse.down();
+        await page.mouse.move(c.x + 5, c.y - 57, { steps: 4 });
+        await page.mouse.up();
+        await expect.poll(() => y('contact'), { timeout: 10000 }).toBeLessThan(0.89);
+        expect(y('contact') - 0.9).toBeCloseTo(y('headline') - 0.3, 3);
+        await expect(editing).toHaveCount(0);
+
+        // The corner resizes both, their words too.
+        const size = () => (lastSave(store)?.layers.find((l) => l.id === 'headline') as { fontSizePct?: number } | undefined)?.fontSizePct ?? 0;
+        const handle = (await page.locator('.ds-group-box .ds-handle').boundingBox())!;
+        await page.mouse.move(handle.x + 7, handle.y + 7);
+        await page.mouse.down();
+        await page.mouse.move(handle.x - 60, handle.y + 7, { steps: 4 });
+        await page.mouse.up();
+        await expect.poll(size, { timeout: 10000 }).toBeLessThan(0.06);
+
+        // A click on one part narrows to that part, and another click types in it.
+        await layer(page, 'headline').click();
+        await expect(page.locator('[data-ds-bold]')).toBeVisible();
+        await layer(page, 'headline').click();
+        await expect(editing).toHaveCount(1);
+        await page.keyboard.press('Escape');
+
+        // Ungroup from a part, and each is its own again.
+        await page.locator('[data-ds-ungroup]').click();
+        await expect.poll(() => groups().filter(Boolean).length, { timeout: 10000 }).toBe(0);
+
+        // Dragging across the bare page selects what it touches.
+        const stage = (await page.locator('[data-ds-page]').boundingBox())!;
+        await page.locator('[data-ds-page]').click({ position: { x: 3, y: 3 } });
+        await page.mouse.move(stage.x + 3, stage.y + 3);
+        await page.mouse.down();
+        await page.mouse.move(stage.x + stage.width - 3, stage.y + stage.height - 3, { steps: 4 });
+        await expect(page.locator('.ds-marquee')).toHaveCount(1);
+        await page.mouse.up();
+        await expect(page.locator('.ds-marquee')).toHaveCount(0);
+        await expect(page.locator('[data-ds-tools]')).toContainText('2 parts selected');
+
+        // Cmd/Ctrl+G groups them, and Delete takes both.
+        await page.keyboard.press('ControlOrMeta+g');
+        await expect(page.locator('[data-ds-ungroup]')).toBeVisible();
+        await page.locator('[data-ds-delete]').click();
+        await expect(page.locator('[data-ds-page] [data-ds-id]')).toHaveCount(0);
+        await page.locator('[data-ds-undo]').click();
+        await expect(page.locator('[data-ds-page] [data-ds-id]')).toHaveCount(2);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('Resize a copy makes a new option and opens it, leaving the original', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        const options = () => store.brief.options as Array<Record<string, unknown>>;
+        let base: ((route: unknown, body: unknown) => unknown) | null = null;
+        stubBriefs({ set: (_n: string, h: typeof base) => { base = h; } } as unknown as ApiStub);
+        const opened: number[] = [];
+        api.set('brand-briefs', (route, body) => {
+            const b = (body || {}) as Record<string, unknown>;
+            if (b.action === 'list') return { ...(base!(route, body) as object), briefs: [store.brief] };
+            if (b.action === 'resize_design') {
+                store.brief = { ...store.brief, options: [...options(), { ...options()[0], id: 78 }] };
+                return { ok: true, optionId: 78 };
+            }
+            if (b.action === 'open_design') { opened.push(b.optionId as number); return { ok: true, design: { ...design(), pageW: 1080, pageH: 1080, kind: 'image' }, photoUrl: null }; }
+            return base!(route, body);
+        });
+        await openStudio(page);
+        await page.locator('[data-ds-resize]').selectOption('1:1');
+        await expect.poll(() => opened.at(-1)).toBe(78);
+        const box = (await page.locator('[data-ds-page]').boundingBox())!;
+        expect(Math.abs(box.width - box.height)).toBeLessThan(2);
+        await expect(page.locator('[data-ds-thumb="77"]')).toBeVisible();
+        await expect(page.locator('[data-ds-thumb="78"]')).toHaveAttribute('aria-current', 'true');
         expect(pageErrors).toEqual([]);
     });
 
@@ -312,7 +468,7 @@ test.describe('wide screen', () => {
         const real = PAGE.replace(/<script>window\.MediaPicker = [^\n]*<\/script>/, '<script src="/src/components/media-picker.js"></script>');
         await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: real }));
         await page.goto('/e2e-studio.html');
-        await page.locator('[data-brief-tab="review"]').click();
+        await page.locator('[data-brief-tab="todo"]').click();
         await page.locator('[data-brief-open-studio="77"]').click();
         await expect(layer(page, 'headline')).toBeVisible();
         await page.locator('button[data-ds-full]').click();
@@ -390,6 +546,26 @@ test.describe('wide screen', () => {
         expect(store.decided[0]).toMatchObject({ action: 'decide', optionId: 77, decision: 'approve' });
         await expect(page.locator('[data-design-studio]')).toHaveCount(0);
         await expect(page.locator('[data-brief-tab="approved"]')).toHaveAttribute('aria-selected', 'true');
+        expect(pageErrors).toEqual([]);
+    });
+});
+
+test.describe('on a phone', () => {
+    test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+    test('tap to select, tap again to type; the page stays on screen and sideways scrolling stays away', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        await openStudio(page);
+        await layer(page, 'headline').tap();
+        await expect(page.locator('[data-ds-bold]')).toBeVisible();
+        await layer(page, 'headline').tap();
+        await expect(page.locator('[data-ds-page] [contenteditable]')).toHaveCount(1);
+        await page.keyboard.type('!');
+        await page.locator('[data-ds-page] [contenteditable]').press('Escape');
+        await expect(layer(page, 'headline')).toContainText('!');
+        const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        expect(overflow).toBeLessThanOrEqual(0);
+        await page.screenshot({ path: 'test-results/design-studio-phone.png' });
         expect(pageErrors).toEqual([]);
     });
 });
@@ -481,7 +657,7 @@ test.describe('the questions go straight to the editor', () => {
         stubBriefs(api);
         await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
         await page.goto('/e2e-studio.html');
-        await page.locator('[data-brief-tab="review"]').click();
+        await page.locator('[data-brief-tab="todo"]').click();
         await expect(page.locator('[data-brief-open-studio="77"]')).toBeVisible();
         await expect(page.locator('[data-brief-pick]')).toHaveCount(0);
         await expect(page.locator('[data-brief-select="77"]')).toHaveCount(0);
@@ -494,7 +670,7 @@ test.describe('the questions go straight to the editor', () => {
         const store = stubBriefs(api);
         await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
         await page.goto('/e2e-studio.html');
-        await page.locator('[data-brief-tab="review"]').click();
+        await page.locator('[data-brief-tab="todo"]').click();
         await page.locator('[data-brief-reject="77"]').click();
         await page.getByRole('button', { name: 'Not this one' }).click();
         expect(store.decided).toHaveLength(0);
@@ -509,7 +685,7 @@ test.describe('the questions go straight to the editor', () => {
         stubBriefs(api);
         await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
         await page.goto('/e2e-studio.html');
-        await page.locator('[data-brief-tab="review"]').click();
+        await page.locator('[data-brief-tab="todo"]').click();
         const edit = page.getByRole('button', { name: 'Edit brief', exact: true });
         await expect(edit).toBeVisible();
         await expect(page.getByRole('button', { name: 'Edit flyer' })).toHaveCount(0);
@@ -531,7 +707,7 @@ test.describe('the questions go straight to the editor', () => {
         });
         await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
         await page.goto('/e2e-studio.html');
-        await page.locator('[data-brief-tab="review"]').click();
+        await page.locator('[data-brief-tab="todo"]').click();
         const toggle = page.locator('[data-brief-toggle="12"]');
         await expect(toggle).toHaveAttribute('aria-expanded', 'true');
         await expect(page.locator('[data-brief-body="12"]')).toBeVisible();
@@ -540,7 +716,7 @@ test.describe('the questions go straight to the editor', () => {
         await expect(page.locator('[data-brief-body="12"]')).toBeHidden();
         await expect(page.locator('[data-brief-body="13"]')).toBeVisible();
         await page.reload();
-        await page.locator('[data-brief-tab="review"]').click();
+        await page.locator('[data-brief-tab="todo"]').click();
         await expect(page.locator('[data-brief-body="12"]')).toBeHidden();
         await page.getByRole('button', { name: 'Hide all' }).click();
         await expect(page.locator('[data-brief-body="13"]')).toBeHidden();

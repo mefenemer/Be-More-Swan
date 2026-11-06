@@ -27,7 +27,11 @@ export interface DesignPhotoRef {
  */
 export interface DesignCrop { zoom: number; x: number; y: number }
 
-export interface DesignPhoto { x: number; y: number; w: number; h: number; opacity: number; ref: DesignPhotoRef; crop?: DesignCrop }
+export interface DesignPhoto {
+    /** Which picture this is, so a picture can move between the page background and a layer and Undo can find it again. */
+    id?: string;
+    x: number; y: number; w: number; h: number; opacity: number; ref: DesignPhotoRef; crop?: DesignCrop;
+}
 
 export interface TextLayer {
     id: string; kind: 'text'; role: string; text: string;
@@ -35,13 +39,13 @@ export interface TextLayer {
     fontFamily: string | null; fontSizePct: number; bold: boolean; align: 'left' | 'center' | 'right';
     color: string; boxFill: string | null; boxOpacity: number;
     /** Missing on a design from before 2026-11-06: upright, not underlined, LINE_HEIGHT. */
-    italic?: boolean; underline?: boolean; lineHeight?: number;
+    italic?: boolean; underline?: boolean; lineHeight?: number; group?: string;
 }
-export interface ShapeLayer { id: string; kind: 'shape'; role: string; x: number; y: number; w: number; h: number; color: string; round: boolean; opacity: number }
+export interface ShapeLayer { id: string; kind: 'shape'; role: string; x: number; y: number; w: number; h: number; color: string; round: boolean; opacity: number; group?: string }
 /** A QR code or logo: `src` is set by the server when the design is made, and never taken from a browser. */
-export interface ImageLayer { id: string; kind: 'qr' | 'logo'; role: string; x: number; y: number; w: number; h: number; src: string }
+export interface ImageLayer { id: string; kind: 'qr' | 'logo'; role: string; x: number; y: number; w: number; h: number; src: string; group?: string }
 /** A picture added on top of the page. `ref` is set by the server from the workspace's own library, like the main picture's. */
-export interface PictureLayer { id: string; kind: 'picture'; role: string; x: number; y: number; w: number; h: number; opacity: number; ref: DesignPhotoRef; crop?: DesignCrop }
+export interface PictureLayer { id: string; kind: 'picture'; role: string; x: number; y: number; w: number; h: number; opacity: number; ref: DesignPhotoRef; crop?: DesignCrop; group?: string }
 export type DesignLayer = TextLayer | ShapeLayer | ImageLayer | PictureLayer;
 /** The layers that point at a file: only ever made by the server, so what was taken off is kept to put back. */
 export type HeldLayer = ImageLayer | PictureLayer;
@@ -122,6 +126,18 @@ function newShape(l: Record<string, unknown>, id: string): ShapeLayer {
 
 const pictureCount = (layers: DesignLayer[]) => layers.filter((l) => l.kind === 'picture').length;
 
+/** The main picture's name. One from before names existed is the design's first. */
+export const FIRST_PHOTO_ID = 'photo0';
+const photoId = (p: DesignPhoto) => p.id ?? FIRST_PHOTO_ID;
+/** A background as a layer: what it becomes when another picture takes its place. */
+export function photoAsPicture(p: DesignPhoto): PictureLayer {
+    return { id: photoId(p), kind: 'picture', role: 'picture', x: p.x, y: p.y, w: p.w, h: p.h, opacity: p.opacity, ref: p.ref, ...(p.crop ? { crop: p.crop } : {}) };
+}
+/** A picture as the page's background: the whole page, showing the whole picture again. */
+export function pictureAsPhoto(l: PictureLayer): DesignPhoto {
+    return { id: l.id, x: 0, y: 0, w: 1, h: 1, opacity: l.opacity, ref: l.ref };
+}
+
 /**
  * The page colour at its strength, on white paper, as a solid colour. Flat on purpose: a PDF prints on white anyway, and
  * a see-through PNG can turn black when a social platform flattens it. Same sum as design-studio.js, so screen = print.
@@ -140,7 +156,8 @@ export function pageFill(design: Pick<Design, 'pageColor' | 'pageOpacity'>): str
 export function normaliseDesign(raw: unknown, stored: Design): Design {
     const r = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
     const shelf = stored.removed?.layers ?? [];
-    const storedById = new Map<string, DesignLayer>([...shelf, ...stored.layers].map((l) => [l.id, l]));
+    const storedPhotos = [stored.photo, stored.removed?.photo].filter((p): p is DesignPhoto => !!p);
+    const storedById = new Map<string, DesignLayer>([...storedPhotos.map(photoAsPicture), ...shelf, ...stored.layers].map((l) => [l.id, l]));
     const photoSource = stored.photo ?? stored.removed?.photo ?? null;
     const seen = new Set<string>();
     const layers: DesignLayer[] = [];
@@ -154,6 +171,7 @@ export function normaliseDesign(raw: unknown, stored: Design): Design {
         // A duplicate names what it copies: its file can only be one the server already holds.
         const copied = !was && typeof l.copyOf === 'string' ? storedById.get(l.copyOf) : undefined;
         const held = was ?? copied;
+        const before = layers.length;
         if (l.kind === 'text') layers.push(textLayer(l, id, was?.kind === 'text' ? was : undefined));
         else if (l.kind === 'shape') {
             if (was?.kind === 'shape') layers.push({ ...was, x: num(l.x, -1, 2, was.x), y: num(l.y, -1, 2, was.y), w: num(l.w, 0.002, 2, was.w), h: num(l.h, 0.002, 2, was.h), color: normalizeHex(l.color) ?? was.color, opacity: num(l.opacity, 0, 1, was.opacity) });
@@ -171,24 +189,42 @@ export function normaliseDesign(raw: unknown, stored: Design): Design {
                 });
             }
         }
+        if (layers.length > before) {
+            const { group: _old, ...plain } = layers[before];
+            const group = cleanId(l.group, '');
+            layers[before] = (group ? { ...plain, group } : plain) as DesignLayer;
+        }
     }
-    const kept = new Set(layers.map((l) => l.id));
-    const taken = [...shelf, ...stored.layers.filter(isHeld)].filter((l, i, all) => !kept.has(l.id) && all.findIndex((x) => x.id === l.id) === i);
     const p = r.photo && typeof r.photo === 'object' ? r.photo as Record<string, unknown> : null;
     const photoCrop = p ? cleanCrop(p.crop) : undefined;
+    // A picture can become the background by name: only one this design already holds.
+    const named = p && typeof p.id === 'string' ? storedById.get(p.id) : undefined;
+    const backgroundFrom = named?.kind === 'picture' ? named : photoSource ? photoAsPicture(photoSource) : null;
+    const photo: DesignPhoto | null = backgroundFrom && p ? {
+        id: backgroundFrom.id, ref: backgroundFrom.ref,
+        x: num(p.x, -1, 2, backgroundFrom.x), y: num(p.y, -1, 2, backgroundFrom.y),
+        w: num(p.w, 0.02, 3, backgroundFrom.w), h: num(p.h, 0.02, 3, backgroundFrom.h),
+        opacity: num(p.opacity, 0, 1, backgroundFrom.opacity),
+        ...(photoCrop ? { crop: photoCrop } : {}),
+    } : null;
+    const kept = new Set(layers.map((l) => l.id));
+    if (photo?.id) kept.add(photo.id);
+    // What was the background and is no longer anything goes on the shelf: as "the removed background" when there is
+    // now none, or as a picture when another took its place.
+    let shelfPhoto: DesignPhoto | null = null;
+    const oldPhotos: PictureLayer[] = [];
+    for (const old of storedPhotos) {
+        if (kept.has(photoId(old))) continue;
+        if (!photo && !shelfPhoto) shelfPhoto = old; else oldPhotos.push(photoAsPicture(old));
+    }
+    const taken = [...shelf, ...stored.layers.filter(isHeld), ...oldPhotos].filter((l, i, all) => !kept.has(l.id) && all.findIndex((x) => x.id === l.id) === i);
     return {
         ...stored,
         pageColor: normalizeHex(r.pageColor) ?? stored.pageColor,
         pageOpacity: num(r.pageOpacity, 0, 1, stored.pageOpacity ?? 1),
-        photo: photoSource && p ? {
-            ref: photoSource.ref,
-            x: num(p.x, -1, 2, photoSource.x), y: num(p.y, -1, 2, photoSource.y),
-            w: num(p.w, 0.02, 3, photoSource.w), h: num(p.h, 0.02, 3, photoSource.h),
-            opacity: num(p.opacity, 0, 1, photoSource.opacity),
-            ...(photoCrop ? { crop: photoCrop } : {}),
-        } : null,
+        photo,
         layers,
-        removed: { layers: taken.slice(-DESIGN_LIMITS.shelf), photo: p ? null : photoSource },
+        removed: { layers: taken.slice(-DESIGN_LIMITS.shelf), photo: shelfPhoto },
     };
 }
 
@@ -215,6 +251,12 @@ export interface DesignEditCard {
     /** Take these back off the shelf: "qr", "logo", "photo", or a picture layer's id. */
     putBack?: string[];
     shapes?: DesignShapeAdd[];
+    /** Layers (ids or roles) to tie together, or whose group to break up. */
+    group?: string[]; ungroup?: string[];
+    /** A picture layer to become the page background; or the background to become an ordinary layer. */
+    setBackground?: string; detachBackground?: boolean;
+    /** A copy of the design at another size, as a new option: a paper size for a flyer, or a picture's shape. */
+    resizeCopy?: string;
     changes: DesignLayerChange[];
     add: Array<{ text: string; x?: number; y?: number; w?: number; color?: string; fontSizePct?: number; bold?: boolean; boxFill?: string | null; boxOpacity?: number }>;
 }
@@ -249,6 +291,15 @@ export function designEditFromUiElement(uiElement: unknown): DesignEditCard | nu
         shapes.push(out);
     }
     if (shapes.length) card.shapes = shapes;
+    const names = (v: unknown) => (Array.isArray(v) ? v : []).map((n) => cleanId(n, '')).filter(Boolean).slice(0, DESIGN_LIMITS.layers);
+    const group = names(ui.group);
+    if (group.length >= 2) card.group = group;
+    const ungroup = names(ui.ungroup);
+    if (ungroup.length) card.ungroup = ungroup;
+    const background = cleanId(ui.setBackground, '');
+    if (background) card.setBackground = background;
+    if (ui.detachBackground === true) card.detachBackground = true;
+    if (typeof ui.resizeCopy === 'string' && resizeTarget(ui.resizeCopy)) card.resizeCopy = ui.resizeCopy;
     for (const c of (Array.isArray(ui.changes) ? ui.changes : []).slice(0, DESIGN_LIMITS.layers)) {
         if (!c || typeof c !== 'object') continue;
         const o = c as Record<string, unknown>;
@@ -290,7 +341,7 @@ export function designEditFromUiElement(uiElement: unknown): DesignEditCard | nu
             ...(o.boxOpacity != null && Number.isFinite(Number(o.boxOpacity)) ? { boxOpacity: num(o.boxOpacity, 0, 1, 1) } : {}),
         });
     }
-    const any = card.pageColor || card.pageOpacity !== undefined || card.photoOpacity !== undefined || card.photoCrop !== undefined || card.putBack || card.shapes || card.font || card.changes.length || card.add.length;
+    const any = card.pageColor || card.pageOpacity !== undefined || card.photoOpacity !== undefined || card.photoCrop !== undefined || card.putBack || card.shapes || card.group || card.ungroup || card.setBackground || card.detachBackground || card.resizeCopy || card.font || card.changes.length || card.add.length;
     return any ? card : null;
 }
 
@@ -301,7 +352,7 @@ export function designEditFromUiElement(uiElement: unknown): DesignEditCard | nu
 export const CHAT_LOCKED_ROLES = ['contact', 'offer'] as const;
 
 /** The change applied. A layer named that is not on the design is left out; `applied` says how many landed. */
-export function applyDesignEdit(design: Design, card: Pick<DesignEditCard, 'pageColor' | 'pageOpacity' | 'photoOpacity' | 'photoCrop' | 'putBack' | 'shapes' | 'font' | 'changes' | 'add'>, opts: { fromChat?: boolean } = {}): { design: Design; applied: number } {
+export function applyDesignEdit(design: Design, card: Pick<DesignEditCard, 'pageColor' | 'pageOpacity' | 'photoOpacity' | 'photoCrop' | 'putBack' | 'shapes' | 'group' | 'ungroup' | 'setBackground' | 'detachBackground' | 'font' | 'changes' | 'add'>, opts: { fromChat?: boolean } = {}): { design: Design; applied: number } {
     let applied = 0;
     const next: Design = { ...design, layers: design.layers.map((l) => ({ ...l })) };
     const shelf: HeldLayer[] = [...(design.removed?.layers ?? [])];
@@ -360,6 +411,41 @@ export function applyDesignEdit(design: Design, card: Pick<DesignEditCard, 'page
         }
         if (order) moveLayer(next.layers, changed.id, order);
     }
+    const named = (names: string[]) => next.layers.filter((l) => names.includes(l.id) || names.includes(l.role));
+    if (card.group) {
+        const members = named(card.group);
+        if (members.length >= 2) {
+            const group = `g${next.layers.length}-${applied}`;
+            next.layers = next.layers.map((l) => (members.includes(l) ? { ...l, group } : l));
+            applied++;
+        }
+    }
+    if (card.ungroup) {
+        const groups = new Set(named(card.ungroup).map((l) => l.group).filter(Boolean));
+        if (groups.size) {
+            next.layers = next.layers.map((l) => {
+                if (!groups.has(l.group)) return l;
+                const { group: _group, ...plain } = l;
+                return plain as DesignLayer;
+            });
+            applied++;
+        }
+    }
+    if (card.setBackground) {
+        const at = next.layers.findIndex((l) => l.kind === 'picture' && (l.id === card.setBackground || l.role === card.setBackground));
+        const layer = at >= 0 ? next.layers[at] : null;
+        if (layer?.kind === 'picture') {
+            if (next.photo) shelf.push(photoAsPicture(next.photo));
+            next.photo = pictureAsPhoto(layer);
+            next.layers.splice(at, 1);
+            applied++;
+        }
+    }
+    if (card.detachBackground && next.photo && pictureCount(next.layers) < DESIGN_LIMITS.pictures) {
+        next.layers.unshift(photoAsPicture(next.photo));
+        next.photo = null;
+        applied++;
+    }
     for (const s of card.shapes ?? []) {
         if (next.layers.length >= DESIGN_LIMITS.layers) break;
         applied++;
@@ -375,6 +461,42 @@ export function applyDesignEdit(design: Design, card: Pick<DesignEditCard, 'page
     return { design: next, applied };
 }
 
+// ── A copy at another size ──────────────────────────────────────────────────────────────────────
+
+export const DESIGN_SIZES: Record<string, { label: string; kind: Design['kind']; pageW: number; pageH: number; paperSize: string | null }> = {
+    A4: { label: 'A4 print', kind: 'flyer', pageW: 210, pageH: 297, paperSize: 'A4' },
+    A5: { label: 'A5 print', kind: 'flyer', pageW: 148, pageH: 210, paperSize: 'A5' },
+    A6: { label: 'A6 print', kind: 'flyer', pageW: 105, pageH: 148, paperSize: 'A6' },
+    DL: { label: 'DL print', kind: 'flyer', pageW: 99, pageH: 210, paperSize: 'DL' },
+    '1:1': { label: 'Square post', kind: 'image', pageW: 1080, pageH: 1080, paperSize: null },
+    '4:5': { label: 'Portrait post', kind: 'image', pageW: 1080, pageH: 1350, paperSize: null },
+    '9:16': { label: 'Story', kind: 'image', pageW: 1080, pageH: 1920, paperSize: null },
+    '16:9': { label: 'Landscape', kind: 'image', pageW: 1920, pageH: 1080, paperSize: null },
+};
+export function resizeTarget(key: unknown) {
+    return typeof key === 'string' && Object.prototype.hasOwnProperty.call(DESIGN_SIZES, key) ? DESIGN_SIZES[key] : null;
+}
+
+/**
+ * The design on another page. Every position stays a share of the page. On a narrower page the words shrink with the
+ * width, so they wrap as they did and take no more of the height; on a wider page they stay the same share of the height
+ * and wrap less. Pictures and shapes keep their own shape, about their own middle, so a circle stays round.
+ */
+export function resizeDesign(design: Design, size: { kind: Design['kind']; pageW: number; pageH: number; paperSize: string | null }): Design {
+    const r = (size.pageW / size.pageH) / (design.pageW / design.pageH);
+    const fit = <T extends { x: number; y: number; w: number; h: number }>(l: T): T => {
+        const w = r > 1 ? l.w / r : l.w;
+        const h = r < 1 ? l.h * r : l.h;
+        return { ...l, x: l.x + (l.w - w) / 2, y: l.y + (l.h - h) / 2, w, h };
+    };
+    return {
+        ...design, kind: size.kind, pageW: size.pageW, pageH: size.pageH, paperSize: size.paperSize,
+        layers: design.layers.map((l) => (l.kind === 'text'
+            ? { ...l, fontSizePct: Math.max(DESIGN_LIMITS.minFontPct, Math.min(DESIGN_LIMITS.maxFontPct, l.fontSizePct * Math.min(1, r))) }
+            : fit(l))),
+    };
+}
+
 /** Move a layer in the stack: the end of the list is the front. */
 export function moveLayer(layers: DesignLayer[], id: string, order: DesignOrder): void {
     const at = layers.findIndex((l) => l.id === id);
@@ -388,7 +510,7 @@ export function moveLayer(layers: DesignLayer[], id: string, order: DesignOrder)
 export function designForChat(design: Design): string {
     const layers = design.layers.map((l) => (l.kind === 'text'
         ? `${l.role === 'text' ? l.id : l.role} "${l.text.replace(/\s+/g, ' ').slice(0, 60)}" (${l.color}${l.boxFill ? `, background ${l.boxFill} at ${Math.round(l.boxOpacity * 100)}%` : ''}${l.fontFamily ? `, ${l.fontFamily}` : ''})`
-        : `${l.role} (layer "${l.id}"${l.kind === 'shape' ? `, ${l.color}` : ''})`));
+        : `${l.role} (layer "${l.id}"${l.kind === 'shape' ? `, ${l.color}` : ''})`) + (l.group ? ` [group ${l.group}]` : ''));
     const held = design.removed ? [...design.removed.layers.map((l) => (l.kind === 'picture' ? l.id : l.role)), ...(design.removed.photo ? ['photo'] : [])] : [];
     const page = (design.pageOpacity ?? 1) < 1 ? ` at ${Math.round((design.pageOpacity ?? 1) * 100)}% strength` : '';
     return `page colour ${design.pageColor}${page}${design.photo ? `, picture at ${Math.round(design.photo.opacity * 100)}% strength` : ', no picture'}; layers, back to front: ${layers.join('; ') || 'none'}${held.length ? `; can be put back: ${held.join(', ')}` : ''}`;

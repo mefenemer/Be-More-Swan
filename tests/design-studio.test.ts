@@ -8,7 +8,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
-    applyDesignEdit, cropRect, designEditFromUiElement, designForChat, moveLayer, normaliseDesign, pageFill, type Design, type DesignLayer,
+    applyDesignEdit, cropRect, designEditFromUiElement, designForChat, moveLayer, normaliseDesign, pageFill, resizeDesign, resizeTarget, type Design, type DesignLayer,
 } from '../src/utils/design-doc';
 import { AI_PICTURE_ANSWER, startableSources, userChoseAiPicture } from '../src/utils/brief-from-chat';
 import { flyerDesign, imageSize, renderDesignPdfs, renderDesignPreview } from '../src/lib/design-render';
@@ -260,6 +260,104 @@ check('the chat can do the same: shapes, order, duplicate, crop, styles and put 
 check('a chat removal shelves a held layer, so it can come back', () => {
     const { design } = applyDesignEdit(withPicture(), { changes: [{ layer: 'qr', remove: true }], add: [] });
     assert.deepStrictEqual(design.removed?.layers.map((l) => l.id), ['qr']);
+});
+
+check('a held picture can become the background by name, never a file a browser names, and Undo brings the old one back', () => {
+    const base: Design = { ...withPicture(), photo: { id: 'photo0', x: 0, y: 0, w: 1, h: 0.4, opacity: 1, ref } };
+    const set = normaliseDesign({ photo: { id: 'p1', x: 0, y: 0, w: 1, h: 1, ref: { storageKey: 'org/2/secret.jpg' } }, layers: [] }, base);
+    assert.strictEqual(set.photo?.id, 'p1');
+    assert.strictEqual(set.photo?.ref.storageKey, 'org/1/p1.jpg');
+    assert.strictEqual(set.photo?.h, 1);
+    assert.ok(!set.layers.some((l) => l.id === 'p1'));
+    const shelf = set.removed?.layers.find((l) => l.id === 'photo0');
+    assert.ok(shelf && shelf.kind === 'picture' && shelf.ref.storageKey === ref.storageKey, 'the old background is held');
+    assert.ok(!set.removed?.layers.some((l) => l.id === 'p1'), 'what is in use is not on the shelf');
+    // Undo: the browser sends the design as it was.
+    const undone = normaliseDesign({ photo: { id: 'photo0', x: 0, y: 0, w: 1, h: 0.4 }, layers: [{ id: 'p1', kind: 'picture', x: 0.2, y: 0.2, w: 0.5, h: 0.3 }] }, set);
+    assert.strictEqual(undone.photo?.ref.storageKey, ref.storageKey);
+    const back = undone.layers.find((l) => l.id === 'p1');
+    assert.ok(back && back.kind === 'picture' && back.ref.storageKey === 'org/1/p1.jpg');
+    assert.ok(!undone.removed?.layers.some((l) => l.id === 'photo0' || l.id === 'p1'));
+    // An unknown name just leaves the background as it is.
+    const stranger = normaliseDesign({ photo: { id: 'nope' }, layers: [] }, base);
+    assert.strictEqual(stranger.photo?.ref.storageKey, ref.storageKey);
+    // The background as an ordinary layer, and it is not also shelved as removed.
+    const detached = normaliseDesign({ photo: null, layers: [{ id: 'photo0', kind: 'picture', x: 0, y: 0, w: 1, h: 0.4 }] }, base);
+    const d = detached.layers.find((l) => l.id === 'photo0');
+    assert.ok(d && d.kind === 'picture' && d.ref.storageKey === ref.storageKey);
+    assert.strictEqual(detached.photo, null);
+    assert.strictEqual(detached.removed?.photo, null);
+});
+
+check('groups are kept and cleaned on every kind of layer, and leaving a group clears it', () => {
+    const d = normaliseDesign({ layers: [
+        { id: 'headline', kind: 'text', group: 'g1' }, { id: 'p1', kind: 'picture', group: 'g1' }, { id: 'qr', kind: 'qr', group: 'g1' },
+        { id: 's', kind: 'shape', group: 'bad group!' },
+    ] }, withPicture());
+    assert.deepStrictEqual(d.layers.map((l) => l.group), ['g1', 'g1', 'g1', undefined]);
+    const left = normaliseDesign({ layers: [{ id: 'headline', kind: 'text' }, { id: 'p1', kind: 'picture' }] }, d);
+    assert.deepStrictEqual(left.layers.map((l) => l.group), [undefined, undefined]);
+});
+
+check('the chat can group, ungroup, set a background, detach it, and ask for a copy', () => {
+    const c = designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, group: ['headline', 'p1'], setBackground: 'bad id!', resizeCopy: 'nope' })!;
+    assert.deepStrictEqual(c.group, ['headline', 'p1']);
+    assert.strictEqual(c.setBackground, undefined);
+    assert.strictEqual(c.resizeCopy, undefined);
+    const grouped = applyDesignEdit(withPicture(), c, { fromChat: true }).design;
+    const ids = grouped.layers.filter((l) => l.group).map((l) => l.id).sort();
+    assert.deepStrictEqual(ids, ['headline', 'p1']);
+    const un = applyDesignEdit(grouped, designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, ungroup: ['p1'] })!).design;
+    assert.ok(!un.layers.some((l) => l.group));
+    const bg = applyDesignEdit(withPicture(), designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, setBackground: 'p1' })!).design;
+    assert.strictEqual(bg.photo?.ref.storageKey, 'org/1/p1.jpg');
+    assert.strictEqual(bg.photo?.w, 1);
+    assert.ok(bg.removed?.layers.some((l) => l.kind === 'picture' && l.ref.storageKey === ref.storageKey), 'the old background is held');
+    const off = applyDesignEdit(withPicture(), designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, detachBackground: true })!).design;
+    assert.strictEqual(off.photo, null);
+    assert.strictEqual(off.layers[0].kind, 'picture');
+    assert.strictEqual(designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, resizeCopy: '1:1' })?.resizeCopy, '1:1');
+    assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"resizeCopy"') && read('netlify/functions/chat-orchestrator.ts').includes('"setBackground"'));
+    assert.ok(read('src/components/disruptive-ui-registry.js').includes('ui.resizeCopy'));
+});
+
+check('a copy at another size: shapes stay their shape, words never take more of the page, positions stay shares of it', () => {
+    const base: Design = { ...stored(), layers: [
+        ...stored().layers,
+        { id: 'c', kind: 'shape', role: 'circle', x: 0.4, y: 0.4, w: 0.2, h: 0.2 * 148 / 210, color: '#000000', round: true, opacity: 1 },
+    ] };
+    const px = (d: Design, l: { w: number; h: number }) => (l.w * d.pageW) / (l.h * d.pageH);
+    for (const key of ['1:1', '16:9', '9:16', 'A4', 'DL']) {
+        const size = resizeTarget(key)!;
+        const d = resizeDesign(base, size);
+        const c = d.layers.find((l) => l.id === 'c');
+        assert.ok(c && c.kind === 'shape' && Math.abs(px(d, c) - 1) < 0.001, `${key}: a circle stays round`);
+        assert.ok(Math.abs(c.x + c.w / 2 - 0.5) < 0.001 && Math.abs(c.y + c.h / 2 - (0.4 + (0.2 * 148 / 210) / 2)) < 0.001, `${key}: about its own middle`);
+        const h = d.layers.find((l) => l.id === 'headline');
+        assert.ok(h && h.kind === 'text' && h.x === 0.1 && h.y === 0.45);
+        assert.strictEqual(d.pageW, size.pageW);
+        assert.strictEqual(d.kind, size.kind);
+        assert.strictEqual(d.photo?.w, 1, 'the background keeps its frame');
+    }
+    const wide = resizeDesign(base, resizeTarget('16:9')!).layers.find((l) => l.id === 'headline');
+    assert.ok(wide && wide.kind === 'text' && wide.fontSizePct === 0.05, 'a wider page: the same share of its height');
+    const thin = resizeDesign(base, resizeTarget('DL')!).layers.find((l) => l.id === 'headline');
+    assert.ok(thin && thin.kind === 'text' && thin.fontSizePct < 0.05, 'a narrower page: smaller');
+    assert.strictEqual(resizeTarget('constructor'), null);
+    assert.strictEqual(resizeTarget('A3'), null);
+});
+
+check('the route only copies with the rules: a picture cannot become a flyer, and the original is left alone', () => {
+    const opts = read('src/utils/design-options.ts');
+    assert.ok(opts.includes("if (size.kind === 'flyer' && !isFlyer)"));
+    assert.ok(opts.includes('db.insert(visualBriefOptions)'));
+    assert.ok(read('netlify/functions/brand-briefs.ts').includes("action === 'resize_design'"));
+    assert.ok(read('src/components/assistant-briefs.js').includes('onOptionsChanged'));
+    // A copy is not a text card: once approved it never reaches the branded-card editor.
+    assert.ok(opts.includes('{ kind: DESIGN_COPY, design, previewKey }'));
+    const briefs = read('src/utils/visual-briefs.ts');
+    assert.ok(briefs.indexOf('provider: DESIGN_PROVIDER') > 0 && briefs.indexOf('provider: DESIGN_PROVIDER') < briefs.indexOf('provider: BRAND_CARD_PROVIDER'));
+    assert.ok(read('my-content.js').includes("asset.provider === 'design'"));
 });
 
 check('imageSize reads a PNG and a JPEG from their own bytes', () => {

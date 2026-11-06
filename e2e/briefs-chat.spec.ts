@@ -50,8 +50,8 @@ async function openTab(page: Page) {
     await page.addInitScript(() => localStorage.setItem('bms-briefs-open-4', '[12]'));
     await page.route('**/e2e-briefs.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
     await page.goto('/e2e-briefs.html');
-    // The tab opens on "Not started" (owner 2026-11-05); a brief with options waiting is under "To review".
-    await page.locator('[data-brief-tab="review"]').click();
+    // Everything waiting on the user is under "To do" (owner 2026-11-06).
+    await page.locator('[data-brief-tab="todo"]').click();
     await expect(page.locator('[data-brief-card="12"]')).toBeVisible();
 }
 
@@ -119,7 +119,7 @@ test.describe('wide screen', () => {
         await expect(page.locator('[data-brief-chat="12"]')).toHaveCount(0);
         store.brief = { ...store.brief, sources: ['stock_video'] };
         await page.reload();
-        await page.locator('[data-brief-tab="review"]').click();
+        await page.locator('[data-brief-tab="todo"]').click();
         await page.locator('[data-brief-chat="12"]').click();
         await ask(page, 'Thoughts?');
         await expect(page.getByText('Noted.')).toBeVisible();
@@ -227,7 +227,7 @@ test.describe('Love Cat feedback (2026-11-05)', () => {
     test('a brief starts closed, and opens from its title', async ({ page, api, pageErrors }) => {
         stubBriefs(api);
         await open(page);
-        await page.locator('[data-brief-tab="review"]').click();
+        await page.locator('[data-brief-tab="todo"]').click();
         const toggle = page.locator('[data-brief-toggle="12"]');
         await expect(toggle).toHaveAttribute('aria-expanded', 'false');
         await expect(page.locator('[data-brief-body="12"]')).toBeHidden();
@@ -236,28 +236,27 @@ test.describe('Love Cat feedback (2026-11-05)', () => {
         expect(pageErrors).toEqual([]);
     });
 
-    test('tabs run left to right with counts, open on To review while something waits, and each brief is in one', async ({ page, api, pageErrors }) => {
+    test('tabs run left to right with counts, open on To do, and each brief is in one', async ({ page, api, pageErrors }) => {
         stubStages(api);
         await open(page);
         const tabs = page.getByRole('tab');
-        await expect(tabs).toHaveText([/Not started\s*1/, /Being made\s*1/, /To review\s*1/, /Approved\s*1/, /Archived\s*1/]);
-        // Owner 2026-11-06 (replacing "always Not started", 2026-11-05): it opened on an empty Not started under
-        // "Needs you: 4", so it now opens on To review whenever something waits there.
-        await expect(page.getByRole('tab', { name: /To review/ })).toHaveAttribute('aria-selected', 'true');
-        await expect(page.locator('[data-brief-card]')).toHaveCount(1);
-        await expect(page.locator('[data-brief-card="3"]')).toBeVisible();
-        await page.getByRole('tab', { name: /Not started/ }).click();
-        await expect(page.locator('[data-brief-card="1"]')).toBeVisible();
-        // A stage the user picked stays picked.
-        await expect(page.getByRole('tab', { name: /Not started/ })).toHaveAttribute('aria-selected', 'true');
-        await page.getByRole('tab', { name: /To review/ }).click();
-        await expect(page.locator('[data-brief-card="3"]')).toBeVisible();
+        // Owner 2026-11-06: "Not started" and "To review" became one "To do". Nothing gets lost: both kinds are in it.
+        await expect(tabs).toHaveText([/To do\s*2/, /Being made\s*1/, /Approved\s*1/, /Archived\s*1/]);
+        await expect(page.getByRole('tab', { name: /To do/ })).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('[data-brief-card]')).toHaveCount(2);
+        // The one with options to choose from comes first, and each says what it needs.
+        await expect(page.locator('[data-brief-card]').first()).toHaveAttribute('data-brief-card', '3');
+        await expect(page.locator('[data-brief-card="3"]')).toContainText('Needs you');
+        await expect(page.locator('[data-brief-card="1"]')).toContainText('Not started');
         await page.screenshot({ path: 'test-results/brief-tabs.png' });
+        await page.getByRole('tab', { name: /Being made/ }).click();
+        // A stage the user picked stays picked.
+        await expect(page.getByRole('tab', { name: /Being made/ })).toHaveAttribute('aria-selected', 'true');
         await page.getByRole('tab', { name: /Archived/ }).click();
         await expect(page.locator('[data-brief-card="5"]')).toBeVisible();
         await page.getByRole('tab', { name: /Archived/ }).press('Home');
         await expect(page.locator('[data-brief-card="1"]')).toBeVisible();
-        await expect(page.getByRole('tab', { name: /Not started/ })).toBeFocused();
+        await expect(page.getByRole('tab', { name: /To do/ })).toBeFocused();
         expect(pageErrors).toEqual([]);
     });
 

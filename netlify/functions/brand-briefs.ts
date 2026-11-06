@@ -35,7 +35,7 @@ import {
 } from '../../src/utils/visual-briefs';
 import { readBrandGuidelines } from '../../src/utils/brand-guidelines';
 import { normalizeBrandKit } from '../../src/utils/brand-kit';
-import { applyDesignCard, openDesign, saveDesign } from '../../src/utils/design-options';
+import { applyDesignCard, openDesign, saveDesign, copyDesignAtSize } from '../../src/utils/design-options';
 import { DESIGN_EDIT_TYPE, designEditFromUiElement } from '../../src/utils/design-doc';
 import { FlyerFitError } from '../../src/lib/flyer';
 import { triggerBriefRound } from '../../src/utils/trigger-brief-round';
@@ -274,13 +274,17 @@ export default withLambda(async (event) => {
     }
 
     // The studio: an option as an editable design (src/utils/design-options.ts).
-    if (action === 'open_design' || action === 'save_design' || action === 'apply_design_edit') {
+    if (action === 'open_design' || action === 'save_design' || action === 'apply_design_edit' || action === 'resize_design') {
         try {
             const optionId = Number(body.optionId);
             if (action !== 'apply_design_edit' && (!Number.isInteger(optionId) || optionId <= 0)) return json(400, { error: 'Option not found.' });
             if (action === 'open_design') {
                 const r = await openDesign(db, orgId, optionId);
                 return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls }) : json(r.status, { error: r.error });
+            }
+            if (action === 'resize_design') {
+                const r = await copyDesignAtSize(db, { orgId, optionId, design: body.design, size: String(body.size ?? '') });
+                return r.ok ? json(200, { ok: true, optionId: r.optionId }) : json(r.status, { error: r.error });
             }
             if (action === 'save_design') {
                 const positive = (v: unknown) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };

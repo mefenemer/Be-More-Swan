@@ -50,7 +50,7 @@ import { PexelsRateLimitError, searchUniqueImages, searchUniqueVideos } from './
 import { BRAND_CARD_PROVIDER } from './brand-card-lifecycle';
 import { resolveAssetDisplayUrl } from './social-publish';
 import { POST_ATTACH_NOTES, attachApprovedToPost, placeOnCampaignPost } from './brief-post-media';
-import { bakeImageDesign } from './design-options';
+import { DESIGN_COPY, DESIGN_PROVIDER, bakeImageDesign } from './design-options';
 import { designForChat, type Design } from './design-doc';
 import { approveFlyerOption, brandPageColours, flyerRoundOptions, type FlyerRenderParams } from './flyer-briefs';
 import { resolveBrandKitForOrg } from '../lib/brand-extract-fetch';
@@ -768,13 +768,17 @@ export async function decideOption(db: Db, args: {
         const baked = await bakeImageDesign(orgId, opt.renderParams);
         const o = baked ? { ...opt, ...baked } : opt;
         const isVideo = (o.mimeType || '').startsWith('video/');
-        const name = clip(`${brief.title} — ${sourceLabel(o.source).replace(/s$/, '')}`, 120);
+        const isDesignCopy = (opt.renderParams as { kind?: unknown } | null)?.kind === DESIGN_COPY;
+        const name = clip(`${brief.title} — ${isDesignCopy ? opt.prompt : sourceLabel(o.source).replace(/s$/, '')}`, 120);
         const common = {
             userId, organisationId: orgId, name, assetType: isVideo ? 'video' : 'image', mimeType: o.mimeType,
             width: o.width, height: o.height, aspectRatio: brief.aspectRatio, status: 'pending',
         };
         const values = opt.source === 'stock' || opt.source === 'stock_video'
             ? { ...common, storageKey: o.storageKey, externalUrl: o.externalUrl, provider: 'pexels', providerAssetId: opt.providerAssetId, attributionName: opt.attributionName, attributionUrl: opt.attributionUrl }
+            : isDesignCopy
+                // A design, not a text card: the branded-card editor could only replace it with a card of its own.
+                ? { ...common, storageKey: o.storageKey, externalUrl: o.externalUrl, provider: DESIGN_PROVIDER, prompt: opt.prompt, libraryKeptAt: new Date() }
             : opt.source === 'brand_card'
                 // libraryKeptAt: a card a human approved is not transient media — without it the
                 // 30-day unused-card sweep (brand-card-lifecycle.ts) would delete it from the library.

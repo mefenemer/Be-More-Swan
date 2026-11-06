@@ -73,8 +73,10 @@
       .ds-tool input[type=number], .ds-tool select { height: 32px; border: 1px solid #d1d5db; border-radius: 6px; padding: 0 6px; font-size: 13px; background: #fff; }
       .ds-tool input[type=range] { width: 90px; }
       [data-ds-tools] { align-content: flex-start; }
-      .ds-words { flex: 1 1 100%; align-items: flex-start; }
-      .ds-words textarea { flex: 1; min-width: 0; height: 56px; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 8px; font-size: 13px; font-weight: 400; color: #1f2937; background: #fff; resize: none; }
+      .ds-group-box { position: absolute; border: 2px solid #ff007f; pointer-events: none; z-index: 5; box-sizing: border-box; }
+      .ds-group-box .ds-handle { pointer-events: auto; right: -8px; bottom: -8px; cursor: nwse-resize; }
+      .ds-marquee { position: absolute; border: 1px solid #ff007f; background: rgba(255,0,127,.12); pointer-events: none; z-index: 6; }
+      .ds-page .ds-sel-member { outline: 1px dashed #ff007f; outline-offset: 1px; }
       .ds-word-list { flex: 1 1 100%; display: flex; align-items: center; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
       .ds-word-list .ds-btn { flex-shrink: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
       .ds-btn { min-height: 32px; min-width: 32px; padding: 0 10px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; font-size: 13px; font-weight: 700; color: #1f2937; cursor: pointer; }
@@ -108,7 +110,7 @@
     const st = {
       optionId: o.optionId, design: null, photoUrl: null, selected: null, picking: false, editing: null,
       undo: [], redo: [], saveTimer: null, saving: false, savedText: '', pageW: 0, pageH: 0, error: '', loading: true, full: false,
-      pictureUrls: {}, cropping: false,
+      pictureUrls: {}, cropping: false, multi: [],
     };
     let fontPicker = null;
     let destroyed = false;
@@ -138,7 +140,7 @@
         <p data-ds-error role="alert" class="hidden text-sm font-semibold text-red-600 mb-2"></p>
         <div class="ds-stage-wrap" data-ds-wrap><div class="ds-page" data-ds-page role="application" aria-label="Your design. Click a part to change it." tabindex="0"></div></div>
         <div data-ds-thumbs class="flex gap-2 mt-3 overflow-x-auto"></div>
-        <p class="text-xs text-gray-600 mt-2">Click anything to change it, drag to move it. Change words in the Words box, or double-click them on the design. Hold Alt while dragging to turn off the guides. Or ask in the chat.</p>
+        <p class="text-xs text-gray-600 mt-2">Click anything to change it, drag to move it, and click selected words to type. Shift-click or drag across the page to select several. Hold Alt while dragging to turn off the guides. Or ask in the chat.</p>
       </div>`;
     const q = (sel) => host.querySelector(sel);
     const page = q('[data-ds-page]');
@@ -183,8 +185,76 @@
       to.push(JSON.stringify(st.design));
       st.design = JSON.parse(from.pop());
       if (st.selected && st.selected !== 'photo' && !selectedLayer()) st.selected = null;
+      setMulti(st.multi);
       paint();
       scheduleSave();
+    }
+
+    // ── Several at once ──────────────────────────────────────────────────────
+    const layerById = (id) => st.design.layers.find((l) => l.id === id);
+    const groupOf = (l) => (l && l.group ? st.design.layers.filter((x) => x.group === l.group).map((x) => x.id) : l ? [l.id] : []);
+    /** Several selected, or one if that is all it comes to. The background is never one of several: it stays behind them. */
+    function setMulti(ids) {
+      const live = [...new Set(ids)].filter((id) => layerById(id));
+      st.multi = live.length > 1 ? live : [];
+      if (live.length === 1) st.selected = live[0];
+      else if (live.length > 1) st.selected = null;
+    }
+    const selectedIds = () => (st.multi.length ? st.multi : st.selected && st.selected !== 'photo' ? [st.selected] : []);
+    /** Which parts of the page these cover, measured: a text box's height is what its words make it. */
+    function boxOf(ids) {
+      const page_ = page.getBoundingClientRect();
+      let left = Infinity; let top = Infinity; let right = -Infinity; let bottom = -Infinity;
+      ids.forEach((id) => {
+        const el = page.querySelector(`[data-ds-id="${CSS.escape(id)}"]`);
+        if (!el) return;
+        const r = el.getBoundingClientRect();
+        left = Math.min(left, r.left); top = Math.min(top, r.top); right = Math.max(right, r.right); bottom = Math.max(bottom, r.bottom);
+      });
+      if (left === Infinity) return null;
+      return { x: (left - page_.left) / page_.width, y: (top - page_.top) / page_.height, w: (right - left) / page_.width, h: (bottom - top) / page_.height };
+    }
+    function paintGroupBox() {
+      let el = page.querySelector('.ds-group-box');
+      const box = st.multi.length ? boxOf(st.multi) : null;
+      if (!box) { if (el) el.remove(); return; }
+      if (!el) { el = document.createElement('div'); el.className = 'ds-group-box'; el.innerHTML = '<span class="ds-handle" data-h="group"></span>'; page.appendChild(el); }
+      el.style.cssText = `left:${box.x * 100}%;top:${box.y * 100}%;width:${box.w * 100}%;height:${box.h * 100}%;`;
+    }
+    function paintLayerEl(t) {
+      const el = page.querySelector(`[data-ds-id="${CSS.escape(t.id)}"]`);
+      if (!el) return;
+      const keep = el.innerHTML;
+      el.setAttribute('style', layerStyle(t));
+      el.innerHTML = keep;
+    }
+    function reorder(ids, order) {
+      const list = st.design.layers;
+      const first = list.findIndex((l) => ids.includes(l.id));
+      if (first < 0) return;
+      const members = list.filter((l) => ids.includes(l.id));
+      const rest = list.filter((l) => !ids.includes(l.id));
+      const below = list.slice(0, first).filter((l) => !ids.includes(l.id)).length;
+      const at = order === 'front' ? rest.length : order === 'back' ? 0 : order === 'forward' ? Math.min(rest.length, below + 1) : Math.max(0, below - 1);
+      st.design.layers = [...rest.slice(0, at), ...members, ...rest.slice(at)];
+    }
+    function groupSelected() {
+      if (st.multi.length < 2) return;
+      change(() => {
+        const group = `g${Date.now().toString(36)}`;
+        // Side by side in the stack, where the topmost was, so moving the group never slides anything between them.
+        const members = st.design.layers.filter((l) => st.multi.includes(l.id));
+        members.forEach((l) => { l.group = group; });
+        const list = st.design.layers;
+        const top = list.lastIndexOf(members[members.length - 1]);
+        const above = list.slice(top + 1);
+        st.design.layers = [...list.slice(0, top + 1).filter((l) => !members.includes(l)), ...members, ...above];
+      });
+    }
+    function ungroupSelected() {
+      const groups = new Set(selectedIds().map((id) => layerById(id)?.group).filter(Boolean));
+      if (!groups.size) return;
+      change(() => { st.design.layers.forEach((l) => { if (groups.has(l.group)) delete l.group; }); });
     }
 
     // ── Painting ─────────────────────────────────────────────────────────────
@@ -242,14 +312,15 @@
         if (kind === 'qr' || kind === 'logo') return handle('se');
         return handle('e') + handle('s') + handle('se');   // a frame: changing its shape shows more or less of the picture
       };
-      const cropClass = (id) => (st.cropping && st.selected === id ? 'ds-cropping' : '');
+      const cropClass = (id) => (st.cropping && st.selected === id ? 'ds-cropping' : st.multi.includes(id) ? 'ds-sel-member' : '');
       const clip = (url, crop) => `<div class="ds-clip"><img src="${esc(url || '')}" alt="" draggable="false" style="${cropStyle(crop)}"></div>`;
-      const photo = d.photo ? `<div class="ds-photo ${st.selected === 'photo' ? 'ds-sel' : ''} ${cropClass('photo')}" data-ds-id="photo" style="left:${d.photo.x * 100}%;top:${d.photo.y * 100}%;width:${d.photo.w * 100}%;height:${d.photo.h * 100}%;opacity:${d.photo.opacity};">${clip(st.photoUrl, d.photo.crop)}${handlesFor('photo', 'picture')}</div>` : '';
+      const photo = d.photo ? `<div class="ds-photo ${st.selected === 'photo' ? 'ds-sel' : ''} ${cropClass('photo')}" data-ds-id="photo" style="left:${d.photo.x * 100}%;top:${d.photo.y * 100}%;width:${d.photo.w * 100}%;height:${d.photo.h * 100}%;opacity:${d.photo.opacity};">${clip(st.pictureUrls[d.photo.id || 'photo0'] || st.photoUrl, d.photo.crop)}${handlesFor('photo', 'picture')}</div>` : '';
       page.innerHTML = photo + d.layers.map((l) => {
         if (l.fontFamily) window.FontPicker?.loadFamily(l.fontFamily);
         const inner = l.kind === 'text' ? esc(l.text) : l.kind === 'shape' ? '' : l.kind === 'picture' ? clip(st.pictureUrls[l.id], l.crop) : `<img src="${esc(l.src)}" alt="${esc(ROLE_LABEL[l.role] || '')}">`;
         return `<div class="ds-layer ${st.selected === l.id ? 'ds-sel' : ''} ${cropClass(l.id)}" data-ds-id="${esc(l.id)}" data-kind="${l.kind}" style="${layerStyle(l)}">${inner}${handlesFor(l.id, l.kind)}</div>`;
       }).join('');
+      paintGroupBox();
     }
     function paintThumbs() {
       const el = q('[data-ds-thumbs]');
@@ -262,10 +333,9 @@
     const orderTool = () => `<label class="ds-tool"><span class="sr-only">Layer order</span><select data-ds-order aria-label="Layer order"><option value="">Layer order</option><option value="front">Bring to front</option><option value="forward">Bring forward</option><option value="backward">Send backward</option><option value="back">Send to back</option></select></label>`;
     const duplicateButton = () => '<button type="button" class="ds-btn" data-ds-duplicate>Duplicate</button>';
     const canPick = () => !!window.MediaPicker;
-    /** The tools for words. The Words box is there for every line on the design, on any device. */
+    const ungroupButton = (l) => (l && l.group ? '<button type="button" class="ds-btn" data-ds-ungroup>Ungroup</button>' : '');
     function textTools(l) {
       return `
-          <label class="ds-tool ds-words">Words <textarea data-ds-text maxlength="600" aria-label="The words">${esc(l.text)}</textarea></label>
           <span class="ds-font" data-ds-font></span>
           <label class="ds-tool">Size <input type="number" data-ds-size min="4" max="200" value="${Math.round(l.fontSizePct * 1000) / 10 * 2}" style="width:60px"></label>
           <button type="button" class="ds-btn" data-ds-bold aria-pressed="${!!l.bold}" aria-label="Bold"><b>B</b></button>
@@ -276,7 +346,7 @@
           <label class="ds-tool">Text colour <input type="color" data-ds-color value="${esc(l.color)}"></label>
           <label class="ds-tool">Background <input type="checkbox" data-ds-boxon ${l.boxFill ? 'checked' : ''}><input type="color" data-ds-box value="${esc(l.boxFill || contrastFor(l.color))}"></label>
           <label class="ds-tool">Transparency <input type="range" data-ds-boxop min="0" max="100" value="${pct(l.boxOpacity)}"></label>
-          ${orderTool()}${duplicateButton()}${askButton()}<button type="button" class="ds-btn" data-ds-delete>Delete</button>`;
+          ${orderTool()}${duplicateButton()}${ungroupButton(l)}${askButton()}<button type="button" class="ds-btn" data-ds-delete>Delete</button>`;
     }
     /** Moving a picture about inside its frame: drag it, and this says how far in. */
     function cropTools(crop) {
@@ -292,10 +362,11 @@
         <button type="button" class="ds-btn" data-ds-crop>Crop</button>
         ${replace}
         <label class="ds-tool">Transparency <input type="range" ${isMain ? 'data-ds-photoop' : 'data-ds-picop'} min="0" max="100" value="${pct(target.opacity)}"></label>
-        ${isMain ? '' : orderTool()}${duplicateButton()}
+        ${isMain ? '<button type="button" class="ds-btn" data-ds-unbg>Make a normal picture</button>' : '<button type="button" class="ds-btn" data-ds-bg>Set as background</button>'}
+        ${isMain ? '' : orderTool()}${duplicateButton()}${isMain ? '' : ungroupButton(target)}
         ${isMain && o.options().filter((x) => x.id !== st.optionId && x.hasPhoto).length ? '<button type="button" class="ds-btn" data-ds-photo-next>Use another picture</button>' : ''}
         ${askButton()}<button type="button" class="ds-btn" data-ds-delete>${isMain ? 'Remove picture' : 'Delete'}</button>
-        ${isMain ? '<span class="text-xs text-gray-600">The main picture always sits behind everything else.</span>' : ''}`;
+        ${isMain ? '<span class="text-xs text-gray-600">This is the page background, behind everything else.</span>' : ''}`;
     }
     function paintTools() {
       const el = q('[data-ds-tools]');
@@ -307,6 +378,16 @@
       const d = st.design;
       const l = selectedLayer();
       const ask = askButton();
+      if (st.multi.length) {
+        const members = st.multi.map(layerById);
+        const oneGroup = members[0]?.group && members.every((x) => x?.group === members[0].group);
+        el.innerHTML = `
+          <span class="ds-tool">${st.multi.length} parts selected</span>
+          ${oneGroup ? '<button type="button" class="ds-btn" data-ds-ungroup>Ungroup</button>' : '<button type="button" class="ds-btn" data-ds-group>Group</button>'}
+          ${orderTool()}${duplicateButton()}<button type="button" class="ds-btn" data-ds-delete>Delete</button>
+          <span class="text-xs text-gray-600">Drag to move them together, or drag the corner to resize them.</span>`;
+        return;
+      }
       if (l && l.kind === 'text') {
         el.innerHTML = textTools(l);
         fontPicker = window.FontPicker?.mount(el.querySelector('[data-ds-font]'), {
@@ -321,7 +402,7 @@
         return;
       }
       if (l) {
-        el.innerHTML = `${l.kind === 'shape' ? `<label class="ds-tool">Colour <input type="color" data-ds-shape value="${esc(l.color)}"></label><label class="ds-tool">Transparency <input type="range" data-ds-shapeop min="0" max="100" value="${pct(l.opacity)}"></label>` : ''}${orderTool()}${duplicateButton()}${ask}<button type="button" class="ds-btn" data-ds-delete>Delete</button>`;
+        el.innerHTML = `${l.kind === 'shape' ? `<label class="ds-tool">Colour <input type="color" data-ds-shape value="${esc(l.color)}"></label><label class="ds-tool">Transparency <input type="range" data-ds-shapeop min="0" max="100" value="${pct(l.opacity)}"></label>` : ''}${orderTool()}${duplicateButton()}${ungroupButton(l)}${ask}<button type="button" class="ds-btn" data-ds-delete>Delete</button>`;
         return;
       }
       const words = d.layers.filter((x) => x.kind === 'text');
@@ -331,6 +412,7 @@
         <button type="button" class="ds-btn" data-ds-add>+ Add words</button>
         ${canPick() ? '<button type="button" class="ds-btn" data-ds-add-picture>+ Add picture</button>' : ''}
         <label class="ds-tool"><span class="sr-only">Add a shape</span><select data-ds-add-shape aria-label="Add a shape"><option value="">+ Add shape</option><option value="rectangle">Rectangle</option><option value="circle">Circle</option><option value="line">Line</option></select></label>
+        <label class="ds-tool"><span class="sr-only">Resize a copy</span><select data-ds-resize aria-label="Resize a copy"><option value="">Resize a copy</option>${d.kind === 'flyer' ? '<option value="A4">A4 print</option><option value="A5">A5 print</option><option value="A6">A6 print</option><option value="DL">DL print</option>' : ''}<option value="1:1">Square post</option><option value="4:5">Portrait post</option><option value="9:16">Story</option><option value="16:9">Landscape</option></select></label>
         ${shelfButtons()}
         ${words.length ? `<div class="ds-word-list"><span class="ds-tool">Change the words:</span>${words.map((x) => `<button type="button" class="ds-btn" data-ds-words="${esc(x.id)}">${esc(x.text.replace(/\s+/g, ' ').trim().slice(0, 40) || ROLE_LABEL[x.role] || 'Empty text box')}</button>`).join('')}</div>` : ''}`;
     }
@@ -364,21 +446,92 @@
       const handle = e.target.closest('.ds-handle');
       const part = e.target.closest('[data-ds-id]');
       if (st.picking) return;
-      if (!part) { if (st.selected) { st.selected = null; st.cropping = false; paint(); } return; }
+      const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+      const startPress = (next) => { drag = { sx: e.clientX, sy: e.clientY, moved: false, ...next }; page.setPointerCapture(e.pointerId); e.preventDefault(); };
+      const items = (ids) => ids.map(layerById).filter(Boolean).map((t) => ({ t, x: t.x, y: t.y, w: t.w, h: t.h, size: t.fontSizePct }));
+      if (handle && handle.dataset.h === 'group') { startPress({ mode: 'group-scale', items: items(st.multi), box: boxOf(st.multi) }); return; }
+      // The bare page, or a held Shift over the background: draw a box round what to select.
+      if (!part || (additive && part.dataset.dsId === 'photo')) {
+        if (!additive && (st.selected || st.multi.length)) { st.selected = null; st.multi = []; st.cropping = false; paint(); }
+        startPress({ mode: 'marquee', adding: additive ? selectedIds() : [] });
+        return;
+      }
       const id = part.dataset.dsId;
-      if (st.selected !== id) { st.selected = id; st.cropping = false; paint(); }
-      const target = id === 'photo' ? st.design.photo : st.design.layers.find((l) => l.id === id);
+      if (additive) {
+        const ids = groupOf(layerById(id));
+        const now = selectedIds();
+        const on = ids.every((x) => now.includes(x));
+        st.cropping = false;
+        st.selected = null;
+        setMulti(on ? now.filter((x) => !ids.includes(x)) : [...now, ...ids]);
+        paint();
+        e.preventDefault();
+        return;
+      }
+      // Pressing what is already one of several: drag them together. A click with no drag narrows it to that one.
+      if (st.multi.includes(id)) {
+        startPress({ mode: 'group-move', clicked: id, items: items(st.multi), box: boxOf(st.multi), snap: null });
+        return;
+      }
+      const layer = id === 'photo' ? null : layerById(id);
+      const wasSelected = st.selected === id;
+      // A group selects whole, unless a part of it is already selected: then the other parts are one click away too.
+      if (!wasSelected && layer?.group && selectedLayer()?.group !== layer.group) {
+        st.selected = null;
+        st.cropping = false;
+        setMulti(groupOf(layer));
+        if (st.multi.length) {
+          paint();
+          startPress({ mode: 'group-move', clicked: null, items: items(st.multi), box: boxOf(st.multi), snap: null });
+          return;
+        }
+      }
+      if (st.multi.length || !wasSelected) { st.multi = []; st.selected = id; st.cropping = false; paint(); }
+      const target = id === 'photo' ? st.design.photo : layer;
       if (!target) return;
-      drag = { id, target, mode: st.cropping ? 'pan' : handle ? handle.dataset.h : 'move', sx: e.clientX, sy: e.clientY, x: target.x, y: target.y, w: target.w, h: target.h, size: target.fontSizePct, crop: target.crop ? { ...target.crop } : { zoom: 1, x: 0.5, y: 0.5 }, moved: false };
-      page.setPointerCapture(e.pointerId);
-      e.preventDefault();
+      startPress({ id, target, wasSelected, mode: st.cropping ? 'pan' : handle ? handle.dataset.h : 'move', x: target.x, y: target.y, w: target.w, h: target.h, size: target.fontSizePct, crop: target.crop ? { ...target.crop } : { zoom: 1, x: 0.5, y: 0.5 } });
     });
     page.addEventListener('pointermove', (e) => {
       if (!drag) return;
       const dx = (e.clientX - drag.sx) / st.pageW;
       const dy = (e.clientY - drag.sy) / st.pageH;
       if (!drag.moved && Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) < 3) return;
-      if (!drag.moved) { drag.moved = true; remember(); if (drag.mode === 'move') drag.snap = snapTargets(drag.id); }
+      if (!drag.moved) {
+        drag.moved = true;
+        if (drag.mode !== 'marquee') remember();
+        if (drag.mode === 'move') drag.snap = snapTargets(drag.id);
+        if (drag.mode === 'group-move') drag.snap = snapTargets(drag.items.map((i) => i.t.id));
+      }
+      if (drag.mode === 'marquee') { paintMarquee(e); return; }
+      if (drag.mode === 'group-move') {
+        const box = { x: drag.box.x + dx, y: drag.box.y + dy };
+        let sx = null; let sy = null;
+        if (!(e.altKey || e.metaKey || e.ctrlKey)) {
+          sx = nearestSnap(box.x, drag.box.w, drag.snap.xs, SNAP_PX / st.pageW);
+          sy = nearestSnap(box.y, drag.box.h, drag.snap.ys, SNAP_PX / st.pageH);
+        }
+        showGuides(sx ? sx.line : null, sy ? sy.line : null);
+        drag.items.forEach((i) => {
+          i.t.x = i.x + dx + (sx ? sx.shift : 0);
+          i.t.y = i.y + dy + (sy ? sy.shift : 0);
+          paintLayerEl(i.t);
+        });
+        paintGroupBox();
+        return;
+      }
+      if (drag.mode === 'group-scale') {
+        const s = clamp((drag.box.w + dx) / drag.box.w, 0.1, 6);
+        drag.items.forEach((i) => {
+          i.t.x = drag.box.x + (i.x - drag.box.x) * s;
+          i.t.y = drag.box.y + (i.y - drag.box.y) * s;
+          i.t.w = i.w * s;
+          if (i.h != null) i.t.h = i.h * s;
+          if (i.size != null) i.t.fontSizePct = clamp(i.size * s, 0.006, 0.3);
+          paintLayerEl(i.t);
+        });
+        paintGroupBox();
+        return;
+      }
       const t = drag.target;
       if (drag.mode === 'pan') { panCrop(t, e.clientX - drag.sx, e.clientY - drag.sy); return; }
       if (drag.mode === 'move') {
@@ -399,15 +552,47 @@
       if (el && drag.id !== 'photo') { const keep = el.innerHTML; el.setAttribute('style', layerStyle(t)); el.innerHTML = keep; }
       else if (el) { el.style.left = `${t.x * 100}%`; el.style.top = `${t.y * 100}%`; el.style.width = `${t.w * 100}%`; el.style.height = `${t.h * 100}%`; }
     });
-    function endDrag() {
+    function paintMarquee(e) {
+      const box = page.getBoundingClientRect();
+      let el = page.querySelector('.ds-marquee');
+      if (!el) { el = document.createElement('div'); el.className = 'ds-marquee'; page.appendChild(el); }
+      const x1 = clamp(drag.sx - box.left, 0, box.width); const x2 = clamp(e.clientX - box.left, 0, box.width);
+      const y1 = clamp(drag.sy - box.top, 0, box.height); const y2 = clamp(e.clientY - box.top, 0, box.height);
+      el.style.cssText = `left:${Math.min(x1, x2)}px;top:${Math.min(y1, y2)}px;width:${Math.abs(x2 - x1)}px;height:${Math.abs(y2 - y1)}px;`;
+    }
+    /** Everything the box touches, and the rest of any group it touches. */
+    function endMarquee(adding) {
+      const el = page.querySelector('.ds-marquee');
+      if (!el) return;
+      const m = el.getBoundingClientRect();
+      el.remove();
+      const hit = [];
+      page.querySelectorAll('.ds-layer[data-ds-id]').forEach((part) => {
+        const r = part.getBoundingClientRect();
+        if (r.left < m.right && r.right > m.left && r.top < m.bottom && r.bottom > m.top) hit.push(...groupOf(layerById(part.dataset.dsId)));
+      });
+      st.selected = null;
+      setMulti([...adding, ...hit]);
+      paint();
+    }
+    function endDrag(e) {
       if (!drag) return;
-      const moved = drag.moved;
+      const d = drag;
       drag = null;
       showGuides(null, null);
-      if (moved) { paintTools(); scheduleSave(); }
+      if (d.mode === 'marquee') { if (d.moved) endMarquee(d.adding); return; }
+      if (d.moved) { paintTools(); scheduleSave(); return; }
+      if (e && e.type !== 'pointerup') return;
+      // A click with no drag. On one of several: that one alone. On words already selected: type in them.
+      if (d.mode === 'group-move') {
+        if (d.clicked) { st.multi = []; st.selected = d.clicked; paint(); }
+        return;
+      }
+      if (d.mode === 'move' && d.wasSelected && d.target.kind === 'text') startEditing(d.id, e);
     }
     // ── Snapping: the page's edges and middle, and the edges and middle of everything else on it. ──
-    function snapTargets(id) {
+    function snapTargets(ownIds) {
+      const own_ = [].concat(ownIds);
       const box = page.getBoundingClientRect();
       const xs = [0, 0.5, 1];
       const ys = [0, 0.5, 1];
@@ -415,7 +600,7 @@
       page.querySelectorAll('[data-ds-id]').forEach((el) => {
         const r = el.getBoundingClientRect();
         const f = { x: (r.left - box.left) / box.width, y: (r.top - box.top) / box.height, w: r.width / box.width, h: r.height / box.height };
-        if (el.dataset.dsId === id) { own = f; return; }
+        if (own_.includes(el.dataset.dsId)) { own = f; return; }
         xs.push(f.x, f.x + f.w / 2, f.x + f.w);
         ys.push(f.y, f.y + f.h / 2, f.y + f.h);
       });
@@ -468,11 +653,21 @@
 
     // Double-click: type on the design itself.
     page.addEventListener('dblclick', (e) => {
+      if (st.editing || st.picking) return;
       // Not e.target: the press captured the pointer for a drag, so this event is aimed at the page, not the words.
       const part = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-ds-page] [data-kind="text"]');
-      if (!part || st.picking) return;
-      const l = st.design.layers.find((x) => x.id === part.dataset.dsId);
-      if (!l) return;
+      if (part) startEditing(part.dataset.dsId, e);
+    });
+    /**
+     * Type in the words where they are on the design (owner 2026-11-06). `at` is the click that started it, to put the
+     * caret where it landed; 'all' selects the words, ready to be typed over.
+     */
+    function startEditing(id, at) {
+      const l = st.design.layers.find((x) => x.id === id);
+      if (!l || l.kind !== 'text') return;
+      if (st.selected !== id || st.multi.length) { st.multi = []; st.selected = id; paint(); }
+      const part = page.querySelector(`[data-ds-id="${CSS.escape(id)}"]`);
+      if (!part) return;
       st.editing = l.id;
       part.querySelectorAll('.ds-handle').forEach((h) => h.remove());
       part.classList.add('ds-editing');
@@ -481,7 +676,10 @@
       part.focus();
       const caret = document.createRange();
       caret.selectNodeContents(part);
-      caret.collapse(false);
+      if (at !== 'all') {
+        const spot = at && document.caretRangeFromPoint ? document.caretRangeFromPoint(at.clientX, at.clientY) : null;
+        if (spot && part.contains(spot.startContainer)) { caret.setStart(spot.startContainer, spot.startOffset); caret.collapse(true); } else caret.collapse(false);
+      }
       const selection = window.getSelection();
       selection.removeAllRanges();
       selection.addRange(caret);
@@ -492,12 +690,10 @@
         if (next !== l.text) { remember(); l.text = next; scheduleSave(); }
         // The page only: a click that ended the typing may be on a tool, and repainting the tools would swallow it.
         paintPage();
-        const box = q('[data-ds-text]');
-        if (box) box.value = l.text;
       };
       part.addEventListener('blur', finish);
       part.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); part.blur(); } });
-    });
+    }
 
     // ── The tools ────────────────────────────────────────────────────────────
     function change(fn) { remember(); fn(); paint(); scheduleSave(); }
@@ -505,12 +701,11 @@
       const t = e.target;
       const l = selectedLayer();
       // Live, on the page, while a colour or slider moves: remembered once, when it starts.
-      if (t.matches('[data-ds-text],[data-ds-boxop],[data-ds-photoop],[data-ds-picop],[data-ds-crop-zoom],[data-ds-shapeop],[data-ds-color],[data-ds-box],[data-ds-page-color],[data-ds-page-op],[data-ds-shape]')) {
+      if (t.matches('[data-ds-boxop],[data-ds-photoop],[data-ds-picop],[data-ds-crop-zoom],[data-ds-shapeop],[data-ds-color],[data-ds-box],[data-ds-page-color],[data-ds-page-op],[data-ds-shape]')) {
         if (!st.liveChange) { remember(); st.liveChange = true; }
         const op = 1 - Number(t.value) / 100;
-        if (t.matches('[data-ds-text]') && l) l.text = t.value;
         // Moving the slider or choosing a colour is asking for a background: it never sits there greyed out.
-        else if (t.matches('[data-ds-boxop]') && l) { l.boxOpacity = op; if (!l.boxFill) l.boxFill = contrastFor(l.color); }
+        if (t.matches('[data-ds-boxop]') && l) { l.boxOpacity = op; if (!l.boxFill) l.boxFill = contrastFor(l.color); }
         else if (t.matches('[data-ds-photoop]') && st.design.photo) st.design.photo.opacity = op;
         else if (t.matches('[data-ds-picop],[data-ds-shapeop]') && l) l.opacity = op;
         else if (t.matches('[data-ds-crop-zoom]')) {
@@ -530,14 +725,12 @@
       const t = e.target;
       st.liveChange = false;
       const l = selectedLayer();
-      if (t.matches('[data-ds-order]') && l && t.value) {
+      if (t.matches('[data-ds-order]') && t.value && selectedIds().length) {
         const order = t.value;
-        change(() => {
-          const list = st.design.layers;
-          const at = list.indexOf(l);
-          list.splice(at, 1);
-          list.splice(order === 'front' ? list.length : order === 'back' ? 0 : order === 'forward' ? Math.min(list.length, at + 1) : Math.max(0, at - 1), 0, l);
-        });
+        const ids = selectedIds();
+        change(() => { reorder(ids, order); });
+      } else if (t.matches('[data-ds-resize]') && t.value) {
+        resizeCopy(t.value, t);
       } else if (t.matches('[data-ds-add-shape]') && t.value) {
         const shape = t.value;
         const across = ratio();
@@ -585,26 +778,23 @@
         return;
       }
       if (t('[data-ds-duplicate]')) { duplicateSelected(); return; }
+      if (t('[data-ds-group]')) { groupSelected(); return; }
+      if (t('[data-ds-ungroup]')) { ungroupSelected(); return; }
+      if (t('[data-ds-bg]')) { setAsBackground(); return; }
+      if (t('[data-ds-unbg]')) { detachBackground(); return; }
       if (t('[data-ds-add-picture]')) { pickPicture((asset) => pictureFromLibrary({ addPicture: asset.id }), 'Add a picture'); return; }
       if (t('[data-ds-replace]')) { const target = st.selected; pickPicture((asset) => pictureFromLibrary({ replacePicture: { assetId: asset.id, target } }), 'Replace this picture'); return; }
       const back = t('[data-ds-putback]');
       if (back) { putBack(back.dataset.dsPutback); return; }
       const wordsBtn = t('[data-ds-words]');
-      if (wordsBtn) {
-        st.selected = wordsBtn.dataset.dsWords;
-        paint();
-        const box = q('[data-ds-text]');
-        if (box) { box.focus(); box.select(); }
-        return;
-      }
+      if (wordsBtn) { startEditing(wordsBtn.dataset.dsWords, 'all'); return; }
       if (t('[data-ds-add]')) {
         change(() => {
           const id = `t${Date.now().toString(36)}`;
           st.design.layers.push({ id, kind: 'text', role: 'text', text: 'Your words', x: 0.1, y: 0.45, w: 0.8, fontFamily: null, fontSizePct: 0.04, bold: true, align: 'center', color: '#1f1e1b', boxFill: null, boxOpacity: 1 });
           st.selected = id;
         });
-        const box = q('[data-ds-text]');
-        if (box) { box.focus(); box.select(); }
+        startEditing(st.selected, 'all');
         return;
       }
       if (t('[data-ds-delete]')) {
@@ -612,11 +802,12 @@
           const shelf = st.design.removed || (st.design.removed = { layers: [], photo: null });
           if (st.selected === 'photo') { shelf.photo = st.design.photo; st.design.photo = null; }
           else {
-            const gone = selectedLayer();
-            if (gone && ['qr', 'logo', 'picture'].includes(gone.kind)) shelf.layers.push(gone);
-            st.design.layers = st.design.layers.filter((l) => l.id !== st.selected);
+            const ids = selectedIds();
+            ids.map(layerById).forEach((gone) => { if (gone && ['qr', 'logo', 'picture'].includes(gone.kind)) shelf.layers.push(gone); });
+            st.design.layers = st.design.layers.filter((l) => !ids.includes(l.id));
           }
           st.selected = null;
+          st.multi = [];
         });
         return;
       }
@@ -645,7 +836,57 @@
       });
     }
     const pictureCount = () => st.design.layers.filter((l) => l.kind === 'picture').length;
+    /** The picture fills the page behind everything; what was the background goes on the shelf, to put back. */
+    function setAsBackground() {
+      const l = selectedLayer();
+      if (!l || l.kind !== 'picture') return;
+      change(() => {
+        const old = st.design.photo;
+        if (old) {
+          const oldId = old.id || 'photo0';
+          st.pictureUrls[oldId] = st.pictureUrls[oldId] || st.photoUrl;
+          const shelf = st.design.removed || (st.design.removed = { layers: [], photo: null });
+          shelf.layers.push({ id: oldId, kind: 'picture', role: 'picture', x: old.x, y: old.y, w: old.w, h: old.h, opacity: old.opacity, ref: old.ref, ...(old.crop ? { crop: old.crop } : {}) });
+        }
+        st.design.photo = { id: l.id, x: 0, y: 0, w: 1, h: 1, opacity: l.opacity, ref: l.ref };
+        st.design.layers = st.design.layers.filter((x) => x !== l);
+        st.selected = 'photo';
+      });
+    }
+    /** The background as an ordinary picture, at the back to start with, which can then be moved and put in front. */
+    function detachBackground() {
+      const p = st.design.photo;
+      if (!p) return;
+      if (pictureCount() >= MAX_PICTURES) { showError(`A design can hold ${MAX_PICTURES} added pictures. Remove one to do this.`); return; }
+      change(() => {
+        const id = p.id || 'photo0';
+        st.pictureUrls[id] = st.pictureUrls[id] || st.photoUrl;
+        st.design.layers.unshift({ id, kind: 'picture', role: 'picture', x: p.x, y: p.y, w: p.w, h: p.h, opacity: p.opacity, ref: p.ref, ...(p.crop ? { crop: p.crop } : {}) });
+        st.design.photo = null;
+        st.selected = id;
+      });
+    }
+    /** A copy at another size, as a new option: the server makes it, so what is on screen is saved first. */
+    async function resizeCopy(size, select) {
+      select.disabled = true;
+      clearTimeout(st.saveTimer);
+      st.saveTimer = null;
+      showSaved('Making a copy…');
+      try {
+        const r = await o.post({ action: 'resize_design', optionId: st.optionId, design: st.design, size });
+        await o.onOptionsChanged?.();
+        if (destroyed) return;
+        await openOption(r.optionId);
+        showSaved('Your copy is open. The original is still there, below.');
+      } catch (err) {
+        showSaved('');
+        showError(err.message || 'The copy could not be made. Please try again.');
+        select.disabled = false;
+        select.value = '';
+      }
+    }
     function duplicateSelected() {
+      if (st.multi.length) { duplicateSeveral(); return; }
       const isPhoto = st.selected === 'photo';
       const from = isPhoto ? st.design.photo : selectedLayer();
       if (!from) return;
@@ -662,6 +903,22 @@
         const at = isPhoto ? 0 : st.design.layers.indexOf(from) + 1;
         st.design.layers.splice(at, 0, copy);
         st.selected = id;
+      });
+    }
+    function duplicateSeveral() {
+      const from = st.multi.map(layerById).filter(Boolean);
+      if (pictureCount() + from.filter((l) => l.kind === 'picture').length > MAX_PICTURES) { showError(`A design can hold ${MAX_PICTURES} added pictures. Remove one to add another.`); return; }
+      change(() => {
+        const stamp = Date.now().toString(36);
+        const group = from[0].group && from.every((l) => l.group === from[0].group) ? `g${stamp}` : null;
+        const copies = from.map((l, i) => {
+          const id = `c${stamp}${i}`;
+          const { group: _old, ...rest } = JSON.parse(JSON.stringify(l));
+          if (l.kind === 'picture') st.pictureUrls[id] = st.pictureUrls[l.id];
+          return { ...rest, id, x: l.x + 0.03, y: l.y + 0.03, ...(group ? { group } : {}), ...(['qr', 'logo', 'picture'].includes(l.kind) ? { copyOf: l.id } : {}) };
+        });
+        st.design.layers.push(...copies);
+        st.multi = copies.map((c) => c.id);
       });
     }
     function putBack(id) {
@@ -704,6 +961,7 @@
     function adopt(r) {
       st.design = r.design;
       if (r.photoUrl !== undefined) st.photoUrl = r.photoUrl;
+      if (r.photoUrl && r.design.photo) st.pictureUrls[r.design.photo.id || 'photo0'] = r.photoUrl;
       if (r.pictureUrls) Object.assign(st.pictureUrls, r.pictureUrls);
     }
     async function nextPhoto() {
@@ -733,6 +991,7 @@
       st.loading = true;
       st.optionId = optionId;
       st.selected = null;
+      st.multi = [];
       st.cropping = false;
       st.pictureUrls = {};
       st.undo = [];
@@ -762,14 +1021,33 @@
         if (st.picking) { st.picking = false; paint(); return; }
         if (st.cropping) { st.cropping = false; paint(); return; }
         if (st.full) { setFull(false); return; }
-        if (st.selected) { st.selected = null; paint(); }
+        if (st.selected || st.multi.length) { st.selected = null; st.multi = []; paint(); }
         return;
       }
       if (typing || !host.contains(e.target) && e.target !== document.body) return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) restore(st.redo, st.undo); else restore(st.undo, st.redo); return; }
+      if (st.multi.length || selectedLayer()) {
+        if (mod && e.key.toLowerCase() === 'g') { e.preventDefault(); if (e.shiftKey) ungroupSelected(); else groupSelected(); return; }
+      }
+      if (st.multi.length) {
+        if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSeveral(); return; }
+        if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); q('[data-ds-delete]')?.click(); return; }
+        const shift = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+        if (shift) {
+          e.preventDefault();
+          remember();
+          const step = e.shiftKey ? 0.02 : 0.004;
+          st.multi.map(layerById).forEach((l) => { if (l) { l.x += shift[0] * step; l.y += shift[1] * step; } });
+          paintPage();
+          scheduleSave();
+        }
+        return;
+      }
       const target = st.selected === 'photo' ? st.design?.photo : selectedLayer();
       if (!target) return;
+      // Enter on selected words starts typing in them, as a second click does.
+      if (e.key === 'Enter' && target.kind === 'text') { e.preventDefault(); startEditing(target.id, null); return; }
       if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected(); return; }
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); q('[data-ds-delete]')?.click(); return; }
       const nudge = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
@@ -810,7 +1088,9 @@
         remember();
         st.design = design;
         if (photoUrl !== undefined) st.photoUrl = photoUrl;
+        if (photoUrl && design.photo) st.pictureUrls[design.photo.id || 'photo0'] = photoUrl;
         if (st.selected && st.selected !== 'photo' && !selectedLayer()) st.selected = null;
+        setMulti(st.multi);
         paint();
         scheduleSave();
         // The chat can duplicate or put back a picture: the signed address to show it comes from the server.

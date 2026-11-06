@@ -47,10 +47,12 @@ Only one answer costs anything: **An AI-made picture (1 task)**. A stock photo, 
 The editor shows your design on the left and the chat on the right.
 
 - **Click** any words, the picture or a shape to change it: the font, size, colour, a background behind the words and how see-through it is, or the picture's strength.
-- **Change the words** in the **Words** box that appears when you click them, or double-click them on the design and type. With nothing selected, **Change the words** lists every piece of text on the design.
+- **Change the words** on the design itself: click them to select them, then click again and type. With nothing selected, **Change the words** lists every piece of text on the design.
 - **Drag** it to move it, or drag its corner to make it bigger or smaller. Pink guide lines show when it lines up with the page or something else on it. Hold Alt while dragging to turn them off.
-- **+ Add picture** adds one of your own, from your library, from stock, or made by AI (which uses a task). Click a picture to **Crop** it, drag it inside its frame and zoom, or to **Replace** it. Your main picture always sits behind everything else.
+- **+ Add picture** adds one of your own, from your library, from stock, or made by AI (which uses a task). Click a picture to **Crop** it, drag it inside its frame and zoom, or to **Replace** it. **Set as background** makes a picture fill the page behind everything else.
 - **+ Add shape** adds a rectangle, circle or line. **Layer order** moves the selected part in front of or behind the others, and **Duplicate** copies it.
+- Hold **Shift** and click, or drag across the page, to select several parts. **Group** keeps them together: click once to move the group, and click again to change one part of it. **Ungroup** separates them.
+- With nothing selected, **Resize a copy** makes a copy at another size as a new option, such as a square post from your flyer. Your original stays as it is, and the copy may need a little tidying.
 - Words can also be **italic** or **underlined**, with their own **line spacing**.
 - If you remove your **logo** or **QR code**, a button appears to put it back.
 - **+ Add words** puts a new line of text on the page, **Page colour** changes the background, and its **Transparency** slider fades that colour towards white paper.
@@ -67,9 +69,8 @@ Briefs move left to right through these tabs. The number on each tells you how m
 
 | Tab | What it means |
 |---|---|
-| **Not started** | Saved, and waiting for you to ask for options. The tab opens here |
+| **To do** | Waiting on you. Choose **Use this** on an option, or **Not this** and say why. A brief with no options yet needs you to ask for them, and it says so. The tab opens here |
 | **Being made** | Your Brand Designer is working on it. Nothing to do yet |
-| **To review** | Options are ready. Choose **Use this**, or **Not this** and say why |
 | **Approved** | Finished, and in My Content |
 | **Archived** | Briefs you stopped. Anything you had approved stays in My Content |
 

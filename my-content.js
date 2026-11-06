@@ -93,7 +93,7 @@ function _mediaTypeKey(asset) {
  */
 function _sourceKey(asset) {
     if (asset.provider === 'canva') return 'canva';
-    if (asset.provider === 'fal' || asset.provider === 'remotion' || asset.provider === 'brand_card' || asset.provider === 'flyer') return 'generated';
+    if (asset.provider === 'fal' || asset.provider === 'remotion' || asset.provider === 'brand_card' || asset.provider === 'flyer' || asset.provider === 'design') return 'generated';
     if (asset.provider) return 'sourced';
     return 'upload';
 }

@@ -163,8 +163,8 @@
     // The page's Needs-you strip counts the same briefs as this badge.
     window._setNeedsYouCount?.(n);
     window._setNextUp?.(nextUpLine());
-    // The compact header's Needs-you card lists them, each opening its brief on "To review".
-    window._setNeedsYouItems?.(inTab('review').slice(0, 3).map((b) => {
+    // The compact header's Needs-you card lists them, each opening its brief on "To do".
+    window._setNeedsYouItems?.(inTab('todo').filter(hasOptionsWaiting).slice(0, 3).map((b) => {
       const w = b.options.filter((o) => o.status === 'proposed').length;
       return { id: b.id, label: b.title || 'Untitled brief', sub: `${w} option${w === 1 ? '' : 's'} to choose from` };
     }));
@@ -177,10 +177,11 @@
   // ── Tabs ───────────────────────────────────────────────────────────────
   // Left to right, the order a brief moves through, each named for where it is. Every brief is in exactly
   // one, and the count on each shows where the work is without opening it (owner, 2026-11-05).
+  // "To do" is "Not started" and "To review" together (owner, 2026-11-06): everything waiting on the user in one place,
+  // with each brief's own sentence saying what it needs. Those with options to choose from come first.
   const TABS = [
-    { key: 'todo', label: 'Not started', help: 'Ask for options on a brief to get it going.', empty: 'Nothing waiting to start. Press "New brief" to begin one.' },
-    { key: 'making', label: 'Being made', help: 'Nothing to do here. Options move to "To review" when they are ready.', empty: 'Nothing is being made right now.' },
-    { key: 'review', label: 'To review', help: 'Choose "Use this" on the one you like, or "Not this" and say why.', empty: 'Nothing is waiting for you to review.' },
+    { key: 'todo', label: 'To do', help: 'Choose "Use this" on the option you like, or "Not this" and say why. A brief with no options yet needs you to ask for them.', empty: 'Nothing to do. Press "New brief" to begin one.' },
+    { key: 'making', label: 'Being made', help: 'Nothing to do here. Options move to "To do" when they are ready.', empty: 'Nothing is being made right now.' },
     { key: 'approved', label: 'Approved', help: 'Finished, and in My Content for your assistants to use.', empty: 'Nothing approved yet.' },
     { key: 'archived', label: 'Archived', help: 'Briefs you stopped. Anything you had approved stays in My Content.', empty: 'Nothing archived.' },
   ];
@@ -188,9 +189,13 @@
     if (b.status === 'cancelled') return 'archived';
     if (b.status === 'generating') return 'making';
     if (b.status === 'approved' || progress(b).done) return 'approved';
-    return b.options.some((o) => o.status === 'proposed') ? 'review' : 'todo';
+    return 'todo';
   }
-  const inTab = (key) => state.briefs.filter((b) => tabOf(b) === key);
+  const hasOptionsWaiting = (b) => b.options.some((o) => o.status === 'proposed');
+  const inTab = (key) => {
+    const list = state.briefs.filter((b) => tabOf(b) === key);
+    return key === 'todo' ? [...list.filter(hasOptionsWaiting), ...list.filter((b) => !hasOptionsWaiting(b))] : list;
+  };
   function tabsHtml() {
     return `
       ${''/* Pills in a grey track, not underlined tabs (owner, 2026-11-06): the page's own tabs above are
@@ -200,7 +205,7 @@
         ${TABS.map((t) => {
           const n = inTab(t.key).length;
           const on = state.tab === t.key;
-          const urgent = t.key === 'review' && n > 0;
+          const urgent = t.key === 'todo' && inTab('todo').some(hasOptionsWaiting);
           return `<button type="button" role="tab" id="brief-tab-${t.key}" aria-selected="${on}" aria-controls="brief-tab-panel" tabindex="${on ? 0 : -1}" data-brief-tab="${t.key}"
             class="flex-shrink-0 min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}">
             ${esc(t.label)} <span class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center ${urgent ? 'bg-amber-100 text-amber-900' : on ? 'bg-gray-100 text-gray-700' : 'bg-gray-200 text-gray-700'}">${n}</span>
@@ -221,7 +226,7 @@
     if (b.status === 'cancelled') return `<span class="${base} bg-gray-50 text-gray-500 border-gray-200">Archived</span>`;
     if (b.status === 'approved') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Approved</span>`;
     if (waiting) return `<span class="${base} bg-amber-50 text-amber-800 border-amber-200">Needs you</span>`;
-    return `<span class="${base} bg-gray-50 text-gray-600 border-gray-200">Not started</span>`;
+    return `<span class="${base} bg-gray-50 text-gray-600 border-gray-200">${b.rounds > 0 ? 'Needs more options' : 'Not started'}</span>`;
   }
 
   /** "What happens next" for the page's Needs-you strip. */
@@ -530,7 +535,7 @@
   // ── "It is being made" pop-up (owner 2026-11-05: half see-through, over the page, not a screen of its own) ──
   function makingNotice(b) {
     const what = isFlyer(b) ? 'your flyer' : isVideoBrief(b) ? 'your video' : 'your pictures';
-    showNotice(`${name()} is making ${what}. It will be under “To review” in about a minute, ready to open in the editor.`);
+    showNotice(`${name()} is making ${what}. It will be under “To do” in about a minute, ready to open in the editor.`);
   }
   function showNotice(text) {
     document.getElementById('brief-notice')?.remove();
@@ -778,14 +783,11 @@
     const keptNotes = {};
     host.querySelectorAll('[data-brief-reject-note]').forEach((el) => { keptNotes[el.dataset.briefRejectNote] = el.value; });
 
-    // Opens on "To review" while anything waits there, else at the start of the row (owner, 2026-11-06: it
-    // used to open on an empty "Not started" under "Needs you: 4"). Until the user picks a tab themselves, an
-    // empty tab gives way to "To review" too, since the first paint can come before the briefs have loaded.
-    if (!state.tab || (!state.userTab && !inTab(state.tab).length && inTab('review').length)) {
-      state.tab = inTab('review').length ? 'review' : 'todo';
-    }
+    // Opens on "To do". Until the user picks a tab themselves, an empty tab gives way to it too, since the first
+    // paint can come before the briefs have loaded.
+    if (!state.tab || (!state.userTab && !inTab(state.tab).length && inTab('todo').length)) state.tab = 'todo';
     // The brief being watched is finished: follow it, rather than leaving an empty "Being made".
-    if (state.tab === 'making' && !inTab('making').length && inTab('review').length) state.tab = 'review';
+    if (state.tab === 'making' && !inTab('making').length && inTab('todo').some(hasOptionsWaiting)) state.tab = 'todo';
     const tab = TABS.find((t) => t.key === state.tab);
     const shown = inTab(state.tab);
     host.innerHTML = `
@@ -841,6 +843,7 @@
       brief: b, optionId: first, assistantName: name(), chatAvailable: chatPaneAvailable(),
       options: () => studioOptions(state.briefs.find((x) => x.id === b.id) || b),
       post,
+      onOptionsChanged: () => load(),
       onRefer: (ref) => chatRefer(ref),
       onClose: () => { state.studio = null; closeStudioInstance(); state.tab = tabOf(state.briefs.find((x) => x.id === b.id) || b); load(); },
       onMore: () => { state.tab = tabOf(b); render(); },
@@ -1427,11 +1430,11 @@
       // Eager: the count drives the tab badge, visible from every tab.
       load();
     },
-    /** The Needs-you card's buttons: the Briefs tab on "To review", one brief opened and in view. */
+    /** The Needs-you card's buttons: the Briefs tab on "To do", one brief opened and in view. */
     openReview(briefId) {
       window._activateMainTab?.('briefs');
       if (briefId != null) setCollapsed([briefId], false);
-      state.tab = 'review';
+      state.tab = 'todo';
       state.rendered = true;
       render();
       if (briefId != null) {

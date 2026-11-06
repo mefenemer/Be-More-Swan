@@ -10,12 +10,15 @@ import { FLYER_SOURCE } from '../config/visual-brief-vocab';
 import { designPixels, flyerDesign, imageDesign, renderDesign, renderDesignPreview } from '../lib/design-render';
 import { qrToDataURL } from '../lib/render-libs';
 import { persistBufferToR2 } from '../lib/media-persist';
-import { DESIGN_LIMITS, applyDesignEdit, designForChat, normaliseDesign, type Design, type DesignEditCard, type DesignLayer, type DesignPhotoRef, type HeldLayer, type PictureLayer } from './design-doc';
+import { DESIGN_LIMITS, FIRST_PHOTO_ID, applyDesignEdit, designForChat, normaliseDesign, photoAsPicture, resizeDesign, resizeTarget, type Design, type DesignEditCard, type DesignLayer, type DesignPhotoRef, type HeldLayer, type PictureLayer } from './design-doc';
 import { fetchDesignPictures, fetchFlyerPhoto, type FlyerRenderParams } from './flyer-briefs';
 import { normalizeBrandKit } from './brand-kit';
 import { resolveAssetDisplayUrl } from './social-publish';
 
 type Db = ReturnType<typeof getDb>;
+/** A picture copy of a design at another size, and the library provider it becomes. */
+export const DESIGN_COPY = 'design_copy';
+export const DESIGN_PROVIDER = 'design';
 type OptionRow = typeof visualBriefOptions.$inferSelect;
 
 export type Refused = { ok: false; status: number; error: string };
@@ -59,7 +62,8 @@ const photoUrlOf = (d: Design) => (d.photo
 
 /** Where to show each added picture, those on the shelf too: Undo and "put back" need them. Signed, so never stored. */
 async function pictureUrlsOf(design: Design): Promise<Record<string, string>> {
-    const pictures = [...design.layers, ...(design.removed?.layers ?? [])].filter((l): l is PictureLayer => l.kind === 'picture');
+    const backgrounds = [design.photo, design.removed?.photo].filter((p): p is NonNullable<typeof p> => !!p).map(photoAsPicture);
+    const pictures = [...backgrounds, ...design.layers, ...(design.removed?.layers ?? [])].filter((l): l is PictureLayer => l.kind === 'picture');
     const entries = await Promise.all(pictures.map(async (l) => [l.id, await resolveAssetDisplayUrl({ assetType: 'image', storageKey: l.ref.storageKey, externalUrl: l.ref.externalUrl })] as const));
     return Object.fromEntries(entries.filter((e): e is readonly [string, string] => !!e[1]));
 }
@@ -68,7 +72,8 @@ async function pictureUrlsOf(design: Design): Promise<Record<string, string>> {
  * The QR code and logo this design could have, on the shelf when they are not on the page, so they can be put back even
  * if they came off before the shelf existed. Both come from what the business recorded, never from a browser.
  */
-async function withElements(db: Db, orgId: number, o: OptionRow, design: Design): Promise<Design> {
+async function withElements(db: Db, orgId: number, o: OptionRow, stored: Design): Promise<Design> {
+    const design = stored.photo && !stored.photo.id ? { ...stored, photo: { ...stored.photo, id: FIRST_PHOTO_ID } } : stored;
     const held = [...design.layers, ...(design.removed?.layers ?? [])];
     const has = (kind: DesignLayer['kind']) => held.some((l) => l.kind === kind);
     const add: HeldLayer[] = [];
@@ -139,10 +144,10 @@ export async function saveDesign(db: Db, args: { orgId: number; optionId: number
         const from = (await openDesign(db, args.orgId, other.id));
         const ref = from.ok ? from.design.photo?.ref : null;
         if (!ref) return { ok: false as const, status: 400, error: 'That option has no picture.' };
-        base = { ...base, photo: { ...(base.photo ?? { x: 0, y: 0, w: 1, h: 0.42, opacity: 1 }), ref } };
+        base = { ...base, photo: { ...(base.photo ?? { x: 0, y: 0, w: 1, h: 0.42, opacity: 1 }), ref, id: `o${other.id}` } };
     }
     const raw = args.design as { photo?: unknown } | null;
-    const incoming = args.usePhotoFromOption && raw ? { ...raw, photo: raw.photo ?? base.photo } : args.design;
+    const incoming = args.usePhotoFromOption && raw ? { ...raw, photo: { ...(raw.photo as object | null ?? base.photo), id: base.photo?.id } } : args.design;
     let design = normaliseDesign(incoming, base);
     let addedId: string | null = null;
     // A new picture from the library, on top of the page: as wide as half of it, in the picture's own shape.
@@ -162,23 +167,53 @@ export async function saveDesign(db: Db, args: { orgId: number; optionId: number
         const { assetId, target } = args.replacePicture;
         const ref = await libraryPicture(db, args.orgId, assetId);
         if ('ok' in ref) return ref;
+        // A new name each time, and the old picture on the shelf, so Undo brings the old one back.
+        const newId = `p${Date.now().toString(36)}`;
+        const shelved = (l: HeldLayer) => ({ layers: [...(design.removed?.layers ?? []), l].slice(-DESIGN_LIMITS.shelf), photo: design.removed?.photo ?? null });
         if (target === 'photo' && design.photo) {
             const { crop: _crop, ...photo } = design.photo;
-            design = { ...design, photo: { ...photo, ref } };
+            design = { ...design, photo: { ...photo, ref, id: newId }, removed: shelved(photoAsPicture(design.photo)) };
         } else {
             const at = design.layers.find((l) => l.id === target);
             if (!at || at.kind !== 'picture') return { ok: false as const, status: 400, error: 'That picture is not on this design any more.' };
-            design = { ...design, layers: design.layers.map((l) => {
-                if (l.id !== target || l.kind !== 'picture') return l;
-                const { crop: _crop, ...picture } = l;
-                return { ...picture, ref };
-            }) };
+            const { crop: _crop, ...picture } = at;
+            design = { ...design, layers: design.layers.map((l) => (l === at ? { ...picture, ref, id: newId } : l)), removed: shelved(at) };
         }
+        addedId = newId;
     }
     const next: Record<string, unknown> = { ...params(o), design };
     if (args.finish) next.previewKey = await redrawPreview(args.orgId, o, design);
     await db.update(visualBriefOptions).set({ renderParams: next }).where(eq(visualBriefOptions.id, o.id));
     return { ok: true as const, design, photoUrl: await photoUrlOf(design), pictureUrls: await pictureUrlsOf(design), addedId };
+}
+
+/**
+ * A copy of the design at another size, as a new option on the same brief, so the original stays as it is. A flyer page
+ * can be any paper size or a picture's shape; a picture has no words or print details to make a flyer's PDFs from, so it
+ * can only become another picture's shape.
+ */
+export async function copyDesignAtSize(db: Db, args: { orgId: number; optionId: number; design?: unknown; size: string }) {
+    const size = resizeTarget(args.size);
+    if (!size) return { ok: false as const, status: 400, error: 'That size is not one of the choices.' };
+    const saved = args.design === undefined ? await openDesign(db, args.orgId, args.optionId) : await saveDesign(db, { orgId: args.orgId, optionId: args.optionId, design: args.design });
+    if (!saved.ok) return saved;
+    const opened = await openDesign(db, args.orgId, args.optionId);
+    if (!opened.ok) return opened;
+    const o = opened.option;
+    const isFlyer = o.source === FLYER_SOURCE && params(o).kind === 'flyer';
+    if (size.kind === 'flyer' && !isFlyer) return { ok: false as const, status: 400, error: 'Only a flyer can be copied to a paper size. Choose a picture shape for this one.' };
+    const design = resizeDesign(opened.design, size);
+    const previewKey = await redrawPreview(args.orgId, o, design);
+    const px = designPixels(design, 96, 1600);
+    const keepsFlyer = size.kind === 'flyer';
+    const [row] = await db.insert(visualBriefOptions).values({
+        organisationId: args.orgId, briefId: o.briefId, round: o.round, source: keepsFlyer ? FLYER_SOURCE : 'brand_card', mimeType: 'image/png',
+        storageKey: previewKey, width: px.width, height: px.height, prompt: size.label,
+        // The picture copy's source is 'brand_card' only because the column's list of sources allows no other drawn
+        // picture. DESIGN_COPY keeps it out of the branded-card editor once it is in the library (visual-briefs.ts).
+        renderParams: keepsFlyer ? { ...params(o), paperSize: size.paperSize, design, previewKey } : { kind: DESIGN_COPY, design, previewKey },
+    }).returning({ id: visualBriefOptions.id });
+    return { ok: true as const, optionId: row.id };
 }
 
 /** A change from a chat card: the same store, with its own rebuilt change. */
@@ -187,9 +222,18 @@ export async function applyDesignCard(db: Db, args: { orgId: number; card: Desig
     if (!opened.ok) return opened;
     if (opened.option.briefId !== args.card.briefId) return { ok: false as const, status: 400, error: 'That option is on another brief.' };
     const { design, applied } = applyDesignEdit(opened.design, args.card, { fromChat: true });
+    // Only a copy was asked for: this design stays exactly as it is.
+    if (!applied && args.card.resizeCopy) {
+        const copy = await copyDesignAtSize(db, { orgId: args.orgId, optionId: args.card.optionId, size: args.card.resizeCopy });
+        return copy.ok ? { ok: true as const, design: opened.design, photoUrl: opened.photoUrl, pictureUrls: opened.pictureUrls } : copy;
+    }
     if (!applied) return { ok: false as const, status: 409, error: 'Nothing changed: those parts are not on this design any more, or they are your contact details or offer, which only you can reword in the editor.' };
     const key = await redrawPreview(args.orgId, opened.option, design);
     await db.update(visualBriefOptions).set({ renderParams: { ...params(opened.option), design, previewKey: key } }).where(eq(visualBriefOptions.id, opened.option.id));
+    if (args.card.resizeCopy) {
+        const copy = await copyDesignAtSize(db, { orgId: args.orgId, optionId: args.card.optionId, size: args.card.resizeCopy });
+        if (!copy.ok) return copy;
+    }
     return { ok: true as const, design, photoUrl: await photoUrlOf(design), pictureUrls: await pictureUrlsOf(design) };
 }
 
@@ -197,7 +241,7 @@ export async function applyDesignCard(db: Db, args: { orgId: number; card: Desig
 export async function bakeImageDesign(orgId: number, renderParams: unknown): Promise<{ storageKey: string; externalUrl: null; mimeType: string; width: number; height: number } | null> {
     const design = (renderParams && typeof renderParams === 'object' ? (renderParams as { design?: Design }).design : null) ?? null;
     if (!design || design.kind !== 'image') return null;
-    const untouched = !design.layers.length && design.photo && !design.photo.crop && design.photo.opacity >= 1 && design.photo.x === 0 && design.photo.y === 0 && design.photo.w === 1 && design.photo.h === 1;
+    const untouched = !design.layers.length && design.photo && (design.photo.id ?? FIRST_PHOTO_ID) === FIRST_PHOTO_ID && !design.photo.crop && design.photo.opacity >= 1 && design.photo.x === 0 && design.photo.y === 0 && design.photo.w === 1 && design.photo.h === 1;
     if (untouched) return null;
     const photo = design.photo ? await fetchFlyerPhoto(design.photo.ref) : null;
     if (design.photo && !photo) throw new Error('flyer_photo_unavailable');
