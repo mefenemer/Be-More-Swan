@@ -1710,15 +1710,29 @@
   // "Chat" (2026-11-04): this assistant's chat, docked beside the preview, first because it is the
   // quickest way to build — every change it proposes still waits for the user's click on its card.
   const chatAvailable = () => !!(window.ChatSession && typeof window.ChatSession.mount === 'function' && window.ChatPane);
-  // Since 2026-11-06 (owner) they are the page's own tabs, like every other assistant's, with the chat on
-  // the right on all of them. "Chat" is the Website tab itself: the preview beside the chat.
-  const MAIN_TAB = { chat: 'sitebuilder', setup: 'sitesetup', design: 'sitedesign', pages: 'sitepages', publish: 'sitepublish' };
-  /** The editor changed tab by itself (a button, or set-up finishing): the tab bar follows. */
-  function syncMainTab() {
-    if (state.surface !== 'website') return;
-    const name = MAIN_TAB[state.panel];
-    const tab = document.getElementById(`maintab-btn-${name}`);
-    if (tab && !tab.classList.contains('active-tab')) window._activateMainTab?.(name);
+  // Sub tabs of the Website tab (owner, 2026-11-06), as pills in a grey track like the Briefs tab's, above both columns
+  // so the chat stays on the right on all of them. "Preview" is `chat`: the preview beside the chat.
+  const SUBTABS = [['chat', 'Preview'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];
+  function subtabsHtml() {
+    const d = state.data || {};
+    const fill = (d.placeholders || []).length;
+    const unpublished = !!(d.site && d.site.status === 'published' && d.site.unpublishedChanges);
+    return `<div role="tablist" aria-label="Your website" class="inline-flex max-w-full gap-1 p-1 rounded-xl bg-gray-100 mb-4" style="overflow-x:auto;overflow-y:hidden">${SUBTABS.map(([k, label]) => {
+      const on = state.panel === k;
+      const mark = k === 'pages' && fill
+        ? `<span title="Parts in [square brackets] to fill in" class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center bg-amber-100 text-amber-900">${fill}</span>`
+        : k === 'publish' && unpublished
+          ? '<span title="Changes not live yet" class="ml-1 inline-block w-2 h-2 rounded-full bg-amber-500"></span><span class="sr-only"> (changes not live yet)</span>'
+          : '';
+      return `<button type="button" role="tab" id="site-subtab-${k}" aria-selected="${on}" aria-controls="site-subtab-panel" tabindex="${on ? 0 : -1}" data-site-subtab="${k}"
+        class="site-subtab flex-shrink-0 min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}">${esc(label)}${mark}</button>`;
+    }).join('')}</div>`;
+  }
+  /** Only when something on it changed: redrawing would take the keyboard's place off the tab. */
+  function paintSubtabs(host) {
+    const bar = host.querySelector(':scope > [data-site-subtabs]');
+    const html = subtabsHtml();
+    if (bar && bar.dataset.painted !== html) { bar.innerHTML = html; bar.dataset.painted = html; }
   }
 
   // ── A new site's first steps (UI review 2026-10-21) ─────────────────────────
@@ -2089,9 +2103,9 @@
       return;
     }
     if (!host.querySelector(':scope > [data-site-layout]')) {
-      host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div data-sb-work class="min-w-0"><div data-sb-blocks class="space-y-4"></div><div data-sb-preview-col class="min-w-0"></div></div><div data-sb-pane class="min-w-0"><div data-sb-chat></div></div></div>';
+      host.innerHTML = '<div data-site-subtabs></div><div data-site-layout id="site-subtab-panel" role="tabpanel" class="grid gap-4 lg:grid-cols-2"><div data-sb-work class="min-w-0"><div data-sb-blocks class="space-y-4"></div><div data-sb-preview-col class="min-w-0"></div></div><div data-sb-pane class="min-w-0"><div data-sb-chat></div></div></div>';
     }
-    const layout = host.firstElementChild;
+    const layout = host.querySelector(':scope > [data-site-layout]');
     const blocksEl = layout.querySelector('[data-sb-blocks]');
     const s = state.data.site;
     const fresh = isFresh();
@@ -2107,6 +2121,8 @@
     // During set-up the other tabs are for looking around: their buttons give way to the step's.
     quietPrimary = fresh && !state.editing && state.panel !== 'setup';
     const P = state.panel;
+    paintSubtabs(host);
+    layout.setAttribute('aria-labelledby', `site-subtab-${P}`);
     // A new site's steps are one at a time, so none is hidden behind a click (fold.js).
     const stepOpen = { attrs: { 'data-no-fold': '' } };
     const blocks = P === 'chat' ? [] : P === 'setup' ? (fresh ? [
@@ -2153,7 +2169,6 @@
     paintChat(layout.querySelector('[data-sb-chat]'));
     paintPreview(layout.querySelector('[data-sb-preview-col]'));
     afterPaint(host);
-    syncMainTab();
   }
 
   // The counts on the Enquiries / Orders / Bookings tabs — visible from every tab.
@@ -2171,15 +2186,12 @@
     // The Calendar tab is this assistant's bookings calendar (assistant-calendar.js), so it goes with them.
     if (state.data) { show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings')); show('maintab-btn-calendar', featureOn('bookings')); show('maintab-btn-sitelistings', listingsOn()); }
     set('site-listings-badge', (state.listings && state.listings.pending) || 0);
-    set('site-pages-badge', (d.placeholders || []).length);
     // The card beside the hero: people waiting on an answer.
     if (state.data) {
       const waiting = [['siteenquiries', 'Enquiries', d.newEnquiries || 0], ['siteorders', 'Orders', d.newOrders || 0], ['sitebookings', 'Bookings', (d.booking && d.booking.waiting) || 0]].filter((x) => x[2]);
       window._setNeedsYouItems?.(waiting.map(([tab, label, n]) => ({ id: tab, tab, label, count: n, sub: `${n} new` })));
       window._setNeedsYouCount?.(waiting.reduce((sum, x) => sum + x[2], 0));
     }
-    const dot = document.getElementById('site-publish-dot');
-    if (dot) dot.style.display = d.site && d.site.status === 'published' && d.site.unpublishedChanges ? 'inline-block' : 'none';
     set('site-enquiries-badge', d.newEnquiries || 0);
     set('site-orders-badge', d.newOrders || 0);
     set('site-bookings-badge', (d.booking && d.booking.waiting) || 0);

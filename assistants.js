@@ -1097,8 +1097,11 @@ function _resizeBriefAutoGrow() {
 
 // Activate a main tab by name ('datahub' | 'goals' | 'activity'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
-const _SITE_PANEL_TABS = { sitebuilder: 'chat', sitesetup: 'setup', sitedesign: 'design', sitepages: 'pages', sitepublish: 'publish' };
+// Set up, Design, Pages and Publish are the Website tab's sub tabs (owner, 2026-11-06). An old name opens that sub tab.
+const _SITE_SUBTAB_OF = { sitesetup: 'setup', sitedesign: 'design', sitepages: 'pages', sitepublish: 'publish' };
 window._activateMainTab = function(name) {
+    const siteSubtab = _SITE_SUBTAB_OF[name];
+    if (siteSubtab) name = 'sitebuilder';
     // The retired Conversations tab is now stages 2–4 of a staged Outreach tab. Old links,
     // bookmarks and in-app buttons still say 'conversations'; they land on Outreach instead.
     if (name === 'conversations' && window.AssistantLeadOutreach?.isStaged()) {
@@ -1115,11 +1118,7 @@ window._activateMainTab = function(name) {
         b.setAttribute('aria-selected', on ? 'true' : 'false');
         b.tabIndex = on ? 0 : -1;
     });
-    // The Website Assistant's Set up / Design / Pages / Publish share the Website tab's panel.
-    const sitePanel = _SITE_PANEL_TABS[name];
-    const panelName = sitePanel ? 'sitebuilder' : name;
-    document.querySelectorAll('.main-tab-content').forEach(c => c.classList.toggle('hidden', c.id !== 'maintab-' + panelName));
-    if (sitePanel) document.getElementById('maintab-sitebuilder')?.setAttribute('aria-labelledby', `maintab-btn-${name}`);
+    document.querySelectorAll('.main-tab-content').forEach(c => c.classList.toggle('hidden', c.id !== 'maintab-' + name));
     // Which tabs a role shows is settled by now, so the strips' widths are final.
     _syncTabScrollerFade();
     // Recompute auto-grow heights now panels are visible (scrollHeight was 0 while hidden).
@@ -1143,7 +1142,8 @@ window._activateMainTab = function(name) {
     // Website (Mystery Shopper) likewise — init() already fetched for the badge.
     if (name === 'website') window.AssistantSiteAudit?.activate();
     // Website (Website Assistant) — the editor and preview; init() already fetched the site.
-    if (sitePanel) siteEditor((ed) => ed.activate('website', sitePanel));
+    // No sub tab named: it comes back on the one that was open.
+    if (name === 'sitebuilder') siteEditor((ed) => ed.activate('website', siteSubtab));
     // …and what the site brings in, each its own tab, rendered by the same editor.
     if (name === 'siteenquiries') siteEditor((ed) => ed.activate('enquiries'));
     if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));
@@ -7480,7 +7480,6 @@ function _applyDashboardRegistry(data) {
     // Website tab — Website Assistant only (siteEditorTab: website_assistant).
     const siteEditorTab = cfg.siteEditorTab;
     toggle('maintab-btn-sitebuilder', !!siteEditorTab);
-    ['setup', 'design', 'pages', 'publish'].forEach((p) => toggle(`maintab-btn-site${p}`, !!siteEditorTab));
     // Enquiries always; Orders and Bookings once the editor knows the site's features (it re-toggles).
     toggle('maintab-btn-siteenquiries', !!siteEditorTab);
     toggle('maintab-btn-siteorders', !!siteEditorTab);
@@ -9184,7 +9183,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             }
             // :not(.hidden) — a role-hidden tab (e.g. social's retired Data Hub) must not be
             // reachable by deep-link either, or activating it re-shows a panel the role retired.
-            if (document.querySelector(`.main-tab-btn[data-maintab="${wanted}"]:not(.hidden)`)) {
+            if (_SITE_SUBTAB_OF[wanted] && !document.getElementById('maintab-btn-sitebuilder')?.classList.contains('hidden')) {
+                window._activateMainTab?.(wanted);
+            } else if (document.querySelector(`.main-tab-btn[data-maintab="${wanted}"]:not(.hidden)`)) {
                 window._activateMainTab?.(wanted);
             } else {
                 const target = document.querySelector(`.detail-tab-btn[data-tab="${wanted}"]`);

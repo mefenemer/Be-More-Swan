@@ -53,6 +53,15 @@ check('the AI draft keeps their choice and drafts nothing switched off; the chat
 
 console.log('\nTabs');
 
+check('Set up, Design, Pages and Publish are sub tabs of Website, not the page\'s tabs; an old name opens the sub tab', () => {
+    const html = read('assistant-detail.html');
+    for (const k of ['setup', 'design', 'pages', 'publish']) assert.ok(!html.includes(`maintab-btn-site${k}`), k);
+    assert.ok(!html.includes('site-pages-badge') && !html.includes('site-publish-dot'), 'their marks are on the sub tabs');
+    const a = read('assistants.js');
+    assert.ok(a.includes("const _SITE_SUBTAB_OF = { sitesetup: 'setup', sitedesign: 'design', sitepages: 'pages', sitepublish: 'publish' };"));
+    assert.ok(a.includes("if (siteSubtab) name = 'sitebuilder';") && a.includes("ed.activate('website', siteSubtab)"));
+});
+
 check('Website, Enquiries, Orders, Bookings — each its own tab, in that order, rendered into its own host', () => {
     const html = read('assistant-detail.html');
     const at = (id: string) => html.indexOf(`id="maintab-btn-${id}"`);
@@ -61,7 +70,7 @@ check('Website, Enquiries, Orders, Bookings — each its own tab, in that order,
     const a = read('assistants.js');
     assert.ok(a.includes("if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));"));
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes("const MAIN_TAB = { chat: 'sitebuilder', setup: 'sitesetup', design: 'sitedesign', pages: 'sitepages', publish: 'sitepublish' };") && ed.includes("['templates', templatesCard(false), { keep: true }]"), 'the Website tab keeps only its own panels — Templates its own, or nobody with a site finds it');
+    assert.ok(ed.includes("const SUBTABS = [['chat', 'Preview'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];") && ed.includes("['templates', templatesCard(false), { keep: true }]"), 'the Website tab keeps only its own panels — Templates its own, or nobody with a site finds it');
     assert.ok(ed.includes("show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings'));"));
     assert.ok(read('netlify/functions/sites.ts').includes('&tab=siteorders&payments=return'), 'back from Stripe on the Orders tab');
     assert.ok(read('notifications.js').includes("site_order_received: ['Open orders', 'siteorders']"));
