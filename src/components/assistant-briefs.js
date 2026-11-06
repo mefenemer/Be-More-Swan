@@ -489,8 +489,10 @@
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add your own</button>`}
             <button type="button" data-brief-edit="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">${flyer && progress(b).done ? 'Change this flyer' : 'Edit brief'}</button>
-            <button type="button" data-brief-chat="${b.id}"
-              class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1.5 text-xs font-bold">Talk it through with ${esc(name())}</button>
+            ${/* Flyers and pictures are talked through in the editor, with the chat beside it (owner 2026-11-06: the link
+               duplicated the chat pane). A video has no editor, and with no docked chat this is the only way in. */
+              isVideoBrief(b) || !chatPaneAvailable() ? `<button type="button" data-brief-chat="${b.id}"
+              class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1.5 text-xs font-bold">Talk it through with ${esc(name())}</button>` : ''}
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Archive brief</button>
           </div>
@@ -498,6 +500,25 @@
           ${flyer ? '' : videoOfferHtml(b)}`}` : ''}
         </div>
       </div>`;
+  }
+
+  // ── Full screen (owner 2026-11-06: "like the Website assistant") ──────────────────────
+  // The briefs and the docked chat over the whole page; the editor keeps its own Full screen inside it.
+  function setFull(on) {
+    state.full = !!on;
+    const host = document.getElementById('briefs-host');
+    const box = document.getElementById('briefs-layout') || host;
+    if (box) box.toggleAttribute('data-briefs-full', state.full);
+    if (window.ScrollLock) { if (state.full) window.ScrollLock.lock('briefs-full'); else window.ScrollLock.release('briefs-full'); }
+    if (!document.getElementById('briefs-full-css')) {
+      const css = document.createElement('style');
+      css.id = 'briefs-full-css';
+      css.textContent = `[data-briefs-full] { position: fixed; inset: 0; z-index: 10500; background: #fff; overflow: auto; padding: 12px; }
+        .chatpane-dock[data-briefs-full].is-on > .chatpane-dock-col { top: 12px; height: calc(100vh - 24px); }`;
+      document.head.appendChild(css);
+    }
+    render();
+    document.querySelector('[data-brief-full]')?.focus();
   }
 
   // ── "Your brand style" in the profile's Brand Knowledge section (owner 2026-11-05: not above the briefs) ──
@@ -722,6 +743,7 @@
           ${credits}
           ${''/* Select lives in the editor, where the design is changed (owner 2026-11-05): not beside New brief. */}
           ${chatPaneAvailable() && !chatIsOn() ? `<button type="button" data-brief-chat-toggle aria-pressed="false" title="Show the chat beside your briefs" class="btn-assistant border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">Chat with ${esc(name())}</button>` : ''}
+          <button type="button" data-brief-full aria-pressed="${state.full ? 'true' : 'false'}" title="${state.full ? 'Back to the page (Esc)' : 'Use the whole screen for your briefs and the chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg">${state.full ? 'Exit full screen' : 'Full screen'}</button>
           ${state.form ? '' : `<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
         </div>
       </div>`;
@@ -958,6 +980,7 @@
       }
     }
     if (t('[data-brief-pick]')) { setPicking(!state.picking); return; }
+    if (t('[data-brief-full]')) { setFull(!state.full); return; }
     const toggle = t('[data-brief-toggle]');
     if (toggle && !state.picking) {
       const id = Number(toggle.dataset.briefToggle);
@@ -1171,6 +1194,8 @@
   // The tabs' arrow keys, and Escape to stop selecting.
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.picking) { setPicking(false); return; }
+    // Esc leaves full screen, unless a dialog or the editor (which has its own full screen) is taking it.
+    if (e.key === 'Escape' && state.full && !state.studio && !document.querySelector('[role="dialog"]')) { setFull(false); return; }
     const tab = e.target.closest && e.target.closest('[data-brief-tab]');
     if (!tab || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
     e.preventDefault();
@@ -1394,6 +1419,7 @@
     init({ assistantId, assistantName }) {
       chatDock?.destroy();
       chatDock = null;
+      if (state.full) setFull(false);
       state.assistantId = assistantId;
       state.assistantName = assistantName || null;
       collapsedIds = null;
