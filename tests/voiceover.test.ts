@@ -1,3 +1,4 @@
+import { DEFAULT_TASK_COSTS } from '../src/config/task-weights';
 // tests/voiceover.test.ts
 // Customer voiceovers (Video Producer plan, Phase 2) — src/lib/tts.ts, generate-voiceover.ts,
 // the voiceover credit/task kind, and the post editor panel.
@@ -20,7 +21,7 @@ import {
     synthesizeSpeech, transcribeWords, TtsError,
 } from '../src/lib/tts';
 import { creditCostFor, workKindForMedia, tasksForCredits, VOICEOVER_CREDIT_COST } from '../src/utils/ai-credits';
-import { MEDIA_KINDS, TASK_WEIGHTS, WORK_KIND_LABELS } from '../src/config/task-weights';
+import { MEDIA_KINDS, DEFAULT_TASK_WEIGHTS, WORK_KIND_LABELS } from '../src/config/task-weights';
 import { voiceoverName } from '../netlify/functions/generate-voiceover';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -60,8 +61,8 @@ async function main() {
         assert.strictEqual(VOICEOVER_CREDIT_COST, 1);
         assert.strictEqual(creditCostFor('voiceover'), 1);
         assert.strictEqual(workKindForMedia('voiceover', 1), 'ai_voiceover');
-        assert.strictEqual(tasksForCredits('voiceover', 1), 1);
-        assert.strictEqual(TASK_WEIGHTS.ai_voiceover, 1);
+        assert.strictEqual(tasksForCredits('voiceover', 1, DEFAULT_TASK_COSTS), 1);
+        assert.strictEqual(DEFAULT_TASK_WEIGHTS.ai_voiceover, 1);
         assert.ok(MEDIA_KINDS.includes('ai_voiceover'), 'the autonomous media cap must count voiceovers');
         assert.ok(WORK_KIND_LABELS.ai_voiceover);
     });

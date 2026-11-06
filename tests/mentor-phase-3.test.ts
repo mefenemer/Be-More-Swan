@@ -29,7 +29,7 @@ import { asksAboutCustomers, type MentorSnapshotData } from '../src/utils/mentor
 import { mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields } from '../src/utils/mentor-cards';
 import { MENTOR_DATA_INVENTORY, mentorVisibility } from '../src/config/mentor-data-inventory';
 import { ROLE_MODEL_PATHS, promptLayersFor } from '../src/config/assistant-prompt-layers';
-import { TASK_WEIGHTS } from '../src/config/task-weights';
+import { DEFAULT_TASK_WEIGHTS } from '../src/config/task-weights';
 import { categoryForType } from '../src/utils/notification-prefs';
 import { REVIEWABLE_KINDS } from '../src/utils/mentor-proposals';
 import { changeableSetupFields } from '../src/utils/setup-field';
@@ -267,7 +267,7 @@ test('a Mentor post request carries "Requested by" the Mentor', () => {
 });
 
 test('metered at 1 task, registered with its model, and its prompt shown on Model & rules', () => {
-    assert.strictEqual(TASK_WEIGHTS.mentor_review, 1);
+    assert.strictEqual(DEFAULT_TASK_WEIGHTS.mentor_review, 1);
     assert.ok(ROLE_MODEL_PATHS.business_mentor.some((p) => p.label === 'Weekly review' && p.defaultModel === 'claude-opus-5-5'));
     const keys = promptLayersFor('business_mentor').map((l) => l.key);
     assert.ok(keys.includes('mentor_review') && keys.includes('workspace_mentor_review'));

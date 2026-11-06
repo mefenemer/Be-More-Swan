@@ -30,6 +30,7 @@ import {
 } from '../../src/lib/fal-gateway';
 import { holdCredits, settleHold, tierCanGenerateVideo, VIDEO_CREDIT_COST } from '../../src/utils/ai-credits';
 import { aiVideoTasks } from '../../src/config/task-weights';
+import { getTaskCosts } from '../../src/utils/task-costs';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const PROMPT_MAX = 1000;
@@ -147,7 +148,7 @@ export default withLambda(async (event) => {
     }
 
     // Hold 5 credits; insufficient → 402 with upgrade CTA payload.
-    const hold = await holdCredits(db, { orgId, amount: VIDEO_CREDIT_COST, mediaType: 'video', tasks: aiVideoTasks(billedSecondsFor(durationSeconds)) });
+    const hold = await holdCredits(db, { orgId, amount: VIDEO_CREDIT_COST, mediaType: 'video', tasks: aiVideoTasks(billedSecondsFor(durationSeconds), await getTaskCosts()) });
     if (!hold.ok) {
         return { statusCode: 402, body: JSON.stringify({ error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit }) };
     }

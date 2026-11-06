@@ -19,7 +19,7 @@ import { enforcePromptModeration } from './moderation';
 
 type Db = ReturnType<typeof getDb>;
 
-export const AI_PICTURE_ANSWER = 'An AI-made picture (1 task)';
+export const AI_PICTURE_ANSWER = 'An AI-made picture (uses tasks)';
 export const DESIGN_STARTED_TYPE = 'design_started';
 
 export interface DesignStartedCard { type: typeof DESIGN_STARTED_TYPE; briefId: number; title: string; note: string | null }

@@ -26,6 +26,6 @@ export const TEAM_FEATURES: Readonly<Record<string, readonly TeamFeature[]>> = {
     brand_designer: [{
         since: '2026-11-02',
         name: 'Printable flyers',
-        text: 'makes one- or two-sided printable flyers (A5, A4, A6 postcard or DL leaflet) in the brand colours with the logo: "New flyer" on the Brand Designer\'s Briefs tab, or ask the Brand Designer in chat. It drafts the words (1 task) from Business Information and Products & Services — contact details and the offer only from what the business recorded, never invented — then draws up to three pages (free; an AI photo is 1 task). Approving one saves a print-ready PDF to My Content with Print, a home-printing PDF and a print-shop PDF with 3 mm bleed. It never prints, posts or sends a flyer to a print shop for them. Help Centre: "Making a Printed Flyer".',
+        text: 'makes one- or two-sided printable flyers (A5, A4, A6 postcard or DL leaflet) in the brand colours with the logo: "New flyer" on the Brand Designer\'s Briefs tab, or ask the Brand Designer in chat. It drafts the words (1 task) from Business Information and Products & Services — contact details and the offer only from what the business recorded, never invented — then draws up to three pages (free; an AI photo uses tasks). Approving one saves a print-ready PDF to My Content with Print, a home-printing PDF and a print-shop PDF with 3 mm bleed. It never prints, posts or sends a flyer to a print shop for them. Help Centre: "Making a Printed Flyer".',
     }],
 };

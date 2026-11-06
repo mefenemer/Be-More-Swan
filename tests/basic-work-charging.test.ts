@@ -8,7 +8,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { basicWorkCharged, CHAT_MESSAGES_PER_TASK, TASK_WEIGHTS, WORK_KIND_LABELS } from '../src/config/task-weights';
+import { basicWorkCharged, DEFAULT_TASK_COSTS, DEFAULT_TASK_WEIGHTS, WORK_KIND_LABELS } from '../src/config/task-weights';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(ROOT, p), 'utf8');
@@ -28,9 +28,9 @@ check('the switch is off unless set, and a date only counts from that day', () =
 });
 
 check('the agreed prices', () => {
-    assert.strictEqual(CHAT_MESSAGES_PER_TASK, 10);
+    assert.strictEqual(DEFAULT_TASK_COSTS.chatMessagesPerTask, 10);
     for (const k of ['chat_messages', 'editing_helper', 'design_round', 'finished_design', 'background_removal'] as const) {
-        assert.strictEqual(TASK_WEIGHTS[k], 1, k);
+        assert.strictEqual(DEFAULT_TASK_WEIGHTS[k], 1, k);
         assert.ok(WORK_KIND_LABELS[k], k);
     }
 });

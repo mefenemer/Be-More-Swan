@@ -29,6 +29,7 @@ import { getBalance } from '../../src/utils/ai-credits';
 import { orgHasAssistantFeature } from '../../src/utils/assistant-capabilities';
 import { BRAND_DESIGNER_ROLE_KEY } from '../../src/constants/roles';
 import { briefVocabForClient, normaliseBrief } from '../../src/config/visual-brief-vocab';
+import { getTaskCosts } from '../../src/utils/task-costs';
 import {
     addOwnOptions, cancelBrief, decideOption, defaultSourcesFor, endRound, listBriefs, listLibraryForPicker, startRound,
     sweepStuckRounds, videoUnavailableReason, type BriefRow,
@@ -131,7 +132,7 @@ export default withLambda(async (event) => {
         ]);
         return json(200, {
             briefs,
-            vocab: briefVocabForClient(),
+            vocab: briefVocabForClient(await getTaskCosts()),
             credits: balance ? balance.balance : null,
             // What `credits` counts: 'tasks' under the single task allowance (getBalance), so the tab
             // quotes tasks, not AI credits. 1,000,000 tasks = an uncapped plan (no "left" to show).

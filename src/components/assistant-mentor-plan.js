@@ -1,3 +1,5 @@
+// What work costs comes from Admin → Revenue → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/assistant-mentor-plan.js
  * The Business Mentor's Plan tab — docs/business-mentor-plan.md §4 and §14. The screen twins of what the
@@ -140,7 +142,7 @@
         ${state.data.canApprove
           ? `<button type="button" data-mplan-approve="${kind}" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50" ${busy || !canApprove ? 'disabled' : ''} title="${dirty(kind) ? 'Save your changes first' : ''}">Approve</button>`
           : '<span class="text-xs text-gray-500">Only the owner or an admin can approve.</span>'}
-        <button type="button" data-mplan-draft="${kind}" class="btn-secondary px-3 py-2 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${busy || draftJob(kind, true) ? 'disabled' : ''}>${kind === 'idea_check' ? 'Draft my canvas' : 'Draft it for me'} · 1 task</button>
+        <button type="button" data-mplan-draft="${kind}" class="btn-secondary px-3 py-2 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${busy || draftJob(kind, true) ? 'disabled' : ''}>${kind === 'idea_check' ? 'Draft my canvas' : 'Draft it for me'} · ${window.taskCost('mentor_strategy')}</button>
         ${d.draft ? `<button type="button" data-mplan-changes aria-expanded="${state.showChanges ? 'true' : 'false'}" class="btn-swan-link px-1 py-2 text-xs font-bold">Changes (${(d.diff || []).length})</button>` : ''}
       </div>
       ${openQuestions(kind) ? '<p class="text-[11px] text-amber-800 mt-1">Answer or remove the parts in [square brackets] before approving.</p>' : ''}
@@ -348,10 +350,10 @@
     }).join('');
     return card(`
       <h2 class="text-base font-bold text-gray-900">Look this up</h2>
-      <p class="text-xs text-gray-500 mt-1">${esc(state.assistantName)} searches the web and answers with its sources — about two minutes, 1 task. If it can’t find a source, it says so rather than guess.</p>
+      <p class="text-xs text-gray-500 mt-1">${esc(state.assistantName)} searches the web and answers with its sources — about two minutes, ${window.taskCost('mentor_research')}. If it can’t find a source, it says so rather than guess.</p>
       <label for="mplan-research-q" class="sr-only">Your question</label>
       <textarea id="mplan-research-q" data-mplan-research-q rows="2" maxlength="600" class="mt-2 w-full rounded-lg border border-gray-300 p-2 text-sm" placeholder="e.g. What do dog groomers in Leeds usually charge for a full groom?" ${r.busy || !d.researchReady ? 'disabled' : ''}>${esc(r.question)}</textarea>
-      <button type="button" data-mplan-research-go class="btn-primary mt-2 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${r.busy || !d.researchReady ? 'disabled' : ''}>${r.busy ? 'Starting…' : 'Look this up · 1 task'}</button>
+      <button type="button" data-mplan-research-go class="btn-primary mt-2 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${r.busy || !d.researchReady ? 'disabled' : ''}>${r.busy ? 'Starting…' : `Look this up · ${window.taskCost('mentor_research')}`}</button>
       ${r.error ? `<p class="mt-2 text-xs font-semibold text-red-600" role="alert">${esc(r.error)}</p>` : ''}
       <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-4">Research</h3>
       ${list ? `<ul class="mt-1">${list}</ul>` : `<p class="text-sm text-gray-500 mt-1">${d.researchReady ? 'Nothing looked up yet. Answers from chat are listed here too.' : 'Research isn’t switched on for this workspace yet.'}</p>`}`, 'data-mplan-panel="research"');

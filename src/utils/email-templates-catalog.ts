@@ -610,6 +610,35 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             p('We have updated clause 5.2 of our Terms of Service to match. The new version takes effect on 3 December. If you would rather not continue under it, you can cancel at any time from Billing.') +
             p('Any questions, just reply to this email.') + signoff,
     },
+    {
+        // A change to task costs (Admin → Revenue → Task costs, src/utils/task-cost-changes.ts). The figures
+        // come from the change; the in-app twin shares the key. Transactional: a notice, not marketing.
+        triggerKey: 'task_cost_change',
+        name: 'Notice: task costs are changing',
+        category: 'Compliance',
+        transactional: true,
+        subject: 'Task costs change on {{change.date}}: please review',
+        preheader: 'What changes on {{change.date}}, and how to accept it.',
+        bodyHtml: greet +
+            p('From <strong>{{change.date}}</strong>, some work will use a different number of tasks from your monthly allowance.') +
+            p('<strong>What changes.</strong> {{change.summary}}') +
+            p('<strong>Why.</strong> {{change.reason}}') +
+            p('<strong>What stays the same.</strong> Everything else costs what it does today. Your assistants show what something will use before you make it, and if your tasks run out, work pauses &mdash; you are never charged extra.') +
+            p('<strong>What we need from you.</strong> If you own the workspace, please review and accept this. If you would rather not continue under the new costs, you can cancel at any time from Billing. The new costs apply from {{change.date}}.') +
+            button('Review and accept', 'change.review_url') +
+            p('Any questions, just reply to this email.') + signoff,
+    },
+    {
+        triggerKey: 'task_cost_change_cancelled',
+        name: 'Notice: task cost change withdrawn',
+        category: 'Compliance',
+        transactional: true,
+        subject: 'The task cost change on {{change.date}} is not going ahead',
+        preheader: 'Nothing changes, and there is nothing to accept.',
+        bodyHtml: greet +
+            p('We told you task costs would change on <strong>{{change.date}}</strong>. That is not going ahead, so nothing changes and there is nothing for you to accept.') +
+            p('Any questions, just reply to this email.') + signoff,
+    },
 ];
 
 /** Look up a default by trigger key (used as the send-time fallback). */

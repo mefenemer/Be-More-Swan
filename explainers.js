@@ -1,3 +1,5 @@
+// What work costs comes from Admin → Revenue → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /* ==========================================================================
    BE MORE SWAN — Jargon Explainers
    --------------------------------------------------------------------------
@@ -330,7 +332,7 @@
     'media-source-ai': {
       term: 'AI Generation',
       emoji: '🎨',
-      plain: "Comes out of your monthly task allowance — a generated image counts as 1 task and a generated video as 20. If your tasks run out, your assistant falls back to the free sources and nothing is charged.",
+      get plain() { return `Comes out of your monthly task allowance — a generated image counts as ${window.taskCost('ai_image')} and a generated video as ${window.taskCost('ai_video', '20 tasks')}. If your tasks run out, your assistant falls back to the free sources and nothing is charged.`; },
     },
     // ── Sign-up form builder (src/components/form-builder.js) ──────────────────────────────────
     'form-live': { term: 'Live', emoji: '🟢', plain: "Whether this form is taking sign-ups. Switched off, it shows nothing — on your website and on its own page — so you can build it in peace and switch it on when it's ready." },
@@ -406,7 +408,7 @@
     'campaign-decisions': { term: 'Decisions', emoji: '⚖️', plain: "Plans and changes your Campaign Assistant wants to make, each with the evidence behind it. Approving one briefs your assistants; turning one down asks why, so it doesn't suggest the same thing again." },
     'video-videos': { term: 'Videos', emoji: '🎬', plain: "Short vertical videos for Reels, Shorts and Facebook. Your Video Producer plans each one as a storyboard for free, you check every scene, and nothing is made until you press “Make the video”. A finished video waits in Review for your approval." },
     'brand-briefs': { term: 'Briefs', emoji: '🎨', plain: "A brief says what you need, whether a picture, a printed flyer or a video, and what it is for. Your Brand Designer makes options from it, and nothing is used anywhere until you approve one. The one you approve goes into your library for every assistant to use." },
-    'brand-brief-sources': { term: 'Where options come from', emoji: '🧺', plain: "Stock photos and videos come free from Pexels, and branded cards are drawn free in your own colours, font and logo. AI images use 1 task for a round of four; an AI video uses 20 tasks for one short clip, on the Busywork Buster plan. Untick a source and that brief never uses it." },
+    'brand-brief-sources': { term: 'Where options come from', emoji: '🧺', get plain() { return `Stock photos and videos come free from Pexels, and branded cards are drawn free in your own colours, font and logo. AI images use ${window.taskCost('ai_image')} for a round of four; an AI video uses ${window.taskCost('ai_video', '20 tasks')} for one short clip, on the Busywork Buster plan. Untick a source and that brief never uses it.`; } },
     'brand-brief-own': { term: 'Your own pictures', emoji: '📎', plain: "Put your own picture or video in as an option: upload one, or choose from your library — designs you've imported from Canva are there too. If someone on your team is making it, name them on the brief; nothing is sent to them, so let them know yourself." },
     'brand-guidelines': { term: 'Picture guidelines', emoji: '📐', plain: "Your house rules for pictures: the style, what to include, what never to show and any extra colours. Every AI image your assistants make reads them. Stock photo search can't filter by them, so check stock picks yourself." },
     'brand-art-direction': { term: 'How the designer read your brief', emoji: '🔍', plain: "The words your Brand Designer actually used: the description given to the AI, the stock search, and the words put on the cards. If a round missed, this shows why — then turn options down with a reason and the next round reads it." },

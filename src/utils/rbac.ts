@@ -84,6 +84,7 @@ const PERMISSION_MIN_RANK: Record<string, number> = {
     view_security_abuse:    4,  // cross-workspace billing linkage / account-splitting signals
     manage_session_timeout: 4,  // change the platform-wide inactivity timeout
     sandbox_access:         4,  // switch the portal to the sandbox database
+    manage_task_costs:      4,  // what each piece of work costs customers in tasks, and announcing a change
 };
 
 /**

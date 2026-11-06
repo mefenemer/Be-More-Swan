@@ -9,6 +9,7 @@
        handler can reach for them. Not deferred — a deferred script runs after parsing, and an
        inline block that calls one of these at load time would find nothing there. -->
   <script src="/dialogs.js"></script>
+  <script src="/task-costs.js"></script>
   <!-- Short-lived, write-invalidated GET cache (window.bmsCachedFetch). Early, so its fetch wrapper
        sees every write. -->
   <script src="/src/components/cached-fetch.js"></script>
@@ -401,6 +402,112 @@ async function submitDpaAcceptance(btn) {
         window.showToast?.(e.message || 'Failed to record acceptance. Please try again.', { icon: '⚠️' });
     }
 }
+</script>
+
+<!-- A change to task costs (Admin → Revenue → Task costs): the workspace owner reviews and accepts.
+     Before the change starts it can wait. Once it has started it can't be dismissed: accept, or go to
+     Billing to cancel (terms 20.2, 20.3). Scheduled work keeps running either way.
+     Server: netlify/functions/task-cost-review.ts. -->
+<div id="modal-task-cost-review" class="hidden fixed inset-0 z-[75] items-center justify-center p-4 bg-gray-900/80 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="tcr-title">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8">
+    <h2 id="tcr-title" class="text-xl font-bold text-gray-900">Task costs are changing</h2>
+    <p id="tcr-intro" class="text-sm text-gray-500 mt-1 mb-4"></p>
+    <div id="tcr-list" class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-5 max-h-64 overflow-y-auto text-sm text-gray-700 leading-relaxed space-y-3"></div>
+    <label class="flex items-start gap-3 mb-5 cursor-pointer">
+      <input type="checkbox" id="tcr-agree" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
+      <span class="text-sm text-gray-700">I accept these task costs for this workspace.</span>
+    </label>
+    <button type="button" id="tcr-accept" class="btn-primary w-full py-3 font-bold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed" disabled>Accept</button>
+    <div class="flex items-center justify-center gap-4 mt-3 text-sm">
+      <button type="button" id="tcr-later" class="text-gray-500 underline">Review later</button>
+      <button type="button" id="tcr-billing" class="text-gray-500 underline">Go to Billing to cancel</button>
+    </div>
+    <p class="text-xs text-gray-400 text-center mt-3">Your acceptance is recorded with timestamp and IP address.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  const API = '/.netlify/functions/task-cost-review';
+  const LATER_KEY = 'bms_task_cost_review_later';
+  let state = null;
+  const el = (id) => document.getElementById(id);
+  const open = () => { const m = el('modal-task-cost-review'); m.classList.remove('hidden'); m.classList.add('flex'); };
+  const close = () => { const m = el('modal-task-cost-review'); m.classList.add('hidden'); m.classList.remove('flex'); };
+  const isOpen = () => !el('modal-task-cost-review').classList.contains('hidden');
+  const later = (v) => { try { if (v) sessionStorage.setItem(LATER_KEY, '1'); return sessionStorage.getItem(LATER_KEY) === '1'; } catch (e) { return false; } };
+
+  function paint() {
+    el('tcr-intro').textContent = state.mustAccept
+      ? 'A change has started. Please accept it to carry on, or go to Billing if you would rather cancel. You are never charged extra: when tasks run out, work pauses.'
+      : 'Please review what changes. If you would rather not continue under the new costs, you can cancel from Billing at any time.';
+    el('tcr-list').replaceChildren(...state.changes.map((c) => {
+      const box = document.createElement('div');
+      const when = document.createElement('p'); when.className = 'font-bold text-gray-900';
+      when.textContent = (c.inForce ? 'Since ' : 'From ') + c.date;
+      const what = document.createElement('p'); what.textContent = c.summary;
+      const why = document.createElement('p'); why.className = 'text-gray-500 mt-1'; why.textContent = c.reason;
+      box.append(when, what, why);
+      return box;
+    }));
+    el('tcr-later').style.display = state.mustAccept ? 'none' : '';
+    el('tcr-agree').checked = false;
+    el('tcr-accept').disabled = true;
+    el('tcr-accept').textContent = 'Accept';
+  }
+
+  async function read() {
+    const res = await fetch(API);
+    if (!res.ok) return null;
+    return res.json();
+  }
+
+  async function check(forced) {
+    let d = null;
+    try { d = await read(); } catch (e) { return; /* never block the workspace on this */ }
+    if (!d) return;
+    state = d;
+    if (!d.canAccept) {
+      if (forced) window.showToast?.('Your workspace owner reviews and accepts this change. Nothing for you to do.', { icon: 'ℹ️' });
+      return;
+    }
+    paint();
+    if (forced || d.mustAccept || !later()) open();
+    if (d.mustAccept && !check.timer) {
+      // It can't be dismissed, except to reach Billing: come back if they move on from there.
+      check.timer = setInterval(() => {
+        if (state && state.mustAccept && !isOpen() && window._currentViewKey !== 'billing') open();
+      }, 5000);
+    }
+  }
+
+  window.openTaskCostReview = () => check(true);
+
+  document.addEventListener('DOMContentLoaded', () => {
+    el('tcr-agree').addEventListener('change', (e) => { el('tcr-accept').disabled = !e.target.checked; });
+    el('tcr-later').addEventListener('click', () => { later(true); close(); });
+    el('tcr-billing').addEventListener('click', () => { close(); window.loadView?.('billing'); });
+    el('tcr-accept').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Recording acceptance…';
+      try {
+        const res = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: state.changes.map((c) => c.id) }) });
+        if (!res.ok) throw new Error('Failed');
+        state = { changes: [], mustAccept: false, canAccept: false };
+        clearInterval(check.timer); check.timer = null;
+        close();
+        window.showToast?.('Thanks. Your acceptance is recorded.', { icon: '✅' });
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Accept';
+        window.showToast?.('Failed to record acceptance. Please try again.', { icon: '⚠️' });
+      }
+    });
+    const forced = new URLSearchParams(location.search).get('review') === 'task-costs';
+    check(forced);
+  });
+})();
 </script>
 
 <!-- US-GOV-1.2.1: ToS re-acceptance modal — shown when ToS version is outdated -->
@@ -22577,7 +22684,7 @@ async function gpAiGenerateVideo() {
         });
         const d = await res.json().catch(() => ({}));
         if (res.status === 403 && d.error === 'video_requires_upgrade') { gpAiMediaStatus(d.message || 'AI video is available on the Busywork Buster and Digital Employee plans.', 'error'); gpAiMediaBusy(false); return; }
-        if (res.status === 402) { gpAiMediaStatus(_gpCap && _gpCap.unifiedTaskMetering ? "An AI video uses 20 tasks and you don't have enough left this month — they reset on the 1st, or upgrade for more." : "You're out of video credits — upgrade to generate more.", 'error'); gpAiMediaBusy(false); return; }
+        if (res.status === 402) { gpAiMediaStatus(_gpCap && _gpCap.unifiedTaskMetering ? `An AI video uses ${window.taskCost('ai_video', '20 tasks')} and you don't have enough left this month — they reset on the 1st, or upgrade for more.` : "You're out of video credits — upgrade to generate more.", 'error'); gpAiMediaBusy(false); return; }
         if (res.status === 422) { gpAiMediaStatus(d.error || 'That description was flagged. Try different wording.', 'error'); gpAiMediaBusy(false); return; }
         if (!res.ok || !d.jobId) { gpAiMediaStatus(d.error || d.message || 'Could not start video generation.', 'error'); gpAiMediaBusy(false); return; }
         gpAiPollVideo(d.jobId);

@@ -1189,6 +1189,26 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        // A change to task costs (Admin → Revenue → Task costs). Each change has its own `type`
+        // (task_cost_change_<id>), the once-each mark, so this one template serves all of them.
+        templateKey: 'task_cost_change',
+        name: 'Task costs are changing',
+        category: 'Billing',
+        type: 'task_cost_change',
+        title: 'Task costs change on {{change.date}}: please review',
+        message: 'From {{change.date}}: {{change.summary}} {{change.reason}} The workspace owner is asked to review and accept this in the workspace. Your assistants always show what something will use first, and you are never charged extra. If you would rather not continue, you can cancel from Billing.',
+        variables: [],
+    },
+    {
+        templateKey: 'task_cost_change_cancelled',
+        name: 'Task cost change withdrawn',
+        category: 'Billing',
+        type: 'task_cost_change_cancelled',
+        title: 'The task cost change on {{change.date}} is not going ahead',
+        message: 'We told you task costs would change on {{change.date}}. That is not going ahead, so nothing changes and there is nothing to accept.',
+        variables: [],
+    },
+    {
         templateKey: 'social_disconnected',
         name: 'Connection disconnected',
         category: 'Connections',

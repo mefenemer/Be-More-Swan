@@ -5,8 +5,8 @@ AI media credits and X posting credits are retired.
 
 ## The rules
 
-- **A task is one finished piece of work.** Weights live in `src/config/task-weights.ts`, the
-  single source of truth:
+- **A task is one finished piece of work.** Costs live in the database and a super admin sets them
+  in Admin → Revenue → Task costs (see "Changing a cost" below). These are the starting costs:
 
   | Work | Tasks |
   |---|---|
@@ -32,7 +32,10 @@ Chat, helpers, free Brand Designer rounds and finished designs start costing tas
 
 | Piece | Where |
 |---|---|
-| Weights, labels | `src/config/task-weights.ts` |
+| Kinds of work, labels, pure rules, the fallback if the database can't be read | `src/config/task-weights.ts` |
+| The costs today (`getTaskCosts()`, one-minute cache, never throws) | `src/utils/task-costs.ts`, `db/z-task-costs.sql` |
+| Changing a cost: rules, who must accept | `src/utils/task-cost-changes.ts`, `netlify/functions/admin-task-costs.ts`, `netlify/functions/task-cost-review.ts` |
+| Costs on the page | `netlify/functions/task-costs.ts`, `task-costs.js` (`data-task-cost`, `window.taskCost`) |
 | Capacity check, recording work, bonus grants | `src/utils/work-metering.ts`: `hasTaskCapacity(db, org, units)`, `recordCompletedWork(db, org, kind, { ref, assistantId })`, `getTaskUsage`, `grantBonusTasks` |
 | Chat and helper metering | `src/utils/task-credit.ts` `meterInteraction(db, org, 'chat' \| 'helpers')`: with the flag off it is still `consumeTaskCredit` |
 | Media | `src/utils/ai-credits.ts`: `holdCredits` / `holdAutonomousCredits` / `settleHold` keep their signatures. With the flag on, a hold is a capacity check and a successful settle records the work (`tasksForCredits`: image ×1, video and music ×4) |
@@ -43,6 +46,26 @@ Chat, helpers, free Brand Designer rounds and finished designs start costing tas
 Media jobs still running (`media_generation_jobs` queued or processing in the last 2 hours) are
 reserved against capacity, so parallel video requests can't overshoot. A charge that lands after
 the cap is still recorded. That keeps the count honest, and every later request is refused.
+
+## Changing a cost
+
+Nothing is decided in code. A code path that charges or quotes a cost calls `getTaskCosts()`.
+
+1. A super admin enters new values in Admin → Revenue → Task costs, with a start date and a reason. This
+   is a draft. It changes nothing and tells nobody.
+2. They read the notice as customers will, can send a test to themselves, and announce it by typing the
+   number of people it goes to. Everyone on a running plan gets an in-app notice and an email, once each.
+3. The new cost starts by itself on its date, for everyone. Pricing, the FAQ, the app and chat follow.
+4. The workspace owner reviews and accepts, once for the workspace. Before the date the prompt can wait.
+   After it, the prompt can't be dismissed: accept, or go to Billing to cancel (terms 20.2, 20.3).
+   Scheduled work keeps running either way. A workspace created after the notice isn't asked.
+
+A rise needs at least 30 days' notice (terms 5.2); a reduction can start the next day. One change can be in
+the works at a time. An announced change can be cancelled before its date, which tells everyone who had
+the notice. A cost nobody is charged yet (see `costInUse`) is saved directly, with no notice.
+
+**Not automatic:** the figures in terms clause 5.2 and the "What Counts as a Task" help article. The admin
+page reminds you. The per-second and basic-work env switches still decide whether those costs apply at all.
 
 ## Rollout
 

@@ -1,3 +1,5 @@
+// What work costs comes from Admin → Revenue → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/assistant-site-audit.js
  * The Mystery Shopper's Website tab — docs/mystery-shopper-plan.md §4.
@@ -207,7 +209,7 @@
           <button type="submit" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">${audit ? 'Save settings' : 'Save and check my site'}</button>
           ${audit ? '<button type="button" data-sa-settings-close class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">Cancel</button>' : ''}
         </div>
-        ${audit ? '' : '<p class="text-xs text-gray-500">Saving starts your first check straight away. It uses 1 task from your monthly allowance.</p>'}
+        ${audit ? '' : '<p class="text-xs text-gray-500">Saving starts your first check straight away. It uses ' + window.taskCost('site_audit') + ' from your monthly allowance.</p>'}
       </form>`;
   }
 
@@ -431,7 +433,7 @@
     return `${verdict}
       ${asked && helper ? `<p class="text-xs font-semibold text-green-700 mt-3">You've asked ${esc(helper.name)} to make this change. When you publish it, ${esc(state.assistantName || 'your Mystery Shopper')} checks again.</p>` : ''}
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        <button type="button" data-sa-check-item="${esc(id)}" data-kind="${kind}" ${running ? 'disabled' : ''} title="A check that re-scores uses 1 task. If nothing on your site or your competitors' sites has changed, it's free." class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${v ? 'Check again' : 'Check if this is done'}</button>
+        <button type="button" data-sa-check-item="${esc(id)}" data-kind="${kind}" ${running ? 'disabled' : ''} title="A check that re-scores uses ${window.taskCost('site_audit')}. If nothing on your site or your competitors' sites has changed, it's free." class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${v ? 'Check again' : 'Check if this is done'}</button>
         ${helper ? `<button type="button" data-sa-ask-website="${esc(id)}" data-kind="${kind}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Ask ${esc(helper.name)} to make this change</button>` : ''}
       </div>`;
   }
@@ -475,7 +477,7 @@
         <p class="text-sm font-black text-green-700">Target reached — ${esc(audit.currentScore)}/100</p>
         <p class="text-xs text-green-700 mt-1">${esc(state.assistantName || 'Your Mystery Shopper')} keeps checking ${esc(pageName(audit.url))} every week and will tell you if a competitor's change puts it at risk.</p>
         ${next.length ? `
-          <p class="text-xs text-gray-700 mt-3">Ready for the next page? Moving on starts a fresh score for that page (its first check uses 1 task), and this page stops being checked.</p>
+          <p class="text-xs text-gray-700 mt-3">Ready for the next page? Moving on starts a fresh score for that page (its first check uses ${window.taskCost('site_audit')}), and this page stops being checked.</p>
           <div class="flex flex-wrap gap-2 mt-2">${next.map((u) => `<button type="button" data-sa-next-page="${esc(u)}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Work on ${esc(pageName(u))}</button>`).join('')}</div>` : ''}
       </div>`;
   }
@@ -730,7 +732,7 @@
     return `
       ${card(`
         <h3 class="text-sm font-black text-gray-900">Changes you're making</h3>
-        <p class="text-xs text-gray-500 mt-1">The next check looks for the new wording on your site. When it's there, the fix moves to Done; if it's still missing after a week, to Needs attention. Made one? "Check if this is done" looks now, and uses 1 task if the score is worked out again.</p>
+        <p class="text-xs text-gray-500 mt-1">The next check looks for the new wording on your site. When it's there, the fix moves to Done; if it's still missing after a week, to Needs attention. Made one? "Check if this is done" looks now, and uses ${window.taskCost('site_audit')} if the score is worked out again.</p>
         <div class="space-y-3 mt-3">${b.progress.fixes.length ? b.progress.fixes.map(fixCard).join('') : empty('None — say “I’ll make this change” on a fix in To review.')}</div>`)}
       ${b.progress.checks.length ? card(`
         <h3 class="text-sm font-black text-gray-900">Score checks you're working on</h3>
@@ -783,7 +785,7 @@
            costs. While a check runs, the line under the buttons says so. -->
       <div>
         <div class="flex flex-wrap items-center gap-2">
-          <button type="button" data-sa-run ${run ? 'disabled' : ''} title="A check that re-scores uses 1 task. If nothing on your site or your competitors' sites has changed, the score stands and nothing is used." class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Check my site now</button>
+          <button type="button" data-sa-run ${run ? 'disabled' : ''} title="A check that re-scores uses ${window.taskCost('site_audit')}. If nothing on your site or your competitors' sites has changed, the score stands and nothing is used." class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Check my site now</button>
           <button type="button" data-sa-settings-open aria-expanded="${state.settingsOpen}" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">Settings</button>
           ${runs.length ? `<button type="button" data-sa-past-checks aria-expanded="${state.pastOpen}" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">${state.pastOpen ? 'Hide past checks' : 'View past checks'}</button>` : ''}
         </div>
@@ -1054,7 +1056,7 @@
     if (nextPage) {
       const url = nextPage.dataset.saNextPage;
       const ok = typeof window.confirmModal === 'function'
-        ? await window.confirmModal(`${pageName(url)} gets its own score from scratch, starting with a first check now (1 task). ${pageName(state.data.audit.url)} stops being checked — you can switch back in Settings.`, { title: `Work on ${pageName(url)}?`, confirmLabel: 'Start', cancelLabel: 'Not yet' })
+        ? await window.confirmModal(`${pageName(url)} gets its own score from scratch, starting with a first check now (${window.taskCost('site_audit')}). ${pageName(state.data.audit.url)} stops being checked — you can switch back in Settings.`, { title: `Work on ${pageName(url)}?`, confirmLabel: 'Start', cancelLabel: 'Not yet' })
         : true;
       if (!ok) return;
       try {

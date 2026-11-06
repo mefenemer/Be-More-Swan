@@ -13,7 +13,8 @@
 // payload; the client should show its own loading state between send and response.
 // Auth: aura_session + active org via requireTenant (tenant isolation on every read).
 
-import { TASK_WEIGHTS, aiVideoPriceText } from '../../src/config/task-weights';
+import { aiVideoPriceText, type TaskCosts } from '../../src/config/task-weights';
+import { getTaskCosts } from '../../src/utils/task-costs';
 import { sanitizeForModel } from '../../src/utils/text-safe';
 import { postTeamChatReply, teamNoteForChatTurn, teamThreadPromptBlock } from '../../src/utils/team-messages';
 import { SPECIAL_CATEGORY_RULE } from '../../src/constants/special-category-rule';
@@ -123,7 +124,7 @@ import { parseScheduleInstruction } from '../../src/utils/parse-schedule-instruc
 import { attachmentLine, buildAttachmentsBlock, readAttachments, saveAttachments, type AcceptedAttachment } from '../../src/utils/chat-attachments';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { chargeChatMessage } from '../../src/utils/basic-work';
-import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS } from '../../src/config/visual-brief-vocab';
+import { BRIEF_PURPOSES, BRIEF_ASPECT_RATIOS, REJECT_REASONS, SOURCE_SPECS, sourceCosts } from '../../src/config/visual-brief-vocab';
 import { FUNNEL_STAGES, FUNNEL_STAGE_DESCRIPTIONS, stageOutcomes } from '../../src/config/campaign-vocab';
 import { asksForACall, callbackOfferElement } from '../../src/utils/callback-request';
 import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
@@ -244,6 +245,8 @@ interface RouteContext {
     /** This Brand Designer's briefs and the options awaiting a decision, by id — read per turn for
      *  routes with usesBriefsSnapshot. Without it "use the second one" has no option to point at. */
     briefsSnapshot?: string | null;
+    /** What work costs this turn (Admin → Revenue → Task costs). */
+    taskCosts: TaskCosts;
     /** This Video Producer's videos by id — read per turn for routes with usesVideosSnapshot. */
     videosSnapshot?: string | null;
     /** This Mystery Shopper's site, scores and suggested fixes by id — read per turn for routes with
@@ -1685,7 +1688,7 @@ ${freeOnly ? 'They chose FREE sources by default at setup: propose "stock" and "
 
 ${rc.briefsSnapshot ?? 'Your list of briefs could not be read this turn. Do not guess what exists: if the user refers to a brief or an option, ask them to check the "Briefs" tab, and do not emit a briefId or an optionId.'}
 
-WHAT YOU CAN AND CANNOT MAKE. Options come from three places: ${Object.entries(SOURCE_SPECS).map(([k, v]) => `"${k}" (${v.label} — ${v.cost})`).join(', ')}. AI video is ONE 6-second clip per round, only on the Busywork Buster and Digital Employee plans; if the user's plan does not include it, the round says so and skips it. You cannot edit a photo or video they give you.
+WHAT YOU CAN AND CANNOT MAKE. Options come from three places: ${Object.entries(SOURCE_SPECS).map(([k, v]) => `"${k}" (${v.label} — ${sourceCosts(rc.taskCosts)[k as keyof typeof SOURCE_SPECS].cost})`).join(', ')}. AI video is ONE 6-second clip per round, only on the Busywork Buster and Digital Employee plans; if the user's plan does not include it, the round says so and skips it. You cannot edit a photo or video they give you.
 
 THEIR OWN PICTURES. "Add your own" on a brief (Briefs tab) puts the user's own file in as an option: an upload, or anything already in their content library — which is where designs they import from Canva land, so that is how a Canva design joins a brief. You cannot upload or import for them from this chat: tell them where the button is. If someone on their team is making it, set "waitingOn" to who (nothing is sent to that person; the user tells them).
 
@@ -1717,7 +1720,7 @@ PICTURE GUIDELINES. The workspace's guidelines (listed above) are read by EVERY 
 
 PRINTED FLYERS. You make printable flyers too (A5, A4, A6 postcard or DL leaflet, portrait, with a back if they want one, which is added in the editor). Emit a visual_brief_proposal with "purpose": "flyer", a "paperSize", and "flyerContent" with the words: "headline" (max 80 characters), "subheading", up to three short "points", a "callToAction", and a "dateLine" only for a date or opening times the user gave you. NEVER put a phone number, email, street address, web address, QR link or offer in flyerContent — those are filled in from what the business recorded, and the user checks them on the "Edit flyer" form before printing. A flyer's photo comes from "stock" or "ai_image" only (or none, for a words-only flyer). A round draws up to three pages from exactly those words (photo at the top, framed photo, words only) and the pages themselves are free. Words never sit on the photo. Pages use their brand colours; if they describe a look or colours for the flyer, put it in "mood" and the pages follow it. If their brand kit has no real colours, the pages use colours chosen to suit the business, and the round tells them so. To change the look of a flyer not yet approved, put the new "mood" in a visual_brief_edit; for an approved one, a new visual_brief_proposal carrying ALL its words and the new "mood". Approving one makes a print-ready PDF in My Content, which they can print at home or send to a print shop (that file has a 3 mm bleed). You cannot print or post it for them. If the words are too long for the paper, the round says which field to shorten. A flyer with an approved page is finished and cannot be changed in place: to change one, emit a new visual_brief_proposal for a flyer carrying ALL its words from the brief list above with the change made. A flyer with no approved page yet changes with a visual_brief_edit, as above. The approved PDF stays in My Content, and the user asks for pages on the new brief.
 
-MORE OPTIONS. If none fit, say they can press "Ask <your name> for more options" on the brief, or set "remake": true on the review card so the user can start the next round with one click. A round with AI images uses ${SOURCE_SPECS.ai_image.tasks} task from their monthly allowance, and AI video ${SOURCE_SPECS.ai_video.tasks} more; stock photos, stock videos and branded cards use none. Say so before they click.
+MORE OPTIONS. If none fit, say they can press "Ask <your name> for more options" on the brief, or set "remake": true on the review card so the user can start the next round with one click. A round with AI images uses ${sourceCosts(rc.taskCosts).ai_image.tasks} from their monthly allowance of tasks, and AI video ${sourceCosts(rc.taskCosts).ai_video.tasks} more; stock photos, stock videos and branded cards use none. Say so before they click.
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the two shapes below, or null:
 {
@@ -1803,7 +1806,7 @@ ${allow === 'stock_only' ? 'They chose stock footage, photos and their own pictu
 
 ${rc.videosSnapshot ?? 'Your list of videos could not be read this turn. Do not guess what exists: if the user refers to a video, ask them to check the "Videos" tab, and do not emit a projectId.'}
 
-WHAT IT COSTS. Planning a storyboard is free. Making the video uses tasks from their monthly allowance only for AI pictures (${TASK_WEIGHTS.ai_image} each), AI clips (${aiVideoPriceText()}, at most ${MAX_AI_CLIPS} per video) and the voiceover (${TASK_WEIGHTS.ai_voiceover}). Stock footage, stock photos, their own pictures and branded cards use no extra tasks. The exact figure is on "Make the video" before they press it. You cannot make the video from this chat — say where the button is.
+WHAT IT COSTS. Planning a storyboard is free. Making the video uses tasks from their monthly allowance only for AI pictures (${rc.taskCosts.weights.ai_image} each), AI clips (${aiVideoPriceText(rc.taskCosts)}, at most ${MAX_AI_CLIPS} per video) and the voiceover (${rc.taskCosts.weights.ai_voiceover}). Stock footage, stock photos, their own pictures and branded cards use no extra tasks. The exact figure is on "Make the video" before they press it. You cannot make the video from this chat — say where the button is.
 
 WHAT YOU CANNOT DO. You do not watch footage the user gives you and cannot pick the best moments from it. You do not make videos longer than 60 seconds, or for TikTok yet. You never claim a video exists, or is being made, before the "Videos" tab says so. Use only facts from the business information — never invent prices, offers or claims.
 
@@ -3284,6 +3287,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         followUpPlanBlock,
         discussionsBlock,
         campaignsSnapshot,
+        taskCosts: await getTaskCosts(),
         briefsSnapshot,
         siteAuditSnapshot,
         siteSnapshot,
@@ -3511,6 +3515,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             const targetName = shadowRow?.name ?? handoff.targetAssistantName;
             const shadowSystem = buildSystemPrompt(
                 targetRoute.buildRolePrompt({
+                    taskCosts: await getTaskCosts(),
                     assistantName: targetName,
                     jobRole: shadowRow?.jobRole ?? null,
                     baseSystemPrompt: shadowRow?.systemPrompt ?? null,

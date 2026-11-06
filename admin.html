@@ -1265,6 +1265,20 @@
         </div>
       </section>
 
+      <!-- ── Task costs — Admin → Revenue → Task costs (admin-task-costs.ts, src/utils/task-cost-changes.ts) ──
+           What each piece of work costs customers. A change is a draft until announced; announcing
+           broadcasts it and asks workspace owners to accept; it starts by itself on its date. -->
+      <section id="view-task-costs" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="mb-5">
+          <p class="text-sm text-gray-500 max-w-3xl">What each piece of work uses from a customer's monthly task allowance. Set a new cost below: it stays a draft until you announce it. Announcing sends every customer an in-app notice and an email, and asks each workspace owner to accept. The new cost then starts by itself on its date. A cost going up needs at least 30 days' notice (terms 5.2).</p>
+        </div>
+        <div id="tc-status" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
+        <div id="tc-mode" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
+        <div id="tc-open" class="mb-6"></div>
+        <div id="tc-costs" class="mb-6"><p class="text-sm text-gray-400">Loading&hellip;</p></div>
+        <div id="tc-history"></div>
+      </section>
+
       <!-- ── Plan moves — Admin → Revenue → Plan moves (admin-plan-moves.ts, src/utils/plan-moves.ts) ──
            Move customers between plans in bulk. Every move starts at the customer's next renewal; a
            price rise at the first renewal 30+ days away; every customer is emailed, coupon included. -->
@@ -3356,7 +3370,7 @@ const VIEW_LABELS = {
   catalog: 'Assistants', analytics: 'Analytics', 'model-config': 'AI Model Config',
   logs: 'System Logs', 'audit-log': 'Audit Log', 'security-abuse': 'Security & Abuse', cogs: 'COGS Dashboard',
   reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue', disputes: 'Disputes',
-  coupons: 'Coupons', 'plan-moves': 'Plan moves', partners: 'Partners',
+  coupons: 'Coupons', 'plan-moves': 'Plan moves', 'task-costs': 'Task costs', partners: 'Partners',
   'publish-pipeline': 'Publishing Pipeline',
   'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
   gamification: 'Gamification Settings', 'session-timeout': 'Session Timeout', 'reward-audits': 'Reward Audits',
@@ -3423,6 +3437,7 @@ const ADMIN_CATS = {
     { view: 'cogs',           icon: '💰', label: 'COGS Dashboard',        perm: 'view_cogs' },
     { view: 'coupons',        icon: '🏷️', label: 'Coupons',               perm: 'manage_coupons' },
     { view: 'plan-moves',     icon: '🔀', label: 'Plan moves',            perm: 'override_subscription' },
+    { view: 'task-costs',     icon: '🧮', label: 'Task costs',            perm: 'manage_task_costs' },
     { view: 'partners',       icon: '🤝', label: 'Partners',              perm: 'manage_partners' },
   ]},
   assistants: { label: 'Assistants', children: [
@@ -3789,6 +3804,7 @@ function adminNav(view) {
   if (view === 'cogs')            loadCogsDashboard();
   if (view === 'coupons')         loadCoupons();
   if (view === 'plan-moves')      loadPlanMoves();
+  if (view === 'task-costs')      loadTaskCostsAdmin();
   if (view === 'partners')        loadPartners();
   if (view === 'beta-testers')    loadBetaTesters();
   if (view === 'platform-reviews') loadPlatformReviews();
@@ -4408,6 +4424,209 @@ async function runBroadcast(btn, resource, payload) {
     setTimeout(loadBroadcasts, 4000);
   } catch (err) {
     showBcStatus('error', err.message || 'That didn\'t work.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Task costs (what each piece of work costs customers) ─────────────────────
+// admin-task-costs.ts does the checking, as Broadcast does: this page shows the notice as customers
+// will read it, a test send to yourself, and an announce that only fires when you type the number of
+// people it goes to (the server re-checks it).
+const TC_API = '/.netlify/functions/admin-task-costs';
+let tcState = null;
+
+function showTcStatus(kind, msg) {
+  const el = document.getElementById('tc-status');
+  el.textContent = msg;
+  el.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' + (kind === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700');
+  el.style.display = 'block';
+}
+
+async function tcCall(resource, payload) {
+  const res = await fetch(`${TC_API}?resource=${resource}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(d.error || `That didn't work (HTTP ${res.status}).`), { status: res.status });
+  return d;
+}
+
+const tcLongDate = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+const tcItemText = (c, i) => {
+  const row = (tcState.costs || []).find((x) => x.key === i.key);
+  return `${bcEsc(row ? row.label : i.key)}: ${i.oldUnits === null ? '' : `${i.oldUnits} → `}${i.newUnits}`;
+};
+
+async function loadTaskCostsAdmin() {
+  const box = document.getElementById('tc-costs');
+  if (!box) return;
+  box.innerHTML = '<p class="text-sm text-gray-400">Loading&hellip;</p>';
+  try {
+    const res = await fetch(`${TC_API}?resource=state`);
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+    tcState = d;
+  } catch (err) {
+    box.innerHTML = `<p class="text-sm text-rose-600">${bcEsc(err.message || 'Could not load the costs.')}</p>`;
+    return;
+  }
+  const mode = document.getElementById('tc-mode');
+  mode.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' + (tcState.emailsGoToCustomers ? 'bg-amber-50 text-amber-800' : 'bg-sky-50 text-sky-800');
+  mode.textContent = tcState.emailsGoToCustomers
+    ? 'This is the live site: announcing emails every customer, and the new cost applies to them on its date.'
+    : `This is not the live site: in-app notices are written to this database, but no customer is emailed. A test emails ${tcState.you} only.`;
+  mode.style.display = 'block';
+  tcPaintOpen();
+  tcPaintCosts();
+  tcPaintHistory();
+}
+
+function tcPaintCosts() {
+  const announced = (tcState.changes || []).find((c) => c.id === tcState.openChangeId && c.status === 'announced');
+  const draft = (tcState.changes || []).find((c) => c.id === tcState.openChangeId && c.status === 'draft');
+  const draftValue = (key) => { const i = draft && draft.items.find((x) => x.key === key); return i ? i.newUnits : null; };
+  const rows = tcState.costs.map((c) => {
+    const set = draftValue(c.key);
+    const input = `<input type="number" min="${c.min}" max="${c.max}" step="1" value="${set ?? c.value}" data-tc-key="${bcEsc(c.key)}" data-tc-now="${c.value}" aria-label="New value for ${bcEsc(c.label)}" class="w-24 border border-gray-300 rounded-lg px-2 py-1.5 text-sm" ${announced ? 'disabled' : ''}>`;
+    return `<tr class="border-t border-gray-100">
+      <td class="px-4 py-2.5 text-gray-800">${bcEsc(c.label)}</td>
+      <td class="px-4 py-2.5 text-gray-600">${bcEsc(c.text)}</td>
+      <td class="px-4 py-2.5">${input}</td>
+      <td class="px-4 py-2.5">${c.inUse ? '' : `<button type="button" data-tc-unused="${bcEsc(c.key)}" class="btn-secondary px-3 py-1.5 text-xs font-semibold border rounded-lg" ${announced ? 'disabled' : ''}>Save</button> <span class="text-xs text-gray-500">Nobody is charged this yet, so no notice is needed.</span>`}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('tc-costs').innerHTML = `
+    <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-xs font-bold text-gray-500 uppercase tracking-wide"><th class="px-4 py-3">Work</th><th class="px-4 py-3">Costs today</th><th class="px-4 py-3">New value</th><th class="px-4 py-3"></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    ${announced ? `<p class="text-sm text-gray-500 mt-3">A change is already announced. Wait for it to start, or cancel it, before setting another.</p>` : `
+    <div class="bg-white rounded-2xl border border-gray-200 p-5 mt-4 space-y-3">
+      <label class="block text-sm font-semibold text-gray-700">Starts on
+        <input type="date" id="tc-date" value="${bcEsc(draft ? draft.effectiveDate : tcState.earliest.rise)}" min="${bcEsc(tcState.earliest.reduction)}" class="block mt-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal">
+        <span class="block text-xs font-normal text-gray-500 mt-1">A cost going up can start from ${bcEsc(tcLongDate(tcState.earliest.rise))}. A reduction can start from ${bcEsc(tcLongDate(tcState.earliest.reduction))}.</span>
+      </label>
+      <label class="block text-sm font-semibold text-gray-700">Why it's changing (customers read this)
+        <textarea id="tc-reason" rows="2" maxlength="600" class="block w-full mt-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal">${bcEsc(draft ? draft.reason : '')}</textarea>
+      </label>
+      <button type="button" id="tc-save" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">${draft ? 'Update the draft' : 'Save as a draft'}</button>
+      <p class="text-xs text-gray-500">A draft changes nothing and tells nobody.</p>
+    </div>`}`;
+  document.querySelectorAll('[data-tc-unused]').forEach((b) => b.addEventListener('click', () => tcSaveUnused(b)));
+  document.getElementById('tc-save')?.addEventListener('click', tcSaveDraft);
+}
+
+async function tcSaveDraft(e) {
+  const btn = e.currentTarget;
+  const items = {};
+  document.querySelectorAll('[data-tc-key]').forEach((i) => { if (i.value !== i.dataset.tcNow) items[i.dataset.tcKey] = Number(i.value); });
+  btn.disabled = true;
+  try {
+    await tcCall('save', { items, effectiveDate: document.getElementById('tc-date').value, reason: document.getElementById('tc-reason').value });
+    showTcStatus('success', 'Saved as a draft. Read the notice below, then announce it when you are ready.');
+    await loadTaskCostsAdmin();
+  } catch (err) {
+    showTcStatus('error', err.message);
+    btn.disabled = false;
+  }
+}
+
+async function tcSaveUnused(btn) {
+  const key = btn.dataset.tcUnused;
+  const input = document.querySelector(`[data-tc-key="${CSS.escape(key)}"]`);
+  btn.disabled = true;
+  try {
+    await tcCall('set_unused', { key, value: Number(input.value) });
+    showTcStatus('success', 'Saved. Nobody is charged this yet, so no notice went out.');
+    await loadTaskCostsAdmin();
+  } catch (err) {
+    showTcStatus('error', err.message);
+    btn.disabled = false;
+  }
+}
+
+function tcPaintOpen() {
+  const box = document.getElementById('tc-open');
+  const c = (tcState.changes || []).find((x) => x.id === tcState.openChangeId);
+  if (!c) { box.innerHTML = ''; return; }
+  const items = c.items.map((i) => `<li>${tcItemText(c, i)}</li>`).join('');
+  if (c.status === 'draft') {
+    box.innerHTML = `
+      <div class="border border-amber-200 rounded-2xl p-5 bg-white">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+          <div><p class="font-extrabold text-gray-900">Draft: starts ${bcEsc(tcLongDate(c.effectiveDate))}</p><ul class="text-sm text-gray-600 mt-1 list-disc list-inside">${items}</ul></div>
+          <p class="text-sm shrink-0"><strong>${c.waiting}</strong> ${c.waiting === 1 ? 'person' : 'people'} will get this</p>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div><p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">In-app</p>
+            ${c.inApp ? `<div class="bg-gray-50 border border-gray-200 rounded-lg p-3"><p class="text-sm font-bold text-gray-900">${bcEsc(c.inApp.title)}</p><p class="text-sm text-gray-600 mt-1">${bcEsc(c.inApp.message)}</p></div>` : '<p class="text-sm text-rose-600">No in-app template.</p>'}</div>
+          <div><p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Email${c.email ? ': ' + bcEsc(c.email.subject) : ''}</p>
+            ${c.email ? '<iframe id="tc-email" class="w-full h-80 border border-gray-200 rounded-lg bg-white" title="Email preview"></iframe>' : '<p class="text-sm text-rose-600">No email template.</p>'}</div>
+        </div>
+        <p class="text-xs text-gray-500 mt-3">Before you announce: if the "What Counts as a Task" help article or the figures in terms clause 5.2 quote this cost, update them for the same date. Pricing, the FAQ and the app follow by themselves.</p>
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+          <button type="button" id="tc-test" class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Send a test to me</button>
+          <button type="button" id="tc-discard" class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Discard the draft</button>
+          <input type="text" inputmode="numeric" id="tc-confirm" class="w-28 border border-gray-300 rounded-lg px-2 py-2 text-sm" placeholder="Type ${c.waiting}" aria-label="Type the number of people to confirm">
+          <button type="button" id="tc-announce" class="btn-golive px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled>Announce to ${c.waiting} ${c.waiting === 1 ? 'person' : 'people'}</button>
+        </div>
+      </div>`;
+    const frame = document.getElementById('tc-email');
+    if (frame && c.email) frame.srcdoc = c.email.html;
+    document.getElementById('tc-confirm').addEventListener('input', (e) => { document.getElementById('tc-announce').disabled = e.target.value.trim() !== String(c.waiting); });
+    document.getElementById('tc-test').addEventListener('click', (e) => tcRun(e.currentTarget, 'test', { id: c.id }, (d) => `Test sent to you: in-app ${d.inApp ? 'added' : 'not added'}, email ${d.emailed ? 'sent to ' + d.to : 'not sent'}.`));
+    document.getElementById('tc-discard').addEventListener('click', (e) => tcRun(e.currentTarget, 'discard', { id: c.id }, () => 'Draft discarded.'));
+    document.getElementById('tc-announce').addEventListener('click', (e) => tcRun(e.currentTarget, 'announce', { id: c.id, expected: c.waiting }, (d) => d.emailsGoToCustomers ? `Announced. Sending to ${d.waiting} people in the background.` : `Announced on this database. In-app notices are going to ${d.waiting} people; no customer is emailed from here.`));
+    return;
+  }
+  const a = c.acceptance || { workspaces: 0, accepted: 0, waiting: [] };
+  box.innerHTML = `
+    <div class="border border-emerald-200 rounded-2xl p-5 bg-white">
+      <p class="font-extrabold text-gray-900">Announced: starts ${bcEsc(tcLongDate(c.effectiveDate))}</p>
+      <ul class="text-sm text-gray-600 mt-1 list-disc list-inside">${items}</ul>
+      ${tcStatsHtml(c, a)}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${c.waiting ? `<button type="button" id="tc-resend" class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Send to the ${c.waiting} still waiting</button>` : ''}
+        <button type="button" id="tc-cancel" class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Cancel this change</button>
+      </div>
+    </div>`;
+  document.getElementById('tc-resend')?.addEventListener('click', (e) => tcRun(e.currentTarget, 'resend', { id: c.id, expected: c.waiting }, (d) => `Sending to ${d.waiting} people in the background.`));
+  document.getElementById('tc-cancel').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    if (!(await window.confirmModal('The costs stay as they are, and everyone who had the notice is told it is not going ahead.', { title: 'Cancel this change?', confirmLabel: 'Cancel the change', cancelLabel: 'Keep it' }))) return;
+    tcRun(btn, 'cancel', { id: c.id }, (d) => d.noticeError ? `Cancelled, but the notice could not start: ${d.noticeError}` : 'Cancelled. Telling everyone who had the notice.');
+  });
+}
+
+function tcStatsHtml(c, a) {
+  const waitingList = a.waiting.length
+    ? `<details class="mt-2 text-sm"><summary class="cursor-pointer text-gray-600">${a.waiting.length} workspace${a.waiting.length === 1 ? '' : 's'} still to accept</summary><ul class="mt-1 text-gray-600 space-y-0.5">${a.waiting.map((w) => `<li>${bcEsc(w.name || 'Workspace ' + w.id)}${w.ownerEmail ? ' · ' + bcEsc(w.ownerEmail) : ''}</li>`).join('')}</ul></details>`
+    : '';
+  return `<p class="text-sm text-gray-600 mt-2"><strong>${c.sent ?? 0}</strong> people have the notice, <strong>${c.waiting ?? 0}</strong> waiting. <strong>${a.accepted}</strong> of ${a.workspaces} workspaces accepted.</p>${waitingList}`;
+}
+
+function tcPaintHistory() {
+  const past = (tcState.changes || []).filter((c) => c.id !== tcState.openChangeId);
+  document.getElementById('tc-history').innerHTML = past.length ? `
+    <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Past changes</p>
+    <div class="space-y-3">${past.map((c) => `
+      <div class="bg-white rounded-2xl border border-gray-200 p-4 text-sm">
+        <p class="font-bold text-gray-900">${c.status === 'cancelled' ? 'Cancelled: was to start' : 'Started'} ${bcEsc(tcLongDate(c.effectiveDate))}</p>
+        <ul class="text-gray-600 mt-1 list-disc list-inside">${c.items.map((i) => `<li>${tcItemText(c, i)}</li>`).join('')}</ul>
+        ${c.acceptance ? tcStatsHtml(c, c.acceptance) : ''}
+      </div>`).join('')}</div>` : '';
+}
+
+async function tcRun(btn, resource, payload, say) {
+  btn.disabled = true;
+  try {
+    const d = await tcCall(resource, payload);
+    showTcStatus('success', say(d));
+    setTimeout(loadTaskCostsAdmin, resource === 'test' ? 0 : 3000);
+  } catch (err) {
+    showTcStatus('error', err.message);
+    if (err.status === 409) loadTaskCostsAdmin();
   } finally {
     btn.disabled = false;
   }

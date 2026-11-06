@@ -30,7 +30,8 @@ import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { loadOrgProducts, renderProductFacts } from './org-products';
 import { normalizeBrandKit } from './brand-kit';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, type MediaKind } from './ai-credits';
-import { TASK_WEIGHTS, aiVideoTasks } from '../config/task-weights';
+import { aiVideoTasks, type TaskCosts } from '../config/task-weights';
+import { getTaskCosts } from './task-costs';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
 import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, i2vModel } from '../lib/fal-gateway';
@@ -255,13 +256,13 @@ export function scriptOverBudget(storyboard: Storyboard, brief: VideoBrief): { w
 // ── Build ───────────────────────────────────────────────────────────────────────────────────────
 
 /** Tasks a build holds under the single task allowance — the same weights the ledger records. Pure. */
-export function buildTasks(storyboard: Storyboard, brief: VideoBrief): number {
+export function buildTasks(storyboard: Storyboard, brief: VideoBrief, costs: TaskCosts): number {
     let n = 0;
     for (const s of storyboard.scenes) {
-        if (s.source === 'ai_image') n += TASK_WEIGHTS.ai_image;
-        if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)));
+        if (s.source === 'ai_image') n += costs.weights.ai_image;
+        if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)), costs);
     }
-    if (brief.voiceover && scriptOf(storyboard)) n += TASK_WEIGHTS.ai_voiceover;
+    if (brief.voiceover && scriptOf(storyboard)) n += costs.weights.ai_voiceover;
     return n;
 }
 
@@ -442,7 +443,7 @@ async function sourceScene(db: Db, args: {
                 assetType: 'video', mimeType: 'video/mp4', fileSize: stored.fileSize, storageKey: stored.storageKey,
                 durationS: sub.billedSeconds, provider: 'fal', prompt: scene.prompt || context, aspectRatio: '9:16', status: 'pending',
             }).returning({ id: contentAssets.id });
-            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: aiVideoTasks(sub.billedSeconds) };
+            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: aiVideoTasks(sub.billedSeconds, await getTaskCosts()) };
         }
     }
     return null;
@@ -608,7 +609,7 @@ export async function sweepStuckProjects(db: Db, orgId: number, now = new Date()
 export async function holdBuild(db: Db, orgId: number, storyboard: Storyboard, brief: VideoBrief) {
     const credits = estimateCredits(storyboard, brief, BUILD_COSTS);
     if (credits === 0) return { ok: true as const, credits: 0 };
-    const hold = await holdCredits(db, { orgId, amount: credits, tasks: buildTasks(storyboard, brief), mediaType: 'video' });
+    const hold = await holdCredits(db, { orgId, amount: credits, tasks: buildTasks(storyboard, brief, await getTaskCosts()), mediaType: 'video' });
     return hold.ok ? { ok: true as const, credits } : { ok: false as const, credits, balance: hold.balance, unit: hold.unit, cost: hold.cost };
 }
 
@@ -620,7 +621,7 @@ export async function holdBuild(db: Db, orgId: number, storyboard: Storyboard, b
  */
 export async function buildEstimate(orgId: number, storyboard: Storyboard, brief: VideoBrief): Promise<{ estimate: number; unit: 'tasks' | 'credits' }> {
     return await isUnifiedTaskMetering(orgId)
-        ? { estimate: buildTasks(storyboard, brief), unit: 'tasks' }
+        ? { estimate: buildTasks(storyboard, brief, await getTaskCosts()), unit: 'tasks' }
         : { estimate: estimateCredits(storyboard, brief, BUILD_COSTS), unit: 'credits' };
 }
 
@@ -669,11 +670,12 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         building: 'being made', built: 'made — the finished video is in the Review Queue for approval',
         failed: 'stopped', cancelled: 'cancelled', draft: 'not started',
     };
+    const costs = await getTaskCosts();
     return ['YOUR VIDEOS (newest first; use only these ids):', ...rows.map((r) => {
         const sb = r.storyboard as Storyboard | null;
         const brief = r.brief as VideoBrief;
         const scenes = sb ? ` · ${sb.scenes.length} scenes` : '';
-        const n = sb ? (tasks ? buildTasks(sb, brief) : estimateCredits(sb, brief, BUILD_COSTS)) : 0;
+        const n = sb ? (tasks ? buildTasks(sb, brief, costs) : estimateCredits(sb, brief, BUILD_COSTS)) : 0;
         const unit = tasks ? (n === 1 ? 'task' : 'tasks') : (n === 1 ? 'credit' : 'credits');
         const cost = sb && (r.status === 'planned' || r.status === 'failed') ? ` · would use ${n} ${unit} to make` : '';
         const note = r.note ? ` · note: ${r.note.slice(0, 160)}` : '';
