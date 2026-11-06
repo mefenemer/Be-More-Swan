@@ -190,14 +190,17 @@
   const inTab = (key) => state.briefs.filter((b) => tabOf(b) === key);
   function tabsHtml() {
     return `
-      <div role="tablist" aria-label="Briefs by stage" class="flex overflow-x-auto gap-1 border-b border-gray-200 mb-4" data-brief-tabs>
+      ${''/* Pills in a grey track, not underlined tabs (owner, 2026-11-06): the page's own tabs above are
+         underlined, and these filter a list rather than move round the page. overflow-y is hidden inline:
+         overflow-x:auto alone gave the row a stray vertical scrollbar. */}
+      <div role="tablist" aria-label="Briefs by stage" class="inline-flex max-w-full gap-1 p-1 rounded-xl bg-gray-100 mb-4" style="overflow-x:auto;overflow-y:hidden" data-brief-tabs>
         ${TABS.map((t) => {
           const n = inTab(t.key).length;
           const on = state.tab === t.key;
           const urgent = t.key === 'review' && n > 0;
           return `<button type="button" role="tab" id="brief-tab-${t.key}" aria-selected="${on}" aria-controls="brief-tab-panel" tabindex="${on ? 0 : -1}" data-brief-tab="${t.key}"
-            class="flex-shrink-0 min-h-[44px] px-3 py-2 text-sm font-bold whitespace-nowrap border-b-2 -mb-px transition ${on ? 'border-emerald-700 text-gray-900' : 'border-transparent text-gray-600 hover:text-gray-900'}">
-            ${esc(t.label)} <span class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center ${urgent ? 'bg-amber-100 text-amber-900' : 'bg-gray-100 text-gray-700'}">${n}</span>
+            class="flex-shrink-0 min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}">
+            ${esc(t.label)} <span class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center ${urgent ? 'bg-amber-100 text-amber-900' : on ? 'bg-gray-100 text-gray-700' : 'bg-gray-200 text-gray-700'}">${n}</span>
           </button>`;
         }).join('')}
       </div>`;
@@ -704,15 +707,18 @@
 
   function toolbarHtml() {
     // Tasks: 1,000,000 means an uncapped plan, so there is no "left" worth showing.
-    const credits = state.credits == null || (state.unit === 'tasks' && state.credits >= 1000000) ? ''
-      : `<span class="text-xs text-gray-500">${state.unit === 'tasks' ? 'Tasks left this month' : 'AI credits left this month'}: <span class="font-bold">${esc(Number(state.credits).toLocaleString('en-GB'))}</span></span>`;
+    // One header row (owner, 2026-11-06): the title on the left, the buttons on the right, and the long
+    // description gone (the ⓘ beside the title explains Briefs). What is left this month is a small badge,
+    // and not shown at all where the page's own "Tasks this month" bar is already on screen above.
+    const leftText = Number(state.credits).toLocaleString('en-GB');
+    const allowanceShown = !!document.querySelector('.detail-v2 #detail-task-share:not(.hidden)');
+    const creditsLabel = `${state.unit === 'tasks' ? 'Tasks left this month' : 'AI credits left this month'}: ${leftText}`;
+    const credits = state.credits == null || (state.unit === 'tasks' && state.credits >= 1000000) || allowanceShown ? ''
+      : `<span class="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 text-[11px] font-semibold text-gray-600 whitespace-nowrap" title="${esc(creditsLabel)}">${esc(leftText)} ${state.unit === 'tasks' ? 'tasks' : 'credits'} left</span>`;
     return `
-      <div class="flex flex-wrap items-center justify-between gap-3 mb-4" data-brief-toolbar>
-        <div>
-          <h2 class="text-base font-bold text-gray-900"><span data-explain="brand-briefs">Briefs</span></h2>
-          <p class="text-xs text-gray-500">Say what you need, whether a picture, a printed flyer or a video. Approve the option that fits and it goes into your library for every assistant to use.</p>
-        </div>
-        <div class="flex flex-wrap items-center gap-3">
+      <div class="flex items-center justify-between gap-3 mb-3" data-brief-toolbar>
+        <h2 class="text-base font-bold text-gray-900 shrink-0"><span data-explain="brand-briefs">Briefs</span></h2>
+        <div class="flex flex-wrap items-center justify-end gap-2">
           ${credits}
           ${''/* Select lives in the editor, where the design is changed (owner 2026-11-05): not beside New brief. */}
           ${chatPaneAvailable() && !chatIsOn() ? `<button type="button" data-brief-chat-toggle aria-pressed="false" title="Show the chat beside your briefs" class="btn-assistant border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">Chat with ${esc(name())}</button>` : ''}
@@ -759,8 +765,12 @@
     const keptNotes = {};
     host.querySelectorAll('[data-brief-reject-note]').forEach((el) => { keptNotes[el.dataset.briefRejectNote] = el.value; });
 
-    // Always opens at the start of the row (owner, 2026-11-05). The count on "To review" says when something waits.
-    if (!state.tab) state.tab = 'todo';
+    // Opens on "To review" while anything waits there, else at the start of the row (owner, 2026-11-06: it
+    // used to open on an empty "Not started" under "Needs you: 4"). Until the user picks a tab themselves, an
+    // empty tab gives way to "To review" too, since the first paint can come before the briefs have loaded.
+    if (!state.tab || (!state.userTab && !inTab(state.tab).length && inTab('review').length)) {
+      state.tab = inTab('review').length ? 'review' : 'todo';
+    }
     // The brief being watched is finished: follow it, rather than leaving an empty "Being made".
     if (state.tab === 'making' && !inTab('making').length && inTab('review').length) state.tab = 'review';
     const tab = TABS.find((t) => t.key === state.tab);
@@ -965,7 +975,7 @@
     if (toStudio) { openStudio(Number(toStudio.dataset.brief), Number(toStudio.dataset.briefOpenStudio)); return; }
     if (t('[data-brief-studio-back]')) { state.studio = null; render(); return; }
     const tabBtn = t('[data-brief-tab]');
-    if (tabBtn) { openTab(tabBtn.dataset.briefTab, false); return; }
+    if (tabBtn) { state.userTab = true; openTab(tabBtn.dataset.briefTab, false); return; }
     if (t('[data-brief-new]')) { startNewBrief(); return; }
     if (t('[data-brief-form-close]')) { state.form = null; render(); return; }
     if (t('[data-brief-reject-cancel]')) { state.rejecting = null; render(); return; }
@@ -1166,6 +1176,7 @@
     e.preventDefault();
     const at = TABS.findIndex((t) => t.key === tab.dataset.briefTab);
     const next = e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : (at + (e.key === 'ArrowRight' ? 1 : -1) + TABS.length) % TABS.length;
+    state.userTab = true;
     openTab(TABS[next].key, true);
   });
 
@@ -1389,6 +1400,7 @@
       state.rendered = false;
       state.form = null;
       state.tab = null;
+      state.userTab = false;
       state.picking = false;
       state.studio = null;
       closeStudioInstance();
