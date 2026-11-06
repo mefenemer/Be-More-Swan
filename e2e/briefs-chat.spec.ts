@@ -225,15 +225,20 @@ test.describe('Love Cat feedback (2026-11-05)', () => {
         await expect(page.locator('[data-brief-tabs]')).toBeVisible();
     }
 
-    test('tabs run left to right with counts, always open on Not started, and each brief is in one', async ({ page, api, pageErrors }) => {
+    test('tabs run left to right with counts, open on To review while something waits, and each brief is in one', async ({ page, api, pageErrors }) => {
         stubStages(api);
         await open(page);
         const tabs = page.getByRole('tab');
         await expect(tabs).toHaveText([/Not started\s*1/, /Being made\s*1/, /To review\s*1/, /Approved\s*1/, /Archived\s*1/]);
-        // Owner 2026-11-05: "the default tab should be Not Started"; To review's count says when something waits.
-        await expect(page.getByRole('tab', { name: /Not started/ })).toHaveAttribute('aria-selected', 'true');
+        // Owner 2026-11-06 (replacing "always Not started", 2026-11-05): it opened on an empty Not started under
+        // "Needs you: 4", so it now opens on To review whenever something waits there.
+        await expect(page.getByRole('tab', { name: /To review/ })).toHaveAttribute('aria-selected', 'true');
         await expect(page.locator('[data-brief-card]')).toHaveCount(1);
+        await expect(page.locator('[data-brief-card="3"]')).toBeVisible();
+        await page.getByRole('tab', { name: /Not started/ }).click();
         await expect(page.locator('[data-brief-card="1"]')).toBeVisible();
+        // A stage the user picked stays picked.
+        await expect(page.getByRole('tab', { name: /Not started/ })).toHaveAttribute('aria-selected', 'true');
         await page.getByRole('tab', { name: /To review/ }).click();
         await expect(page.locator('[data-brief-card="3"]')).toBeVisible();
         await page.screenshot({ path: 'test-results/brief-tabs.png' });
