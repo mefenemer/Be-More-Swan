@@ -12,7 +12,7 @@ import {
 } from '../src/utils/design-doc';
 import { AI_PICTURE_ANSWER, startableSources, userChoseAiPicture } from '../src/utils/brief-from-chat';
 import { cleanTemplateName, designFromTemplate } from '../src/utils/design-templates';
-import { flyerDesign, imageSize, renderDesignPdfs, renderDesignPreview } from '../src/lib/design-render';
+import { flyerDesign, imageSize, renderDesignPdf, renderDesignPdfs, renderDesignPreview } from '../src/lib/design-render';
 import { normaliseFlyerContent } from '../src/config/flyer-vocab';
 import { normalizeBrandKit } from '../src/utils/brand-kit';
 import { flyerPageStyle } from '../src/lib/flyer';
@@ -575,6 +575,25 @@ check('templates are the workspace\'s own, the SQL matches, and the chat can use
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"useTemplate"'));
     assert.ok(read('src/utils/visual-briefs.ts').includes('SAVED DESIGN TEMPLATES'));
     assert.ok(read('src/components/disruptive-ui-registry.js').includes('ui.useTemplate'));
+});
+
+check('a downloaded PDF: a flyer at its paper size with or without bleed, and a picture in its own shape', async () => {
+    const { PDFDocument } = await import('pdf-lib');
+    const flyer: Design = { v: 1, kind: 'flyer', pageW: 148, pageH: 210, paperSize: 'A5', pageColor: '#f2aa00', photo: null, layers: [], back: { pageColor: '#000000', photo: null, layers: [] } };
+    const open = async (b: Buffer) => (await PDFDocument.load(b)).getPages();
+    const home = await open(await renderDesignPdf({ design: flyer, photo: null, title: 'T', bleedMm: 0 }));
+    assert.strictEqual(home.length, 2, 'both sides');
+    assert.ok(Math.abs(home[0].getWidth() - 148 * 72 / 25.4) < 1 && Math.abs(home[0].getHeight() - 210 * 72 / 25.4) < 1, 'A5');
+    const shop = await open(await renderDesignPdf({ design: flyer, photo: null, title: 'T', bleedMm: 3 }));
+    assert.ok(Math.abs(shop[0].getWidth() - 154 * 72 / 25.4) < 1, 'A5 plus 3 mm each side');
+    const square: Design = { ...flyer, kind: 'image', pageW: 1080, pageH: 1080, paperSize: null, back: undefined };
+    const pic = await open(await renderDesignPdf({ design: square, photo: null, title: 'T', bleedMm: 3 }));
+    assert.strictEqual(pic.length, 1);
+    assert.ok(Math.abs(pic[0].getWidth() - pic[0].getHeight()) < 1, 'square, not stretched to paper');
+    const wide: Design = { ...square, pageW: 1920, pageH: 1080 };
+    const w = (await open(await renderDesignPdf({ design: wide, photo: null, title: 'T', bleedMm: 0 })))[0];
+    assert.ok(Math.abs(w.getWidth() / w.getHeight() - 16 / 9) < 0.01, 'landscape stays landscape');
+    assert.ok(read('netlify/functions/brand-briefs.ts').includes("action === 'download_pdf'"));
 });
 
 check('a see-through download has no page colour; a normal one and the print do', async () => {

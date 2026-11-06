@@ -7,7 +7,7 @@ import { contentAssets, organisations, visualBriefOptions, visualBriefs } from '
 import type { getDb } from '../../db/client';
 import { normaliseFlyerContent, paperSizeOf } from '../config/flyer-vocab';
 import { FLYER_SOURCE } from '../config/visual-brief-vocab';
-import { designPixels, flyerDesign, imageDesign, imageSize, renderDesign, renderDesignDownload, renderDesignPreview } from '../lib/design-render';
+import { designPixels, flyerDesign, imageDesign, imageSize, renderDesign, renderDesignDownload, renderDesignPdf, renderDesignPreview } from '../lib/design-render';
 import { falConfigured, FalServiceError, removeImageBackground } from '../lib/fal-gateway';
 import { qrToDataURL } from '../lib/render-libs';
 import { persistBufferToR2 } from '../lib/media-persist';
@@ -206,6 +206,30 @@ export async function downloadDesignPng(db: Db, args: { orgId: number; optionId:
     const r = await renderDesignDownload(page, photo, await fetchDesignPictures(page), args.seeThrough);
     const { storageKey } = await persistBufferToR2({ orgId: args.orgId, bytes: r.png, contentType: 'image/png', folder: 'briefs' });
     return { ok: true as const, storageKey };
+}
+
+/** The design as a PDF to save: every side of it, whichever is open. Spends nothing and finishes nothing. */
+export async function downloadDesignPdf(db: Db, args: { orgId: number; optionId: number; design: unknown; bleedMm: number; title: string }) {
+    const saved = await saveDesign(db, { orgId: args.orgId, optionId: args.optionId, design: args.design });
+    if (!saved.ok) return saved;
+    const front = saved.design;
+    const photo = front.photo ? await fetchFlyerPhoto(front.photo.ref) : null;
+    if (front.photo && !photo) return { ok: false as const, status: 502, error: 'A picture on this design could not be read just now. Please try again.' };
+    const back = front.back ? sideOf(front, 'back') : null;
+    const backPhoto = back?.photo ? await fetchFlyerPhoto(back.photo.ref) : null;
+    if (back?.photo && !backPhoto) return { ok: false as const, status: 502, error: 'A picture on this design could not be read just now. Please try again.' };
+    try {
+        const pdf = await renderDesignPdf({
+            design: front, photo, pictures: await fetchDesignPictures(front, true),
+            backFiles: back ? { photo: backPhoto, pictures: await fetchDesignPictures(back, true) } : undefined,
+            title: args.title, bleedMm: args.bleedMm,
+        });
+        const { storageKey } = await persistBufferToR2({ orgId: args.orgId, bytes: pdf, contentType: 'application/pdf', folder: 'briefs' });
+        return { ok: true as const, storageKey };
+    } catch (err) {
+        if (err instanceof Error && err.message === 'flyer_photo_unavailable') return { ok: false as const, status: 502, error: 'A picture on this design could not be read just now. Please try again.' };
+        throw err;
+    }
 }
 
 /** Save what the studio sent. `finish` also redraws the preview: leaving the design, not every keystroke. */

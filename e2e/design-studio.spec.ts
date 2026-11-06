@@ -693,6 +693,43 @@ test.describe('wide screen', () => {
         expect(pageErrors).toEqual([]);
     });
 
+    test('Download offers a PDF, and a print-shop one for a flyer only, and sends what is on screen', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        let base: ((route: unknown, body: unknown) => unknown) | null = null;
+        stubBriefs({ set: (_n: string, h: typeof base) => { base = h; } } as unknown as ApiStub);
+        const asked: Array<Record<string, unknown>> = [];
+        api.set('brand-briefs', (route, body) => {
+            const b = (body || {}) as Record<string, unknown>;
+            if (b.action === 'download_pdf') { asked.push(b); return { ok: true, url: b.printShop ? '/e2e-shop.pdf' : '/e2e-home.pdf' }; }
+            if (b.action === 'open_design') return { ok: true, design: store.design, photoUrl: null };
+            return base!(route, body);
+        });
+        await page.route('**/e2e-home.pdf', (r) => r.fulfill({ contentType: 'application/pdf', headers: { 'Content-Disposition': 'attachment; filename="design.pdf"' }, body: Buffer.from('%PDF') }));
+        await page.route('**/e2e-shop.pdf', (r) => r.fulfill({ contentType: 'application/pdf', headers: { 'Content-Disposition': 'attachment; filename="design-print-shop.pdf"' }, body: Buffer.from('%PDF') }));
+        await openStudio(page);
+        const menu = page.locator('[data-ds-download]');
+        let saved = page.waitForEvent('download');
+        await menu.selectOption('pdf');
+        expect((await saved).suggestedFilename()).toBe('design.pdf');
+        await expect(menu).toBeEnabled();
+        saved = page.waitForEvent('download');
+        await menu.selectOption('shop');
+        expect((await saved).suggestedFilename()).toBe('design-print-shop.pdf');
+        expect(asked.map((a) => a.printShop)).toEqual([false, true]);
+        expect(asked[0].title).toBe('Launch party flyer');
+        expect((asked[0].design as { layers: unknown[] }).layers.length).toBe(2);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a picture design offers a PDF but no print-shop one', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        store.design = { ...store.design, kind: 'image', pageW: 1080, pageH: 1080, paperSize: null } as never;
+        await openStudio(page);
+        await expect(page.locator('[data-ds-download] option[value="pdf"]')).toHaveCount(1);
+        await expect(page.locator('[data-ds-download] option[value="shop"]')).toHaveCount(0);
+        expect(pageErrors).toEqual([]);
+    });
+
     test('a removed logo or QR code offers itself back, and comes back', async ({ page, api, pageErrors }) => {
         const store = stubBriefs(api);
         store.design = { ...store.design, removed: { layers: [{ id: 'qr', kind: 'qr', role: 'qr', x: 0.7, y: 0.8, w: 0.2, h: 0.14, src: PICTURE }], photo: null } } as never;

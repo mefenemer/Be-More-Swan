@@ -177,11 +177,10 @@ async function onePdf(opts: { design: Design; photo: FlyerPhoto | null; pictures
 
 async function drawPdfSide(doc: Awaited<ReturnType<PdfLib['PDFDocument']['create']>>, design: Design, photo: FlyerPhoto | null, pictures: DesignPictures | undefined, bleedMm: number): Promise<void> {
     const opts = { photo, pictures, bleedMm };
-    const spec = PAPER_SPECS[(design.paperSize as PaperSize) ?? 'A5'] ?? PAPER_SPECS.A5;
     const px = (mm: number) => Math.round(mm * PRINT_DPI / 25.4);
-    const W = px(spec.widthMm);
-    const H = px(spec.heightMm);
-    const bleed = px(opts.bleedMm);
+    // A picture has no paper: its page is its own shape, and with no trim there is nothing to bleed past.
+    const { width: W, height: H } = designPixels(design, PRINT_DPI, 4096);
+    const bleed = design.kind === 'flyer' ? px(opts.bleedMm) : 0;
     const layered = !opts.photo || pdfCanEmbed(opts.photo.mimeType);
     const words = await renderDesign({ design, photo: opts.photo, pictures: opts.pictures, width: W, height: H, bleedPx: bleed, words: layered });
 
@@ -213,6 +212,11 @@ async function drawPdfSide(doc: Awaited<ReturnType<PdfLib['PDFDocument']['create
         page.setBleedBox(0, 0, pageW, pageH);
         page.setTrimBox(b, b, pageW - b * 2, pageH - b * 2);
     }
+}
+
+/** One PDF to download: both sides of a flyer, with `bleedMm` for a print shop or 0 for printing at home. */
+export function renderDesignPdf(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; backFiles?: DesignSideFiles; title: string; bleedMm: number }): Promise<Buffer> {
+    return onePdf(opts);
 }
 
 export async function renderDesignPdfs(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; backFiles?: DesignSideFiles; title: string; bleedMm: number }): Promise<{ home: Buffer; printShop: Buffer }> {

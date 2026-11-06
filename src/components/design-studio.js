@@ -493,7 +493,7 @@
         ${canPick() ? '<button type="button" class="ds-btn" data-ds-add-picture>+ Add picture</button>' : ''}
         <label class="ds-tool"><span class="sr-only">Add a shape</span><select data-ds-add-shape aria-label="Add a shape"><option value="">+ Add shape</option><option value="rectangle">Rectangle</option><option value="circle">Circle</option><option value="line">Line</option></select></label>
         <label class="ds-tool"><span class="sr-only">Resize a copy</span><select data-ds-resize aria-label="Resize a copy"><option value="">Resize a copy</option>${d.kind === 'flyer' ? '<option value="A4">A4 print</option><option value="A5">A5 print</option><option value="A6">A6 print</option><option value="DL">DL print</option>' : ''}<option value="1:1">Square post</option><option value="4:5">Portrait post</option><option value="9:16">Story</option><option value="16:9">Landscape</option></select></label>
-        <label class="ds-tool"><span class="sr-only">Download</span><select data-ds-download aria-label="Download"><option value="">Download</option><option value="page">PNG</option><option value="clear">PNG, see-through background</option></select></label>
+        <label class="ds-tool"><span class="sr-only">Download</span><select data-ds-download aria-label="Download"><option value="">Download</option><option value="page">PNG</option><option value="clear">PNG, see-through background</option><option value="pdf">PDF</option>${d.kind === 'flyer' ? '<option value="shop">PDF for a print shop (with bleed)</option>' : ''}</select></label>
         <label class="ds-tool"><span class="sr-only">Templates</span><select data-ds-templates aria-label="Templates"><option value="">Templates</option><option value="save">Save this as a template…</option>${(st.templates || []).length ? `<optgroup label="Use a template">${st.templates.map((x) => `<option value="use:${x.id}">${esc(x.name)}</option>`).join('')}</optgroup><optgroup label="Delete a template">${st.templates.map((x) => `<option value="del:${x.id}">${esc(x.name)}</option>`).join('')}</optgroup>` : ''}</select></label>
         ${shelfButtons()}`;
     }
@@ -817,7 +817,7 @@
         templateChoice(t.value);
         t.value = '';
       } else if (t.matches('[data-ds-download]') && t.value) {
-        downloadPng(t.value === 'clear', t);
+        downloadFile(t.value, t);
       } else if (t.matches('[data-ds-add-shape]') && t.value) {
         const shape = t.value;
         const across = ratio();
@@ -1032,13 +1032,16 @@
         btn.textContent = 'Remove background';
       }
     }
-    async function downloadPng(seeThrough, select) {
+    async function downloadFile(choice, select) {
+      const isPdf = choice === 'pdf' || choice === 'shop';
       select.disabled = true;
       clearTimeout(st.saveTimer);
       st.saveTimer = null;
-      showSaved('Getting your PNG ready…');
+      showSaved(`Getting your ${isPdf ? 'PDF' : 'PNG'} ready…`);
       try {
-        const r = await o.post({ action: 'download_png', optionId: st.optionId, design: wire(), ...sideParam(), seeThrough });
+        const r = await o.post(isPdf
+          ? { action: 'download_pdf', optionId: st.optionId, design: wire(), printShop: choice === 'shop', title: o.brief.title }
+          : { action: 'download_png', optionId: st.optionId, design: wire(), ...sideParam(), seeThrough: choice === 'clear' });
         const a = document.createElement('a');
         a.href = r.url;
         a.rel = 'noopener';
@@ -1049,7 +1052,7 @@
         showError('');
       } catch (err) {
         showSaved('');
-        showError(err.message || 'The PNG could not be made. Please try again.');
+        showError(err.message || 'That file could not be made. Please try again.');
       }
       select.disabled = false;
       select.value = '';
