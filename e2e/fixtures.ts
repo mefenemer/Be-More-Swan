@@ -27,6 +27,8 @@ export interface ApiCall { name: string; method: string; url: string; body: unkn
 export class ApiStub {
     private answers = new Map<string, Answer>(Object.entries(DEFAULTS));
     readonly calls: ApiCall[] = [];
+    /** Warm-up GETs to chat-orchestrator (ChatPane.warm), kept out of `calls`. */
+    warmups = 0;
 
     set(name: string, answer: Answer) { this.answers.set(name, answer); }
     called(name: string) { return this.calls.filter((c) => c.name === name); }
@@ -36,6 +38,14 @@ export class ApiStub {
             const req = route.request();
             const url = new URL(req.url());
             const name = url.pathname.split('/').pop() || '';
+            // The chat pane wakes chat-orchestrator with a bodiless GET when it opens (ChatPane.warm,
+            // answered 405 for real). It is not a message, so it is answered and counted apart; in
+            // `calls` it sat first and every `called('chat-orchestrator')[0].body` read null.
+            if (name === 'chat-orchestrator' && req.method() === 'GET') {
+                this.warmups++;
+                await route.fulfill({ status: 405, json: { error: 'Method not allowed' } });
+                return;
+            }
             let body: unknown = null;
             try { body = req.postDataJSON(); } catch { body = req.postData(); }
             this.calls.push({ name, method: req.method(), url: req.url(), body });
