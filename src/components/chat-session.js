@@ -597,6 +597,13 @@
         if (startedUi && startedUi.type === 'design_started') {
           document.dispatchEvent(new CustomEvent('brief:openStudio', { detail: { assistantId, briefId: startedUi.briefId } }));
         }
+        // This reply saved a post or a record (its link says where): the list may be right beside a docked chat.
+        if (startedUi && startedUi.hubLink) {
+          window.detailRqRefresh?.();
+          window._detailRqRefreshColumnCounts?.();
+          window.AssistantDataHub?.refresh?.();
+          document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId } }));
+        }
       } catch (err) {
         console.error('[ChatSession] send failed:', err);
         showError('Connection problem — please check your internet and try again.');

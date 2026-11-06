@@ -64,6 +64,9 @@
  *                //   with hideGoals still gets the tab, with its cards and no goals section.
  *   cfg.resultsTabAfter // → optional tab key (e.g. 'review-queue'); the Results tab is moved to sit
  *                //   straight after that tab instead of its default place before Activity.
+ *   cfg.tabChat // → optional { tabs, placeholder }: the chat panel docked beside these main tabs, one
+ *                //   conversation across them (assistants.js _setupTabChat). A role with its own dock
+ *                //   (Briefs, Videos, Campaigns, Mentor) leaves this out.
  *   cfg.inspoTab // → optional Inspo tab config (assistant-inspo.js); the content roles
  *                //   (social_media_manager, blog_writer) only — { label, description }
  *   cfg.myContentTab // → optional My Content tab config (assistant-my-content.js); the content
@@ -125,6 +128,7 @@
       // landing tab (defaultMainTab) so users open straight into their content pipeline.
       reviewQueue: { kind: 'posts', label: 'Posts' },
       defaultMainTab: 'review-queue',
+      tabChat: { tabs: ['review-queue'], placeholder: 'Ask for a post or a change…' },
       // The old "Content Library" Data Hub tab is retired for social — the Posts pipeline is the
       // single home for every drafted/scheduled/published post, so the separate library tab is hidden.
       hideDataHub: true,
@@ -1057,6 +1061,8 @@
       // should see first. Stated explicitly rather than relying on _activateDefaultMainTab's
       // "first visible tab" fallback, which gave the right answer only by accident of tab order.
       defaultMainTab: 'signals',
+      // Searches, All leads and Outreach: the Lead Generator's working tabs, with one conversation across them.
+      tabChat: { tabs: ['signals', 'datahub', 'review-queue'], placeholder: 'Ask about your leads…' },
       // ⚠️ There is no `memoryPanel` key any more, and re-adding one wires up nothing — the
       // component is deleted. It declared the "Ask your memory" panel that sat above this tab's
       // table (Phase 3 §5.5): an account picker, a question box and an Ask button, answering from

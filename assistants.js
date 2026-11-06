@@ -1099,6 +1099,43 @@ function _resizeBriefAutoGrow() {
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 // Set up, Design, Pages and Publish are the Website tab's sub tabs (owner, 2026-11-06). An old name opens that sub tab.
 const _SITE_SUBTAB_OF = { sitesetup: 'setup', sitedesign: 'design', sitepages: 'pages', sitepublish: 'publish' };
+// The chat panel beside a role's work tabs (registry: cfg.tabChat; owner, 2026-11-06: the Social Media Assistant
+// and the Lead Generator). The tabs are moved into ONE box and that box is docked (ChatPane.dock), so switching
+// between them keeps the same conversation on screen, mid-sentence. No draftTarget: nothing is open here, so a
+// post drafted in this chat is saved as a new post, as in the pop-up chat. On any other tab the panel steps aside
+// and the page's Chat button opens the pop-up. The view is re-injected per load, so nothing here needs undoing.
+let _tabChat = null;
+function _setupTabChat(cfg, data) {
+    _tabChat?.dock.destroy();
+    _tabChat = null;
+    const conf = cfg.tabChat;
+    const panels = (conf?.tabs || []).map((t) => document.getElementById(`maintab-${t}`)).filter(Boolean);
+    if (!panels.length || !window.ChatPane?.available?.()) return;
+    const work = document.createElement('div');
+    work.id = 'tabchat-work';
+    panels[0].parentNode.insertBefore(work, panels[0]);
+    panels.forEach((p) => work.appendChild(p));
+    _tabChat = {
+        tabs: conf.tabs,
+        dock: window.ChatPane.dock(work, {
+            prefix: 'tabchat', storageKey: 'bms-tab-chat-on',
+            pane: () => ({
+                assistantId: data.id, assistantName: data.name, roleKey: data.roleKey,
+                rememberKey: `bms-tab-chat:${data.id}`,
+                placeholder: conf.placeholder,
+                draftTarget: () => null,
+            }),
+        }),
+    };
+    _syncTabChat(document.querySelector('.main-tab-btn.active-tab')?.dataset.maintab);
+}
+function _syncTabChat(name) {
+    if (!_tabChat) return;
+    const here = _tabChat.tabs.includes(name);
+    // Inline: the dock's own CSS sets display:grid, which would beat the hidden attribute.
+    _tabChat.dock.layout.style.display = here ? '' : 'none';
+    if (here && !_tabChat.dock.isOn() && _tabChat.dock.wanted()) _tabChat.dock.setOn(true, false);
+}
 window._activateMainTab = function(name) {
     const siteSubtab = _SITE_SUBTAB_OF[name];
     if (siteSubtab) name = 'sitebuilder';
@@ -1110,6 +1147,7 @@ window._activateMainTab = function(name) {
     }
     // The strip belongs to the landing tab only; re-judged after the tab has switched.
     setTimeout(() => window._renderNeedsYou?.(), 0);
+    _syncTabChat(name);
     document.querySelectorAll('.main-tab-btn').forEach(b => {
         const on = b.dataset.maintab === name;
         b.classList.toggle('active-tab', on);
@@ -7050,6 +7088,7 @@ function _applyDashboardRegistry(data) {
     window._detailNeedsYouSource = cfg.videosTab ? 'videos' : !cfg.hideReviewQueue ? 'review' : cfg.briefsTab ? 'briefs' : cfg.needsYou ? 'module' : null;
     window._detailNeedsYouModule = cfg.needsYou || null;
     _applyCompactHeader(cfg);
+    _setupTabChat(cfg, data);
     window._detailNeedsYouOverride = 0;
     window._detailNeedsYouItems = [];
     window._detailNextUp = null;

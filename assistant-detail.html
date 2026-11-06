@@ -2892,6 +2892,13 @@ window._revokeConnection = async function (connectionId, onSuccess) {
   .stage-pills > [role="tab"][aria-selected="true"] { background: #fff; color: #111827 !important; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
   /* Review full screen: over the top bar (z 50), UNDER the post, blog and email pop-ups (70–90) it opens. */
   #maintab-review-queue[data-rq-full] { position: fixed; inset: 0; z-index: 60; background: #f9fafb; overflow: auto; padding: 16px 20px; }
+  /* A role's docked chat (assistants.js _setupTabChat) stays beside the list in full screen, as on the Briefs tab. */
+  #tabchat-layout.is-on:has(#maintab-review-queue[data-rq-full]) > .chatpane-dock-col { position: fixed; top: 16px; right: 20px; bottom: 16px; height: auto; width: min(380px, calc(100vw - 40px)); z-index: 61; }
+  @media (min-width: 1280px) {
+    #tabchat-layout.is-on #maintab-review-queue[data-rq-full] { padding-right: 424px; }
+    /* Beside the chat, All leads' three buttons (they never shrink) squeezed its description into a column one word wide. */
+    #tabchat-layout.is-on #datahub-toolbar > div:first-child { flex-direction: column; }
+  }
   /* A tab strip wider than the screen fades at the edge that has more, so the tabs past it read as
      "scroll for more" rather than not existing. .is-clipped-* is kept current by assistants.js. */
   .tab-scroller.is-clipped-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent); }
