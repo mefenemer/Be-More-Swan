@@ -1340,6 +1340,21 @@
     }
   });
 
+  // "Choose a picture" on the chat's card: on the design on screen if this brief is open, because that is the one they
+  // mean, and otherwise on the card's option, opened first.
+  document.addEventListener('design:findPicture', (e) => {
+    const d = e.detail || {};
+    const b = state.rendered ? state.briefs.find((x) => x.id === d.briefId) : null;
+    if (!b) return;
+    if (!studioInstance || studioInstance.briefId !== b.id) {
+      const option = b.options.find((o) => o.id === d.optionId && canEdit(o));
+      openStudio(b.id, option ? option.id : null);
+    }
+    if (!state.studio || !studioInstance) return;
+    d.handled = true;
+    studioInstance.findPicture(d.target, d.shows);
+  });
+
   // A brief created, or options decided, from the chat (chat-session.js).
   // The questions finished and the design is being made (brief-from-chat.ts): go there.
   document.addEventListener('brief:openStudio', (e) => {

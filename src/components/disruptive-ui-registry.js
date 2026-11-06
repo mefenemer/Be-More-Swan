@@ -4051,6 +4051,27 @@
   // { type: 'design_edit', briefId, optionId, summary, pageColor?, pageOpacity?, photoOpacity?, photoCrop?, font?, putBack?, shapes?, changes: [...], add: [...] }
   // A change to a design, asked for in chat (src/utils/design-doc.ts). Costs nothing. chat-session.js → brand-briefs.ts.
   function renderDesignEditCard(ui, esc) {
+    // A different picture: the user chooses it in the editor's picture window, so nothing changes on this click.
+    if (ui.findPicture && ui.findPicture.shows && Number.isInteger(Number(ui.optionId))) {
+      const card = document.createElement('div');
+      card.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+      card.innerHTML = `
+        <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change the picture</p>
+        <p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary || `A picture of ${ui.findPicture.shows}`).slice(0, 300))}</p>
+        <p class="text-xs text-gray-600 mt-2">Nothing changes until you choose one.</p>
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+          <button type="button" data-de-find class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Choose a picture</button>
+        </div>
+        <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-de-status></p>`;
+      card.querySelector('[data-de-find]').addEventListener('click', () => {
+        const detail = { briefId: Number(ui.briefId), optionId: Number(ui.optionId), target: ui.findPicture.target, shows: ui.findPicture.shows, handled: false };
+        document.dispatchEvent(new CustomEvent('design:findPicture', { detail }));
+        const status = card.querySelector('[data-de-status]');
+        status.classList.remove('hidden');
+        status.textContent = detail.handled ? 'Choose one in the window. Undo in the editor takes it back.' : 'Open this design in the editor on your Briefs tab, then press this again.';
+      });
+      return card;
+    }
     if (!Number.isInteger(Number(ui.optionId)) || !(Array.isArray(ui.changes) || Array.isArray(ui.shapes) || Array.isArray(ui.putBack) || Array.isArray(ui.group) || Array.isArray(ui.ungroup) || ui.setBackground || ui.detachBackground || ui.saveTemplate || ui.useTemplate || ui.addBack || ui.removeBack || ui.removeBackground || ui.resizeCopy || ui.pageColor || ui.font || ui.pageOpacity !== undefined || ui.photoOpacity !== undefined || ui.photoCrop !== undefined)) return null;
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';

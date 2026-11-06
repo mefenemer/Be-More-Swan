@@ -295,6 +295,12 @@ export interface DesignEditCard {
     addBack?: boolean; removeBack?: boolean;
     /** Take the background out of this picture: "photo", or a picture layer's id. */
     removeBackground?: string;
+    /**
+     * A different picture: the card opens the editor's picture window with `shows` already searched, and the user chooses.
+     * `target` is "photo", a picture layer's id, or "new" for one more. It goes alone on its card, as it happens in the
+     * browser rather than through apply_design_edit, and a chat can never name a file.
+     */
+    findPicture?: { target: string; shows: string };
     /** A copy of the design at another size, as a new option: a paper size for a flyer, or a picture's shape. */
     resizeCopy?: string;
     changes: DesignLayerChange[];
@@ -310,6 +316,13 @@ export function designEditFromUiElement(uiElement: unknown): DesignEditCard | nu
     const optionId = Number(String(ui.optionId ?? '').replace(/^#/, ''));
     if (!Number.isInteger(briefId) || briefId <= 0 || !Number.isInteger(optionId) || optionId <= 0) return null;
     const card: DesignEditCard = { type: DESIGN_EDIT_TYPE, briefId, optionId, summary: typeof ui.summary === 'string' ? ui.summary.trim().slice(0, 300) || null : null, changes: [], add: [] };
+    const find = ui.findPicture && typeof ui.findPicture === 'object' ? ui.findPicture as Record<string, unknown> : null;
+    const shows = find && typeof find.shows === 'string' ? find.shows.trim().slice(0, 120) : '';
+    if (shows) {
+        card.findPicture = { target: cleanId(find!.target, '') || 'photo', shows };
+        if (ui.side === 'back') card.side = 'back';
+        return card;
+    }
     const page = normalizeHex(ui.pageColor);
     if (page) card.pageColor = page;
     if (ui.pageOpacity != null && Number.isFinite(Number(ui.pageOpacity))) card.pageOpacity = num(ui.pageOpacity, 0, 1, 1);

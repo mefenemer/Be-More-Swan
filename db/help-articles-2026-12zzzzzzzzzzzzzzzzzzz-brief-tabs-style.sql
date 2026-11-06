@@ -67,7 +67,7 @@ The editor shows your design on the left and the chat on the right.
 - If you remove your **logo** or **QR code**, a button appears to put it back.
 - **+ Add words** puts a new line of text on the page, **Page colour** changes the background, and its **Transparency** slider fades that colour towards white paper.
 - **Undo** and **Redo** step back and forward. Every change saves itself.
-- **Select**, then click part of the design, to ask your Brand Designer about it in the chat, for example "make this stand out more". It shows you the change on a card, and nothing changes until you press **Change it**. It can move or recolour your contact details and offer, but only you can change their wording.
+- **Select**, then click part of the design, to ask your Brand Designer about it in the chat, for example "make this stand out more". It shows you the change on a card, and nothing changes until you press **Change it**. It can move or recolour your contact details and offer, but only you can change their wording. Ask for a different picture, such as "change the picture to popcorn", and **Choose a picture** on its card opens the picture window with some already found: the one you choose goes on your design.
 - **Full screen** gives you more room. Press Esc to leave it.
 - **Back to brief** saves your work and opens the brief, where you can ask for different designs. A brief has a limited number of rounds, and it tells you when they are used. **Use this design** finishes it and puts it in My Content. For a flyer, that includes the print-ready PDFs.
 

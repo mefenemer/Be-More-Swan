@@ -783,6 +783,60 @@ test.describe('wide screen', () => {
         expect(pageErrors).toEqual([]);
     });
 
+    test('asking the chat for a different picture opens the real window with it found, and the choice replaces the picture', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        store.design = { ...store.design, photo: { ref: { storageKey: 'old' }, id: 'photo0', x: 0, y: 0, w: 1, h: 0.4, opacity: 1 } } as never;
+        api.set('pexels-search', async (_route, body) => {
+            const b = body as { action?: string };
+            return b.action === 'save' ? { assetId: 555 } : { keywords: 'popcorn', candidates: [{ providerAssetId: 'p1', url: PICTURE, title: 'Popcorn', photographer: 'A Photographer' }] };
+        });
+        api.set('chat-orchestrator', { chatSessionId: 3, message: { id: 1, role: 'assistant', content: 'Choose one.', uiElement: {
+            type: 'design_edit', briefId: 12, optionId: 77, summary: 'Change the picture to popcorn.', findPicture: { target: 'photo', shows: 'popcorn' }, changes: [],
+        } } });
+        const real = PAGE.replace(/<script>window\.MediaPicker = [^\n]*<\/script>/, '<script src="/src/components/media-picker.js"></script>');
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: real }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-tab="todo"]').click();
+        await page.locator('[data-brief-open-studio="77"]').click();
+        await expect(layer(page, 'headline')).toBeVisible();
+        const input = page.locator('#briefs-chat-host [data-chat-input]');
+        await input.fill('Change picture to popcorn');
+        await input.press('Enter');
+        await page.getByRole('button', { name: 'Choose a picture' }).click();
+        await expect(page.getByText('Replace this picture', { exact: true })).toBeVisible();
+        expect(api.called('pexels-search')[0].body).toMatchObject({ topic: 'popcorn' });
+        await page.locator('[data-mp-stock-pick="0"]').click();
+        await expect.poll(() => api.called('brand-briefs').map((c) => c.body as Record<string, unknown>).find((b) => b.replacePicture)?.replacePicture).toEqual({ assetId: 555, target: 'photo' });
+        expect(store.applied).toHaveLength(0);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a design with no picture to replace adds the chosen one instead', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        await openStudio(page);
+        await page.evaluate(() => document.dispatchEvent(new CustomEvent('design:findPicture', { detail: { briefId: 12, optionId: 77, target: 'photo', shows: 'popcorn' } })));
+        await expect.poll(() => api.called('brand-briefs').map((c) => c.body as Record<string, unknown>).find((b) => b.addPicture)?.addPicture).toBe(501);
+        expect(await page.evaluate(() => (window as unknown as { __picker: { topic: string; findNow: boolean } }).__picker)).toMatchObject({ topic: 'popcorn', findNow: true });
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('"Choose a picture" opens the design first when the editor is closed', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-tab="todo"]').click();
+        await expect(page.locator('[data-brief-card="12"]')).toBeVisible();
+        const handled = await page.evaluate(() => {
+            const detail = { briefId: 12, optionId: 77, target: 'photo', shows: 'popcorn', handled: false };
+            document.dispatchEvent(new CustomEvent('design:findPicture', { detail }));
+            return detail.handled;
+        });
+        expect(handled).toBe(true);
+        await expect(page.locator('[data-design-studio]')).toBeVisible();
+        await expect.poll(() => api.called('brand-briefs').map((c) => c.body as Record<string, unknown>).find((b) => b.addPicture)?.addPicture).toBe(501);
+        expect(pageErrors).toEqual([]);
+    });
+
     test('"Back to brief" opens a brief that started closed, in view, with its round button', async ({ page, api, pageErrors }) => {
         const store = stubBriefs(api);
         // Reached as the chat reaches it: this brief has never been opened, so its card is folded shut.

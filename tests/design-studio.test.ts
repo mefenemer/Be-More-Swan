@@ -624,4 +624,13 @@ check('Remove background costs 1 task, asked before the provider and charged aft
     assert.ok(read('src/components/disruptive-ui-registry.js').includes('ui.removeBackground'));
 });
 
+check('a card asking for a different picture keeps only that, and never a file', () => {
+    const c = designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, summary: 'Popcorn', findPicture: { target: 'photo', shows: ' popcorn ', storageKey: 'someone-elses' }, pageColor: '#000000', changes: [{ layer: 'headline', color: '#000' }] });
+    assert.deepStrictEqual(c?.findPicture, { target: 'photo', shows: 'popcorn' });
+    assert.strictEqual(c?.pageColor, undefined);
+    assert.strictEqual(c?.changes.length, 0);
+    assert.strictEqual(designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, findPicture: { target: 'photo', shows: '  ' } }), null);
+    assert.strictEqual(designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, findPicture: { target: '../x', shows: 'tea' } })?.findPicture?.target, 'photo');
+});
+
 Promise.all(pending).then(() => console.log(`\n${passed} passed`));

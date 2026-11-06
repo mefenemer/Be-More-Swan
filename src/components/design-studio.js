@@ -1127,9 +1127,28 @@
       });
     }
     /** Every way a picture reaches this workspace: upload, library, stock or AI, each with its own cost and checks. */
-    function pickPicture(onPick, title) {
+    function pickPicture(onPick, title, shows) {
       if (!canPick()) return;
-      window.MediaPicker.open({ title, onPick, topic: o.brief.title, assistantName: o.assistantName });
+      window.MediaPicker.open({ title, onPick, topic: shows || o.brief.title, findNow: !!shows, assistantName: o.assistantName });
+    }
+    /**
+     * The chat's "Choose a picture". The card can only guess which picture is meant when nothing was selected, so a name
+     * that is not on the design falls back to what is selected, then the main picture, then an only picture, then adding one.
+     */
+    function findPictureNow(target, shows) {
+      const isPicture = (id) => (id === 'photo' ? !!st.design.photo : st.design.layers.some((l) => l.id === id && l.kind === 'picture'));
+      const pictures = st.design.layers.filter((l) => l.kind === 'picture');
+      const aim = target === 'new' ? null
+        : isPicture(target) ? target
+          : isPicture(st.selected) ? st.selected
+            : st.design.photo ? 'photo'
+              : pictures.length === 1 ? pictures[0].id : null;
+      if (!aim && pictures.length >= MAX_PICTURES) { showError(`A design can hold ${MAX_PICTURES} added pictures. Remove one to add another.`); return; }
+      pickPicture(
+        (asset) => pictureFromLibrary(aim ? { replacePicture: { assetId: asset.id, target: aim } } : { addPicture: asset.id }),
+        aim ? 'Replace this picture' : 'Add a picture',
+        shows,
+      );
     }
     /** The server adds it, as only the server may name a file, so this also saves what is on screen first. */
     async function pictureFromLibrary(request) {
@@ -1199,6 +1218,9 @@
         paint();
       } catch (err) { showSaved(''); showError(err.message); }
       st.loading = false;
+      const waiting = st.pendingFind;
+      st.pendingFind = null;
+      if (waiting && st.design && !destroyed) findPictureNow(waiting.target, waiting.shows);
     }
     /**
      * Save, then leave. A failed save stays here with the error, because leaving would lose the changes since the last
@@ -1295,6 +1317,11 @@
 
     return {
       get optionId() { return st.optionId; },
+      /** The chat's "Choose a picture", waiting for the design if it has only just been opened. */
+      findPicture(target, shows) {
+        if (st.loading || !st.design) { st.pendingFind = { target, shows }; return; }
+        findPictureNow(target, shows);
+      },
       /** A change saved from the chat's card: shown here, and Undo goes back past it. */
       setDesign(optionId, design, photoUrl) {
         if (optionId !== st.optionId) return;
