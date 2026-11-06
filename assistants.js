@@ -9798,7 +9798,9 @@ async function _fetchAndRenderWrittenRoi(assistantId, period = 'all') {
     });
 
     try {
-        const res = await fetch(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
+        // The same one-shot prefetch as _fetchAndRenderAssistantMetrics: whichever loader the role runs
+        // first takes it (the Brand Designer's ROI strip reads metrics here, not there).
+        const res = await _fetchPrefetched(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
         if (!res.ok) return;
         const d = await res.json();
         if (roiStrip.dataset.roleHidden === '1') return;   // role switched while we were awaiting
