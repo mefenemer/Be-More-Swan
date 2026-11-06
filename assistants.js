@@ -4902,12 +4902,13 @@ function _briefShowPanel(panelId) {
 // ── Right-hand profile menu (compactHeader roles) ─────────────────────────────
 // The Assistant Settings' sections as a side menu that mirrors the left one: icons when closed (the
 // default), labels when open, remembered per browser. Built from the drawer's own Operating File
-// cards so a role's renamed sections ("Brand Knowledge", "When and how I work") read the same here.
+// cards so a role's renamed sections ("How I write", "When and how I work") read the same here.
 const _RM_ICONS = {
     'profile-home': 'M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z',
     problem: 'M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
     operation: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
     strategy: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z',
+    brand: 'M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01',
     platforms: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1',
     rules: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
     guardrails: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
@@ -5040,12 +5041,12 @@ window._openProfileDrawer = function() {
 // Open (or swap to) a specific section panel, with a back arrow to the home index.
 window._openBriefDrawer = function(tabKey) {
     _briefShowPanel('tab-' + tabKey);
-    const titles = { problem: 'What I do', operation: 'When and how I post', strategy: 'What I post about', platforms: 'Connections', rules: 'Do’s and don’ts', guardrails: 'Safety and legal', notifications: 'Notifications' };
+    const titles = { problem: 'What I do', operation: 'When and how I post', strategy: 'What I post about', brand: 'Your brand', platforms: 'Connections', rules: 'Do’s and don’ts', guardrails: 'Safety and legal', notifications: 'Notifications' };
     // The 'strategy' card is the one the role registry RENAMES: roles with hasCreativeBrief:false
     // (every non-social role) lose the marketing cards, so _applyRoleDashboard rewrites the nav
-    // card's title to "Brand Knowledge". Reading that element back keeps the drawer header saying
-    // whatever the card the user just clicked says — a static map here shipped a "Creative Brief"
-    // header above a panel the user had opened from a "Brand Knowledge" card.
+    // card's title to "How I write" (or _syncStrategyCard hides it). Reading that element back keeps
+    // the drawer header saying whatever the card the user just clicked says — a static map here
+    // shipped a "Creative Brief" header above a panel opened from a differently named card.
     // 'operation' is renamed the same way ("When and how I work" for a role that doesn't post).
     const cardTitle = document.getElementById(`opcard-${tabKey}-title`);
     if ((tabKey === 'strategy' || tabKey === 'operation') && cardTitle && cardTitle.textContent.trim()) titles[tabKey] = cardTitle.textContent.trim();
@@ -7126,10 +7127,12 @@ function _applyDashboardRegistry(data) {
     toggle('module-empty-library', mods.hasEmptyLibraryFallback !== false);
     toggle('module-review-cadence', mods.hasReviewCadence !== false);
     // Operating File nav-card subtitles — when the social cards inside are hidden, the subtitle
-    // shouldn't promise them. Creative Brief collapses to just Business Knowledge for these roles.
+    // shouldn't promise them. For these roles the card keeps only the voice builder / content mix
+    // (Blog, Email); the brand moved to its own "Your brand" card (2026-11-06), and a role with neither
+    // loses the card altogether — _syncStrategyCard, once the data has said which cards show.
     if (mods.hasCreativeBrief === false) {
-        setText('opcard-strategy-title', 'Brand Knowledge');
-        setText('opcard-strategy-sub', 'Business information and brand context your assistant applies');
+        setText('opcard-strategy-title', 'How I write');
+        setText('opcard-strategy-sub', 'Voice and the kinds of piece I write');
         // "When and how I post" is the social role's card; every other role's is about its work.
         setText('opcard-operation-title', 'When and how I work');
         setText('operation-heading', 'When and how I work');
@@ -7607,6 +7610,7 @@ function _detailHydrate(data) {
     _detailSetVal('edit_tone', ctx.tone_of_voice || '');
     _renderContentMix(data);
     _renderVoiceBuilder(data);
+    _syncStrategyCard();
     _detailSetVal('edit_pillars', Array.isArray(ctx.content_pillars) ? ctx.content_pillars.join(', ') : (ctx.content_pillars || ''));
     _renderPillarChips();
     // Sales context — feeds the auto-responder objection playbook (P4) and DM drafting.
@@ -8064,6 +8068,18 @@ function _vbDefaults() {
     return { personalities: [], formality: 3, playfulness: 3, energy: 3, colour: 3, emoji: 'auto', exclamations: 'auto', spelling: 'auto',
         // Empty by default (2026-10-06) — the clichés are offered as suggestions, not pre-banned.
         neverSay: [], sample: '' };
+}
+
+// The "What I post about" / "How I write" card only shows while its panel has something in it. Since the brand
+// moved to "Your brand" (2026-11-06), a role without the social cards, voice builder or content mix (every role
+// but Social, Blog and Email) would open an empty panel, so its card goes, and the right-hand menu with it.
+function _syncStrategyCard() {
+    const tab = document.getElementById('tab-strategy');
+    const card = document.querySelector('#tab-profile-home .detail-tab-btn[data-tab="strategy"]');
+    if (!tab || !card) return;
+    const shown = [...tab.children].some((c) => !c.classList.contains('hidden') && c.style.display !== 'none');
+    card.classList.toggle('hidden', !shown);
+    if (document.getElementById('assistant-detail-content')?.classList.contains('detail-v2')) _renderRightMenu();
 }
 
 function _renderVoiceBuilder(data) {
@@ -10497,12 +10513,15 @@ window._goToDisclosureField = function() {
 function _kickoffFixLink(key) {
     const fix = _KICKOFF_FIX[key];
     if (!fix) return '';
-    // The strategy card is retitled per role ("Brand Knowledge" for roles that post nothing), so read
-    // the name off the card rather than promising "What I post about" (review, 2026-10-22).
-    const where = key === 'brand_strategy'
-        ? (document.getElementById('opcard-strategy-title')?.textContent.trim() || fix.where)
+    // The strategy card is retitled per role ("How I write"), and hidden for a role with nothing on it,
+    // where "Brand & strategy" is about the brand — so send it to "Your brand" (2026-11-06).
+    const strategyCard = document.querySelector('#tab-profile-home .detail-tab-btn[data-tab="strategy"]');
+    const toBrand = key === 'brand_strategy' && strategyCard?.classList.contains('hidden');
+    const where = toBrand ? 'Your brand'
+        : key === 'brand_strategy' ? (document.getElementById('opcard-strategy-title')?.textContent.trim() || fix.where)
         : fix.where;
-    return ` <button type="button" onclick="${fix.go}" title="Opens ${_escapeHtml(where)}" class="link font-semibold cursor-pointer">${fix.label || 'Do this now →'}</button>`;
+    const go = toBrand ? "window._openBriefDrawer('brand')" : fix.go;
+    return ` <button type="button" onclick="${go}" title="Opens ${_escapeHtml(where)}" class="link font-semibold cursor-pointer">${fix.label || 'Do this now →'}</button>`;
 }
 
 // Kick Off Meeting — readiness checklist + activation gate. Fetches
@@ -11778,77 +11797,17 @@ window.fetchAndRenderIntegrations = async function() {
 async function _fetchAndRenderWorkspaceDefaults(assistantId, currentData, triggerAutoSave) {
     // ── Assistant Rules now live per-assistant — see _fetchAndRenderAssistantRules() ──
 
-    // ── Business Information & Brand Knowledge ─────────────────────
-    // There is no longer a separate "Brand Profile". The documents and links the user adds in
-    // Business Information are mandatory context: they're always applied to this assistant as a
-    // strict rule that can't be turned off — so this panel is informational only, no toggle.
-    const knowledgeContainer = document.getElementById('business-knowledge-content');
-    if (knowledgeContainer) {
-        let assets = [];
-        try {
-            const aRes = await fetch('/.netlify/functions/get-workspace-assets');
-            if (aRes.ok) assets = (await aRes.json()).assets || [];
-        } catch { /* non-fatal — still show the strict-rule notice below */ }
-
-        const strictNote = `
-            <div class="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800 mb-4">
-                <svg class="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                <span>Your business details and every document or link in Business Information are considered by Be More Swan AI whenever it generates content. This is applied as a <strong>strict rule that can't be turned off</strong>.</span>
-            </div>`;
-
-        const catLabel = (c) => ({ tone_of_voice: 'Tone of Voice', logo: 'Brand Logo', product_info: 'Product Knowledge', general: 'General Context' }[c] || 'General Context');
-
-        // Only assets the blueprint actually injects count as "applied": status ∈ {ready, confirmed}
-        // (mirrors assemble-blueprint § 11 in src/utils/blueprint.ts). Anything still processing or
-        // failed is shown separately so we don't claim it's an active strict rule when it isn't.
-        const APPLIED_STATUSES = ['ready', 'confirmed'];
-        const applied = assets.filter(a => APPLIED_STATUSES.includes(a.status));
-        const pending = assets.filter(a => !APPLIED_STATUSES.includes(a.status));
-
-        // Plain-language reason an asset isn't applied yet (mirrors STATUS_HINTS in assets.js).
-        const notAppliedHint = (s) => ({
-            processing: 'Still processing — will apply automatically once ready.',
-            pending:    "Upload didn't finish, so it isn't applied. Remove it and try again.",
-            failed:     "Upload failed, so it isn't applied. Remove it and try again.",
-        }[s] || 'Not applied yet.');
-
-        const appliedList = applied.length ? `
-                <ul class="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
-                    ${applied.map(a => `
-                        <li class="flex items-center justify-between gap-3 px-4 py-3">
-                            <div class="min-w-0">
-                                <p class="text-sm font-semibold text-gray-800 truncate">${_escapeHtml(a.name)}</p>
-                                <p class="text-xs text-gray-500 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
-                            </div>
-                            ${(a.externalUrl && !a.isFile) ? `<a href="${_escapeHtml(a.externalUrl)}" target="_blank" rel="noopener" class="text-xs font-bold text-emerald-700 hover:underline shrink-0">Open</a>` : ''}
-                        </li>`).join('')}
-                </ul>` : `
-                <div class="flex flex-col items-center justify-center py-4 text-center gap-2">
-                    <p class="text-sm text-gray-500">No documents or links applied yet.</p>
-                    <a href="#" onclick="window.loadView('assets')" class="text-sm font-bold text-emerald-600 hover:underline cursor-pointer">Add documents or links in Business Information →</a>
-                </div>`;
-
-        // Muted section for assets that exist but aren't feeding the assistant yet.
-        const pendingList = pending.length ? `
-                <div class="mt-4">
-                    <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Not applied yet</p>
-                    <ul class="divide-y divide-gray-100 border border-dashed border-gray-200 rounded-xl overflow-hidden">
-                        ${pending.map(a => `
-                            <li class="flex items-center justify-between gap-3 px-4 py-3 bg-gray-50/50">
-                                <div class="min-w-0">
-                                    <p class="text-sm font-semibold text-gray-500 truncate">${_escapeHtml(a.name)}</p>
-                                    <p class="text-xs text-gray-500 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
-                                </div>
-                                <span class="text-xs font-medium text-gray-500 shrink-0" title="${_escapeHtml(notAppliedHint(a.status))}">${_escapeHtml(a.status)}</span>
-                            </li>`).join('')}
-                    </ul>
-                </div>` : '';
-
-        knowledgeContainer.innerHTML = strictNote + appliedList + pendingList + `
-                <div class="mt-3 text-right">
-                    <a href="#" onclick="window.loadView('assets')" class="text-sm font-bold text-emerald-600 hover:underline cursor-pointer">Manage in Business Information →</a>
-                </div>`;
+    // ── Your brand (owner 2026-11-06) ─────────────────────────────
+    // The workspace's Brand Assets inside the assistant: style + picture guidelines (brand-style-card.js →
+    // brand-style-dialog.js → brand-kit.ts) and the files and links (brand-files.js, the same functions as
+    // assets.js). Nothing is per assistant, so a change here is the change in Business Information ▸ Brand
+    // Assets. The files are a strict rule every assistant reads; nothing here turns them off.
+    const styleEl = document.getElementById('module-brand-style');
+    if (styleEl && window.BrandStyleCard) {
+        window.BrandStyleCard.mount(styleEl, { assistantName: document.getElementById('detail-name-input')?.value.trim() || null });
     }
+    const knowledgeContainer = document.getElementById('business-knowledge-content');
+    if (knowledgeContainer && window.BrandFiles) window.BrandFiles.mount(knowledgeContainer);
 }
 
 function _escapeHtml(str) {

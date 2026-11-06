@@ -157,13 +157,26 @@ check('Business Information ▸ Brand Assets has the section and saves through t
     assert.match(page, /const wanted = window\._bizinfoInitialTab;\s*window\._bizinfoInitialTab = null;/, 'the deep link is one-shot');
 });
 
-check('the profile\'s Brand Knowledge shows them (owner 2026-11-05); Brand Assets only if the pop-up is missing', () => {
+check('every assistant\'s "Your brand" shows them (owner 2026-11-06); Brand Assets only if the pop-up is missing', () => {
     const card = read('src/components/brand-style-card.js');
     assert.match(card, /window\.BrandStyleDialog\.open\(/);
     assert.match(card, /window\._bizinfoInitialTab = 'assets';\s*if \(window\.loadView\) window\.loadView\('assets'\)/);
-    const tab = read('src/components/assistant-briefs.js');
-    assert.ok(tab.includes("document.getElementById('tab-strategy')") && !tab.includes('function styleHtml()'), 'in the profile, not above the briefs');
-    assert.ok(read('workspace.html').includes('<script src="/src/components/brand-style-card.js"></script>'));
+    const detail = read('assistant-detail.html');
+    const tab = span(detail, '<div id="tab-brand"', '<!-- ── TAB: Connections', 'the Your brand tab');
+    assert.ok(tab.includes('id="module-brand-style"') && tab.includes('id="business-knowledge-content"'), 'style and files both in Your brand');
+    assert.ok(detail.includes('data-tab="brand"') && detail.includes('>Your brand</p>'), 'its card, which the right-hand menu reads');
+    assert.ok(!span(detail, '<div id="tab-strategy"', '<div id="tab-brand"', 'the strategy tab').includes('business-knowledge-content'), 'no second copy on the strategy tab');
+    const js = read('assistants.js');
+    assert.ok(js.includes("window.BrandStyleCard.mount(styleEl") && js.includes('window.BrandFiles.mount(knowledgeContainer)'), 'mounted for every role');
+    assert.ok(!read('src/components/assistant-briefs.js').includes('mountProfileStyle'), 'the Brand Designer adds no copy of its own');
+    const ws = read('workspace.html');
+    assert.ok(ws.includes('<script src="/src/components/brand-style-card.js"></script>') && ws.includes('<script src="/src/components/brand-files.js"></script>'));
+    // Files and links are the workspace library through the very functions Brand Assets uses, so the two never differ.
+    const files = read('src/components/brand-files.js');
+    for (const fn of ['get-workspace-assets', 'storage-request-upload', 'storage-confirm-upload', "'upload-asset'", 'delete-workspace-asset']) {
+        assert.ok(files.includes(fn), `brand-files.js calls ${fn}`);
+        assert.ok(read('assets.js').includes(fn.replace(/'/g, '')), `assets.js still calls ${fn}`);
+    }
     assert.match(code(read('netlify/functions/brand-briefs.ts')), /readBrandGuidelines\(db, orgId\)\.catch\(\(\) => null\)/);
 });
 

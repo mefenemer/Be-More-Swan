@@ -1250,6 +1250,16 @@
       </div>
     </button>
 
+    <button type="button" data-tab="brand" class="detail-tab-btn brief-card w-full text-left">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-bold text-gray-900">Your brand</p>
+          <p class="text-xs text-gray-500 mt-0.5">Brand style, picture guidelines, files and links — shared by all your assistants</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </button>
+
     <button type="button" data-tab="platforms" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
@@ -1604,17 +1614,6 @@
   <!-- ── TAB: Creative Strategy ────────────────────────────────── -->
   <div id="tab-strategy" class="detail-tab-content hidden space-y-6">
 
-    <!-- Business Information & Brand Knowledge (always applied — strict, non-overridable) -->
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-      <div class="mb-5">
-        <h3 class="text-lg font-bold text-gray-900">Business Information &amp; Brand Knowledge</h3>
-        <p class="text-sm text-gray-500 mt-1">Your business details and any documents or links added in <a href="#" onclick="window.loadView('assets')" class="text-emerald-800 hover:underline font-medium">Business Information</a> are automatically applied to this assistant.</p>
-      </div>
-      <div id="business-knowledge-content">
-        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading brand knowledge…</div>
-      </div>
-    </div>
-
     <div id="module-creative-objective" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
         <h3 class="text-lg font-bold text-gray-900">Objective &amp; Message</h3>
@@ -1881,6 +1880,29 @@
       </div>
     </div>
     </div><!-- /module-social-strategy -->
+  </div>
+
+  <!-- ── TAB: Your brand (owner 2026-11-06) ──────────────────────────────
+       The workspace's Brand Assets, inside the assistant: the same saves as Business Information ▸ Brand Assets
+       (brand-kit.ts for the style and picture guidelines, the storage-* / upload-asset / delete-workspace-asset
+       functions for files and links), so a change here IS the change there and reaches every assistant. -->
+  <div id="tab-brand" class="detail-tab-content hidden space-y-6">
+    <div class="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-900">
+      <svg class="w-4 h-4 shrink-0 mt-0.5 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      <span><strong>Shared by all your assistants.</strong> Anything you change here also changes in <a href="#" onclick="window._bizinfoInitialTab='assets'; window.loadView('assets'); return false;" class="font-semibold underline">Business Information ▸ Brand Assets</a>, and every assistant uses it from then on.</span>
+    </div>
+    <div id="module-brand-style" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <p class="text-sm text-gray-500">Loading your brand style…</p>
+    </div>
+    <div id="module-brand-files" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="mb-5">
+        <h3 class="text-lg font-bold text-gray-900">Files and links</h3>
+        <p class="text-sm text-gray-500 mt-1">Logos, brand guidelines, product sheets and links. Your business details and everything here are read whenever your assistants write or design, and that can't be turned off.</p>
+      </div>
+      <div id="business-knowledge-content">
+        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading your files and links…</div>
+      </div>
+    </div>
   </div>
 
   <!-- ── TAB: Connections (full connect/manage, scoped to this assistant) ── -->

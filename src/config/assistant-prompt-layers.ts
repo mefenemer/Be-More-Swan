@@ -46,7 +46,7 @@ const CHAT_LAYERS: PromptLayer[] = [
       text: `${ACTIVE_TEAMMATES_RULE}\n\nWith no active teammates, the chat is told instead:\n${NO_TEAMMATES_BLOCK}` },
     { key: 'special', title: 'Special category data', kind: 'rule', usedBy: 'Chat', source: 'src/constants/special-category-rule.ts', text: SPECIAL_CATEGORY_RULE },
     { key: 'workspace_chat', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Chat', source: 'netlify/functions/chat-orchestrator.ts',
-      text: 'The role prompt for this assistant (its base prompt is on the Prompt & versions tab), the business identity, Products & Services, Brand Knowledge documents, the assistant\'s own settings and goals, and recent team activity.' },
+      text: 'The role prompt for this assistant (its base prompt is on the Prompt & versions tab), the business identity, Products & Services, brand files and links, the assistant\'s own settings and goals, and recent team activity.' },
 ];
 
 const SOCIAL: PromptLayer[] = [
@@ -58,7 +58,7 @@ const SOCIAL: PromptLayer[] = [
     { key: 'hooks', title: `Opening hooks (${SOCIAL_HOOK_STYLES.length}, one per post in turn)`, kind: 'rotation', usedBy: 'Drafting posts', source: 'src/config/hook-styles.ts', text: list(SOCIAL_HOOK_STYLES) },
     { key: 'special_social', title: 'Special category data', kind: 'rule', usedBy: 'Drafting posts', source: 'src/constants/special-category-rule.ts', text: SPECIAL_CATEGORY_RULE },
     { key: 'workspace_social', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Drafting posts', source: 'netlify/functions/process-content-jobs.ts',
-      text: 'Voice, content pillars, the call-to-action setting, platform strategy (hashtag counts, formats), Products & Services, the intro offer, Inspo, Brand Knowledge, campaign directives, and the last posts drafted (so it does not repeat itself).' },
+      text: 'Voice, content pillars, the call-to-action setting, platform strategy (hashtag counts, formats), Products & Services, the intro offer, Inspo, brand files and links, campaign directives, and the last posts drafted (so it does not repeat itself).' },
 ];
 
 const EMAIL: PromptLayer[] = [
@@ -137,7 +137,7 @@ const MENTOR: PromptLayer[] = [
     { key: 'workspace_mentor_jobs', title: 'Filled in per workspace (background jobs)', kind: 'workspace', usedBy: 'Strategy documents', source: 'src/utils/mentor-jobs.ts',
       text: 'The workspace overview the chat reads, the document\'s sections with what is written now, their idea check, and the reviewed playbook for their kind of business (if any). Research gets only the question and a one-line description of the business; every link it gives is checked against the search tool\'s own results in code.' },
     { key: 'workspace_mentor', title: 'Filled in per workspace', kind: 'workspace', usedBy: 'Chat', source: 'netlify/functions/chat-orchestrator.ts',
-      text: 'Whether this is an established business or a new idea (its one set-up answer), plus everything every chat gets: the business identity, Products & Services, Brand Knowledge, its own settings and goals, and which teammates are active. Also its strategy documents (draft and approved), its last research answers with their links, the reviewed playbook for their kind of business, if there is one, the commitments and why any were missed, its track record, its weekly review settings, and — only when the user asks about customers — their customers from active assistants (names and dates only).' },
+      text: 'Whether this is an established business or a new idea (its one set-up answer), plus everything every chat gets: the business identity, Products & Services, brand files and links, its own settings and goals, and which teammates are active. Also its strategy documents (draft and approved), its last research answers with their links, the reviewed playbook for their kind of business, if there is one, the commitments and why any were missed, its track record, its weekly review settings, and — only when the user asks about customers — their customers from active assistants (names and dates only).' },
 ];
 
 const BY_ROLE: Record<string, PromptLayer[]> = {

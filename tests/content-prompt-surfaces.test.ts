@@ -53,7 +53,8 @@ const routeOf = (role: string) => span(orchestrator, `    ${role}: {`, '        
 
 // Renamed to plain words 2026-10-21 (owner): Mandate, Operational Setup, Creative Brief, Rules,
 // Brand Safety & Legal.
-const PROFILE = (strategyCard: string) => ['What I do', strategyCard === 'Brand Knowledge' ? 'When and how I work' : 'When and how I post', strategyCard, 'Connections', 'Do’s and don’ts', 'Safety and legal', 'Notifications'];
+// "Your brand" (2026-11-06) is on every role; Blog and Email keep the strategy card as "How I write".
+const PROFILE = (strategyCard: string) => ['What I do', strategyCard === 'How I write' ? 'When and how I work' : 'When and how I post', strategyCard, 'Your brand', 'Connections', 'Do’s and don’ts', 'Safety and legal', 'Notifications'];
 
 const ROLES = [
     {
@@ -68,14 +69,14 @@ const ROLES = [
         // "Published" is the Posted column relabelled for this role (assistants.js setText … 'Published').
         columns: ['Review', 'Scheduled', 'Published', 'Needs attention', 'Archived'],
         tabs: ['Calendar', 'Inspo', 'My Content', 'Results', 'Activity'],
-        profile: PROFILE('Brand Knowledge'),
+        profile: PROFILE('How I write'),
     },
     {
         role: 'newsletter_editor', helper: 'emailSurfaces', kind: 'emails', queue: 'Emails',
         // "Sent" is the Posted column relabelled for this role (assistants.js setText … 'Sent').
         columns: ['Review', 'Approved', 'Scheduled', 'Sent', 'Needs attention', 'Archived'],
         tabs: ['Email Flows', 'Calendar', 'Results', 'Activity'],
-        profile: PROFILE('Brand Knowledge'),
+        profile: PROFILE('How I write'),
     },
 ];
 
@@ -95,8 +96,8 @@ const COLUMN_ON_PAGE = (col: string) => col === 'Sent' || col === 'Published'
     ? read('assistants.js').includes(`setText('detail-rq-col-label-posted', '${col}')`)
     : new RegExp(`class="detail-rq-col[^"]*"[\\s\\S]{0,200}?>\\s*(<span[^>]*>)?${col}\\b`).test(page);
 
-const PROFILE_ON_PAGE = (card: string) => card === 'Brand Knowledge'
-    ? read('assistants.js').includes("setText('opcard-strategy-title', 'Brand Knowledge')")
+const PROFILE_ON_PAGE = (card: string) => card === 'How I write'
+    ? read('assistants.js').includes("setText('opcard-strategy-title', 'How I write')")
     : card === 'When and how I work'
     ? read('assistants.js').includes("setText('opcard-operation-title', 'When and how I work')")
     : page.includes(`font-bold text-gray-900">${card.replace('&', '&amp;')}</p>`);

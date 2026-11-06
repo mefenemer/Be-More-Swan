@@ -63,7 +63,7 @@ Every time you chat, it sees:
 - **Your business:** Business Information, Products & Services and your offers
 - **Your team:** each assistant, whether it's active or paused, and its set-up answers
 - **Goals** and how close each one is
-- **Brand Knowledge** documents and links
+- **Your brand** files and links
 - **What your assistants did** in the last two weeks and what's booked next
 - **Your plan** and the tasks used this month
 - **Its own work:** your plans, what it has looked up for you, its suggestions, weekly reviews, commitments and track record

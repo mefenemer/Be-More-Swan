@@ -1,5 +1,5 @@
 // src/utils/business-knowledge.ts
-// Business Information's documents and links — what the Brand Knowledge card says every assistant
+// Business Information's documents and links — what the "Your brand" card says every assistant
 // applies "as a strict rule that can't be turned off".
 //
 // ONE loader and ONE renderer, shared by:

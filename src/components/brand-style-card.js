@@ -1,6 +1,6 @@
 /**
- * src/components/brand-style-card.js — "Your brand style" on the Brand Designer's profile, in its Brand Knowledge
- * section (owner, 2026-11-05: it belongs in the assistant's profile, not above the briefs).
+ * src/components/brand-style-card.js — "Your brand style" in every assistant's "Your brand" section (owner,
+ * 2026-11-05: in the profile, not above the briefs; 2026-11-06: every assistant, beside the files and links).
  *
  * Shows the colours, font and picture guidelines from netlify/functions/brand-kit.ts (GET), and "View or change"
  * opens the same pop-up the chat's style card uses (brand-style-dialog.js), so there is one place that saves.
