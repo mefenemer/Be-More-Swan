@@ -15,10 +15,10 @@ $$2. Press **New flyer**.
 3. Give it a name, say what the flyer is for, and choose the paper: **A5** (the usual handout), **A4** (a poster or notice), **A6** (a postcard) or **DL** (a slim leaflet). Every flyer is portrait and one-sided.
 4. Choose a photo: a stock photo, an AI photo, or untick both for a words-only flyer.
 5. Press **Next: draft the words for me** (1 task) or **Next: I'll write the words**.$$,
-$$2. Press **New brief** and answer your Brand Designer's questions, choosing **A printed flyer or poster**. It suggests the paper (**A5** for a handout, **A4** for a poster, **A6** for a postcard or **DL** for a slim leaflet), and the flyer opens in the editor as soon as it is ready. Every flyer is portrait and one-sided.$$),
+$$2. Press **New brief** and answer your Brand Designer's questions, choosing **A printed flyer or poster**. It suggests the paper (**A5** for a handout, **A4** for a poster, **A6** for a postcard or **DL** for a slim leaflet), and the flyer opens in the editor as soon as it is ready. Every flyer is portrait, and you can add a back in the editor.$$),
     updated_at = now()
 WHERE title = 'Making a Printed Flyer'
-RETURNING title, is_published, content_md LIKE '%opens in the editor as soon as it is ready%' AS ok;
+RETURNING title, is_published, content_md LIKE '%you can add a back in the editor%' AS ok;
 
 -- The flyer article's "Save and ask … for pages" button is now "Save and make the flyer", which opens the editor.
 -- Only the sentence's start is matched: the rest differs depending on whether the flyer-look file has run.
@@ -29,6 +29,13 @@ $$Press **Save and make the flyer** (or **Make the flyer** on the brief). The ed
     updated_at = now()
 WHERE title = 'Making a Printed Flyer'
 RETURNING title, is_published, content_md LIKE '%Save and make the flyer%' AS ok;
+
+-- A database that already had the 2026-11-06 wording of this sentence.
+UPDATE help_articles SET
+    content_md = replace(content_md, $$Every flyer is portrait and one-sided.$$, $$Every flyer is portrait, and you can add a back in the editor.$$),
+    updated_at = now()
+WHERE title = 'Making a Printed Flyer'
+RETURNING title, is_published, content_md LIKE '%you can add a back in the editor%' AS ok;
 
 INSERT INTO help_articles (category, sort_order, title, content_md, is_published) VALUES
 ('Your Assistants', 71, 'Briefs and Your Brand Style', $$
@@ -49,7 +56,10 @@ The editor shows your design on the left and the chat on the right.
 - **Click** any words, the picture or a shape to change it: the font, size, colour, a background behind the words and how see-through it is, or the picture's strength.
 - **Type** on the design itself to change the words: click them to select them, then click again and type.
 - **Drag** it to move it, or drag its corner to make it bigger or smaller. Pink guide lines show when it lines up with the page or something else on it. Hold Alt while dragging to turn them off.
-- **+ Add picture** adds one of your own, from your library, from stock, or made by AI (which uses a task). Click a picture to **Crop** it, drag it inside its frame and zoom, or to **Replace** it. **Set as background** makes a picture fill the page behind everything else.
+- **+ Add picture** adds one of your own, from your library, from stock, or made by AI (which uses a task). Click a picture to **Crop** it, drag it inside its frame and zoom, or to **Replace** it. **Set as background** makes a picture fill the page behind everything else. **Remove background** cuts out the subject of a picture, with no task used.
+- **+ Add a back** makes a flyer double-sided: **Front** and **Back** switch between the two, and the print PDFs get a page for each. **Remove back** makes it one-sided again.
+- **Templates** keeps a design under a name, for any design in your workspace to start from. Using one replaces what is on the page at the page's size, and **Undo** brings it back. Check the words afterwards, as they come with the template.
+- **Download** saves the design as a PNG, with its page colour or with a see-through background to lay over something else. For a flyer's print PDFs, use **Use this design**.
 - **+ Add shape** adds a rectangle, circle or line. **Layer order** moves the selected part in front of or behind the others, and **Duplicate** copies it.
 - Hold **Shift** and click, or drag across the page, to select several parts. **Group** keeps them together: click once to move the group, and click again to change one part of it. **Ungroup** separates them.
 - With nothing selected, **Resize a copy** makes a copy at another size as a new option, such as a square post from your flyer. Your original stays as it is, and the copy may need a little tidying.

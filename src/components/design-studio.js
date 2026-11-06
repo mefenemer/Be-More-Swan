@@ -127,6 +127,7 @@
           <button type="button" data-ds-back class="ds-btn">← Briefs</button>
           <p class="text-sm font-bold text-gray-900 truncate mr-auto min-w-0">${esc(o.brief.title)}</p>
           <span data-ds-saved class="text-xs font-semibold text-gray-500" aria-live="polite"></span>
+          <span data-ds-sides class="inline-flex items-center gap-1"></span>
           <button type="button" data-ds-undo class="ds-btn" aria-label="Undo" title="Undo">↶</button>
           <button type="button" data-ds-redo class="ds-btn" aria-label="Redo" title="Redo">↷</button>
           ${o.chatAvailable ? '<button type="button" data-ds-pick class="ds-btn" aria-pressed="false" title="Click a part of the design to talk about it">🎯 Select</button>' : ''}
@@ -143,6 +144,79 @@
     const q = (sel) => host.querySelector(sel);
     const page = q('[data-ds-page]');
 
+    // ── The two sides of a flyer ─────────────────────────────────────────────
+    // Everything here works on st.design, so showing the back swaps the two sides round in it and marks `side`. Undo
+    // comes along for free. What goes to the server is always the design the right way round: wire().
+    const SIDE_FIELDS = ['pageColor', 'pageOpacity', 'photo', 'layers', 'removed'];
+    function flipped(d) {
+      const out = { ...d, back: { ...d.back }, side: d.side === 'back' ? 'front' : 'back' };
+      SIDE_FIELDS.forEach((k) => { out[k] = d.back[k]; out.back[k] = d[k]; });
+      return out;
+    }
+    const onBackSide = () => st.design && st.design.side === 'back';
+    const wire = () => (onBackSide() ? flipped(st.design) : st.design);
+    const sideParam = () => (onBackSide() ? { side: 'back' } : {});
+    function showSide(side) {
+      if ((side === 'back') === !!onBackSide() || (side === 'back' && !st.design.back)) return;
+      st.design = flipped(st.design);
+      st.selected = null;
+      st.multi = [];
+      st.cropping = false;
+      paint();
+    }
+    function paintSides() {
+      const el = q('[data-ds-sides]');
+      if (!el || !st.design) return;
+      if (st.design.kind !== 'flyer') { el.innerHTML = ''; return; }
+      const on = onBackSide();
+      el.innerHTML = st.design.back
+        ? `<button type="button" class="ds-btn" data-ds-side="front" aria-pressed="${!on}">Front</button><button type="button" class="ds-btn" data-ds-side="back" aria-pressed="${!!on}">Back</button><button type="button" class="ds-btn" data-ds-remove-back title="Make this flyer one-sided. Undo brings the back back.">Remove back</button>`
+        : '<button type="button" class="ds-btn" data-ds-add-back>+ Add a back</button>';
+    }
+    /** Through the server, which offers the logo and QR code on the new side. */
+    async function addBack() {
+      remember();
+      const d = st.design;
+      const front = onBackSide() ? flipped(d) : d;
+      const withNew = { ...front, back: { pageColor: front.pageColor, pageOpacity: front.pageOpacity, photo: null, layers: [], removed: { layers: [], photo: null } } };
+      st.design = flipped(withNew);
+      st.selected = null;
+      st.multi = [];
+      paint();
+      try {
+        const r = await o.post({ action: 'save_design', optionId: st.optionId, design: wire() });
+        // Only what the server adds to the new side: the user may already have changed it while this was on its way.
+        const offered = r.design && r.design.back && r.design.back.removed ? r.design.back.removed.layers : [];
+        const page = onBackSide() ? st.design : st.design.back;
+        if (page) {
+          const shelf = page.removed || (page.removed = { layers: [], photo: null });
+          offered.forEach((l) => { if (!shelf.layers.some((x) => x.id === l.id) && !page.layers.some((x) => x.id === l.id)) shelf.layers.push(l); });
+          paintTools();
+        }
+      } catch (err) { showError(err.message || 'That could not be saved. Your changes are still here, so please try again.'); }
+    }
+    /**
+     * For a change the server makes and sends back whole: the design holds still until it has, or anything done
+     * meanwhile would be overwritten by the reply.
+     */
+    async function holdingStill(work) {
+      const parts = [q('[data-ds-page]'), q('[data-ds-tools]')];
+      st.busy = true;
+      parts.forEach((el) => { if (el) el.style.pointerEvents = 'none'; });
+      try { return await work(); } finally {
+        st.busy = false;
+        parts.forEach((el) => { if (el) el.style.pointerEvents = ''; });
+      }
+    }
+    function removeBack() {
+      change(() => {
+        const front = onBackSide() ? flipped(st.design) : st.design;
+        st.design = { ...front, back: null, side: 'front' };
+        st.selected = null;
+        st.multi = [];
+      });
+    }
+
     // ── Saving ───────────────────────────────────────────────────────────────
     function showSaved(text) { const el = q('[data-ds-saved]'); if (el) el.textContent = text; }
     function showError(msg) { const el = q('[data-ds-error]'); if (!el) return; el.textContent = msg || ''; el.classList.toggle('hidden', !msg); }
@@ -153,7 +227,7 @@
       const optionId = st.optionId;
       showSaved('Saving…');
       try {
-        await o.post({ action: 'save_design', optionId, design: st.design, finish: !!finish });
+        await o.post({ action: 'save_design', optionId, design: wire(), finish: !!finish });
         if (!destroyed) { showSaved('Saved'); showError(''); }
       } catch (err) {
         if (!destroyed) { showSaved(''); showError(err.message || 'That could not be saved. Your changes are still here, so please try again.'); }
@@ -270,9 +344,12 @@
       probe.className = el.className;
       probe.setAttribute('aria-hidden', 'true');
       probe.style.cssText = `position:absolute;visibility:hidden;min-height:0;width:${width}px;align-content:flex-start`;
-      probe.innerHTML = textTools(SAMPLE_WORDS);
       el.parentNode.appendChild(probe);
-      el.style.minHeight = `${probe.offsetHeight}px`;
+      // Whichever is taller: the words' tools, or the page's own with nothing selected.
+      probe.innerHTML = textTools(SAMPLE_WORDS);
+      const forWords = probe.offsetHeight;
+      probe.innerHTML = st.design ? pageTools() : '';
+      el.style.minHeight = `${Math.max(forWords, probe.offsetHeight)}px`;
       probe.remove();
     }
     function sizePage() {
@@ -359,10 +436,11 @@
       return `
         <button type="button" class="ds-btn" data-ds-crop>Crop</button>
         ${replace}
+        <button type="button" class="ds-btn" data-ds-cutout title="Free">Remove background</button>
         <label class="ds-tool">Transparency <input type="range" ${isMain ? 'data-ds-photoop' : 'data-ds-picop'} min="0" max="100" value="${pct(target.opacity)}"></label>
         ${isMain ? '<button type="button" class="ds-btn" data-ds-unbg>Make a normal picture</button>' : '<button type="button" class="ds-btn" data-ds-bg>Set as background</button>'}
         ${isMain ? '' : orderTool()}${duplicateButton()}${isMain ? '' : ungroupButton(target)}
-        ${isMain && o.options().filter((x) => x.id !== st.optionId && x.hasPhoto).length ? '<button type="button" class="ds-btn" data-ds-photo-next>Use another picture</button>' : ''}
+        ${isMain && !onBackSide() && o.options().filter((x) => x.id !== st.optionId && x.hasPhoto).length ? '<button type="button" class="ds-btn" data-ds-photo-next>Use another picture</button>' : ''}
         ${askButton()}<button type="button" class="ds-btn" data-ds-delete>${isMain ? 'Remove picture' : 'Delete'}</button>
         ${isMain ? '<span class="text-xs text-gray-600">This is the page background, behind everything else.</span>' : ''}`;
     }
@@ -403,13 +481,20 @@
         el.innerHTML = `${l.kind === 'shape' ? `<label class="ds-tool">Colour <input type="color" data-ds-shape value="${esc(l.color)}"></label><label class="ds-tool">Transparency <input type="range" data-ds-shapeop min="0" max="100" value="${pct(l.opacity)}"></label>` : ''}${orderTool()}${duplicateButton()}${ungroupButton(l)}${ask}<button type="button" class="ds-btn" data-ds-delete>Delete</button>`;
         return;
       }
-      el.innerHTML = `
+      el.innerHTML = pageTools();
+    }
+    /** The tools for the page, with nothing selected. */
+    function pageTools() {
+      const d = st.design;
+      return `
         <label class="ds-tool">Page colour <input type="color" data-ds-page-color value="${esc(d.pageColor)}"></label>
         <label class="ds-tool">Transparency <input type="range" data-ds-page-op min="0" max="100" value="${pct(d.pageOpacity == null ? 1 : d.pageOpacity)}"></label>
         <button type="button" class="ds-btn" data-ds-add>+ Add words</button>
         ${canPick() ? '<button type="button" class="ds-btn" data-ds-add-picture>+ Add picture</button>' : ''}
         <label class="ds-tool"><span class="sr-only">Add a shape</span><select data-ds-add-shape aria-label="Add a shape"><option value="">+ Add shape</option><option value="rectangle">Rectangle</option><option value="circle">Circle</option><option value="line">Line</option></select></label>
         <label class="ds-tool"><span class="sr-only">Resize a copy</span><select data-ds-resize aria-label="Resize a copy"><option value="">Resize a copy</option>${d.kind === 'flyer' ? '<option value="A4">A4 print</option><option value="A5">A5 print</option><option value="A6">A6 print</option><option value="DL">DL print</option>' : ''}<option value="1:1">Square post</option><option value="4:5">Portrait post</option><option value="9:16">Story</option><option value="16:9">Landscape</option></select></label>
+        <label class="ds-tool"><span class="sr-only">Download</span><select data-ds-download aria-label="Download"><option value="">Download</option><option value="page">PNG</option><option value="clear">PNG, see-through background</option></select></label>
+        <label class="ds-tool"><span class="sr-only">Templates</span><select data-ds-templates aria-label="Templates"><option value="">Templates</option><option value="save">Save this as a template…</option>${(st.templates || []).length ? `<optgroup label="Use a template">${st.templates.map((x) => `<option value="use:${x.id}">${esc(x.name)}</option>`).join('')}</optgroup><optgroup label="Delete a template">${st.templates.map((x) => `<option value="del:${x.id}">${esc(x.name)}</option>`).join('')}</optgroup>` : ''}</select></label>
         ${shelfButtons()}`;
     }
     /** What came off and can go back on, and a QR code or logo this design could have. */
@@ -428,6 +513,7 @@
       paintTools();
       paintUndo();
       paintThumbs();
+      paintSides();
       const pick = q('[data-ds-pick]');
       if (pick) pick.setAttribute('aria-pressed', String(st.picking));
     }
@@ -727,6 +813,11 @@
         change(() => { reorder(ids, order); });
       } else if (t.matches('[data-ds-resize]') && t.value) {
         resizeCopy(t.value, t);
+      } else if (t.matches('[data-ds-templates]') && t.value) {
+        templateChoice(t.value);
+        t.value = '';
+      } else if (t.matches('[data-ds-download]') && t.value) {
+        downloadPng(t.value === 'clear', t);
       } else if (t.matches('[data-ds-add-shape]') && t.value) {
         const shape = t.value;
         const across = ratio();
@@ -774,6 +865,11 @@
         return;
       }
       if (t('[data-ds-duplicate]')) { duplicateSelected(); return; }
+      const sideBtn = t('[data-ds-side]');
+      if (sideBtn) { showSide(sideBtn.dataset.dsSide); return; }
+      if (t('[data-ds-add-back]')) { await addBack(); return; }
+      if (t('[data-ds-remove-back]')) { removeBack(); return; }
+      if (t('[data-ds-cutout]')) { removeBackground(t('[data-ds-cutout]')); return; }
       if (t('[data-ds-group]')) { groupSelected(); return; }
       if (t('[data-ds-ungroup]')) { ungroupSelected(); return; }
       if (t('[data-ds-bg]')) { setAsBackground(); return; }
@@ -785,7 +881,7 @@
       if (t('[data-ds-add]')) {
         change(() => {
           const id = `t${Date.now().toString(36)}`;
-          st.design.layers.push({ id, kind: 'text', role: 'text', text: 'Your words', x: 0.1, y: 0.45, w: 0.8, fontFamily: null, fontSizePct: 0.04, bold: true, align: 'center', color: '#1f1e1b', boxFill: null, boxOpacity: 1 });
+          st.design.layers.push({ id, kind: 'text', role: 'text', text: 'Your words', x: 0.1, y: 0.45, w: 0.8, fontFamily: null, fontSizePct: 0.04, bold: true, align: 'center', color: contrastFor(pageFill(st.design)) === '#ffffff' ? '#ffffff' : '#1f1e1b', boxFill: null, boxOpacity: 1 });
           st.selected = id;
         });
         startEditing(st.selected, 'all');
@@ -860,6 +956,104 @@
         st.selected = id;
       });
     }
+    // ── Templates ────────────────────────────────────────────────────────────
+    async function loadTemplates() {
+      try {
+        const r = await o.post({ action: 'list_design_templates' });
+        st.templates = Array.isArray(r.templates) ? r.templates : [];
+        if (st.design && !selectedLayer() && st.selected !== 'photo' && !st.multi.length) paintTools();
+      } catch { st.templates = []; }
+    }
+    async function templateChoice(choice) {
+      clearTimeout(st.saveTimer);
+      st.saveTimer = null;
+      try {
+        if (choice === 'save') {
+          const typed = await window.promptModal('Any design in your workspace can start from it. Using the same name again replaces that template.', { title: 'Save as a template', confirmLabel: 'Save template', placeholder: 'Summer events', required: true });
+          const name = (typed || '').trim();
+          if (!name) return;
+          showSaved('Saving…');
+          const r = await o.post({ action: 'save_template', optionId: st.optionId, design: wire(), name });
+          st.templates = r.templates || st.templates;
+          showSaved(`Saved as the template “${name}”`);
+          showError('');
+          paintTools();
+          return;
+        }
+        const id = Number(choice.split(':')[1]);
+        if (choice.startsWith('del:')) {
+          const gone = (st.templates || []).find((t) => t.id === id);
+          const sure = await window.confirmModal(`Delete the template “${esc(gone ? gone.name : '')}”? Designs already made from it stay as they are.`, { title: 'Delete this template?', confirmLabel: 'Delete template' });
+          if (!sure) return;
+          const r = await o.post({ action: 'delete_design_template', templateId: id });
+          st.templates = r.templates || st.templates.filter((x) => x.id !== id);
+          showSaved('Template deleted');
+          paintTools();
+          return;
+        }
+        showSaved('Using the template…');
+        const before = JSON.stringify(st.design);
+        const r = await holdingStill(() => o.post({ action: 'use_template', optionId: st.optionId, design: wire(), templateId: id }));
+        st.undo.push(before);
+        st.redo = [];
+        st.selected = null;
+        st.multi = [];
+        adopt(r);
+        showSaved('Template on the page. Undo takes it back.');
+        showError('');
+        paint();
+      } catch (err) {
+        showSaved('');
+        showError(err.message || 'That could not be done. Please try again.');
+      }
+    }
+    /** The server takes the background out and keeps the old picture to come back to, so Undo works as ever. */
+    async function removeBackground(btn) {
+      const target = st.selected;
+      btn.disabled = true;
+      btn.textContent = 'Removing…';
+      clearTimeout(st.saveTimer);
+      st.saveTimer = null;
+      showSaved('Removing the background…');
+      try {
+        const before = JSON.stringify(st.design);
+        const r = await holdingStill(() => o.post({ action: 'remove_background', optionId: st.optionId, design: wire(), ...sideParam(), target }));
+        st.undo.push(before);
+        st.redo = [];
+        adopt(r);
+        if (r.addedId && target !== 'photo') st.selected = r.addedId;
+        showSaved('Saved');
+        showError('');
+        paint();
+      } catch (err) {
+        showSaved('');
+        showError(err.message || 'The background could not be removed. Please try again.');
+        btn.disabled = false;
+        btn.textContent = 'Remove background';
+      }
+    }
+    async function downloadPng(seeThrough, select) {
+      select.disabled = true;
+      clearTimeout(st.saveTimer);
+      st.saveTimer = null;
+      showSaved('Getting your PNG ready…');
+      try {
+        const r = await o.post({ action: 'download_png', optionId: st.optionId, design: wire(), ...sideParam(), seeThrough });
+        const a = document.createElement('a');
+        a.href = r.url;
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        showSaved('Saved');
+        showError('');
+      } catch (err) {
+        showSaved('');
+        showError(err.message || 'The PNG could not be made. Please try again.');
+      }
+      select.disabled = false;
+      select.value = '';
+    }
     /** A copy at another size, as a new option: the server makes it, so what is on screen is saved first. */
     async function resizeCopy(size, select) {
       select.disabled = true;
@@ -867,7 +1061,7 @@
       st.saveTimer = null;
       showSaved('Making a copy…');
       try {
-        const r = await o.post({ action: 'resize_design', optionId: st.optionId, design: st.design, size });
+        const r = await o.post({ action: 'resize_design', optionId: st.optionId, design: wire(), size });
         await o.onOptionsChanged?.();
         if (destroyed) return;
         await openOption(r.optionId);
@@ -942,7 +1136,7 @@
       showSaved('Saving…');
       try {
         const before = JSON.stringify(st.design);
-        const r = await o.post({ action: 'save_design', optionId: st.optionId, design: st.design, ...request });
+        const r = await holdingStill(() => o.post({ action: 'save_design', optionId: st.optionId, design: wire(), ...sideParam(), ...request }));
         st.undo.push(before);
         st.redo = [];
         adopt(r);
@@ -952,8 +1146,11 @@
         paint();
       } catch (err) { showSaved(''); showError(err.message || 'That picture could not be added. Please try again.'); }
     }
-    function adopt(r) {
+    /** What the server sent, which is always the right way round, on the side that was open. */
+    function adopt(r, opening) {
+      const stayOnBack = !opening && onBackSide();
       st.design = r.design;
+      if (stayOnBack && st.design.back) st.design = flipped(st.design);
       if (r.photoUrl !== undefined) st.photoUrl = r.photoUrl;
       if (r.photoUrl && r.design.photo) st.pictureUrls[r.design.photo.id || 'photo0'] = r.photoUrl;
       if (r.pictureUrls) Object.assign(st.pictureUrls, r.pictureUrls);
@@ -964,7 +1161,7 @@
       st.photoAt = ((st.photoAt || 0) + 1) % others.length;
       try {
         remember();
-        const r = await o.post({ action: 'save_design', optionId: st.optionId, design: st.design, usePhotoFromOption: others[st.photoAt].id });
+        const r = await holdingStill(() => o.post({ action: 'save_design', optionId: st.optionId, design: wire(), usePhotoFromOption: others[st.photoAt].id }));
         adopt(r);
         paint();
       } catch (err) { showError(err.message); }
@@ -994,7 +1191,7 @@
       try {
         const r = await o.post({ action: 'open_design', optionId });
         if (destroyed) return;
-        adopt(r);
+        adopt(r, true);
         showSaved('');
         showError('');
         paint();
@@ -1008,7 +1205,7 @@
     }
 
     function onKey(e) {
-      if (destroyed || st.editing) return;
+      if (destroyed || st.editing || st.busy) return;
       const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
       if (e.key === 'Escape') {
         if (typing) return;
@@ -1056,7 +1253,8 @@
       }
     }
     document.addEventListener('keydown', onKey);
-    const onResize = () => { if (st.design && !st.editing) { sizePage(); paintPage(); } };
+    // Never under a drag or typing: a repaint replaces what is being held (see the memory note on drags).
+    const onResize = () => { if (st.design && !st.editing && !drag) { sizePage(); paintPage(); } };
     window.addEventListener('resize', onResize);
     // Width only, on the next frame: sizing the page from inside the callback changes what is observed, and the
     // browser then raises "ResizeObserver loop completed", which the page shows as "Something went wrong"
@@ -1071,6 +1269,7 @@
     if (ro) ro.observe(q('[data-ds-wrap]'));
 
     openOption(o.optionId);
+    loadTemplates();
 
     return {
       get optionId() { return st.optionId; },
@@ -1080,7 +1279,8 @@
         clearTimeout(st.saveTimer);
         st.saveTimer = null;
         remember();
-        st.design = design;
+        const stayOnBack = onBackSide();
+        st.design = stayOnBack && design.back ? flipped(design) : design;
         if (photoUrl !== undefined) st.photoUrl = photoUrl;
         if (photoUrl && design.photo) st.pictureUrls[design.photo.id || 'photo0'] = photoUrl;
         if (st.selected && st.selected !== 'photo' && !selectedLayer()) st.selected = null;
@@ -1088,7 +1288,7 @@
         paint();
         scheduleSave();
         // The chat can duplicate or put back a picture: the signed address to show it comes from the server.
-        const unseen = design.layers.some((l) => l.kind === 'picture' && !st.pictureUrls[l.id]);
+        const unseen = [...design.layers, ...(design.back ? design.back.layers : [])].some((l) => l.kind === 'picture' && !st.pictureUrls[l.id]);
         if (unseen) {
           o.post({ action: 'open_design', optionId }).then((r) => {
             if (destroyed || optionId !== st.optionId) return;

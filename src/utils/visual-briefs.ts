@@ -51,6 +51,7 @@ import { BRAND_CARD_PROVIDER } from './brand-card-lifecycle';
 import { resolveAssetDisplayUrl } from './social-publish';
 import { POST_ATTACH_NOTES, attachApprovedToPost, placeOnCampaignPost } from './brief-post-media';
 import { DESIGN_COPY, DESIGN_PROVIDER, bakeImageDesign } from './design-options';
+import { listDesignTemplates } from './design-templates';
 import { designForChat, type Design } from './design-doc';
 import { approveFlyerOption, brandPageColours, flyerRoundOptions, type FlyerRenderParams } from './flyer-briefs';
 import { resolveBrandKitForOrg } from '../lib/brand-extract-fetch';
@@ -1117,6 +1118,8 @@ export async function buildBriefsSnapshot(db: Db, orgId: number, assistantId: nu
             : `BRAND STYLE (current, ${kit.source === 'manual' ? 'set by them' : 'read from their website'}): main colour ${colourWords(kit.primaryColor)} (${kit.primaryColor}), background ${colourWords(kit.backgroundColor)} (${kit.backgroundColor}), text ${colourWords(kit.textColor)} (${kit.textColor}), ${font}.`;
     } catch { /* stated above */ }
     guide = `${style}\n${guide}`;
+    const templates = await listDesignTemplates(db, orgId);
+    if (templates.length) guide = `${guide}\nSAVED DESIGN TEMPLATES (by name): ${templates.map((t) => `"${t.name}"`).join(', ')}.`;
     if (!briefs.length) return `YOUR BRIEFS: none yet. ${credits}\n${guide}`.trim();
     const lines = briefs.map((b) => {
         const waiting = b.options.filter((o) => o.status === 'proposed');

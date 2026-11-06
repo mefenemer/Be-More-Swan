@@ -61,12 +61,24 @@ export interface Design {
     pageOpacity?: number;
     photo: DesignPhoto | null;
     layers: DesignLayer[];
+    /** The other side of a printed flyer, when it has one. A flyer's front is the design itself; a picture has no back. */
+    back?: DesignSide | null;
     /**
      * What was taken off, and a QR code or logo the design could have: Undo and "put back" only work because the server
      * still holds these, as a browser can never name a file itself. Written by the server; a browser's copy is ignored.
      */
     removed?: { layers: HeldLayer[]; photo: DesignPhoto | null };
 }
+
+export type DesignSide = Pick<Design, 'pageColor' | 'pageOpacity' | 'photo' | 'layers' | 'removed'>;
+const asSide = (d: Design): DesignSide => ({ pageColor: d.pageColor, pageOpacity: d.pageOpacity, photo: d.photo, layers: d.layers, removed: d.removed });
+/** One side of a design as a design of its own, which everything that draws or changes a design can then work on. */
+export function sideOf(design: Design, side: 'front' | 'back' = 'front'): Design {
+    const { back, ...front } = design;
+    return side === 'back' && back ? { ...front, ...back } : front;
+}
+/** A design with its back replaced by this side. */
+export const withBack = (design: Design, side: Design): Design => ({ ...design, back: asSide(side) });
 
 const num = (v: unknown, min: number, max: number, fallback: number): number => {
     const n = Number(v);
@@ -217,7 +229,26 @@ export function normaliseDesign(raw: unknown, stored: Design): Design {
         if (kept.has(photoId(old))) continue;
         if (!photo && !shelfPhoto) shelfPhoto = old; else oldPhotos.push(photoAsPicture(old));
     }
-    const taken = [...shelf, ...stored.layers.filter(isHeld), ...oldPhotos].filter((l, i, all) => !kept.has(l.id) && all.findIndex((x) => x.id === l.id) === i);
+    // ── The back of a flyer: a page of its own, cleaned the same way. Its files come from what its own side holds; a new
+    // back also starts with the front's logo, QR code and shelf within reach. A back taken off leaves its files on the
+    // front's shelf, or Undo could not bring them back.
+    let back = stored.back ?? null;
+    const backGone: HeldLayer[] = [];
+    if (stored.kind === 'flyer' && r.back !== undefined) {
+        if (r.back && typeof r.back === 'object') {
+            const base: Design = stored.back
+                ? sideOf(stored, 'back')
+                : { ...sideOf(stored), photo: null, layers: [], removed: { layers: [...shelf, ...stored.layers.filter((l): l is ImageLayer => l.kind === 'qr' || l.kind === 'logo')], photo: null } };
+            back = asSide(normaliseDesign(r.back, base));
+        } else {
+            if (stored.back) {
+                backGone.push(...stored.back.layers.filter(isHeld), ...(stored.back.removed?.layers ?? []));
+                for (const p of [stored.back.photo, stored.back.removed?.photo]) if (p) backGone.push(photoAsPicture(p));
+            }
+            back = null;
+        }
+    }
+    const taken = [...shelf, ...stored.layers.filter(isHeld), ...oldPhotos, ...backGone].filter((l, i, all) => !kept.has(l.id) && all.findIndex((x) => x.id === l.id) === i);
     return {
         ...stored,
         pageColor: normalizeHex(r.pageColor) ?? stored.pageColor,
@@ -225,6 +256,7 @@ export function normaliseDesign(raw: unknown, stored: Design): Design {
         photo,
         layers,
         removed: { layers: taken.slice(-DESIGN_LIMITS.shelf), photo: shelfPhoto },
+        ...(back ? { back } : { back: undefined }),
     };
 }
 
@@ -255,6 +287,14 @@ export interface DesignEditCard {
     group?: string[]; ungroup?: string[];
     /** A picture layer to become the page background; or the background to become an ordinary layer. */
     setBackground?: string; detachBackground?: boolean;
+    /** Keep this design as a template under a name, or put a saved template on this design. */
+    saveTemplate?: string; useTemplate?: string;
+    /** Which side of a flyer this card's changes are for. The front unless it says. */
+    side?: 'back';
+    /** Give a flyer a back, or take it off. */
+    addBack?: boolean; removeBack?: boolean;
+    /** Take the background out of this picture: "photo", or a picture layer's id. */
+    removeBackground?: string;
     /** A copy of the design at another size, as a new option: a paper size for a flyer, or a picture's shape. */
     resizeCopy?: string;
     changes: DesignLayerChange[];
@@ -299,6 +339,14 @@ export function designEditFromUiElement(uiElement: unknown): DesignEditCard | nu
     const background = cleanId(ui.setBackground, '');
     if (background) card.setBackground = background;
     if (ui.detachBackground === true) card.detachBackground = true;
+    const templateName = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, 60) : '');
+    if (templateName(ui.saveTemplate)) card.saveTemplate = templateName(ui.saveTemplate);
+    if (templateName(ui.useTemplate)) card.useTemplate = templateName(ui.useTemplate);
+    if (ui.side === 'back') card.side = 'back';
+    if (ui.addBack === true) card.addBack = true;
+    if (ui.removeBack === true) card.removeBack = true;
+    const cutout = cleanId(ui.removeBackground, '');
+    if (cutout) card.removeBackground = cutout;
     if (typeof ui.resizeCopy === 'string' && resizeTarget(ui.resizeCopy)) card.resizeCopy = ui.resizeCopy;
     for (const c of (Array.isArray(ui.changes) ? ui.changes : []).slice(0, DESIGN_LIMITS.layers)) {
         if (!c || typeof c !== 'object') continue;
@@ -341,7 +389,7 @@ export function designEditFromUiElement(uiElement: unknown): DesignEditCard | nu
             ...(o.boxOpacity != null && Number.isFinite(Number(o.boxOpacity)) ? { boxOpacity: num(o.boxOpacity, 0, 1, 1) } : {}),
         });
     }
-    const any = card.pageColor || card.pageOpacity !== undefined || card.photoOpacity !== undefined || card.photoCrop !== undefined || card.putBack || card.shapes || card.group || card.ungroup || card.setBackground || card.detachBackground || card.resizeCopy || card.font || card.changes.length || card.add.length;
+    const any = card.pageColor || card.pageOpacity !== undefined || card.photoOpacity !== undefined || card.photoCrop !== undefined || card.putBack || card.shapes || card.group || card.ungroup || card.setBackground || card.detachBackground || card.saveTemplate || card.useTemplate || card.addBack || card.removeBack || card.removeBackground || card.resizeCopy || card.font || card.changes.length || card.add.length;
     return any ? card : null;
 }
 
@@ -352,7 +400,32 @@ export function designEditFromUiElement(uiElement: unknown): DesignEditCard | nu
 export const CHAT_LOCKED_ROLES = ['contact', 'offer'] as const;
 
 /** The change applied. A layer named that is not on the design is left out; `applied` says how many landed. */
-export function applyDesignEdit(design: Design, card: Pick<DesignEditCard, 'pageColor' | 'pageOpacity' | 'photoOpacity' | 'photoCrop' | 'putBack' | 'shapes' | 'group' | 'ungroup' | 'setBackground' | 'detachBackground' | 'font' | 'changes' | 'add'>, opts: { fromChat?: boolean } = {}): { design: Design; applied: number } {
+export function applyDesignEdit(design: Design, card: Pick<DesignEditCard, 'pageColor' | 'pageOpacity' | 'photoOpacity' | 'photoCrop' | 'putBack' | 'shapes' | 'group' | 'ungroup' | 'setBackground' | 'detachBackground' | 'font' | 'changes' | 'add'> & Partial<Pick<DesignEditCard, 'side' | 'addBack' | 'removeBack'>>, opts: { fromChat?: boolean } = {}): { design: Design; applied: number } {
+    // The flyer's back first, then the rest of the card on the side it names.
+    if (card.removeBack || card.addBack || card.side === 'back') {
+        const { side, addBack, removeBack, ...rest } = card;
+        let whole = design;
+        let done = 0;
+        if (removeBack && whole.back) {
+            const held = [...whole.back.layers.filter(isHeld), ...(whole.back.removed?.layers ?? [])];
+            whole = { ...whole, back: null, removed: { layers: [...(whole.removed?.layers ?? []), ...held].slice(-DESIGN_LIMITS.shelf), photo: whole.removed?.photo ?? null } };
+            done++;
+        }
+        if (addBack && !whole.back && whole.kind === 'flyer') {
+            const elements = whole.layers.filter((l): l is ImageLayer => l.kind === 'qr' || l.kind === 'logo');
+            whole = { ...whole, back: { pageColor: whole.pageColor, pageOpacity: whole.pageOpacity, photo: null, layers: [], removed: { layers: elements, photo: null } } };
+            done++;
+        }
+        const hasOtherChanges = rest.changes.length || rest.add.length || rest.shapes || rest.pageColor || rest.pageOpacity !== undefined || rest.photoOpacity !== undefined || rest.photoCrop !== undefined || rest.putBack || rest.group || rest.ungroup || rest.setBackground || rest.detachBackground || rest.font;
+        if (!hasOtherChanges) return { design: whole, applied: done };
+        if (side === 'back') {
+            if (!whole.back) return { design: whole, applied: done };
+            const r = applyDesignEdit(sideOf(whole, 'back'), rest, opts);
+            return { design: withBack(whole, r.design), applied: done + r.applied };
+        }
+        const r = applyDesignEdit(whole, rest, opts);
+        return { design: r.design, applied: done + r.applied };
+    }
     let applied = 0;
     const next: Design = { ...design, layers: design.layers.map((l) => ({ ...l })) };
     const shelf: HeldLayer[] = [...(design.removed?.layers ?? [])];
@@ -489,11 +562,14 @@ export function resizeDesign(design: Design, size: { kind: Design['kind']; pageW
         const h = r < 1 ? l.h * r : l.h;
         return { ...l, x: l.x + (l.w - w) / 2, y: l.y + (l.h - h) / 2, w, h };
     };
+    const fitLayers = (layers: DesignLayer[]) => layers.map((l) => (l.kind === 'text'
+        ? { ...l, fontSizePct: Math.max(DESIGN_LIMITS.minFontPct, Math.min(DESIGN_LIMITS.maxFontPct, l.fontSizePct * Math.min(1, r))) }
+        : fit(l)));
     return {
         ...design, kind: size.kind, pageW: size.pageW, pageH: size.pageH, paperSize: size.paperSize,
-        layers: design.layers.map((l) => (l.kind === 'text'
-            ? { ...l, fontSizePct: Math.max(DESIGN_LIMITS.minFontPct, Math.min(DESIGN_LIMITS.maxFontPct, l.fontSizePct * Math.min(1, r))) }
-            : fit(l))),
+        layers: fitLayers(design.layers),
+        // A picture has one side: only a flyer keeps its back.
+        back: size.kind === 'flyer' && design.back ? { ...design.back, layers: fitLayers(design.back.layers) } : undefined,
     };
 }
 
@@ -513,5 +589,5 @@ export function designForChat(design: Design): string {
         : `${l.role} (layer "${l.id}"${l.kind === 'shape' ? `, ${l.color}` : ''})`) + (l.group ? ` [group ${l.group}]` : ''));
     const held = design.removed ? [...design.removed.layers.map((l) => (l.kind === 'picture' ? l.id : l.role)), ...(design.removed.photo ? ['photo'] : [])] : [];
     const page = (design.pageOpacity ?? 1) < 1 ? ` at ${Math.round((design.pageOpacity ?? 1) * 100)}% strength` : '';
-    return `page colour ${design.pageColor}${page}${design.photo ? `, picture at ${Math.round(design.photo.opacity * 100)}% strength` : ', no picture'}; layers, back to front: ${layers.join('; ') || 'none'}${held.length ? `; can be put back: ${held.join(', ')}` : ''}`;
+    return `page colour ${design.pageColor}${page}${design.photo ? `, picture at ${Math.round(design.photo.opacity * 100)}% strength` : ', no picture'}; layers, back to front: ${layers.join('; ') || 'none'}${held.length ? `; can be put back: ${held.join(', ')}` : ''}${design.back ? `. THE BACK OF THE FLYER (say "side": "back" to change it): ${designForChat(sideOf(design, 'back'))}` : design.kind === 'flyer' ? '. One-sided so far' : ''}`;
 }

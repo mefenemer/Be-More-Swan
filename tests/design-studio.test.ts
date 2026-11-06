@@ -8,9 +8,10 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
-    applyDesignEdit, cropRect, designEditFromUiElement, designForChat, moveLayer, normaliseDesign, pageFill, resizeDesign, resizeTarget, type Design, type DesignLayer,
+    applyDesignEdit, sideOf, cropRect, designEditFromUiElement, designForChat, moveLayer, normaliseDesign, pageFill, resizeDesign, resizeTarget, type Design, type DesignLayer,
 } from '../src/utils/design-doc';
 import { AI_PICTURE_ANSWER, startableSources, userChoseAiPicture } from '../src/utils/brief-from-chat';
+import { cleanTemplateName, designFromTemplate } from '../src/utils/design-templates';
 import { flyerDesign, imageSize, renderDesignPdfs, renderDesignPreview } from '../src/lib/design-render';
 import { normaliseFlyerContent } from '../src/config/flyer-vocab';
 import { normalizeBrandKit } from '../src/utils/brand-kit';
@@ -466,6 +467,142 @@ check('added pictures, crops, shapes and text styles draw to a preview and print
     assert.ok(!noPicture.png.equals(left.png), 'the picture is drawn only when its file is there');
     const pdf = await renderDesignPdfs({ design: base, photo: null, pictures: new Map([['p1', file]]), title: 'T', bleedMm: 3 });
     assert.ok(pdf.printShop.subarray(0, 4).toString() === '%PDF' && pdf.home.length > 1000);
+});
+
+check('a flyer back is cleaned as a page of its own, its files stay its own, and a picture cannot have one', () => {
+    const made = normaliseDesign({ back: { pageColor: '#123456', layers: [{ id: 'b1', kind: 'text', text: 'Terms', x: 0.1 }, { id: 'qr', kind: 'qr', src: 'https://evil.example/qr.png', x: 0.5 }, { id: 'evil', kind: 'picture', ref: { storageKey: 'org/2/secret.jpg' } }] }, layers: [{ id: 'headline', kind: 'text' }, { id: 'qr', kind: 'qr' }] }, stored());
+    assert.strictEqual(made.back?.pageColor, '#123456');
+    const q = made.back?.layers.find((l) => l.id === 'qr');
+    assert.ok(q && q.kind === 'qr' && q.src === 'data:image/png;base64,AAAA', "the front's QR, never the address a browser sent");
+    assert.ok(!made.back?.layers.some((l) => l.id === 'evil'));
+    assert.ok(made.layers.some((l) => l.id === 'headline'), 'the front is untouched');
+    // Nothing said about the back keeps it; saying null takes it off, and its files wait on the front's shelf for Undo.
+    const kept = normaliseDesign({ layers: [] }, made);
+    assert.strictEqual(kept.back?.pageColor, '#123456');
+    const withPic: Design = { ...stored(), back: { pageColor: '#000000', photo: null, layers: [picture('pb')] } };
+    const gone = normaliseDesign({ back: null, layers: [] }, withPic);
+    assert.strictEqual(gone.back ?? null, null);
+    assert.ok(gone.removed?.layers.some((l) => l.id === 'pb'));
+    const undone = normaliseDesign({ back: { pageColor: '#000000', layers: [{ id: 'pb', kind: 'picture', x: 0.1 }] }, layers: [] }, gone);
+    const pb = undone.back?.layers[0];
+    assert.ok(pb && pb.kind === 'picture' && pb.ref.storageKey === 'org/1/pb.jpg', 'Undo finds its file again');
+    const image: Design = { ...stored(), kind: 'image' };
+    assert.ok(!normaliseDesign({ back: { pageColor: '#000000', layers: [] }, layers: [] }, image).back, 'a picture has one side');
+});
+
+check('the chat can add, change and remove a back, and never touches the front by it; a copy keeps it only as a flyer', () => {
+    const card = designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, addBack: true, side: 'back', pageColor: '#111111', add: [{ text: 'Terms' }] })!;
+    const { design, applied } = applyDesignEdit(stored(), card, { fromChat: true });
+    assert.ok(applied >= 3);
+    assert.strictEqual(design.pageColor, '#f2aa00', 'the front');
+    assert.strictEqual(design.back?.pageColor, '#111111');
+    assert.ok(design.back?.layers.some((l) => l.kind === 'text' && l.text === 'Terms'));
+    assert.ok(design.back?.removed?.layers.some((l) => l.kind === 'qr'), 'the QR code is within reach on the back');
+    assert.ok(designForChat(design).includes('THE BACK OF THE FLYER'));
+    assert.strictEqual(applyDesignEdit({ ...stored(), kind: 'image' }, { addBack: true, changes: [], add: [] }).design.back ?? null, null);
+    assert.strictEqual(applyDesignEdit(stored(), { side: 'back', pageColor: '#000000', changes: [], add: [] }).applied, 0, 'no back to change');
+    const off = applyDesignEdit(design, { removeBack: true, changes: [], add: [] });
+    assert.strictEqual(off.design.back, null);
+    assert.ok(resizeDesign(design, resizeTarget('A4')!).back, 'a flyer copy keeps its back');
+    assert.ok(!resizeDesign(design, resizeTarget('1:1')!).back, 'a picture copy does not');
+    assert.strictEqual(sideOf(design, 'back').pageColor, '#111111');
+    assert.ok(!('back' in sideOf(design)));
+});
+
+check('a double-sided flyer prints as two pages at trim plus bleed, and a one-sided one as one', async () => {
+    const { PDFDocument } = await import('pdf-lib');
+    const kit = normalizeBrandKit({ primaryColor: '#f2aa00', textColor: '#14243a', backgroundColor: '#ffffff', source: 'manual' });
+    const n = normaliseFlyerContent({ headline: 'Launch party', contact: { phone: '01632 960418' } });
+    assert.ok(n.ok);
+    const d = await flyerDesign({ content: n.content, kit, paperSize: 'A5', layout: 'type_only', photo: null, orgName: 'B', style: flyerPageStyle('type_only', '#f2aa00', kit) });
+    const pages = async (b: Buffer) => (await PDFDocument.load(b)).getPageCount();
+    const one = await renderDesignPdfs({ design: d, photo: null, title: 'T', bleedMm: 3 });
+    assert.strictEqual(await pages(one.home), 1);
+    const both: Design = { ...d, back: { pageColor: '#14243a', photo: null, layers: [{ id: 'b', kind: 'text', role: 'text', text: 'Terms', x: 0.1, y: 0.1, w: 0.8, fontFamily: null, fontSizePct: 0.03, bold: false, align: 'left', color: '#ffffff', boxFill: null, boxOpacity: 1 }] } };
+    const two = await renderDesignPdfs({ design: both, photo: null, title: 'T', bleedMm: 3 });
+    assert.strictEqual(await pages(two.home), 2);
+    assert.strictEqual(await pages(two.printShop), 2);
+    const doc = await PDFDocument.load(two.printShop);
+    const [a, b] = doc.getPages();
+    assert.strictEqual(Math.round(a.getWidth()), Math.round(b.getWidth()), 'both sides the same size');
+    assert.ok(a.getBleedBox().width > a.getTrimBox().width);
+    assert.ok(b.getBleedBox().width > b.getTrimBox().width);
+    const preview = await renderDesignPreview(sideOf(both), null);
+    assert.ok(preview.png.length > 500);
+});
+
+check('a template lands at the page it is used on; what was there stays reachable by Undo, and pictures take new names', () => {
+    const current: Design = { ...withPicture(), photo: { id: 'photo0', x: 0, y: 0, w: 1, h: 0.4, opacity: 1, ref } };
+    const template: Design = {
+        v: 1, kind: 'flyer', pageW: 210, pageH: 297, paperSize: 'A4', pageColor: '#ffe4e1',
+        photo: { id: 'photo0', x: 0, y: 0, w: 1, h: 1, opacity: 1, ref: { ...ref, storageKey: 'org/1/tpl.jpg' } },
+        layers: [picture('p1'), { id: 'words', kind: 'text', role: 'text', text: 'Template', x: 0, y: 0, w: 1, fontFamily: null, fontSizePct: 0.05, bold: false, align: 'left', color: '#000000', boxFill: null, boxOpacity: 1 }],
+        back: { pageColor: '#000000', photo: null, layers: [picture('pb')] },
+    };
+    const d = designFromTemplate(current, template, 'x');
+    assert.strictEqual(d.pageW, 148, "this page's size");
+    assert.strictEqual(d.paperSize, 'A5');
+    assert.strictEqual(d.pageColor, '#ffe4e1');
+    assert.notStrictEqual(d.photo?.id, 'photo0', 'a new name, so it cannot be mistaken for the old one on the shelf');
+    assert.strictEqual(d.photo?.ref.storageKey, 'org/1/tpl.jpg');
+    assert.ok(!d.layers.some((l) => l.id === 'p1'), 'nor a picture for one with the same name');
+    assert.ok(d.back);
+    const shelf = d.removed?.layers.map((l) => l.id) ?? [];
+    for (const id of ['photo0', 'p1', 'qr']) assert.ok(shelf.includes(id), `${id} is on the shelf`);
+    // Undo: the browser sends what was there, and every file is found.
+    const undone = normaliseDesign({ photo: { id: 'photo0', x: 0, y: 0, w: 1, h: 0.4 }, back: null, layers: [{ id: 'p1', kind: 'picture' }, { id: 'qr', kind: 'qr' }, { id: 'headline', kind: 'text', text: 'Launch party' }] }, d);
+    assert.strictEqual(undone.photo?.ref.storageKey, ref.storageKey);
+    const p = undone.layers.find((l) => l.id === 'p1');
+    assert.ok(p && p.kind === 'picture' && p.ref.storageKey === 'org/1/p1.jpg');
+    assert.ok(undone.layers.some((l) => l.id === 'qr'));
+    // A picture option has one side.
+    const onImage = designFromTemplate({ ...current, kind: 'image', pageW: 1080, pageH: 1080, paperSize: null }, template, 'y');
+    assert.ok(!onImage.back);
+    assert.strictEqual(onImage.kind, 'image');
+    assert.strictEqual(cleanTemplateName('  Summer   events '), 'Summer events');
+    assert.strictEqual(cleanTemplateName(7), '');
+});
+
+check('templates are the workspace\'s own, the SQL matches, and the chat can use them by name', () => {
+    const t = read('src/utils/design-templates.ts');
+    assert.strictEqual((t.match(/designTemplates\.organisationId, (args\.)?orgId/g) || []).length, 6, 'every read and write is scoped');
+    assert.ok(read('db/schema.ts').includes('pgTable("design_templates"'));
+    const sqlFile = read('db/z-design-templates.sql');
+    assert.ok(sqlFile.includes('CREATE TABLE IF NOT EXISTS design_templates') && sqlFile.includes('ON DELETE CASCADE') && sqlFile.includes('lower(name)'));
+    const c = designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, useTemplate: ' Summer  events ', saveTemplate: 'Mine' })!;
+    assert.strictEqual(c.useTemplate, 'Summer events');
+    assert.strictEqual(c.saveTemplate, 'Mine');
+    assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"useTemplate"'));
+    assert.ok(read('src/utils/visual-briefs.ts').includes('SAVED DESIGN TEMPLATES'));
+    assert.ok(read('src/components/disruptive-ui-registry.js').includes('ui.useTemplate'));
+});
+
+check('a see-through download has no page colour; a normal one and the print do', async () => {
+    const { renderDesign } = await import('../src/lib/design-render');
+    const { Resvg } = await import('@resvg/resvg-js');
+    const d: Design = { v: 1, kind: 'image', pageW: 40, pageH: 40, paperSize: null, pageColor: '#ff0000', photo: null, layers: [] };
+    const clear = await renderDesign({ design: d, photo: null, width: 40, height: 40, seeThrough: true });
+    const solid = await renderDesign({ design: d, photo: null, width: 40, height: 40 });
+    const corner = async (png: Buffer) => {
+        // Draw the PNG over green: the green only shows through a see-through page.
+        const uri = `data:image/png;base64,${png.toString('base64')}`;
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="40" height="40"><rect width="40" height="40" fill="#00ff00"/><image width="40" height="40" xlink:href="${uri}"/></svg>`;
+        const raw = new Resvg(svg).render();
+        return [...raw.pixels.subarray(0, 3)];
+    };
+    assert.deepStrictEqual(await corner(clear.png), [0, 255, 0], 'see-through');
+    assert.deepStrictEqual(await corner(solid.png), [255, 0, 0], 'solid');
+});
+
+check('Remove background is a free helper under the fair-use limit, and the chat can ask for it', () => {
+    const route = read('netlify/functions/brand-briefs.ts');
+    const at = route.indexOf("action === 'remove_background') {");
+    assert.ok(at > 0 && route.indexOf("checkFairUse(db, orgId, 'helpers')", at) > at);
+    assert.ok(!read('src/utils/design-options.ts').includes('holdCredits'), 'no task is touched');
+    const c = designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, removeBackground: 'p1' })!;
+    assert.strictEqual(c.removeBackground, 'p1');
+    assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"removeBackground"'));
+    assert.ok(read('src/components/disruptive-ui-registry.js').includes('ui.removeBackground'));
 });
 
 Promise.all(pending).then(() => console.log(`\n${passed} passed`));

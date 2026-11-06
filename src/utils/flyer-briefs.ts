@@ -22,6 +22,7 @@ import { persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured } from '../li
 import { normalizeBrandKit, type BrandKit } from './brand-kit';
 import { renderDesignPdfs } from '../lib/design-render';
 import type { Design } from './design-doc';
+import { sideOf } from './design-doc';
 import { isAccentCandidate } from './brand-extract';
 import { PexelsRateLimitError, searchUniqueImages } from './pexels';
 import { resolveAssetDisplayUrl } from './social-publish';
@@ -307,8 +308,11 @@ export async function approveFlyerOption(db: Db, args: {
     const design = p.design ?? null;
     const designPhoto = design && design.photo ? await fetchFlyerPhoto(design.photo.ref) : null;
     if (design && design.photo && !designPhoto) throw new Error('flyer_photo_unavailable');
+    const backSide = design?.back ? sideOf(design, 'back') : null;
+    const backPhoto = backSide?.photo ? await fetchFlyerPhoto(backSide.photo.ref) : null;
+    if (backSide?.photo && !backPhoto) throw new Error('flyer_photo_unavailable');
     const { home, printShop } = design
-        ? await renderDesignPdfs({ design, photo: designPhoto, pictures: await fetchDesignPictures(design, true), title: args.title, bleedMm: PRINT_BLEED_MM })
+        ? await renderDesignPdfs({ design, photo: designPhoto, pictures: await fetchDesignPictures(design, true), backFiles: backSide ? { photo: backPhoto, pictures: await fetchDesignPictures(backSide, true) } : undefined, title: args.title, bleedMm: PRINT_BLEED_MM })
         : await renderFlyerPdfs({
             content: n.content, kit: normalizeBrandKit(p.kit), paperSize, layout: p.layout, photo,
             orgName: p.orgName, title: args.title, bleedMm: PRINT_BLEED_MM, style: p.style ?? null,

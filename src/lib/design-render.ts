@@ -10,7 +10,7 @@ import { loadWebFont, type SatoriFont } from './brand-card-webfont';
 import { inlineLogo } from './brand-card';
 import { PREVIEW_DPI, PRINT_DPI, blockSpecs, fitBlocks, flyerGeometry, flyerPageStyle, olderPageStyle, pdfCanEmbed, type FlyerPageStyle, type FlyerPhoto } from './flyer';
 import { PAPER_SPECS, type FlyerContent, type FlyerLayout, type PaperSize } from '../config/flyer-vocab';
-import { BOX_PAD_RATIO, LINE_HEIGHT, cropRect, pageFill, type Design, type DesignCrop, type DesignLayer, type DesignPhotoRef, type TextLayer } from '../utils/design-doc';
+import { BOX_PAD_RATIO, LINE_HEIGHT, cropRect, pageFill, sideOf, type Design, type DesignCrop, type DesignLayer, type DesignPhotoRef, type TextLayer } from '../utils/design-doc';
 import type { BrandKit } from '../utils/brand-kit';
 
 type Node = { type: string; props: Record<string, unknown> };
@@ -69,7 +69,7 @@ function pictureNode(photo: FlyerPhoto, box: { left: number; top: number; width:
  * The page at `width` × `height` px of TRIMMED page, plus `bleedPx` all round. `words: true` draws only the layers on
  * a transparent page, which the PDF lays over the page colour and the picture embedded as itself.
  */
-export async function renderDesign(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; width: number; height: number; bleedPx?: number; words?: boolean }): Promise<DesignRender> {
+export async function renderDesign(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; width: number; height: number; bleedPx?: number; words?: boolean; seeThrough?: boolean }): Promise<DesignRender> {
     const { design, width: W, height: H } = opts;
     const bleed = opts.bleedPx ?? 0;
     const canvasW = W + bleed * 2;
@@ -87,7 +87,8 @@ export async function renderDesign(opts: { design: Design; photo: FlyerPhoto | n
     };
 
     const nodes: Node[] = [];
-    if (!opts.words) nodes.push(el({ position: 'absolute', left: 0, top: 0, width: canvasW, height: canvasH, backgroundColor: pageFill(design) }));
+    // seeThrough: no page colour at all, for a download someone will lay over something else.
+    if (!opts.words && !opts.seeThrough) nodes.push(el({ position: 'absolute', left: 0, top: 0, width: canvasW, height: canvasH, backgroundColor: pageFill(design) }));
     if (design.photo && opts.photo && !opts.words) {
         nodes.push(pictureNode(opts.photo, photoBox(design, W, H, bleed), design.photo.opacity, design.photo.crop));
     }
@@ -159,9 +160,23 @@ function hexRgb(rgb: PdfLib['rgb'], hex: string) {
     return rgb(parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255);
 }
 
-/** A PDF at the paper size plus bleed: page colour, the picture embedded as itself, the layers over it. */
-async function onePdf(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; title: string; bleedMm: number }): Promise<Buffer> {
-    const { design } = opts;
+/** One side's files. */
+export interface DesignSideFiles { photo: FlyerPhoto | null; pictures?: DesignPictures }
+
+/** A PDF at the paper size plus bleed, a page for each side: page colour, the picture embedded as itself, the layers over it. */
+async function onePdf(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; backFiles?: DesignSideFiles; title: string; bleedMm: number }): Promise<Buffer> {
+    const { PDFDocument } = await pdfLib();
+    const doc = await PDFDocument.create();
+    doc.setTitle(opts.title.slice(0, 200));
+    doc.setCreator('Be More Swan');
+    doc.setProducer('Be More Swan');
+    await drawPdfSide(doc, sideOf(opts.design), opts.photo, opts.pictures, opts.bleedMm);
+    if (opts.design.back) await drawPdfSide(doc, sideOf(opts.design, 'back'), opts.backFiles?.photo ?? null, opts.backFiles?.pictures, opts.bleedMm);
+    return Buffer.from(await doc.save());
+}
+
+async function drawPdfSide(doc: Awaited<ReturnType<PdfLib['PDFDocument']['create']>>, design: Design, photo: FlyerPhoto | null, pictures: DesignPictures | undefined, bleedMm: number): Promise<void> {
+    const opts = { photo, pictures, bleedMm };
     const spec = PAPER_SPECS[(design.paperSize as PaperSize) ?? 'A5'] ?? PAPER_SPECS.A5;
     const px = (mm: number) => Math.round(mm * PRINT_DPI / 25.4);
     const W = px(spec.widthMm);
@@ -171,11 +186,7 @@ async function onePdf(opts: { design: Design; photo: FlyerPhoto | null; pictures
     const words = await renderDesign({ design, photo: opts.photo, pictures: opts.pictures, width: W, height: H, bleedPx: bleed, words: layered });
 
     const k = 72 / PRINT_DPI;
-    const { PDFDocument, clip, endPath, popGraphicsState, pushGraphicsState, rectangle, rgb } = await pdfLib();
-    const doc = await PDFDocument.create();
-    doc.setTitle(opts.title.slice(0, 200));
-    doc.setCreator('Be More Swan');
-    doc.setProducer('Be More Swan');
+    const { clip, endPath, popGraphicsState, pushGraphicsState, rectangle, rgb } = await pdfLib();
     const pageW = words.width * k;
     const pageH = words.height * k;
     const page = doc.addPage([pageW, pageH]);
@@ -202,11 +213,16 @@ async function onePdf(opts: { design: Design; photo: FlyerPhoto | null; pictures
         page.setBleedBox(0, 0, pageW, pageH);
         page.setTrimBox(b, b, pageW - b * 2, pageH - b * 2);
     }
-    return Buffer.from(await doc.save());
 }
 
-export async function renderDesignPdfs(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; title: string; bleedMm: number }): Promise<{ home: Buffer; printShop: Buffer }> {
+export async function renderDesignPdfs(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; backFiles?: DesignSideFiles; title: string; bleedMm: number }): Promise<{ home: Buffer; printShop: Buffer }> {
     return { home: await onePdf({ ...opts, bleedMm: 0 }), printShop: await onePdf(opts) };
+}
+
+/** A PNG to download: a flyer at print quality, a picture at its own size. Only here does the page's colour stay off. */
+export async function renderDesignDownload(design: Design, photo: FlyerPhoto | null, pictures: DesignPictures, seeThrough: boolean): Promise<DesignRender> {
+    const { width, height } = designPixels(design, PRINT_DPI, 4096);
+    return renderDesign({ design, photo, pictures, width, height, seeThrough });
 }
 
 /** The preview: a flyer at PREVIEW_DPI, a picture at its own size (capped, so a save stays quick). */

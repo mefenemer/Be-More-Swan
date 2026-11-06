@@ -35,7 +35,10 @@ import {
 } from '../../src/utils/visual-briefs';
 import { readBrandGuidelines } from '../../src/utils/brand-guidelines';
 import { normalizeBrandKit } from '../../src/utils/brand-kit';
-import { applyDesignCard, openDesign, saveDesign, copyDesignAtSize } from '../../src/utils/design-options';
+import { applyDesignCard, openDesign, saveDesign, copyDesignAtSize, downloadDesignPng, removePictureBackground, saveAsTemplate, useTemplate } from '../../src/utils/design-options';
+import { checkFairUse, fairUseResponse } from '../../src/utils/fair-use';
+import { deleteDesignTemplate, listDesignTemplates } from '../../src/utils/design-templates';
+import { presignR2Attachment } from '../../src/utils/social-publish';
 import { DESIGN_EDIT_TYPE, designEditFromUiElement } from '../../src/utils/design-doc';
 import { FlyerFitError } from '../../src/lib/flyer';
 import { triggerBriefRound } from '../../src/utils/trigger-brief-round';
@@ -274,13 +277,33 @@ export default withLambda(async (event) => {
     }
 
     // The studio: an option as an editable design (src/utils/design-options.ts).
-    if (action === 'open_design' || action === 'save_design' || action === 'apply_design_edit' || action === 'resize_design') {
+    if (action === 'open_design' || action === 'save_design' || action === 'apply_design_edit' || action === 'resize_design' || action === 'remove_background' || action === 'download_png' || action === 'save_template' || action === 'use_template') {
         try {
             const optionId = Number(body.optionId);
             if (action !== 'apply_design_edit' && (!Number.isInteger(optionId) || optionId <= 0)) return json(400, { error: 'Option not found.' });
             if (action === 'open_design') {
                 const r = await openDesign(db, orgId, optionId);
                 return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls }) : json(r.status, { error: r.error });
+            }
+            if (action === 'save_template') {
+                const r = await saveAsTemplate(db, { orgId, userId, optionId, design: body.design, name: body.name });
+                return r.ok ? json(200, { ok: true, templates: await listDesignTemplates(db, orgId) }) : json(r.status, { error: r.error });
+            }
+            if (action === 'use_template') {
+                const r = await useTemplate(db, { orgId, optionId, design: body.design, templateId: Number(body.templateId) || null });
+                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls }) : json(r.status, { error: r.error });
+            }
+            if (action === 'remove_background') {
+                const fair = await checkFairUse(db, orgId, 'helpers');
+                if (!fair.allowed) return fairUseResponse(fair);
+                const r = await removePictureBackground(db, { orgId, userId, optionId, design: body.design, target: String(body.target ?? ''), side: body.side === 'back' ? 'back' : null });
+                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls, addedId: r.addedId }) : json(r.status, { error: r.error });
+            }
+            if (action === 'download_png') {
+                const r = await downloadDesignPng(db, { orgId, optionId, design: body.design, seeThrough: body.seeThrough === true, side: body.side === 'back' ? 'back' : null });
+                if (!r.ok) return json(r.status, { error: r.error });
+                // Saved, not opened: a browser ignores the `download` attribute on another site's address.
+                return json(200, { ok: true, url: await presignR2Attachment(r.storageKey, 'design.png') });
             }
             if (action === 'resize_design') {
                 const r = await copyDesignAtSize(db, { orgId, optionId, design: body.design, size: String(body.size ?? '') });
@@ -292,7 +315,7 @@ export default withLambda(async (event) => {
                 const replaceAsset = positive(replace?.assetId);
                 const r = await saveDesign(db, {
                     orgId, optionId, design: body.design, finish: body.finish === true, usePhotoFromOption: positive(body.usePhotoFromOption),
-                    addPicture: positive(body.addPicture),
+                    addPicture: positive(body.addPicture), side: body.side === 'back' ? 'back' : null,
                     replacePicture: replaceAsset && typeof replace?.target === 'string' ? { assetId: replaceAsset, target: replace.target } : null,
                 });
                 return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls, addedId: r.addedId }) : json(r.status, { error: r.error });
@@ -306,6 +329,13 @@ export default withLambda(async (event) => {
             console.error('[brand-briefs] design failed:', action, err instanceof Error ? err.message : err);
             return json(err instanceof FlyerFitError ? 409 : 500, { error: err instanceof FlyerFitError ? err.message : 'That could not be done just now. Please try again.' });
         }
+    }
+
+    if (action === 'list_design_templates') return json(200, { templates: await listDesignTemplates(db, orgId) });
+    if (action === 'delete_design_template') {
+        const id = Number(body.templateId);
+        if (Number.isInteger(id) && id > 0) await deleteDesignTemplate(db, orgId, id);
+        return json(200, { ok: true, templates: await listDesignTemplates(db, orgId) });
     }
 
     if (action === 'decide') {

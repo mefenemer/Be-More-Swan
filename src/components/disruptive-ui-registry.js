@@ -4051,7 +4051,7 @@
   // { type: 'design_edit', briefId, optionId, summary, pageColor?, pageOpacity?, photoOpacity?, photoCrop?, font?, putBack?, shapes?, changes: [...], add: [...] }
   // A change to a design, asked for in chat (src/utils/design-doc.ts). Costs nothing. chat-session.js → brand-briefs.ts.
   function renderDesignEditCard(ui, esc) {
-    if (!Number.isInteger(Number(ui.optionId)) || !(Array.isArray(ui.changes) || Array.isArray(ui.shapes) || Array.isArray(ui.putBack) || Array.isArray(ui.group) || Array.isArray(ui.ungroup) || ui.setBackground || ui.detachBackground || ui.resizeCopy || ui.pageColor || ui.font || ui.pageOpacity !== undefined || ui.photoOpacity !== undefined || ui.photoCrop !== undefined)) return null;
+    if (!Number.isInteger(Number(ui.optionId)) || !(Array.isArray(ui.changes) || Array.isArray(ui.shapes) || Array.isArray(ui.putBack) || Array.isArray(ui.group) || Array.isArray(ui.ungroup) || ui.setBackground || ui.detachBackground || ui.saveTemplate || ui.useTemplate || ui.addBack || ui.removeBack || ui.removeBackground || ui.resizeCopy || ui.pageColor || ui.font || ui.pageOpacity !== undefined || ui.photoOpacity !== undefined || ui.photoCrop !== undefined)) return null;
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
     el.innerHTML = `

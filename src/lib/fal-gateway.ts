@@ -261,6 +261,30 @@ async function drawOneHedged(input: Record<string, unknown>, timeoutMs: number):
     throw new FalError('Fal job timed out before completion.', 504);
 }
 
+export const BACKGROUND_MODEL = process.env.FAL_BACKGROUND_MODEL ?? 'fal-ai/birefnet/v2';
+
+/**
+ * A picture with its background taken away, as a transparent PNG at a Fal URL. Direct, not queued: it takes a few
+ * seconds, and the time limit stays under the 26 s function timeout so a slow run is a clean error, not a 502.
+ */
+export async function removeImageBackground(opts: {
+    imageUrl: string; timeoutMs?: number;
+    usage?: { workspaceId?: number | null; userId?: number | null; assistantId?: number | null };
+}): Promise<GeneratedImage> {
+    const res = await fetch(`https://fal.run/${BACKGROUND_MODEL}`, {
+        method: 'POST', headers: authHeaders(),
+        body: JSON.stringify({ image_url: opts.imageUrl, model: 'General Use (Light)', output_format: 'png', refine_foreground: true }),
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 20_000),
+    });
+    const text = await res.text();
+    if (!res.ok) throwForResponse('request', res.status, text);
+    const out = text ? JSON.parse(text) : {};
+    const image = out?.image;
+    if (!image?.url) throw new FalError('Fal returned no image.');
+    logMediaCost(BACKGROUND_MODEL, { images: [image] }, { ...opts.usage, sessionId: 'fal-background' });
+    return { url: image.url, width: image.width ?? null, height: image.height ?? null, contentType: image.content_type ?? 'image/png' };
+}
+
 /** Generate up to `numImages` image variations, one hedged request each. Resolves to ephemeral Fal URLs. */
 export async function generateImages(opts: {
     prompt: string;

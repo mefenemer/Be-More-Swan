@@ -2,7 +2,7 @@
 // anything on it, full screen, and approve from it. The tab's real modules on a bare page, with every function stubbed.
 
 import { test, expect, type ApiStub } from './fixtures';
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 const PICTURE = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="560"><rect width="400" height="560" fill="#8a9a8f"/></svg>')}`;
 
@@ -82,6 +82,12 @@ async function openStudio(page: Page) {
     await expect(page.locator('[data-design-studio]')).toBeVisible();
     await expect(layer(page, 'headline')).toBeVisible();
 }
+/** The page is sized to the window once it has drawn, replacing what is on it, so a measurement can miss: try again. */
+async function settledBox(target: Locator) {
+    let box: { x: number; y: number; width: number; height: number } | null = null;
+    await expect.poll(async () => (box = await target.boundingBox()) !== null).toBe(true);
+    return box!;
+}
 const layer = (page: Page, id: string) => page.locator(`[data-ds-page] [data-ds-id="${id}"]`);
 const lastSave = (store: ReturnType<typeof stubBriefs>) => store.saves[store.saves.length - 1]?.design;
 const headline = (d: ReturnType<typeof design> | undefined) => d?.layers.find((l) => l.id === 'headline');
@@ -138,11 +144,11 @@ test.describe('wide screen', () => {
         const stage = page.locator('[data-ds-page]');
         const editing = page.locator('[data-ds-page] [contenteditable]');
         await expect.poll(async () => (await stage.boundingBox())?.width ?? 0).toBeGreaterThan(100);
-        const before = (await stage.boundingBox())!;
+        const before = await settledBox(stage);
         await layer(page, 'headline').click();
         await expect(page.locator('[data-ds-bold]')).toBeVisible();
         await expect(editing).toHaveCount(0);
-        const after = (await stage.boundingBox())!;
+        const after = await settledBox(stage);
         expect(after.y, 'selecting words must not push the design down').toBe(before.y);
         expect(after.width).toBe(before.width);
         await expect(page.locator('[data-ds-text]'), 'no separate box for the words').toHaveCount(0);
@@ -163,7 +169,7 @@ test.describe('wide screen', () => {
         await expect(layer(page, 'headline')).toContainText('Launch party');
 
         // Dragging selected words moves them and does not open them.
-        const box = (await layer(page, 'headline').boundingBox())!;
+        const box = await settledBox(layer(page, 'headline'));
         await page.mouse.move(box.x + 30, box.y + 10);
         await page.mouse.down();
         await page.mouse.move(box.x + 30, box.y + 60, { steps: 4 });
@@ -214,8 +220,8 @@ test.describe('wide screen', () => {
         const bg = layer(page, 'photo');
         await expect(bg).toBeVisible();
         await expect(layer(page, 'p1')).toHaveCount(0);
-        const stage = (await page.locator('[data-ds-page]').boundingBox())!;
-        const b = (await bg.boundingBox())!;
+        const stage = await settledBox(page.locator('[data-ds-page]'));
+        const b = await settledBox(bg);
         expect(Math.round(b.width)).toBe(Math.round(stage.width));
         expect(Math.round(b.height)).toBe(Math.round(stage.height));
         // It goes behind the words.
@@ -264,7 +270,7 @@ test.describe('wide screen', () => {
 
         // Dragging moves both by the same amount.
         const y = (id: string) => lastSave(store)?.layers.find((l) => l.id === id)?.y ?? 0;
-        const c = (await layer(page, 'contact').boundingBox())!;
+        const c = await settledBox(layer(page, 'contact'));
         await page.mouse.move(c.x + 5, c.y + 3);
         await page.mouse.down();
         await page.mouse.move(c.x + 5, c.y - 57, { steps: 4 });
@@ -275,7 +281,7 @@ test.describe('wide screen', () => {
 
         // The corner resizes both, their words too.
         const size = () => (lastSave(store)?.layers.find((l) => l.id === 'headline') as { fontSizePct?: number } | undefined)?.fontSizePct ?? 0;
-        const handle = (await page.locator('.ds-group-box .ds-handle').boundingBox())!;
+        const handle = await settledBox(page.locator('.ds-group-box .ds-handle'));
         await page.mouse.move(handle.x + 7, handle.y + 7);
         await page.mouse.down();
         await page.mouse.move(handle.x - 60, handle.y + 7, { steps: 4 });
@@ -294,7 +300,7 @@ test.describe('wide screen', () => {
         await expect.poll(() => groups().filter(Boolean).length, { timeout: 10000 }).toBe(0);
 
         // Dragging across the bare page selects what it touches.
-        const stage = (await page.locator('[data-ds-page]').boundingBox())!;
+        const stage = await settledBox(page.locator('[data-ds-page]'));
         await page.locator('[data-ds-page]').click({ position: { x: 3, y: 3 } });
         await page.mouse.move(stage.x + 3, stage.y + 3);
         await page.mouse.down();
@@ -333,7 +339,7 @@ test.describe('wide screen', () => {
         await openStudio(page);
         await page.locator('[data-ds-resize]').selectOption('1:1');
         await expect.poll(() => opened.at(-1)).toBe(78);
-        const box = (await page.locator('[data-ds-page]').boundingBox())!;
+        const box = await settledBox(page.locator('[data-ds-page]'));
         expect(Math.abs(box.width - box.height)).toBeLessThan(2);
         await expect(page.locator('[data-ds-thumb="77"]')).toBeVisible();
         await expect(page.locator('[data-ds-thumb="78"]')).toHaveAttribute('aria-current', 'true');
@@ -373,7 +379,7 @@ test.describe('wide screen', () => {
         await expect(layer(page, 'p1')).toBeVisible();
         await expect(layer(page, 'p1').locator('img')).toHaveJSProperty('complete', true);
         // Crop: zoom, then drag the picture inside its frame. The frame stays where it is.
-        const frame = (await layer(page, 'p1').boundingBox())!;
+        const frame = await settledBox(layer(page, 'p1'));
         await page.locator('[data-ds-crop]').click();
         await page.locator('[data-ds-crop-zoom]').fill('300');
         await page.mouse.move(frame.x + frame.width / 2, frame.y + frame.height / 2);
@@ -415,7 +421,10 @@ test.describe('wide screen', () => {
         await page.locator('[data-ds-add-shape]').selectOption('circle');
         const shape = page.locator('[data-ds-page] [data-kind="shape"]');
         await expect(shape).toHaveCSS('border-radius', '50%');
-        const made = (await shape.boundingBox())!;
+        // The page is sized to the window once it has drawn, so measure after it settles.
+        let made: { width: number; height: number } | null = null;
+        await expect.poll(async () => (made = await shape.boundingBox()) !== null).toBe(true);
+        made = made!;
         expect(Math.abs(made.width - made.height), 'a circle is round on the page').toBeLessThan(2);
         await page.locator('[data-ds-shapeop]').fill('50');
         await expect(shape).toHaveCSS('opacity', '0.5');
@@ -440,7 +449,7 @@ test.describe('wide screen', () => {
         await openStudio(page);
         await page.locator('[data-ds-add-shape]').selectOption('rectangle');
         const shape = page.locator('[data-ds-page] [data-kind="shape"]');
-        const b = (await shape.boundingBox())!;
+        const b = await settledBox(shape);
         // The rectangle is 0.2 tall, so its centre is 0.5 when its top is 0.4. It starts there: move away, then come back near.
         const cx = b.x + b.width / 2;
         const cy = b.y + b.height / 2;
@@ -455,7 +464,7 @@ test.describe('wide screen', () => {
         const shapeSave = () => (lastSave(store) as unknown as { layers: Array<Record<string, number & string>> } | undefined)?.layers.find((l) => l.kind === 'shape' as never);
         await expect.poll(() => Math.round((shapeSave()?.x ?? 0) * 1000) / 1000, { timeout: 10000 }).toBe(0.3);
 
-        const again = (await shape.boundingBox())!;
+        const again = await settledBox(shape);
         await page.keyboard.down('Alt');
         await page.mouse.move(again.x + again.width / 2, again.y + again.height / 2);
         await page.mouse.down();
@@ -494,6 +503,196 @@ test.describe('wide screen', () => {
         expect(pageErrors).toEqual([]);
     });
 
+    test('Remove background swaps in the cut-out, and Undo brings the original back', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        let base: ((route: unknown, body: unknown) => unknown) | null = null;
+        stubBriefs({ set: (_n: string, h: typeof base) => { base = h; } } as unknown as ApiStub);
+        const CUT = PICTURE.replace('8a9a8f', '123456');
+        api.set('brand-briefs', (route, body) => {
+            const b = (body || {}) as Record<string, unknown>;
+            if (b.action === 'open_design') return { ok: true, design: store.design, photoUrl: null };
+            if (b.action === 'remove_background') {
+                const layers = (store.design.layers as Array<Record<string, unknown>>).map((l) => (l.id === b.target ? { ...l, id: 'p2' } : l));
+                store.design = { ...store.design, layers } as never;
+                return { ok: true, design: store.design, photoUrl: null, pictureUrls: { p2: CUT }, addedId: 'p2' };
+            }
+            if (b.action === 'save_design') {
+                store.saves.push({ design: JSON.parse(JSON.stringify(b.design)) });
+                store.design = b.design as never;
+                if (b.addPicture) {
+                    store.design = { ...store.design, layers: [...store.design.layers, { id: 'p1', kind: 'picture', role: 'picture', x: 0.25, y: 0.5, w: 0.5, h: 0.3, opacity: 1, ref: { storageKey: 'k' } } as never] };
+                    return { ok: true, design: store.design, photoUrl: null, pictureUrls: { p1: PICTURE }, addedId: 'p1' };
+                }
+                return { ok: true, design: store.design, photoUrl: null };
+            }
+            return base!(route, body);
+        });
+        await openStudio(page);
+        await page.locator('[data-ds-add-picture]').click();
+        await expect(layer(page, 'p1')).toBeVisible();
+        await page.locator('[data-ds-cutout]').click();
+        await expect(layer(page, 'p2')).toBeVisible();
+        await expect(layer(page, 'p2').locator('img')).toHaveAttribute('src', CUT);
+        await expect(page.locator('[data-ds-cutout]')).toBeEnabled();
+        await page.locator('[data-ds-undo]').click();
+        await expect(layer(page, 'p1')).toBeVisible();
+        await expect(layer(page, 'p1').locator('img')).toHaveAttribute('src', PICTURE);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('Download asks for a see-through PNG when chosen, and saves through the address it gets back', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        let base: ((route: unknown, body: unknown) => unknown) | null = null;
+        stubBriefs({ set: (_n: string, h: typeof base) => { base = h; } } as unknown as ApiStub);
+        const asked: unknown[] = [];
+        api.set('brand-briefs', (route, body) => {
+            const b = (body || {}) as Record<string, unknown>;
+            if (b.action === 'download_png') { asked.push(b.seeThrough); return { ok: true, url: '/e2e-download.png' }; }
+            if (b.action === 'open_design') return { ok: true, design: store.design, photoUrl: null };
+            return base!(route, body);
+        });
+        await page.route('**/e2e-download.png', (r) => r.fulfill({ contentType: 'image/png', headers: { 'Content-Disposition': 'attachment; filename="design.png"' }, body: Buffer.from('x') }));
+        await openStudio(page);
+        const saved = page.waitForEvent('download');
+        await page.locator('[data-ds-download]').selectOption('clear');
+        expect((await saved).suggestedFilename()).toBe('design.png');
+        expect(asked).toEqual([true]);
+        await expect(page.locator('[data-ds-download]')).toHaveValue('');
+        await expect(page.locator('[data-ds-download]')).toBeEnabled();
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a flyer can have a back: add it, edit it apart from the front, save both, undo, and remove it', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        const saved = () => lastSave(store) as unknown as { layers: Array<{ id: string; text?: string }>; back?: { layers: Array<{ id: string; text?: string }>; pageColor: string } | null; pageColor: string };
+        await openStudio(page);
+        await expect(page.locator('[data-ds-side="back"]')).toHaveCount(0);
+        await page.locator('[data-ds-add-back]').click();
+        await expect(page.locator('[data-ds-side="back"]')).toHaveAttribute('aria-pressed', 'true');
+        await expect(page.locator('[data-ds-page] [data-ds-id]')).toHaveCount(0);
+
+        // What goes on the back stays on the back, and the front is sent as the front.
+        await page.locator('[data-ds-page-color]').fill('#123456');
+        await page.locator('[data-ds-add]').click();
+        await page.keyboard.type('Terms and conditions');
+        await page.keyboard.press('Escape');
+        await expect.poll(() => saved()?.back?.layers.length ?? 0, { timeout: 10000 }).toBe(1);
+        // New words show up on a dark page.
+        await expect(page.locator('[data-ds-page] [data-kind="text"]')).toHaveCSS('color', 'rgb(255, 255, 255)');
+        expect(saved().back?.layers[0].text).toBe('Terms and conditions');
+        expect(saved().back?.pageColor).toBe('#123456');
+        expect(saved().pageColor).toBe('#f2aa00');
+        expect(saved().layers.map((l) => l.id)).toContain('headline');
+        await page.screenshot({ path: 'test-results/design-studio-back.png' });
+
+        // Over to the front and back again.
+        await page.locator('[data-ds-side="front"]').click();
+        await expect(layer(page, 'headline')).toBeVisible();
+        await expect(page.locator('[data-ds-page]')).toHaveCSS('background-color', 'rgb(242, 170, 0)');
+        await page.locator('[data-ds-side="back"]').click();
+        await expect(page.locator('[data-ds-page]')).toContainText('Terms and conditions');
+        await expect(page.locator('[data-ds-page]')).toHaveCSS('background-color', 'rgb(18, 52, 86)');
+
+        // Saved while on the back: still the front at the top of what is sent.
+        await page.locator('[data-ds-page]').click({ position: { x: 3, y: 3 } });
+        await page.locator('[data-ds-add]').click();
+        await page.keyboard.type('More');
+        await page.keyboard.press('Escape');
+        await expect.poll(() => saved()?.back?.layers.length ?? 0, { timeout: 10000 }).toBe(2);
+        expect(saved().layers.map((l) => l.id)).toContain('headline');
+
+        // Remove the back: the front is what remains, and Undo returns it.
+        await page.locator('[data-ds-remove-back]').click();
+        await expect(page.locator('[data-ds-side="back"]')).toHaveCount(0);
+        await expect(layer(page, 'headline')).toBeVisible();
+        await expect.poll(() => saved()?.back ?? null, { timeout: 10000 }).toBeNull();
+        await page.locator('[data-ds-undo]').click();
+        await expect(page.locator('[data-ds-side="back"]')).toBeVisible();
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('templates: save one under a name, use it with Undo to come back, and delete it', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        let base: ((route: unknown, body: unknown) => unknown) | null = null;
+        stubBriefs({ set: (_n: string, h: typeof base) => { base = h; } } as unknown as ApiStub);
+        let templates: Array<{ id: number; name: string }> = [];
+        const savedDesigns: unknown[] = [];
+        const templated = { ...design(), pageColor: '#ffe4e1', layers: [{ ...design().layers[0], id: 'tpl', text: 'From the template' }] };
+        api.set('brand-briefs', (route, body) => {
+            const b = (body || {}) as Record<string, unknown>;
+            if (b.action === 'list_design_templates') return { templates };
+            if (b.action === 'save_template') { savedDesigns.push(b.design); templates = [{ id: 7, name: String(b.name) }]; return { ok: true, templates }; }
+            if (b.action === 'use_template') { expect(b.templateId).toBe(7); store.design = templated as never; return { ok: true, design: templated, photoUrl: null }; }
+            if (b.action === 'delete_design_template') { templates = []; return { ok: true, templates }; }
+            if (b.action === 'open_design') return { ok: true, design: store.design, photoUrl: null };
+            return base!(route, body);
+        });
+        await openStudio(page);
+        const menu = page.locator('[data-ds-templates]');
+        await menu.selectOption('save');
+        const name = page.locator('#apm-input');
+        await expect(name).toBeVisible();
+        // Cancel leaves everything as it was.
+        await page.locator('#apm-cancel').click();
+        await expect(name).toHaveCount(0);
+        expect(savedDesigns).toHaveLength(0);
+        await menu.selectOption('save');
+        await name.fill('Summer events');
+        await page.locator('#apm-confirm').click();
+        await expect(page.locator('[data-ds-saved]')).toContainText('Summer events');
+        expect(savedDesigns).toHaveLength(1);
+
+        await menu.selectOption('use:7');
+        await expect(layer(page, 'tpl')).toContainText('From the template');
+        await expect(page.locator('[data-ds-page]')).toHaveCSS('background-color', 'rgb(255, 228, 225)');
+        await page.screenshot({ path: 'test-results/design-studio-template.png' });
+        await page.locator('[data-ds-undo]').click();
+        await expect(layer(page, 'headline')).toContainText('Launch party');
+
+        await page.locator('[data-ds-page]').click({ position: { x: 3, y: 3 } });
+        await menu.selectOption('del:7');
+        await page.getByRole('button', { name: 'Delete template' }).click();
+        await expect(page.locator('[data-ds-saved]')).toContainText('Template deleted');
+        await expect(menu.locator('option[value="use:7"]')).toHaveCount(0);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('the design holds still while the server changes a picture, and takes clicks again after', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        let base: ((route: unknown, body: unknown) => unknown) | null = null;
+        stubBriefs({ set: (_n: string, h: typeof base) => { base = h; } } as unknown as ApiStub);
+        let release: () => void = () => {};
+        const waiting = new Promise<void>((r) => { release = r; });
+        api.set('brand-briefs', async (route, body) => {
+            const b = (body || {}) as Record<string, unknown>;
+            if (b.action === 'open_design') return { ok: true, design: store.design, photoUrl: null };
+            if (b.addPicture) {
+                await waiting;
+                store.design = { ...(b.design as typeof store.design), layers: [...(b.design as typeof store.design).layers, { id: 'p1', kind: 'picture', role: 'picture', x: 0.25, y: 0.5, w: 0.5, h: 0.3, opacity: 1, ref: {} } as never] };
+                return { ok: true, design: store.design, photoUrl: null, pictureUrls: { p1: PICTURE }, addedId: 'p1' };
+            }
+            return base!(route, body) as never;
+        });
+        await openStudio(page);
+        await page.locator('[data-ds-add-picture]').click();
+        await expect(page.locator('[data-ds-page]')).toHaveCSS('pointer-events', 'none');
+        await expect(page.locator('[data-ds-tools]')).toHaveCSS('pointer-events', 'none');
+        release();
+        await expect(layer(page, 'p1')).toBeVisible();
+        await expect(page.locator('[data-ds-page]')).not.toHaveCSS('pointer-events', 'none');
+        await layer(page, 'p1').click();
+        await expect(page.locator('[data-ds-bg]')).toBeVisible();
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a picture brief has no back to add', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        store.design = { ...store.design, kind: 'image', pageW: 1080, pageH: 1080, paperSize: null } as never;
+        await openStudio(page);
+        await expect(page.locator('[data-ds-add-back]')).toHaveCount(0);
+        expect(pageErrors).toEqual([]);
+    });
+
     test('a removed logo or QR code offers itself back, and comes back', async ({ page, api, pageErrors }) => {
         const store = stubBriefs(api);
         store.design = { ...store.design, removed: { layers: [{ id: 'qr', kind: 'qr', role: 'qr', x: 0.7, y: 0.8, w: 0.2, h: 0.14, src: PICTURE }], photo: null } } as never;
@@ -512,7 +711,7 @@ test.describe('wide screen', () => {
         await page.locator('[data-ds-full]').first().click();
         const dock = page.locator('.chatpane-dock[data-ds-full]');
         await expect(dock).toHaveCount(1);
-        const b = (await dock.boundingBox())!;
+        const b = await settledBox(dock);
         expect(b.width).toBeGreaterThanOrEqual(1580);
         await page.mouse.move(5, 900);
         const exit = page.locator('[data-ds-full].ds-btn');

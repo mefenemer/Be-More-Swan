@@ -7,15 +7,17 @@ import { contentAssets, organisations, visualBriefOptions, visualBriefs } from '
 import type { getDb } from '../../db/client';
 import { normaliseFlyerContent, paperSizeOf } from '../config/flyer-vocab';
 import { FLYER_SOURCE } from '../config/visual-brief-vocab';
-import { designPixels, flyerDesign, imageDesign, renderDesign, renderDesignPreview } from '../lib/design-render';
+import { designPixels, flyerDesign, imageDesign, imageSize, renderDesign, renderDesignDownload, renderDesignPreview } from '../lib/design-render';
+import { falConfigured, FalServiceError, removeImageBackground } from '../lib/fal-gateway';
 import { qrToDataURL } from '../lib/render-libs';
 import { persistBufferToR2 } from '../lib/media-persist';
-import { DESIGN_LIMITS, FIRST_PHOTO_ID, applyDesignEdit, designForChat, normaliseDesign, photoAsPicture, resizeDesign, resizeTarget, type Design, type DesignEditCard, type DesignLayer, type DesignPhotoRef, type HeldLayer, type PictureLayer } from './design-doc';
+import { DESIGN_LIMITS, FIRST_PHOTO_ID, applyDesignEdit, designForChat, normaliseDesign, photoAsPicture, resizeDesign, resizeTarget, sideOf, withBack, type Design, type DesignEditCard, type DesignLayer, type DesignPhotoRef, type HeldLayer, type PictureLayer } from './design-doc';
 import { fetchDesignPictures, fetchFlyerPhoto, type FlyerRenderParams } from './flyer-briefs';
 import { normalizeBrandKit } from './brand-kit';
 import { resolveAssetDisplayUrl } from './social-publish';
 
 type Db = ReturnType<typeof getDb>;
+import { designFromTemplate, findDesignTemplate, saveDesignTemplate } from './design-templates';
 /** A picture copy of a design at another size, and the library provider it becomes. */
 export const DESIGN_COPY = 'design_copy';
 export const DESIGN_PROVIDER = 'design';
@@ -64,6 +66,11 @@ const photoUrlOf = (d: Design) => (d.photo
 async function pictureUrlsOf(design: Design): Promise<Record<string, string>> {
     const backgrounds = [design.photo, design.removed?.photo].filter((p): p is NonNullable<typeof p> => !!p).map(photoAsPicture);
     const pictures = [...backgrounds, ...design.layers, ...(design.removed?.layers ?? [])].filter((l): l is PictureLayer => l.kind === 'picture');
+    if (design.back) {
+        const back = sideOf(design, 'back');
+        const onBack = [...[back.photo, back.removed?.photo].filter((p): p is NonNullable<typeof p> => !!p).map(photoAsPicture), ...back.layers, ...(back.removed?.layers ?? [])];
+        pictures.push(...onBack.filter((l): l is PictureLayer => l.kind === 'picture'));
+    }
     const entries = await Promise.all(pictures.map(async (l) => [l.id, await resolveAssetDisplayUrl({ assetType: 'image', storageKey: l.ref.storageKey, externalUrl: l.ref.externalUrl })] as const));
     return Object.fromEntries(entries.filter((e): e is readonly [string, string] => !!e[1]));
 }
@@ -74,6 +81,11 @@ async function pictureUrlsOf(design: Design): Promise<Record<string, string>> {
  */
 async function withElements(db: Db, orgId: number, o: OptionRow, stored: Design): Promise<Design> {
     const design = stored.photo && !stored.photo.id ? { ...stored, photo: { ...stored.photo, id: FIRST_PHOTO_ID } } : stored;
+    // The back can have the logo and QR code too.
+    if (design.back) {
+        const [front, back] = await Promise.all([withElements(db, orgId, o, sideOf(design)), withElements(db, orgId, o, sideOf(design, 'back'))]);
+        return withBack(front, back);
+    }
     const held = [...design.layers, ...(design.removed?.layers ?? [])];
     const has = (kind: DesignLayer['kind']) => held.some((l) => l.kind === kind);
     const add: HeldLayer[] = [];
@@ -126,12 +138,78 @@ export async function openDesign(db: Db, orgId: number, optionId: number): Promi
 /** Redraw the tile's picture, so the brief's card shows the design as it now is. */
 async function redrawPreview(orgId: number, o: OptionRow, design: Design): Promise<string> {
     const photo = design.photo ? await fetchFlyerPhoto(design.photo.ref) : null;
-    const r = await renderDesignPreview(design, photo, await fetchDesignPictures(design));
+    // The tile shows the front.
+    const r = await renderDesignPreview(sideOf(design), photo, await fetchDesignPictures(design));
     return (await persistBufferToR2({ orgId, bytes: r.png, contentType: 'image/png', folder: 'briefs' })).storageKey;
 }
 
+/**
+ * Another file in a picture's frame. A new name, and the old picture on the shelf, so Undo brings the old one back.
+ * `keepCrop` when it is the same picture, only changed: what showed before still means the same.
+ */
+function swapPicture(design: Design, target: string, ref: DesignPhotoRef, keepCrop = false): { design: Design; newId: string } | null {
+    const newId = `p${Date.now().toString(36)}`;
+    const shelved = (l: HeldLayer) => ({ layers: [...(design.removed?.layers ?? []), l].slice(-DESIGN_LIMITS.shelf), photo: design.removed?.photo ?? null });
+    if (target === 'photo' && design.photo) {
+        const { crop, ...photo } = design.photo;
+        return { newId, design: { ...design, photo: { ...photo, ...(keepCrop && crop ? { crop } : {}), ref, id: newId }, removed: shelved(photoAsPicture(design.photo)) } };
+    }
+    const at = design.layers.find((l) => l.id === target);
+    if (!at || at.kind !== 'picture') return null;
+    const { crop, ...picture } = at;
+    return { newId, design: { ...design, layers: design.layers.map((l) => (l === at ? { ...picture, ...(keepCrop && crop ? { crop } : {}), ref, id: newId } : l)), removed: shelved(at) } };
+}
+
+/**
+ * Take the background out of a picture: a free editing helper under the daily fair-use limit, like the other helpers
+ * (src/config/task-weights.ts). The file it sends and the file it keeps are the design's own, by name only.
+ */
+export async function removePictureBackground(db: Db, args: { orgId: number; userId: number | null; optionId: number; design?: unknown; target: string; side?: 'back' | null }) {
+    if (!falConfigured()) return { ok: false as const, status: 503, error: 'Removing a background is not available just now.' };
+    const saved = args.design === undefined ? await openDesign(db, args.orgId, args.optionId) : await saveDesign(db, { orgId: args.orgId, optionId: args.optionId, design: args.design });
+    if (!saved.ok) return saved;
+    const opened = await openDesign(db, args.orgId, args.optionId);
+    if (!opened.ok) return opened;
+    const onBack = args.side === 'back' && !!opened.design.back;
+    const page = onBack ? sideOf(opened.design, 'back') : opened.design;
+    const layer = page.layers.find((l) => l.id === args.target);
+    const from = args.target === 'photo' ? page.photo?.ref : layer?.kind === 'picture' ? layer.ref : null;
+    if (!from) return { ok: false as const, status: 400, error: 'That picture is not on this design any more.' };
+    const imageUrl = await resolveAssetDisplayUrl({ assetType: 'image', storageKey: from.storageKey, externalUrl: from.externalUrl });
+    if (!imageUrl) return { ok: false as const, status: 400, error: 'That picture could not be read just now. Please try again.' };
+    let bytes: Buffer;
+    try {
+        const cut = await removeImageBackground({ imageUrl, usage: { workspaceId: args.orgId, userId: args.userId } });
+        const res = await fetch(cut.url, { signal: AbortSignal.timeout(10_000) });
+        if (!res.ok) throw new Error(`download ${res.status}`);
+        bytes = Buffer.from(await res.arrayBuffer());
+    } catch (err) {
+        console.error('[design-options] remove background failed:', err instanceof Error ? err.message : err);
+        const down = err instanceof FalServiceError;
+        return { ok: false as const, status: down ? 503 : 502, error: down ? 'Removing a background is not available just now.' : 'The background could not be removed. Please try again.' };
+    }
+    const size = imageSize(bytes);
+    const { storageKey } = await persistBufferToR2({ orgId: args.orgId, bytes, contentType: 'image/png', folder: 'briefs' });
+    const swapped = swapPicture(page, args.target, { source: 'cutout', storageKey, externalUrl: null, mimeType: 'image/png', width: size?.width ?? from.width, height: size?.height ?? from.height }, true);
+    if (!swapped) return { ok: false as const, status: 400, error: 'That picture is not on this design any more.' };
+    const result = onBack ? withBack(opened.design, swapped.design) : swapped.design;
+    await db.update(visualBriefOptions).set({ renderParams: { ...params(opened.option), design: result } }).where(eq(visualBriefOptions.id, opened.option.id));
+    return { ok: true as const, design: result, photoUrl: await photoUrlOf(result), pictureUrls: await pictureUrlsOf(result), addedId: swapped.newId };
+}
+
+/** The design as a PNG to save, with or without its page colour. Spends nothing and changes nothing on the design. */
+export async function downloadDesignPng(db: Db, args: { orgId: number; optionId: number; design: unknown; seeThrough: boolean; side?: 'back' | null }) {
+    const saved = await saveDesign(db, { orgId: args.orgId, optionId: args.optionId, design: args.design });
+    if (!saved.ok) return saved;
+    const page = sideOf(saved.design, args.side === 'back' ? 'back' : 'front');
+    const photo = page.photo ? await fetchFlyerPhoto(page.photo.ref) : null;
+    const r = await renderDesignDownload(page, photo, await fetchDesignPictures(page), args.seeThrough);
+    const { storageKey } = await persistBufferToR2({ orgId: args.orgId, bytes: r.png, contentType: 'image/png', folder: 'briefs' });
+    return { ok: true as const, storageKey };
+}
+
 /** Save what the studio sent. `finish` also redraws the preview: leaving the design, not every keystroke. */
-export async function saveDesign(db: Db, args: { orgId: number; optionId: number; design: unknown; finish?: boolean; usePhotoFromOption?: number | null; addPicture?: number | null; replacePicture?: { assetId: number; target: string } | null }) {
+export async function saveDesign(db: Db, args: { orgId: number; optionId: number; design: unknown; finish?: boolean; usePhotoFromOption?: number | null; addPicture?: number | null; replacePicture?: { assetId: number; target: string } | null; side?: 'back' | null }) {
     const opened = await openDesign(db, args.orgId, args.optionId);
     if (!opened.ok) return opened;
     const o = opened.option;
@@ -148,7 +226,10 @@ export async function saveDesign(db: Db, args: { orgId: number; optionId: number
     }
     const raw = args.design as { photo?: unknown } | null;
     const incoming = args.usePhotoFromOption && raw ? { ...raw, photo: { ...(raw.photo as object | null ?? base.photo), id: base.photo?.id } } : args.design;
-    let design = normaliseDesign(incoming, base);
+    const whole = normaliseDesign(incoming, base);
+    // A picture added or replaced lands on the side that is open.
+    const onBack = args.side === 'back' && !!whole.back;
+    let design = onBack ? sideOf(whole, 'back') : whole;
     let addedId: string | null = null;
     // A new picture from the library, on top of the page: as wide as half of it, in the picture's own shape.
     if (args.addPicture) {
@@ -167,20 +248,12 @@ export async function saveDesign(db: Db, args: { orgId: number; optionId: number
         const { assetId, target } = args.replacePicture;
         const ref = await libraryPicture(db, args.orgId, assetId);
         if ('ok' in ref) return ref;
-        // A new name each time, and the old picture on the shelf, so Undo brings the old one back.
-        const newId = `p${Date.now().toString(36)}`;
-        const shelved = (l: HeldLayer) => ({ layers: [...(design.removed?.layers ?? []), l].slice(-DESIGN_LIMITS.shelf), photo: design.removed?.photo ?? null });
-        if (target === 'photo' && design.photo) {
-            const { crop: _crop, ...photo } = design.photo;
-            design = { ...design, photo: { ...photo, ref, id: newId }, removed: shelved(photoAsPicture(design.photo)) };
-        } else {
-            const at = design.layers.find((l) => l.id === target);
-            if (!at || at.kind !== 'picture') return { ok: false as const, status: 400, error: 'That picture is not on this design any more.' };
-            const { crop: _crop, ...picture } = at;
-            design = { ...design, layers: design.layers.map((l) => (l === at ? { ...picture, ref, id: newId } : l)), removed: shelved(at) };
-        }
-        addedId = newId;
+        const swapped = swapPicture(design, target, ref);
+        if (!swapped) return { ok: false as const, status: 400, error: 'That picture is not on this design any more.' };
+        design = swapped.design;
+        addedId = swapped.newId;
     }
+    if (onBack) design = withBack(whole, design);
     const next: Record<string, unknown> = { ...params(o), design };
     if (args.finish) next.previewKey = await redrawPreview(args.orgId, o, design);
     await db.update(visualBriefOptions).set({ renderParams: next }).where(eq(visualBriefOptions.id, o.id));
@@ -216,12 +289,51 @@ export async function copyDesignAtSize(db: Db, args: { orgId: number; optionId: 
     return { ok: true as const, optionId: row.id };
 }
 
+/** Keep what is on screen as a template. */
+export async function saveAsTemplate(db: Db, args: { orgId: number; userId: number | null; optionId: number; design?: unknown; name: unknown }) {
+    const saved = args.design === undefined ? await openDesign(db, args.orgId, args.optionId) : await saveDesign(db, { orgId: args.orgId, optionId: args.optionId, design: args.design });
+    if (!saved.ok) return saved;
+    return saveDesignTemplate(db, { orgId: args.orgId, userId: args.userId, name: args.name, design: saved.design });
+}
+
+/** Put a template on this option, at its size. What was there stays within reach of Undo. */
+export async function useTemplate(db: Db, args: { orgId: number; optionId: number; design?: unknown; templateId?: number | null; name?: unknown }) {
+    const saved = args.design === undefined ? await openDesign(db, args.orgId, args.optionId) : await saveDesign(db, { orgId: args.orgId, optionId: args.optionId, design: args.design });
+    if (!saved.ok) return saved;
+    const template = await findDesignTemplate(db, args.orgId, { id: args.templateId, name: args.name });
+    if (!template) return { ok: false as const, status: 404, error: 'That template is not there any more.' };
+    const opened = await openDesign(db, args.orgId, args.optionId);
+    if (!opened.ok) return opened;
+    const design = await withElements(db, args.orgId, opened.option, designFromTemplate(opened.design, template, Date.now().toString(36)));
+    await db.update(visualBriefOptions).set({ renderParams: { ...params(opened.option), design } }).where(eq(visualBriefOptions.id, opened.option.id));
+    return { ok: true as const, design, photoUrl: await photoUrlOf(design), pictureUrls: await pictureUrlsOf(design) };
+}
+
 /** A change from a chat card: the same store, with its own rebuilt change. */
-export async function applyDesignCard(db: Db, args: { orgId: number; card: DesignEditCard }) {
+export async function applyDesignCard(db: Db, args: { orgId: number; card: DesignEditCard }): Promise<{ ok: true; design: Design; photoUrl: string | null; pictureUrls: Record<string, string> } | Refused> {
     const opened = await openDesign(db, args.orgId, args.card.optionId);
     if (!opened.ok) return opened;
     if (opened.option.briefId !== args.card.briefId) return { ok: false as const, status: 400, error: 'That option is on another brief.' };
+    // Templates are their own step, around the card's other changes: first a template to start from, last one to keep.
+    if (args.card.useTemplate) {
+        const used = await useTemplate(db, { orgId: args.orgId, optionId: args.card.optionId, name: args.card.useTemplate });
+        if (!used.ok) return used;
+        const { useTemplate: _used, ...rest } = args.card;
+        const anythingElse = rest.changes.length || rest.add.length || rest.shapes || rest.pageColor || rest.pageOpacity !== undefined || rest.font || rest.saveTemplate;
+        return anythingElse ? applyDesignCard(db, { orgId: args.orgId, card: rest }) : used;
+    }
+    if (args.card.saveTemplate) {
+        const { saveTemplate: name, ...rest } = args.card;
+        const anythingElse = rest.changes.length || rest.add.length || rest.shapes || rest.putBack || rest.group || rest.ungroup || rest.setBackground || rest.detachBackground || rest.addBack || rest.removeBack || rest.removeBackground || rest.resizeCopy || rest.pageColor || rest.pageOpacity !== undefined || rest.photoOpacity !== undefined || rest.photoCrop !== undefined || rest.font;
+        const after = anythingElse ? await applyDesignCard(db, { orgId: args.orgId, card: rest }) : opened;
+        if (!after.ok) return after;
+        const kept = await saveDesignTemplate(db, { orgId: args.orgId, userId: null, name, design: after.design });
+        if (!kept.ok) return kept;
+        return { ok: true as const, design: after.design, photoUrl: after.photoUrl, pictureUrls: after.pictureUrls };
+    }
     const { design, applied } = applyDesignEdit(opened.design, args.card, { fromChat: true });
+    // Only a cut-out was asked for: that is its own step, and the design changes only by it.
+    if (!applied && args.card.removeBackground) return removePictureBackground(db, { orgId: args.orgId, userId: null, optionId: args.card.optionId, target: args.card.removeBackground, side: args.card.side });
     // Only a copy was asked for: this design stays exactly as it is.
     if (!applied && args.card.resizeCopy) {
         const copy = await copyDesignAtSize(db, { orgId: args.orgId, optionId: args.card.optionId, size: args.card.resizeCopy });
@@ -230,6 +342,10 @@ export async function applyDesignCard(db: Db, args: { orgId: number; card: Desig
     if (!applied) return { ok: false as const, status: 409, error: 'Nothing changed: those parts are not on this design any more, or they are your contact details or offer, which only you can reword in the editor.' };
     const key = await redrawPreview(args.orgId, opened.option, design);
     await db.update(visualBriefOptions).set({ renderParams: { ...params(opened.option), design, previewKey: key } }).where(eq(visualBriefOptions.id, opened.option.id));
+    if (args.card.removeBackground) {
+        const cut = await removePictureBackground(db, { orgId: args.orgId, userId: null, optionId: args.card.optionId, target: args.card.removeBackground, side: args.card.side });
+        if (cut.ok) return cut;
+    }
     if (args.card.resizeCopy) {
         const copy = await copyDesignAtSize(db, { orgId: args.orgId, optionId: args.card.optionId, size: args.card.resizeCopy });
         if (!copy.ok) return copy;

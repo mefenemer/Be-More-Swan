@@ -5461,6 +5461,17 @@ export const visualBriefs = pgTable("visual_briefs", {
   check("visual_briefs_origin_check", sql`${t.origin} IN ('user','chat','campaign','assistant')`),
 ]);
 
+// Saved designs a workspace can start from (db/z-design-templates.sql, src/utils/design-templates.ts).
+export const designTemplates = pgTable("design_templates", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  name: text().notNull(),
+  design: jsonb().notNull(),
+  createdBy: integer("created_by"),
+  createdAt: timestamp("created_at", { mode: 'date' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: 'date' }).defaultNow().notNull(),
+});
+
 export const visualBriefOptions = pgTable("visual_brief_options", {
   id: serial().primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
