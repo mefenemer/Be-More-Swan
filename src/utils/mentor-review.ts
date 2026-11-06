@@ -6,7 +6,7 @@
 // `reviewDay`, Monday by default) — dispatchDueReviews, called daily by dispatch-mentor-reviews.ts
 // (production) and run-mentor-review-dispatch.ts (staging, from .github/workflows/staging-crons.yml).
 // A missed day is caught up later the same week. Skipped: Quiet mode, the review switched off, no paid
-// plan (§2.7), or the task allowance used up (§2.1). "Review my week now" (queueReviewNow — the Overview
+// plan (§2.7), or the task allowance used up (§2.1). "Review my week now" (queueReviewNow — the Results
 // tab's button and the chat card, through mentor.ts) runs one on demand for an owner or admin.
 //
 // WHAT IT READS: Results across ACTIVE assistants only (roi-activity.ts, this week against last), goals,
@@ -681,5 +681,5 @@ export function mentorReviewLink(base: string, mentorId: number, chatSessionId: 
 export function renderReviewSettingsForMentor(mentorId: number, ctx: unknown): string {
     const st = reviewSettings(ctx);
     const state = st.quiet ? 'off while Quiet mode is on' : st.on ? `on, every ${st.day[0].toUpperCase()}${st.day.slice(1)}` : 'switched off';
-    return `YOUR WEEKLY REVIEW: ${state}. It goes to the workspace's owners and admins, in their chat with you, and its suggestions also wait in Notifications ▸ Needs you; how each is told is "Business Mentor weekly review" in My Account ▸ Notifications. An owner or admin can ask for one now with "Review my week now" on your Overview tab (1 task). To change the day or switch it off when they ask, use setup_field_proposal with assistantId ${mentorId} and key "reviewDay" ("Monday" … "Sunday") or "weeklyReview" ("on" / "off"), "asked": true.`;
+    return `YOUR WEEKLY REVIEW: ${state}. It goes to the workspace's owners and admins, in their chat with you, and its suggestions also wait in Notifications ▸ Needs you; how each is told is "Business Mentor weekly review" in My Account ▸ Notifications. An owner or admin can ask for one now with "Review my week now" on your Results tab (1 task). To change the day or switch it off when they ask, use setup_field_proposal with assistantId ${mentorId} and key "reviewDay" ("Monday" … "Sunday") or "weeklyReview" ("on" / "off"), "asked": true.`;
 }

@@ -1,14 +1,14 @@
 // netlify/functions/mentor.ts
 // The Business Mentor's own page and its suggestions (docs/business-mentor-plan.md §3.13, §14).
-// One server action per capability: the Overview tab (assistants.js) and the chat cards
+// One server action per capability: the Mentor's page (assistants.js) and the chat cards
 // (disruptive-ui-registry.js → chat-session.js) both call this.
 //
 // GET                                               → { checklist, visibility, dismissed, week, open, recommended }
 //     checklist  — the "Set-up checklist": the same gaps the Mentor raises (mentor-snapshot.ts setupChecklist)
 //     visibility — "What I can see" (Assistant Settings), generated from src/config/mentor-data-inventory.ts
-//     dismissed  — "Dismissed" under Suggestions, each with "Bring back"
+//     dismissed  — "Dismissed" on the Suggestions tab, each with "Bring back"
 //     week       — { used, cap }: suggestions shown since Monday (direct asks don't count)
-//     open       — suggestions still waiting, for "Review all" (mentor-review-all.js: chat, Overview, Inbox)
+//     open       — suggestions still waiting, for "Review all" (mentor-review-all.js: chat, Suggestions tab, Inbox)
 //     recommended — "Recommended next": who to hire next (mentor-hire.ts, the same list as the chat card)
 // GET ?only=recommended                             → { recommended }  the catalogue's "Recommended" badge
 // GET ?only=open                                    → { open: [{ id, kind, title }] }  Inbox "Needs you"'s strip
@@ -16,7 +16,7 @@
 // POST { action: 'decide', proposalId, decision: 'accepted' }            → { ok }  after a card's click saved
 // POST { action: 'decide', proposalId, decision: 'dismissed', reason }   → { ok }  the card's Dismiss
 //     reason ∈ not_relevant | already_done | disagree | not_now (not_now snoozes 14 days)
-// POST { action: 'bring_back', proposalId }                               → { ok }  the Overview's "Bring back"
+// POST { action: 'bring_back', proposalId }                               → { ok }  the Suggestions tab's "Bring back"
 // POST { action: 'card_outcome', messageId, outcome, note? }             → { ok }  what the user did with a chat card
 //     outcome ∈ applied | failed | not_now | dismissed — read back by the chat route (mentor-card-outcome.ts)
 //
@@ -29,7 +29,7 @@
 // POST { action: 'research', question, chatSessionId? }            → { job }  "Look this up" (1 task, background)
 // POST { action: 'break_even', inputs }                            → { result }  the calculator (break-even.ts, in code)
 //
-// Phase 3 — the weekly review (§5): Reviews and Customers on the Results tab, Accepted on the Overview, the
+// Phase 3 — the weekly review (§5): Reviews and Customers on the Results tab, Accepted on the Suggestions tab, the
 // Results tab's Commitments list (mentor-commitments.js) and the chat's commitments card (mentor-apply.js):
 // GET ?reviews=1                                    → { ready, reviews, settings, canRun, trackRecord, trackReady }
 // GET ?customers=1                                  → { customers }  (mentor-customers.ts: active assistants only, names and dates only)

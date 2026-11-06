@@ -721,13 +721,15 @@
              Without it an empty amber pill shows until the first count lands. -->
         <span id="campaigns-live-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
-      <!-- Overview — Business Mentor only (mentorTab: business_mentor). This week's Commitments, Suggestions,
-           the Set-up checklist and Recommended next: the screen twins of its chat cards
+      <!-- Suggestions — Business Mentor only (mentorTab: business_mentor). What it produces, as one list with a
+           pill per stage: the screen twin of its chat cards
            (docs/business-mentor-plan.md §14). assistant-mentor-overview.js → mentor.ts.
            ⚠️ Rename a panel and businessMentorSurfaces() in chat-orchestrator.ts must change too
            (tests/mentor-page.test.ts). -->
       <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-mentor" id="maintab-btn-mentor" data-maintab="mentor" class="main-tab-btn hidden">
-        <span id="mentor-tab-label">Overview</span>
+        <span id="mentor-tab-label">Suggestions</span>
+        <!-- `hidden` loses to `inline-flex` (equal specificity, later in style.css): pinned inline too. -->
+        <span id="mentor-review-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
       <!-- Plan — Business Mentor only (mentorPlanTab: business_mentor). Idea check, business and marketing
            plans, break-even calculator, research and the playbook in use (docs/business-mentor-plan.md §4,
@@ -1157,7 +1159,7 @@
 
   <!-- Briefs — Brand Designer only. Rendered lazily by assistant-briefs.js on first activation;
        init() fetches eagerly because the count of briefs needing a decision drives the tab badge. -->
-  <!-- Overview — Business Mentor only. Rendered by assistant-mentor-overview.js. -->
+  <!-- Suggestions — Business Mentor only. Rendered by assistant-mentor-overview.js. -->
   <div id="maintab-mentor" role="tabpanel" aria-labelledby="maintab-btn-mentor" class="main-tab-content hidden">
     <div id="mentor-overview-host"></div>
   </div>

@@ -478,7 +478,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const dReg = window.AssistantDashboardRegistry ? window.AssistantDashboardRegistry.get(assistant.roleKey) : null;
     const quickActions = dReg ? [
         ...(dReg.hideDataHub ? [] : [['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub']]),
-        ...(dReg.mentorTab ? [['🧭', dReg.mentorTab.label || 'Overview', 'mentor']] : []),
+        ...(dReg.mentorTab ? [['🧭', dReg.mentorTab.label || 'Suggestions', 'mentor']] : []),
         ...(dReg.mentorPlanTab ? [['🗺️', dReg.mentorPlanTab.label || 'Plan', 'mentorplan']] : []),
         ...(dReg.briefsTab ? [['🎨', dReg.briefsTab.label || 'Briefs', 'briefs']] : []),
         ...(dReg.videosTab ? [['🎬', dReg.videosTab.label || 'Videos', 'videos']] : []),
@@ -7426,8 +7426,8 @@ function _applyDashboardRegistry(data) {
         document.getElementById('campaign-control-strip')?.classList.add('hidden');
     }
 
-    // Overview tab — Business Mentor only (mentorTab: business_mentor): commitments, suggestions, set-up
-    // checklist and who to hire next (assistant-mentor-overview.js → mentor.ts). The same module paints
+    // Suggestions tab — Business Mentor only (mentorTab: business_mentor): what it suggests, by stage
+    // (assistant-mentor-overview.js → mentor.ts). The same module paints
     // Reviews and Customers on its Results tab, and "What I can see" in its Assistant Settings.
     const mentorTab = cfg.mentorTab;
     toggle('maintab-btn-mentor', !!mentorTab);
@@ -7439,7 +7439,7 @@ function _applyDashboardRegistry(data) {
         el.style.display = mentorTab ? '' : 'none';
     });
     if (mentorTab) {
-        setText('mentor-tab-label', mentorTab.label || 'Overview');
+        setText('mentor-tab-label', mentorTab.label || 'Suggestions');
         window.AssistantMentorOverview?.init({ assistantId: data.id, assistantName: data.name });
     }
     // Plan tab — Business Mentor only (mentorPlanTab): plans, calculator, research, playbook (assistant-mentor-plan.js).

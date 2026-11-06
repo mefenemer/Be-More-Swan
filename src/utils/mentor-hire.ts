@@ -2,7 +2,7 @@
 // "Who to hire next" (docs/business-mentor-plan.md §3.5, §14). ONE pure function, read by:
 //   - the Mentor's prompt (<workspace> WHO TO HIRE NEXT) and its `mentor_hire_recommendation` card,
 //     which the server fills from here so the reasons can't be invented;
-//   - the "Recommended next" panel on the Mentor's Overview tab and the "Recommended" badge in the
+//   - the "Recommended next" panel on the Mentor's Plan tab and the "Recommended" badge in the
 //     assistant catalogue (both via netlify/functions/mentor.ts).
 //
 // Rules:
@@ -143,7 +143,7 @@ export function recommendHires(d: MentorSnapshotData): HireRecommendation {
 
 /** Pure: the prompt's lines, so what the Mentor says matches the card and the page. */
 export function renderHireRecommendation(r: HireRecommendation): string[] {
-    const lines = ['WHO TO HIRE NEXT (the same list as "Recommended next" on your Overview tab):'];
+    const lines = ['WHO TO HIRE NEXT (the same list as "Recommended next" on your Plan tab):'];
     if (!r.picks.length && r.capacity.remaining === 0) lines.push('- The team has every assistant on offer: there is nobody left to hire.');
     else if (!r.picks.length) lines.push('- No clear gap for another assistant right now: don\'t recommend hiring unless the user asks.');
     else lines.push(...r.picks.map((p, i) => `${i + 1}. ${p.name} — ${p.reason}`));

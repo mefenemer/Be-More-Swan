@@ -788,17 +788,18 @@ function businessMentorSurfaces(): string {
 - Each assistant's own page — its settings, set-up answers, goals ("Results" tab) and rules. Only mention assistants listed as active below.
 - "My Account" — its "Billing & Subscription" tab (the plan, payments, resubscribing and changing plan), tasks used, notifications and "Your data". Always say "My Account ▸ Billing & Subscription", never "the Billing page".
 - "Help & Support" — Help Centre articles, contacting support, and "Report an Issue".
-Your own page has an "Overview" tab, a "Plan" tab, a "Results" tab and an "Activity" tab; the user chats with you from the "Chat" button at the top. The "Plan" tab holds:
+Your own page has a "Suggestions" tab, a "Plan" tab, a "Results" tab and an "Activity" tab; the user chats with you from the "Chat" button at the top. The "Plan" tab holds:
   - "Your plans" — "Idea check", "Business plan" and "Marketing plan". The idea check is the same questions you ask, one at a time with "Back" and "Next", then the "Lean Canvas" (nine boxes they can edit) and "Riskiest assumptions". Each plan has "Save draft", "Approve" (owner or admin only), "Changes" since the approved version and "Earlier versions"; "Draft it for me" (or "Draft my canvas") drafts it for 1 task, and the result waits there with "Use this draft". An existing workspace's plans start pre-filled from Business Information, not saved until "Save draft".
   - "Look this up" — a question box (1 task, about two minutes) and the "Research" list of past answers with their links. Each section of a plan has a "Look this up" link too.
   - "Break-even calculator" — price of one sale, cost per sale, fixed costs, marketing spend and how many leads become a sale, each with "A guess"; "Work it out".
   - "The playbook I'm using" — the reviewed playbook for their kind of business, or that there isn't one yet.
   - "Get feedback" — they paste a draft (or "Open a text file") and press "Get feedback" to get your critique on the page.
-The "Overview" tab holds what needs them now:
-  - "Commitments this week" — this week's 1–3 things for each person (theirs first), with the same buttons as on the "Results" tab, and "Add one for this week".
-  - "Suggestions" — one card with three pills. "Waiting": your suggestions they haven't answered yet, with "Review all", and "Suggestions this week" (how many of your 3 a week you have used). "Accepted": suggestions they accepted and what changed since. "Dismissed": suggestions they dismissed, with the reason, each with "Bring back".
-  - "Set-up checklist" — the same Business Information gaps you see, ticked when done; each opens its field.
+  - "Set-up checklist" — at the top until everything is done: the same Business Information gaps you see, ticked when done; each opens its field.
   - "Recommended next" — who you'd hire next and why (the same list as WHO TO HIRE NEXT), each with "See this assistant".
+The "Suggestions" tab is the one they land on, one list with three pills:
+  - "To review" — your suggestions they haven't answered yet, each with its own button and "Dismiss…", and "Review all" when there are several. Also "Suggestions this week": how many of your 3 a week you have used.
+  - "Accepted" — suggestions they accepted and what changed since.
+  - "Dismissed" — suggestions they dismissed, with the reason, each with "Bring back".
 The "Results" tab holds:
   - "Commitments" — this week's 1–3 things for each person (theirs first), each with "Done", "Missed…" (pick why) and "Drop", "Add one for this week", and "Earlier weeks".
   - "Reviews" — every weekly review you wrote, with its suggestions and whether each was accepted, and "Open in chat"; "Review my week now" (owners and admins, 1 task).
@@ -3736,7 +3737,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 content = `${content}\n\n(I’ve left out a card: those details are already filled in, and I only suggest filling gaps. Ask me if you want to change them.)`;
             } else if (m) {
                 // The hire card's picks, reasons and plan room come from mentor-hire.ts — the same list as
-                // the Overview tab's "Recommended next" — never from the model.
+                // the Plan tab's "Recommended next" — never from the model.
                 const rec = m.type === 'mentor_hire_recommendation' ? recommendHires(mentorParts!.data) : null;
                 const gaps = m.type === 'mentor_business_profile' && !m.asked && mentorParts ? onlyGapFields(m.fields, mentorParts.data.business) : null;
                 const filled = rec ? { ...m, why: rec.why, picks: rec.picks, capacity: rec.capacity } : gaps && m.type === 'mentor_business_profile' ? { ...m, fields: gaps } : m;

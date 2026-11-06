@@ -2,7 +2,7 @@
  * src/components/mentor-apply.js
  * What a click on a Business Mentor card does (docs/business-mentor-plan.md §3.3–3.7, §3.13, §14), in
  * ONE place for the three screens that apply them: the chat (chat-session.js), "Review all" on the
- * Mentor's Overview tab and in Inbox "Needs you" (mentor-review-all.js). Each card calls the endpoint its
+ * Mentor's Suggestions tab and in Inbox "Needs you" (mentor-review-all.js). Each card calls the endpoint its
  * own screen uses — the same server action, whichever way in:
  *
  *   mentor_business_profile → organisation-profile.ts POST, read-merge-write of only the profile fields

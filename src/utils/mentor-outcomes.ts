@@ -10,7 +10,7 @@
 //   - A draft the Mentor asked for is linked here by its job id (linkOutcomeJob, from generate-post.ts),
 //     which is how the post carries a "Requested by <Mentor>" pill (src/utils/requested-by.ts).
 //
-// Screens: "Accepted" under Suggestions on the Mentor's Overview tab (mentor.ts), the weekly review, and the
+// Screens: "Accepted" on the Mentor's Suggestions tab (mentor.ts), the weekly review, and the
 // Mentor's prompt. Never throws on a missing table.
 
 import { and, desc, eq, gte, isNull, lte, or, sql } from 'drizzle-orm';
@@ -167,7 +167,7 @@ export async function checkOutcomes(db: Db, orgId: number, now = new Date()): Pr
     }
 }
 
-/** "Accepted" on the Overview and the review's "since" lines, newest first. Null when the table isn't there. */
+/** "Accepted" on the Suggestions tab and the review's "since" lines, newest first. Null when the table isn't there. */
 export async function loadTrackRecord(db: Db, orgId: number, now = new Date(), limit = 20): Promise<TrackRecordItem[] | null> {
     try {
         const rows = await db.select({

@@ -18,52 +18,66 @@ const mentorData = { checklist: [{ key: 'a', label: 'Your customers', done: fals
 test.describe('wide screen', () => {
     test.use({ viewport: { width: 1600, height: 1000 } });
 
-    test('the Mentor: hero beside Needs you, chat panel on Overview, cards closed until opened and open through a repaint', async ({ page, api, signedIn, pageErrors }) => {
+    test('the Mentor: hero beside Needs you, chat panel on its first tab, the Plan cards closed until opened and open through a repaint', async ({ page, api, signedIn, pageErrors }) => {
         stubRole(api, 'business_mentor');
         api.set('mentor', mentorData);
         await open(page);
         const hero = await page.locator('#detail-hero').boundingBox();
         const strip = page.locator('#detail-top-row > #detail-needs-you');
-        await expect(strip).toContainText('Needs you: 1 waiting in Overview');
+        await expect(strip).toContainText('Needs you: 1 waiting in Suggestions');
         await expect(strip).toContainText('Post more often');
         expect(hero!.x + hero!.width).toBeLessThanOrEqual((await strip.boundingBox())!.x);
         await expect(page.locator('#mentoroverview-chat-host [data-chat-input]')).toBeVisible();
 
+        await page.locator('#maintab-btn-mentorplan').click();
         const list = page.locator('details[data-fold*="Set-up checklist"]');
         await expect(list).toHaveCount(1);
         await expect(list).not.toHaveAttribute('open', '');
         await expect(list.getByText('Your customers')).toBeHidden();
         await list.locator('summary').click();
         await expect(list.getByText('Your customers')).toBeVisible();
-        await page.evaluate(() => (window as any).AssistantMentorOverview.activate());   // a repaint
+        await page.evaluate(() => (window as any).AssistantMentorPlan.activate());   // a repaint
         await expect(page.locator('details[data-fold*="Set-up checklist"]').getByText('Your customers')).toBeVisible();
         await page.locator('details[data-fold*="Set-up checklist"] summary').click();
         await expect(list.getByText('Your customers')).toBeHidden();
         expect(pageErrors).toEqual([]);
     });
 
-    test('the Mentor: Suggestions is one open card with a pill per stage, and the other panels moved tab', async ({ page, api, signedIn, pageErrors }) => {
+    test('the Mentor opens on Suggestions: one list, a pill per stage, each row answered in place', async ({ page, api, signedIn, pageErrors }) => {
         stubRole(api, 'business_mentor');
-        api.set('mentor', mentorData);
+        api.set('mentor', { ...mentorData, open: [{ id: 5, kind: 'business_info_gap', title: 'Post more often', why: 'You posted once last month.', card: { type: 'mentor_business_profile', fields: { websiteUrl: 'https://example.test' } } }] });
         await open(page);
-        const card = page.locator('#maintab-mentor [data-mentor-panel="suggestions"]');
-        await expect(card.getByText('Post more often')).toBeVisible();
-        await expect(card.getByRole('button', { name: 'Review all' })).toBeVisible();
+        await expect(page.locator('#maintab-btn-mentor')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#mentor-tab-label')).toHaveText('Suggestions');
+        await expect(page.locator('#mentor-review-badge')).toHaveText('1');
+        const tab = page.locator('#maintab-mentor');
+        for (const moved of ['Commitments', 'Commitments this week', 'Reviews', 'Customers', 'Get feedback', 'What I can see', 'Set-up checklist', 'Recommended next']) await expect(tab.getByRole('heading', { name: moved, exact: true })).toHaveCount(0);
+
+        const card = tab.locator('[data-mentor-panel="suggestions"]');
+        const row = card.locator('[data-mentor-suggestion="5"]');
+        await expect(row.getByText('Post more often')).toBeVisible();
+        await expect(row.getByText('You posted once last month.')).toBeVisible();
+        await expect(row.getByText('https://example.test')).toBeVisible();
+        await expect(row.getByRole('button', { name: 'Save this' })).toBeVisible();
         await expect(card.getByText('1 of 3 used since Monday')).toBeVisible();
+
+        await row.getByRole('button', { name: 'Dismiss…' }).click();
+        const sent = page.waitForRequest((r) => r.method() === 'POST' && r.url().includes('/functions/mentor') && (r.postData() || '').includes('"decision":"dismissed"'));
+        await row.getByRole('button', { name: 'Not relevant' }).click();
+        expect((await sent).postDataJSON()).toMatchObject({ action: 'decide', proposalId: 5, decision: 'dismissed', reason: 'not_relevant' });
+
         await card.getByRole('tab', { name: /^Dismissed/ }).click();
         await expect(card.getByText('Nothing dismissed.')).toBeVisible();
-        await expect(card.getByRole('tab', { name: /^Dismissed/ })).toHaveAttribute('aria-selected', 'true');
         await expect(card.getByRole('tab', { name: /^Dismissed/ })).toBeFocused();
         await page.keyboard.press('ArrowLeft');
         await expect(card.getByRole('tab', { name: /^Accepted/ })).toBeFocused();
         await expect(card.getByText('Post more often')).toBeHidden();
 
-        const tab = page.locator('#maintab-mentor');
-        for (const moved of ['Reviews', 'Customers', 'Get feedback', 'What I can see']) await expect(tab.getByRole('heading', { name: moved, exact: true })).toHaveCount(0);
         await expect(page.locator('#mentor-results-host [data-mentor-panel="reviews"]')).toHaveCount(1);
         await expect(page.locator('#mentor-results-host [data-mentor-panel="customers"]')).toHaveCount(1);
         await expect(page.locator('#mentor-plan-host [data-mentor-panel="feedback"]')).toHaveCount(1);
-        await expect(page.locator('#rm-items .rm-item', { hasText: 'What I can see' })).toHaveCount(1);
+        await expect(page.locator('#mentor-plan-host [data-mentor-panel="checklist"]')).toHaveCount(1);
+        await expect(page.locator('#mentor-plan-host [data-mentor-panel="recommended"]')).toHaveCount(1);
         await page.locator('#rm-items [data-rm-tab="mentorsees"]').click();
         await expect(page.locator('#brief-drawer-title')).toHaveText('What I can see');
         await expect(page.locator('#mentor-sees-host').getByText('Passwords')).toBeVisible();

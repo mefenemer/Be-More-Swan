@@ -25,7 +25,7 @@
 //                             Commitments list on its Results tab (src/utils/mentor-commitments.ts). A
 //                             "close" card is rebuilt from the row (closeCommitmentCard).
 //   mentor_draft_request (Phase 3) → generate-post.ts, as "Create a Post" does (src/utils/mentor-draft-request.ts)
-// The clicks are window.MentorApply (src/components/mentor-apply.js), shared by chat, the Overview tab and
+// The clicks are window.MentorApply (src/components/mentor-apply.js), shared by chat, the Suggestions tab and
 // Inbox "Needs you". Every gap card carries a "why" — the evidence it's based on (§3.13). A gap card
 // without one is dropped.
 
@@ -328,7 +328,7 @@ export function mentorCardsPromptBlock(): string {
 4. Ask Be More Swan for help, or report something broken — only when the user asks for it or describes a problem with Be More Swan itself. "issue" = something isn't working; "support" = a question, billing, or help. Write it in their words; never include passwords, card details or other people's personal details:
 {"type":"mentor_support_request","summary":"<one sentence>","destination":"issue"|"support","subject":"<short>","description":"<what happened, what they expected, and where>"}
 
-Set "asked": true ONLY when the user's latest message asked for exactly this change ("add my website", "fill in my products"); a suggestion you volunteer is "asked": false. Volunteered suggestions are limited to 3 a week and the user can dismiss them (see SUGGESTIONS THIS WEEK): never volunteer one they dismissed, and when the week's 3 are used, mention the gap in words instead. If they want a dismissed one back, they can ask you for it or use "Bring back" on your Overview tab.
+Set "asked": true ONLY when the user's latest message asked for exactly this change ("add my website", "fill in my products"); a suggestion you volunteer is "asked": false. Volunteered suggestions are limited to 3 a week and the user can dismiss them (see SUGGESTIONS THIS WEEK): never volunteer one they dismissed, and when the week's 3 are used, mention the gap in words instead. If they want a dismissed one back, they can ask you for it or use "Bring back" on your Suggestions tab.
 
 5. The opening question — established business or new idea? Only when you don't know yet (see above), as part of your introduction. It shows both answers as buttons; their click saves it to your set-up, and they can change it later on your profile:
 {"type":"mentor_business_stage","summary":"<one short sentence asking it>"}

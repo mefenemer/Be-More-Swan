@@ -1827,7 +1827,7 @@
     }
 
     // The writes themselves are window.MentorApply (src/components/mentor-apply.js), shared with
-    // "Review all" on the Mentor's Overview tab and in Inbox "Needs you", so each card calls its
+    // "Review all" on the Mentor's Suggestions tab and in Inbox "Needs you", so each card calls its
     // screen's own endpoint the same way wherever it is applied.
     function mentorRun(e, work) {
       const d = e.detail || {};
@@ -1899,7 +1899,7 @@
     }
 
     // A suggestion answered (§3.13): accepted after its click saved, or dismissed with a reason →
-    // mentor.ts, the same action the Overview tab's "Bring back" uses. Repaints an open Overview.
+    // mentor.ts, the same action the Suggestions tab's "Bring back" uses. Repaints it if open.
     async function onMentorDecide(e) {
       if (mentorAlreadyHandled(e)) return;
       mentorRun(e, (A, d) => A.decide(d.proposalId, d.decision, d.reason));

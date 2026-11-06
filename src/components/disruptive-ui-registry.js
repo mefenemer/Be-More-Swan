@@ -2683,7 +2683,7 @@
   // `answered` (chat-card-refresh.ts → mentor-proposal-cards.ts): the suggestion was answered somewhere else —
   // this chat, another member's, Inbox "Needs you" or "Review all" — so the card says so instead of offering
   // its buttons again.
-  const MENTOR_ANSWERED = { accepted: 'Done — this suggestion was accepted.', dismissed: 'Dismissed — listed under Suggestions on your Mentor’s Overview tab.', expired: 'This suggestion has expired.', failed: 'This suggestion couldn’t be applied.' };
+  const MENTOR_ANSWERED = { accepted: 'Done — this suggestion was accepted.', dismissed: 'Dismissed — listed under Dismissed on your Mentor’s Suggestions tab.', expired: 'This suggestion has expired.', failed: 'This suggestion couldn’t be applied.' };
   function mentorCard(esc, { eyebrow, summary, why, bodyHtml, goLabel, eventName, detail, doneText, note, proposalId, noGo, answered }) {
     const suggestion = Number.isInteger(proposalId) && proposalId > 0;
     const el = document.createElement('div');
@@ -2742,9 +2742,9 @@
           if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
           reasons.style.display = 'none';
           outcome('dismissed', reason);
-          say(reason === 'not_now' ? 'Dismissed for now — your Mentor may raise it again in two weeks. It\'s listed under Suggestions on its Overview tab.'
+          say(reason === 'not_now' ? 'Dismissed for now — your Mentor may raise it again in two weeks. It\'s listed under Dismissed on its Suggestions tab.'
             : reason === 'already_done' ? 'Dismissed — thanks for letting your Mentor know.'
-              : 'Dismissed — your Mentor won\'t suggest this again. Bring it back from its Overview tab any time.');
+              : 'Dismissed — your Mentor won\'t suggest this again. Bring it back from its Suggestions tab any time.');
         });
         return;
       }
@@ -3049,7 +3049,7 @@
       eyebrow: 'Who to hire next', summary: ui.summary, why: ui.why, noGo: true, proposalId: ui.proposalId, answered: ui.answered,
       bodyHtml: `<ol class="mt-2">${rows}</ol>
         ${cap.note ? `<p class="mt-2 text-xs rounded-lg px-2.5 py-1.5 ${cap.needsUpgrade ? 'border border-amber-200 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-700'}">${esc(String(cap.note))}</p>` : ''}`,
-      note: 'Nothing is hired from here. The same list is under "Recommended next" on your Mentor’s Overview tab.',
+      note: 'Nothing is hired from here. The same list is under "Recommended next" on your Mentor’s Plan tab.',
     });
     el.addEventListener('click', (e) => {
       const b = e.target.closest('[data-mhr-open]');
@@ -3071,7 +3071,7 @@
       <div class="mt-2" data-mra-host></div>`;
     const host = el.querySelector('[data-mra-host]');
     if (window.MentorReviewAll) window.MentorReviewAll.mount(host);
-    else host.innerHTML = '<p class="text-xs text-gray-600">Open your Mentor’s Overview tab to review them.</p>';
+    else host.innerHTML = '<p class="text-xs text-gray-600">Open your Mentor’s Suggestions tab to review them.</p>';
     return el;
   });
 

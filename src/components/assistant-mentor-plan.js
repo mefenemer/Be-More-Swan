@@ -3,6 +3,11 @@
  * The Business Mentor's Plan tab — docs/business-mentor-plan.md §4 and §14. The screen twins of what the
  * Mentor does in chat, through the SAME server actions (netlify/functions/mentor.ts):
  *
+ *   Set-up checklist        — the same gaps it raises as cards (mentor-snapshot.ts setupChecklist); each opens its
+ *                             Business Information tab. Top of the tab, and gone once everything is done
+ *   Recommended next        — who to hire next (mentor-hire.ts — the same list as the chat card and the catalogue's
+ *                             "Recommended" badge); "See this assistant" opens the catalogue
+ *                             (both read through the Suggestions tab's module: `mentor:overviewLoaded`)
  *   Your plans              — "Idea check", "Business plan" and "Marketing plan" (strategy-documents.ts)
  *     Idea check            — the eight interview questions one step at a time ("Back" / "Next" saves),
  *                             the "Lean Canvas" (nine editable boxes) and "Riskiest assumptions"
@@ -31,6 +36,7 @@
     calc: { inputs: {}, result: null, error: null, busy: false },
     research: { question: '', busy: false, error: null },
     feedback: { text: '', busy: false, result: null, error: null },
+    setup: null,
   });
   const FEEDBACK_MAX = 12000;
   let state = fresh();
@@ -379,6 +385,55 @@
     `, 'data-mplan-panel="playbook"');
   }
 
+  function checklistHtml(items) {
+    const done = items.filter((i) => i.done).length;
+    if (!items.length || done === items.length) return '';
+    const pct = Math.round((done / items.length) * 100);
+    const rows = items.map((i) => `
+      <li class="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0">
+        <span class="mt-0.5 w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center text-xs font-bold ${i.done ? 'border-green-500 bg-green-600 text-white' : 'border-gray-300'}" aria-hidden="true">${i.done ? '✓' : ''}</span>
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2">
+            ${i.done
+              ? `<span class="text-sm text-gray-700">${esc(i.label)}</span><span class="sr-only">(done)</span>`
+              : `<button type="button" data-mentor-open-field="${esc(i.tab)}" class="text-sm font-semibold text-pink-700 hover:underline text-left">${esc(i.label)}</button>
+                 ${i.optional ? '<span class="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-gray-100 text-gray-600">Optional</span>' : '<span class="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200">To do</span>'}`}
+          </div>
+          ${i.done ? '' : `<p class="text-xs text-gray-500 mt-0.5">${esc(i.why)}</p>`}
+        </div>
+      </li>`).join('');
+    // The bar is in the heading row, so it still shows when the card is closed (fold.js).
+    return card(`
+      <div>
+        <div class="flex items-center justify-between gap-2">
+          <h2 class="text-base font-bold text-gray-900">Set-up checklist</h2>
+          <span class="text-xs font-semibold text-gray-500 shrink-0">${done} of ${items.length} done</span>
+        </div>
+        <div class="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden" role="progressbar" aria-label="Set-up checklist" aria-valuemin="0" aria-valuemax="${items.length}" aria-valuenow="${done}"><div class="h-full rounded-full bg-green-600" style="width:${pct}%"></div></div>
+      </div>
+      <p class="text-xs text-gray-500 mb-2">The same gaps ${esc(state.assistantName)} raises in chat. Each opens its place in Business Information.</p>
+      <ul>${rows}</ul>`, 'data-mentor-panel="checklist"');
+  }
+
+  function recommendedHtml(rec) {
+    const picks = (rec && rec.picks) || [];
+    const cap = (rec && rec.capacity) || {};
+    const rows = picks.map((p, i) => `
+      <li class="py-2 border-b border-gray-100 last:border-0">
+        <p class="text-sm font-semibold text-gray-900">${i + 1}. ${esc(p.name)}</p>
+        <p class="text-xs text-gray-600 mt-0.5 break-words">${esc(p.reason)}</p>
+        <button type="button" data-mentor-see-role="${esc(p.roleKey)}" class="btn-swan-link mt-1 px-0 py-1 text-xs font-bold">See this assistant</button>
+      </li>`).join('');
+    return card(`
+      <h2 class="text-base font-bold text-gray-900">Recommended next</h2>
+      ${picks.length
+        ? `<p class="text-xs text-gray-500 mt-1">Who ${esc(state.assistantName)} would hire next, and why. Nothing is hired from here.</p><ol class="mt-1">${rows}</ol>`
+        : cap.remaining === 0
+          ? '<p class="text-sm text-gray-600 mt-1">You already have every assistant on offer.</p>'
+          : '<p class="text-sm text-gray-600 mt-1">No clear gap for another assistant right now.</p>'}
+      ${cap.note ? `<p class="mt-2 text-xs rounded-lg px-2.5 py-1.5 ${cap.needsUpgrade ? 'border border-amber-200 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-700'}">${esc(cap.note)}</p>` : ''}`, 'data-mentor-panel="recommended"');
+  }
+
   function feedbackHtml() {
     const f = state.feedback;
     return card(`
@@ -428,8 +483,8 @@
     const focusKey = active && el.contains(active) ? (active.getAttribute('data-mplan-field') || active.getAttribute('data-mplan-assumption') || active.getAttribute('data-mplan-calc') || (active.hasAttribute('data-mplan-research-q') ? 'research' : active.hasAttribute('data-mplan-feedback-text') ? 'feedback' : null)) : null;
     el.innerHTML = `
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
-        <div class="space-y-4 min-w-0 lg:col-span-2">${plansHtml()}${researchHtml()}${feedbackHtml()}</div>
-        <div class="space-y-4 min-w-0">${calcHtml()}${playbookHtml()}
+        <div class="space-y-4 min-w-0 lg:col-span-2">${checklistHtml(state.setup?.checklist || [])}${plansHtml()}${researchHtml()}${feedbackHtml()}</div>
+        <div class="space-y-4 min-w-0">${state.setup ? recommendedHtml(state.setup.recommended) : ''}${calcHtml()}${playbookHtml()}
           ${card(chatPaneAvailable()
             ? `<p class="text-xs text-gray-600">Prefer to talk it through? 🎯 Select a part of a plan and ask ${esc(state.assistantName)} — “challenge this”, “make it shorter”. It changes the same plans, and nothing is saved without your click.</p>`
             : `<p class="text-xs text-gray-600">Prefer to talk it through? Ask ${esc(state.assistantName)} in chat — it fills in the same plans, and nothing is saved without your click.</p>`)}
@@ -506,6 +561,14 @@
     const t = e.target;
     if (!(t instanceof Element) || !host()?.contains(t)) return;
     if (t.closest('[data-mplan-feedback-go]')) { getFeedback(); return; }
+    const openField = t.closest('[data-mentor-open-field]');
+    if (openField) {
+      window._bizinfoInitialTab = openField.getAttribute('data-mentor-open-field');
+      if (window.loadView) window.loadView('assets');
+      return;
+    }
+    const see = t.closest('[data-mentor-see-role]');
+    if (see) { window.MentorOpenCatalogue?.(see.getAttribute('data-mentor-see-role')); return; }
     const sel = t.closest('[data-mplan-select], [data-mplan-select-assumption]');
     if (sel) { const ref = selectionRef(sel); if (ref) getChatDock()?.refer(ref); return; }
     const k = t.closest('[data-mplan-kind]');
@@ -618,6 +681,9 @@
   // Unsaved typing elsewhere is kept, but a part the chat has just changed shows the chat's words: the
   // user approved that card, and their older typing over it would hide the change and then overwrite it
   // on "Save draft".
+  // The Suggestions tab read the checklist and who to hire next, and re-reads them when a card or Business
+  // Information saves: one read for the two tabs.
+  document.addEventListener('mentor:overviewLoaded', (e) => { state.setup = e.detail; render(); });
   document.addEventListener('mentor:planChanged', async () => {
     if (!state.assistantId || !host()) return;
     const before = Object.fromEntries(KINDS.map((k) => [k, JSON.stringify(baseOf(k))]));
@@ -702,6 +768,7 @@
       state.assistantId = assistantId;
       state.assistantName = assistantName || 'Your Mentor';
       if (keepCalc) state.calc = keepCalc;
+      state.setup = window.AssistantMentorOverview?.data?.() || null;
       render();
       load();
     },

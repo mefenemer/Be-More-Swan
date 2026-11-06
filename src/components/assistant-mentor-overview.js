@@ -1,20 +1,15 @@
 /**
  * src/components/assistant-mentor-overview.js
- * The Business Mentor's Overview tab — what needs the user now — and the panels of its other screens that
- * read the same data (docs/business-mentor-plan.md §14, redesigned 2026-11-06). Screen twins of what the
- * Mentor does in chat:
+ * The Business Mentor's first tab, Suggestions: what it produces, as one list with a pill per stage, the way
+ * Posts and Briefs work on the other assistants (redesigned 2026-11-06, docs/business-mentor-plan.md §14). This
+ * file keeps its old name; the tab's key is still `mentor`.
  *
- * Overview (#mentor-overview-host)
- *   Commitments            — this week's, painted by mentor-commitments.js into #mentor-commitments-now
- *   Suggestions            — one card, one pill per stage:
- *     Waiting              — the open ones, "Review all" (mentor-review-all.js, the same list as the chat
- *                            card and Inbox "Needs you"; nothing pre-ticked), and n of 3 this week (§3.13)
- *     Accepted             — accepted suggestions and what changed SINCE (mentor-outcomes.ts)
- *     Dismissed            — what the user dismissed from a card, with the reason; "Bring back"
- *   Set-up checklist       — the same gaps it raises as cards (mentor-snapshot.ts setupChecklist);
- *                            each opens its Business Information tab
- *   Recommended next       — who to hire next (mentor-hire.ts — the same list as the chat card and the
- *                            catalogue's "Recommended" badge); "See this assistant" opens the catalogue
+ * Suggestions (#mentor-overview-host)
+ *   To review              — the open ones, each with its own answer: the same button words and server action as
+ *                            its chat card, and "Dismiss…" with the same reasons. "Review all" (mentor-review-all.js,
+ *                            the same list as the chat card and Inbox "Needs you"; nothing pre-ticked) does several
+ *   Accepted               — accepted suggestions and what changed SINCE (mentor-outcomes.ts)
+ *   Dismissed              — what the user dismissed, with the reason; "Bring back"
  * Results tab (#mentor-results-host)
  *   Reviews (Phase 3)      — every weekly review, its suggestions and what was answered; "Review my week now"
  *                            (mentor.ts review_now, owners and admins); its day and on/off are on the profile
@@ -23,6 +18,8 @@
  * Assistant Settings (#mentor-sees-host)
  *   What I can see         — generated from src/config/mentor-data-inventory.ts, the list its prompt reads
  *
+ * The Plan tab shows the Set-up checklist and Recommended next from this module's read: `mentor:overviewLoaded`.
+ *
  * Backed by netlify/functions/mentor.ts, the SAME action a card's Dismiss calls (chat-session.js →
  * mentor:decide). A save from a card dispatches `mentor:changed` / `bizinfo:*Changed`, which reload this
  * tab. Handlers are bound to `document` once, at load, never from render. Server values are escaped.
@@ -30,9 +27,17 @@
 (function () {
   const API = '/.netlify/functions/mentor';
   const state = { assistantId: null, assistantName: 'Your Mentor', data: null, error: null, loading: false, notes: {},
-    stage: 'waiting',
+    stage: 'review', busyRow: null, dismissing: null,
     reviews: null, customers: null, reviewBusy: false, reviewNote: null, poll: null };
-  const STAGES = ['waiting', 'accepted', 'dismissed'];
+  const STAGES = ['review', 'accepted', 'dismissed'];
+  // The same reasons as a chat card's "Dismiss…" (disruptive-ui-registry.js MENTOR_DISMISS_REASONS).
+  const DISMISS_REASONS = [['not_relevant', 'Not relevant'], ['already_done', 'Already done'], ['disagree', 'Disagree'], ['not_now', 'Not now']];
+  /** The same words as this suggestion's chat card. */
+  function acceptLabel(c) {
+    if (c && c.type === 'mentor_products') return (c.products || []).length > 1 ? `Add these ${c.products.length}` : 'Add this';
+    if (c && c.type === 'mentor_draft_request') return 'Ask for this post';
+    return 'Save this';
+  }
 
   function esc(v) {
     return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => (
@@ -56,7 +61,10 @@
     if (!host()) return;
     state.loading = true;
     const [main, reviews, customers] = await Promise.allSettled([getJson(API), getJson(`${API}?reviews=1`), getJson(`${API}?customers=1`)]);
-    if (main.status === 'fulfilled') { state.data = main.value; state.error = null; }
+    if (main.status === 'fulfilled') {
+      state.data = main.value; state.error = null;
+      document.dispatchEvent(new CustomEvent('mentor:overviewLoaded', { detail: state.data }));
+    }
     else state.error = main.reason?.message || 'Couldn’t load your Mentor’s overview.';
     state.reviews = reviews.status === 'fulfilled' ? reviews.value : { error: reviews.reason?.message || 'Couldn’t load your reviews.' };
     state.customers = customers.status === 'fulfilled' ? customers.value.customers : { error: customers.reason?.message || 'Couldn’t load your customers.' };
@@ -72,6 +80,12 @@
     const open = state.data?.open || [];
     window._setNeedsYouItems?.(open.slice(0, 4).map((s) => ({ id: s.id, label: s.title || 'A suggestion', sub: 'Waiting' })));
     window._setNeedsYouCount?.(open.length);
+    const badge = document.getElementById('mentor-review-badge');
+    if (badge) {
+      badge.textContent = String(open.length);
+      badge.classList.toggle('hidden', !open.length);
+      badge.style.display = open.length ? 'inline-flex' : 'none';   // `hidden` loses to inline-flex
+    }
   }
 
   function schedulePoll() {
@@ -186,39 +200,6 @@
     return `<section class="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 sm:p-5 min-w-0" ${attrs}>${inner}</section>`;
   }
 
-  function checklistHtml(items) {
-    if (!items.length) return '';
-    const done = items.filter((i) => i.done).length;
-    if (done === items.length) {
-      return card(`<p class="flex items-center gap-2 text-sm text-gray-700"><span class="w-5 h-5 shrink-0 rounded-md bg-green-600 text-white flex items-center justify-center text-xs font-bold" aria-hidden="true">✓</span><span><strong class="text-gray-900">Set-up checklist</strong> · All ${items.length} done</span></p>`, 'data-mentor-panel="checklist" data-no-fold');
-    }
-    const pct = Math.round((done / items.length) * 100);
-    const rows = items.map((i) => `
-      <li class="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0">
-        <span class="mt-0.5 w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center text-xs font-bold ${i.done ? 'border-green-500 bg-green-600 text-white' : 'border-gray-300'}" aria-hidden="true">${i.done ? '✓' : ''}</span>
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-2">
-            ${i.done
-              ? `<span class="text-sm text-gray-700">${esc(i.label)}</span><span class="sr-only">(done)</span>`
-              : `<button type="button" data-mentor-open-field="${esc(i.tab)}" class="text-sm font-semibold text-pink-700 hover:underline text-left">${esc(i.label)}</button>
-                 ${i.optional ? '<span class="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-gray-100 text-gray-600">Optional</span>' : '<span class="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200">To do</span>'}`}
-          </div>
-          ${i.done ? '' : `<p class="text-xs text-gray-500 mt-0.5">${esc(i.why)}</p>`}
-        </div>
-      </li>`).join('');
-    // The bar is in the heading row, so it still shows when the card is closed (fold.js).
-    return card(`
-      <div>
-        <div class="flex items-center justify-between gap-2">
-          <h2 class="text-base font-bold text-gray-900">Set-up checklist</h2>
-          <span class="text-xs font-semibold text-gray-500 shrink-0">${done} of ${items.length} done</span>
-        </div>
-        <div class="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden" role="progressbar" aria-label="Set-up checklist" aria-valuemin="0" aria-valuemax="${items.length}" aria-valuenow="${done}"><div class="h-full rounded-full bg-green-600" style="width:${pct}%"></div></div>
-      </div>
-      <p class="text-xs text-gray-500 mb-2">The same gaps I raise in chat. Each opens its place in Business Information.</p>
-      <ul>${rows}</ul>`, 'data-mentor-panel="checklist"');
-  }
-
   function visibilityHtml(v) {
     const list = (xs) => `<ul class="mt-1 space-y-1">${xs.map((x) => `<li class="text-sm text-gray-700 flex gap-2"><span aria-hidden="true" class="text-gray-400">•</span><span class="min-w-0">${esc(x)}</span></li>`).join('')}</ul>`;
     return card(`
@@ -249,13 +230,32 @@
       : '<p class="text-sm text-gray-500">Nothing dismissed. When you dismiss a suggestion in chat, it’s listed here with your reason.</p>';
   }
 
-  function waitingPane(open, week) {
+  function rowHtml(it) {
+    const busy = state.busyRow === it.id;
+    const note = state.notes[it.id];
+    const preview = window.MentorReviewAll?.previewHtml?.(it.card) || '';
+    return `<li class="py-3 border-b border-gray-100 last:border-0" data-mentor-suggestion="${Number(it.id)}">
+      <p class="text-sm font-semibold text-gray-900 break-words">${esc(it.title || 'A suggestion')}</p>
+      ${preview ? `<div class="mt-1">${preview}</div>` : ''}
+      ${it.why ? `<p class="mt-1 text-xs text-blue-800 break-words"><span class="font-bold">Why?</span> ${esc(it.why)}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-2">
+        <button type="button" data-mentor-accept class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50" ${busy ? 'disabled' : ''}>${esc(acceptLabel(it.card))}</button>
+        <button type="button" data-mentor-dismiss aria-expanded="${state.dismissing === it.id}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${busy ? 'disabled' : ''}>Dismiss…</button>
+      </div>
+      ${state.dismissing === it.id ? `<div class="flex flex-wrap items-center gap-2 mt-2">
+        <span class="text-xs text-gray-500">Why?</span>
+        ${DISMISS_REASONS.map(([k, label]) => `<button type="button" data-mentor-dismiss-reason="${k}" class="btn-secondary px-2.5 py-1 border text-xs font-semibold rounded-full transition disabled:opacity-50" ${busy ? 'disabled' : ''}>${label}</button>`).join('')}
+      </div>` : ''}
+      ${note ? `<p class="mt-2 text-xs font-semibold ${note.error ? 'text-red-600' : 'text-pink-700'}" role="status">${esc(note.text)}</p>` : ''}
+    </li>`;
+  }
+
+  function reviewPane(open, week) {
     const used = week && week.used != null ? week.used : null;
     const list = open.length
-      ? `<p class="text-xs text-gray-500">My suggestions you haven’t answered yet. Review them together and tick the ones you want.</p>
-        <ul class="mt-1">${open.map((s) => `<li class="text-sm text-gray-900 py-2 border-b border-gray-100 last:border-0 break-words">${esc(s.title || 'A suggestion')}</li>`).join('')}</ul>
-        <button type="button" data-mentor-review-all class="btn-primary mt-2 px-4 py-2 text-sm font-bold rounded-lg transition">Review all</button>`
-      : '<p class="text-sm text-gray-500">Nothing waiting for you.</p>';
+      ? `<p class="text-xs text-gray-500">My suggestions you haven’t answered yet. Nothing changes until you say so.</p>
+        <ul class="mt-1">${open.map(rowHtml).join('')}</ul>`
+      : '<p class="text-sm text-gray-500">Nothing to review. New suggestions appear here and in chat.</p>';
     return `${list}
       <div class="mt-3 pt-3 border-t border-gray-100">
         <p class="text-xs font-semibold text-gray-700">Suggestions this week: ${used == null ? 'not available just now' : `${Math.min(used, week.cap)} of ${week.cap} used since Monday`}</p>
@@ -263,53 +263,23 @@
       </div>`;
   }
 
-  /** Stages of one suggestion, as pills like the Review and Briefs tabs. Never folded: it's why they came here. */
+  /** The tab's one list, its stages as pills like the Review and Briefs tabs. Never folded: it's what the tab is for. */
   function suggestionsHtml(d) {
     const open = d.open || [];
     const dismissed = d.dismissed || [];
     const accepted = state.reviews?.trackRecord || [];
-    const pills = [['waiting', 'Waiting', open.length], ['accepted', 'Accepted', accepted.length], ['dismissed', 'Dismissed', dismissed.length]].map(([key, label, n]) => {
+    const pills = [['review', 'To review', open.length], ['accepted', 'Accepted', accepted.length], ['dismissed', 'Dismissed', dismissed.length]].map(([key, label, n]) => {
       const on = state.stage === key;
-      return `<button type="button" role="tab" id="mentor-stage-${key}" aria-controls="mentor-stage-panel" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-mentor-stage="${key}" class="text-sm whitespace-nowrap">${label}${n ? ` <span class="text-xs font-semibold text-gray-500">${n}</span>` : ''}</button>`;
+      const count = !n ? '' : key === 'review' ? ` <span class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 py-0.5 rounded-full">${n}</span>` : ` <span class="text-xs font-semibold text-gray-500">${n}</span>`;
+      return `<button type="button" role="tab" id="mentor-stage-${key}" aria-controls="mentor-stage-panel" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-mentor-stage="${key}" class="text-sm whitespace-nowrap">${label}${count}</button>`;
     }).join('');
-    const pane = state.stage === 'accepted' ? acceptedPane() : state.stage === 'dismissed' ? dismissedPane(dismissed) : waitingPane(open, d.week);
+    const pane = state.stage === 'accepted' ? acceptedPane() : state.stage === 'dismissed' ? dismissedPane(dismissed) : reviewPane(open, d.week);
     return card(`
-      <h2 class="text-base font-bold text-gray-900">Suggestions</h2>
-      <div class="stage-pills tab-scroller mt-3" style="margin-left:0;margin-right:0;margin-bottom:.75rem;max-width:100%" role="tablist" aria-label="Suggestions by stage">${pills}</div>
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div class="stage-pills tab-scroller" style="margin:0;max-width:100%" role="tablist" aria-label="Suggestions by stage">${pills}</div>
+        ${state.stage === 'review' && open.length > 1 ? '<button type="button" data-mentor-review-all class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Review all</button>' : ''}
+      </div>
       <div id="mentor-stage-panel" role="tabpanel" aria-labelledby="mentor-stage-${esc(state.stage)}" tabindex="0">${pane}</div>`, 'data-mentor-panel="suggestions" data-no-fold');
-  }
-
-  function recommendedHtml(rec) {
-    const picks = (rec && rec.picks) || [];
-    const cap = (rec && rec.capacity) || {};
-    const rows = picks.map((p, i) => `
-      <li class="py-2 border-b border-gray-100 last:border-0">
-        <p class="text-sm font-semibold text-gray-900">${i + 1}. ${esc(p.name)}</p>
-        <p class="text-xs text-gray-600 mt-0.5 break-words">${esc(p.reason)}</p>
-        <button type="button" data-mentor-see-role="${esc(p.roleKey)}" class="btn-swan-link mt-1 px-0 py-1 text-xs font-bold">See this assistant</button>
-      </li>`).join('');
-    return card(`
-      <h2 class="text-base font-bold text-gray-900">Recommended next</h2>
-      ${picks.length
-        ? `<p class="text-xs text-gray-500 mt-1">Who I would hire next, and why. Nothing is hired from here.</p><ol class="mt-1">${rows}</ol>`
-        : cap.remaining === 0
-          ? '<p class="text-sm text-gray-600 mt-1">You already have every assistant on offer.</p>'
-          : '<p class="text-sm text-gray-600 mt-1">No clear gap for another assistant right now.</p>'}
-      ${cap.note ? `<p class="mt-2 text-xs rounded-lg px-2.5 py-1.5 ${cap.needsUpgrade ? 'border border-amber-200 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-700'}">${esc(cap.note)}</p>` : ''}`, 'data-mentor-panel="recommended"');
-  }
-
-  /**
-   * The Overview's panels repaint; the Commitments slot above them belongs to mentor-commitments.js and doesn't,
-   * so a repaint here never takes the caret out of its "Add one" box.
-   */
-  function overviewPanels(el) {
-    let panels = el.querySelector('[data-mentor-overview-panels]');
-    if (!panels) {
-      el.insertAdjacentHTML('afterbegin', '<div id="mentor-commitments-now" class="mb-4 min-w-0"></div><div data-mentor-overview-panels class="space-y-4 min-w-0"></div>');
-      panels = el.querySelector('[data-mentor-overview-panels]');
-      window.MentorCommitments?.paint();
-    }
-    return panels;
   }
 
   function render() {
@@ -319,17 +289,49 @@
     if (sees) sees.innerHTML = state.data ? visibilityHtml(state.data.visibility || { sees: [], never: [] }) : card('<p class="text-sm text-gray-400 animate-pulse">Loading…</p>');
     const el = host();
     if (!el) return;
-    const panels = overviewPanels(el);
     if (state.error && !state.data) {
-      panels.innerHTML = card(`<p class="text-sm text-red-600">${esc(state.error)}</p>
+      el.innerHTML = card(`<p class="text-sm text-red-600">${esc(state.error)}</p>
         <button type="button" data-mentor-retry class="btn-secondary mt-3 px-3 py-1.5 border text-xs font-bold rounded-lg">Try again</button>`);
       return;
     }
-    if (!state.data) { panels.innerHTML = card('<p class="text-sm text-gray-400 animate-pulse">Loading…</p>'); return; }
+    if (!state.data) { el.innerHTML = card('<p class="text-sm text-gray-400 animate-pulse">Loading…</p>'); return; }
     const d = state.data;
-    panels.innerHTML = `
-      ${suggestionsHtml(d)}${checklistHtml(d.checklist || [])}${recommendedHtml(d.recommended)}
-      <p class="text-xs text-gray-600 px-1">Need help with Be More Swan? Ask me in chat, or use <button type="button" data-mentor-help class="font-semibold text-pink-700 hover:underline">Help &amp; Support</button>.</p>`;
+    el.innerHTML = `
+      ${suggestionsHtml(d)}
+      <p class="text-xs text-gray-600 px-1 mt-4">Need help with Be More Swan? Ask me in chat, or use <button type="button" data-mentor-help class="font-semibold text-pink-700 hover:underline">Help &amp; Support</button>.</p>`;
+  }
+
+  /** The same two steps as "Review all": the change, then recording it, whose failure isn't the user's problem. */
+  async function accept(id) {
+    const it = (state.data?.open || []).find((x) => x.id === id);
+    if (!it || state.busyRow || !window.MentorApply) return;
+    state.busyRow = id; state.notes[id] = { text: 'Saving…' }; render();
+    try {
+      await window.MentorApply.applyCard({ ...it.card, proposalId: it.id });
+      await window.MentorApply.decide(it.id, 'accepted').catch(() => {});
+      delete state.notes[id];
+      state.busyRow = null;
+      await load();
+    } catch (err) {
+      state.busyRow = null;
+      state.notes[id] = { text: `Not saved: ${err.message || 'that couldn’t be saved.'}`, error: true };
+      render();
+    }
+  }
+
+  async function dismiss(id, reason) {
+    if (state.busyRow || !window.MentorApply) return;
+    state.busyRow = id; state.notes[id] = { text: 'Saving…' }; render();
+    try {
+      await window.MentorApply.decide(id, 'dismissed', reason);
+      delete state.notes[id];
+      state.busyRow = null; state.dismissing = null;
+      await load();
+    } catch (err) {
+      state.busyRow = null;
+      state.notes[id] = { text: err.message || 'That couldn’t be saved.', error: true };
+      render();
+    }
   }
 
   async function bringBack(id) {
@@ -361,18 +363,18 @@
       document.getElementById(`mentor-stage-${state.stage}`)?.focus();   // the repaint replaced the pill
       return;
     }
-    const open = t.closest('[data-mentor-open-field]');
-    if (open) {
-      window._bizinfoInitialTab = open.getAttribute('data-mentor-open-field');
-      if (window.loadView) window.loadView('assets');
-      return;
+    const row = t.closest('[data-mentor-suggestion]');
+    if (row) {
+      const id = Number(row.getAttribute('data-mentor-suggestion'));
+      if (t.closest('[data-mentor-accept]')) { accept(id); return; }
+      if (t.closest('[data-mentor-dismiss]')) { state.dismissing = state.dismissing === id ? null : id; render(); return; }
+      const reason = t.closest('[data-mentor-dismiss-reason]');
+      if (reason) { dismiss(id, reason.getAttribute('data-mentor-dismiss-reason')); return; }
     }
     const back = t.closest('[data-mentor-bring-back]');
     if (back) { bringBack(Number(back.getAttribute('data-mentor-bring-back'))); return; }
     if (t.closest('[data-mentor-retry]')) { load(); return; }
     if (t.closest('[data-mentor-review-all]')) { window.MentorReviewAll?.openDialog(); return; }
-    const see = t.closest('[data-mentor-see-role]');
-    if (see) { window.MentorOpenCatalogue?.(see.getAttribute('data-mentor-see-role')); return; }
     if (t.closest('[data-mentor-review-now]')) { reviewNow(); return; }
     const openReview = t.closest('[data-mentor-open-review]');
     if (openReview) { window.openAssistantChat?.({ assistantId: state.assistantId, sessionId: Number(openReview.getAttribute('data-mentor-open-review')) }); return; }
@@ -392,7 +394,7 @@
   ['mentor:changed', 'bizinfo:profileChanged', 'bizinfo:productsChanged', 'assistant:settingsChanged'].forEach((ev) =>
     document.addEventListener(ev, () => { if (state.assistantId && host()) load(); }));
 
-  // The chat panel beside the Overview, as on the landing tab of the other assistants (owner, 2026-11-06). The
+  // The chat panel beside the list, as on the landing tab of the other assistants (owner, 2026-11-06). The
   // same thread as the Plan tab's: it is one conversation with the Mentor.
   let chatDock = null;
   function getChatDock() {
@@ -418,11 +420,13 @@
       chatDock = null;
       state.assistantId = assistantId;
       state.assistantName = assistantName || 'Your Mentor';
-      state.data = null; state.error = null; state.notes = {}; state.stage = 'waiting';
+      state.data = null; state.error = null; state.notes = {}; state.stage = 'review'; state.busyRow = null; state.dismissing = null;
       state.reviews = null; state.customers = null; state.reviewNote = null; clearTimeout(state.poll);
       render();
       load();
     },
+    /** The last read, for the Plan tab's Set-up checklist and Recommended next. */
+    data() { return state.data; },
     /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
     rename(name) { state.assistantName = name || state.assistantName; render(); },
     activate() {

@@ -60,7 +60,7 @@ check('the card text it quotes is the card text the app draws', () => {
 
 check('the tabs and buttons it names exist', () => {
     const reg = read('src/components/assistant-dashboard-registry.js');
-    assert.match(reg, /mentorTab: \{\s*label: 'Overview'/);
+    assert.match(reg, /mentorTab: \{\s*label: 'Suggestions'/);
     assert.match(reg, /mentorPlanTab: \{\s*label: 'Plan'/);
     const plan = read('src/components/assistant-mentor-plan.js');
     for (const s of ['Draft it for me', 'Use this draft', 'Save draft', 'Earlier versions']) assert.ok(plan.includes(s), `Plan tab has "${s}"`);

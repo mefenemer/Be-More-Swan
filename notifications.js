@@ -1004,7 +1004,7 @@ window.initNotifications = async function(param) {
     mentorStrip?.addEventListener('click', (e) => {
         if (e.target.closest('[data-mentor-strip-review]')) window.MentorReviewAll?.openDialog();
     });
-    // A suggestion answered anywhere (chat, Overview, Review all): re-read. Swapped, not stacked.
+    // A suggestion answered anywhere (chat, the Mentor's page, Review all): re-read. Swapped, not stacked.
     if (window._notifMentorListener) document.removeEventListener('mentor:changed', window._notifMentorListener);
     window._notifMentorListener = () => { if (mentorStrip && document.body.contains(mentorStrip)) loadMentorOpen(); };
     document.addEventListener('mentor:changed', window._notifMentorListener);
