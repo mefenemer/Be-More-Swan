@@ -80,7 +80,7 @@
     html.sb-collapsed #sidebar-container .nav-lock-icon { position: absolute; top: 1px; right: 4px; margin: 0; }
     html.sb-collapsed #sidebar-container .nav-lock-icon svg { width: .75rem; height: .75rem; }
   }
-  /* Side-menu tooltip bubble (script: sideMenuTooltips). */
+  /* Icon tooltip bubble: side menus and header icons (script: sideMenuTooltips). */
   #side-menu-tip { position: fixed; z-index: 9999; pointer-events: none; padding: .3rem .55rem; border-radius: .375rem;
     background: #111827; color: #fff; font-size: 12px; font-weight: 500; line-height: 1.3; white-space: nowrap;
     box-shadow: 0 4px 12px rgba(0,0,0,.15); opacity: 0; transition: opacity .1s ease; left: -9999px; top: 0; }
@@ -2485,7 +2485,7 @@ window.showComplianceModals = function showComplianceModals(force) {
          Filled on open from get-assistants; logic in the "Assistant quick switcher" script below. -->
     <div class="relative" id="nav-assistant-switcher">
       <button type="button" id="nav-assistant-switcher-btn" aria-label="Go to an assistant" aria-haspopup="true" aria-expanded="false"
-        class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors cursor-pointer" title="Go to an assistant">
+        class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors cursor-pointer" data-tip="">
         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
       </button>
       <div id="nav-assistant-switcher-panel" role="menu" style="display:none" class="hidden absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-200 z-50 overflow-hidden" data-no-i18n>
@@ -2503,7 +2503,7 @@ window.showComplianceModals = function showComplianceModals(force) {
     </div>
 
     <!-- Issue #106: Notifications moved here from the side menu -->
-    <button id="nav-notifications" aria-label="Notifications" class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors">
+    <button id="nav-notifications" aria-label="Notifications" data-tip="" class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors">
       <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
       <span id="sidebar-nav-badge" class="absolute top-0.5 right-0.5 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full hidden">0</span>
       <!-- Nothing needs you, but there is something unread: a dot, not a number (notifications.js). -->
@@ -2516,7 +2516,7 @@ window.showComplianceModals = function showComplianceModals(force) {
          that opens from it — four lines of identity next to every page title was clutter. The ids
          are unchanged, so loadHeaderProfile() and refreshPlanPill() fill the panel as before. -->
     <div class="relative" id="header-user-menu">
-      <button type="button" id="header-user-initials" aria-haspopup="true" aria-expanded="false" aria-controls="header-user-panel" aria-label="Your account"
+      <button type="button" id="header-user-initials" aria-haspopup="true" aria-expanded="false" aria-controls="header-user-panel" aria-label="Your account" data-tip=""
         class="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold shrink-0 text-sm cursor-pointer hover:ring-2 hover:ring-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400">
       </button>
       <div id="header-user-panel" role="menu" class="hidden absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50" style="display:none" data-no-i18n>
@@ -2945,10 +2945,12 @@ function formatCurrency(amount, currency) {
       });
     }
 
-    // Side-menu tooltips: anything with data-tip (the collapsed left menu's links, the assistant
-    // page's right-hand settings menu, both toggles) shows its name in a dark bubble straight away
-    // on hover or keyboard focus — a native title waits about a second and is easy to miss. The
-    // bubble sits beside the icon, on the page side: right of the left menu, left of the right one.
+    // Icon tooltips: anything with data-tip (the collapsed left menu's links, the assistant page's
+    // right-hand settings menu, both toggles, the header's assistants / notifications / account
+    // icons) shows its name in a dark bubble straight away on hover or keyboard focus — a native
+    // title waits about a second and is easy to miss. An empty data-tip reads the aria-label, which
+    // i18n translates. The bubble sits on the page side: right of the left menu, left of the right
+    // one, under the header. Not while the icon's own panel is open.
     (function sideMenuTooltips() {
       const tip = document.createElement('div');
       tip.id = 'side-menu-tip';
@@ -2956,17 +2958,19 @@ function formatCurrency(amount, currency) {
       document.body.appendChild(tip);
       let current = null;
       function show(el) {
-        const text = el.dataset.tip;
-        if (!text || window.innerWidth < 768) return hide();
+        const text = el.dataset.tip || el.getAttribute('aria-label');
+        const inHeader = !!el.closest('#app-header');
+        if (!text || (!inHeader && window.innerWidth < 768) || el.getAttribute('aria-expanded') === 'true') return hide();
         current = el;
         tip.textContent = text;
         tip.classList.add('is-on');
         const r = el.getBoundingClientRect();
         const onRight = !!el.closest('#detail-right-menu');
         const w = tip.offsetWidth, h = tip.offsetHeight;
-        const left = onRight ? r.left - w - 8 : r.right + 8;
-        const top = Math.min(Math.max(4, r.top + r.height / 2 - h / 2), window.innerHeight - h - 4);
-        tip.style.left = Math.max(4, left) + 'px';
+        let left = onRight ? r.left - w - 8 : r.right + 8;
+        let top = Math.min(Math.max(4, r.top + r.height / 2 - h / 2), window.innerHeight - h - 4);
+        if (inHeader) { left = r.left + r.width / 2 - w / 2; top = r.bottom + 6; }
+        tip.style.left = Math.min(Math.max(4, left), window.innerWidth - w - 4) + 'px';
         tip.style.top = top + 'px';
       }
       function hide() { current = null; tip.classList.remove('is-on'); }
