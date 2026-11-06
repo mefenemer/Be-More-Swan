@@ -1198,7 +1198,10 @@
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.picking) { setPicking(false); return; }
     // Esc leaves full screen, unless a dialog or the editor (which has its own full screen) is taking it.
-    if (e.key === 'Escape' && state.full && !state.studio && !document.querySelector('[role="dialog"]')) { setFull(false); return; }
+    // An OPEN dialog takes Esc first. "Any dialog" never let Esc work: the settings drawer is always in the page as
+    // one, inert while shut.
+    const dialogOpen = [...document.querySelectorAll('[role="dialog"]')].some((d) => !d.inert && !d.hidden && d.getClientRects().length && getComputedStyle(d).visibility !== 'hidden');
+    if (e.key === 'Escape' && state.full && !state.studio && !dialogOpen) { setFull(false); return; }
     const tab = e.target.closest && e.target.closest('[data-brief-tab]');
     if (!tab || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
     e.preventDefault();

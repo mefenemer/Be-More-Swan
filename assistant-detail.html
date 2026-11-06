@@ -134,6 +134,9 @@
         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M15 4v16"/><path id="rm-toggle-chevron" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10l-2 2 2 2"/></svg>
       </button>
     </div>
+    <!-- The header's Chat button is hidden while this menu shows, so the chat lives here: every role
+         keeps a way into its chat on every tab (issue #197), docked chat pane or not. -->
+    <button id="rm-chat" type="button" class="rm-item"><svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg><span class="nav-label">Chat</span></button>
     <p class="rm-heading nav-label">Assistant Settings</p>
     <nav id="rm-items" class="space-y-0.5"></nav>
   </aside>
@@ -934,17 +937,28 @@
   <!-- ── MAIN TAB: Review Queue ──────────────────────────────────────── -->
   <div id="maintab-review-queue" role="tabpanel" aria-labelledby="maintab-btn-review-queue" class="main-tab-content hidden">
 
-    <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+    <!-- One header row (owner, 2026-11-06, as on the Brand Designer's Briefs): the title and its ⓘ on
+         the left, the buttons on the right. The description is kept in #detail-rq-subtitle for the
+         registry to write, and shown inside the ⓘ (_applyDashboardRegistry); it only shows here when
+         the explainer script is missing. -->
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
         <h2 id="detail-rq-heading" class="text-lg font-extrabold text-gray-900">Review</h2>
         <!-- Subtitle + primary button copy adapt to the role's reviewQueue kind (posts vs records)
              in _applyDashboardRegistry. -->
-        <p id="detail-rq-subtitle" class="text-sm text-gray-500 mt-1">Items awaiting your review — approve, edit or reject before anything is scheduled.</p>
+        <p id="detail-rq-subtitle" class="hidden text-sm text-gray-500 mt-1">Items awaiting your review — approve, edit or reject before anything is scheduled.</p>
         <!-- Blog Writer only (_renderAutopilotCard): whether autopilot is writing more drafts. -->
         <button type="button" id="detail-rq-autopilot-chip" style="display:none" onclick="window._activateMainTab && window._activateMainTab('goals')"
           class="hidden mt-2 inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition cursor-pointer"></button>
       </div>
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <!-- Show all / Hide all for a records queue's cards (each opens from its title). -->
+        <button type="button" id="detail-rq-foldall" style="display:none" onclick="window._rqFoldAll()"
+          class="hidden text-xs font-bold text-gray-600 hover:text-gray-900 px-1 py-1 cursor-pointer">Show all</button>
+        <!-- Full screen, as on the Briefs and Website tabs: this list over the whole page, Esc to leave. -->
+        <button type="button" id="detail-rq-full-btn" onclick="window._rqSetFull(!document.getElementById('maintab-review-queue').hasAttribute('data-rq-full'))"
+          aria-pressed="false" title="Use the whole screen for this list"
+          class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Full screen</button>
         <!-- Blog Writer only: Search Console and the blog widget, set once for the whole blog
              (Blog Studio's mode:'setup'). They used to be sections 7–8 of every post's editor. -->
         <button type="button" id="detail-rq-setup-btn" style="display:none"
@@ -968,7 +982,7 @@
 
     <div id="detail-rq-card" class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <!-- Lifecycle columns -->
-      <div id="detail-rq-colstrip" class="tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Items by stage">
+      <div id="detail-rq-colstrip" class="stage-pills tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Items by stage">
         <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="true" tabindex="0" class="detail-rq-col px-4 py-2 text-sm font-semibold rounded-t border-b-2 border-emerald-800 text-emerald-800 whitespace-nowrap"
           data-status="review" onclick="detailRqOpenStatus('review', this)">
           Review
@@ -2818,6 +2832,18 @@ window._revokeConnection = async function (connectionId, onSuccess) {
   /* The selected column's underline follows aria-selected, so look and announced state cannot
      disagree. (border-emerald-700 is not in the compiled style.css.) */
   .detail-rq-col[aria-selected="true"], .site-subtab[aria-selected="true"] { border-bottom-color: #ff007f; }
+  /* Stages as pills in a grey track (owner, 2026-11-06, as on the Briefs tab): these filter a list,
+     so they must not look like the page's own underlined tabs above. Overrides the underline classes
+     detailRqOpenStatus and the Lead Generator's strip still toggle. */
+  .stage-pills:not(.hidden) { display: inline-flex !important; }   /* :not(.hidden): the Lead Generator hides the shared strip */
+  .stage-pills { max-width: calc(100% - 2rem); gap: .25rem; padding: .25rem !important;
+    margin: .75rem 1rem .25rem; border-radius: .75rem; background: #f3f4f6; border-bottom: 0 !important; overflow-x: auto; overflow-y: hidden; }
+  .stage-pills > [role="tab"] { border-bottom: 0 !important; border-radius: .5rem !important; padding: .375rem .75rem !important;
+    font-weight: 700 !important; color: #4b5563 !important; background: transparent; transition: background .15s ease, color .15s ease; }
+  .stage-pills > [role="tab"]:hover { color: #111827 !important; }
+  .stage-pills > [role="tab"][aria-selected="true"] { background: #fff; color: #111827 !important; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  /* Review full screen: over the top bar (z 50), UNDER the post, blog and email pop-ups (70–90) it opens. */
+  #maintab-review-queue[data-rq-full] { position: fixed; inset: 0; z-index: 60; background: #f9fafb; overflow: auto; padding: 16px 20px; }
   /* A tab strip wider than the screen fades at the edge that has more, so the tabs past it read as
      "scroll for more" rather than not existing. .is-clipped-* is kept current by assistants.js. */
   .tab-scroller.is-clipped-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent); }
@@ -2854,9 +2880,9 @@ window._revokeConnection = async function (connectionId, onSuccess) {
     background: #fff0f5;
   }
   /* ── Compact header + right-hand menu (registry `compactHeader`; .detail-v2 on
-     #assistant-detail-content). Owner, 2026-11-05: piloted on the Brand Designer first. ── */
+     #assistant-detail-content). Piloted on the Brand Designer 2026-11-05; every assistant from
+     2026-11-06 (owner). ── */
   #detail-right-menu { display: none; }
-  .detail-v2 #btn-detail-chat { display: none !important; }
   .detail-v2 #detail-top-wrap { container-type: inline-size; }
   @container (min-width: 900px) {
     .detail-v2 #detail-top-row:has(> #detail-needs-you:not(.hidden)) {
@@ -2880,6 +2906,8 @@ window._revokeConnection = async function (connectionId, onSuccess) {
   #needs-you-list .ny-sub { font-size: .75rem; color: #92400e; white-space: nowrap; flex-shrink: 0; }
   #needs-you-list .ny-more { font-size: .75rem; color: #6b7280; padding-left: .25rem; }
   #detail-top-row #needs-you-go:not(.hidden) { align-self: flex-start; margin-top: .875rem; }
+  /* The card a Needs-you item opened, marked for a moment so the eye lands on it. */
+  .ny-flash { border-radius: .75rem; box-shadow: 0 0 0 2px #f59e0b; background: #fffbeb; transition: box-shadow .3s ease, background .3s ease; }
 
   /* Status pill: green for working, amber for waiting on you, grey for idle. Tailwind's emerald is the
      brand pink in this build (only the 500 dot stayed green), so "Working" read as pink with a green dot. */
@@ -2906,7 +2934,8 @@ window._revokeConnection = async function (connectionId, onSuccess) {
   .detail-v2 #task-share-note .ts-key { display: inline-flex; align-items: center; gap: .3rem; margin-right: .75rem; white-space: nowrap; }
   .detail-v2 #task-share-note .ts-dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
   @media (min-width: 768px) {
-    .detail-v2 #btn-assistant-profile { display: none !important; }
+    /* Both header buttons go where the right-hand menu shows; on phones (no menu) they stay. */
+    .detail-v2 #btn-assistant-profile, .detail-v2 #btn-detail-chat { display: none !important; }
     /* Same look as the left menu (components/sidebar.html + workspace.html): 16rem open, 4.5rem of
        icons closed, under the 64px header. The page makes room for it the way it does on the left. */
     .detail-v2 #detail-right-menu { display: flex; flex-direction: column; position: fixed; top: 64px; right: 0; bottom: 0;

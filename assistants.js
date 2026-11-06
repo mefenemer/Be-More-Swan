@@ -1339,8 +1339,52 @@ window.detailRqOpenStatus = function(statusKey, btn) {
     });
     // border-emerald-800 too: border-b-2 alone draws the default grey, so only the text turned pink.
     if (active) { active.classList.add('border-b-2', 'border-emerald-800', 'text-emerald-800'); active.classList.remove('text-gray-500'); }
-    return _detailRqRenderGroups(statusKey);
+    const done = _detailRqRenderGroups(statusKey);
+    Promise.resolve(done).then(_rqSyncFoldAll, _rqSyncFoldAll);
+    return done;
 };
+
+// ── Review tab: Show all / Hide all, and Full screen (owner, 2026-11-06: the Briefs tab's patterns) ──
+// A records card opens from its title (_rqToggleCard); this opens or closes every card in the column.
+function _rqSyncFoldAll() {
+    const btn = document.getElementById('detail-rq-foldall');
+    if (!btn) return;
+    const cards = document.querySelectorAll('#detail-rq-groups [data-rq-record] .rq-card-body');
+    const on = cards.length > 1;
+    btn.classList.toggle('hidden', !on);
+    btn.style.display = on ? '' : 'none';
+    btn.textContent = [...cards].some((b) => !b.classList.contains('hidden')) ? 'Hide all' : 'Show all';
+}
+window._rqFoldAll = function() {
+    const cards = [...document.querySelectorAll('#detail-rq-groups [data-rq-record]')];
+    const anyOpen = cards.some((c) => !c.querySelector('.rq-card-body')?.classList.contains('hidden'));
+    cards.forEach((c) => {
+        const body = c.querySelector('.rq-card-body');
+        const isOpen = body && !body.classList.contains('hidden');
+        if (body && isOpen === anyOpen) window._rqToggleCard(c.querySelector('[aria-expanded]'));
+    });
+    _rqSyncFoldAll();
+};
+window._rqSetFull = function(on) {
+    const panel = document.getElementById('maintab-review-queue');
+    const btn = document.getElementById('detail-rq-full-btn');
+    if (!panel) return;
+    panel.toggleAttribute('data-rq-full', !!on);
+    if (window.ScrollLock) { if (on) window.ScrollLock.lock('rq-full', { scoped: true }); else window.ScrollLock.release('rq-full'); }
+    if (btn) {
+        btn.textContent = on ? 'Exit full screen' : 'Full screen';
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.title = on ? 'Back to the page (Esc)' : 'Use the whole screen for this list';
+        btn.focus({ preventScroll: true });
+    }
+};
+// Esc leaves it, unless an OPEN dialog (a post, blog or email pop-up) is taking Esc. "Any dialog" is
+// not enough: the settings drawer is always in the page as one, inert while shut.
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !document.getElementById('maintab-review-queue')?.hasAttribute('data-rq-full')) return;
+    const dialogOpen = [...document.querySelectorAll('[role="dialog"]')].some((d) => !d.inert && !d.hidden && !d.classList.contains('hidden') && d.getClientRects().length && getComputedStyle(d).visibility !== 'hidden');
+    if (!dialogOpen) window._rqSetFull(false);
+});
 
 // Re-render whichever column is currently open, e.g. after a new post is added elsewhere
 // (the Create Post sheet) so the list reflects it without the user manually switching tabs.
@@ -3274,6 +3318,7 @@ window._rqToggleCard = function (btn) {
     card.querySelector('.rq-card-chevron')?.classList.toggle('rotate-180', open);
     const id = Number(card.getAttribute('data-rq-record'));
     if (open) _rqExpanded.add(id); else _rqExpanded.delete(id);
+    _rqSyncFoldAll();
 };
 
 async function _detailRqRenderRecords(statusKey) {
@@ -5000,6 +5045,9 @@ function _renderRightMenu() {
     };
     list.onpointerover = warm;
     list.onfocusin = warm;
+    // Chat: the same as the header's Chat button, which this menu replaces (md and up).
+    const chat = document.getElementById('rm-chat');
+    if (chat) chat.onclick = () => document.getElementById('btn-detail-chat')?.click();
     const btn = document.getElementById('rm-toggle');
     if (btn) btn.onclick = () => {
         const open = !menu.classList.contains('is-open');
@@ -5015,11 +5063,13 @@ function _renderRightMenu() {
 
 // compactHeader (registry): hero at just under half width with the "Needs you" strip beside it, the
 // header's Chat / Assistant Settings buttons gone (CSS), and the profile as the right-hand menu.
+// ON for every role since 2026-11-06 (owner, after the Brand Designer pilot); a role can still opt
+// out with `compactHeader: false`.
 // The view is re-injected on every load, so nothing here needs undoing for the next assistant.
 function _applyCompactHeader(cfg) {
     const root = document.getElementById('assistant-detail-content');
     if (!root) return;
-    const on = !!(cfg && cfg.compactHeader);
+    const on = !!cfg && cfg.compactHeader !== false;
     root.classList.toggle('detail-v2', on);
     if (!on) return;
     const row = document.getElementById('detail-top-row');
@@ -5428,8 +5478,29 @@ window._renderNeedsYou = function() {
     const showGo = n > 0 && (inHeader || targetTab !== landing);
     const openTarget = (id) => {
         if (source === 'briefs' && window.AssistantBriefs?.openReview) { window.AssistantBriefs.openReview(id); return; }
+        // A post named in the compact header opens straight into its review, as its card does.
+        const rqKind = (window._detailReviewQueue || {});
+        if (id && targetTab === 'review-queue' && rqKind.kind === 'posts' && !rqKind.source && typeof window.openPostReview === 'function') {
+            window.openPostReview(Number(id)); return;
+        }
         window._activateMainTab(targetTab);
         if (targetTab === 'review-queue') window.detailRqOpenStatus?.('review');
+        // Anything else named: scroll to its card once the column has painted, and mark it briefly.
+        if (id && (targetTab === 'review-queue' || targetTab === 'videos')) {
+            const attrs = targetTab === 'videos' ? ['data-video'] : ['data-rq-record', 'data-rq-blog', 'data-rq-newsletter', 'data-post-id'];
+            const sel = attrs.map((a) => `[${a}="${CSS.escape(String(id))}"]`).join(',');
+            const scope = targetTab === 'videos' ? '#videos-host' : '#detail-rq-groups';
+            let tries = 0;
+            const find = () => {
+                const el = document.querySelector(`${scope} :is(${sel})`);
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el.classList.add('ny-flash');
+                    setTimeout(() => el.classList.remove('ny-flash'), 1800);
+                } else if (++tries < 20) setTimeout(find, 150);
+            };
+            setTimeout(find, 150);
+        }
     };
     if (go) {
         go.classList.toggle('hidden', !showGo);
@@ -7076,6 +7147,22 @@ function _applyDashboardRegistry(data) {
             : rqIsNewsletter
                 ? 'Emails awaiting your review — open in the Email Studio to edit and approve before anything is sent to your subscribers.'
                 : 'Items awaiting your review — approve, edit or reject before anything is scheduled.');
+    // One header row (owner, 2026-11-06, as on the Briefs tab): the description moves into the
+    // heading's ⓘ, joined to the role's own explainer when it names one. Without the explainer
+    // script the line stays visible under the heading instead.
+    {
+        const sub = document.getElementById('detail-rq-subtitle');
+        const about = sub?.textContent.trim() || '';
+        const G = window.BMSExplainers?.GLOSSARY;
+        const base = window._detailReviewQueue.explain && G?.[window._detailReviewQueue.explain];
+        const into = !!(rqHeading && G && about);
+        if (into) {
+            G['detail-rq-about'] = { term: base?.term || rqLabel, emoji: base?.emoji || '✅', plain: base ? `${base.plain} ${about}` : about, ...(base?.example ? { example: base.example } : {}) };
+            rqHeading.removeAttribute('data-explain-ready');
+            rqHeading.setAttribute('data-explain', 'detail-rq-about');
+        }
+        if (sub) { sub.classList.toggle('hidden', into); sub.style.display = into ? 'none' : ''; }
+    }
     // Records queues have no post-generation button; blog re-points it at Blog Studio.
     toggleBtn('detail-rq-primary-btn', !rqIsRecords);
     toggle('detail-rq-col-posted', !rqIsRecords);
@@ -9487,10 +9574,20 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     _results.forEach(r => { if (r.status === 'rejected') console.error('[initAssistantDetail] a section failed to load:', r.reason); });
 };
 
+// "3 Nov" / "today" for a Needs-you line; '' when there is no date.
+function _nyWhen(v) {
+    if (!v) return '';
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return '';
+    if (d.toDateString() === new Date().toDateString()) return 'today';
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
 async function _prefetchDetailRqBadge(assistantId) {
     const rq = window._detailReviewQueue || {};
     try {
         let count = 0;
+        let items = [];   // [{ id, label, sub }] for the Needs-you card
         // A role with no Review tab (hideReviewQueue, e.g. the Brand Designer) has no posts to count:
         // this read always answered 0. Say 0 without asking, so the signals settle exactly as before.
         if (rq.__defaulted) {
@@ -9502,32 +9599,53 @@ async function _prefetchDetailRqBadge(assistantId) {
             // Records-backed queue (data-hub roles): count assistant_records awaiting approval.
             const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${assistantId}&recordType=${encodeURIComponent(rq.recordType)}&approvalStatus=pending_approval`);
             if (!res.ok) return;
-            count = ((await res.json()).records || []).length;
+            const records = (await res.json()).records || [];
+            count = records.length;
+            items = records.map((r) => ({ id: r.id, label: r.title || 'Untitled', sub: _nyWhen(r.createdAt) }));
         } else if (rq.source === 'blog_posts') {
             // Blog Writer: count long-form drafts awaiting review.
             const posts = await _fetchBlogPosts(assistantId).catch(() => null);
             if (!posts) return;
             const wanted = new Set(['draft', 'pending_approval', 'in_review']);
-            count = posts.filter((p) => wanted.has(p.status)).length;
+            const waiting = posts.filter((p) => wanted.has(p.status));
+            count = waiting.length;
+            items = waiting.map((p) => ({ id: p.id, label: p.title || 'Untitled article', sub: _nyWhen(p.updatedAt || p.createdAt) }));
         } else if (rq.source === 'newsletter_issues') {
             // Email Marketing: the Review column's statuses. This fell through to get-social-drafts,
             // which holds no emails, and zeroed the Emails badge and the Autopilot card's waiting
             // count after the queue had painted them (2026-10-22).
             const res = await fetch(`/.netlify/functions/newsletter-issues?assistantId=${assistantId}`);
             if (!res.ok) return;
-            count = ((await res.json()).issues || []).filter((i) => _RQ_NEWSLETTER_WAITING.includes(i.status)).length;
+            const waiting = ((await res.json()).issues || []).filter((i) => _RQ_NEWSLETTER_WAITING.includes(i.status));
+            count = waiting.length;
+            items = waiting.map((i) => ({ id: i.id, label: i.subject || 'Untitled email', sub: _nyWhen(i.scheduledFor || i.updatedAt) }));
         } else {
             // ⚠️ Paged (limit=1) so the server returns `total` counted in POSTS. Unpaged, this counted
             // ROWS — one per platform, capped at 50 — so a post going to three platforms counted
             // three, and the assistant's pop-up ("N things are waiting") disagreed with the Review
             // tab it pointed at (2026-11-04).
-            const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}&limit=1&offset=0`);
+            // limit=5 (not 1) so the compact header's Needs-you card can name the first few posts.
+            const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}&limit=5&offset=0`);
             if (!res.ok) return;
             const j = await res.json();
             count = typeof j.total === 'number' ? j.total : (j.drafts || []).length;
+            // One row per platform: name each post once.
+            const seen = new Set();
+            for (const d of j.drafts || []) {
+                const key = `${(d.caption || '').slice(0, 80)}|${d.publishDate || ''}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                const words = String(d.caption || '').replace(/\s+/g, ' ').trim();
+                items.push({ id: d.id, label: words ? (words.length > 70 ? words.slice(0, 70) + '…' : words) : 'Post with no caption yet', sub: _nyWhen(d.publishDate) });
+            }
         }
         _setDetailRqTabBadge(count);
         window._setPendingReviewCount?.(count);
+        // The compact header's Needs-you card names the first few (the Brand Designer's Briefs feed
+        // their own). Not for the Video Producer, whose count also holds storyboards.
+        if (Number(window._currentAssistantId) === Number(assistantId) && window._detailNeedsYouSource === 'review') {
+            window._setNeedsYouItems?.(items.slice(0, 4));
+        }
         // Feed the operational status pill (Epic 1 AC1.1.2): pending drafts → "Needs you".
         window._updateOpSignals?.({ pendingReview: count });
     } catch { /* non-critical */ }
