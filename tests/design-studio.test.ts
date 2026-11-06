@@ -8,10 +8,10 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
-    applyDesignEdit, designEditFromUiElement, designForChat, normaliseDesign, type Design,
+    applyDesignEdit, cropRect, designEditFromUiElement, designForChat, moveLayer, normaliseDesign, pageFill, type Design, type DesignLayer,
 } from '../src/utils/design-doc';
 import { AI_PICTURE_ANSWER, startableSources, userChoseAiPicture } from '../src/utils/brief-from-chat';
-import { flyerDesign, renderDesignPdfs, renderDesignPreview } from '../src/lib/design-render';
+import { flyerDesign, imageSize, renderDesignPdfs, renderDesignPreview } from '../src/lib/design-render';
 import { normaliseFlyerContent } from '../src/config/flyer-vocab';
 import { normalizeBrandKit } from '../src/utils/brand-kit';
 import { flyerPageStyle } from '../src/lib/flyer';
@@ -127,6 +127,149 @@ check('the chat sees the design in words, with each part named the way a card na
     assert.ok(s.includes('page colour #f2aa00') && s.includes('headline "Launch party"') && s.includes('background #14243a at 100%'));
 });
 
+check('page transparency: cleaned from a browser, a design without it is solid, it fades to paper, and chat can set it', () => {
+    assert.strictEqual(pageFill(stored()), '#f2aa00', 'a design from before this is untouched');
+    assert.strictEqual(pageFill({ pageColor: '#000000', pageOpacity: 0.5 }), '#808080');
+    assert.strictEqual(pageFill({ pageColor: '#14243a', pageOpacity: 0 }), '#ffffff');
+    assert.strictEqual(normaliseDesign({ pageOpacity: 0.4, layers: [] }, stored()).pageOpacity, 0.4);
+    assert.strictEqual(normaliseDesign({ pageOpacity: 9, layers: [] }, stored()).pageOpacity, 1);
+    assert.strictEqual(normaliseDesign({ pageOpacity: 'x', layers: [] }, { ...stored(), pageOpacity: 0.3 }).pageOpacity, 0.3);
+    const card = designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, pageOpacity: 0.5 })!;
+    assert.strictEqual(card.pageOpacity, 0.5);
+    const { design, applied } = applyDesignEdit(stored(), card, { fromChat: true });
+    assert.strictEqual(applied, 1);
+    assert.strictEqual(design.pageOpacity, 0.5);
+    assert.ok(designForChat(design).includes('page colour #f2aa00 at 50% strength'));
+    assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"pageOpacity": 0.6'), 'the chat is told it can');
+    assert.ok(read('src/components/disruptive-ui-registry.js').includes('ui.pageOpacity !== undefined'), 'a card with only this still draws');
+});
+
+// ── Pictures, shapes and the stack ───────────────────────────────────────────────────────────────
+
+const picture = (id = 'p1'): DesignLayer => ({ id, kind: 'picture', role: 'picture', x: 0.2, y: 0.2, w: 0.5, h: 0.3, opacity: 1, ref: { source: 'own', storageKey: `org/1/${id}.jpg`, externalUrl: null, mimeType: 'image/jpeg', width: 800, height: 600 } });
+const withPicture = (): Design => ({ ...stored(), layers: [...stored().layers, picture()] });
+
+check('an added picture keeps the file the server gave it: a browser can move, crop and fade it, never point it elsewhere', () => {
+    const d = normaliseDesign({ layers: [{ id: 'p1', kind: 'picture', x: 0.1, opacity: 0.5, crop: { zoom: 2, x: 0, y: 1 }, ref: { storageKey: 'org/2/secret.jpg', externalUrl: 'https://evil.example/x.jpg' } }] }, withPicture());
+    const p = d.layers[0];
+    assert.ok(p.kind === 'picture');
+    assert.strictEqual(p.ref.storageKey, 'org/1/p1.jpg');
+    assert.strictEqual(p.ref.externalUrl, null);
+    assert.strictEqual(p.x, 0.1);
+    assert.strictEqual(p.opacity, 0.5);
+    assert.deepStrictEqual(p.crop, { zoom: 2, x: 0, y: 1 });
+});
+
+check('a browser cannot invent a picture, or copy one from anywhere but this design', () => {
+    const invented = normaliseDesign({ layers: [{ id: 'mine', kind: 'picture', x: 0, y: 0, w: 1, h: 1, ref: { storageKey: 'org/2/secret.jpg' } }] }, withPicture());
+    assert.ok(!invented.layers.some((l) => l.id === 'mine'));
+    const stranger = normaliseDesign({ layers: [{ id: 'mine', kind: 'picture', copyOf: 'nope', ref: { storageKey: 'org/2/secret.jpg' } }] }, withPicture());
+    assert.ok(!stranger.layers.some((l) => l.id === 'mine'));
+    const copy = normaliseDesign({ layers: [{ id: 'p1', kind: 'picture' }, { id: 'mine', kind: 'picture', copyOf: 'p1', ref: { storageKey: 'org/2/secret.jpg' } }] }, withPicture());
+    const c = copy.layers.find((l) => l.id === 'mine');
+    assert.ok(c && c.kind === 'picture' && c.ref.storageKey === 'org/1/p1.jpg', 'a duplicate is of the held file');
+    const ofPhoto = normaliseDesign({ photo: {}, layers: [{ id: 'mine', kind: 'picture', copyOf: 'photo', x: 0 }] }, stored());
+    const m = ofPhoto.layers[0];
+    assert.ok(m.kind === 'picture' && m.ref.storageKey === ref.storageKey, 'the main picture can be duplicated');
+    const many = Array.from({ length: 9 }, (_, i) => ({ id: `c${i}`, kind: 'picture', copyOf: 'p1' }));
+    assert.strictEqual(normaliseDesign({ layers: many }, withPicture()).layers.length, 6, 'at most six added pictures');
+});
+
+check('a held layer taken off goes on the shelf, and can come back with its own file on the next save (Undo)', () => {
+    const off = normaliseDesign({ layers: [] }, withPicture());
+    assert.deepStrictEqual(off.removed?.layers.map((l) => l.id).sort(), ['p1', 'qr']);
+    assert.strictEqual(off.removed?.photo?.ref.storageKey, ref.storageKey, 'the main picture too');
+    const back = normaliseDesign({ photo: { x: 0 }, layers: [{ id: 'p1', kind: 'picture' }, { id: 'qr', kind: 'qr', src: 'https://evil.example/qr.png' }] }, off);
+    const p = back.layers.find((l) => l.id === 'p1');
+    const q = back.layers.find((l) => l.id === 'qr');
+    assert.ok(p && p.kind === 'picture' && p.ref.storageKey === 'org/1/p1.jpg');
+    assert.ok(q && q.kind === 'qr' && q.src === 'data:image/png;base64,AAAA', 'never the address a browser sent');
+    assert.strictEqual(back.photo?.ref.storageKey, ref.storageKey);
+    assert.strictEqual(back.removed?.layers.length, 0);
+    assert.strictEqual(back.removed?.photo, null);
+});
+
+check('a new shape can be made, words and shapes only: nothing in a shape points anywhere', () => {
+    const d = normaliseDesign({ layers: [{ id: 's1', kind: 'shape', round: true, color: 'url(x)', x: 0.1, y: 0.1, w: 0.2, h: 0.1, opacity: 0.5, src: 'https://evil.example/x.png' }] }, stored());
+    const s = d.layers[0];
+    assert.ok(s.kind === 'shape' && s.round && s.role === 'circle' && s.opacity === 0.5 && s.color === '#1f1e1b');
+    assert.ok(!('src' in s));
+});
+
+check('italic, underline and line spacing are kept and held in range, and an old layer stays as it was', () => {
+    const d = normaliseDesign({ layers: [{ id: 'headline', kind: 'text', italic: true, underline: true, lineHeight: 9 }, { id: 'contact', kind: 'text' }] }, stored());
+    const [h, c] = d.layers;
+    assert.ok(h.kind === 'text' && h.italic === true && h.underline === true && h.lineHeight === 3);
+    assert.ok(c.kind === 'text' && !c.italic && !c.underline && c.lineHeight === 1.25);
+});
+
+check('the crop sum: always covers the frame, and zoom and position say which part shows', () => {
+    // A 2:1 picture in a square frame: as tall as the frame, with half its width spare.
+    const mid = cropRect(200, 100, 100, 100);
+    assert.deepStrictEqual(mid, { left: -50, top: 0, width: 200, height: 100 });
+    assert.strictEqual(Math.abs(cropRect(200, 100, 100, 100, { zoom: 1, x: 0, y: 0.5 }).left), 0);
+    assert.strictEqual(cropRect(200, 100, 100, 100, { zoom: 1, x: 1, y: 0.5 }).left, -100);
+    const zoomed = cropRect(200, 100, 100, 100, { zoom: 2, x: 0.5, y: 0.5 });
+    assert.strictEqual(zoomed.width, 400);
+    assert.strictEqual(zoomed.top, -50);
+    // The browser draws the same thing from a zoomed box: see cropStyle in design-studio.js.
+    assert.ok(read('src/components/design-studio.js').includes('left:${-(c.zoom - 1) * c.x * 100}%'));
+});
+
+check('layer order moves one step or to either end, and the end of the list is the front', () => {
+    const ids = (l: DesignLayer[]) => l.map((x) => x.id).join();
+    const list = () => [picture('a'), picture('b'), picture('c')];
+    const t = (id: string, o: Parameters<typeof moveLayer>[2]) => { const l = list(); moveLayer(l, id, o); return ids(l); };
+    assert.strictEqual(t('a', 'front'), 'b,c,a');
+    assert.strictEqual(t('c', 'back'), 'c,a,b');
+    assert.strictEqual(t('a', 'forward'), 'b,a,c');
+    assert.strictEqual(t('c', 'backward'), 'a,c,b');
+    assert.strictEqual(t('c', 'forward'), 'a,b,c');
+    assert.strictEqual(t('a', 'backward'), 'a,b,c');
+});
+
+check('the chat can do the same: shapes, order, duplicate, crop, styles and put back, on a rebuilt card', () => {
+    const card = designEditFromUiElement({
+        type: 'design_edit', briefId: 4, optionId: 9, photoCrop: { zoom: 2, x: 0.1, y: 0.9 }, putBack: ['logo', 'bad id!'],
+        shapes: [{ shape: 'line', y: 0.6, color: '#ff0000' }, { shape: 'hexagon' }],
+        changes: [
+            { layer: 'p1', crop: { zoom: 3, x: 0, y: 0 }, opacity: 0.4, order: 'back', duplicate: true, src: 'https://evil.example' },
+            { layer: 'headline', italic: true, underline: true, lineHeight: 1.6, order: 'sideways' },
+        ],
+    })!;
+    assert.deepStrictEqual(card.putBack, ['logo']);
+    assert.strictEqual(card.shapes?.length, 1);
+    const base: Design = { ...withPicture(), removed: { layers: [{ id: 'logo', kind: 'logo', role: 'logo', x: 0, y: 0, w: 0.3, h: 0.1, src: 'https://example.com/l.png' }], photo: null } };
+    const { design } = applyDesignEdit(base, card, { fromChat: true });
+    assert.deepStrictEqual(design.photo?.crop, { zoom: 2, x: 0.1, y: 0.9 });
+    assert.ok(design.layers.some((l) => l.kind === 'logo'));
+    assert.strictEqual(design.removed?.layers.length, 0);
+    assert.ok(design.layers.some((l) => l.kind === 'shape' && l.role === 'line' && l.color === '#ff0000'));
+    assert.strictEqual(design.layers[0].id, 'p1', 'sent to the back');
+    const p = design.layers[0];
+    assert.ok(p.kind === 'picture' && p.crop?.zoom === 3 && p.opacity === 0.4 && p.ref.storageKey === 'org/1/p1.jpg');
+    assert.strictEqual(design.layers.filter((l) => l.kind === 'picture').length, 2, 'duplicated');
+    const h = design.layers.find((l) => l.role === 'headline');
+    assert.ok(h && h.kind === 'text' && h.italic === true && h.underline === true && h.lineHeight === 1.6);
+    assert.ok(!('order' in (h as object)) && !('duplicate' in (h as object)), 'no stray fields on a text layer');
+    assert.ok(designForChat(design).includes('picture (layer "p1")'));
+    assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"+ Add picture"'), 'the chat says where a new picture is added');
+    assert.ok(read('src/components/disruptive-ui-registry.js').includes('Array.isArray(ui.shapes)'));
+});
+
+check('a chat removal shelves a held layer, so it can come back', () => {
+    const { design } = applyDesignEdit(withPicture(), { changes: [{ layer: 'qr', remove: true }], add: [] });
+    assert.deepStrictEqual(design.removed?.layers.map((l) => l.id), ['qr']);
+});
+
+check('imageSize reads a PNG and a JPEG from their own bytes', () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAYAAAAAAAAAAAA=', 'base64');
+    assert.deepStrictEqual(imageSize(png), { width: 2, height: 3 });
+    const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0, 0xff, 0xc0, 0, 11, 8, 0, 30, 0, 40, 1, 1, 0, 0]);
+    assert.deepStrictEqual(imageSize(jpg), { width: 40, height: 30 });
+    assert.strictEqual(imageSize(Buffer.from('not a picture at all, sorry')), null);
+});
+
 // ── The questions go straight to the design ───────────────────────────────────────────────────────
 
 check('an AI picture is only made when the user\'s own latest answers chose it', () => {
@@ -202,6 +345,29 @@ check('a flyer becomes layers, and a changed design draws to a preview and print
     assert.ok(png.png.length > 1000 && png.width > 0 && png.height > png.width, 'a portrait preview');
     const pdf = await renderDesignPdfs({ design: moved, photo: null, title: 'Launch', bleedMm: 3 });
     assert.ok(pdf.home.subarray(0, 4).toString() === '%PDF' && pdf.printShop.subarray(0, 4).toString() === '%PDF');
+});
+
+check('added pictures, crops, shapes and text styles draw to a preview and print PDFs', async () => {
+    const { Resvg } = await import('@resvg/resvg-js');
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="200" height="200" fill="#ff0000"/><rect x="200" width="200" height="200" fill="#0000ff"/></svg>';
+    const bytes = Buffer.from(new Resvg(svg).render().asPng());
+    const file = { bytes, mimeType: 'image/png', width: 400, height: 200 };
+    const base: Design = {
+        v: 1, kind: 'flyer', pageW: 148, pageH: 210, paperSize: 'A5', pageColor: '#ffffff', photo: null,
+        layers: [
+            { id: 'p1', kind: 'picture', role: 'picture', x: 0, y: 0, w: 0.5, h: 0.5, opacity: 1, ref: { storageKey: 'k', externalUrl: null, mimeType: 'image/png', width: 400, height: 200 }, crop: { zoom: 1, x: 0, y: 0.5 } },
+            { id: 's1', kind: 'shape', role: 'shape', x: 0.6, y: 0.6, w: 0.2, h: 0.1, color: '#00ff00', round: false, opacity: 1 },
+            { id: 't', kind: 'text', role: 'text', text: 'Slanted', x: 0.1, y: 0.8, w: 0.8, fontFamily: null, fontSizePct: 0.05, bold: true, italic: true, underline: true, lineHeight: 1.6, align: 'left', color: '#000000', boxFill: null, boxOpacity: 1 },
+        ],
+    };
+    // Cropped to the picture's left: the frame shows red, and never its blue half.
+    const left = await renderDesignPreview(base, null, new Map([['p1', file]]));
+    const right = await renderDesignPreview({ ...base, layers: base.layers.map((l) => (l.kind === 'picture' ? { ...l, crop: { zoom: 1, x: 1, y: 0.5 } } : l)) }, null, new Map([['p1', file]]));
+    assert.ok(!left.png.equals(right.png), 'the crop changes what is drawn');
+    const noPicture = await renderDesignPreview(base, null);
+    assert.ok(!noPicture.png.equals(left.png), 'the picture is drawn only when its file is there');
+    const pdf = await renderDesignPdfs({ design: base, photo: null, pictures: new Map([['p1', file]]), title: 'T', bleedMm: 3 });
+    assert.ok(pdf.printShop.subarray(0, 4).toString() === '%PDF' && pdf.home.length > 1000);
 });
 
 Promise.all(pending).then(() => console.log(`\n${passed} passed`));

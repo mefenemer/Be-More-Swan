@@ -15,16 +15,34 @@
 
   const BOX_PAD_RATIO = 0.35;   // src/utils/design-doc.ts
   const LINE_HEIGHT = 1.25;
+  const MAX_PICTURES = 6;       // DESIGN_LIMITS in src/utils/design-doc.ts
+  const MAX_ZOOM = 5;
+  const SNAP_PX = 6;
   const SAVE_MS = 700;
   const UNDO_MAX = 50;
   const ROLE_LABEL = {
     headline: 'the headline', subheading: 'the subheading', points: 'the points', offer: 'the offer', callToAction: 'the call to action',
-    dateLine: 'the date line', contact: 'the contact details', wordmark: 'the business name', qr: 'the QR code', logo: 'the logo', circle: 'the circle', text: 'the text box',
+    dateLine: 'the date line', contact: 'the contact details', wordmark: 'the business name', qr: 'the QR code', logo: 'the logo', circle: 'the circle', shape: 'the shape', line: 'the line', picture: 'the added picture', text: 'the text box',
   };
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
   const rgba = (hex, a) => { const m = /^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || ''); return m ? `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${a})` : 'transparent'; };
   const fontStack = (f) => (f ? `'${f}', system-ui, sans-serif` : "'Plus Jakarta Sans', system-ui, sans-serif");
+  /** The page colour at its strength, on white paper: pageFill in src/utils/design-doc.ts, so the screen matches the print. */
+  const pageFill = (d) => {
+    const m = /^#([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(d.pageColor || '');
+    const a = d.pageOpacity == null ? 1 : d.pageOpacity;
+    if (!m || a >= 1) return d.pageColor;
+    return `#${[m[1], m[2], m[3]].map((h) => Math.round(parseInt(h, 16) * a + 255 * (1 - a)).toString(16).padStart(2, '0')).join('')}`;
+  };
+  /** A picture filling a frame `crop` zoomed and placed: the same sum as cropRect in src/utils/design-doc.ts. */
+  const cropStyle = (crop) => {
+    const c = crop || { zoom: 1, x: 0.5, y: 0.5 };
+    return `width:${c.zoom * 100}%;height:${c.zoom * 100}%;left:${-(c.zoom - 1) * c.x * 100}%;top:${-(c.zoom - 1) * c.y * 100}%;object-position:${c.x * 100}% ${c.y * 100}%;`;
+  };
+  // The tallest the text tools can be, to measure the room they need.
+  const SAMPLE_WORDS = { kind: 'text', text: '', bold: false, align: 'left', color: '#000000', boxFill: null, boxOpacity: 1, fontSizePct: 0.03 };
+  const RESERVE_MIN_WIDTH = 560;   // below this (a phone) the room would take the page's place
 
   function ensureCss() {
     if (document.getElementById('design-studio-css')) return;
@@ -33,24 +51,36 @@
     css.textContent = `
       .ds-stage-wrap { display: flex; justify-content: center; background: #eceae6; border-radius: 12px; padding: 20px; overflow: auto; }
       .ds-page { position: relative; overflow: hidden; flex-shrink: 0; box-shadow: 0 4px 18px rgba(0,0,0,.18); touch-action: none; user-select: none; }
-      .ds-photo { position: absolute; background-size: cover; background-position: center; cursor: move; }
+      .ds-photo { position: absolute; cursor: move; }
+      .ds-clip { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+      .ds-clip img { position: absolute; display: block; max-width: none; object-fit: cover; pointer-events: none; }
+      .ds-cropping { cursor: grab !important; outline: 2px dashed #ff007f !important; outline-offset: 1px; }
+      .ds-guide { position: absolute; background: #ff007f; pointer-events: none; z-index: 6; }
+      .ds-guide[data-axis="x"] { top: 0; bottom: 0; width: 1px; }
+      .ds-guide[data-axis="y"] { left: 0; right: 0; height: 1px; }
       .ds-layer { position: absolute; cursor: move; box-sizing: border-box; }
-      .ds-layer[data-kind="text"] { white-space: pre-wrap; overflow-wrap: anywhere; }
+      .ds-layer[data-kind="text"] { white-space: pre-wrap; overflow-wrap: anywhere; min-height: 1em; }
       .ds-layer img { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
       .ds-page .ds-sel { outline: 2px solid #ff007f; outline-offset: 1px; }
       .ds-page.ds-picking .ds-layer:hover, .ds-page.ds-picking .ds-photo:hover { outline: 3px dashed #ff007f; outline-offset: 1px; cursor: pointer; }
       .ds-handle { position: absolute; width: 14px; height: 14px; background: #fff; border: 2px solid #ff007f; border-radius: 50%; z-index: 5; touch-action: none; }
       .ds-handle[data-h="e"] { right: -8px; top: calc(50% - 7px); cursor: ew-resize; }
+      .ds-handle[data-h="s"] { bottom: -8px; left: calc(50% - 7px); cursor: ns-resize; }
       .ds-handle[data-h="se"] { right: -8px; bottom: -8px; cursor: nwse-resize; }
       .ds-editing { cursor: text !important; user-select: text; outline: 2px solid #ff007f; }
       .ds-tool { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #374151; }
       .ds-tool input[type=color] { width: 32px; height: 32px; padding: 2px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; cursor: pointer; }
       .ds-tool input[type=number], .ds-tool select { height: 32px; border: 1px solid #d1d5db; border-radius: 6px; padding: 0 6px; font-size: 13px; background: #fff; }
       .ds-tool input[type=range] { width: 90px; }
+      [data-ds-tools] { align-content: flex-start; }
+      .ds-words { flex: 1 1 100%; align-items: flex-start; }
+      .ds-words textarea { flex: 1; min-width: 0; height: 56px; border: 1px solid #d1d5db; border-radius: 6px; padding: 6px 8px; font-size: 13px; font-weight: 400; color: #1f2937; background: #fff; resize: none; }
+      .ds-word-list { flex: 1 1 100%; display: flex; align-items: center; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+      .ds-word-list .ds-btn { flex-shrink: 0; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
       .ds-btn { min-height: 32px; min-width: 32px; padding: 0 10px; border: 1px solid #d1d5db; border-radius: 6px; background: #fff; font-size: 13px; font-weight: 700; color: #1f2937; cursor: pointer; }
       .ds-btn[aria-pressed="true"] { background: #1f2937; color: #fff; border-color: #1f2937; }
       .ds-btn:disabled { opacity: .45; cursor: default; }
-      .ds-font { position: relative; width: 190px; }
+      .ds-font { position: relative; width: 190px; min-height: 40px; }
       .ds-font [data-fp-toggle] { padding: 4px 8px; }
       .ds-font [data-fp-current] { font-size: 13px; }
       .ds-font [data-fp-panel] { width: 260px; z-index: 40; }
@@ -78,6 +108,7 @@
     const st = {
       optionId: o.optionId, design: null, photoUrl: null, selected: null, picking: false, editing: null,
       undo: [], redo: [], saveTimer: null, saving: false, savedText: '', pageW: 0, pageH: 0, error: '', loading: true, full: false,
+      pictureUrls: {}, cropping: false,
     };
     let fontPicker = null;
     let destroyed = false;
@@ -107,7 +138,7 @@
         <p data-ds-error role="alert" class="hidden text-sm font-semibold text-red-600 mb-2"></p>
         <div class="ds-stage-wrap" data-ds-wrap><div class="ds-page" data-ds-page role="application" aria-label="Your design. Click a part to change it." tabindex="0"></div></div>
         <div data-ds-thumbs class="flex gap-2 mt-3 overflow-x-auto"></div>
-        <p class="text-xs text-gray-600 mt-2">Click anything to change it, drag to move it, double-click words to type. Or ask in the chat.</p>
+        <p class="text-xs text-gray-600 mt-2">Click anything to change it, drag to move it. Change words in the Words box, or double-click them on the design. Hold Alt while dragging to turn off the guides. Or ask in the chat.</p>
       </div>`;
     const q = (sel) => host.querySelector(sel);
     const page = q('[data-ds-page]');
@@ -157,9 +188,29 @@
     }
 
     // ── Painting ─────────────────────────────────────────────────────────────
+    /**
+     * Room for the tallest tools, always. Clicking words brings up their tools: if that made the bar taller it would push
+     * the design down under the pointer, and the second click of a double-click would miss the words (owner 2026-11-06).
+     */
+    function reserveTools() {
+      const el = q('[data-ds-tools]');
+      const width = el ? el.offsetWidth : 0;
+      if (!width || width === st.toolsWidth) return;
+      st.toolsWidth = width;
+      if (width < RESERVE_MIN_WIDTH) { el.style.minHeight = ''; return; }
+      const probe = document.createElement('div');
+      probe.className = el.className;
+      probe.setAttribute('aria-hidden', 'true');
+      probe.style.cssText = `position:absolute;visibility:hidden;min-height:0;width:${width}px;align-content:flex-start`;
+      probe.innerHTML = textTools(SAMPLE_WORDS);
+      el.parentNode.appendChild(probe);
+      el.style.minHeight = `${probe.offsetHeight}px`;
+      probe.remove();
+    }
     function sizePage() {
       const wrap = q('[data-ds-wrap]');
       if (!wrap || !st.design) return;
+      reserveTools();
       const room = wrap.clientWidth - 40;
       const top = wrap.getBoundingClientRect().top;
       const maxH = Math.max(320, (st.full ? window.innerHeight - 180 : window.innerHeight - Math.max(top, 120) - 40));
@@ -174,21 +225,30 @@
     function layerStyle(l) {
       const pos = `left:${l.x * 100}%;top:${l.y * 100}%;width:${l.w * 100}%;`;
       if (l.kind === 'shape') return `${pos}height:${l.h * 100}%;background:${l.color};opacity:${l.opacity};border-radius:${l.round ? '50%' : '0'};`;
+      if (l.kind === 'picture') return `${pos}height:${l.h * 100}%;opacity:${l.opacity};`;
       if (l.kind !== 'text') return `${pos}height:${l.h * 100}%;`;
       const size = l.fontSizePct * st.pageH;
-      return `${pos}font-family:${esc(fontStack(l.fontFamily))};font-size:${size}px;line-height:${LINE_HEIGHT};font-weight:${l.bold ? 800 : 400};text-align:${l.align};color:${l.color};`
+      return `${pos}font-family:${esc(fontStack(l.fontFamily))};font-size:${size}px;line-height:${l.lineHeight || LINE_HEIGHT};font-weight:${l.bold ? 800 : 400};font-style:${l.italic ? 'italic' : 'normal'};text-decoration:${l.underline ? 'underline' : 'none'};text-align:${l.align};color:${l.color};`
         + (l.boxFill ? `background:${rgba(l.boxFill, l.boxOpacity)};padding:${size * BOX_PAD_RATIO}px;border-radius:${size * 0.25}px;` : '');
     }
     function paintPage() {
       const d = st.design;
-      page.style.background = d.pageColor;
+      page.style.background = pageFill(d);
       page.classList.toggle('ds-picking', st.picking);
-      const handles = '<span class="ds-handle" data-h="e"></span><span class="ds-handle" data-h="se"></span>';
-      const photo = d.photo ? `<div class="ds-photo ${st.selected === 'photo' ? 'ds-sel' : ''}" data-ds-id="photo" style="left:${d.photo.x * 100}%;top:${d.photo.y * 100}%;width:${d.photo.w * 100}%;height:${d.photo.h * 100}%;opacity:${d.photo.opacity};background-image:url('${esc(st.photoUrl || '')}')">${st.selected === 'photo' ? handles : ''}</div>` : '';
+      const handle = (h) => `<span class="ds-handle" data-h="${h}"></span>`;
+      const handlesFor = (id, kind) => {
+        if (st.selected !== id || st.cropping) return '';
+        if (kind === 'text') return handle('e') + handle('se');
+        if (kind === 'qr' || kind === 'logo') return handle('se');
+        return handle('e') + handle('s') + handle('se');   // a frame: changing its shape shows more or less of the picture
+      };
+      const cropClass = (id) => (st.cropping && st.selected === id ? 'ds-cropping' : '');
+      const clip = (url, crop) => `<div class="ds-clip"><img src="${esc(url || '')}" alt="" draggable="false" style="${cropStyle(crop)}"></div>`;
+      const photo = d.photo ? `<div class="ds-photo ${st.selected === 'photo' ? 'ds-sel' : ''} ${cropClass('photo')}" data-ds-id="photo" style="left:${d.photo.x * 100}%;top:${d.photo.y * 100}%;width:${d.photo.w * 100}%;height:${d.photo.h * 100}%;opacity:${d.photo.opacity};">${clip(st.photoUrl, d.photo.crop)}${handlesFor('photo', 'picture')}</div>` : '';
       page.innerHTML = photo + d.layers.map((l) => {
         if (l.fontFamily) window.FontPicker?.loadFamily(l.fontFamily);
-        const inner = l.kind === 'text' ? esc(l.text) : l.kind === 'shape' ? '' : `<img src="${esc(l.src)}" alt="${esc(ROLE_LABEL[l.role] || '')}">`;
-        return `<div class="ds-layer ${st.selected === l.id ? 'ds-sel' : ''}" data-ds-id="${esc(l.id)}" data-kind="${l.kind}" style="${layerStyle(l)}">${inner}${st.selected === l.id ? handles : ''}</div>`;
+        const inner = l.kind === 'text' ? esc(l.text) : l.kind === 'shape' ? '' : l.kind === 'picture' ? clip(st.pictureUrls[l.id], l.crop) : `<img src="${esc(l.src)}" alt="${esc(ROLE_LABEL[l.role] || '')}">`;
+        return `<div class="ds-layer ${st.selected === l.id ? 'ds-sel' : ''} ${cropClass(l.id)}" data-ds-id="${esc(l.id)}" data-kind="${l.kind}" style="${layerStyle(l)}">${inner}${handlesFor(l.id, l.kind)}</div>`;
       }).join('');
     }
     function paintThumbs() {
@@ -196,6 +256,46 @@
       if (!el) return;
       const list = o.options();
       el.innerHTML = list.length > 1 ? list.map((x, i) => `<button type="button" class="ds-thumb" data-ds-thumb="${x.id}" aria-current="${x.id === st.optionId}" aria-label="Design ${i + 1}"><img src="${esc(x.url || '')}" alt=""></button>`).join('') : '';
+    }
+    const pct = (v) => Math.round((1 - v) * 100);
+    const askButton = () => (o.chatAvailable ? '<button type="button" data-ds-ask class="ds-btn">Ask about this</button>' : '');
+    const orderTool = () => `<label class="ds-tool"><span class="sr-only">Layer order</span><select data-ds-order aria-label="Layer order"><option value="">Layer order</option><option value="front">Bring to front</option><option value="forward">Bring forward</option><option value="backward">Send backward</option><option value="back">Send to back</option></select></label>`;
+    const duplicateButton = () => '<button type="button" class="ds-btn" data-ds-duplicate>Duplicate</button>';
+    const canPick = () => !!window.MediaPicker;
+    /** The tools for words. The Words box is there for every line on the design, on any device. */
+    function textTools(l) {
+      return `
+          <label class="ds-tool ds-words">Words <textarea data-ds-text maxlength="600" aria-label="The words">${esc(l.text)}</textarea></label>
+          <span class="ds-font" data-ds-font></span>
+          <label class="ds-tool">Size <input type="number" data-ds-size min="4" max="200" value="${Math.round(l.fontSizePct * 1000) / 10 * 2}" style="width:60px"></label>
+          <button type="button" class="ds-btn" data-ds-bold aria-pressed="${!!l.bold}" aria-label="Bold"><b>B</b></button>
+          <button type="button" class="ds-btn" data-ds-italic aria-pressed="${!!l.italic}" aria-label="Italic"><i>I</i></button>
+          <button type="button" class="ds-btn" data-ds-underline aria-pressed="${!!l.underline}" aria-label="Underline"><u>U</u></button>
+          <label class="ds-tool">Line spacing <input type="number" data-ds-lh min="0.8" max="3" step="0.05" value="${l.lineHeight || LINE_HEIGHT}" style="width:64px"></label>
+          <label class="ds-tool"><span class="sr-only">Line up</span><select data-ds-align aria-label="Line up">${[['left', 'Left'], ['center', 'Centre'], ['right', 'Right']].map(([k, t]) => `<option value="${k}" ${l.align === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+          <label class="ds-tool">Text colour <input type="color" data-ds-color value="${esc(l.color)}"></label>
+          <label class="ds-tool">Background <input type="checkbox" data-ds-boxon ${l.boxFill ? 'checked' : ''}><input type="color" data-ds-box value="${esc(l.boxFill || contrastFor(l.color))}"></label>
+          <label class="ds-tool">Transparency <input type="range" data-ds-boxop min="0" max="100" value="${pct(l.boxOpacity)}"></label>
+          ${orderTool()}${duplicateButton()}${askButton()}<button type="button" class="ds-btn" data-ds-delete>Delete</button>`;
+    }
+    /** Moving a picture about inside its frame: drag it, and this says how far in. */
+    function cropTools(crop) {
+      return `
+        <label class="ds-tool">Zoom <input type="range" data-ds-crop-zoom min="100" max="${MAX_ZOOM * 100}" value="${Math.round((crop ? crop.zoom : 1) * 100)}"></label>
+        <span class="text-xs text-gray-600">Drag the picture to choose what shows.</span>
+        <button type="button" class="ds-btn" data-ds-crop-reset>Reset</button>
+        <button type="button" class="ds-btn" data-ds-crop-done aria-pressed="true">Done</button>`;
+    }
+    function pictureTools(isMain, target) {
+      const replace = canPick() ? '<button type="button" class="ds-btn" data-ds-replace>Replace picture</button>' : '';
+      return `
+        <button type="button" class="ds-btn" data-ds-crop>Crop</button>
+        ${replace}
+        <label class="ds-tool">Transparency <input type="range" ${isMain ? 'data-ds-photoop' : 'data-ds-picop'} min="0" max="100" value="${pct(target.opacity)}"></label>
+        ${isMain ? '' : orderTool()}${duplicateButton()}
+        ${isMain && o.options().filter((x) => x.id !== st.optionId && x.hasPhoto).length ? '<button type="button" class="ds-btn" data-ds-photo-next>Use another picture</button>' : ''}
+        ${askButton()}<button type="button" class="ds-btn" data-ds-delete>${isMain ? 'Remove picture' : 'Delete'}</button>
+        ${isMain ? '<span class="text-xs text-gray-600">The main picture always sits behind everything else.</span>' : ''}`;
     }
     function paintTools() {
       const el = q('[data-ds-tools]');
@@ -206,42 +306,45 @@
       fontPicker = null;
       const d = st.design;
       const l = selectedLayer();
-      const pct = (v) => Math.round((1 - v) * 100);
-      const ask = o.chatAvailable ? '<button type="button" data-ds-ask class="ds-btn">Ask about this</button>' : '';
+      const ask = askButton();
       if (l && l.kind === 'text') {
-        el.innerHTML = `
-          <span class="ds-font" data-ds-font></span>
-          <label class="ds-tool">Size <input type="number" data-ds-size min="4" max="200" value="${Math.round(l.fontSizePct * 1000) / 10 * 2}" style="width:60px"></label>
-          <button type="button" class="ds-btn" data-ds-bold aria-pressed="${l.bold}" aria-label="Bold"><b>B</b></button>
-          <label class="ds-tool"><span class="sr-only">Line up</span><select data-ds-align aria-label="Line up">${[['left', 'Left'], ['center', 'Centre'], ['right', 'Right']].map(([k, t]) => `<option value="${k}" ${l.align === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-          <label class="ds-tool">Words <input type="color" data-ds-color value="${esc(l.color)}"></label>
-          <label class="ds-tool">Background <input type="checkbox" data-ds-boxon ${l.boxFill ? 'checked' : ''}><input type="color" data-ds-box value="${esc(l.boxFill || contrastFor(l.color))}" ${l.boxFill ? '' : 'disabled'}></label>
-          <label class="ds-tool">Transparency <input type="range" data-ds-boxop min="0" max="100" value="${pct(l.boxOpacity)}" ${l.boxFill ? '' : 'disabled'}></label>
-          ${ask}<button type="button" class="ds-btn" data-ds-delete>Delete</button>`;
+        el.innerHTML = textTools(l);
         fontPicker = window.FontPicker?.mount(el.querySelector('[data-ds-font]'), {
           value: l.fontFamily, label: 'Font', sample: false,
           onChange: (family) => { remember(); l.fontFamily = family; paint(); scheduleSave(); },
         }) || null;
         return;
       }
-      if (st.selected === 'photo' && d.photo) {
-        el.innerHTML = `
-          <label class="ds-tool">Transparency <input type="range" data-ds-photoop min="0" max="100" value="${pct(d.photo.opacity)}"></label>
-          ${o.options().filter((x) => x.id !== st.optionId && x.hasPhoto).length ? '<button type="button" class="ds-btn" data-ds-photo-next>Use another picture</button>' : ''}
-          ${ask}<button type="button" class="ds-btn" data-ds-delete>Remove picture</button>`;
+      const pictureTarget = st.selected === 'photo' ? d.photo : l && l.kind === 'picture' ? l : null;
+      if (pictureTarget) {
+        el.innerHTML = st.cropping ? cropTools(pictureTarget.crop) : pictureTools(st.selected === 'photo', pictureTarget);
         return;
       }
       if (l) {
-        el.innerHTML = `${l.kind === 'shape' ? `<label class="ds-tool">Colour <input type="color" data-ds-shape value="${esc(l.color)}"></label><label class="ds-tool">Transparency <input type="range" data-ds-shapeop min="0" max="100" value="${pct(l.opacity)}"></label>` : ''}${ask}<button type="button" class="ds-btn" data-ds-delete>Delete</button>`;
+        el.innerHTML = `${l.kind === 'shape' ? `<label class="ds-tool">Colour <input type="color" data-ds-shape value="${esc(l.color)}"></label><label class="ds-tool">Transparency <input type="range" data-ds-shapeop min="0" max="100" value="${pct(l.opacity)}"></label>` : ''}${orderTool()}${duplicateButton()}${ask}<button type="button" class="ds-btn" data-ds-delete>Delete</button>`;
         return;
       }
+      const words = d.layers.filter((x) => x.kind === 'text');
       el.innerHTML = `
         <label class="ds-tool">Page colour <input type="color" data-ds-page-color value="${esc(d.pageColor)}"></label>
+        <label class="ds-tool">Transparency <input type="range" data-ds-page-op min="0" max="100" value="${pct(d.pageOpacity == null ? 1 : d.pageOpacity)}"></label>
         <button type="button" class="ds-btn" data-ds-add>+ Add words</button>
-        <span class="text-xs text-gray-600">Click a part of the design to change it.</span>`;
+        ${canPick() ? '<button type="button" class="ds-btn" data-ds-add-picture>+ Add picture</button>' : ''}
+        <label class="ds-tool"><span class="sr-only">Add a shape</span><select data-ds-add-shape aria-label="Add a shape"><option value="">+ Add shape</option><option value="rectangle">Rectangle</option><option value="circle">Circle</option><option value="line">Line</option></select></label>
+        ${shelfButtons()}
+        ${words.length ? `<div class="ds-word-list"><span class="ds-tool">Change the words:</span>${words.map((x) => `<button type="button" class="ds-btn" data-ds-words="${esc(x.id)}">${esc(x.text.replace(/\s+/g, ' ').trim().slice(0, 40) || ROLE_LABEL[x.role] || 'Empty text box')}</button>`).join('')}</div>` : ''}`;
+    }
+    /** What came off and can go back on, and a QR code or logo this design could have. */
+    function shelfButtons() {
+      const r = st.design.removed || {};
+      const names = { qr: 'QR code', logo: 'Logo', picture: 'Removed picture' };
+      const layers = (r.layers || []).map((x) => `<button type="button" class="ds-btn" data-ds-putback="${esc(x.id)}">+ ${names[x.kind]}</button>`);
+      if (r.photo) layers.push('<button type="button" class="ds-btn" data-ds-putback="photo">+ Main picture</button>');
+      return layers.join('');
     }
     function paint() {
       if (!st.design) return;
+      if (st.cropping && !(st.selected === 'photo' ? st.design.photo : selectedLayer()?.kind === 'picture')) st.cropping = false;
       sizePage();
       paintPage();
       paintTools();
@@ -255,15 +358,18 @@
     let drag = null;
     page.addEventListener('pointerdown', (e) => {
       if (st.editing || !st.design) return;
+      // Finish what is being typed in the tools first: repainting them would lose its change event.
+      const active = document.activeElement;
+      if (active && active !== page && q('[data-ds-tools]')?.contains(active)) active.blur();
       const handle = e.target.closest('.ds-handle');
       const part = e.target.closest('[data-ds-id]');
       if (st.picking) return;
-      if (!part) { if (st.selected) { st.selected = null; paint(); } return; }
+      if (!part) { if (st.selected) { st.selected = null; st.cropping = false; paint(); } return; }
       const id = part.dataset.dsId;
-      if (st.selected !== id) { st.selected = id; paint(); }
+      if (st.selected !== id) { st.selected = id; st.cropping = false; paint(); }
       const target = id === 'photo' ? st.design.photo : st.design.layers.find((l) => l.id === id);
       if (!target) return;
-      drag = { id, target, mode: handle ? handle.dataset.h : 'move', sx: e.clientX, sy: e.clientY, x: target.x, y: target.y, w: target.w, h: target.h, size: target.fontSizePct, moved: false };
+      drag = { id, target, mode: st.cropping ? 'pan' : handle ? handle.dataset.h : 'move', sx: e.clientX, sy: e.clientY, x: target.x, y: target.y, w: target.w, h: target.h, size: target.fontSizePct, crop: target.crop ? { ...target.crop } : { zoom: 1, x: 0.5, y: 0.5 }, moved: false };
       page.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
@@ -272,10 +378,16 @@
       const dx = (e.clientX - drag.sx) / st.pageW;
       const dy = (e.clientY - drag.sy) / st.pageH;
       if (!drag.moved && Math.abs(e.clientX - drag.sx) + Math.abs(e.clientY - drag.sy) < 3) return;
-      if (!drag.moved) { drag.moved = true; remember(); }
+      if (!drag.moved) { drag.moved = true; remember(); if (drag.mode === 'move') drag.snap = snapTargets(drag.id); }
       const t = drag.target;
-      if (drag.mode === 'move') { t.x = clamp(drag.x + dx, -0.5, 1.2); t.y = clamp(drag.y + dy, -0.5, 1.2); }
-      else if (drag.mode === 'e') t.w = clamp(drag.w + dx, 0.05, 1.5);
+      if (drag.mode === 'pan') { panCrop(t, e.clientX - drag.sx, e.clientY - drag.sy); return; }
+      if (drag.mode === 'move') {
+        t.x = clamp(drag.x + dx, -0.5, 1.2);
+        t.y = clamp(drag.y + dy, -0.5, 1.2);
+        // Alt or Cmd moves it freely, as in most design tools.
+        if (e.altKey || e.metaKey || e.ctrlKey) showGuides(null, null); else applySnap(t, drag);
+      } else if (drag.mode === 'e') t.w = clamp(drag.w + dx, drag.h != null ? 0.002 : 0.05, 1.5);
+      else if (drag.mode === 's') t.h = clamp(drag.h + dy, 0.002, 1.5);
       else {
         // The corner scales: a text box's words grow with it, a picture or shape keeps its shape.
         const scale = clamp((drag.w + dx) / drag.w, 0.1, 6);
@@ -291,14 +403,73 @@
       if (!drag) return;
       const moved = drag.moved;
       drag = null;
+      showGuides(null, null);
       if (moved) { paintTools(); scheduleSave(); }
+    }
+    // ── Snapping: the page's edges and middle, and the edges and middle of everything else on it. ──
+    function snapTargets(id) {
+      const box = page.getBoundingClientRect();
+      const xs = [0, 0.5, 1];
+      const ys = [0, 0.5, 1];
+      let own = { w: 0, h: 0 };
+      page.querySelectorAll('[data-ds-id]').forEach((el) => {
+        const r = el.getBoundingClientRect();
+        const f = { x: (r.left - box.left) / box.width, y: (r.top - box.top) / box.height, w: r.width / box.width, h: r.height / box.height };
+        if (el.dataset.dsId === id) { own = f; return; }
+        xs.push(f.x, f.x + f.w / 2, f.x + f.w);
+        ys.push(f.y, f.y + f.h / 2, f.y + f.h);
+      });
+      return { xs, ys, w: own.w, h: own.h };
+    }
+    /** The nearest line within reach, as how far to move and which line it was. */
+    function nearestSnap(start, size, lines, reach) {
+      let best = null;
+      [start, start + size / 2, start + size].forEach((edge) => lines.forEach((line) => {
+        const shift = line - edge;
+        if (Math.abs(shift) <= reach && (!best || Math.abs(shift) < Math.abs(best.shift))) best = { shift, line };
+      }));
+      return best;
+    }
+    function applySnap(t, d) {
+      if (!d.snap) return;
+      const sx = nearestSnap(t.x, d.snap.w, d.snap.xs, SNAP_PX / st.pageW);
+      const sy = nearestSnap(t.y, d.snap.h, d.snap.ys, SNAP_PX / st.pageH);
+      if (sx) t.x += sx.shift;
+      if (sy) t.y += sy.shift;
+      showGuides(sx ? sx.line : null, sy ? sy.line : null);
+    }
+    function showGuides(x, y) {
+      [['x', x], ['y', y]].forEach(([axis, at]) => {
+        let g = page.querySelector(`.ds-guide[data-axis="${axis}"]`);
+        if (at == null) { if (g) g.remove(); return; }
+        if (!g) { g = document.createElement('div'); g.className = 'ds-guide'; g.dataset.axis = axis; page.appendChild(g); }
+        g.style[axis === 'x' ? 'left' : 'top'] = `${at * 100}%`;
+      });
+    }
+    /** Dragging a picture inside its frame, by how far the pointer moved. A picture that only just covers one way cannot move that way. */
+    function panCrop(t, px, py) {
+      const el = page.querySelector(`[data-ds-id="${CSS.escape(drag.id)}"]`);
+      const img = el && el.querySelector('img');
+      if (!img || !img.naturalWidth) return;
+      const bw = el.clientWidth;
+      const bh = el.clientHeight;
+      const scale = Math.max(bw / img.naturalWidth, bh / img.naturalHeight) * drag.crop.zoom;
+      const spareX = bw - img.naturalWidth * scale;
+      const spareY = bh - img.naturalHeight * scale;
+      t.crop = {
+        zoom: drag.crop.zoom,
+        x: spareX < -0.5 ? clamp(drag.crop.x + px / spareX, 0, 1) : drag.crop.x,
+        y: spareY < -0.5 ? clamp(drag.crop.y + py / spareY, 0, 1) : drag.crop.y,
+      };
+      img.setAttribute('style', cropStyle(t.crop));
     }
     page.addEventListener('pointerup', endDrag);
     page.addEventListener('pointercancel', endDrag);
 
     // Double-click: type on the design itself.
     page.addEventListener('dblclick', (e) => {
-      const part = e.target.closest('[data-kind="text"]');
+      // Not e.target: the press captured the pointer for a drag, so this event is aimed at the page, not the words.
+      const part = document.elementFromPoint(e.clientX, e.clientY)?.closest('[data-ds-page] [data-kind="text"]');
       if (!part || st.picking) return;
       const l = st.design.layers.find((x) => x.id === part.dataset.dsId);
       if (!l) return;
@@ -308,12 +479,21 @@
       part.textContent = l.text;
       part.contentEditable = 'plaintext-only';
       part.focus();
+      const caret = document.createRange();
+      caret.selectNodeContents(part);
+      caret.collapse(false);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(caret);
       const finish = () => {
         part.removeEventListener('blur', finish);
         const next = part.innerText.replace(/\n$/, '');
         st.editing = null;
         if (next !== l.text) { remember(); l.text = next; scheduleSave(); }
-        paint();
+        // The page only: a click that ended the typing may be on a tool, and repainting the tools would swallow it.
+        paintPage();
+        const box = q('[data-ds-text]');
+        if (box) box.value = l.text;
       };
       part.addEventListener('blur', finish);
       part.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { ev.stopPropagation(); part.blur(); } });
@@ -325,15 +505,22 @@
       const t = e.target;
       const l = selectedLayer();
       // Live, on the page, while a colour or slider moves: remembered once, when it starts.
-      if (t.matches('[data-ds-boxop],[data-ds-photoop],[data-ds-shapeop],[data-ds-color],[data-ds-box],[data-ds-page-color],[data-ds-shape]')) {
+      if (t.matches('[data-ds-text],[data-ds-boxop],[data-ds-photoop],[data-ds-picop],[data-ds-crop-zoom],[data-ds-shapeop],[data-ds-color],[data-ds-box],[data-ds-page-color],[data-ds-page-op],[data-ds-shape]')) {
         if (!st.liveChange) { remember(); st.liveChange = true; }
         const op = 1 - Number(t.value) / 100;
-        if (t.matches('[data-ds-boxop]') && l) l.boxOpacity = op;
+        if (t.matches('[data-ds-text]') && l) l.text = t.value;
+        // Moving the slider or choosing a colour is asking for a background: it never sits there greyed out.
+        else if (t.matches('[data-ds-boxop]') && l) { l.boxOpacity = op; if (!l.boxFill) l.boxFill = contrastFor(l.color); }
         else if (t.matches('[data-ds-photoop]') && st.design.photo) st.design.photo.opacity = op;
-        else if (t.matches('[data-ds-shapeop]') && l) l.opacity = op;
+        else if (t.matches('[data-ds-picop],[data-ds-shapeop]') && l) l.opacity = op;
+        else if (t.matches('[data-ds-crop-zoom]')) {
+          const target = st.selected === 'photo' ? st.design.photo : l;
+          if (target) target.crop = { x: 0.5, y: 0.5, ...(target.crop || {}), zoom: clamp(Number(t.value) / 100, 1, MAX_ZOOM) };
+        }
         else if (t.matches('[data-ds-color]') && l) l.color = t.value;
         else if (t.matches('[data-ds-box]') && l) l.boxFill = t.value;
         else if (t.matches('[data-ds-page-color]')) st.design.pageColor = t.value;
+        else if (t.matches('[data-ds-page-op]')) st.design.pageOpacity = op;
         else if (t.matches('[data-ds-shape]') && l) l.color = t.value;
         paintPage();
         scheduleSave();
@@ -343,10 +530,29 @@
       const t = e.target;
       st.liveChange = false;
       const l = selectedLayer();
-      if (t.matches('[data-ds-size]') && l) change(() => { l.fontSizePct = clamp(Number(t.value) / 2 / 100, 0.006, 0.3); });
+      if (t.matches('[data-ds-order]') && l && t.value) {
+        const order = t.value;
+        change(() => {
+          const list = st.design.layers;
+          const at = list.indexOf(l);
+          list.splice(at, 1);
+          list.splice(order === 'front' ? list.length : order === 'back' ? 0 : order === 'forward' ? Math.min(list.length, at + 1) : Math.max(0, at - 1), 0, l);
+        });
+      } else if (t.matches('[data-ds-add-shape]') && t.value) {
+        const shape = t.value;
+        const across = ratio();
+        change(() => {
+          const id = `s${Date.now().toString(36)}`;
+          const size = shape === 'line' ? { x: 0.2, y: 0.5, w: 0.6, h: 0.006 } : shape === 'circle' ? { x: 0.35, y: 0.5 - 0.15 * across, w: 0.3, h: 0.3 * across } : { x: 0.3, y: 0.4, w: 0.4, h: 0.2 };
+          st.design.layers.push({ id, kind: 'shape', role: shape === 'line' ? 'line' : shape === 'circle' ? 'circle' : 'shape', ...size, color: contrastFor(st.design.pageColor) === '#ffffff' ? '#ffffff' : '#1f1e1b', round: shape === 'circle', opacity: 1 });
+          st.selected = id;
+        });
+      } else if (t.matches('[data-ds-lh]') && l) change(() => { l.lineHeight = clamp(Number(t.value) || LINE_HEIGHT, 0.8, 3); });
+      else if (t.matches('[data-ds-size]') && l) change(() => { l.fontSizePct = clamp(Number(t.value) / 2 / 100, 0.006, 0.3); });
       else if (t.matches('[data-ds-align]') && l) change(() => { l.align = t.value; });
       // A box in the page's own colour would be invisible: it starts behind the words in their opposite.
       else if (t.matches('[data-ds-boxon]') && l) change(() => { l.boxFill = t.checked ? contrastFor(l.color) : null; l.boxOpacity = 1; });
+      else if (t.matches('[data-ds-box],[data-ds-boxop]') && l) paintTools();   // the tick follows
     });
     host.addEventListener('click', async (e) => {
       const t = (sel) => e.target.closest(sel);
@@ -365,21 +571,51 @@
       if (t('[data-ds-undo]')) { restore(st.undo, st.redo); return; }
       if (t('[data-ds-redo]')) { restore(st.redo, st.undo); return; }
       if (t('[data-ds-pick]')) { st.picking = !st.picking; st.selected = null; paint(); return; }
-      if (t('[data-ds-full]')) { setFull(!st.full); return; }
+      // The button, not just the attribute: in full screen the layout around this editor carries data-ds-full too.
+      if (t('button[data-ds-full]')) { setFull(!st.full); return; }
       if (t('[data-ds-ask]')) { refer(st.selected); return; }
       if (t('[data-ds-bold]')) { const l = selectedLayer(); if (l) change(() => { l.bold = !l.bold; }); return; }
+      if (t('[data-ds-italic]')) { const l = selectedLayer(); if (l) change(() => { l.italic = !l.italic; }); return; }
+      if (t('[data-ds-underline]')) { const l = selectedLayer(); if (l) change(() => { l.underline = !l.underline; }); return; }
+      if (t('[data-ds-crop]')) { st.cropping = true; paint(); return; }
+      if (t('[data-ds-crop-done]')) { st.cropping = false; paint(); return; }
+      if (t('[data-ds-crop-reset]')) {
+        const target = st.selected === 'photo' ? st.design.photo : selectedLayer();
+        if (target) change(() => { delete target.crop; });
+        return;
+      }
+      if (t('[data-ds-duplicate]')) { duplicateSelected(); return; }
+      if (t('[data-ds-add-picture]')) { pickPicture((asset) => pictureFromLibrary({ addPicture: asset.id }), 'Add a picture'); return; }
+      if (t('[data-ds-replace]')) { const target = st.selected; pickPicture((asset) => pictureFromLibrary({ replacePicture: { assetId: asset.id, target } }), 'Replace this picture'); return; }
+      const back = t('[data-ds-putback]');
+      if (back) { putBack(back.dataset.dsPutback); return; }
+      const wordsBtn = t('[data-ds-words]');
+      if (wordsBtn) {
+        st.selected = wordsBtn.dataset.dsWords;
+        paint();
+        const box = q('[data-ds-text]');
+        if (box) { box.focus(); box.select(); }
+        return;
+      }
       if (t('[data-ds-add]')) {
         change(() => {
           const id = `t${Date.now().toString(36)}`;
           st.design.layers.push({ id, kind: 'text', role: 'text', text: 'Your words', x: 0.1, y: 0.45, w: 0.8, fontFamily: null, fontSizePct: 0.04, bold: true, align: 'center', color: '#1f1e1b', boxFill: null, boxOpacity: 1 });
           st.selected = id;
         });
+        const box = q('[data-ds-text]');
+        if (box) { box.focus(); box.select(); }
         return;
       }
       if (t('[data-ds-delete]')) {
         change(() => {
-          if (st.selected === 'photo') st.design.photo = null;
-          else st.design.layers = st.design.layers.filter((l) => l.id !== st.selected);
+          const shelf = st.design.removed || (st.design.removed = { layers: [], photo: null });
+          if (st.selected === 'photo') { shelf.photo = st.design.photo; st.design.photo = null; }
+          else {
+            const gone = selectedLayer();
+            if (gone && ['qr', 'logo', 'picture'].includes(gone.kind)) shelf.layers.push(gone);
+            st.design.layers = st.design.layers.filter((l) => l.id !== st.selected);
+          }
           st.selected = null;
         });
         return;
@@ -408,6 +644,68 @@
         message: `About ${what} (layer "${l ? l.id : 'photo'}"${shown}) on option ${st.optionId} of my brief ${o.brief.id} “${o.brief.title}”.`,
       });
     }
+    const pictureCount = () => st.design.layers.filter((l) => l.kind === 'picture').length;
+    function duplicateSelected() {
+      const isPhoto = st.selected === 'photo';
+      const from = isPhoto ? st.design.photo : selectedLayer();
+      if (!from) return;
+      if ((isPhoto || from.kind === 'picture') && pictureCount() >= MAX_PICTURES) { showError(`A design can hold ${MAX_PICTURES} added pictures. Remove one to add another.`); return; }
+      change(() => {
+        const id = `c${Date.now().toString(36)}`;
+        const copy = isPhoto
+          ? { id, kind: 'picture', role: 'picture', x: from.x, y: from.y, w: from.w, h: from.h, opacity: from.opacity, ...(from.crop ? { crop: { ...from.crop } } : {}), copyOf: 'photo' }
+          : { ...JSON.parse(JSON.stringify(from)), id, ...(['qr', 'logo', 'picture'].includes(from.kind) ? { copyOf: from.id } : {}) };
+        copy.x += 0.03;
+        copy.y += 0.03;
+        if (copy.kind === 'picture') st.pictureUrls[id] = isPhoto ? st.photoUrl : st.pictureUrls[from.id];
+        // Straight above what it copies; the main picture's copy goes behind everything else on the page.
+        const at = isPhoto ? 0 : st.design.layers.indexOf(from) + 1;
+        st.design.layers.splice(at, 0, copy);
+        st.selected = id;
+      });
+    }
+    function putBack(id) {
+      const shelf = st.design.removed;
+      if (!shelf) return;
+      if (id !== 'photo') {
+        const item = shelf.layers.find((x) => x.id === id);
+        if (item && item.kind === 'picture' && pictureCount() >= MAX_PICTURES) { showError(`A design can hold ${MAX_PICTURES} added pictures. Remove one to put this back.`); return; }
+      }
+      change(() => {
+        if (id === 'photo') { st.design.photo = shelf.photo; shelf.photo = null; st.selected = 'photo'; return; }
+        const at = shelf.layers.findIndex((x) => x.id === id);
+        if (at < 0) return;
+        st.design.layers.push(shelf.layers.splice(at, 1)[0]);
+        st.selected = id;
+      });
+    }
+    /** Every way a picture reaches this workspace: upload, library, stock or AI, each with its own cost and checks. */
+    function pickPicture(onPick, title) {
+      if (!canPick()) return;
+      window.MediaPicker.open({ title, onPick, topic: o.brief.title, assistantName: o.assistantName });
+    }
+    /** The server adds it, as only the server may name a file, so this also saves what is on screen first. */
+    async function pictureFromLibrary(request) {
+      clearTimeout(st.saveTimer);
+      st.saveTimer = null;
+      showSaved('Saving…');
+      try {
+        const before = JSON.stringify(st.design);
+        const r = await o.post({ action: 'save_design', optionId: st.optionId, design: st.design, ...request });
+        st.undo.push(before);
+        st.redo = [];
+        adopt(r);
+        if (r.addedId) st.selected = r.addedId;
+        showSaved('Saved');
+        showError('');
+        paint();
+      } catch (err) { showSaved(''); showError(err.message || 'That picture could not be added. Please try again.'); }
+    }
+    function adopt(r) {
+      st.design = r.design;
+      if (r.photoUrl !== undefined) st.photoUrl = r.photoUrl;
+      if (r.pictureUrls) Object.assign(st.pictureUrls, r.pictureUrls);
+    }
     async function nextPhoto() {
       const others = o.options().filter((x) => x.id !== st.optionId && x.hasPhoto);
       if (!others.length) return;
@@ -415,8 +713,7 @@
       try {
         remember();
         const r = await o.post({ action: 'save_design', optionId: st.optionId, design: st.design, usePhotoFromOption: others[st.photoAt].id });
-        st.design = r.design;
-        st.photoUrl = r.photoUrl;
+        adopt(r);
         paint();
       } catch (err) { showError(err.message); }
     }
@@ -436,14 +733,15 @@
       st.loading = true;
       st.optionId = optionId;
       st.selected = null;
+      st.cropping = false;
+      st.pictureUrls = {};
       st.undo = [];
       st.redo = [];
       showSaved('Opening…');
       try {
         const r = await o.post({ action: 'open_design', optionId });
         if (destroyed) return;
-        st.design = r.design;
-        st.photoUrl = r.photoUrl;
+        adopt(r);
         showSaved('');
         showError('');
         paint();
@@ -462,6 +760,7 @@
       if (e.key === 'Escape') {
         if (typing) return;
         if (st.picking) { st.picking = false; paint(); return; }
+        if (st.cropping) { st.cropping = false; paint(); return; }
         if (st.full) { setFull(false); return; }
         if (st.selected) { st.selected = null; paint(); }
         return;
@@ -471,6 +770,7 @@
       if (mod && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) restore(st.redo, st.undo); else restore(st.undo, st.redo); return; }
       const target = st.selected === 'photo' ? st.design?.photo : selectedLayer();
       if (!target) return;
+      if (mod && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected(); return; }
       if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); q('[data-ds-delete]')?.click(); return; }
       const nudge = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       if (nudge) {
@@ -484,7 +784,7 @@
       }
     }
     document.addEventListener('keydown', onKey);
-    const onResize = () => { if (st.design) { sizePage(); paintPage(); } };
+    const onResize = () => { if (st.design && !st.editing) { sizePage(); paintPage(); } };
     window.addEventListener('resize', onResize);
     // Width only, on the next frame: sizing the page from inside the callback changes what is observed, and the
     // browser then raises "ResizeObserver loop completed", which the page shows as "Something went wrong"
@@ -513,6 +813,15 @@
         if (st.selected && st.selected !== 'photo' && !selectedLayer()) st.selected = null;
         paint();
         scheduleSave();
+        // The chat can duplicate or put back a picture: the signed address to show it comes from the server.
+        const unseen = design.layers.some((l) => l.kind === 'picture' && !st.pictureUrls[l.id]);
+        if (unseen) {
+          o.post({ action: 'open_design', optionId }).then((r) => {
+            if (destroyed || optionId !== st.optionId) return;
+            Object.assign(st.pictureUrls, r.pictureUrls || {});
+            paintPage();
+          }).catch(() => {});
+        }
       },
       refreshThumbs: paintThumbs,
       destroy() {

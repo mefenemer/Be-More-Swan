@@ -280,18 +280,24 @@ export default withLambda(async (event) => {
             if (action !== 'apply_design_edit' && (!Number.isInteger(optionId) || optionId <= 0)) return json(400, { error: 'Option not found.' });
             if (action === 'open_design') {
                 const r = await openDesign(db, orgId, optionId);
-                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl }) : json(r.status, { error: r.error });
+                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls }) : json(r.status, { error: r.error });
             }
             if (action === 'save_design') {
-                const other = Number(body.usePhotoFromOption);
-                const r = await saveDesign(db, { orgId, optionId, design: body.design, finish: body.finish === true, usePhotoFromOption: Number.isInteger(other) && other > 0 ? other : null });
-                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl }) : json(r.status, { error: r.error });
+                const positive = (v: unknown) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
+                const replace = body.replacePicture as { assetId?: unknown; target?: unknown } | null | undefined;
+                const replaceAsset = positive(replace?.assetId);
+                const r = await saveDesign(db, {
+                    orgId, optionId, design: body.design, finish: body.finish === true, usePhotoFromOption: positive(body.usePhotoFromOption),
+                    addPicture: positive(body.addPicture),
+                    replacePicture: replaceAsset && typeof replace?.target === 'string' ? { assetId: replaceAsset, target: replace.target } : null,
+                });
+                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls, addedId: r.addedId }) : json(r.status, { error: r.error });
             }
             // Rebuilt from what the card says, however it got here.
             const card = designEditFromUiElement({ ...(body.card as Record<string, unknown>), type: DESIGN_EDIT_TYPE });
             if (!card) return json(400, { error: 'That change could not be read.' });
             const r = await applyDesignCard(db, { orgId, card });
-            return r.ok ? json(200, { ok: true, optionId: card.optionId, design: r.design, photoUrl: r.photoUrl }) : json(r.status, { error: r.error });
+            return r.ok ? json(200, { ok: true, optionId: card.optionId, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls }) : json(r.status, { error: r.error });
         } catch (err) {
             console.error('[brand-briefs] design failed:', action, err instanceof Error ? err.message : err);
             return json(err instanceof FlyerFitError ? 409 : 500, { error: err instanceof FlyerFitError ? err.message : 'That could not be done just now. Please try again.' });

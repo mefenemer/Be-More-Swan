@@ -139,6 +139,18 @@ export async function fetchFlyerPhoto(ref: Pick<FlyerPhotoRef, 'storageKey' | 'e
     } catch { return null; }
 }
 
+/** The files of a design's added pictures. `strict` for a finished file, which must not lose one without saying so. */
+export async function fetchDesignPictures(design: Design, strict = false): Promise<Map<string, FlyerPhoto>> {
+    const pictures = design.layers.filter((l) => l.kind === 'picture');
+    const out = new Map<string, FlyerPhoto>();
+    await Promise.all(pictures.map(async (l) => {
+        const photo = l.kind === 'picture' ? await fetchFlyerPhoto(l.ref) : null;
+        if (photo) out.set(l.id, photo);
+        else if (strict) throw new Error('flyer_photo_unavailable');
+    }));
+    return out;
+}
+
 type OptionValues = {
     source: string; storageKey: string; mimeType: string; width: number; height: number; prompt: string;
     providerAssetId?: string | null; attributionName?: string | null; attributionUrl?: string | null;
@@ -296,7 +308,7 @@ export async function approveFlyerOption(db: Db, args: {
     const designPhoto = design && design.photo ? await fetchFlyerPhoto(design.photo.ref) : null;
     if (design && design.photo && !designPhoto) throw new Error('flyer_photo_unavailable');
     const { home, printShop } = design
-        ? await renderDesignPdfs({ design, photo: designPhoto, title: args.title, bleedMm: PRINT_BLEED_MM })
+        ? await renderDesignPdfs({ design, photo: designPhoto, pictures: await fetchDesignPictures(design, true), title: args.title, bleedMm: PRINT_BLEED_MM })
         : await renderFlyerPdfs({
             content: n.content, kit: normalizeBrandKit(p.kit), paperSize, layout: p.layout, photo,
             orgName: p.orgName, title: args.title, bleedMm: PRINT_BLEED_MM, style: p.style ?? null,

@@ -47,8 +47,13 @@ Only one answer costs anything: **An AI-made picture (1 task)**. A stock photo, 
 The editor shows your design on the left and the chat on the right.
 
 - **Click** any words, the picture or a shape to change it: the font, size, colour, a background behind the words and how see-through it is, or the picture's strength.
-- **Drag** it to move it, or drag its corner to make it bigger or smaller.
-- **+ Add words** puts a new line of text on the page, and **Page colour** changes the background.
+- **Change the words** in the **Words** box that appears when you click them, or double-click them on the design and type. With nothing selected, **Change the words** lists every piece of text on the design.
+- **Drag** it to move it, or drag its corner to make it bigger or smaller. Pink guide lines show when it lines up with the page or something else on it. Hold Alt while dragging to turn them off.
+- **+ Add picture** adds one of your own, from your library, from stock, or made by AI (which uses a task). Click a picture to **Crop** it, drag it inside its frame and zoom, or to **Replace** it. Your main picture always sits behind everything else.
+- **+ Add shape** adds a rectangle, circle or line. **Layer order** moves the selected part in front of or behind the others, and **Duplicate** copies it.
+- Words can also be **italic** or **underlined**, with their own **line spacing**.
+- If you remove your **logo** or **QR code**, a button appears to put it back.
+- **+ Add words** puts a new line of text on the page, **Page colour** changes the background, and its **Transparency** slider fades that colour towards white paper.
 - **Undo** and **Redo** step back and forward. Every change saves itself.
 - **Select**, then click part of the design, to ask your Brand Designer about it in the chat, for example "make this stand out more". It shows you the change on a card, and nothing changes until you press **Change it**. It can move or recolour your contact details and offer, but only you can change their wording.
 - **Full screen** gives you more room. Press Esc to leave it.
