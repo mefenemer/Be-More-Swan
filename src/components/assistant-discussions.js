@@ -538,6 +538,8 @@
       }
       load();
     },
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; render(); },
     activate() {
       render();
       if (state.loaded) load();

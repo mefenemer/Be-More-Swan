@@ -46,7 +46,7 @@
   const state = {
     assistantId: null, assistantName: null, setup: {}, videos: [], loaded: false, loadError: null,
     rendered: false, form: false, editing: null, replanning: null, notes: {}, busy: new Set(), pollTimer: null,
-    stage: null, userStage: false, collapsed: new Set(), full: false,
+    stage: null, userStage: false, opened: new Set(), full: false,
   };
 
   // Stages as pills, like the Brand Designer's Briefs (owner, 2026-11-06: the Briefs tab's patterns on
@@ -61,13 +61,14 @@
     const st = STAGES.find((x) => x.key === key) || STAGES[0];
     return state.videos.filter((v) => st.statuses.includes(v.status));
   };
-  // Folded videos, remembered per assistant in this browser (as the Briefs are).
-  const foldKey = () => `bms-video-folded:${state.assistantId}`;
+  // Videos start closed; the ones opened are remembered per assistant in this browser (as the Briefs are).
+  // A new key: the old one listed the ones hidden.
+  const foldKey = () => `bms-video-open:${state.assistantId}`;
   function loadFolded() {
-    try { state.collapsed = new Set(JSON.parse(localStorage.getItem(foldKey()) || '[]').map(Number)); } catch { state.collapsed = new Set(); }
+    try { state.opened = new Set(JSON.parse(localStorage.getItem(foldKey()) || '[]').map(Number)); } catch { state.opened = new Set(); }
   }
   function saveFolded() {
-    try { localStorage.setItem(foldKey(), JSON.stringify([...state.collapsed])); } catch { /* private window */ }
+    try { localStorage.setItem(foldKey(), JSON.stringify([...state.opened])); } catch { /* private window */ }
   }
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -242,9 +243,10 @@
     const cost = v.estimate == null ? '' : (v.estimate === 0 ? ' — free' : ` — uses ${v.estimate} ${unit}${v.estimate === 1 ? '' : 's'}`);
     const replanning = state.replanning === v.id;
     const note = state.notes[v.id];
-    const folded = state.collapsed.has(v.id) && !replanning && !(state.editing && state.editing.id === v.id);
+    // Closed until opened (owner, 2026-11-06), and remembered in this browser.
+    const folded = !state.opened.has(v.id) && !replanning && !(state.editing && state.editing.id === v.id);
     return `
-      <article class="bg-white border border-gray-200 rounded-xl p-4" data-video="${v.id}">
+      <article data-no-fold class="bg-white border border-gray-200 rounded-xl p-4" data-video="${v.id}">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
             <button type="button" data-vid-act="fold" data-id="${v.id}" aria-expanded="${folded ? 'false' : 'true'}" title="${folded ? 'Show this video' : 'Hide this video'}"
@@ -297,7 +299,7 @@
     }
     const visible = inStage(state.stage);
     const stageLabel = (STAGES.find((st) => st.key === state.stage) || STAGES[0]).label;
-    const anyOpen = visible.some((v) => !state.collapsed.has(v.id));
+    const anyOpen = visible.some((v) => state.opened.has(v.id));
     const pills = STAGES.map((st) => {
       const n = inStage(st.key).length;
       const on = st.key === state.stage;
@@ -313,7 +315,6 @@
         <h2 class="text-base font-bold text-gray-900 shrink-0"><span data-explain="video-videos">Videos</span></h2>
         <div class="flex flex-wrap items-center justify-end gap-2">
           <button type="button" data-vid-act="full" aria-pressed="${state.full ? 'true' : 'false'}" title="${state.full ? 'Back to the page (Esc)' : 'Use the whole screen for your videos and the chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg">${state.full ? 'Exit full screen' : 'Full screen'}</button>
-          ${chatPaneAvailable() ? `<button type="button" data-vid-act="chat-toggle" aria-pressed="${chatDock && chatDock.isOn() ? 'true' : 'false'}" title="Show or hide the chat beside your videos" class="btn-assistant border px-4 py-2 text-sm font-bold rounded-lg shrink-0">💬 Chat with ${who()}</button>` : ''}
           ${state.form ? '' : '<button type="button" data-vid-act="new" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg shrink-0">New video</button>'}
         </div>
       </div>
@@ -400,20 +401,19 @@
       }
       case 'close-form': state.form = false; render(); break;
       case 'fold': {
-        if (state.collapsed.has(id)) state.collapsed.delete(id); else state.collapsed.add(id);
+        if (state.opened.has(id)) state.opened.delete(id); else state.opened.add(id);
         saveFolded(); render();
         host()?.querySelector(`[data-vid-act="fold"][data-id="${id}"]`)?.focus();
         break;
       }
       case 'fold-all': {
         const shown = inStage(state.stage);
-        const anyOpen = shown.some((v) => !state.collapsed.has(v.id));
-        shown.forEach((v) => { if (anyOpen) state.collapsed.add(v.id); else state.collapsed.delete(v.id); });
+        const anyOpen = shown.some((v) => state.opened.has(v.id));
+        shown.forEach((v) => { if (anyOpen) state.opened.delete(v.id); else state.opened.add(v.id); });
         saveFolded(); render();
         break;
       }
       case 'full': setFull(!state.full); break;
-      case 'chat-toggle': { const d = getChatDock(); if (d) d.setOn(!d.isOn(), true); break; }
       case 'talk': {
         const v = state.videos.find((x) => x.id === id);
         if (v) getChatDock()?.refer({ label: `Video “${v.title}”`, message: `About my video ${v.id} “${v.title}”.` });
@@ -500,7 +500,6 @@
     if (chatDock && chatDock.connected()) return chatDock;
     chatDock = window.ChatPane.dock(el, {
       prefix: 'videos', storageKey: 'bms-video-chat-on',
-      onToggle: (on) => document.querySelector('[data-vid-act="chat-toggle"]')?.setAttribute('aria-pressed', on ? 'true' : 'false'),
       pane: () => ({
         assistantId: state.assistantId, assistantName: state.assistantName || 'your Video Producer', roleKey: 'video_producer',
         rememberKey: `bms-video-chat:${state.assistantId}`,
@@ -526,6 +525,8 @@
       loadFolded();
       load();   // eager: the planned count is the tab badge
     },
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; if (state.rendered) render(); },
     activate() {
       if (state.rendered) return;
       state.rendered = true;

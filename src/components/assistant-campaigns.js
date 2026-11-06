@@ -1322,7 +1322,7 @@
     const excludeCustomers = c ? c.excludeExistingCustomers !== false : f.stage !== 'retention';
     const exclKey = c ? 'f-excl' : `f-excl-${f.stage}`;
     return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-4 space-y-3" data-cmp-form>
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-4 space-y-3" data-cmp-form data-no-fold>
         <p class="text-sm font-bold text-gray-900">${f.mode === 'edit' ? 'Edit campaign' : 'New campaign'}</p>
         <label class="block text-xs font-bold text-gray-600"><span data-explain="campaign-objective">What should this campaign achieve?</span>
           <textarea rows="2" maxlength="500" data-cmpf="objective" data-keep="f-objective"
@@ -1455,9 +1455,7 @@
         <!-- The chat route to a campaign, where the user lands. "Set an Objective" lived only on the
              Orders tab, as a full page load, beside a header Chat button that opened a pop-up
              (review, 2026-10-22). Both now open the same pop-up. -->
-        ${chatPaneAvailable()
-          ? `<button type="button" data-cmp-chat-toggle aria-pressed="${chatDock && chatDock.isOn() ? 'true' : 'false'}" title="Show or hide the chat beside your campaigns" class="btn-assistant min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">💬 Chat with ${esc(whoChat())}</button>`
-          : '<button type="button" data-cmp-chat class="btn-assistant min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">Set an objective in chat</button>'}
+        ${chatPaneAvailable() ? '' : '<button type="button" data-cmp-chat class="btn-assistant min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">Set an objective in chat</button>'}
         <button type="button" data-cmp-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New campaign</button>
       </div>`;
   }
@@ -3139,7 +3137,6 @@
   // file; none starts a campaign or places an order, so the pane never spends (plan §1.3, §9.0).
   let chatDock = null;
   const chatPaneAvailable = () => !!window.ChatPane?.available?.() && !!state.assistantId;
-  const whoChat = () => state.assistantName || 'your assistant';
   const clip = (s, n) => { const t = String(s || '').trim(); return t.length > n ? `${t.slice(0, n - 1)}…` : t; };
   function getChatDock() {
     const el = document.getElementById('campaigns-host');
@@ -3147,7 +3144,6 @@
     if (chatDock && chatDock.connected()) return chatDock;
     chatDock = window.ChatPane.dock(el, {
       prefix: 'campaigns', storageKey: 'bms-campaign-chat-on',
-      onToggle: (on) => document.querySelector('[data-cmp-chat-toggle]')?.setAttribute('aria-pressed', on ? 'true' : 'false'),
       pane: () => ({
         assistantId: state.assistantId, assistantName: state.assistantName || 'your Campaign Orchestrator', roleKey: 'campaign_orchestrator',
         rememberKey: `bms-campaign-chat:${state.assistantId}`,
@@ -3205,6 +3201,8 @@
     },
     /** The year view, drawn into `host` (the Calendar tab, §9.4). */
     renderTimeline,
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; if (state.rendered) render(); },
     /** Called on first activation of the tab. Cheap if init() already loaded. */
     activate() {
       // Coming BACK to the tab re-reads it: its work is moved on by other assistants while the page

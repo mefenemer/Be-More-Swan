@@ -48,19 +48,14 @@ async function ask(page: Page, text: string) { await input(page).fill(text); awa
 test.describe('wide screen', () => {
     test.use({ viewport: { width: 1600, height: 950 } });
 
-    test('the campaigns on the left, the chat docked on the right; the button hides it', async ({ page, api, pageErrors }) => {
+    test('the campaigns on the left, the chat docked on the right, with no button for it', async ({ page, api, pageErrors }) => {
         stubCampaigns(api);
         await openTab(page);
         await expect(input(page)).toBeVisible();
         const row = await page.locator('[data-cmp-row="31"]').boundingBox();
         const box = await input(page).boundingBox();
         expect(row!.x + row!.width).toBeLessThanOrEqual(box!.x);
-        const toggle = page.locator('[data-cmp-chat-toggle]');
-        await expect(toggle).toHaveText(/Chat with Cora/);
-        await toggle.click();
-        await expect(input(page)).toBeHidden();
-        await toggle.click();
-        await expect(input(page)).toBeVisible();
+        await expect(page.locator('[data-cmp-chat-toggle]')).toHaveCount(0);
         expect(pageErrors).toEqual([]);
     });
 

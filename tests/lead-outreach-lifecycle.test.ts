@@ -299,9 +299,9 @@ check('a group heading is a control, and the fold is state not markup', () => {
     assert.match(body, /aria-expanded="\$\{collapsed \? 'false' : 'true'\}"/, 'and say so to a screen reader');
     // ⚠️ paintRows() rewrites every row on each keystroke, so a fold recorded in the DOM would
     // spring open as the user typed in the search box — the same reason `selected` is a Set.
-    assert.match(body, /state\.view\.collapsed\.has\(group\.label\)/, 'the fold lives in the view state');
-    assert.match(HUB, /collapsed: new Set\(\)/g, 'and is initialised with the rest of the view');
-    assert.strictEqual((HUB.match(/collapsed: new Set\(\)/g) || []).length, 2,
+    assert.match(body, /state\.view\.opened\.has\(group\.label\)/, 'the fold lives in the view state');
+    assert.match(HUB, /opened: new Set\(\)/g, 'and is initialised with the rest of the view');
+    assert.strictEqual((HUB.match(/opened: new Set\(\)/g) || []).length, 2,
         'both view initialisers (first paint and init()) must create the Set, or a fold throws');
 });
 
@@ -316,11 +316,11 @@ check('folded rows are not drawn, and nothing else changes', () => {
 
 check('changing the grouping opens everything again', () => {
     const handler = HUB.slice(landmark(HUB, "const group = host.querySelector('[data-hub-group]');")).slice(0, 900);
-    assert.match(handler, /state\.view\.collapsed\.clear\(\)/,
+    assert.match(handler, /state\.view\.opened\.clear\(\)/,
         'labels belong to the column they were made in — "Rejected" folded under Approval must not '
         + 'fold a Rating group that happens to share the word');
     const clear = HUB.slice(landmark(HUB, "host.querySelector('[data-hub-clear]')?.addEventListener")).slice(0, 500);
-    assert.match(clear, /state\.view\.collapsed\.clear\(\)/, 'and Clear must clear the folds too');
+    assert.match(clear, /state\.view\.opened\.clear\(\)/, 'and Clear must clear the folds too');
 });
 
 // ── The tab and its columns are named for what they DO ───────────────────────

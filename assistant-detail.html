@@ -533,7 +533,7 @@
        order:-1 pulls this above the status row within the flex-column wrapper.
        A role with goalsTab.bringsResults (Social Media, 2026-10-21 trial) has this card and Goal
        Progress moved into its Goals tab, renamed "Results" — see _applyDashboardRegistry. -->
-  <div id="performance-metrics-card" class="mb-8" style="order:-1">
+  <div id="performance-metrics-card" data-fold-section class="mb-8" style="order:-1">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
       <span id="metrics-status-note" class="text-xs text-gray-500 font-medium">Last 30 days</span>
@@ -764,6 +764,21 @@
       <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-sitebuilder" id="maintab-btn-sitebuilder" data-maintab="sitebuilder" class="main-tab-btn hidden">
         <span id="sitebuilder-tab-label">Website</span>
       </button>
+      <!-- Set up, Design, Pages and Publish were sub-tabs in a box above the chat (owner, 2026-11-06: the same
+           tabs as every other assistant). All five share one panel, #maintab-sitebuilder: the editor paints
+           what the open tab asks for, with the chat docked on the right on every one. -->
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-sitebuilder" id="maintab-btn-sitesetup" data-maintab="sitesetup" class="main-tab-btn hidden">
+        <span>Set up</span>
+      </button>
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-sitebuilder" id="maintab-btn-sitedesign" data-maintab="sitedesign" class="main-tab-btn hidden">
+        <span>Design</span>
+      </button>
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-sitebuilder" id="maintab-btn-sitepages" data-maintab="sitepages" class="main-tab-btn hidden">
+        <span>Pages</span><span id="site-pages-badge" style="display:none" title="Parts in [square brackets] to fill in" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
+      <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-sitebuilder" id="maintab-btn-sitepublish" data-maintab="sitepublish" class="main-tab-btn hidden">
+        <span>Publish</span><span id="site-publish-dot" style="display:none" title="Changes not live yet" class="ml-1 w-2 h-2 rounded-full bg-amber-500"></span>
+      </button>
       <!-- What the website brings in — Website Assistant only, each its own tab (owner, 2026-10-16):
            enquiries, orders and bookings are checked daily; editing the site is occasional. Shown by
            assistants.js with the Website tab; Orders/Bookings follow the site's chosen features.
@@ -887,7 +902,8 @@
   </div>
 
   <!-- ── MAIN TAB: Activity ─────────────────────────────────────────── -->
-  <div id="maintab-activity" role="tabpanel" aria-labelledby="maintab-btn-activity" class="main-tab-content hidden">
+  <!-- data-no-fold: the feed is the tab, one line per thing done (fold.js) -->
+  <div data-no-fold id="maintab-activity" role="tabpanel" aria-labelledby="maintab-btn-activity" class="main-tab-content hidden">
 
   <!-- AC6: Daily Relationship-Building Checklist (relocated here by issue #181) — hidden until
        loaded; only shown for social assistants. -->
@@ -935,7 +951,8 @@
   </div><!-- /maintab-activity -->
 
   <!-- ── MAIN TAB: Review Queue ──────────────────────────────────────── -->
-  <div id="maintab-review-queue" role="tabpanel" aria-labelledby="maintab-btn-review-queue" class="main-tab-content hidden">
+  <!-- data-no-fold: its cards fold themselves (_rqToggleCard) (fold.js) -->
+  <div data-no-fold id="maintab-review-queue" role="tabpanel" aria-labelledby="maintab-btn-review-queue" class="main-tab-content hidden">
 
     <!-- One header row (owner, 2026-11-06, as on the Brand Designer's Briefs): the title and its ⓘ on
          the left, the buttons on the right. The description is kept in #detail-rq-subtitle for the
@@ -1040,7 +1057,8 @@
        enrichment diffs / meeting notes / ledger / tickets. Populated by
        assistant-data-hub.js from the hubTab config; records live in
        assistant_records (netlify/functions/assistant-records.ts). -->
-  <div id="maintab-datahub" role="tabpanel" aria-labelledby="maintab-btn-datahub" class="main-tab-content">
+  <!-- data-no-fold: a table, whose groups start closed (fold.js) -->
+  <div data-no-fold id="maintab-datahub" role="tabpanel" aria-labelledby="maintab-btn-datahub" class="main-tab-content">
 
     <!-- Primary action bar (Epic 2.1; relocated here by issue #181) — the role's one "do the thing"
          intent, front and centre on its workspace tab.
@@ -1086,7 +1104,8 @@
        renders the global calendar (calendar.js) scoped to _currentAssistantId:
        scheduled posts (get-social-drafts), records with scheduled_for
        (assistant-records) and completed task runs (get-calendar-activity). -->
-  <div id="maintab-calendar" role="tabpanel" aria-labelledby="maintab-btn-calendar" class="main-tab-content hidden">
+  <!-- data-no-fold: a calendar (fold.js) -->
+  <div data-no-fold id="maintab-calendar" role="tabpanel" aria-labelledby="maintab-btn-calendar" class="main-tab-content hidden">
     <div id="assistant-calendar-host"></div>
   </div><!-- /maintab-calendar -->
 
@@ -1094,7 +1113,8 @@
        The org-wide content library (uploads/links/AI-generated media, not
        assistant-scoped). Populated by assistant-my-content.js, which reuses the
        standalone my-content.html fragment + my-content.js controller. -->
-  <div id="maintab-mycontent" role="tabpanel" aria-labelledby="maintab-btn-mycontent" class="main-tab-content hidden">
+  <!-- data-no-fold: columns of pictures (fold.js) -->
+  <div data-no-fold id="maintab-mycontent" role="tabpanel" aria-labelledby="maintab-btn-mycontent" class="main-tab-content hidden">
     <!-- Shown inside one assistant, the library read as THAT assistant's — and deleting here removes
          a picture from every assistant's posts. Say so before anything is touched (UX review,
          2026-10-21). -->

@@ -134,7 +134,7 @@
       ? `
           <div class="max-w-md mx-auto text-center py-8" data-chat-empty>
             <div class="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">👋</div>
-            <p class="text-lg font-bold text-gray-900">Hi, I'm ${displayName}.</p>
+            <p class="text-lg font-bold text-gray-900">Hi, I'm <span data-chat-name>${displayName}</span>.</p>
             <p class="text-sm text-gray-500 mt-1 mb-6">Here's how I can help — pick one to get started, or type your own message below.</p>
             <div class="flex flex-col gap-2.5 text-left">
               ${starterPrompts.map((prompt, i) => `
@@ -148,7 +148,7 @@
       : `
           <div class="text-center py-10" data-chat-empty>
             <div class="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center text-2xl mx-auto mb-3">💬</div>
-            <p class="font-bold text-gray-900">${escapeHtml(assistantName || 'Your assistant')} is ready</p>
+            <p class="font-bold text-gray-900"><span data-chat-name>${escapeHtml(assistantName || 'Your assistant')}</span> is ready</p>
             <p class="text-sm text-gray-500 mt-1">Send a message below to get started.</p>
           </div>`;
 
@@ -2581,6 +2581,11 @@
       setReference,
       focus() { if (inputEl) inputEl.focus(); },
       getSessionId: () => chatSessionId,
+      /** The assistant was renamed: an empty chat's greeting says the new name; later turns already read it. */
+      setAssistantName(name) {
+        props.assistantName = name;
+        container.querySelectorAll('[data-chat-name]').forEach((el) => { el.textContent = name || 'your assistant'; });
+      },
       destroy() {
         scrollEl.removeEventListener('scroll', onScroll);
         scrollEl.removeEventListener('load', keepPinned, true);

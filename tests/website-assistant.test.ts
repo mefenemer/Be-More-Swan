@@ -172,7 +172,7 @@ check('the page has the tab, its panel and the script; every branch routes to th
     assert.match(read('assistant-detail.html'), /<div id="maintab-sitebuilder" role="tabpanel" aria-labelledby="maintab-btn-sitebuilder" class="main-tab-content hidden">\s*<div id="site-editor-host" data-site-host="website"><\/div>/);
     assert.match(assistants, /s\.src = '\/src\/components\/assistant-site-editor\.js';/, 'loaded on demand by siteEditor()');
     assert.match(assistants, /toggle\('maintab-btn-sitebuilder', !!siteEditorTab\)/);
-    assert.match(assistants, /if \(name === 'sitebuilder'\) siteEditor\(\(ed\) => ed\.activate\('website'\)\);/);
+    assert.match(assistants, /if \(sitePanel\) siteEditor\(\(ed\) => ed\.activate\('website', sitePanel\)\);/);
     assert.match(assistants, /if \(source === 'site'\)[\s\S]{0,100}_loadSiteMetrics\(assistantId\)/);
     assert.match(assistants, /_detailRulesScope === 'site'/);
 });

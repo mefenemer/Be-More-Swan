@@ -54,11 +54,19 @@
     state.reviews = reviews.status === 'fulfilled' ? reviews.value : { error: reviews.reason?.message || 'Couldn’t load your reviews.' };
     state.customers = customers.status === 'fulfilled' ? customers.value.customers : { error: customers.reason?.message || 'Couldn’t load your customers.' };
     state.loading = false;
+    feedNeedsYou();
     render();
     schedulePoll();
   }
 
   // While a review is being written, look again every 15 s (it takes a minute or two).
+  /** The card beside the hero says what is waiting, as every assistant's does. */
+  function feedNeedsYou() {
+    const open = state.data?.open || [];
+    window._setNeedsYouItems?.(open.slice(0, 4).map((s) => ({ id: s.id, label: s.title || 'A suggestion', sub: 'Waiting' })));
+    window._setNeedsYouCount?.(open.length);
+  }
+
   function schedulePoll() {
     clearTimeout(state.poll);
     const writing = (state.reviews?.reviews || []).some((r) => r.status === 'queued' || r.status === 'running');
@@ -185,39 +193,24 @@
           ${i.done ? '' : `<p class="text-xs text-gray-500 mt-0.5">${esc(i.why)}</p>`}
         </div>
       </li>`).join('');
-    // Collapsible. The viewer's choice is kept (a repaint after a chat card must not reopen it);
-    // until they choose, it is open while anything is left to do.
-    const open = checklistOpenPref() ?? done < items.length;
     return card(`
-      <details data-mentor-checklist class="group" ${open ? 'open' : ''}>
-        <summary class="cursor-pointer flex items-center justify-between gap-2">
-          <h2 class="text-base font-bold text-gray-900">Set-up checklist</h2>
-          <span class="flex items-center gap-2 shrink-0">
-            <span class="text-xs font-semibold text-gray-500">${done} of ${items.length} done</span>
-            <svg class="w-4 h-4 text-gray-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-          </span>
-        </summary>
-        <p class="text-xs text-gray-500 mt-1 mb-2">The same gaps I raise in chat. Each opens its place in Business Information.</p>
-        <ul>${rows}</ul>
-      </details>`, 'data-mentor-panel="checklist"');
-  }
-
-  const CHECKLIST_OPEN_KEY = 'mentorChecklistOpen';
-  function checklistOpenPref() {
-    try { const v = localStorage.getItem(CHECKLIST_OPEN_KEY); return v === null ? null : v === '1'; } catch { return null; }
+      <div class="flex items-center justify-between gap-2">
+        <h2 class="text-base font-bold text-gray-900">Set-up checklist</h2>
+        <span class="text-xs font-semibold text-gray-500 shrink-0">${done} of ${items.length} done</span>
+      </div>
+      <p class="text-xs text-gray-500 mt-1 mb-2">The same gaps I raise in chat. Each opens its place in Business Information.</p>
+      <ul>${rows}</ul>`, 'data-mentor-panel="checklist"');
   }
 
   function visibilityHtml(v) {
     const list = (xs) => `<ul class="mt-1 space-y-1">${xs.map((x) => `<li class="text-sm text-gray-700 flex gap-2"><span aria-hidden="true" class="text-gray-400">•</span><span class="min-w-0">${esc(x)}</span></li>`).join('')}</ul>`;
     return card(`
-      <details>
-        <summary class="cursor-pointer text-base font-bold text-gray-900">What I can see</summary>
+      <h2 class="text-base font-bold text-gray-900">What I can see</h2>
         <p class="text-xs text-gray-500 mt-2">I work from this list, and never change anything without your click.</p>
         <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Sees</h3>
         ${list(v.sees || [])}
         <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Never sees</h3>
-        ${list(v.never || [])}
-      </details>`, 'data-mentor-panel="visibility"');
+        ${list(v.never || [])}`, 'data-mentor-panel="visibility"');
   }
 
   function dismissedHtml(rows) {
@@ -235,12 +228,10 @@
       </li>`;
     }).join('');
     return card(`
-      <details ${rows.length ? 'open' : ''}>
-        <summary class="cursor-pointer text-base font-bold text-gray-900">Dismissed suggestions (${rows.length})</summary>
+      <h2 class="text-base font-bold text-gray-900">Dismissed suggestions (${rows.length})</h2>
         ${rows.length
           ? `<p class="text-xs text-gray-500 mt-2">I won’t suggest these again. "Bring back" lets me.</p><ul class="mt-1">${items}</ul>`
-          : `<p class="text-sm text-gray-500 mt-2">Nothing dismissed. When you dismiss a suggestion in chat, it’s listed here with your reason.</p>`}
-      </details>`, 'data-mentor-panel="dismissed"');
+          : `<p class="text-sm text-gray-500 mt-2">Nothing dismissed. When you dismiss a suggestion in chat, it’s listed here with your reason.</p>`}`, 'data-mentor-panel="dismissed"');
   }
 
   function weekHtml(week) {
@@ -253,6 +244,7 @@
 
   function waitingHtml(open) {
     if (!open.length) return '';
+    // Not folded: it is one line and its button, and it is why the Needs-you card sent them here.
     return card(`
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="min-w-0">
@@ -260,7 +252,7 @@
           <p class="text-xs text-gray-500 mt-0.5">My suggestions you haven’t answered yet. Review them together and tick the ones you want.</p>
         </div>
         <button type="button" data-mentor-review-all class="btn-primary shrink-0 px-4 py-2 text-sm font-bold rounded-lg transition">Review all</button>
-      </div>`, 'data-mentor-panel="waiting"');
+      </div>`, 'data-mentor-panel="waiting" data-no-fold');
   }
 
   function recommendedHtml(rec) {
@@ -361,10 +353,6 @@
   document.addEventListener('click', (e) => {
     const t = e.target;
     if (!(t instanceof Element) || !host()?.contains(t)) return;
-    // The viewer opening/closing the checklist (click, or Enter/Space on the summary). Not `toggle`:
-    // that also fires when a render inserts it open, which would save a choice nobody made.
-    const checklist = t.closest('[data-mentor-checklist] > summary')?.parentElement;
-    if (checklist) { try { localStorage.setItem(CHECKLIST_OPEN_KEY, checklist.open ? '0' : '1'); } catch { /* per-viewer nicety only */ } return; }
     const open = t.closest('[data-mentor-open-field]');
     if (open) {
       window._bizinfoInitialTab = open.getAttribute('data-mentor-open-field');
@@ -407,8 +395,30 @@
   ['mentor:changed', 'bizinfo:profileChanged', 'bizinfo:productsChanged', 'assistant:settingsChanged'].forEach((ev) =>
     document.addEventListener(ev, () => { if (state.assistantId && host()) load(); }));
 
+  // The chat panel beside the Overview, as on the landing tab of the other assistants (owner, 2026-11-06). The
+  // same thread as the Plan tab's: it is one conversation with the Mentor.
+  let chatDock = null;
+  function getChatDock() {
+    const el = host();
+    if (!el || !window.ChatPane?.available?.() || !state.assistantId) return null;
+    if (chatDock && chatDock.connected()) return chatDock;
+    chatDock = window.ChatPane.dock(el, {
+      prefix: 'mentoroverview', storageKey: 'bms-mentorplan-chat-on',
+      pane: () => ({
+        assistantId: state.assistantId, assistantName: state.assistantName, roleKey: 'business_mentor',
+        rememberKey: `bms-mentorplan-chat:${state.assistantId}`,
+        placeholder: 'Ask your Mentor…',
+        starterPrompts: ['What should I focus on this week?', 'Where is my business weakest right now?', 'Which assistant would help me most next?'],
+        composerRows: 3,
+      }),
+    });
+    return chatDock;
+  }
+
   window.AssistantMentorOverview = {
     init({ assistantId, assistantName }) {
+      chatDock?.destroy();
+      chatDock = null;
       state.assistantId = assistantId;
       state.assistantName = assistantName || 'Your Mentor';
       state.data = null; state.error = null; state.notes = {};
@@ -417,6 +427,12 @@
       render();
       load();
     },
-    activate() { if (!state.data && !state.loading) load(); else render(); },
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; render(); },
+    activate() {
+      if (!state.data && !state.loading) load(); else render();
+      const dock = getChatDock();
+      if (dock && !dock.isOn() && dock.wanted()) dock.setOn(true, false);
+    },
   };
 })();

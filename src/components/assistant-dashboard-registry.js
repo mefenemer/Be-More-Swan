@@ -649,6 +649,8 @@
       // Rules tab: read by every AI draft of the site and by its chat (site-store.ts, RULE_READING_ROLES).
       rulesScope: 'site',
       defaultMainTab: 'sitebuilder',
+      // The card beside the hero: enquiries, orders and bookings to deal with (assistant-site-editor.js).
+      needsYou: { tab: 'siteenquiries', where: 'Enquiries' },
     },
 
     // Mystery Shopper (docs/mystery-shopper-plan.md §4). Its work is CHECKS of the business's website
@@ -673,6 +675,8 @@
       // Phase 3 (§5.1): the Commitments list at the top of its Results tab (mentor-commitments.js).
       mentorCommitments: true,
       defaultMainTab: 'mentor',
+      // The card beside the hero: its suggestions waiting (assistant-mentor-overview.js feeds it).
+      needsYou: { tab: 'mentor', where: 'Overview' },
       hideReviewQueue: true,
       hideDataHub: true,
       hideGoals: true,
@@ -733,6 +737,8 @@
       // Rules tab: read by its chat AND by the rewrites every check suggests (site-audit.ts).
       rulesScope: 'audit',
       defaultMainTab: 'website',
+      // The card beside the hero: suggested fixes not decided on (assistant-site-audit.js).
+      needsYou: { tab: 'website', where: 'Website' },
     },
 
     lead_qualifier: {

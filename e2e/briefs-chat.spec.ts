@@ -46,6 +46,8 @@ function stubBriefs(api: ApiStub) {
 }
 
 async function openTab(page: Page) {
+    // Briefs start closed (owner, 2026-11-06); these tests are about what is inside one.
+    await page.addInitScript(() => localStorage.setItem('bms-briefs-open-4', '[12]'));
     await page.route('**/e2e-briefs.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
     await page.goto('/e2e-briefs.html');
     // The tab opens on "Not started" (owner 2026-11-05); a brief with options waiting is under "To review".
@@ -61,7 +63,7 @@ async function ask(page: Page, text: string) { await input(page).fill(text); awa
 test.describe('wide screen', () => {
     test.use({ viewport: { width: 1600, height: 950 } });
 
-    test('the briefs on the left, the chat docked on the right; its button only shows once the chat is closed', async ({ page, api, pageErrors }) => {
+    test('the briefs on the left, the chat docked on the right, with no button for it', async ({ page, api, pageErrors }) => {
         stubBriefs(api);
         await openTab(page);
         await expect(input(page)).toBeVisible();
@@ -69,11 +71,6 @@ test.describe('wide screen', () => {
         const box = await input(page).boundingBox();
         expect(card!.x + card!.width).toBeLessThanOrEqual(box!.x);
         await page.screenshot({ path: 'test-results/briefs-chat.png' });
-        await expect(page.locator('[data-brief-chat-toggle]')).toHaveCount(0);
-        await page.getByRole('button', { name: /close/i }).first().click();
-        await expect(input(page)).toBeHidden();
-        await page.locator('[data-brief-chat-toggle]').click();
-        await expect(input(page)).toBeVisible();
         await expect(page.locator('[data-brief-chat-toggle]')).toHaveCount(0);
         expect(pageErrors).toEqual([]);
     });
@@ -226,6 +223,18 @@ test.describe('Love Cat feedback (2026-11-05)', () => {
         await page.goto('/e2e-briefs.html');
         await expect(page.locator('[data-brief-tabs]')).toBeVisible();
     }
+
+    test('a brief starts closed, and opens from its title', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        await open(page);
+        await page.locator('[data-brief-tab="review"]').click();
+        const toggle = page.locator('[data-brief-toggle="12"]');
+        await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+        await expect(page.locator('[data-brief-body="12"]')).toBeHidden();
+        await toggle.click();
+        await expect(page.locator('[data-brief-body="12"]')).toBeVisible();
+        expect(pageErrors).toEqual([]);
+    });
 
     test('tabs run left to right with counts, open on To review while something waits, and each brief is in one', async ({ page, api, pageErrors }) => {
         stubStages(api);

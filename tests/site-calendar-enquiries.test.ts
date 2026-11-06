@@ -70,8 +70,8 @@ check('"Availability", not "Timetable"; the Website tab leads with a new site\'s
     assert.ok(ed.includes('<p class="text-sm font-black text-gray-900">Availability</p>') && !ed.includes('Timetable — classes'));
     // Since 2026-10-21 the order is the sub-tabs': Set up (what the website does) first, Publish last
     // (the docked Chat sits before them all since 2026-11-04).
-    assert.ok(ed.includes("const SUBTABS_ALL = [['chat', 'Chat'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];"), 'what the website does comes before Publish');
-    assert.ok(ed.includes("['features', step === 1 ? featuresCard(true) : '']"), 'a new site starts with what it does');
+    assert.ok(ed.includes("const MAIN_TAB = { chat: 'sitebuilder', setup: 'sitesetup', design: 'sitedesign', pages: 'sitepages', publish: 'sitepublish' };"), 'what the website does comes before Publish');
+    assert.ok(ed.includes("['first-features', step === 1 ? featuresCard(true) : '', stepOpen]"), 'a new site starts with what it does');
     assert.ok(ed.includes('return structureCard() + designCard();'), 'the layout, then the design — templates have their own tab (2026-10-18)');
     assert.ok(ed.includes("['templates', templatesCard(false), { keep: true }],\n      ['design', designPanel()],"), 'templates lead the Design sub-tab');
     const pages = ed.slice(ed.indexOf('  function pagesPanel() {'), ed.indexOf('  // ── "Add your own words"'));

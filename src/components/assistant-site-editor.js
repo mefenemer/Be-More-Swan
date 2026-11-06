@@ -354,10 +354,12 @@
       '@media (max-width: 639px) { .sb-tap { min-height: 44px; min-width: 44px; } [data-sb-wide-only] { display: none !important; } }',
       '@media (min-width: 1024px) { [data-sb-narrow-only] { display: none !important; } }',
       'iframe[data-site-preview] { max-width: 100%; }',
-      // Preview on the left, the pane (Chat or one of the sub-tabs) on the right — narrow screens keep
-      // the pane first, with the preview a button away (owner, 2026-11-04, after trying Lovable).
-      // One pane width on every sub-tab, so the preview never jumps when the tab changes (owner, 2026-11-05).
-      '@media (min-width: 1024px) { [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(380px, 460px) !important; } [data-sb-preview-col] { order: 1; } [data-sb-pane] { order: 2; } }',
+      // The tab's work on the left (on the Website tab, the preview), the chat on the right on every tab.
+      // Narrow screens keep the chat first on the Website tab; on the others the header's Chat button
+      // opens it, because it would push the work off the screen.
+      '@media (min-width: 1024px) { [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(380px, 460px) !important; } [data-sb-mode="edit"] [data-sb-pane] { position: sticky; top: 76px; align-self: start; } [data-sb-mode="edit"] [data-sb-chatbox] { height: calc(100vh - 92px); } }',
+      '@media (max-width: 1023px) { [data-sb-mode="chat"] [data-sb-pane] { order: -1; } [data-sb-mode="edit"] [data-sb-pane] { display: none; } }',
+      '[data-sb-mode="edit"] [data-sb-preview-col]:not([data-sb-full]) { display: none; }',
       '[data-sb-chatbox] { height: clamp(460px, calc(100vh - 150px), 880px); }',
       // Wide screens: the preview sets the height and the chat fills the pane to exactly match it.
       '@media (min-width: 1024px) { iframe[data-site-preview] { height: clamp(408px, calc(100vh - 202px), 828px) !important; }',
@@ -1461,7 +1463,7 @@
   }
   function paintChat(box) {
     if (!box) return;
-    const show = state.panel === 'chat' && chatAvailable();
+    const show = chatAvailable();
     box.hidden = !show;
     if (!show) return;
     if (chatPane.session && chatPane.assistantId === state.assistantId && chatPane.mountEl && box.contains(chatPane.mountEl)) return;
@@ -1708,22 +1710,15 @@
   // "Chat" (2026-11-04): this assistant's chat, docked beside the preview, first because it is the
   // quickest way to build — every change it proposes still waits for the user's click on its card.
   const chatAvailable = () => !!(window.ChatSession && typeof window.ChatSession.mount === 'function' && window.ChatPane);
-  const SUBTABS_ALL = [['chat', 'Chat'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];
-  function siteSubtabsHtml() {
-    const SUBTABS = SUBTABS_ALL.filter(([k]) => k !== 'chat' || chatAvailable());
-    const s = state.data.site;
-    const brackets = (state.data.placeholders || []).length;
-    // What a tab is waiting on, said on the tab so the owner needn't open each to find out.
-    const badge = {
-      pages: brackets ? `<span class="ml-1 bg-amber-100 text-amber-800 text-[10px] font-black px-1.5 py-0.5 rounded-full" title="Parts in [square brackets] to fill in">${brackets}</span><span class="sr-only"> parts to fill in</span>` : '',
-      publish: s.status === 'published' && s.unpublishedChanges ? '<span class="ml-1 inline-block w-2 h-2 rounded-full bg-amber-500 align-middle" aria-hidden="true" title="Changes not live yet"></span><span class="sr-only"> (changes not live yet)</span>' : '',
-    };
-    return `<div class="tab-scroller border-b border-gray-200 overflow-x-auto overflow-y-hidden">
-      <div class="flex gap-1" role="tablist" aria-label="Your website">${SUBTABS.map(([k, l]) => {
-        const on = state.panel === k;
-        return `<button type="button" role="tab" id="site-subtab-${k}" data-site-subtab="${k}" aria-selected="${on}" tabindex="${on ? 0 : -1}"
-          class="site-subtab px-3 py-2 text-sm whitespace-nowrap border-b-2 ${on ? 'font-bold text-emerald-800' : 'font-medium text-gray-500 hover:text-gray-700 border-transparent'}">${esc(l)}${badge[k] || ''}</button>`;
-      }).join('')}</div></div>`;
+  // Since 2026-11-06 (owner) they are the page's own tabs, like every other assistant's, with the chat on
+  // the right on all of them. "Chat" is the Website tab itself: the preview beside the chat.
+  const MAIN_TAB = { chat: 'sitebuilder', setup: 'sitesetup', design: 'sitedesign', pages: 'sitepages', publish: 'sitepublish' };
+  /** The editor changed tab by itself (a button, or set-up finishing): the tab bar follows. */
+  function syncMainTab() {
+    if (state.surface !== 'website') return;
+    const name = MAIN_TAB[state.panel];
+    const tab = document.getElementById(`maintab-btn-${name}`);
+    if (tab && !tab.classList.contains('active-tab')) window._activateMainTab?.(name);
   }
 
   // ── A new site's first steps (UI review 2026-10-21) ─────────────────────────
@@ -2094,7 +2089,7 @@
       return;
     }
     if (!host.querySelector(':scope > [data-site-layout]')) {
-      host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div data-sb-pane class="min-w-0"><div data-sb-blocks class="space-y-4"></div><div data-sb-chat class="mt-4"></div></div><div data-sb-preview-col class="min-w-0"></div></div>';
+      host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div data-sb-work class="min-w-0"><div data-sb-blocks class="space-y-4"></div><div data-sb-preview-col class="min-w-0"></div></div><div data-sb-pane class="min-w-0"><div data-sb-chat></div></div></div>';
     }
     const layout = host.firstElementChild;
     const blocksEl = layout.querySelector('[data-sb-blocks]');
@@ -2102,25 +2097,25 @@
     const fresh = isFresh();
     const step = fresh ? setupStep() : 0;
     const imp = state.data.import;
-    // Which sub-tab. A new site (or one whose imported draft is waiting to be looked at) opens on
-    // Set up, where its steps are; a site under way opens on Pages. Finishing set-up moves on to
-    // Pages once, so the words just written are what the owner sees next.
-    // With the chat available it opens first (an imported draft waiting still opens on Set up).
-    if (state.panel === 'chat' && !chatAvailable()) state.panel = null;
-    if (!state.panel) state.panel = imp && imp.status === 'ready' ? 'setup' : chatAvailable() ? 'chat' : fresh ? 'setup' : 'pages';
+    // Which tab. The Website tab (preview and chat) opens first, unless an imported draft is waiting to be
+    // looked at, which is on Set up. Finishing set-up moves on to Pages once, so the words just written are
+    // what the owner sees next.
+    if (!state.landed) { state.landed = true; if (imp && imp.status === 'ready') state.panel = 'setup'; }
+    if (!state.panel) state.panel = 'chat';
     if (state.wasFresh && !fresh && state.panel === 'setup') state.panel = 'pages';
     state.wasFresh = fresh;
-    const tabbar = siteSubtabsHtml();
     // During set-up the other tabs are for looking around: their buttons give way to the step's.
     quietPrimary = fresh && !state.editing && state.panel !== 'setup';
     const P = state.panel;
+    // A new site's steps are one at a time, so none is hidden behind a click (fold.js).
+    const stepOpen = { attrs: { 'data-no-fold': '' } };
     const blocks = P === 'chat' ? [] : P === 'setup' ? (fresh ? [
-      ['setup', setupStepsHtml(step)],
-      ['features', step === 1 ? featuresCard(true) : ''],
-      ['templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true }],
-      ['import', imp || step === 2 ? importCard('start') : ''],
-      ['setup-skip', step === 2 && !imp ? setupSkipHtml() : ''],
-      ['draft', step === 3 || s.drafting ? draftCard('start') : ''],
+      ['first-setup', setupStepsHtml(step), stepOpen],
+      ['first-features', step === 1 ? featuresCard(true) : '', stepOpen],
+      ['first-templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true, ...stepOpen }],
+      ['first-import', imp || step === 2 ? importCard('start') : '', stepOpen],
+      ['first-skip', step === 2 && !imp ? setupSkipHtml() : '', stepOpen],
+      ['first-draft', step === 3 || s.drafting ? draftCard('start') : '', stepOpen],
     ] : [
       ['import', imp ? importCard('start') : ''],
       ['details', detailsPanel()],
@@ -2136,25 +2131,29 @@
       ['pages', pagesPanel()],
     ] : [
       ['placeholders', placeholdersCard()],
-      ['publish', fresh ? card(`<p class="text-sm font-black text-gray-900">Publish your site</p><p class="text-xs text-gray-500 mt-1">There's nothing to publish yet. Finish setting up your website first — ${btn('data-site-subtab="setup"', 'Go to Set up')}</p>`) : publishCard()],
+      // The tab's one job, so its buttons aren't behind a click.
+      ['publish', fresh ? card(`<p class="text-sm font-black text-gray-900">Publish your site</p><p class="text-xs text-gray-500 mt-1">There's nothing to publish yet. Finish setting up your website first — ${btn('data-site-subtab="setup"', 'Go to Set up')}</p>`) : publishCard(), { attrs: { 'data-no-fold': '' } }],
     ];
     // Drafting takes a minute or two and can be started from more than one tab: say it on all of them.
-    const drafting = s.drafting && !blocks.some(([k, h]) => (k === 'draft') && h) ? draftCard('start') : '';
+    const drafting = s.drafting && !blocks.some(([k, h]) => (k === 'draft' || k === 'first-draft') && h) ? draftCard('start') : '';
     quietPrimary = false;
     layout.setAttribute('data-sb-mode', P === 'chat' ? 'chat' : 'edit');
     paintBlocks(blocksEl, [
-      ['tabs', tabbar],
       ['note', noteHtml(), { live: true }],
       ['drafting', drafting],
-      ...blocks.map(([k, h, o]) => [`${P}-${k}`, h, { ...(o || {}), attrs: { role: 'tabpanel', 'aria-labelledby': `site-subtab-${P}` } }]),
-      // Narrow screens: the preview is below everything, so a button that stays in reach opens it.
+      ...blocks.map(([k, h, o]) => [`${P}-${k}`, h, o || {}]),
+      // The preview is a button away: below everything on a narrow Website tab, and not on the page at all
+      // on the others, where the chat has its column. It opens over the page.
       // Sticky on the wrapper itself — inside it, it could only stick within its own height.
-      ['preview-jump', btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site'),
+      ['preview-jump', P === 'chat' ? btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site') : '',
         { attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
+      ['preview-open', P === 'chat' ? '' : btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site'),
+        { attrs: { style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
     ]);
     paintChat(layout.querySelector('[data-sb-chat]'));
-    paintPreview(layout.lastElementChild);
+    paintPreview(layout.querySelector('[data-sb-preview-col]'));
     afterPaint(host);
+    syncMainTab();
   }
 
   // The counts on the Enquiries / Orders / Bookings tabs — visible from every tab.
@@ -2172,6 +2171,15 @@
     // The Calendar tab is this assistant's bookings calendar (assistant-calendar.js), so it goes with them.
     if (state.data) { show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings')); show('maintab-btn-calendar', featureOn('bookings')); show('maintab-btn-sitelistings', listingsOn()); }
     set('site-listings-badge', (state.listings && state.listings.pending) || 0);
+    set('site-pages-badge', (d.placeholders || []).length);
+    // The card beside the hero: people waiting on an answer.
+    if (state.data) {
+      const waiting = [['siteenquiries', 'Enquiries', d.newEnquiries || 0], ['siteorders', 'Orders', d.newOrders || 0], ['sitebookings', 'Bookings', (d.booking && d.booking.waiting) || 0]].filter((x) => x[2]);
+      window._setNeedsYouItems?.(waiting.map(([tab, label, n]) => ({ id: tab, tab, label, count: n, sub: `${n} new` })));
+      window._setNeedsYouCount?.(waiting.reduce((sum, x) => sum + x[2], 0));
+    }
+    const dot = document.getElementById('site-publish-dot');
+    if (dot) dot.style.display = d.site && d.site.status === 'published' && d.site.unpublishedChanges ? 'inline-block' : 'none';
     set('site-enquiries-badge', d.newEnquiries || 0);
     set('site-orders-badge', d.newOrders || 0);
     set('site-bookings-badge', (d.booking && d.booking.waiting) || 0);
@@ -2932,7 +2940,7 @@
       if (picker.off) { picker.off(); picker.off = null; }
       if (chatPane.assistantId !== assistantId) unmountChat();
       setEditorFull(false);
-      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
+      Object.assign(state, { assistantId, assistantName: assistantName || null, landed: false, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
         importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false, wasDrafting: false, listings: null, listingEdit: null, listingError: null });
       load();
@@ -2941,7 +2949,12 @@
     },
     // surface: 'website' (pages, design, details, preview) or 'enquiries' | 'orders' | 'bookings',
     // each its own tab. A list re-reads every time its tab is opened.
-    activate(surface) {
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; rerender(); },
+    activate(surface, panel) {
+      // Only a tab the user chose beats the landing rule (an imported draft opens on Set up): the Website
+      // tab is also what the page opens on, before the site has loaded.
+      if (panel) { state.panel = panel; if (panel !== 'chat') state.landed = true; }
       setPreviewFull(false);
       setEditorFull(false);
       if (picker.on && (surface || 'website') !== 'website') { picker.on = false; if (picker.off) { picker.off(); picker.off = null; } }

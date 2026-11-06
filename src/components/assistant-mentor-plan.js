@@ -368,11 +368,11 @@
         <p class="text-sm text-gray-600 mt-1">None yet for your kind of business. ${esc(state.assistantName)} only coaches from a playbook once a person at Be More Swan has reviewed it${(p.awaitingReview || []).length ? ' — one for your kind of business is being reviewed' : ''}. Until then, general advice is labelled as its own judgement.</p>`, 'data-mplan-panel="playbook"');
     }
     const list = (title, pts) => pts && pts.length ? `<h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">${esc(title)}</h3><ul class="mt-1 space-y-1">${pts.map((x) => `<li class="text-sm text-gray-800 break-words">${esc(x.text)}${x.judgement ? ' <span class="text-[11px] text-gray-500">(reviewer’s judgement)</span>' : ''}${(x.sources || []).map((s) => ` <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" class="text-[11px] text-pink-700 underline">${esc(s.title)}</a>`).join('')}</li>`).join('')}</ul>` : '';
-    return card(`<details><summary class="cursor-pointer text-base font-bold text-gray-900">The playbook I’m using</summary>
+    return card(`<h2 class="text-base font-bold text-gray-900">The playbook I’m using</h2>
       <p class="text-sm font-semibold text-gray-900 mt-2">${esc(b.title)}</p>
       <p class="text-[11px] text-gray-500">Reviewed by ${esc(b.reviewed.by)} on ${esc(ukDate(b.reviewed.on))}</p>
       ${list('What good looks like', b.whatGoodLooksLike)}${list('The usual first 90 days', b.first90Days)}${list('Common mistakes', b.commonMistakes)}${list('The measures that matter', b.measures)}
-    </details>`, 'data-mplan-panel="playbook"');
+    `, 'data-mplan-panel="playbook"');
   }
 
   function render() {
@@ -390,7 +390,6 @@
     try { if (active && el.contains(active) && typeof active.selectionStart === 'number') caret = [active.selectionStart, active.selectionEnd]; } catch (e) { /* number inputs */ }
     const focusKey = active && el.contains(active) ? (active.getAttribute('data-mplan-field') || active.getAttribute('data-mplan-assumption') || active.getAttribute('data-mplan-calc') || (active.hasAttribute('data-mplan-research-q') ? 'research' : null)) : null;
     el.innerHTML = `
-      ${chatPaneAvailable() ? `<div class="flex justify-end mb-3"><button type="button" data-mplan-chat-toggle aria-pressed="${chatDock && chatDock.isOn() ? 'true' : 'false'}" title="Show or hide the chat beside your plans" class="btn-assistant border px-4 py-2 text-sm font-bold rounded-lg">💬 Chat with ${esc(state.assistantName)}</button></div>` : ''}
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
         <div class="space-y-4 min-w-0 lg:col-span-2">${plansHtml()}${researchHtml()}</div>
         <div class="space-y-4 min-w-0">${calcHtml()}${playbookHtml()}
@@ -469,7 +468,6 @@
   document.addEventListener('click', (e) => {
     const t = e.target;
     if (!(t instanceof Element) || !host()?.contains(t)) return;
-    if (t.closest('[data-mplan-chat-toggle]')) { const d = getChatDock(); if (d) d.setOn(!d.isOn(), true); return; }
     const sel = t.closest('[data-mplan-select], [data-mplan-select-assumption]');
     if (sel) { const ref = selectionRef(sel); if (ref) getChatDock()?.refer(ref); return; }
     const k = t.closest('[data-mplan-kind]');
@@ -524,7 +522,7 @@
   // below), which would swap the button out between the press and the click, and the click would be lost.
   document.addEventListener('mousedown', (e) => {
     const t = e.target;
-    if (t instanceof Element && host()?.contains(t) && t.closest('[data-mplan-select], [data-mplan-select-assumption], [data-mplan-chat-toggle]')) e.preventDefault();
+    if (t instanceof Element && host()?.contains(t) && t.closest('[data-mplan-select], [data-mplan-select-assumption]')) e.preventDefault();
   });
   // Typing is kept in state (never lost to a repaint from a chat card or a poll).
   document.addEventListener('input', (e) => {
@@ -607,7 +605,6 @@
     if (chatDock && chatDock.connected()) return chatDock;
     chatDock = window.ChatPane.dock(el, {
       prefix: 'mentorplan', storageKey: 'bms-mentorplan-chat-on',
-      onToggle: (on) => document.querySelector('[data-mplan-chat-toggle]')?.setAttribute('aria-pressed', on ? 'true' : 'false'),
       pane: () => ({
         assistantId: state.assistantId, assistantName: state.assistantName, roleKey: 'business_mentor',
         rememberKey: `bms-mentorplan-chat:${state.assistantId}`,
@@ -653,6 +650,8 @@
       render();
       load();
     },
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; render(); },
     activate() {
       if (!state.data && !state.loading) load(); else { render(); schedulePoll(); }
       const dock = getChatDock();

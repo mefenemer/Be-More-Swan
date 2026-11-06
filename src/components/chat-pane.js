@@ -49,6 +49,28 @@
     try { fetch('/.netlify/functions/chat-orchestrator', { method: 'GET', credentials: 'same-origin' }).catch(() => {}); } catch { /* never in the way */ }
   }
 
+  // Every pane and dock on the page: what the page's own Chat button reaches, and what a rename updates.
+  const panes = new Set();
+  const docks = new Set();
+  const onScreen = (el) => !!el && el.isConnected && el.getClientRects().length > 0;
+
+  /**
+   * The page's Chat button (the right-hand menu's, or the header's on a phone): bring up the chat docked on
+   * this tab, opening it if it was closed. False when this tab has none, so the caller opens the pop-up.
+   */
+  function focusOnScreen() {
+    for (const d of docks) {
+      if (d.connected() && onScreen(d.layout)) { d.setOn(true, true); return true; }
+    }
+    for (const p of panes) {
+      if (onScreen(p.container)) { p.focus(); return true; }
+    }
+    return false;
+  }
+  function renameAll(assistantId, name) {
+    panes.forEach((p) => { if (Number(p.assistantId) === Number(assistantId)) p.rename(name); });
+  }
+
   function mount(container, opts) {
     opts = opts || {};
     warm();
@@ -64,7 +86,7 @@
         <div class="flex items-center justify-between gap-2 px-4 py-2 border-b border-gray-200" style="flex-shrink:0">
           <span class="flex items-center gap-2 min-w-0">
             <span aria-hidden="true" data-chatpane-avatar style="position:relative;flex-shrink:0;width:28px;height:28px;border-radius:9999px;background:${esc(avatarColor)};color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:800">${esc(avatarLetter)}<span style="position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:9999px;background:#22c55e;border:2px solid #fff"></span></span>
-            <p class="text-sm font-black text-gray-900 truncate">${esc(opts.title || `Chat with ${opts.assistantName || 'your assistant'}`)}</p>
+            <p data-chatpane-title class="text-sm font-black text-gray-900 truncate">${esc(opts.title || `Chat with ${opts.assistantName || 'your assistant'}`)}</p>
           </span>
           <span class="flex items-center gap-1" style="flex-shrink:0">${window.ChatHistoryPanel ? '<button type="button" data-chatpane-history aria-expanded="false" aria-label="Past chats" title="Past chats" class="inline-flex items-center px-2 py-1 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg" style="background:none;border:0;cursor:pointer"><svg aria-hidden="true" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 2m6-2a9 9 0 11-9-9 9 9 0 019 9z"/></svg></button>' : ''}<button type="button" data-chatpane-new title="Start a new conversation" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg" style="background:none;border:0;cursor:pointer"><span aria-hidden="true">+</span> New chat</button>${opts.onClose ? '<button type="button" data-chatpane-close aria-label="Close the chat" class="px-2 py-1 text-lg leading-none text-gray-500 hover:text-gray-900">&times;</button>' : ''}</span>
         </div>
@@ -154,6 +176,19 @@
     container.addEventListener('click', onClick);
 
     const api = {
+      container,
+      /** The assistant was renamed while this pane is open: its header and the "I'm …" of an empty chat. */
+      rename(name) {
+        const was = opts.assistantName;
+        opts.assistantName = name;
+        if (session && session.setAssistantName) session.setAssistantName(name);
+        const title = container.querySelector('[data-chatpane-title]');
+        if (title && !opts.title) title.textContent = `Chat with ${name || 'your assistant'}`;
+        const avatar = container.querySelector('[data-chatpane-avatar]');
+        const letter = AC && AC.letterFor ? AC.letterFor(opts.assistantId, name) : (String(name || 'A').trim()[0] || 'A').toUpperCase();
+        if (avatar && avatar.firstChild && was !== name) avatar.firstChild.textContent = letter;
+      },
+      get assistantId() { return opts.assistantId; },
       ready: start(key ? read(key) : null),
       /** A part of the page onto the chip above the message box (waits for the chat to be ready). */
       setReference(ref) { if (session) session.setReference(ref); else pendingRef = ref; },
@@ -178,8 +213,10 @@
         if (session && session.destroy) { try { session.destroy(); } catch { /* gone */ } }
         session = null;
         container.innerHTML = '';
+        panes.delete(api);
       },
     };
+    panes.add(api);
     return api;
   }
 
@@ -228,9 +265,12 @@
     let on = false;
     let pane = null;
     const api = {
+      layout,
       wanted() {
         try { const v = localStorage.getItem(opts.storageKey); if (v === '1' || v === '0') return v === '1'; } catch { /* private window */ }
-        return window.innerWidth >= 1440;   // on by default where the list keeps its room beside it
+        // On wherever it docks beside the tab rather than over it: with no button on the tab to ask for it,
+        // the chat panel is simply there (owner, 2026-11-06). Its ✕ and the menu's Chat close and reopen it.
+        return window.innerWidth >= 1280;
       },
       isOn: () => on,
       setOn(next, remember) {
@@ -254,12 +294,14 @@
         if (pane) { try { pane.destroy(); } catch { /* gone */ } }
         pane = null; on = false;
         layout.classList.remove('is-on');
+        docks.delete(api);
       },
       /** False once the page holding it has been replaced. */
       connected: () => layout.isConnected,
     };
+    docks.add(api);
     return api;
   }
 
-  window.ChatPane = { mount, available, dock, warm };
+  window.ChatPane = { mount, available, dock, warm, focusOnScreen, renameAll };
 })();

@@ -456,7 +456,7 @@
     const live = b.status !== 'cancelled';
     const open = !isCollapsed(b.id);
     return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5" data-brief-card="${b.id}">
+      <div data-no-fold class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5" data-brief-card="${b.id}">
         <div class="flex items-start justify-between gap-3">
           <button type="button" data-brief-toggle="${b.id}" aria-expanded="${open}" aria-controls="brief-body-${b.id}" class="min-w-0 flex items-start gap-2 text-left flex-1 rounded-lg -m-1 p-1 hover:bg-gray-50">
             <span aria-hidden="true" class="text-gray-500 text-xs mt-0.5 inline-block transition-transform" style="transform:rotate(${open ? 90 : 0}deg)">▶</span>
@@ -549,8 +549,9 @@
   }
 
   // ── Show or hide a brief (owner 2026-11-05: every tab's briefs expandable/collapsible) ─────
-  // Remembered per assistant in this browser. Open unless hidden; "Hide all" / "Show all" per tab.
-  const collapseKey = () => `bms-briefs-collapsed-${state.assistantId}`;
+  // Remembered per assistant in this browser. Closed until opened (owner, 2026-11-06); "Hide all" / "Show all"
+  // per tab. What is kept is the ones OPEN, under a new key: the old key listed the ones hidden.
+  const collapseKey = () => `bms-briefs-open-${state.assistantId}`;
   let collapsedIds = null;
   function collapsedSet() {
     if (collapsedIds) return collapsedIds;
@@ -558,10 +559,10 @@
     catch { collapsedIds = new Set(); }
     return collapsedIds;
   }
-  const isCollapsed = (id) => collapsedSet().has(Number(id));
+  const isCollapsed = (id) => !collapsedSet().has(Number(id));
   function setCollapsed(ids, hide) {
     const set = collapsedSet();
-    ids.forEach((id) => (hide ? set.add(Number(id)) : set.delete(Number(id))));
+    ids.forEach((id) => (hide ? set.delete(Number(id)) : set.add(Number(id))));
     try { localStorage.setItem(collapseKey(), JSON.stringify([...set].slice(-500))); } catch { /* private window */ }
   }
 
@@ -733,7 +734,6 @@
         <div class="flex flex-wrap items-center justify-end gap-2">
           ${credits}
           ${''/* Select lives in the editor, where the design is changed (owner 2026-11-05): not beside New brief. */}
-          ${chatPaneAvailable() && !chatIsOn() ? `<button type="button" data-brief-chat-toggle aria-pressed="false" title="Show the chat beside your briefs" class="btn-assistant border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">Chat with ${esc(name())}</button>` : ''}
           <button type="button" data-brief-full aria-pressed="${state.full ? 'true' : 'false'}" title="${state.full ? 'Back to the page (Esc)' : 'Use the whole screen for your briefs and the chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg">${state.full ? 'Exit full screen' : 'Full screen'}</button>
           ${state.form ? '' : `<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
         </div>
@@ -1053,7 +1053,6 @@
     }
 
     if (t('[data-brief-library]')) { window.loadView?.('my-content'); return; }
-    if (t('[data-brief-chat-toggle]')) { setChatOn(!chatIsOn(), true); return; }
     const select = t('[data-brief-select]');
     if (select) {
       const b = state.briefs.find((x) => x.id === Number(select.dataset.brief));
@@ -1350,7 +1349,6 @@
   // at any scroll position, on a phone too. The layout is ChatPane.dock's.
   let chatDock = null;
   const chatPaneAvailable = () => !!window.ChatPane?.available?.() && !!state.assistantId;
-  const chatIsOn = () => !!chatDock && chatDock.isOn();
   function getChatDock() {
     const host = document.getElementById('briefs-host');
     if (!host || !chatPaneAvailable()) return null;
@@ -1373,7 +1371,6 @@
     });
     return chatDock;
   }
-  function setChatOn(on, remember) { getChatDock()?.setOn(on, remember); }
   function chatRefer(ref) { getChatDock()?.refer(ref); }
   function referOption(b, o) {
     const what = o.flyer ? (o.prompt || 'Flyer') : sourceLabel(o.source).replace(/s$/, '');
@@ -1442,6 +1439,8 @@
       }
     },
     /** Called on first activation of the tab. */
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; if (state.rendered) render(); },
     activate() {
       if (state.rendered) return;
       state.rendered = true;

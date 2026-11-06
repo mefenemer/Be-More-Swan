@@ -58,8 +58,8 @@ check('a selected part rides in front of the next message, visibly, then clears'
 });
 
 check('the pane: Chat first, preview on the left, the chat mounted once and kept across repaints', () => {
-    assert.ok(editor.includes("const SUBTABS_ALL = [['chat', 'Chat'], ['setup', 'Set up']"));
-    assert.ok(editor.includes("[data-sb-preview-col] { order: 1; } [data-sb-pane] { order: 2; }"));
+    assert.ok(editor.includes("const MAIN_TAB = { chat: 'sitebuilder', setup: 'sitesetup'"));
+    assert.ok(editor.includes('<div data-sb-work class="min-w-0">') && editor.includes('[data-sb-mode="edit"] [data-sb-preview-col]:not([data-sb-full]) { display: none; }'));
     assert.ok(editor.includes("const blocks = P === 'chat' ? [] :"));
     const paint = slice(editor, 'function paintChat(', 'function mountChat(');
     assert.ok(paint.includes('box.contains(chatPane.mountEl)) return;'), 'a repaint must not remount the chat');
@@ -136,7 +136,7 @@ check('the Website Assistant is told to ask with the card, then propose with its
     assert.ok(rule.includes('ONE chat_questions card') && rule.includes('"My answers:"') && rule.includes('site_draft_request'));
     assert.ok(chat.includes('"type": "chat_questions"'), 'in the reply shapes');
     const s = slice(chat, 'function websiteAssistantSurfaces()', '\n}');
-    for (const n of ['"Chat"', '"Select"']) {
+    for (const n of ['"Select"']) {
         assert.ok(s.includes(n), `surfaces: ${n}`);
         assert.ok(editor.includes(n.replace(/"/g, "'")), `editor: ${n}`);
     }

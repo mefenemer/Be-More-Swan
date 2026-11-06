@@ -20,6 +20,28 @@ window._paintDetailAvatarLetter = function () {
 };
 
 // The name input is sized to its text, so the pencil and the swan sit right after the name.
+/**
+ * The new name reaches everything on the page holding the old one, as the save lands (owner, 2026-11-06:
+ * it took a browser refresh). The tabs were handed the name once, at init; each has rename(), which repaints
+ * it. The shared list is dropped so the assistants list, the chat and the other pages read the new name.
+ */
+function _assistantRenamed(assistantId, name) {
+    window._currentAssistantName = name;
+    const data = window._detailCurrentData;
+    if (data && Number(data.id) === assistantId) data.name = name;
+    window._assistantProfileTitle = `${name}'s Settings`;
+    const backBtn = document.getElementById('brief-drawer-back');
+    const title = document.getElementById('brief-drawer-title');
+    // The settings home names the assistant (a section's title doesn't); the back arrow is hidden only there.
+    if (title && backBtn && backBtn.hidden && document.body.classList.contains('brief-drawer-open')) title.textContent = window._assistantProfileTitle;
+    window.bmsCachedFetch?.invalidate?.();
+    window.ChatPane?.renameAll?.(assistantId, name);
+    [window.AssistantDataHub, window.AssistantCampaigns, window.AssistantMentorOverview, window.AssistantMentorPlan, window.MentorCommitments,
+        window.AssistantBriefs, window.AssistantVideos, window.AssistantSiteEditor, window.AssistantSiteAudit, window.AssistantDiscussions, window.AssistantInspo]
+        .forEach((m) => { try { m?.rename?.(name); } catch (e) { console.warn('[assistant-detail] a tab could not take the new name', e); } });
+    document.dispatchEvent(new CustomEvent('assistant:renamed', { detail: { assistantId, name } }));
+}
+
 window._fitDetailNameInput = function () {
     const i = document.getElementById('detail-name-input');
     if (!i) return;
@@ -1075,6 +1097,7 @@ function _resizeBriefAutoGrow() {
 
 // Activate a main tab by name ('datahub' | 'goals' | 'activity'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
+const _SITE_PANEL_TABS = { sitebuilder: 'chat', sitesetup: 'setup', sitedesign: 'design', sitepages: 'pages', sitepublish: 'publish' };
 window._activateMainTab = function(name) {
     // The retired Conversations tab is now stages 2–4 of a staged Outreach tab. Old links,
     // bookmarks and in-app buttons still say 'conversations'; they land on Outreach instead.
@@ -1092,7 +1115,11 @@ window._activateMainTab = function(name) {
         b.setAttribute('aria-selected', on ? 'true' : 'false');
         b.tabIndex = on ? 0 : -1;
     });
-    document.querySelectorAll('.main-tab-content').forEach(c => c.classList.toggle('hidden', c.id !== 'maintab-' + name));
+    // The Website Assistant's Set up / Design / Pages / Publish share the Website tab's panel.
+    const sitePanel = _SITE_PANEL_TABS[name];
+    const panelName = sitePanel ? 'sitebuilder' : name;
+    document.querySelectorAll('.main-tab-content').forEach(c => c.classList.toggle('hidden', c.id !== 'maintab-' + panelName));
+    if (sitePanel) document.getElementById('maintab-sitebuilder')?.setAttribute('aria-labelledby', `maintab-btn-${name}`);
     // Which tabs a role shows is settled by now, so the strips' widths are final.
     _syncTabScrollerFade();
     // Recompute auto-grow heights now panels are visible (scrollHeight was 0 while hidden).
@@ -1116,7 +1143,7 @@ window._activateMainTab = function(name) {
     // Website (Mystery Shopper) likewise — init() already fetched for the badge.
     if (name === 'website') window.AssistantSiteAudit?.activate();
     // Website (Website Assistant) — the editor and preview; init() already fetched the site.
-    if (name === 'sitebuilder') siteEditor((ed) => ed.activate('website'));
+    if (sitePanel) siteEditor((ed) => ed.activate('website', sitePanel));
     // …and what the site brings in, each its own tab, rendered by the same editor.
     if (name === 'siteenquiries') siteEditor((ed) => ed.activate('enquiries'));
     if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));
@@ -5048,6 +5075,7 @@ function _renderRightMenu() {
     list.onfocusin = warm;
     // Chat: the same as the header's Chat button, which this menu replaces (md and up).
     const chat = document.getElementById('rm-chat');
+    // On a tab with a chat panel it brings that up (its Chat with … button is gone); elsewhere the pop-up.
     if (chat) chat.onclick = () => document.getElementById('btn-detail-chat')?.click();
     const btn = document.getElementById('rm-toggle');
     if (btn) btn.onclick = () => {
@@ -5459,11 +5487,12 @@ window._renderNeedsYou = function() {
     const reviewLabel = (window._detailReviewQueue || {}).label || 'Review';
     // 'videos': storyboards waiting for "Make the video" (assistant-videos.js) + finished videos to approve.
     const boards = source === 'videos' ? (window._detailNeedsYouOverride || 0) : 0;
-    const n = source === 'briefs' ? (window._detailNeedsYouOverride || 0) : source === 'videos' ? boards + reviewN : reviewN;
-    const where = source === 'briefs' ? 'Briefs'
+    const own = source === 'module' ? window._detailNeedsYouModule : null;
+    const n = source === 'briefs' || own ? (window._detailNeedsYouOverride || 0) : source === 'videos' ? boards + reviewN : reviewN;
+    const where = own ? own.where : source === 'briefs' ? 'Briefs'
         : source === 'videos' ? (boards && reviewN ? `Videos and ${reviewLabel}` : boards ? 'Videos' : reviewLabel)
         : reviewLabel;
-    const targetTab = source === 'briefs' ? 'briefs' : (source === 'videos' && boards) ? 'videos' : 'review-queue';
+    const targetTab = own ? own.tab : source === 'briefs' ? 'briefs' : (source === 'videos' && boards) ? 'videos' : 'review-queue';
     const text = document.getElementById('needs-you-text');
     const go = document.getElementById('needs-you-go');
     const next = document.getElementById('next-up-text');
@@ -5477,7 +5506,9 @@ window._renderNeedsYou = function() {
     // In the compact header the button is always there while something waits (a primary one), since
     // the card is the page's call to action; on the landing tab strip, only when the work is elsewhere.
     const showGo = n > 0 && (inHeader || targetTab !== landing);
-    const openTarget = (id) => {
+    const openTarget = (id, tab) => {
+        // An item of a 'module' role can say which tab it is on (Website: Enquiries, Orders, Bookings).
+        if (own) { window._activateMainTab(tab || targetTab); return; }
         if (source === 'briefs' && window.AssistantBriefs?.openReview) { window.AssistantBriefs.openReview(id); return; }
         // A post named in the compact header opens straight into its review, as its card does.
         const rqKind = (window._detailReviewQueue || {});
@@ -5493,8 +5524,12 @@ window._renderNeedsYou = function() {
             const scope = targetTab === 'videos' ? '#videos-host' : '#detail-rq-groups';
             let tries = 0;
             const find = () => {
-                const el = document.querySelector(`${scope} :is(${sel})`);
+                let el = document.querySelector(`${scope} :is(${sel})`);
                 if (el) {
+                    // A video starts closed: open the one named, on its repainted card.
+                    const shut = el.querySelector('[data-vid-act="fold"][aria-expanded="false"]');
+                    if (shut) { shut.click(); el = document.querySelector(`${scope} :is(${sel})`) || el; }
+                    window.Fold?.reveal(el);
                     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     el.classList.add('ny-flash');
                     setTimeout(() => el.classList.remove('ny-flash'), 1800);
@@ -5513,15 +5548,17 @@ window._renderNeedsYou = function() {
     const list = document.getElementById('needs-you-list');
     if (list) {
         const items = inHeader && n > 0 ? (window._detailNeedsYouItems || []) : [];
+        const shownCount = items.reduce((sum, it) => sum + (Number(it.count) || 1), 0);
         list.classList.toggle('hidden', !items.length);
         list.innerHTML = items.map((it) => `
-            <li><button type="button" class="ny-item" data-ny-id="${_escapeHtml(String(it.id))}">
+            <li><button type="button" class="ny-item" data-ny-id="${_escapeHtml(String(it.id))}"${it.tab ? ` data-ny-tab="${_escapeHtml(it.tab)}"` : ''}>
               <span class="ny-title">${_escapeHtml(it.label)}</span><span class="ny-sub">${_escapeHtml(it.sub || '')}</span>
             </button></li>`).join('')
-            + (n > items.length && items.length ? `<li class="ny-more">and ${n - items.length} more</li>` : '');
+            // An item can stand for several ("Enquiries, 2 new").
+            + (n > shownCount && items.length ? `<li class="ny-more">and ${n - shownCount} more</li>` : '');
         list.onclick = (e) => {
             const b = e.target.closest('.ny-item');
-            if (b) openTarget(b.dataset.nyId);
+            if (b) openTarget(b.dataset.nyId, b.dataset.nyTab);
         };
     }
     if (next) {
@@ -7008,11 +7045,18 @@ function _applyDashboardRegistry(data) {
     // Briefs badge, the Video Producer's storyboards PLUS its review queue (it lands on Videos, so a
     // review-only count said "Nothing needs you" over two waiting storyboards — staging, 2026-10-31),
     // or nothing for a role with none. Its figures are reset per assistant.
-    window._detailNeedsYouSource = cfg.videosTab ? 'videos' : !cfg.hideReviewQueue ? 'review' : (cfg.briefsTab ? 'briefs' : null);
+    // cfg.needsYou: a role with no review queue whose own tab says what is waiting, so every role has the card
+    // (owner, 2026-11-06: the Business Mentor's hero sat alone at full width with nothing beside it).
+    window._detailNeedsYouSource = cfg.videosTab ? 'videos' : !cfg.hideReviewQueue ? 'review' : cfg.briefsTab ? 'briefs' : cfg.needsYou ? 'module' : null;
+    window._detailNeedsYouModule = cfg.needsYou || null;
     _applyCompactHeader(cfg);
     window._detailNeedsYouOverride = 0;
     window._detailNeedsYouItems = [];
     window._detailNextUp = null;
+    // Everything starts closed on each assistant's page (fold.js).
+    window.Fold?.reset();
+    // A role whose count arrives later still takes its place beside the hero from the start.
+    if (window._detailNeedsYouSource === 'module') setTimeout(() => window._renderNeedsYou?.(), 0);
     // Results sits right after the landing tab: "your work, then how it is going". It was near the
     // end of a 6–8 tab row, past the fade on a phone (review, 2026-10-22). Moved in the DOM, so
     // keyboard order and the scroller follow; the view is re-injected per load, so it never stacks.
@@ -7428,6 +7472,7 @@ function _applyDashboardRegistry(data) {
     // Website tab — Website Assistant only (siteEditorTab: website_assistant).
     const siteEditorTab = cfg.siteEditorTab;
     toggle('maintab-btn-sitebuilder', !!siteEditorTab);
+    ['setup', 'design', 'pages', 'publish'].forEach((p) => toggle(`maintab-btn-site${p}`, !!siteEditorTab));
     // Enquiries always; Orders and Bookings once the editor knows the site's features (it re-toggles).
     toggle('maintab-btn-siteenquiries', !!siteEditorTab);
     toggle('maintab-btn-siteorders', !!siteEditorTab);
@@ -8662,6 +8707,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     const btnChat = document.getElementById('btn-detail-chat');
     if (btnChat) {
         btnChat.onclick = () => {
+            if (window.ChatPane?.focusOnScreen?.()) return;
             if (typeof window.openAssistantChat === 'function') {
                 window.openAssistantChat({ assistantId });
             } else {
@@ -8730,6 +8776,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 body: JSON.stringify(body),
             });
             if (res.ok) {
+                const renamed = !!newName && newName !== currentData.name;
                 // A change to what the posts are ABOUT (pillars, core message, audience…) only reaches
                 // posts drafted after it, weeks out — offer to redraft the upcoming ones
                 // (src/components/redraft-upcoming.js). Compared before currentData is overwritten.
@@ -8748,6 +8795,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                     currentData.name = newName;
                     window._paintDetailAvatarLetter();
                 }
+                if (renamed) _assistantRenamed(parseInt(assistantId), newName);
                 // Keep the in-memory record in step, so a later save that rebuilds newConfiguration
                 // from currentData carries the colour rather than a stale one.
                 currentData.configuration = { ...(currentData.configuration || {}) };

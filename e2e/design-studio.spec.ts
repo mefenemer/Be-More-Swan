@@ -62,6 +62,11 @@ function stubBriefs(api: ApiStub) {
     return store;
 }
 
+// Briefs start closed (owner, 2026-11-06); these tests are about what is inside one.
+test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => { if (!localStorage.getItem('bms-briefs-open-4')) localStorage.setItem('bms-briefs-open-4', '[12,13]'); });
+});
+
 async function openStudio(page: Page) {
     await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
     await page.goto('/e2e-studio.html');

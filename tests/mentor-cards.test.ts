@@ -160,7 +160,7 @@ test('the Mentor can\'t be paused or archived, on the server or the page', () =>
     const m = read('netlify/functions/manage-assistant.ts');
     assert.match(m, /action === 'pause' && isWorkspaceRole\(/);
     assert.match(m, /httpMethod === 'DELETE'[\s\S]{0,400}isWorkspaceRole\(/);
-    assert.match(read('src/components/assistant-dashboard-registry.js'), /business_mentor: \{[\s\S]{0,1400}noPauseOrArchive: true/);
+    assert.match(read('src/components/assistant-dashboard-registry.js'), /business_mentor: \{[\s\S]{0,1600}noPauseOrArchive: true/);
     assert.match(read('assistants.js'), /const lockedIn = !!window\.AssistantDashboardRegistry\?\.get\(currentData\.roleKey\)\?\.noPauseOrArchive;/);
 });
 

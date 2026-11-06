@@ -711,5 +711,5 @@
   // `_test` exposes the pure functions behind the "Write a … from this" button and the link card.
   // tests/inspo-draft-from-item.test.ts calls them directly: the wording is role-dependent, and a
   // Blog Writer being asked for a "social post" is a bug no source scan would catch.
-  window.AssistantInspo = { init, _test: { buildSeed, draftNoun, itemBadge, linkHref, normaliseLink } };
+  window.AssistantInspo = { rename(name) { state.assistantName = name || state.assistantName; }, init, _test: { buildSeed, draftNoun, itemBadge, linkHref, normaliseLink } };
 })();

@@ -110,7 +110,7 @@
 
     // How the list is being READ right now. Kept on `state` rather than in the DOM so a repaint
     // (after a nudge, a note, an outcome) cannot silently reset the user's view.
-    view: { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, collapsed: new Set() },
+    view: { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, opened: new Set() },
 
     // threadId → the loaded conversation { thread, messages, enrolment }, for rows expanded in
     // place. Cached so collapsing and re-opening a row is free, and so a repaint (which rebuilds
@@ -1097,7 +1097,8 @@
     for (const group of groupVisible(pg.items)) {
       // A group is FOLDED by its LABEL, not its index — it has to stay shut when a sort reorders
       // it, when a filter shrinks it, and when the tab refetches.
-      const collapsed = group.label !== null && state.view.collapsed.has(group.label);
+      // Groups start closed (owner, 2026-11-06): their headings are the list until one is opened.
+      const collapsed = group.label !== null && !state.view.opened.has(group.label);
       if (group.label !== null) {
         const head = document.createElement('tr');
         head.className = 'bg-gray-50';
@@ -1113,8 +1114,8 @@
           </button>
         </td>`;
         head.querySelector('[data-lt-group-toggle]').addEventListener('click', () => {
-          if (state.view.collapsed.has(group.label)) state.view.collapsed.delete(group.label);
-          else state.view.collapsed.add(group.label);
+          if (state.view.opened.has(group.label)) state.view.opened.delete(group.label);
+          else state.view.opened.add(group.label);
           // Repaint rather than hiding rows in place: each row carries a sibling <tr> holding its
           // detail panel, and toggling two <tr>s per row by hand is how one of them ends up
           // visible on its own.
@@ -1646,13 +1647,13 @@
       state.view.groupKey = group.value || null;
       // Folds belong to the column they were made in: "Closed" folded under Status must not
       // silently fold an Outcome group that happens to share a label.
-      state.view.collapsed.clear();
+      state.view.opened.clear();
       resetPage();
       paintRows();
     });
 
     h.querySelector('[data-lt-clear]')?.addEventListener('click', () => {
-      state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, collapsed: new Set() };
+      state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, opened: new Set() };
       render();                                     // the controls themselves have to reset too
     });
 
@@ -1831,7 +1832,7 @@
       const threadId = Number(window._assistantDetailFocusThreadId) || null;
       state.focus = threadId ? { threadId } : null;
       window._assistantDetailFocusThreadId = null;
-      state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, collapsed: new Set() };
+      state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, opened: new Set() };
       state.rendered = true;
       load();
     },
@@ -1847,7 +1848,7 @@
         state.sticky.clear();
         state.view = {
           search: '', filters: {}, sortKey: null, sortDir: 'asc',
-          groupKey: phase === 'replied' ? null : 'group', page: 1, collapsed: new Set(),
+          groupKey: phase === 'replied' ? null : 'group', page: 1, opened: new Set(),
         };
       }
       render();
