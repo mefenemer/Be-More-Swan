@@ -69,7 +69,7 @@ The editor shows your design on the left and the chat on the right.
 - **Undo** and **Redo** step back and forward. Every change saves itself.
 - **Select**, then click part of the design, to ask your Brand Designer about it in the chat, for example "make this stand out more". It shows you the change on a card, and nothing changes until you press **Change it**. It can move or recolour your contact details and offer, but only you can change their wording.
 - **Full screen** gives you more room. Press Esc to leave it.
-- **More options** takes you back to the brief, to ask for different designs. **Use this design** finishes it and puts it in My Content. For a flyer, that includes the print-ready PDFs.
+- **Back to brief** saves your work and opens the brief, where you can ask for different designs. A brief has a limited number of rounds, and it tells you when they are used. **Use this design** finishes it and puts it in My Content. For a flyer, that includes the print-ready PDFs.
 
 You can open any option still waiting for you with **Open in editor**.
 

@@ -226,7 +226,7 @@
     if (b.status === 'cancelled') return `<span class="${base} bg-gray-50 text-gray-500 border-gray-200">Archived</span>`;
     if (b.status === 'approved') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Approved</span>`;
     if (waiting) return `<span class="${base} bg-amber-50 text-amber-800 border-amber-200">Needs you</span>`;
-    return `<span class="${base} bg-gray-50 text-gray-600 border-gray-200">${b.rounds > 0 ? 'Needs more options' : 'Not started'}</span>`;
+    return `<span class="${base} bg-gray-50 text-gray-600 border-gray-200">${roundsUsedUp(b) ? 'All rounds used' : b.rounds > 0 ? 'Needs more options' : 'Not started'}</span>`;
   }
 
   /** "What happens next" for the page's Needs-you strip. */
@@ -246,6 +246,10 @@
     const chosen = b.options.filter((o) => o.status === 'approved').length;
     return { needed, chosen, left: Math.max(0, needed - chosen), done: chosen >= needed };
   }
+
+  /** The server refuses another round past this (startRound), so the page says so rather than only greying the button. */
+  const roundCap = (b) => b.maxRounds || V().maxRounds;
+  const roundsUsedUp = (b) => b.rounds >= roundCap(b);
 
   /** What the pictures are for, in the campaign's words: its social posts, its articles, its emails. */
   function forWhat(b) {
@@ -268,13 +272,16 @@
         : 'Done — you have chosen the picture this brief needs. Nothing else to do here.';
     }
     const tally = p.needed > 1 ? `${p.chosen} of ${p.needed} chosen for ${forWhat(b)} — ${p.left} more needed. ` : '';
+    const usedUp = roundsUsedUp(b) ? `This brief has used all ${roundCap(b)} of its rounds, so for something different, start a new brief.` : '';
     if (waiting) {
       // Fewer options here than pictures still needed: say where the rest come from.
-      return waiting >= p.left
-        ? `${tally}Choose ${p.left === 1 ? 'the one you like' : `${p.left} you like`} with "Use this".`
+      if (waiting >= p.left) return `${tally}Choose ${p.left === 1 ? 'the one you like' : `${p.left} you like`} with "Use this".${usedUp ? ` ${usedUp}` : ''}`;
+      return usedUp
+        ? `${tally}Choose the ones you like with "Use this". ${usedUp}`
         : `${tally}Choose the ones you like with "Use this", then ask ${name()} for more options for the rest.`;
     }
     if (b.waitingOn) return `${tally}Waiting on ${b.waitingOn} to add their own — they use "Add your own" on this brief. Nothing is sent to them; tell them yourself.`;
+    if (usedUp) return `${tally}${usedUp}`;
     if (b.rounds > 0) return `${tally}Ask ${name()} for more options — the next round reads why you turned any down.`;
     return `${tally}Not started. Ask ${name()} for options when the brief says what you want.`;
   }
@@ -491,7 +498,7 @@
         ${live ? ownPanelHtml(b) : ''}
         ${live ? `
           <div class="flex flex-wrap items-center gap-2 mt-4">
-            ${progress(b).done ? '' : `<button type="button" data-brief-generate="${b.id}" ${b.status === 'generating' || b.rounds >= (b.maxRounds || V().maxRounds) || (flyer && !words) ? 'disabled' : ''}
+            ${progress(b).done ? '' : `<button type="button" data-brief-generate="${b.id}" ${b.status === 'generating' || roundsUsedUp(b) || (flyer && !words) ? 'disabled' : ''}
               class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(roundButtonLabel(b))}</button>`}
             ${flyer ? '' : `<button type="button" data-brief-own-open="${b.id}"
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add your own</button>`}
@@ -504,7 +511,7 @@
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Archive brief</button>
           </div>
-          ${progress(b).done ? '' : `<p class="text-[11px] text-gray-500 mt-1">${esc(flyer ? flyerCostLine(b) : roundCostLine(b))}</p>
+          ${progress(b).done ? '' : `${roundsUsedUp(b) ? '' : `<p class="text-[11px] text-gray-500 mt-1">${esc(flyer ? flyerCostLine(b) : roundCostLine(b))}</p>`}
           ${flyer ? '' : videoOfferHtml(b)}`}` : ''}
         </div>
       </div>`;
@@ -845,8 +852,7 @@
       post,
       onOptionsChanged: () => load(),
       onRefer: (ref) => chatRefer(ref),
-      onClose: () => { state.studio = null; closeStudioInstance(); state.tab = tabOf(state.briefs.find((x) => x.id === b.id) || b); load(); },
-      onMore: () => { state.tab = tabOf(b); render(); },
+      onClose: () => leaveStudio(b.id),
       onApprove: async (optionId) => {
         await post({ action: 'decide', optionId, decision: 'approve' });
         state.studio = null;
@@ -856,6 +862,34 @@
       },
     });
     studioInstance.briefId = b.id;
+  }
+  /**
+   * "Back to brief": out of the editor, onto the tab the brief is on now, with the brief open and in view and its round
+   * button with it, however the editor was reached. A brief starts closed, and one that came from the chat has never
+   * been opened. The list is painted at once and read again, because a round started from the chat while the editor was
+   * open moves the brief.
+   */
+  async function leaveStudio(briefId) {
+    const tabNow = () => {
+      const b = state.briefs.find((x) => x.id === briefId);
+      return b ? tabOf(b) : state.tab;
+    };
+    const bring = () => {
+      const card = document.querySelector(`[data-brief-card="${Number(briefId)}"]`);
+      card?.scrollIntoView({ block: 'start' });
+      card?.querySelector('[data-brief-toggle]')?.focus({ preventScroll: true });
+    };
+    state.studio = null;
+    closeStudioInstance();
+    setCollapsed([briefId], false);
+    state.tab = tabNow();
+    render();
+    bring();
+    await load();
+    if (state.studio || tabNow() === state.tab) return;
+    state.tab = tabNow();
+    render();
+    bring();
   }
   function openStudio(briefId, optionId) {
     state.picking = false;

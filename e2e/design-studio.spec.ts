@@ -30,6 +30,7 @@ function stubBriefs(api: ApiStub) {
         saves: [] as Array<{ design: ReturnType<typeof design>; finish?: boolean }>,
         decided: [] as unknown[],
         applied: [] as unknown[],
+        refuseSaves: false,
         design: design(),
         brief: {
             id: 12, assistantId: 4, title: 'Launch party flyer', purpose: 'flyer', status: 'options_ready', aspectRatio: null, message: 'Our launch', headline: null, mood: 'Calm and natural',
@@ -37,8 +38,12 @@ function stubBriefs(api: ApiStub) {
             options: [{ id: 77, round: 1, source: 'flyer', status: 'proposed', url: PICTURE, width: 400, height: 560, mimeType: 'image/png', prompt: null, flyer: { layout: 'type_only', paperSize: 'A5', lowResPhoto: false, photoDpi: null } }],
         } as Record<string, unknown>,
     };
-    api.set('brand-briefs', (_route, body) => {
+    api.set('brand-briefs', async (route, body) => {
         const b = (body || {}) as Record<string, unknown>;
+        if (b.action === 'save_design' && store.refuseSaves) {
+            await route.fulfill({ status: 500, json: { error: 'That could not be done just now. Please try again.' } });
+            return undefined;
+        }
         if (b.action === 'list') {
             return { briefs: [store.brief], vocab: { purposes: [], sources: [], aspectRatios: [], rejectReasons: [{ key: 'style', label: 'Wrong style' }], maxRounds: 5, flyer: null }, credits: 10, unit: 'tasks', aiAvailable: true, defaultSources: ['stock'], guidelines: null };
         }
@@ -775,6 +780,81 @@ test.describe('wide screen', () => {
         await expect(page.getByText('Done. Undo in the editor takes it back.')).toBeVisible();
         expect(store.applied).toHaveLength(1);
         await expect.poll(() => page.locator('[data-ds-page]').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(255, 228, 225)');
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('"Back to brief" opens a brief that started closed, in view, with its round button', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        // Reached as the chat reaches it: this brief has never been opened, so its card is folded shut.
+        await page.addInitScript(() => localStorage.setItem('bms-briefs-open-4', '[]'));
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-tab="todo"]').click();
+        await expect(page.locator('[data-brief-generate="12"]')).toBeHidden();
+        await page.evaluate(() => document.dispatchEvent(new CustomEvent('brief:openStudioAny', { detail: { briefId: 12 } })));
+        await expect(layer(page, 'headline')).toBeVisible();
+        await expect(page.getByRole('button', { name: /Back to brief/ })).toHaveCount(1);
+        await expect(page.getByRole('button', { name: 'More options', exact: true })).toHaveCount(0);
+        await page.locator('[data-ds-back]').click();
+        await expect(page.locator('[data-design-studio]')).toHaveCount(0);
+        await expect(page.locator('[data-brief-tab="todo"]')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('[data-brief-generate="12"]')).toBeVisible();
+        await expect(page.locator('[data-brief-card="12"]')).toBeInViewport();
+        expect(store.saves[store.saves.length - 1].finish).toBe(true);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('"Back to brief" follows a brief that a round from the chat has moved to Being made', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        await openStudio(page);
+        store.brief = { ...store.brief, status: 'generating' };
+        await page.locator('[data-ds-back]').click();
+        await expect(page.locator('[data-brief-tab="making"]')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('[data-brief-card="12"]')).toBeVisible();
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a failed save keeps you in the editor, and a second press leaves', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        await openStudio(page);
+        store.refuseSaves = true;
+        const saves = store.saves.length;
+        await page.locator('[data-ds-back]').click();
+        await expect(page.locator('[data-ds-error]')).toContainText('Press again to leave');
+        await expect(page.locator('[data-design-studio]')).toBeVisible();
+        await page.locator('[data-ds-back]').click();
+        await expect(page.locator('[data-design-studio]')).toHaveCount(0);
+        expect(store.saves.length).toBe(saves);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a change made after a failed save is saved again before leaving', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        await openStudio(page);
+        store.refuseSaves = true;
+        await page.locator('[data-ds-back]').click();
+        await expect(page.locator('[data-ds-error]')).toContainText('Press again to leave');
+        store.refuseSaves = false;
+        await layer(page, 'headline').click();
+        await page.keyboard.press('ArrowRight');
+        const before = store.saves.length;
+        await page.locator('[data-ds-back]').click();
+        await expect(page.locator('[data-design-studio]')).toHaveCount(0);
+        expect(store.saves.length).toBeGreaterThan(before);
+        expect(store.saves[store.saves.length - 1].finish).toBe(true);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a brief with all its rounds used says so, and offers no cost line', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
+        store.brief = { ...store.brief, rounds: 5 };
+        await page.route('**/e2e-studio.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
+        await page.goto('/e2e-studio.html');
+        await page.locator('[data-brief-tab="todo"]').click();
+        const card = page.locator('[data-brief-card="12"]');
+        await expect(card).toContainText('used all 5 of its rounds');
+        await expect(page.locator('[data-brief-generate="12"]')).toBeDisabled();
+        await expect(card).not.toContainText('Each round');
         expect(pageErrors).toEqual([]);
     });
 

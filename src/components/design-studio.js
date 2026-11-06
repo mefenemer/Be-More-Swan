@@ -5,7 +5,7 @@
  *
  * Works on a Design (src/utils/design-doc.ts). Positions are fractions of the page and type sizes a fraction of its
  * height, as in src/lib/design-render.ts, so what is dragged here is what prints. It saves itself. Nothing here spends:
- * "More options" on the brief is the only way to a new round, and its button says what that costs.
+ * the round button on the brief is the only way to a new round, and it says what that costs. "Back to brief" goes there.
  *
  *   const s = DesignStudio.mount(host, { brief, options, optionId, assistantName, post, onClose, onApprove, onRefer, chatAvailable });
  *   s.setDesign(optionId, design, photoUrl); s.destroy();
@@ -124,7 +124,7 @@
     host.innerHTML = `
       <div data-design-studio>
         <div class="flex flex-wrap items-center gap-2 mb-3">
-          <button type="button" data-ds-back class="ds-btn">← Briefs</button>
+          <button type="button" data-ds-back class="ds-btn" title="Save and open this brief, where you can ask for different designs">← Back to brief</button>
           <p class="text-sm font-bold text-gray-900 truncate mr-auto min-w-0">${esc(o.brief.title)}</p>
           <span data-ds-saved class="text-xs font-semibold text-gray-500" aria-live="polite"></span>
           <span data-ds-sides class="inline-flex items-center gap-1"></span>
@@ -132,7 +132,6 @@
           <button type="button" data-ds-redo class="ds-btn" aria-label="Redo" title="Redo">↷</button>
           ${o.chatAvailable ? '<button type="button" data-ds-pick class="ds-btn" aria-pressed="false" title="Click a part of the design to talk about it">🎯 Select</button>' : ''}
           <button type="button" data-ds-full class="ds-btn" aria-pressed="false">Full screen</button>
-          <button type="button" data-ds-more class="ds-btn">More options</button>
           <button type="button" data-ds-approve class="btn-golive px-4 min-h-[32px] text-sm font-bold rounded-lg">Use this design</button>
         </div>
         <div data-ds-tools class="flex flex-wrap items-center gap-3 bg-white border border-gray-200 rounded-xl px-3 py-2 mb-3 min-h-[50px]"></div>
@@ -235,6 +234,7 @@
       }
     }
     function scheduleSave() {
+      st.leaveUnsaved = false; // A new change: leaving tries to save it again first.
       showSaved('Saving…');
       clearTimeout(st.saveTimer);
       st.saveTimer = setTimeout(() => { saveNow(false).catch(() => {}); }, SAVE_MS);
@@ -904,7 +904,6 @@
       if (t('[data-ds-photo-next]')) { await nextPhoto(); return; }
       const thumb = t('[data-ds-thumb]');
       if (thumb) { await openOption(Number(thumb.dataset.dsThumb)); return; }
-      if (t('[data-ds-more]')) { await close(); o.onMore?.(); return; }
       if (t('[data-ds-approve]')) {
         const btn = t('[data-ds-approve]');
         btn.disabled = true;
@@ -1201,10 +1200,30 @@
       } catch (err) { showSaved(''); showError(err.message); }
       st.loading = false;
     }
+    /**
+     * Save, then leave. A failed save stays here with the error, because leaving would lose the changes since the last
+     * autosave and the error with them. A second press leaves anyway, or a design that can no longer be saved (say it
+     * was approved from the chat) would have no way out.
+     */
     async function close() {
-      setFull(false);
-      try { await saveNow(true); } catch { /* still here; o.onClose goes back regardless of a failed preview */ }
-      o.onClose();
+      if (st.leaving) return;
+      st.leaving = true;
+      try {
+        if (!st.leaveUnsaved) {
+          try {
+            await saveNow(true);
+            st.leaveUnsaved = false;
+          } catch (err) {
+            st.leaveUnsaved = true;
+            showError(`${err.message || 'That could not be saved.'} Your latest changes are still here. Press again to leave without them.`);
+            return;
+          }
+        }
+        setFull(false);
+        o.onClose();
+      } finally {
+        st.leaving = false;
+      }
     }
 
     function onKey(e) {
