@@ -17,8 +17,11 @@
  *   pane.focus();  pane.ready (Promise);  pane.destroy();
  *
  * The conversation is the ordinary one (chat-session.js) — every change still arrives as a card the
- * user approves. The thread is remembered per surface in this browser, so coming back carries on;
- * "New chat" starts again. An archived, missing or other assistant's thread is never resumed.
+ * user approves. The thread is remembered per surface in this browser, so coming back carries on —
+ * unless nothing was said in it for a day (STALE_MS), when a new chat starts (owner, 2026-11-06).
+ * "New chat" starts again; "History" (chat-history-panel.js, the pop-up chat's drawer) lists this
+ * assistant's chats, so an earlier one is one click away. An archived, missing or other assistant's
+ * thread is never resumed by itself; one picked from History's Archived list opens read-only.
  * Requires chat-session.js (window.ChatSession) and its card registry on the page.
  */
 (function () {
@@ -26,6 +29,9 @@
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const read = (k) => { try { return Number(localStorage.getItem(k)) || null; } catch { return null; } };
   const write = (k, id) => { try { if (id) localStorage.setItem(k, String(id)); else localStorage.removeItem(k); } catch { /* private window */ } };
+
+  /** A remembered thread nobody has said anything in for this long opens as a new chat instead. */
+  const STALE_MS = 24 * 60 * 60 * 1000;
 
   function available() { return !!(window.ChatSession && typeof window.ChatSession.mount === 'function'); }
 
@@ -45,13 +51,44 @@
             <span aria-hidden="true" data-chatpane-avatar style="position:relative;flex-shrink:0;width:28px;height:28px;border-radius:9999px;background:${esc(avatarColor)};color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:800">${esc(avatarLetter)}<span style="position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:9999px;background:#22c55e;border:2px solid #fff"></span></span>
             <p class="text-sm font-black text-gray-900 truncate">${esc(opts.title || `Chat with ${opts.assistantName || 'your assistant'}`)}</p>
           </span>
-          <span class="flex items-center gap-1" style="flex-shrink:0"><button type="button" data-chatpane-new title="Start a new conversation" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg" style="background:none;border:0;cursor:pointer"><span aria-hidden="true">+</span> New chat</button>${opts.onClose ? '<button type="button" data-chatpane-close aria-label="Close the chat" class="px-2 py-1 text-lg leading-none text-gray-500 hover:text-gray-900">&times;</button>' : ''}</span>
+          <span class="flex items-center gap-1" style="flex-shrink:0">${window.ChatHistoryPanel ? '<button type="button" data-chatpane-history aria-expanded="false" aria-label="Past chats" title="Past chats" class="inline-flex items-center px-2 py-1 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg" style="background:none;border:0;cursor:pointer"><svg aria-hidden="true" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 2m6-2a9 9 0 11-9-9 9 9 0 019 9z"/></svg></button>' : ''}<button type="button" data-chatpane-new title="Start a new conversation" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg" style="background:none;border:0;cursor:pointer"><span aria-hidden="true">+</span> New chat</button>${opts.onClose ? '<button type="button" data-chatpane-close aria-label="Close the chat" class="px-2 py-1 text-lg leading-none text-gray-500 hover:text-gray-900">&times;</button>' : ''}</span>
         </div>
-        <div style="position:relative;flex:1;min-height:0"><div data-chatpane-mount style="position:absolute;inset:0"><p class="text-sm text-gray-500 text-center p-8">Loading the chat…</p></div></div>
+        <div style="position:relative;flex:1;min-height:0;overflow:hidden"><div data-chatpane-mount style="position:absolute;inset:0"><p class="text-sm text-gray-500 text-center p-8">Loading the chat…</p></div>
+          <div data-chatpane-drawer hidden style="position:absolute;top:0;left:0;bottom:0;width:280px;max-width:88%;background:#fff;border-right:1px solid #e5e7eb;box-shadow:6px 0 18px rgba(0,0,0,.08);z-index:2"></div></div>
       </div>`;
     const mountEl = container.querySelector('[data-chatpane-mount]');
+    const drawerEl = container.querySelector('[data-chatpane-drawer]');
+    const historyBtn = container.querySelector('[data-chatpane-history]');
+    let history = null;
+    let viewingArchived = false;   // an archived chat picked in History: read-only, so sending starts a new one
 
-    async function start(sessionId) {
+    // ── History: the pop-up chat's drawer, over the conversation from the left ──
+    function setHistoryOpen(open) {
+      if (!drawerEl || !historyBtn) return;
+      if (open && !history && window.ChatHistoryPanel) {
+        history = window.ChatHistoryPanel.mount({
+          container: drawerEl,
+          assistantId: opts.assistantId,
+          currentSessionId: session && session.getSessionId ? session.getSessionId() : null,
+          onSelect: (id, o) => {
+            setHistoryOpen(false);
+            const readOnly = !!(o && o.readOnly);
+            if (key) write(key, readOnly ? null : id);
+            api.ready = start(id, { picked: true, readOnly });
+          },
+          onNew: () => { setHistoryOpen(false); if (key) write(key, null); api.ready = start(null); },
+        });
+      } else if (open && history) {
+        if (history.setCurrentSession) history.setCurrentSession(session && session.getSessionId ? session.getSessionId() : null);
+        history.refresh();
+      }
+      drawerEl.hidden = !open;
+      historyBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+
+    /** opts2.picked — chosen in History: no "a day old" check, and an archived one opens read-only. */
+    async function start(sessionId, opts2) {
+      opts2 = opts2 || {};
       if (session && session.destroy) { try { session.destroy(); } catch { /* gone */ } }
       session = null;
       let initialMessages = [];
@@ -60,12 +97,17 @@
         try {
           const r = await fetch(`/.netlify/functions/get-chat-session?chatSessionId=${encodeURIComponent(sessionId)}`, { credentials: 'same-origin' });
           const d = r.ok ? await r.json() : null;
-          if (d && d.session && Number(d.session.aiAssistantId) === Number(opts.assistantId) && d.session.status !== 'archived') {
-            chatSessionId = sessionId; initialMessages = d.messages || [];
+          const msgs = (d && d.messages) || [];
+          const last = msgs.length ? msgs[msgs.length - 1].createdAt : d && d.session && d.session.updatedAt;
+          const stale = !opts2.picked && last && Date.now() - new Date(last).getTime() > STALE_MS;
+          const archived = d && d.session && d.session.status === 'archived';
+          if (d && d.session && Number(d.session.aiAssistantId) === Number(opts.assistantId) && !stale && (!archived || opts2.readOnly)) {
+            chatSessionId = sessionId; initialMessages = msgs;
           } else if (key) write(key, null);
         } catch { /* start a new one */ }
       }
       if (destroyed || !mountEl.isConnected) return;
+      viewingArchived = !!(opts2.readOnly && chatSessionId);
       session = window.ChatSession.mount({
         container: mountEl,
         assistantId: opts.assistantId,
@@ -73,6 +115,7 @@
         assistantName: opts.assistantName,
         roleKey: opts.roleKey,
         initialMessages,
+        readOnly: viewingArchived,
         placeholder: opts.placeholder,
         starterPrompts: chatSessionId ? null : opts.starterPrompts || null,
         // A docked pane is narrow and short: one line that grows as they type, Send inside it. Only the
@@ -81,13 +124,15 @@
         composerRows: opts.tallComposer ? opts.composerRows || 4 : 1,
         draftTarget: opts.draftTarget,
         turnContext: opts.turnContext,
-        onSession: (id) => { if (key && !destroyed) write(key, id); },
+        onSession: (id) => { if (key && !destroyed && !opts2.readOnly) write(key, id); },
       });
       if (pendingRef) { session.setReference(pendingRef); pendingRef = null; }
     }
     const onClick = (e) => {
       if (e.target.closest('[data-chatpane-close]')) { opts.onClose(); return; }
+      if (e.target.closest('[data-chatpane-history]')) { setHistoryOpen(drawerEl.hidden); return; }
       if (!e.target.closest('[data-chatpane-new]')) return;
+      setHistoryOpen(false);
       if (key) write(key, null);
       api.ready = start(null);
     };
@@ -98,7 +143,10 @@
       /** A part of the page onto the chip above the message box (waits for the chat to be ready). */
       setReference(ref) { if (session) session.setReference(ref); else pendingRef = ref; },
       /** Say this for the user, once the chat is ready ("New brief" on the Briefs tab). */
-      send(text) { return Promise.resolve(api.ready).then(() => (session ? session.sendMessage(text, { noReference: true }) : undefined)); },
+      send(text) {
+        if (viewingArchived) return api.sendFresh(text);
+        return Promise.resolve(api.ready).then(() => (session ? session.sendMessage(text, { noReference: true }) : undefined));
+      },
       /** "New chat", then say this: a new piece of work never continues the conversation on screen. */
       sendFresh(text) {
         if (key) write(key, null);
@@ -110,6 +158,8 @@
       destroy() {
         destroyed = true;
         container.removeEventListener('click', onClick);
+        if (history && history.destroy) { try { history.destroy(); } catch { /* gone */ } }
+        history = null;
         if (session && session.destroy) { try { session.destroy(); } catch { /* gone */ } }
         session = null;
         container.innerHTML = '';

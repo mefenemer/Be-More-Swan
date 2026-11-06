@@ -65,7 +65,8 @@ check('the pane: Chat first, preview on the left, the chat mounted once and kept
     assert.ok(paint.includes('box.contains(chatPane.mountEl)) return;'), 'a repaint must not remount the chat');
     assert.ok(editor.includes("chatPane.session = window.ChatPane.mount(host, {") && editor.includes("roleKey: 'website_assistant',"), 'the shared pane');
     const pane = read('src/components/chat-pane.js');
-    assert.ok(pane.includes("d.session.status !== 'archived'") && pane.includes('Number(d.session.aiAssistantId) === Number(opts.assistantId)'), 'only carries on its own, live thread');
+    assert.ok(pane.includes("d.session.status === 'archived'") && pane.includes("(!archived || opts2.readOnly)") && pane.includes('Number(d.session.aiAssistantId) === Number(opts.assistantId)'), 'only carries on its own, live thread (an archived one only read-only, picked in History)');
+    assert.ok(pane.includes('const STALE_MS = 24 * 60 * 60 * 1000') && pane.includes('!opts2.picked && last'), 'a remembered chat a day old opens as a new one (owner 2026-11-06)');
     assert.ok(read('workspace.html').includes('<script src="/src/components/chat-pane.js"></script>'));
     // The chat's own cards still refresh the preview.
     assert.match(editor, /document\.addEventListener\('site:changed'/);

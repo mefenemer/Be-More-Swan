@@ -10,7 +10,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
   <link rel="stylesheet" href="/style.css"></head><body class="bg-gray-50">
   <div class="page-wide p-4"><div id="tab-strategy" class="space-y-6"></div><div id="maintab-briefs"><div id="briefs-host"></div></div></div>
   <script src="/src/components/scroll-lock.js"></script><script src="/dialogs.js"></script>
-  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/chat-pane.js"></script>
+  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/chat-history-panel.js"></script><script src="/src/components/chat-pane.js"></script>
   <script src="/src/generated/platform-constants.js"></script><script src="/src/components/font-picker.js"></script><script src="/src/components/brand-style-dialog.js"></script>
   <script src="/src/components/brand-style-card.js"></script><script src="/src/components/assistant-briefs.js"></script>
   <script>AssistantBriefs.init({ assistantId: 4, assistantName: 'Mira' }); setTimeout(() => AssistantBriefs.activate(), 50);</script>
@@ -112,10 +112,15 @@ test.describe('wide screen', () => {
         expect(pageErrors).toEqual([]);
     });
 
-    test('"Talk it through" uses the docked chat, not a pop-up', async ({ page, api, pageErrors }) => {
-        stubBriefs(api);
+    test('"Talk it through" only on a video brief (no editor there), and it uses the docked chat', async ({ page, api, pageErrors }) => {
+        const store = stubBriefs(api);
         api.set('chat-orchestrator', { chatSessionId: 3, message: { id: 1, role: 'assistant', content: 'Noted.', uiElement: null } });
         await openTab(page);
+        // A picture brief: the editor has the chat beside it, so no duplicate link (owner 2026-11-06).
+        await expect(page.locator('[data-brief-chat="12"]')).toHaveCount(0);
+        store.brief = { ...store.brief, sources: ['stock_video'] };
+        await page.reload();
+        await page.locator('[data-brief-tab="review"]').click();
         await page.locator('[data-brief-chat="12"]').click();
         await ask(page, 'Thoughts?');
         await expect(page.getByText('Noted.')).toBeVisible();
@@ -123,13 +128,75 @@ test.describe('wide screen', () => {
         expect(pageErrors).toEqual([]);
     });
 
-    test('the conversation is remembered for this assistant', async ({ page, api, pageErrors }) => {
+    test('Full screen: the briefs and the chat cover the page, like the Website tab; Esc comes back', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        await openTab(page);
+        await page.getByRole('button', { name: 'Full screen' }).click();
+        const box = page.locator('[data-briefs-full]');
+        await expect(box).toHaveCount(1);
+        const b = (await box.boundingBox())!;
+        expect(b.x).toBe(0);
+        expect(b.width).toBeGreaterThanOrEqual(1590);
+        await expect(input(page)).toBeVisible();
+        await expect(page.locator('[data-brief-card="12"]')).toBeVisible();
+        await page.screenshot({ path: 'test-results/briefs-full.png' });
+        await page.keyboard.press('Escape');
+        await expect(box).toHaveCount(0);
+        await expect(page.getByRole('button', { name: 'Full screen' })).toBeVisible();
+        expect(pageErrors).toEqual([]);
+    });
+
+        test('the conversation is remembered for this assistant', async ({ page, api, pageErrors }) => {
         stubBriefs(api);
         api.set('chat-orchestrator', { chatSessionId: 3, message: { id: 1, role: 'assistant', content: 'Noted.', uiElement: null } });
         await openTab(page);
         await ask(page, 'Hello');
         await expect(page.getByText('Noted.')).toBeVisible();
         expect(await page.evaluate(() => localStorage.getItem('bms-brief-chat:4'))).toBe('3');
+        expect(pageErrors).toEqual([]);
+    });
+
+    // Owner 2026-11-06: carry on the last chat, but a day with nothing said in it opens a new one; History brings it back.
+    function stubThreads(api: ApiStub, lastSaid: string) {
+        const thread = (id: number, text: string, at: string) => ({
+            session: { id, status: 'active', aiAssistantId: 4, assistantName: 'Mira', assistantRole: 'brand_designer', createdAt: at, updatedAt: at },
+            messages: [{ id: id * 10, role: 'user', content: text, uiElement: null, createdAt: at }, { id: id * 10 + 1, role: 'assistant', content: `Reply to ${text}`, uiElement: null, createdAt: at }],
+        });
+        const now = new Date().toISOString();
+        api.set('get-chat-session', (route) => {
+            const id = Number(new URL(route.request().url()).searchParams.get('chatSessionId'));
+            return id === 3 ? thread(3, 'The old flyer', lastSaid) : thread(id, 'Another chat', now);
+        });
+        api.set('list-chat-sessions', { sessions: [
+            { id: 3, preview: 'The old flyer', lastMessageAt: lastSaid, messageCount: 2, status: 'active' },
+            { id: 8, preview: 'Another chat', lastMessageAt: now, messageCount: 2, status: 'active' },
+        ] });
+    }
+
+    test('a chat from yesterday opens as a new one, and History brings it back', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        stubThreads(api, new Date(Date.now() - 26 * 3600 * 1000).toISOString());
+        await page.addInitScript(() => { localStorage.setItem('bms-brief-chat:4', '3'); });
+        await openTab(page);
+        await expect(input(page)).toBeVisible();
+        await expect(page.getByText('Reply to The old flyer')).toHaveCount(0);
+        expect(await page.evaluate(() => localStorage.getItem('bms-brief-chat:4'))).toBeNull();
+        await page.getByRole('button', { name: 'Past chats' }).click();
+        await expect(page.locator('[data-chatpane-drawer]')).toBeVisible();
+        await page.screenshot({ path: 'test-results/briefs-chat-history.png' });
+        await page.locator('[data-ch-open="3"]').click();
+        await expect(page.locator('[data-chatpane-drawer]')).toBeHidden();
+        await expect(page.getByText('Reply to The old flyer')).toBeVisible();
+        expect(await page.evaluate(() => localStorage.getItem('bms-brief-chat:4'))).toBe('3');
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('a chat from this morning carries on', async ({ page, api, pageErrors }) => {
+        stubBriefs(api);
+        stubThreads(api, new Date(Date.now() - 3 * 3600 * 1000).toISOString());
+        await page.addInitScript(() => { localStorage.setItem('bms-brief-chat:4', '3'); });
+        await openTab(page);
+        await expect(page.getByText('Reply to The old flyer')).toBeVisible();
         expect(pageErrors).toEqual([]);
     });
 });
