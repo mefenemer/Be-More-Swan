@@ -153,7 +153,8 @@ export default withLambda(async (event) => {
     if (action === 'performance') {
         const designer = await requireDesigner(body.assistantId);
         if (!designer) return json(404, { error: 'Assistant not found.' });
-        const [counts] = await db.execute<{ approved: number; rejected: number; waiting: number; briefs: number }>(sql`
+        // Both counts at once: they are independent, and on one connection they pipeline.
+        const [[counts], [spent]] = await Promise.all([db.execute<{ approved: number; rejected: number; waiting: number; briefs: number }>(sql`
             SELECT count(*) FILTER (WHERE o.status = 'approved')::int AS approved,
                    count(*) FILTER (WHERE o.status = 'rejected' AND coalesce(o.reject_reason, '') NOT LIKE 'other: brief cancelled%')::int AS rejected,
                    (SELECT count(*)::int FROM visual_briefs b2
@@ -162,12 +163,12 @@ export default withLambda(async (event) => {
                    (SELECT count(*)::int FROM visual_briefs b3 WHERE b3.ai_assistant_id = ${designer.id} AND b3.organisation_id = ${orgId}) AS briefs
               FROM visual_brief_options o
               JOIN visual_briefs b ON b.id = o.brief_id
-             WHERE b.ai_assistant_id = ${designer.id} AND b.organisation_id = ${orgId}`);
+             WHERE b.ai_assistant_id = ${designer.id} AND b.organisation_id = ${orgId}`),
         // Credits are read from the generation jobs this assistant ran, completed only — a failed or
         // refused round was refunded and cost nothing.
-        const [spent] = await db.execute<{ credits: number }>(sql`
+            db.execute<{ credits: number }>(sql`
             SELECT coalesce(sum(credit_cost), 0)::int AS credits FROM media_generation_jobs
-             WHERE organisation_id = ${orgId} AND assistant_id = ${designer.id} AND status = 'completed'`);
+             WHERE organisation_id = ${orgId} AND assistant_id = ${designer.id} AND status = 'completed'`)]);
         const approved = Number(counts?.approved ?? 0);
         const rejected = Number(counts?.rejected ?? 0);
         return json(200, {

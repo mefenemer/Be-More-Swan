@@ -131,7 +131,10 @@
     const h = host();
     if (!h) return;
     try {
-      const res = await fetch(API + '/scenarios?assistantId=' + encodeURIComponent(state.assistantId));
+      // Shared GET cache (cached-fetch.js): the page load and opening Settings → Connections asked for
+      // the same list seconds apart. Any activate / toggle / remove (a POST) clears it.
+      const url = API + '/scenarios?assistantId=' + encodeURIComponent(state.assistantId);
+      const res = await (window.bmsCachedFetch ? window.bmsCachedFetch(url, { ttlMs: 300000 }) : fetch(url));
       if (!res.ok) throw new Error('status ' + res.status);
       state.scenarios = (await res.json()).scenarios || [];
       render();

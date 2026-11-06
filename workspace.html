@@ -23623,14 +23623,27 @@ async function gpSubmitReject() {
         </button>`;
     }).join('');
   }
+  // One request at a time: hover, focus and the click can all ask within a few milliseconds.
+  let loading = null;
   async function load() {
     if (cache && Date.now() - cachedAt < 60000) return;
-    try {
-      const d = await (await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants'))).json();
-      cache = (d.assistants || []).filter((a) => a.lifecycleStatus !== 'archived').sort((x, y) => String(x.name).localeCompare(String(y.name)));
-      cachedAt = Date.now();
-    } catch { cache = cache || []; }
+    if (loading) return loading;
+    loading = (async () => {
+      try {
+        const d = await (await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants'))).json();
+        cache = (d.assistants || []).filter((a) => a.lifecycleStatus !== 'archived').sort((x, y) => String(x.name).localeCompare(String(y.name)));
+        cachedAt = Date.now();
+      } catch { cache = cache || []; }
+    })().finally(() => { loading = null; });
+    return loading;
   }
+  // Have the list before the click (measured 2026-11-06: the first open showed "Loading…" for
+  // ~280 ms warm, longer cold, and again after any save emptied the shared cache). The page has
+  // usually just read get-assistants itself, so the idle fill is a cache hit, not a new request.
+  // A list older than a minute still paints at once on open (render() above) while it refreshes.
+  btn.addEventListener('pointerenter', () => { load(); });
+  btn.addEventListener('focus', () => { load(); });
+  (window.requestIdleCallback || ((f) => setTimeout(f, 2000)))(() => { load(); });
   btn.addEventListener('click', async (e) => {
     e.stopPropagation();
     const open = panel.classList.contains('hidden');

@@ -979,6 +979,35 @@ function _renderPillarChips() {
 // AI-wand fields), so they're rendered as textareas that expand to keep everything visible —
 // no inner scrollbar, no truncation. Heights must be recomputed when a hidden tab is revealed,
 // since scrollHeight is 0 while the panel is display:none.
+/**
+ * A GET through the shared, write-invalidated cache (src/components/cached-fetch.js), for lists the
+ * detail page and its Settings sections both read: the page load read the assistant's rules twice,
+ * and opening Settings read them (and the notification choices) again. Any write clears the cache,
+ * so a change the user makes is never answered from an old copy.
+ */
+function _cachedGet(url) {
+    return window.bmsCachedFetch ? window.bmsCachedFetch(url, { ttlMs: 300000 }) : fetch(url);
+}
+
+/**
+ * One-shot prefetch for the detail page. initAssistantDetail used to wait for get-assistant-context
+ * before starting any of the page's other reads, so on a first visit two waves of cold functions ran
+ * one after the other (measured on staging 2026-11-06: ~1.7 s, then 1.4–3.6 s more). The reads that
+ * need only the assistant's id start beside it instead; each loader takes its answer ONCE, and any
+ * later call (a refresh, a period toggle) goes to the network as before, so nothing is served stale.
+ */
+const _detailPrefetched = new Map();
+function _prefetchDetail(urls) {
+    _detailPrefetched.clear();
+    urls.forEach((u) => _detailPrefetched.set(u, fetch(u, { credentials: 'same-origin' }).catch(() => null)));
+}
+function _fetchPrefetched(url) {
+    const p = _detailPrefetched.get(url);
+    if (!p) return fetch(url);
+    _detailPrefetched.delete(url);
+    return p.then((r) => r || fetch(url));
+}
+
 const _AUTOGROW_FIELDS = ['edit_problem', 'edit_core_message', 'edit_audience', 'edit_tone', 'edit_pillars', 'edit_objections'];
 
 // The Website Assistant's editor (src/components/assistant-site-editor.js, ~2,000 lines) is loaded the
@@ -4958,6 +4987,19 @@ function _renderRightMenu() {
         if (b.dataset.rmTab === 'profile-home') window._openProfileDrawer();
         else window._openBriefDrawer(b.dataset.rmTab);
     };
+    // Warm a section's data while the pointer is on its item (or a key lands on it), so it is in the
+    // shared cache by the click: these are the sections that read on open. Same URLs as their loaders.
+    const aid = window._currentAssistantId;
+    const warm = (e) => {
+        const tab = e.target.closest?.('.rm-item')?.dataset.rmTab;
+        const url = tab === 'notifications' ? `/.netlify/functions/notification-preferences?assistantId=${aid}`
+            : tab === 'rules' ? `/.netlify/functions/content-rules?assistantId=${aid}`
+            : tab === 'platforms' ? `/api/integrations/scenarios?assistantId=${encodeURIComponent(aid)}`
+            : null;
+        if (url && aid) _cachedGet(url).catch(() => {});
+    };
+    list.onpointerover = warm;
+    list.onfocusin = warm;
     const btn = document.getElementById('rm-toggle');
     if (btn) btn.onclick = () => {
         const open = !menu.classList.contains('is-open');
@@ -5106,7 +5148,7 @@ async function _initAssistantNotifPrefs() {
     };
 
     try {
-        const res = await fetch(`/.netlify/functions/notification-preferences?assistantId=${assistantId}`);
+        const res = await _cachedGet(`/.netlify/functions/notification-preferences?assistantId=${assistantId}`);
         if (!res.ok) throw new Error('Load failed');
         const { categories } = await res.json();
         // Role-aware: post/publishing alerts only apply to roles that actually publish
@@ -5850,6 +5892,10 @@ window._openAutopilotSettings = function() {
 async function _loadAutopilotNext(assistantId) {
     const el = document.getElementById('autopilot-next');
     if (!el || !assistantId) return;
+    // A role without the Autopilot card (registry hasPostingSchedule:false, e.g. the Brand Designer)
+    // still has a schedule-shaped context, so this used to run three post reads for a line nobody sees.
+    // _applyDashboardRegistry has hidden the card by the time this runs.
+    if (document.getElementById('autopilot-status-card')?.classList.contains('hidden')) return;
     try {
         const statuses = ['pending_approval', 'approved', 'scheduled'];
         const results = await Promise.all(statuses.map(s =>
@@ -6029,7 +6075,7 @@ window._renderRunbookDirectives = async function(assistantId) {
     if (!aid) return;
     let rules = [];
     try {
-        const res = await fetch(`/.netlify/functions/content-rules?assistantId=${aid}`);
+        const res = await _cachedGet(`/.netlify/functions/content-rules?assistantId=${aid}`);
         if (res.ok) rules = (await res.json()).rules || [];
     } catch { /* non-critical */ }
     rules.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
@@ -8706,6 +8752,15 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     }
 
     // ── Load & hydrate ────────────────────────────────────────────
+    // Started beside the context read, not after it (see _prefetchDetail). Same URLs as their loaders.
+    _prefetchDetail([
+        `/.netlify/functions/get-assistant-readiness?id=${assistantId}`,
+        `/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=all`,
+        `${GOALS_API}?assistantId=${parseInt(assistantId)}`,
+    ]);
+    // Shared-cache reads the page makes later (check-capacity / get-usage-summary for the task strip).
+    window.bmsCachedFetch?.('/.netlify/functions/check-capacity').catch(() => {});
+    window.bmsCachedFetch?.('/.netlify/functions/get-usage-summary').catch(() => {});
     try {
         const res = await fetch(`/.netlify/functions/get-assistant-context?id=${assistantId}`);
         if (res.status === 403) {
@@ -9198,7 +9253,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         _fetchAndRenderBlogDestinations();
     } else if (_audienceSource === 'newsletter_list') {
         _fetchAndRenderNewsletterList();
-    } else {
+    } else if (_skelAutopilot) {
+        // The follower bars live inside the Autopilot card: with the card hidden (the Brand Designer)
+        // there is nothing to fill, and the read asks every connected platform.
         _fetchAndRenderFollowerCounts();
     }
 
@@ -9434,6 +9491,13 @@ async function _prefetchDetailRqBadge(assistantId) {
     const rq = window._detailReviewQueue || {};
     try {
         let count = 0;
+        // A role with no Review tab (hideReviewQueue, e.g. the Brand Designer) has no posts to count:
+        // this read always answered 0. Say 0 without asking, so the signals settle exactly as before.
+        if (rq.__defaulted) {
+            window._setPendingReviewCount?.(0);
+            window._updateOpSignals?.({ pendingReview: 0 });
+            return;
+        }
         if (rq.kind === 'records' && rq.recordType) {
             // Records-backed queue (data-hub roles): count assistant_records awaiting approval.
             const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${assistantId}&recordType=${encodeURIComponent(rq.recordType)}&approvalStatus=pending_approval`);
@@ -9784,7 +9848,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     });
 
     try {
-        const res = await fetch(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
+        const res = await _fetchPrefetched(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
         if (!res.ok) return;
         const d = await res.json();
 
@@ -10542,7 +10606,7 @@ async function _renderKickOff(assistantId) {
 
     let data;
     try {
-        const res = await fetch(`/.netlify/functions/get-assistant-readiness?id=${assistantId}`);
+        const res = await _fetchPrefetched(`/.netlify/functions/get-assistant-readiness?id=${assistantId}`);
         if (!res.ok) { card.classList.add('hidden'); return; }
         data = await res.json();
     } catch { card.classList.add('hidden'); return; }
@@ -11338,6 +11402,7 @@ async function _loadBrandMetrics(assistantId) {
         const res = await fetch('/.netlify/functions/brand-briefs', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
             body: JSON.stringify({ action: 'performance', assistantId }),
+            bmsRead: true,   // a read: leaves the shared GET cache alone (cached-fetch.js)
         });
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
@@ -11898,7 +11963,7 @@ async function _fetchAndRenderAssistantRules(assistantId) {
 
     let rules = [];
     try {
-        const res = await fetch(`${RULES_API}?assistantId=${_rulesAssistantId}`);
+        const res = await _cachedGet(`${RULES_API}?assistantId=${_rulesAssistantId}`);
         if (res.ok) rules = (await res.json()).rules || [];
     } catch (e) {
         console.warn('Could not load assistant rules:', e);
@@ -12252,7 +12317,7 @@ async function _fetchAndRenderGoals(assistantId) {
 
     let goals = [];
     try {
-        const res = await fetch(`${GOALS_API}?assistantId=${_goalsAssistantId}`);
+        const res = await _fetchPrefetched(`${GOALS_API}?assistantId=${_goalsAssistantId}`);
         _goalsLoadFailed = !res.ok;
         if (res.ok) {
             const data = await res.json();

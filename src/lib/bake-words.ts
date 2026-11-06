@@ -8,9 +8,7 @@
 // so they are spelt exactly as typed. Box geometry copies the overlay editor's ratios, so a picture
 // made here looks like one whose text layers were baked from the post editor.
 
-import satori from 'satori';
-import { Resvg } from '@resvg/resvg-js';
-import { brandCardFonts, BRAND_CARD_FONT_FAMILY } from './brand-card-fonts';
+import { BRAND_CARD_FONT_FAMILY, rasterLibs } from './render-libs';
 
 // Same ratios as image-overlay-editor.js — keep them in step.
 const PAD_RATIO = 0.30;
@@ -67,6 +65,7 @@ export async function bakeWordsOnImage(opts: {
                 color: l.color || '#ffffff', fontSize, lineHeight: LINE_HEIGHT,
             }, rows.map((r) => el({ display: 'flex', whiteSpace: 'nowrap' }, r || ' ')))));
     }
+    const { satori, Resvg, brandCardFonts } = await rasterLibs();
     const svg = await satori(
         el({ display: 'flex', position: 'relative', width: '100%', height: '100%', fontFamily: BRAND_CARD_FONT_FAMILY }, nodes) as unknown as Parameters<typeof satori>[0],
         { width: W, height: H, fonts: brandCardFonts },

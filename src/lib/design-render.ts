@@ -3,11 +3,9 @@
 // what prints here. The flyer's first layout comes from src/lib/flyer.ts, so a page opened in the studio starts where
 // the round drew it.
 
-import satori from 'satori';
-import { Resvg } from '@resvg/resvg-js';
-import QRCode from 'qrcode';
-import { PDFDocument, clip, endPath, popGraphicsState, pushGraphicsState, rectangle, rgb } from 'pdf-lib';
-import { brandCardFonts, BRAND_CARD_FONT_FAMILY } from './brand-card-fonts';
+import { BRAND_CARD_FONT_FAMILY, pdfLib, qrToDataURL, rasterLibs } from './render-libs';
+
+type PdfLib = Awaited<ReturnType<typeof pdfLib>>;
 import { loadWebFont, type SatoriFont } from './brand-card-webfont';
 import { inlineLogo } from './brand-card';
 import { PREVIEW_DPI, PRINT_DPI, blockSpecs, fitBlocks, flyerGeometry, flyerPageStyle, olderPageStyle, pdfCanEmbed, type FlyerPageStyle, type FlyerPhoto } from './flyer';
@@ -38,7 +36,8 @@ export async function renderDesign(opts: { design: Design; photo: FlyerPhoto | n
     const Y = (f: number) => Math.round(bleed + f * H);
 
     const families = [...new Set(design.layers.filter((l): l is TextLayer => l.kind === 'text').map((l) => l.fontFamily).filter((f): f is string => !!f))];
-    const loaded = (await Promise.all(families.map((f) => loadWebFont(f)))).filter((f): f is SatoriFont[] => !!f);
+    const [fontSets, { satori, Resvg, brandCardFonts }] = await Promise.all([Promise.all(families.map((f) => loadWebFont(f))), rasterLibs()]);
+    const loaded = fontSets.filter((f): f is SatoriFont[] => !!f);
     const fonts = [...loaded.flat(), ...brandCardFonts];
     const familyOf = (name: string | null) => {
         const hit = name ? loaded.find((f) => f[0].name.toLowerCase() === name.toLowerCase()) : null;
@@ -111,7 +110,7 @@ function textNode(l: TextLayer, g: { X: (f: number) => number; Y: (f: number) =>
 
 // ── The print PDF ───────────────────────────────────────────────────────────────────────────────
 
-function hexRgb(hex: string) {
+function hexRgb(rgb: PdfLib['rgb'], hex: string) {
     return rgb(parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255);
 }
 
@@ -127,6 +126,7 @@ async function onePdf(opts: { design: Design; photo: FlyerPhoto | null; title: s
     const words = await renderDesign({ design, photo: opts.photo, width: W, height: H, bleedPx: bleed, words: layered });
 
     const k = 72 / PRINT_DPI;
+    const { PDFDocument, clip, endPath, popGraphicsState, pushGraphicsState, rectangle, rgb } = await pdfLib();
     const doc = await PDFDocument.create();
     doc.setTitle(opts.title.slice(0, 200));
     doc.setCreator('Be More Swan');
@@ -135,7 +135,7 @@ async function onePdf(opts: { design: Design; photo: FlyerPhoto | null; title: s
     const pageH = words.height * k;
     const page = doc.addPage([pageW, pageH]);
     if (layered) {
-        page.drawRectangle({ x: 0, y: 0, width: pageW, height: pageH, color: hexRgb(design.pageColor) });
+        page.drawRectangle({ x: 0, y: 0, width: pageW, height: pageH, color: hexRgb(rgb, design.pageColor) });
         if (design.photo && opts.photo) {
             const img = /png/i.test(opts.photo.mimeType) ? await doc.embedPng(opts.photo.bytes) : await doc.embedJpg(opts.photo.bytes);
             const b = photoBox(design, W, H, bleed);
@@ -227,7 +227,7 @@ export async function flyerDesign(args: {
         layers.push(words('contact', contactLines.join('\n'), box.left, bottom - h, box.width - (qrSize ? qrSize + gap : 0), contactSize));
     }
     if (content.qr) {
-        const src = await QRCode.toDataURL(content.qr.url, { errorCorrectionLevel: 'M', margin: 4, width: 400, color: { dark: '#000000', light: '#ffffff' } });
+        const src = await qrToDataURL(content.qr.url, { errorCorrectionLevel: 'M', margin: 4, width: 400, color: { dark: '#000000', light: '#ffffff' } });
         layers.push({ id: 'qr', kind: 'qr', role: 'qr', x: (box.left + box.width - qrSize) / W, y: (bottom - qrSize) / H, w: qrSize / W, h: qrSize / H, src });
     }
 

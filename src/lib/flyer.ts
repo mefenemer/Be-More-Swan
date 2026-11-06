@@ -18,11 +18,7 @@
 // still do not fit, renderFlyer throws FlyerFitError naming the field, and the round says which field
 // to shorten. It never draws a flyer with words missing.
 
-import satori from 'satori';
-import { Resvg } from '@resvg/resvg-js';
-import QRCode from 'qrcode';
-import { PDFDocument, clip, endPath, popGraphicsState, pushGraphicsState, rectangle } from 'pdf-lib';
-import { brandCardFonts, BRAND_CARD_FONT_FAMILY } from './brand-card-fonts';
+import { BRAND_CARD_FONT_FAMILY, pdfLib, qrToDataURL, rasterLibs } from './render-libs';
 import { loadWebFont } from './brand-card-webfont';
 import { estimateWrappedLines, inlineLogo, resolveCardPalette } from './brand-card';
 import { contrastRatio, readableInkOn, type BrandKit } from '../utils/brand-kit';
@@ -285,14 +281,15 @@ export async function renderFlyer(opts: {
     const style = opts.style ?? olderPageStyle(layout, kit);
     const { field: fieldColour, accent, ink, offerBg, offerInk } = style;
 
-    const [logoSrc, webFont, qrSrc] = await Promise.all([
+    const [logoSrc, webFont, qrSrc, { satori, Resvg, brandCardFonts }] = await Promise.all([
         kit.logoUrl ? inlineLogo(kit.logoUrl) : Promise.resolve(null),
         loadWebFont(kit.fontFamily),
-        content.qr ? QRCode.toDataURL(content.qr.url, {
+        content.qr ? qrToDataURL(content.qr.url, {
             // Black on white whatever the brand: a QR in brand colours is the one that will not scan.
             errorCorrectionLevel: 'M', margin: 4, width: mm(Math.max(22, PAPER_SPECS[paperSize].widthMm * 0.17)),
             color: { dark: '#000000', light: '#ffffff' },
         }) : Promise.resolve(null),
+        rasterLibs(),
     ]);
     const fonts = webFont ? [...webFont, ...brandCardFonts] : brandCardFonts;
     const fontFamily = webFont ? `${webFont[0].name}, ${BRAND_CARD_FONT_FAMILY}` : BRAND_CARD_FONT_FAMILY;
@@ -446,6 +443,7 @@ export async function flyerPdf(opts: {
     const { words } = opts;
     const g = words.geometry;
     const k = 72 / g.dpi;   // canvas px → PDF points
+    const { PDFDocument, clip, endPath, popGraphicsState, pushGraphicsState, rectangle } = await pdfLib();
     const doc = await PDFDocument.create();
     doc.setTitle(opts.title.slice(0, 200));
     doc.setCreator('Be More Swan');

@@ -12,7 +12,10 @@
 //     'brand_card'). Costs no AI credits — nothing is generated, only drawn.
 
 import crypto from 'crypto';
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+// The S3 client is loaded on the first upload, not at cold start: this module is imported by every
+// function that touches briefs (via visual-briefs.ts), and most of their requests never upload.
+// See src/lib/render-libs.ts for the measurement.
+const s3Sdk = () => import('@aws-sdk/client-s3');
 import { contentAssets } from '../../db/schema';
 import { generateImages, falConfigured, type AspectRatio } from './fal-gateway';
 import { renderBrandCard, type CardVariant } from './brand-card';
@@ -87,6 +90,7 @@ export async function persistRemoteMediaToR2(params: {
  * folder, to be deleted with that workspace.
  */
 export async function putR2Object(params: { key: string; bytes: Buffer; contentType: string }): Promise<void> {
+    const { S3Client, PutObjectCommand } = await s3Sdk();
     const s3 = new S3Client({
         region: 'auto', endpoint: R2_ENDPOINT,
         credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
@@ -102,6 +106,7 @@ export async function putR2Object(params: { key: string; bytes: Buffer; contentT
 export async function deleteR2Object(key: string): Promise<boolean> {
     if (!r2Configured || !key) return false;
     try {
+        const { S3Client, DeleteObjectCommand } = await s3Sdk();
         const s3 = new S3Client({
             region: 'auto', endpoint: R2_ENDPOINT,
             credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
@@ -121,6 +126,7 @@ export async function persistBufferToR2(params: {
     folder?: string;
 }): Promise<{ storageKey: string; fileSize: number }> {
     const storageKey = `content/org-${params.orgId}/${params.folder || 'generated'}/${crypto.randomUUID()}.${extFromMime(params.contentType)}`;
+    const { S3Client, PutObjectCommand } = await s3Sdk();
     const s3 = new S3Client({
         region: 'auto', endpoint: R2_ENDPOINT,
         credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },

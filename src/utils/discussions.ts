@@ -17,7 +17,6 @@
 // the person posts it themselves. See src/config/discussion-sites.ts for why that is the design.
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import * as cheerio from 'cheerio';
 import type { getDb } from '../../db/client';
 import { aiAssistants, discussions, discussionWatches } from '../../db/schema';
 import {
@@ -219,6 +218,9 @@ async function readThread(url: string): Promise<string> {
         const u = new URL(url);
         if (!(await robotsAllows(u.hostname, u.pathname, CRAWLERS.leadDiscovery))) return '';
         const { body } = await safeFetchText(url, { timeoutMs: PAGE_FETCH_MS, maxBytes: PAGE_MAX_BYTES, userAgent: CRAWLERS.leadDiscovery.userAgent });
+        // cheerio (and undici, parse5, iconv-lite under it) loads on the first scan, not at cold start:
+        // chat-orchestrator imports this module for its Discussions snapshot. See src/lib/render-libs.ts.
+        const cheerio = await import('cheerio');
         const $ = cheerio.load(body);
         $('script, style, noscript, svg, nav, header, footer').remove();
         return $('body').text().replace(/\s+/g, ' ').trim().slice(0, THREAD_TEXT_CHARS);

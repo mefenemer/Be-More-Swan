@@ -19,7 +19,9 @@ import { and, eq, lt, sql } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import type { getDb } from '../../db/client';
 import { bookings, orgProducts } from '../../db/schema';
-import { getStripe } from './stripe';
+// Stripe's SDK loads on first use, not at cold start: class-sessions.ts imports this module, and
+// site-store.ts (in chat-orchestrator) imports that. See src/lib/render-libs.ts.
+const stripeClient = async () => (await import('./stripe')).getStripe();
 import { connectAccountFor } from './site-shop';
 import { depositFor, formatPounds } from './product-price';
 import { BOOK_PATH, FORM_SENT_PATH } from './site-render';
@@ -68,7 +70,7 @@ export async function startDepositCheckout(db: Db, p: Parameters<typeof depositC
     const account = await connectAccountFor(db, p.booking.organisationId);
     if (!account?.chargesEnabled) return { ok: false };
     try {
-        const session = await getStripe().checkout.sessions.create(depositCheckoutParams(p), { stripeAccount: account.stripeAccountId });
+        const session = await (await stripeClient()).checkout.sessions.create(depositCheckoutParams(p), { stripeAccount: account.stripeAccountId });
         if (!session.url) throw new Error('Stripe returned no checkout address');
         await db.update(bookings).set({ checkoutSessionId: session.id }).where(eq(bookings.id, p.booking.id));
         return { ok: true, url: session.url };
@@ -130,7 +132,7 @@ export async function refundDeposit(db: Db, b: Pick<BookingRow, 'id' | 'organisa
     try {
         const account = await connectAccountFor(db, b.organisationId);
         if (!account) throw new Error('no connected account');
-        await getStripe().refunds.create({ payment_intent: b.paymentIntentId, reason: 'requested_by_customer' }, { stripeAccount: account.stripeAccountId, idempotencyKey: `deposit-refund-${b.id}` });
+        await (await stripeClient()).refunds.create({ payment_intent: b.paymentIntentId, reason: 'requested_by_customer' }, { stripeAccount: account.stripeAccountId, idempotencyKey: `deposit-refund-${b.id}` });
         await db.update(bookings).set({ paymentStatus: 'refunded' }).where(eq(bookings.id, b.id));
         return 'refunded';
     } catch (err) {

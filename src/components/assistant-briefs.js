@@ -82,12 +82,15 @@
   const purposeLabel = (k) => (V().purposes.find((p) => p.key === k) || { label: k }).label;
 
   // ── Server ─────────────────────────────────────────────────────────────────
+  // Actions that only read: they leave the shared GET cache alone (cached-fetch.js `bmsRead`).
+  const READ_ACTIONS = new Set(['list', 'performance', 'calendar']);
   async function post(payload) {
     const res = await fetch(API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       body: JSON.stringify(payload),
+      bmsRead: READ_ACTIONS.has(payload && payload.action),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(errorText(data, res.status));

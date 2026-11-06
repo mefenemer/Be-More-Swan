@@ -35,8 +35,23 @@
 
   function available() { return !!(window.ChatSession && typeof window.ChatSession.mount === 'function'); }
 
+  /**
+   * Wake the chat function while the user is still reading or typing. A cold chat-orchestrator took
+   * 3–3.9 s on staging (2026-11-06) before it even looked at a message, and the first message after
+   * opening a pane paid all of it. A GET is answered 405 before any database or model work (the
+   * handler's first line), so this costs one tiny invocation; at most once every four minutes, about
+   * as long as an idle function instance is kept.
+   */
+  let warmedAt = 0;
+  function warm() {
+    if (Date.now() - warmedAt < 4 * 60 * 1000) return;
+    warmedAt = Date.now();
+    try { fetch('/.netlify/functions/chat-orchestrator', { method: 'GET', credentials: 'same-origin' }).catch(() => {}); } catch { /* never in the way */ }
+  }
+
   function mount(container, opts) {
     opts = opts || {};
+    warm();
     const key = opts.rememberKey || null;
     let session = null;
     let destroyed = false;
@@ -246,5 +261,5 @@
     return api;
   }
 
-  window.ChatPane = { mount, available, dock };
+  window.ChatPane = { mount, available, dock, warm };
 })();
