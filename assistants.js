@@ -4932,11 +4932,11 @@ function _applyRightMenuOpen(open) {
         const label = open ? 'Collapse settings menu' : 'Expand settings menu';
         btn.setAttribute('aria-expanded', String(open));
         btn.setAttribute('aria-label', label);
-        btn.title = label;
+        btn.dataset.tip = label;
         document.getElementById('rm-toggle-chevron')?.setAttribute('d', open ? 'M7 10l2 2-2 2' : 'M9 10l-2 2 2 2');
     }
     menu.querySelectorAll('.rm-item').forEach((b) => {
-        if (open) b.removeAttribute('title'); else b.title = b.querySelector('.nav-label')?.textContent.trim() || '';
+        if (open) delete b.dataset.tip; else b.dataset.tip = b.querySelector('.nav-label')?.textContent.trim() || '';
     });
 }
 function _renderRightMenu() {
