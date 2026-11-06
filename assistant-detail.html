@@ -145,6 +145,10 @@
   <!-- #detail-top-row: for a role with `compactHeader` (registry), the hero takes just under half the
        width and the "Needs you" strip is moved up beside it (_applyCompactHeader, assistants.js). For
        every other role the row is a plain block and nothing moves. -->
+  <!-- The wrapper is the size container the compact header's grid reads (the page's own width, not the
+       window's: with both menus and a settings section open, a 1600px window leaves ~850px here). Not on
+       #assistant-detail-content, because containment would trap its position:fixed menus and drawer. -->
+  <div id="detail-top-wrap">
   <div id="detail-top-row">
   <div id="detail-hero" class="bg-white rounded-2xl border border-gray-200 shadow-sm px-5 py-4 mb-6 relative z-20">
     <!-- Issue #65 follow-up: overflow-hidden used to live on the card itself, which clipped the
@@ -297,6 +301,7 @@
     </div>
   </div>
   </div><!-- /detail-top-row -->
+  </div><!-- /detail-top-wrap -->
 
   <!-- Kick Off Meeting — readiness checklist + activation gate, shown when the assistant
        hasn't been kicked off yet (issue #193: moved here from the removed Progress Reviews tab). -->
@@ -2852,7 +2857,8 @@ window._revokeConnection = async function (connectionId, onSuccess) {
      #assistant-detail-content). Owner, 2026-11-05: piloted on the Brand Designer first. ── */
   #detail-right-menu { display: none; }
   .detail-v2 #btn-detail-chat { display: none !important; }
-  @media (min-width: 1024px) {
+  .detail-v2 #detail-top-wrap { container-type: inline-size; }
+  @container (min-width: 900px) {
     .detail-v2 #detail-top-row:has(> #detail-needs-you:not(.hidden)) {
       display: grid; grid-template-columns: minmax(0, 48%) minmax(0, 1fr); gap: 1.5rem; align-items: stretch; margin-bottom: 1.5rem; }
     .detail-v2 #detail-top-row:has(> #detail-needs-you:not(.hidden)) > #detail-hero { margin-bottom: 0; }
@@ -2861,7 +2867,7 @@ window._revokeConnection = async function (connectionId, onSuccess) {
      and one primary button to it. */
   #detail-top-row > #detail-needs-you:not(.hidden) { display: flex; flex-direction: column; justify-content: flex-start;
     margin: 0 0 1.5rem; padding: 1rem 1.25rem; border-radius: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
-  @media (min-width: 1024px) { #detail-top-row > #detail-needs-you:not(.hidden) { margin: 0; } }
+  @container (min-width: 900px) { .detail-v2 #detail-top-row > #detail-needs-you:not(.hidden) { margin: 0; } }
   #detail-top-row #needs-you-text { font-size: 1.125rem; line-height: 1.75rem; }
   #detail-top-row #next-up-text { font-size: .8125rem; margin-top: .125rem; }
   #detail-top-row #needs-you-list:not(.hidden) { display: flex; flex-direction: column; gap: .375rem; margin: .75rem 0 0; padding: 0; list-style: none; }
@@ -2919,6 +2925,15 @@ window._revokeConnection = async function (connectionId, onSuccess) {
     #detail-right-menu .rm-item:hover { background: #f3f4f6; color: #111827; }
     #detail-right-menu .rm-item.is-active { background: #fff0f5; color: #d6006b; }
     #detail-right-menu .rm-item:focus-visible, #rm-toggle:focus-visible { outline: none; box-shadow: 0 0 0 2px #D6006B; }
+    /* An open section docks against the menu's left edge as one panel: under the header, no backdrop
+       or shadow, no back arrow (the menu beside it is the list), and the page moves over for it.
+       !important because the drawer's base layout is inline (it is the pop-over everywhere else). */
+    .detail-v2 #brief-drawer { top: 64px !important; right: 4.5rem !important; width: 28rem !important; z-index: 29 !important;
+      box-shadow: none !important; border-left: 1px solid #e5e7eb; transition: transform .2s ease-in-out !important; }
+    html:has(#detail-right-menu.is-open) .detail-v2 #brief-drawer { right: 16rem !important; }
+    .detail-v2 #brief-drawer-backdrop, .detail-v2 #brief-drawer-back { display: none !important; }
+    html:has(.detail-v2 #detail-right-menu) body.brief-drawer-open #workspace-main { margin-right: calc(4.5rem + 28rem); }
+    html:has(.detail-v2 #detail-right-menu.is-open) body.brief-drawer-open #workspace-main { margin-right: calc(16rem + 28rem); }
     #detail-right-menu:not(.is-open) .rm-item { justify-content: center; gap: 0; padding-left: 0; padding-right: 0; }
     #detail-right-menu:not(.is-open) .nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden;
       clip: rect(0 0 0 0); white-space: nowrap; }

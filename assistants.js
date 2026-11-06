@@ -4913,6 +4913,11 @@ const _RM_ICONS = {
     guardrails: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
     notifications: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',
 };
+// The settings sections dock beside the right-hand menu when that menu is on screen (compact header, md+).
+function _settingsDocked() {
+    const menu = document.getElementById('detail-right-menu');
+    return !!(menu && document.querySelector('.detail-v2') && getComputedStyle(menu).display !== 'none');
+}
 function _syncRightMenuActive(panelId) {
     document.querySelectorAll('#rm-items .rm-item').forEach((b) => {
         b.classList.toggle('is-active', !!panelId && `tab-${b.dataset.rmTab}` === panelId);
@@ -4996,13 +5001,24 @@ function _briefOpenChrome() {
         window._briefDrawerOpener = opener && !drawer.contains(opener) ? opener : null;
     }
     drawer.inert = false;
+    // Compact header (md and up): the section docks beside the right-hand menu as part of it — no
+    // backdrop, the page stays usable and moves over (CSS in assistant-detail.html), and the menu
+    // drops to icons while a section is open so the two fit. Below md it is the old pop-over.
+    const docked = _settingsDocked();
+    drawer.setAttribute('aria-modal', docked ? 'false' : 'true');
+    if (docked && !document.body.classList.contains('brief-drawer-open')) {
+        const menu = document.getElementById('detail-right-menu');
+        window._rmWasOpen = !!menu?.classList.contains('is-open');
+        if (window._rmWasOpen) _applyRightMenuOpen(false);
+    }
     document.body.classList.add('brief-drawer-open');
-    if (backdrop) { backdrop.style.display = 'block'; setTimeout(() => backdrop.style.opacity = '1', 10); }
+    if (backdrop && !docked) { backdrop.style.display = 'block'; setTimeout(() => backdrop.style.opacity = '1', 10); }
     drawer.style.transform = 'translateX(0)';
     // Scoped: the drawer markup lives in assistant-detail.html, i.e. *inside* the swappable
     // view, so navigating away destroys it without running _closeBriefDrawer. The scoped flag
-    // lets loadView drop this lock on teardown instead of stranding it.
-    window.ScrollLock.lock('brief-drawer', { scoped: true });
+    // lets loadView drop this lock on teardown instead of stranding it. Docked, the page scrolls.
+    if (!docked) window.ScrollLock.lock('brief-drawer', { scoped: true });
+    else setTimeout(() => window.dispatchEvent(new Event('resize')), 260);
     const body = document.getElementById('brief-drawer-body');
     if (body) body.scrollTop = 0;
     _resizeBriefAutoGrow();
@@ -5233,6 +5249,11 @@ window._closeBriefDrawer = function() {
     const backdrop = document.getElementById('brief-drawer-backdrop');
     if (drawer) drawer.style.transform = 'translateX(100%)';
     _syncRightMenuActive(null);
+    if (_settingsDocked()) {
+        if (window._rmWasOpen) _applyRightMenuOpen(true);
+        window._rmWasOpen = false;
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 260);
+    }
     if (backdrop) { backdrop.style.opacity = '0'; setTimeout(() => { backdrop.style.display = 'none'; }, 250); }
     document.body.classList.remove('brief-drawer-open');
     window.ScrollLock.release('brief-drawer');
