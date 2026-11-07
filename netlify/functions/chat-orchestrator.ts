@@ -107,7 +107,7 @@ import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsPr
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
-import { confirmCardReply, missingCardReply, pictureReply, replyClaimsPicture } from '../../src/utils/confirm-card-reply';
+import { confirmCardReply, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, replyClaimsPicture } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
 import { videoSceneCard, videoSceneRequestFromUiElement, VIDEO_SCENE_EDIT_TYPE, type VideoSceneCard } from '../../src/utils/chat-video-scene';
@@ -416,7 +416,7 @@ const defaultRoute: AssistantRoute = {
 // only when the output was never a structured attempt at all do we pass it through as plain
 // text. A JSON-shaped-but-broken reply degrades to a friendly retry line, not the payload.
 /** Ends the Business Mentor's system prompt (see `system` below): its reply format, where it can't be lost. */
-const MENTOR_REPLY_FORMAT_REMINDER = 'REPLY FORMAT (always, every turn, however long the answer): one STRICT JSON object and nothing else: {"reply": "<your message>", "uiElement": <one card from CARDS, or null>}. Never answer in plain prose. If your reply mentions a card or a button below, that card MUST be the uiElement; if you are not including one, do not mention it.';
+const MENTOR_REPLY_FORMAT_REMINDER = 'REPLY FORMAT (always, every turn, however long the answer): one STRICT JSON object and nothing else: {"reply": "<your message>", "uiElement": <one card from CARDS, or null>}. Never answer in plain prose. uiElement is ONE card object, never a list: when several changes are worth making, send the most important one as the card, and say you will send the next when they have dealt with it. If your reply mentions a card or a button below, that card MUST be the uiElement; if you are not including one, do not mention it.';
 
 const STRUCTURED_REPLY_FALLBACK =
     "Sorry — something went wrong formatting that on my end. Could you send that to me again? I'll redraft it cleanly.";
@@ -448,9 +448,12 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
     // This route hand-rolled its own strip plus an outermost-{...} recovery. The shared extractor
     // does the same thing with a string-aware brace balancer, so a `}` inside a reply no longer
     // truncates the object — see src/utils/model-json.ts.
-    const parsed = parseModelJson<{ reply?: unknown; uiElement?: unknown }>(raw);
+    const parsed = parseModelJson<Record<string, unknown> & { reply?: unknown; uiElement?: unknown }>(raw);
     if (parsed && typeof parsed.reply === 'string') {
-        return { content: parsed.reply.trim(), uiElement: parsed.uiElement ?? null };
+        const { card, extra } = firstCard(parsed);
+        const content = parsed.reply.trim();
+        // One card per reply. Several used to be dropped together, with nothing said (below).
+        return { content: extra ? `${content}\n\n${MORE_CARDS_NOTE}` : content, uiElement: card };
     }
 
     // Unparseable. Never show raw JSON scaffolding to the user: if this was clearly a

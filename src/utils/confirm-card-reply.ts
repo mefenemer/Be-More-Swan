@@ -38,6 +38,8 @@ export function confirmCardReply(content: string, card: { blocked?: unknown; set
 const POINTS_AT_CARD = new RegExp([
     /\b(?:I(?:'|’)?ve|I have)\s+(?:added|included|attached|drafted|put)\b[^.\n]{0,40}\bcard\b/.source,
     /\bcard\s+(?:below|above|here)\b/.source,
+    // "The card is below this time", "this time the card really is below" (prod 2026-11-07, org 40).
+    /\bcard\s+(?:is|really is|should be|will be)\s+(?:below|above|here)\b/.source,
     /\b(?:the|a|this)\s+card\s+(?:that|which)\b/.source,
     /\bbelow is a card\b/.source,
     /\btap (?:the|an?) (?:button|answer) below\b/.source,
@@ -87,4 +89,26 @@ export function pictureReply(content: string, hasPictureCard: boolean): string {
     return hasPictureCard
         ? 'Here it is — choose “Create with AI” or “Find stock photos” on the card below, then pick the one you like. Nothing is made or added until you do.'
         : 'I can’t make or add a picture from a message — ask me for a picture for a section and I’ll put a card here with options to choose from. Nothing has been made or added.';
+}
+
+/**
+ * The one card in a reply, however the model shaped it. Every route draws ONE card, and every card
+ * check downstream reads a single object — so a LIST of cards, or cards under "uiElements" / "cards",
+ * matched no card type and was dropped without a word. Prod 2026-11-07 (org 40, Business Mentor):
+ * asked to make three changes, it sent them together, turn after turn; the user saw "the card is
+ * below" and no card six times, and even the ticket she asked for about it vanished the same way.
+ * The token counts showed the cards were written. Now the first card is kept and the rest are said.
+ */
+export const MORE_CARDS_NOTE = '(I can show one card at a time. Ask me for the next one when you’ve dealt with this.)';
+export function firstCard(parsed: Record<string, unknown>): { card: unknown | null; extra: number } {
+    const isCard = (v: unknown) => !!v && typeof v === 'object' && !Array.isArray(v);
+    for (const key of ['uiElement', 'uiElements', 'cards', 'ui_element']) {
+        const v = parsed[key];
+        if (isCard(v)) return { card: v, extra: 0 };
+        if (Array.isArray(v)) {
+            const cards = v.filter(isCard);
+            if (cards.length) return { card: cards[0], extra: cards.length - 1 };
+        }
+    }
+    return { card: null, extra: 0 };
 }
