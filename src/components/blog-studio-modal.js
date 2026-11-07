@@ -960,9 +960,13 @@
   // article is open. The worker writes its body on the server, so as with this studio's own buttons:
   // save what is on screen first, lock the editor meanwhile, and reload it afterwards. Without this the
   // editor's next autosave silently put the old words back over the rewrite.
+  // A rewrite pressed in the chat beside the Blogs list, on an article that is NOT open yet: the list is right
+  // there, so it can be opened mid-rewrite. openWorkspace locks it the same way, or it shows the old words and
+  // the next autosave puts them back over the rewrite.
+  var rewritesRunning = {};
   document.addEventListener('blog:rewriteStarting', function (e) {
     var d = e.detail || {};
-    if (!isOpenHere(d.postId)) return;
+    if (!isOpenHere(d.postId)) { rewritesRunning[Number(d.postId)] = true; return; }
     if (state.aiDraftJobId || state.chatRewriting) { d.busy = true; return; }
     d.open = true;
     setSelecting(false);
@@ -973,6 +977,7 @@
   });
   document.addEventListener('blog:rewriteFinished', function (e) {
     var d = e.detail || {};
+    delete rewritesRunning[Number(d.postId)];
     if (state.chatRewriting == null || Number(d.postId) !== Number(state.chatRewriting)) return;
     // Still running: stays locked, because the worker has yet to write. Closing the article releases it.
     if (d.outcome === 'running') { setBanner('bs-action-status', 'Still working \u2014 close this article and reopen it in a minute to see the new version.', 'info'); return; }
@@ -1056,6 +1061,11 @@
     renderHooks(post);
     setSelecting(false);
     if (state.chatRewriting && Number(state.chatRewriting) !== Number(postId)) { state.chatRewriting = null; aiDraftBusy(false); }
+    if (rewritesRunning[Number(postId)]) {
+      state.chatRewriting = postId;
+      aiDraftBusy(true);
+      setBanner('bs-action-status', 'Your assistant is working on this article… about a minute.', 'info');
+    }
     syncChatPane();
     return state.editor;
   }

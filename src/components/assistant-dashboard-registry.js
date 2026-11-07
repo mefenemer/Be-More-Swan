@@ -369,6 +369,9 @@
       // figure on the Social Media Manager and Lead Generator pages.
       roiSource: 'blog',
       defaultMainTab: 'review-queue',
+      // The chat beside the Blogs list, as on the Social Media Assistant's Posts. An article open in Blog Studio
+      // has its own chat beside it, remembered per article (blog-studio-modal.js).
+      tabChat: { tabs: ['review-queue'], placeholder: 'Ask for an article or a change…' },
       hideDataHub: true,
       // hubTab is retained (used by the Calendar's from/to feed + generic registry readers) even
       // though its tab is hidden; its data model still reads blog_posts.

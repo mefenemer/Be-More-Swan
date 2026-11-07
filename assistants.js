@@ -1100,7 +1100,7 @@ function _resizeBriefAutoGrow() {
 // Set up, Design, Pages and Publish are the Website tab's sub tabs (owner, 2026-11-06). An old name opens that sub tab.
 const _SITE_SUBTAB_OF = { sitesetup: 'setup', sitedesign: 'design', sitepages: 'pages', sitepublish: 'publish' };
 // The chat panel beside a role's work tabs (registry: cfg.tabChat; owner, 2026-11-06: the Social Media Assistant
-// and the Lead Generator). The tabs are moved into ONE box and that box is docked (ChatPane.dock), so switching
+// and the Lead Generator; 2026-11-07: the Blog Writer). The tabs are moved into ONE box and that box is docked (ChatPane.dock), so switching
 // between them keeps the same conversation on screen, mid-sentence. No draftTarget: nothing is open here, so a
 // post drafted in this chat is saved as a new post, as in the pop-up chat. On any other tab the panel steps aside
 // and the page's Chat button opens the pop-up. The view is re-injected per load, so nothing here needs undoing.
