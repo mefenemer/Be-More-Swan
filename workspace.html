@@ -18863,8 +18863,17 @@ async function rqReviewRestorePost() {
         window.showToast?.(err.message || 'The post could not be brought back.', { icon: '⚠️' });
         return;
     }
-    const ids = [postId, ...(_rqReviewGroupIds || []), ...(data.restoredIds || [])];
-    ids.forEach(id => { delete _rqPostCache[id]; });
+    // Update the cached rows in place rather than dropping them: reopening a post that isn't cached
+    // refetches get-social-drafts, which returns only the newest 50 — an old post (staging #26,
+    // drafted 126 days earlier, behind 72 waiting) wasn't in them, and "Bring back" ended on
+    // "That post couldn't be opened".
+    const restored = new Set((data.restoredIds || [postId]).map(Number));
+    restored.forEach(id => {
+        const row = _rqPostCache[id];
+        if (!row) return;
+        Object.assign(row, { status: 'pending_approval', rejectedAt: null, rejectionReason: null, cancelledAt: null, daysRemaining: null });
+        if (data.mediaGone) row.mediaMissing = true;
+    });
     window.showToast?.(data.mediaGone
         ? 'Brought back to Review. Its picture had already been deleted, so add a new one before approving.'
         : 'Brought back — it’s in Review.', { icon: '↩️' });

@@ -139,6 +139,11 @@ async function main() {
         assert.ok(html.includes(`if (post.status === 'rejected' || post.status === 'cancelled') {`));
         assert.ok(html.includes('onclick="rqReviewRestorePost()"'));
         assert.ok(/async function rqReviewRestorePost\(\)[\s\S]{0,800}\/\.netlify\/functions\/restore-post/.test(html));
+        // The cached rows are updated, not dropped: a cold reopen fetches only the newest 50 waiting
+        // posts, so an old post brought back couldn't be reopened (staging #26, 2026-11-07).
+        const fn = html.slice(html.indexOf('async function rqReviewRestorePost()'), html.indexOf('window.rqReviewRestorePost = rqReviewRestorePost;'));
+        assert.ok(fn.includes(`Object.assign(row, { status: 'pending_approval'`));
+        assert.ok(!fn.includes('delete _rqPostCache'));
         // Remove no longer says it can't be undone.
         assert.ok(!html.includes('This cannot be undone from here.'));
     });
