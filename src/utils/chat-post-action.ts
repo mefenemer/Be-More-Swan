@@ -1,6 +1,7 @@
 // src/utils/chat-post-action.ts
 // The Social Media chat's hands on posts that ALREADY exist: approve, reject, try a failed one
-// again, move one to another time, remove one nobody wants, and make one shorter or longer.
+// again, move one to another time, remove one nobody wants, bring back one removed or rejected, and
+// make one shorter or longer.
 //
 // ── Why ──────────────────────────────────────────────────────────────────────────────────────────
 // Every capability is meant to be reachable from the GUI and from chat, through the same server
@@ -15,7 +16,7 @@
 // the model said about the post with what is actually true (its platforms, status, time, wording).
 // The card in disruptive-ui-registry.js shows those facts; only the user's click acts, and the click
 // calls the SAME endpoints the Posts tab does (approve-post, reject-post, retry-failed-post,
-// reschedule-post-chat, scheduled-posts DELETE for remove, rewrite-post-text + scheduled-posts PATCH
+// reschedule-post-chat, scheduled-posts DELETE for remove, restore-post for restore, rewrite-post-text + scheduled-posts PATCH
 // for shorter / longer — the post editor's own two buttons; video-projects `from_post` for video_version, the Review
 // Queue's "Make a video version"), so every gate those apply — a disconnected account, an open compliance
 // warning, a time in the past — applies here too. Nothing here writes.
@@ -34,7 +35,7 @@ import { normalizeCaptionStyle, type CaptionStyle } from '../lib/captions';
 type Db = ReturnType<typeof getDb>;
 
 export const POST_ACTION_PROPOSAL_TYPE = 'post_action_proposal';
-export const POST_ACTIONS = ['approve', 'reject', 'retry', 'reschedule', 'remove', 'shorter', 'longer', 'video_version', 'voiceover', 'captions', 'time_text'] as const;
+export const POST_ACTIONS = ['approve', 'reject', 'retry', 'reschedule', 'remove', 'shorter', 'longer', 'video_version', 'voiceover', 'captions', 'time_text', 'restore'] as const;
 export type PostAction = typeof POST_ACTIONS[number];
 
 /** Which rows each action applies to — the statuses its endpoint accepts. */
@@ -63,6 +64,8 @@ const ACTIONABLE: Record<PostAction, readonly string[]> = {
     voiceover: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
     captions: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
     time_text: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'paused', 'paused_credits', 'failed'],
+    // restore-post.ts (the post editor's "Bring back"): the two statuses of the Archived column.
+    restore: ['rejected', 'cancelled'],
 };
 
 /** Said on the card when the post is not in a state the action applies to. */
@@ -78,6 +81,7 @@ const NOT_NOW: Record<PostAction, string> = {
     voiceover: 'This post can’t change now: it has already gone out, is publishing, or was removed or rejected.',
     captions: 'This post can’t change now: it has already gone out, is publishing, or was removed or rejected.',
     time_text: 'This post can’t change now: it has already gone out, is publishing, or was removed or rejected.',
+    restore: 'Only a post that was removed or rejected can be brought back, and this one wasn’t.',
 };
 
 const TEXT_MAX = 200;

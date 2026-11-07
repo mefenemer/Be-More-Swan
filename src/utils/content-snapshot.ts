@@ -131,6 +131,8 @@ const POST_WORDS: Record<string, string> = {
     // X's own API quota. All three resume on the 1st; the post's failure_reason says which.
     paused_credits: 'paused — X posting is limited until the 1st (the post\'s note says why)',
     failed: 'failed to publish',
+    rejected: 'rejected — can be brought back to Review',
+    cancelled: 'removed — can be brought back to Review',
 };
 
 /**
@@ -174,6 +176,13 @@ export async function buildPostsSnapshot(db: Db, organisationId: number, aiAssis
         );
         const booked = inArray(scheduledPosts.status, [...BOOKED_STATUSES]);
         const failed = and(inArray(scheduledPosts.status, [...ATTENTION_STATUSES]), gte(scheduledPosts.publishDate, since(RECENT_DAYS)));
+        // Removed or rejected recently, so "bring back the post I removed" can name it (restore-post.ts).
+        // A blank composer shell that was thrown away is not a post anyone wants back.
+        const archived = and(
+            inArray(scheduledPosts.status, ['rejected', 'cancelled']),
+            gte(scheduledPosts.updatedAt, since(RECENT_DAYS)),
+            sql`btrim(coalesce(${scheduledPosts.caption}, '')) <> ''`,
+        );
         const cols = {
             id: scheduledPosts.id, platform: scheduledPosts.platform, status: scheduledPosts.status, publishDate: scheduledPosts.publishDate, caption: scheduledPosts.caption,
             failureReason: scheduledPosts.failureReason, qualityReview: scheduledPosts.qualityReview, mediaMissing: scheduledPosts.mediaMissing, mediaMissingNote: scheduledPosts.mediaMissingNote,
@@ -189,6 +198,7 @@ export async function buildPostsSnapshot(db: Db, organisationId: number, aiAssis
             col(inReview, asc(scheduledPosts.publishDate), 'In the "Review" column — waiting for the user to approve'),
             col(booked, asc(scheduledPosts.publishDate), 'In the "Scheduled" column — approved and booked to publish'),
             col(failed, desc(scheduledPosts.publishDate), `In the "Needs attention" column — tried to publish in the last ${RECENT_DAYS} days and stopped`),
+            col(archived, desc(scheduledPosts.updatedAt), `In the "Archived" column — removed or rejected in the last ${RECENT_DAYS} days`),
         ]);
         return renderContentSnapshot({ noun: 'posts', tab: 'Posts', sections, stateWords: POST_WORDS, timezone });
     } catch (err) {

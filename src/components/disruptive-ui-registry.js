@@ -4811,6 +4811,8 @@
     voiceover: { head: 'Add a voiceover', button: 'Make the voiceover', busy: 'Recording the voiceover…' },
     captions: { head: 'Change the captions', button: 'Save the captions', busy: 'Saving…' },
     time_text: { head: 'Time the text to the voice', button: 'Time the text', busy: 'Listening for the words…' },
+    // The post editor's "Bring back" on a removed or rejected post (restore-post.ts).
+    restore: { head: 'Bring this post back', button: 'Bring it back', busy: 'Bringing it back…' },
   };
 
   function renderPostActionProposalCard(ui, esc) {
@@ -4845,6 +4847,7 @@
         </label>` : ''}
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">It’s booked into a free slot in your posting schedule.</p>' : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
+      ${!blocked && ui.action === 'restore' ? '<p class="text-xs text-gray-600 mt-3">It goes back to Review for you to check and approve again. Nothing is posted until you approve it.</p>' : ''}
       ${!blocked && ui.action === 'voiceover' ? `
         <p class="text-xs font-bold text-gray-700 mt-3">What it says</p>
         <p class="text-sm text-gray-900 mt-0.5 break-words">“${esc(ui.script || '')}”</p>

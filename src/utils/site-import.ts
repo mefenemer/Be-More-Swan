@@ -24,6 +24,7 @@ import {
     cleanHref, LIMITS, normaliseSiteDefinition, RESERVED_SLUGS, sectionAllowed, type SectionType, type SiteDefinition,
 } from './site-definition';
 import { chunkBodies } from './site-words';
+import { inlineEmbeds, type EmbedFetchers } from './site-embeds';
 
 /** Pages read at most (home + menu pages), before the plan's own page cap. */
 export const IMPORT_MAX_PAGES = 8;
@@ -554,6 +555,8 @@ export interface ImportDeps {
      * found under IMPORT_THIN_WORDS, i.e. a site that draws its words after the page loads.
      */
     renderHtml?(url: string): Promise<{ ok: true; html: string; finalUrl: string } | { ok: false; message: string }>;
+    /** A builder's own data file (Wix page JSON) — where an embedded HTML box lives (site-embeds.ts). */
+    fetchJson?(url: string): Promise<{ ok: true; html: string; finalUrl: string } | { ok: false; message: string }>;
     /** The model's reply to the plan prompt, parsed — or null when it failed (the import still runs, unplanned). */
     plan(prompt: { system: string; user: string }): Promise<unknown | null>;
     /** Copy one picture into the workspace's library: its asset id, or null when it couldn't be copied. */
@@ -567,8 +570,10 @@ export type ImportOutcome =
     | { ok: false; message: string; report: ImportReport | null };
 
 /** What we say when there is too little to import — honestly, and with the way round it. */
-export function thinMessage(words: number, builder: ImportPage['builder']): string {
-    const how = builder === 'square' || builder === 'other'
+export function thinMessage(words: number, builder: ImportPage['builder'], embedsUnread = 0): string {
+    const how = embedsUnread
+        ? 'Most of your home page sits inside an embedded HTML box that we couldn\'t open.'
+        : builder === 'square' || builder === 'other'
         ? 'It looks like your site draws its words with JavaScript after the page loads, which we can\'t read yet.'
         : 'Your site may be mostly pictures, or draw its words with JavaScript after the page loads, which we can\'t read yet.';
     return `We could only read a little of your site (${words} word${words === 1 ? '' : 's'}), so we haven't made a draft from it — it would be nearly empty. ${how} Paste your text in instead with "Add your own words" on each page, or let your assistant write your site from your business details. Nothing was charged.`;
@@ -613,7 +618,7 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
         prices: [], leftOut: [], notCarried: [], contact: importedContact(read), hadForm: read.some((p) => p.page.hasForm), placeholders: 0,
     });
     if (wordsRead < IMPORT_THIN_SITE_WORDS || (homePage.words < IMPORT_THIN_WORDS && read.length === 1)) {
-        return { ok: false, message: thinMessage(wordsRead, homePage.builder), report: baseReport() };
+        return { ok: false, message: thinMessage(wordsRead, homePage.builder, home.embedsUnread), report: baseReport() };
     }
 
     const { blocks, prices } = numberBlocks(read);
@@ -654,16 +659,28 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
  * JavaScript run. The rendered read is kept only when it found more words; the menu still comes from
  * whichever read had it (a JavaScript menu is read from the rendered page).
  */
-async function readPage(url: string, deps: ImportDeps): Promise<{ ok: true; page: ImportPage } | { ok: false; message: string }> {
+async function readPage(url: string, deps: ImportDeps): Promise<{ ok: true; page: ImportPage; embedsUnread: number } | { ok: false; message: string }> {
     const r = await deps.fetchHtml(url);
     if (!r.ok) return r;
-    const page = readImportPageSafe(r.html, r.finalUrl);
-    if (page.words >= IMPORT_THIN_WORDS || !deps.renderHtml) return { ok: true, page };
+    let page = readImportPageSafe(r.html, r.finalUrl);
+    if (page.words >= IMPORT_THIN_WORDS) return { ok: true, page, embedsUnread: 0 };
+    // Words inside an embedded HTML box (Wix "Embed HTML", site-embeds.ts) — cheaper than a browser,
+    // and a browser wouldn't see them anyway (page.content() is the top document only).
+    const embeds = await inlineEmbeds(r.html, r.finalUrl, embedFetchers(deps));
+    const withEmbeds = embeds.read ? readImportPageSafe(embeds.html, r.finalUrl) : page;
+    if (withEmbeds.words > page.words) page = { ...withEmbeds, navLinks: withEmbeds.navLinks.length ? withEmbeds.navLinks : page.navLinks };
+    const embedsUnread = embeds.found - embeds.read;
+    if (page.words >= IMPORT_THIN_WORDS || !deps.renderHtml) return { ok: true, page, embedsUnread };
     const rendered = await deps.renderHtml(r.finalUrl).catch(() => null);
-    if (!rendered?.ok) return { ok: true, page };
-    const fuller = readImportPageSafe(rendered.html, r.finalUrl);
-    if (fuller.words <= page.words) return { ok: true, page };
-    return { ok: true, page: { ...fuller, navLinks: fuller.navLinks.length ? fuller.navLinks : page.navLinks } };
+    if (!rendered?.ok) return { ok: true, page, embedsUnread };
+    const renderedEmbeds = await inlineEmbeds(rendered.html, r.finalUrl, embedFetchers(deps));
+    const fuller = readImportPageSafe(renderedEmbeds.html, r.finalUrl);
+    if (fuller.words <= page.words) return { ok: true, page, embedsUnread };
+    return { ok: true, page: { ...fuller, navLinks: fuller.navLinks.length ? fuller.navLinks : page.navLinks }, embedsUnread: renderedEmbeds.found - renderedEmbeds.read };
+}
+
+function embedFetchers(deps: ImportDeps): EmbedFetchers {
+    return { html: (u) => deps.fetchHtml(u), json: (u) => (deps.fetchJson ? deps.fetchJson(u) : Promise.resolve({ ok: false as const, message: 'not read' })) };
 }
 
 /** readImportPage, never throwing: a page cheerio can't make sense of reads as empty. */

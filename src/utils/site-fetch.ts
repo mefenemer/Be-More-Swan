@@ -10,13 +10,25 @@ import { safeFetchText, SafeFetchError } from './safe-fetch';
 export type HtmlFetch = { ok: true; html: string; finalUrl: string } | { ok: false; message: string };
 
 export async function fetchSiteHtml(url: string, crawler: Crawler, opts: { timeoutMs: number; maxBytes: number }): Promise<HtmlFetch> {
+    return fetchSite(url, crawler, opts, /html|xml/i);
+}
+
+/**
+ * The same read for a builder's own JSON — a Wix page's data file, which says where its embedded
+ * HTML boxes live (site-embeds.ts). Never the owner's page itself: that is fetchSiteHtml.
+ */
+export async function fetchSiteJson(url: string, crawler: Crawler, opts: { timeoutMs: number; maxBytes: number }): Promise<HtmlFetch> {
+    return fetchSite(url, crawler, opts, /json/i);
+}
+
+async function fetchSite(url: string, crawler: Crawler, opts: { timeoutMs: number; maxBytes: number }, accept: RegExp): Promise<HtmlFetch> {
     try {
         const u = new URL(url);
         if (!(await robotsAllows(u.host, u.pathname + u.search, crawler))) {
             return { ok: false, message: `${u.host} asks crawlers like ours not to read this page (robots.txt), so we didn't.` };
         }
         const res = await safeFetchText(url, { userAgent: crawler.userAgent, timeoutMs: opts.timeoutMs, maxBytes: opts.maxBytes });
-        if (res.contentType && !/html|xml/i.test(res.contentType)) {
+        if (res.contentType && !accept.test(res.contentType)) {
             return { ok: false, message: 'That link isn\'t a web page (it returned a file).' };
         }
         return { ok: true, html: res.body, finalUrl: res.finalUrl };
