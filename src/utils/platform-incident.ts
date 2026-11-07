@@ -2,6 +2,7 @@
 //
 // ONE helper every incident source calls. The trigger is deterministic code at the call site (a job
 // failed after its last retry, a chat turn errored, a Mentor action threw), never the model's opinion.
+// (What an assistant itself noticed is src/utils/assistant-notes.ts, owner's decision 2026-11-07: same queue, source 'suspected'.)
 // Rows go to issue_reports with source 'system', user_id NULL, so the admin portal's Report an Issue
 // queue — and Pass to Developer — works on them unchanged, while no user ever sees or is told about one.
 //
@@ -30,6 +31,15 @@ export const INCIDENT_KINDS = {
     mentor_job: 'Business Mentor background job',
     mentor_review: 'Business Mentor weekly review',
     mentor_morning: 'Business Mentor morning summary',
+    lead_search_job: 'Lead search',
+    video_plan: 'Video storyboard',
+    video_build: 'Video making',
+    media_job: 'AI video',
+    design_round: 'Brand Designer options',
+    site_draft: 'Website drafting',
+    site_import: 'Website import',
+    site_audit: 'Website check',
+    email_draft: 'Email drafting',
 } as const;
 
 export type IncidentKind = keyof typeof INCIDENT_KINDS;

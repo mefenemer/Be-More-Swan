@@ -100,9 +100,9 @@
 
   async function support(d) {
     if (d.destination === 'issue') {
-      await post('/.netlify/functions/issue-reports', { description: `${d.subject}\n\n${d.description}`, sourceLocation: 'Business Mentor chat', sourceUrl: window.location.href });
+      await post('/.netlify/functions/issue-reports', { description: `${d.subject}\n\n${d.description}`, sourceLocation: d.from ? `${d.from} chat` : 'Business Mentor chat', sourceUrl: window.location.href });
     } else {
-      await post('/.netlify/functions/support-tickets', { subject: d.subject, category: 'Business Mentor', description: d.description });
+      await post('/.netlify/functions/support-tickets', { subject: d.subject, category: d.from || 'Business Mentor', description: d.description });
     }
   }
 

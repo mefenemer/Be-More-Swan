@@ -81,6 +81,21 @@ test('Set up, Design, Pages and Publish are sub tabs of Website, with the chat b
     expect(pageErrors).toEqual([]);
 });
 
+test('the chat lines up with the top and bottom of the preview', async ({ page, pageErrors }) => {
+    await page.setViewportSize({ width: 1500, height: 900 });
+    await page.goto('/e2e-website-chat.html');
+    await expect(page.locator('iframe[data-site-preview]')).toBeVisible();
+    const preview = (await page.locator('[data-sb-preview-col] > div').boundingBox())!;
+    const chat = (await page.locator('[data-chatpane]').boundingBox())!;
+    expect(Math.abs(preview.y - chat.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(preview.y + preview.height - (chat.y + chat.height))).toBeLessThanOrEqual(1);
+    // Full screen is on the sub tabs' row, at its right, where every assistant's tab has it.
+    const full = (await page.locator('[data-site-subtabs] [data-site-editor-full]').boundingBox())!;
+    expect(full.x + full.width).toBeGreaterThan(chat.x);
+    await page.screenshot({ path: 'test-results/website-aligned.png' });
+    expect(pageErrors).toEqual([]);
+});
+
 test('preview on the left, the chat docked on the right and open first', async ({ page, pageErrors }) => {
     await page.setViewportSize({ width: 1400, height: 900 });
     await page.goto('/e2e-website-chat.html');

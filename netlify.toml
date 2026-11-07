@@ -338,6 +338,14 @@
   to   = "/invite.html"
   status = 200
 
+# Guest review links: /r/<token> -> shared-review.html (docs/review-link-plan.md). A 200 REWRITE, since
+# the page reads the token off the last path segment. Same rules as /invite above: ":token" = ONE
+# segment, and the page keeps every path root-relative.
+[[redirects]]
+  from = "/r/:token"
+  to   = "/shared-review.html"
+  status = 200
+
 # Phase 1 External Integrations: pretty /api/* routes for the OAuth router and the
 # generic action-sync endpoint. Rewrites (status 200) — the original path survives in
 # event.rawUrl, which oauth-integrations.ts parses for :provider/:action; provider
@@ -843,6 +851,19 @@ node_bundler = "esbuild"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow"
 
+# A private review link must not be indexed, or leak its address to another site.
+[[headers]]
+  for = "/r/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Referrer-Policy = "no-referrer"
+
+[[headers]]
+  for = "/shared-review*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Referrer-Policy = "no-referrer"
+
 # ── auth-guard bindings ─────────────────────────────────────────────────────────
 # Netlify serves every page at BOTH /foo.html and /foo. These two rules used to be the whole
 # binding, and neither matches the extensionless form — so /admin returned the complete admin
@@ -917,6 +938,10 @@ node_bundler = "esbuild"
 [[edge_functions]]
   function = "rate-limit"
   path = "/.netlify/functions/site-audit-public"
+
+[[edge_functions]]
+  function = "rate-limit"
+  path = "/.netlify/functions/review-link-public"
 
 # SC3: Daily task-volume threshold check — 08:00 UTC every day
 # "Import my current site" runs a site's JavaScript in headless Chrome when the plain read finds

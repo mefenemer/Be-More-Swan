@@ -2889,7 +2889,7 @@
       eyebrow: issue ? 'Report a problem to Be More Swan' : 'Message Be More Swan support', summary: ui.summary, why: null,
       bodyHtml: `<div class="mt-2 rounded-lg bg-gray-50 border border-dashed border-gray-300 px-3 py-2"><p class="text-xs font-bold text-gray-900">${esc(String(ui.subject || ''))}</p><p class="text-xs text-gray-700 mt-1 whitespace-pre-line break-words">${esc(String(ui.description || ''))}</p></div>`,
       goLabel: issue ? 'Send report' : 'Send', eventName: 'mentor:support',
-      detail: { destination: issue ? 'issue' : 'support', subject: ui.subject, description: ui.description },
+      detail: { destination: issue ? 'issue' : 'support', subject: ui.subject, description: ui.description, from: typeof ui.from === 'string' ? ui.from : undefined },
       doneText: issue ? 'Sent — follow it under Help & Support ▸ Report an Issue.' : 'Sent — the team will reply by email and in Help & Support.',
       note: 'Only what’s written here is sent, with the page you were on. Nothing else from your workspace.',
     });
@@ -3744,7 +3744,7 @@
           $('[data-sp-more]').innerHTML = '<button type="button" data-sp-again class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Show different ones</button>';
         } else if (!video) {
           say('Creating four for you to choose from — about half a minute…');
-          const res = await call('generate-ai-image', { prompt: desc, aspectRatio: '16:9' });
+          const res = await call('generate-ai-image', { prompt: desc, aspectRatio: '16:9', assistantId: window._currentAssistantId || undefined });
           if (mine !== run) return;
           if (!res.ok) throw new Error(res.body && res.body.error === 'insufficient_credits' ? 'Your monthly tasks are used up — they reset on the 1st.' : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be created.');
           job = res.body.jobId;
@@ -4913,6 +4913,33 @@
       <button type="button" data-redraft-preview class="btn-primary mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">See which posts would be redrafted</button>
       <p class="text-[11px] text-gray-500 mt-2">Nothing changes until you press Redraft.</p>`;
     el.querySelector('[data-redraft-preview]').addEventListener('click', () => window.offerRedraftUpcoming?.(ui.assistantId, { now: true }));
+    return el;
+  });
+
+  // ── Built-in: Share for review (Social Media Assistant chat) ──────────────
+  // { type: 'share_for_review_proposal', summary, postId, postLabel }. The orchestrator checked the
+  // post is this assistant's. Nothing is made or sent until the click (src/components/review-links.js).
+  register('share_for_review_proposal', (ui, esc) => {
+    const postId = Number(ui.postId);
+    if (!Number.isInteger(postId)) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-200 rounded-xl shadow-sm p-4 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Share for review</p>
+      ${ui.postLabel ? `<p class="text-sm font-semibold text-gray-900 mt-1">${esc(String(ui.postLabel).slice(0, 200))}</p>` : ''}
+      ${ui.summary ? `<p class="text-sm text-gray-800 mt-1">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <div data-rl-card-form class="mt-3 space-y-2 text-xs">
+        <label class="block font-semibold text-gray-700">Who's it for? <span class="font-normal text-gray-500">(optional, only you see this)</span>
+          <input type="text" data-rl-label maxlength="80" value="${esc(String(ui.label || '').slice(0, 80))}" class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 font-normal">
+        </label>
+        <label class="block font-semibold text-gray-700">Email it to <span class="font-normal text-gray-500">(optional)</span>
+          <input type="email" data-rl-email maxlength="200" class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 font-normal">
+        </label>
+        <button type="button" data-rl-card-create class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Create link</button>
+        <p class="text-[11px] text-gray-500">Anyone with the link can see this post and respond. Nothing is posted until you approve it.</p>
+      </div>
+      <div data-rl-card-result class="hidden mt-3 text-xs"></div>`;
+    el.querySelector('[data-rl-card-create]').addEventListener('click', () => window.ReviewLinks?.shareCard(postId, el));
     return el;
   });
 

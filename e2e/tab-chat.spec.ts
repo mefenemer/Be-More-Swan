@@ -1,5 +1,5 @@
-// The chat panel beside a role's work tabs (owner, 2026-11-06): the Social Media Assistant's Posts, and the Lead
-// Generator's Searches, All leads and Outreach. One conversation across those tabs; its ✕ closes it and the right-hand
+// The chat panel beside a role's work tabs (owner, 2026-11-06): the Social Media Assistant's Posts, the Blog Writer's
+// Blogs, and the Lead Generator's Searches, All leads and Outreach. One conversation across those tabs; its ✕ closes it and the right-hand
 // menu's Chat brings it back. On any other tab the panel steps aside and Chat opens the pop-up.
 
 import { test, expect, openWorkspace, type ApiStub } from './fixtures';
@@ -118,6 +118,63 @@ test.describe('wide screen', () => {
         await input(page).press('Enter');
         await expect(page.locator('#tabchat-chat-host').getByText('Saved it for review.')).toBeVisible();
         await expect.poll(() => api.called('get-social-drafts').length).toBeGreaterThan(before);
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('Blog Writer: the chat sits beside Blogs and steps aside on the Calendar', async ({ page, api, signedIn, pageErrors }) => {
+        stubRole(api, 'blog_writer');
+        await open(page);
+        await expect(page.locator('#maintab-btn-review-queue')).toHaveAttribute('aria-selected', 'true');
+        await expect(input(page)).toBeVisible();
+        await expect(input(page)).toHaveAttribute('placeholder', 'Ask for an article or a change…');
+        const list = await page.locator('#maintab-review-queue').boundingBox();
+        const chat = await page.locator('#tabchat-chat-col').boundingBox();
+        expect(list!.x + list!.width).toBeLessThanOrEqual(chat!.x);
+
+        await page.locator('#maintab-btn-calendar').click();
+        await expect(input(page)).toBeHidden();
+        await page.locator('#maintab-btn-review-queue').click();
+        await expect(input(page)).toBeVisible();
+        expect(pageErrors).toEqual([]);
+    });
+
+    test('Blog Writer: an article opened mid-rewrite stays locked and shows the rewrite, with its own chat over the list', async ({ page, api, signedIn, pageErrors }) => {
+        stubRole(api, 'blog_writer');
+        const store = { body: 'The old words.', saves: 0 };
+        let finish = false;
+        api.set('blog-posts', () => ({ post: { id: 41, assistantId: 9, title: 'Fresh beans', status: 'draft', bodyMarkdown: store.body }, posts: [] }));
+        api.set('save-widget-config', { config: { publicKey: 'e2e-key' } });
+        api.set('save-blog-draft', (_route, body) => {
+            if (typeof (body as { bodyMarkdown?: string }).bodyMarkdown === 'string') store.saves += 1;
+            return { ok: true, updatedAt: new Date().toISOString() };
+        });
+        api.set('generate-blog', (route) => {
+            if (route.request().method() === 'POST') return { jobId: 'j1' };
+            if (!finish) return { status: 'processing' };
+            store.body = 'The worker wrote this.';
+            return { status: 'completed' };
+        });
+        api.set('chat-orchestrator', { chatSessionId: 9, message: { id: 1, role: 'assistant', content: 'A card is ready.', uiElement: {
+            type: 'blog_action_proposal', action: 'revise', postId: 41, title: 'Fresh beans', status: 'draft', instruction: 'Make it punchier', timezone: 'Europe/London',
+        } } });
+        await open(page);
+        await input(page).fill('Make article 41 punchier');
+        await input(page).press('Enter');
+        await page.locator('#tabchat-chat-host').getByRole('button', { name: 'Rewrite it' }).click();
+        await expect.poll(() => api.called('generate-blog').length).toBeGreaterThan(0);
+
+        await page.evaluate(() => (window as any).openBlogStudio({ postId: 41, assistantId: 9 }));
+        await expect(page.locator('#bs-editor')).toContainText('The old words.');
+        await expect.poll(() => page.locator('#bs-editor').evaluate((e) => (e as HTMLElement).style.pointerEvents)).toBe('none');
+        await expect(page.locator('#bs-chat-host [data-chat-input]')).toBeVisible();
+        const studioChat = page.locator('#bs-chat-host [data-chat-input]');
+        const hit = await studioChat.evaluate((el) => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x + 5, r.y + 5)); });
+        expect(hit).toBe(true);
+
+        finish = true;
+        await expect(page.locator('#bs-editor')).toContainText('The worker wrote this.', { timeout: 15000 });
+        await expect.poll(() => page.locator('#bs-editor').evaluate((e) => (e as HTMLElement).style.pointerEvents)).toBe('');
+        expect(store.saves).toBe(0);
         expect(pageErrors).toEqual([]);
     });
 

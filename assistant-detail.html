@@ -355,7 +355,7 @@
        empty state and CTA rather than hiding, which is what makes the feature discoverable. That is
        also what makes it safe to skeleton on first load. -->
   <!-- "From your team" used to sit here. Removed (owner, 2026-10-16): the same thread is one click
-       away in the chat pop-up's Team switch (assistant-chat-modal.js) and in Notifications → Messages. -->
+       away in the chat pop-up's Team switch (assistant-chat-modal.js) and in Notifications → Team Chat. -->
 
   <div id="goal-progress-card" class="mb-8" style="order:-2">
     <!-- The title and its two actions sit INSIDE the white panel, so "Check again now" and "Manage
@@ -960,14 +960,9 @@
         <button type="button" id="detail-rq-foldall" style="display:none" onclick="window._rqFoldAll()"
           class="hidden text-xs font-bold text-gray-600 hover:text-gray-900 px-1 py-1 cursor-pointer">Show all</button>
         <!-- Full screen, as on the Briefs and Website tabs: this list over the whole page, Esc to leave. -->
-        <button type="button" id="detail-rq-full-btn" onclick="window._rqSetFull(!document.getElementById('maintab-review-queue').hasAttribute('data-rq-full'))"
+        <button type="button" id="detail-rq-full-btn" data-tab-full-btn="review-queue" onclick="window._rqSetFull(!document.getElementById('maintab-review-queue').hasAttribute('data-rq-full'))"
           aria-pressed="false" title="Use the whole screen for this list"
           class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Full screen</button>
-        <!-- Blog Writer only: Search Console and the blog widget, set once for the whole blog
-             (Blog Studio's mode:'setup'). They used to be sections 7–8 of every post's editor. -->
-        <button type="button" id="detail-rq-setup-btn" style="display:none"
-          onclick="window.openBlogStudio && window.openBlogStudio({ mode: 'setup', assistantId: window._currentAssistantId })"
-          class="btn-secondary px-4 py-2 text-sm font-bold rounded-lg border transition cursor-pointer">Blog setup</button>
         <button type="button" id="detail-rq-primary-btn" onclick="openGeneratePostSheet()" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           <span id="detail-rq-primary-label">Assign Task</span>
@@ -1027,9 +1022,14 @@
           data-status="archived" onclick="detailRqOpenStatus('archived', this)">Archived
           <span id="detail-rq-col-count-archived" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
         </button>
+        <!-- Blog Writer only: Search Console and the blog widget, set once for the whole blog
+             (assistants.js _rqOpenBlogSetup). A sub tab, not a stage: no count, and no list behind it. -->
+        <button type="button" role="tab" aria-controls="detail-rq-blog-setup" aria-selected="false" tabindex="-1" id="detail-rq-col-setup" style="display:none" class="detail-rq-col hidden px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+          data-status="setup" onclick="window._rqOpenBlogSetup(this)">Blog setup</button>
       </div>
       <!-- Content -->
       <div id="detail-rq-groups" role="tabpanel" class="px-4 py-2 min-h-[200px]"></div>
+      <div id="detail-rq-blog-setup" role="tabpanel" aria-labelledby="detail-rq-col-setup" class="hidden p-4" style="display:none"></div>
     </div>
 
     <!-- Following up / Replied / Finished — the Lead Generator's conversations, one stage at a time
@@ -2891,13 +2891,17 @@ window._revokeConnection = async function (connectionId, onSuccess) {
   .stage-pills > [role="tab"]:hover { color: #111827 !important; }
   .stage-pills > [role="tab"][aria-selected="true"] { background: #fff; color: #111827 !important; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
   /* Review full screen: over the top bar (z 50), UNDER the post, blog and email pop-ups (70–90) it opens. */
-  #maintab-review-queue[data-rq-full] { position: fixed; inset: 0; z-index: 60; background: #f9fafb; overflow: auto; padding: 16px 20px; }
+  .main-tab-content[data-rq-full] { position: fixed; inset: 0; z-index: 60; background: #f9fafb; overflow: auto; padding: 16px 20px; }
   /* A role's docked chat (assistants.js _setupTabChat) stays beside the list in full screen, as on the Briefs tab. */
-  #tabchat-layout.is-on:has(#maintab-review-queue[data-rq-full]) > .chatpane-dock-col { position: fixed; top: 16px; right: 20px; bottom: 16px; height: auto; width: min(380px, calc(100vw - 40px)); z-index: 61; }
+  #tabchat-layout.is-on:has(.main-tab-content[data-rq-full]) > .chatpane-dock-col { position: fixed; top: 16px; right: 20px; bottom: 16px; height: auto; width: min(380px, calc(100vw - 40px)); z-index: 61; }
   @media (min-width: 1280px) {
-    #tabchat-layout.is-on #maintab-review-queue[data-rq-full] { padding-right: 424px; }
+    #tabchat-layout.is-on .main-tab-content[data-rq-full] { padding-right: 424px; }
+    /* A chat docked INSIDE the tab (Campaigns, the Mentor's): the sticky offset allows for a top bar that is covered now. */
+    .main-tab-content[data-rq-full] .chatpane-dock.is-on > .chatpane-dock-col { top: 0; height: calc(100vh - 32px); }
     /* Beside the chat, All leads' three buttons (they never shrink) squeezed its description into a column one word wide. */
     #tabchat-layout.is-on #datahub-toolbar > div:first-child { flex-direction: column; }
+    /* Stacked, they still end at the right of the tab, where every assistant's Full screen and New are. */
+    #tabchat-layout.is-on #datahub-toolbar > div:first-child > div:last-child { align-self: flex-end; }
   }
   /* A tab strip wider than the screen fades at the edge that has more, so the tabs past it read as
      "scroll for more" rather than not existing. .is-clipped-* is kept current by assistants.js. */

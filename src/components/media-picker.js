@@ -332,7 +332,7 @@
     async function createImage(prompt) {
       showWords([]);
       say(`${who} is creating four for you to choose from…`);
-      const res = await api('generate-ai-image', { method: 'POST', body: JSON.stringify({ prompt, aspectRatio: $('[data-mp-ai-shape]').value }) });
+      const res = await api('generate-ai-image', { method: 'POST', body: JSON.stringify({ prompt, aspectRatio: $('[data-mp-ai-shape]').value, assistantId: window._currentAssistantId || undefined }) });
       if (closed) return;
       if (!res.ok) { say(res.body && res.body.error === 'insufficient_credits' ? creditMessage(res.body) : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be created. Please try again.', true); return; }
       say('Choose the one you like — it\'s saved to your library.');

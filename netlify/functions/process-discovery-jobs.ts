@@ -57,6 +57,7 @@ import {
 } from '../../src/config/discovery-limits';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { hasTaskCapacity, recordCompletedWork } from '../../src/utils/work-metering';
+import { recordPlatformIncident } from '../../src/utils/platform-incident';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -1348,6 +1349,7 @@ async function handleFailure(db: Db, job: JobRow, err: unknown): Promise<void> {
     const newAttempt = job.attempt + 1;
     if (newAttempt >= job.max_attempts) {
         await db.update(discoveryJobs).set({ status: 'failed', attempt: newAttempt, errorMessage: message, updatedAt: new Date() }).where(eq(discoveryJobs.id, job.id));
+        await recordPlatformIncident(db, { kind: 'lead_search_job', error: err, organisationId: job.organisation_id, role: 'lead_qualifier', view: 'process-discovery-jobs', ids: { jobId: job.job_id, attempt: newAttempt } });
     } else {
         const backoff = BACKOFF_SECS[Math.min(job.attempt, BACKOFF_SECS.length - 1)];
         await db.update(discoveryJobs)

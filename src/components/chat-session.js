@@ -1049,7 +1049,9 @@
       } catch (err) {
         respond({ ok: false, error: err.message });
       }
-      if (editor.open) document.dispatchEvent(new CustomEvent('post:actionFinished', { detail: { postIds: ids, action: d.action, ok: done, message: doneMessage } }));
+      // Whether or not it was open when this started: with the list beside a docked chat, the post can be opened
+      // while the action runs. The editor decides whether it is showing this post, and reloads so it can't save the old words back.
+      document.dispatchEvent(new CustomEvent('post:actionFinished', { detail: { postIds: ids, action: d.action, ok: done, message: doneMessage } }));
       // Whatever happened, a row may have changed (a group can half-succeed): repaint the tab behind
       // the chat so it shows the truth.
       window.detailRqRefresh?.();

@@ -279,7 +279,10 @@ const DATED_KIND_META = {
     invoice_due: { icon: '💷', label: 'Invoice due' },
     meeting:     { icon: '🗓', label: 'Meeting' },
     notes_taken: { icon: '📝', label: 'Notes taken' },
-    brief_due:   { icon: '🎨', label: 'Brief due' },
+    brief_received: { icon: '📥', label: 'Brief received' },
+    brief_drafted:  { icon: '🎨', label: 'Options drafted' },
+    brief_approved: { icon: '✅', label: 'Approved' },
+    brief_due:   { icon: '📅', label: 'Brief due' },
     site_check:  { icon: '🔍', label: 'Website check' },
     campaign_start: { icon: '🚀', label: 'Campaign starts' },
     campaign_end:   { icon: '🏁', label: 'Campaign ends' },
@@ -574,8 +577,8 @@ async function _loadDatedItems(t, from, to) {
     if (t.datedSource === 'briefs') {
         const br = await _calPost('brand-briefs', { action: 'calendar', assistantId: t.id, from: _dateKey(from), to: _dateKey(to) });
         const items = br.ok ? ((await br.json()).items || []) : [];
-        // A DATE column: noon local, so it can never slip a day across a timezone.
-        return items.map((i) => ({ key: `b${i.id}`, kind: 'brief_due', title: i.title, at: new Date(`${i.dueDate}T12:00:00`), derived: false, tab: 'briefs', done: i.status === 'approved' }));
+        // brief_due is a DATE column: noon local, so it can never slip a day across a timezone.
+        return items.map((i) => ({ key: `b${i.id}-${i.kind}`, kind: i.kind, title: i.title, at: new Date(i.kind === 'brief_due' ? `${i.at}T12:00:00` : i.at), derived: false, tab: 'briefs', done: i.kind === 'brief_approved' }));
     }
     return [];
 }
@@ -906,7 +909,7 @@ function _renderStatusLegend() {
         `<span class="inline-flex items-center gap-1.5 text-xs text-gray-600"><span aria-hidden="true" class="inline-flex">${marker}</span> ${label}</span>`;
     // The dated kinds this assistant's grid can actually contain — listed only when it has them.
     const datedLegend = () => {
-        const kinds = _datedSource === 'briefs' ? ['brief_due'] : _datedSource === 'campaigns' ? ['campaign_start', 'campaign_end']
+        const kinds = _datedSource === 'briefs' ? ['brief_received', 'brief_drafted', 'brief_approved', 'brief_due'] : _datedSource === 'campaigns' ? ['campaign_start', 'campaign_end']
             : _datedSource === 'records' ? ['invoice_due', 'meeting', 'notes_taken'] : [];
         const role = _roleKey || '';
         const relevant = kinds.filter((k) => _datedSource === 'briefs' || _datedSource === 'campaigns'
@@ -1664,7 +1667,7 @@ function _emptyUpcomingMessage() {
 }
 function _emptyMonthMessage() {
     if (!_lockedAssistant || _publishesContent) return 'Nothing scheduled this month. Approve a draft in Review to put it on the calendar.';
-    if (_datedSource === 'briefs') return 'Nothing this month. Briefs with a due date appear here on that date.';
+    if (_datedSource === 'briefs') return 'Nothing this month. Each brief appears on the day it was received, drafted and approved, and on its due date.';
     if (_datedSource === 'campaigns') return 'Nothing this month. Each campaign appears on the day it starts and the day it ends.';
     const role = _roleKey || '';
     if (role === 'accounts_receivable_clerk') return 'Nothing this month. Invoices appear on their due date once your assistant has them.';

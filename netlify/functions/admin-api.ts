@@ -44,6 +44,7 @@ import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { loadInbox, ticketToIssue, issueToTicket } from '../../src/utils/support-inbox';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
+import { loginLinkParams } from '../../src/utils/login-link';
 import { loadDeliveryReport, listDeliveryProblems } from '../../src/utils/email-delivery';
 import { isAdminRole, hasPermission, requirePermission, permissionsForRole } from '../../src/utils/rbac';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
@@ -505,7 +506,7 @@ export default withLambda(async (event) => {
                 .set({ verificationToken: hashedToken, tokenExpiresAt: expiresAt, updatedAt: new Date() })
                 .where(eq(users.id, uid));
 
-            const loginUrl = `${process.env.BASE_URL || 'https://bemoreswan.com'}/verify-account.html?token=${token}`;
+            const loginUrl = `${process.env.BASE_URL || 'https://bemoreswan.com'}/verify-account.html?token=${token}${loginLinkParams({ plainToken: token, userId: uid })}`;
 
             if (process.env.RESEND_API_KEY) {
                 await resend.emails.send({

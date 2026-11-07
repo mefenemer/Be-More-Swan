@@ -195,6 +195,19 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        templateKey: 'review_link_response',
+        name: 'Review link response',
+        category: 'Assistants',
+        type: 'review_link_response',
+        title: '{{review.guest}} {{review.outcome}}',
+        message: 'A response to the post you shared for review. Open it to see what they said and decide what happens next.',
+        variables: [
+            ASSISTANT_NAME,
+            v('review.guest', 'Name the guest typed', 'Sarah'),
+            v('review.outcome', 'What they did', 'approved it'),
+        ],
+    },
+    {
         // The Mystery Shopper finished a check (src/utils/site-audit.ts executeAuditRun). Only sent
         // for a check that re-scored — an unchanged week is not news. The score is passed as a
         // string ('—' when the page couldn't be scored) so the merge never prints "null".

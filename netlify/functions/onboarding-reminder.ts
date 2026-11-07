@@ -11,6 +11,7 @@ import { and, lt, or, isNull, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, onboardingDrafts, aiAssistants, plans } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
+import { loginLinkParams } from '../../src/utils/login-link';
 import { isEmailAllowedForUser } from '../../src/utils/notification-email-gate';
 
 // ── Onboarding path → HTML page map ──────────────────────────────────────────
@@ -194,7 +195,7 @@ export default async (req: Request): Promise<Response> => {
                 .where(eq(users.id, user.id));
 
             // Build the resume URL — verify.ts will redirect to the right onboarding step
-            const resumeUrl = `${baseUrl}/verify-account.html?token=${plainToken}&intent=resume_onboarding`;
+            const resumeUrl = `${baseUrl}/verify-account.html?token=${plainToken}&intent=resume_onboarding${loginLinkParams({ plainToken, userId: user.id })}`;
 
             // ── Send reminder email ───────────────────────────────────────────
             try {

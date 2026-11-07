@@ -58,6 +58,7 @@ export const SITE_SETUP_KEYS = { goal: 'siteGoal', pages: 'pagesWanted', style: 
 // that don't need the rest of this module); re-exported so existing callers are unchanged.
 export { maxPagesFor, publishedDefinition } from './site-published';
 import { maxPagesFor, publishedDefinition } from './site-published';
+import { recordPlatformIncident } from './platform-incident';
 
 async function businessFacts(db: Db, orgId: number, userId: number | null): Promise<{ facts: BusinessFacts; brandKit: unknown }> {
     const [org] = await db.select({
@@ -270,6 +271,7 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
         }
     } catch (err) {
         console.error('[site-store] draft failed', { siteId, message: err instanceof Error ? err.message : String(err) });
+        await recordPlatformIncident(db, { kind: 'site_draft', error: err, organisationId: site.organisationId, assistantId: site.aiAssistantId, role: 'website_assistant', view: 'site-store', ids: { siteId } });
         await endDraft(db, siteId, 'The draft couldn\'t be completed this time — your site is unchanged and nothing was charged. Try again in a few minutes.').catch(() => {});
     }
 }

@@ -364,6 +364,8 @@
       '@media (max-width: 1023px) { [data-sb-mode="chat"] [data-sb-pane] { order: -1; } [data-sb-mode="edit"] [data-sb-pane] { display: none; } }',
       '[data-sb-mode="edit"] [data-sb-preview-col]:not([data-sb-full]) { display: none; }',
       '[data-sb-chatbox] { height: clamp(460px, calc(100vh - 150px), 880px); }',
+      // An empty row has no margin: the empty note's collapsed through the empty list above the preview and pushed the preview 16px below the chat.
+      '[data-sb-blocks] > :empty { margin-top: 0 !important; margin-bottom: 0 !important; }',
       // Wide screens: the preview sets the height and the chat fills the pane to exactly match it.
       '@media (min-width: 1024px) { iframe[data-site-preview] { height: clamp(408px, calc(100vh - 202px), 828px) !important; }',
       '  [data-sb-mode="chat"] [data-sb-pane] { display: flex; flex-direction: column; }',
@@ -1418,7 +1420,7 @@
   function previewHeadHtml(showImport) {
     return `<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
         <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${showImport ? 'your imported site (not your draft yet)' : state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
-        <div class="flex flex-wrap gap-1">${!showImport && chatAvailable() ? btn(`data-site-pick aria-pressed="${!!picker.on}" title="Click any part of the preview to ask ${esc(state.assistantName || 'your assistant')} to change it"`, `<span aria-hidden="true">🎯</span> ${picker.on ? 'Click a part… (Esc to stop)' : 'Select'}`, picker.on) : ''}<span class="flex gap-1" data-sb-wide-only>${btn(`data-site-device="desktop" aria-pressed="${state.device === 'desktop'}"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile" aria-pressed="${state.device === 'mobile'}"`, 'Phone', state.device === 'mobile')}${state.previewFull ? '' : btn(`data-site-editor-full aria-pressed="${!!state.editorFull}" title="${state.editorFull ? 'Back to the normal view (Esc)' : 'Use the whole window for your website and chat'}"`, state.editorFull ? '<span aria-hidden="true">⤡</span> Exit full screen' : '<span aria-hidden="true">⤢</span> Full screen')}</span></div>
+        <div class="flex flex-wrap gap-1">${!showImport && chatAvailable() ? btn(`data-site-pick aria-pressed="${!!picker.on}" title="Click any part of the preview to ask ${esc(state.assistantName || 'your assistant')} to change it"`, `<span aria-hidden="true">🎯</span> ${picker.on ? 'Click a part… (Esc to stop)' : 'Select'}`, picker.on) : ''}<span class="flex gap-1" data-sb-wide-only>${btn(`data-site-device="desktop" aria-pressed="${state.device === 'desktop'}"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile" aria-pressed="${state.device === 'mobile'}"`, 'Phone', state.device === 'mobile')}</span></div>
         ${state.previewFull ? btn('data-site-preview-close', 'Close preview', true) : ''}
       </div>`;
   }
@@ -1720,7 +1722,9 @@
     const d = state.data || {};
     const fill = (d.placeholders || []).length;
     const unpublished = !!(d.site && d.site.status === 'published' && d.site.unpublishedChanges);
-    return `<div role="tablist" aria-label="Your website" class="inline-flex max-w-full gap-1 p-1 rounded-xl bg-gray-100 mb-4" style="overflow-x:auto;overflow-y:hidden">${SUBTABS.map(([k, label]) => {
+    // Full screen at the right of this row, where every assistant's tab has it (owner, 2026-11-07), not in the preview's header.
+    const full = `<button type="button" data-site-editor-full data-sb-wide-only aria-pressed="${!!state.editorFull}" title="${state.editorFull ? 'Back to the normal view (Esc)' : 'Use the whole window for your website and chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap shrink-0">${state.editorFull ? 'Exit full screen' : 'Full screen'}</button>`;
+    return `<div class="flex items-center justify-between gap-3 mb-4"><div role="tablist" aria-label="Your website" class="inline-flex max-w-full min-w-0 gap-1 p-1 rounded-xl bg-gray-100" style="overflow-x:auto;overflow-y:hidden">${SUBTABS.map(([k, label]) => {
       const on = state.panel === k;
       const mark = k === 'pages' && fill
         ? `<span title="Parts in [square brackets] to fill in" class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center bg-amber-100 text-amber-900">${fill}</span>`
@@ -1729,7 +1733,7 @@
           : '';
       return `<button type="button" role="tab" id="site-subtab-${k}" aria-selected="${on}" aria-controls="site-subtab-panel" tabindex="${on ? 0 : -1}" data-site-subtab="${k}"
         class="site-subtab flex-shrink-0 min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}">${esc(label)}${mark}</button>`;
-    }).join('')}</div>`;
+    }).join('')}</div>${full}</div>`;
   }
   /** Only when something on it changed: redrawing would take the keyboard's place off the tab. */
   function paintSubtabs(host) {

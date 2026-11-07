@@ -182,6 +182,8 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     search_signals_published: 'state_change',
     // A Mystery Shopper check finished (site-audit.ts). A report — nothing is blocked on it.
     site_audit_ready: 'state_change',
+    // A guest responded to a review link. It records a sign-off, and nothing waits on it to publish.
+    review_link_response: 'state_change',
     site_audit_competitor_change: 'state_change', site_audit_goal_met: 'state_change',
     // A Website Assistant draft is ready to look at. Nothing is published by it.
     site_draft_ready: 'state_change',

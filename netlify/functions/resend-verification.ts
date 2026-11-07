@@ -5,6 +5,7 @@ import { getDb, withUpdatedAt } from '../../db/client';
 import { users } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { loginBrowserCookie, loginLinkParams } from '../../src/utils/login-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -22,6 +23,7 @@ export default withLambda(async (event) => {
         // Normalize the email to prevent silent case-mismatch failures
         const email = body.email.trim().toLowerCase();
         const db = getDb();
+        const browser = loginBrowserCookie(event.headers.cookie);
 
         // 1. Find the user by normalized email
         const [existingUser] = await db.select()
@@ -30,7 +32,7 @@ export default withLambda(async (event) => {
             .limit(1);
 
         if (!existingUser) {
-            return { statusCode: 200, body: JSON.stringify({ message: 'If an account exists, a new link has been sent.' }) };
+            return { statusCode: 200, headers: { 'Set-Cookie': browser.setCookie }, body: JSON.stringify({ message: 'If an account exists, a new link has been sent.' }) };
         }
 
         if (existingUser.status === 'active') {
@@ -55,7 +57,7 @@ export default withLambda(async (event) => {
         if (!baseUrl) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
         // Ensure we send the PLAIN token in the URL, not the hash
-        const magicLink = `${baseUrl}/verify-account.html?token=${plainToken}`;
+        const magicLink = `${baseUrl}/verify-account.html?token=${plainToken}${loginLinkParams({ plainToken, userId: existingUser.id, browser: browser.value })}`;
 
         await sendMagicLinkEmail({
             to: email,
@@ -76,6 +78,7 @@ export default withLambda(async (event) => {
 
         return {
             statusCode: 200,
+            headers: { 'Set-Cookie': browser.setCookie },
             body: JSON.stringify({
                 message: 'A new verification link has been sent to your email.'
             }),

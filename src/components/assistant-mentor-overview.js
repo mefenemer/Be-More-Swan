@@ -297,6 +297,7 @@
     if (!state.data) { el.innerHTML = card('<p class="text-sm text-gray-400 animate-pulse">Loading…</p>'); return; }
     const d = state.data;
     el.innerHTML = `
+      <div class="flex items-center justify-between gap-3 mb-3"><h2 class="text-base font-bold text-gray-900 shrink-0">Suggestions</h2><div class="flex flex-wrap items-center justify-end gap-2">${window._tabFullBtn?.('mentor') || ''}</div></div>
       ${suggestionsHtml(d)}
       <p class="text-xs text-gray-600 px-1 mt-4">Need help with Be More Swan? Ask me in chat, or use <button type="button" data-mentor-help class="font-semibold text-pink-700 hover:underline">Help &amp; Support</button>.</p>`;
   }

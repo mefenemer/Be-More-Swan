@@ -39,7 +39,7 @@ check('W8: only a Mentor turn passes the no-plan paywall, never a Team note, and
 check('W8: help-only mode reads the Help Centre and draws nothing but the support card and Take Me There', () => {
     assert.match(ORCH, /const mentorNoPlanBlock = mentorNoPlan \?/);
     assert.match(ORCH, /loadHelpKnowledge\(db\)/);
-    assert.match(ORCH, /myAccountBlock, mentorPointerBlock, mentorNoPlanBlock\]\.filter\(Boolean\)/);
+    assert.match(ORCH, /myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards \? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT\]\.filter\(Boolean\)/);
     // Take Me There (2026-11-02) only opens a page and changes nothing, so it is allowed without a plan too.
     assert.match(ORCH, /if \(mentorNoPlan && !\['mentor_support_request', 'mentor_take_me_there'\]\.includes\(String\(\(uiElement as \{ type\?: unknown \} \| null\)\?\.type\)\)\) uiElement = null;/);
     assert.match(ORCH, /if \(!uiElement && !mentorNoPlan\) uiElement = cardTheUserAskedFor\(typed\);/);

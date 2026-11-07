@@ -43,8 +43,11 @@ import {
     groundFixes, isGrounded, sanitiseRubricAnswers, scoreAudit, suggestionIsLive, type AuditScore, type Lens, type RubricAnswer, type SuggestedFix,
 } from './site-score';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
+import { recordPlatformIncident } from './platform-incident';
 
 type Db = ReturnType<typeof getDb>;
+
+const REVIEW_FAILED_MESSAGE = 'The review couldn\'t be completed this time — nothing was charged. Try again in a few minutes.';
 
 /** Lifecycle states in which an assistant is not a teammate to hand work to (assistant-lifecycle.ts). */
 const INACTIVE_STATES = new Set(['paused', 'system_paused', 'archived']);
@@ -258,7 +261,7 @@ export async function runAuditCore(input: AuditInput, deps: AuditDeps): Promise<
 
     const answered = results.filter((r): r is NonNullable<typeof r> => r !== null);
     if (!answered.length) {
-        return { status: 'failed', error: 'The review couldn\'t be completed this time — nothing was charged. Try again in a few minutes.' };
+        return { status: 'failed', error: REVIEW_FAILED_MESSAGE };
     }
 
     const answers: Partial<Record<Lens, RubricAnswer[]>> = {};
@@ -437,6 +440,8 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
         });
 
         if (outcome.status === 'failed') {
+            // Every lens failing is our fault; a site we couldn't read or a spent allowance isn't.
+            if (outcome.error === REVIEW_FAILED_MESSAGE) await recordPlatformIncident(db, { kind: 'site_audit', error: 'Every lens of the review failed', organisationId: orgId, assistantId: audit.aiAssistantId, role: 'mystery_shopper', view: 'site-audit', ids: { runId } });
             await failAuditRun(db, runId, outcome.error);
             return;
         }
@@ -568,6 +573,7 @@ export async function executeAuditRun(db: Db, runId: number, opts: { emailTo?: s
         }
     } catch (err) {
         console.error('[site-audit] run failed', { runId, message: err instanceof Error ? err.message : String(err) });
+        await recordPlatformIncident(db, { kind: 'site_audit', error: err, organisationId: orgId, role: 'mystery_shopper', view: 'site-audit', ids: { runId } });
         await failAuditRun(db, runId, 'Something went wrong running this check. Nothing was charged — try again.').catch(() => {});
     }
 }

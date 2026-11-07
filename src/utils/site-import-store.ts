@@ -25,6 +25,7 @@ import { runImport, type ImportDeps, type ImportReport, type PictureChoice } fro
 import { claimDraft, definitionOf, endDraft, maxPagesFor, verifySiteAssets, type SiteRow, SITE_WRITE_DEADLINE_MS } from './site-store';
 import { triggerSiteDraft } from './trigger-site-draft';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
+import { recordPlatformIncident } from './platform-incident';
 
 type Db = ReturnType<typeof getDb>;
 export type SiteImportRow = typeof siteImports.$inferSelect;
@@ -186,6 +187,7 @@ export async function runSiteImport(db: Db, siteId: number): Promise<void> {
         }
     } catch (err) {
         console.error('[site-import] import failed', { siteId, message: err instanceof Error ? err.message : String(err) });
+        await recordPlatformIncident(db, { kind: 'site_import', error: err, organisationId: site.organisationId, assistantId: site.aiAssistantId, role: 'website_assistant', view: 'site-import', ids: { siteId } });
         await failImport(db, site.id, 'The import couldn\'t be completed this time — your site is unchanged and nothing was charged. Try again in a few minutes.', null).catch(() => {});
         await endDraft(db, site.id, null).catch(() => {});
     } finally {
