@@ -136,6 +136,9 @@ export const userOrganisations = pgTable("user_organisations", {
       .notNull()
       .references(() => organisations.id, { onDelete: "cascade" }),
   role: text("role").notNull().default("member"),
+  // Which assistants this person can use. NULL = all of them (owners and admins always). A list =
+  // only those ai_assistants ids. src/utils/assistant-access.ts; db/z-member-assistant-access.sql.
+  assistantIds: integer("assistant_ids").array(),
   joinedAt: timestamp("joined_at").defaultNow().notNull(),
 }, (t) => [
   // US-DB-1.3.1: unique membership — prevents duplicate invite rows

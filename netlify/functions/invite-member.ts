@@ -10,6 +10,9 @@
 //      src/utils/team-seats.ts holds the rule
 // SC4: Invite email contains inviter name, org name, role, 7-day expiry link
 // SC6: Resend invalidates the previous link (replaces its pending membership row)
+//
+// assistantIds: which assistants a member or viewer can use (src/utils/assistant-access.ts). Required
+// for a new member or viewer; admins always get every assistant. A resend keeps what was chosen.
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
@@ -19,12 +22,14 @@ import {
     users,
     userOrganisations,
     organisations,
+    aiAssistants,
 } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTeamAllowance, canAddSeat, seatRefusal } from '../../src/utils/team-seats';
 import { signInviteLink } from '../../src/utils/invite-link';
+import { parseRequestedAccess, type AssistantAccess } from '../../src/utils/assistant-access';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret  = process.env.JWT_SECRET;
@@ -58,7 +63,7 @@ export default withLambda(async (event) => {
         .select({ email: users.email, firstName: users.firstName, lastName: users.lastName })
         .from(users).where(eq(users.id, ctx.userId)).limit(1);
 
-    let body: { email?: string; role?: string; resend?: boolean };
+    let body: { email?: string; role?: string; resend?: boolean; assistantIds?: unknown };
     try { body = JSON.parse(event.body || '{}'); } catch {
         return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) };
     }
@@ -76,7 +81,7 @@ export default withLambda(async (event) => {
 
     // Check if they're already an active member
     const [existingMembership] = await db
-        .select({ role: userOrganisations.role, userId: userOrganisations.userId })
+        .select({ role: userOrganisations.role, userId: userOrganisations.userId, assistantIds: userOrganisations.assistantIds })
         .from(userOrganisations)
         .innerJoin(users, eq(userOrganisations.userId, users.id))
         .where(and(
@@ -88,6 +93,30 @@ export default withLambda(async (event) => {
     if (existingMembership && existingMembership.role !== 'invited') {
         return { statusCode: 409, body: JSON.stringify({ error: 'This person is already a member of your workspace.' }) };
     }
+
+    // Which assistants they get. A resend that doesn't say keeps what the first invite chose; a new
+    // member or viewer must have them chosen, never every assistant by default.
+    const workspaceAssistants = await db
+        .select({ id: aiAssistants.id, name: aiAssistants.name })
+        .from(aiAssistants)
+        .where(eq(aiAssistants.organisationId, orgId));
+    let assistantAccess: AssistantAccess;
+    if (body.assistantIds === undefined && existingMembership?.role === 'invited') {
+        assistantAccess = role === 'admin' ? null : (existingMembership.assistantIds ?? null);
+    } else if (body.assistantIds === undefined && role !== 'admin') {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Choose which assistants they can use.', code: 'ASSISTANTS_REQUIRED' }) };
+    } else {
+        const parsed = parseRequestedAccess(role, body.assistantIds, workspaceAssistants.map((a) => a.id));
+        if ('error' in parsed) return { statusCode: 400, body: JSON.stringify({ error: parsed.error }) };
+        assistantAccess = parsed.access;
+    }
+    const assistantNames = assistantAccess === null
+        ? null
+        : workspaceAssistants.filter((a) => assistantAccess!.includes(a.id)).map((a) => a.name);
+    const escapeHtml = (v: string) => v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+    const accessLine = assistantNames && assistantNames.length
+        ? `You'll work with ${assistantNames.map((n) => `<strong>${escapeHtml(n)}</strong>`).join(', ')}.`
+        : '';
 
     // SC3: Workspace Collaboration + seats (src/utils/team-seats.ts). A resend re-uses the seat its
     // pending invite already holds, so only a NEW person is counted. Pending invites count as seats.
@@ -125,6 +154,7 @@ export default withLambda(async (event) => {
             userId:         existingUser.id,
             organisationId: orgId,
             role:           role as any,
+            assistantIds:   assistantAccess,
         }).onConflictDoNothing();
 
         // SC2a: In-app notification
@@ -139,7 +169,7 @@ export default withLambda(async (event) => {
             to: existingUser.email,
             subject: `You've been added to ${orgName} on Be More Swan`,
             html: `<p>Hi ${existingUser.firstName || 'there'},</p>
-                   <p><strong>${inviterName}</strong> has added you to <strong>${orgName}</strong> on Be More Swan as a ${role}.</p>
+                   <p><strong>${inviterName}</strong> has added you to <strong>${orgName}</strong> on Be More Swan as a ${role}. ${accessLine}</p>
                    <p style="margin-top:20px;">
                      <a href="${BASE_URL}/workspace.html" style="background:#10b981;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">
                        Open Workspace →
@@ -185,6 +215,7 @@ export default withLambda(async (event) => {
                 userId: existingUser.id,
                 organisationId: orgId,
                 role: 'invited' as any,
+                assistantIds: assistantAccess,
                 ...(previous ? { joinedAt: previous.joinedAt } : {}),
             }).returning({ id: userOrganisations.id });
             return row.id;
@@ -199,7 +230,7 @@ export default withLambda(async (event) => {
 
         // Pending org membership
         const [row] = await db.insert(userOrganisations).values({
-            userId: newUser.id, organisationId: orgId, role: 'invited' as any,
+            userId: newUser.id, organisationId: orgId, role: 'invited' as any, assistantIds: assistantAccess,
         }).returning({ id: userOrganisations.id });
         invitedMembershipId = row.id;
     }
@@ -224,7 +255,7 @@ export default withLambda(async (event) => {
     <p style="color:#374151;margin:0 0 6px;line-height:1.6">
       <strong>${inviterName}</strong> has invited you to join <strong>${orgName}</strong> on Be More Swan.
     </p>
-    <p style="color:#6b7280;margin:0 0 24px;font-size:14px">You'll be joining as a <strong>${role}</strong>.</p>
+    <p style="color:#6b7280;margin:0 0 24px;font-size:14px">You'll be joining as a <strong>${role}</strong>. ${accessLine}</p>
     <a href="${acceptUrl}" style="display:inline-block;padding:14px 28px;background:#10b981;color:#fff;font-weight:700;text-decoration:none;border-radius:8px;font-size:15px">
       Join ${orgName} on Be More Swan →
     </a>
