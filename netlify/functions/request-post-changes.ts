@@ -85,8 +85,9 @@ export default withLambda(async (event) => {
 
     const now = new Date();
     const jobId = randomUUID();
-    const contextPrompt =
-        `Revise the previous ${post.platform} draft. Keep what worked, but apply this reviewer feedback: ${feedback}`.slice(0, MAX_FEEDBACK);
+    // The feedback is already capped at MAX_FEEDBACK, so the whole of it fits after the lead-in. It
+    // used to be the lead-in PLUS feedback cut to 500, which dropped the end of a long comment.
+    const contextPrompt = `Revise the previous ${post.platform} draft. Keep what worked, but apply this reviewer feedback: ${feedback}`;
 
     // Enqueue the regeneration job targeting the same slot the original draft was aimed at.
     await db.insert(contentGenerationJobs).values({
@@ -102,6 +103,9 @@ export default withLambda(async (event) => {
         triggerType: 'on_demand',
         platform: post.platform,
         targetPublishDate: post.publishDate,
+        // The redraft reads this draft (caption and picture) to change only what the feedback names,
+        // and the review panel follows it so guest comments stay with the new version.
+        revisedFromPostId: postId,
     });
 
     // Remove the superseded draft from the review queue.

@@ -6768,6 +6768,10 @@ export const reviewLinkResponses = pgTable("review_link_responses", {
   body: text("body"),
   contentHash: text("content_hash").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  // The subscriber's own call on a comment: 'done' | 'ignored' | null (db/review-link-response-resolved.sql).
+  resolution: text("resolution"),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: integer("resolved_by").references(() => users.id, { onDelete: "set null" }),
 }, (t) => [
   index("review_link_responses_link").on(t.linkId, t.createdAt),
 ]);

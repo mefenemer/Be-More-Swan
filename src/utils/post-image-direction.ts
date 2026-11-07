@@ -28,6 +28,7 @@
 import { and, desc, eq, inArray, isNotNull, sql } from 'drizzle-orm';
 import { aiAssistants, contentAssets, scheduledPostAssets, scheduledPosts, visualBriefOptions } from '../../db/schema';
 import type { getDb } from '../../db/client';
+import { revisionPictureSection } from './post-revision';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { PLAN_WORDS_RULE, parseImagePlan, planImage, type ImagePlan } from '../lib/image-prompt';
 import { ART_DIRECTION_CRAFT } from '../constants/art-direction-craft';
@@ -71,6 +72,8 @@ export interface PostImageBriefing {
     currentPicturePrompt: string | null;
     /** False where nothing will lay words over the picture (drafting), so no space is left for them. */
     wordsOnPicture?: boolean;
+    /** A redraft answering feedback on the post it replaces (src/utils/post-revision.ts). */
+    revision?: { feedback: string; previousPicturePrompt: string | null } | null;
 }
 
 export function postImageUserPrompt(b: PostImageBriefing): string {
@@ -87,7 +90,9 @@ export function postImageUserPrompt(b: PostImageBriefing): string {
         b.wordsOnPicture === false
             ? 'NO WORDS WILL BE ADDED to this picture: fill the frame, leave no space for text, and return "words": [].'
             : '',
-        b.currentPicturePrompt
+        b.revision ? revisionPictureSection(b.revision.feedback, b.revision.previousPicturePrompt) : '',
+        // A revision says what to change and what to keep; "use a different idea" would undo that.
+        b.currentPicturePrompt && !b.revision
             ? `THE PICTURE ON THIS POST NOW, which they want replaced (use a different idea, not a rewording): ${clip(b.currentPicturePrompt, 300)}`
             : '',
     ].filter(Boolean).join('\n');
@@ -172,6 +177,7 @@ async function writeDirection(db: Db, args: DirectPostImageArgs, usage: { worksp
         messages: [{ role: 'user', content: postImageUserPrompt({
             request: args.request, requestIsCaption: args.requestIsCaption, platform: args.platform,
             ctx, rejections, postFeedback, currentPicturePrompt, wordsOnPicture: args.wordsOnPicture,
+            revision: args.revision ?? null,
         }) }],
         // Short on purpose: FLUX gains nothing from a longer scene, and every word is time out of the
         // budget. The gateway adds room for the thinking on top of this.
@@ -194,6 +200,7 @@ export interface DirectPostImageArgs {
     requestIsCaption: boolean;
     contentAssetIds?: unknown;
     wordsOnPicture?: boolean;
+    revision?: { feedback: string; previousPicturePrompt: string | null } | null;
 }
 
 /** The scene to draw and the words to lay over it, for a post's picture. Never throws. */

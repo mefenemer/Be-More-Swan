@@ -353,6 +353,25 @@ export async function createReviewLink(
     return { ok: true, token, linkId: row.id, expiresAt };
 }
 
+export type ReviewResolution = 'done' | 'ignored';
+
+/**
+ * Signed in. The subscriber marks a guest's comment as done or ignored, or null to bring it back.
+ * Only ever their click: using a comment to redraft does not resolve it.
+ */
+export async function resolveReviewResponse(
+    db: Db, orgId: number, userId: number, responseId: number, resolution: unknown,
+): Promise<boolean> {
+    if (resolution !== null && resolution !== 'done' && resolution !== 'ignored') return false;
+    const rows = await db.update(reviewLinkResponses)
+        .set(resolution
+            ? { resolution, resolvedAt: new Date(), resolvedBy: userId }
+            : { resolution: null, resolvedAt: null, resolvedBy: null })
+        .where(and(eq(reviewLinkResponses.id, responseId), eq(reviewLinkResponses.organisationId, orgId)))
+        .returning({ id: reviewLinkResponses.id });
+    return rows.length > 0;
+}
+
 /** Signed in. Only a link in this workspace can be revoked. */
 export async function revokeReviewLink(db: Db, orgId: number, linkId: number): Promise<boolean> {
     const rows = await db.update(reviewLinks)
@@ -362,7 +381,38 @@ export async function revokeReviewLink(db: Db, orgId: number, linkId: number): P
     return rows.length > 0;
 }
 
-/** Signed in. Links and responses for one post, across its cross-post group, newest first. */
+/** How far back a redraft's comments are followed. Each "Regenerate" is one hop. */
+export const MAX_REVISION_HOPS = 10;
+
+/**
+ * Signed in. For each post, the posts it was redrafted from (revised_from_post_id), nearest first.
+ * A redraft is a NEW post, so without this a guest's comment on the version they saw vanished the
+ * moment the user used it to regenerate. One query per hop for the whole batch.
+ */
+export async function revisionAncestors(db: Db, orgId: number, postIds: number[]): Promise<Map<number, number[]>> {
+    const out = new Map<number, number[]>(postIds.map((id) => [id, []]));
+    const tipOf = new Map<number, number>(postIds.map((id) => [id, id])); // origin → current frontier
+    for (let hop = 0; hop < MAX_REVISION_HOPS && tipOf.size; hop++) {
+        const rows = await db
+            .select({ id: scheduledPosts.id, from: scheduledPosts.revisedFromPostId })
+            .from(scheduledPosts)
+            .where(and(eq(scheduledPosts.organisationId, orgId), inArray(scheduledPosts.id, [...new Set(tipOf.values())])));
+        const parentOf = new Map(rows.map((r) => [r.id, r.from]));
+        for (const [origin, tip] of [...tipOf]) {
+            const parent = parentOf.get(tip);
+            const seen = out.get(origin)!;
+            if (!parent || parent === origin || seen.includes(parent)) { tipOf.delete(origin); continue; }
+            seen.push(parent);
+            tipOf.set(origin, parent);
+        }
+    }
+    return out;
+}
+
+/**
+ * Signed in. Links and responses for one post, across its cross-post group and the drafts it was
+ * redrafted from, newest first.
+ */
 export async function listReviewLinks(db: Db, orgId: number, postId: number) {
     const [post] = await db
         .select({ crosspostGroupId: scheduledPosts.crosspostGroupId })
@@ -374,13 +424,24 @@ export async function listReviewLinks(db: Db, orgId: number, postId: number) {
         ? await db.select({ id: scheduledPosts.id }).from(scheduledPosts).where(and(
             eq(scheduledPosts.organisationId, orgId), eq(scheduledPosts.crosspostGroupId, post.crosspostGroupId)))
         : [{ id: postId }];
+    const ancestors = [...new Set([...(await revisionAncestors(db, orgId, siblings.map((s) => s.id))).values()].flat())];
+    const ancestorGroups = ancestors.length
+        ? await db.select({ group: scheduledPosts.crosspostGroupId }).from(scheduledPosts)
+            .where(and(eq(scheduledPosts.organisationId, orgId), inArray(scheduledPosts.id, ancestors)))
+        : [];
+    const groupIds = [...new Set(ancestorGroups.map((g) => g.group).filter((g): g is string => !!g))];
+    const ancestorSiblings = groupIds.length
+        ? await db.select({ id: scheduledPosts.id }).from(scheduledPosts)
+            .where(and(eq(scheduledPosts.organisationId, orgId), inArray(scheduledPosts.crosspostGroupId, groupIds)))
+        : [];
+    const itemIds = [...new Set([...siblings.map((s) => s.id), ...ancestors, ...ancestorSiblings.map((s) => s.id)])];
     const links = await db
         .select()
         .from(reviewLinks)
         .where(and(
             eq(reviewLinks.organisationId, orgId),
             eq(reviewLinks.itemKind, 'social_post'),
-            inArray(reviewLinks.itemId, siblings.map((s) => s.id)),
+            inArray(reviewLinks.itemId, itemIds),
         ))
         .orderBy(desc(reviewLinks.createdAt));
     if (!links.length) return [];
@@ -407,6 +468,7 @@ export async function listReviewLinks(db: Db, orgId: number, postId: number) {
             body: r.body,
             createdAt: r.createdAt,
             changedSince: currentHash != null && r.contentHash !== currentHash,
+            resolution: r.resolution === 'done' || r.resolution === 'ignored' ? r.resolution : null,
         })),
     }));
 }
@@ -446,10 +508,16 @@ export function linkStatusLabel(link: { firstViewedAt: unknown }, latest: { gues
 export async function reviewStatusForPosts(db: Db, orgId: number, postIds: number[]) {
     const out: Record<number, { label: string; at: string }> = {};
     if (!postIds.length) return out;
+    // A redraft's card shows the response to the version it replaced, as its panel does.
+    const ancestors = await revisionAncestors(db, orgId, postIds);
+    const cardsFor = new Map<number, number[]>();
+    for (const [card, from] of ancestors) {
+        for (const id of [card, ...from]) cardsFor.set(id, [...(cardsFor.get(id) || []), card]);
+    }
     const links = await db
         .select({ id: reviewLinks.id, itemId: reviewLinks.itemId, firstViewedAt: reviewLinks.firstViewedAt, createdAt: reviewLinks.createdAt, revokedAt: reviewLinks.revokedAt, expiresAt: reviewLinks.expiresAt })
         .from(reviewLinks)
-        .where(and(eq(reviewLinks.organisationId, orgId), eq(reviewLinks.itemKind, 'social_post'), inArray(reviewLinks.itemId, postIds)));
+        .where(and(eq(reviewLinks.organisationId, orgId), eq(reviewLinks.itemKind, 'social_post'), inArray(reviewLinks.itemId, [...cardsFor.keys()])));
     if (!links.length) return out;
     const responses = await db
         .select({ linkId: reviewLinkResponses.linkId, guestName: reviewLinkResponses.guestName, decision: reviewLinkResponses.decision, createdAt: reviewLinkResponses.createdAt })
@@ -462,8 +530,10 @@ export async function reviewStatusForPosts(db: Db, orgId: number, postIds: numbe
         const live = !link.revokedAt && new Date(link.expiresAt).getTime() > now;
         if (!latest && !live) continue; // A dead link nobody answered says nothing worth a chip.
         const at = new Date(latest?.createdAt ?? link.createdAt).toISOString();
-        const current = out[link.itemId];
-        if (!current || current.at < at) out[link.itemId] = { label: linkStatusLabel(link, latest), at };
+        for (const card of cardsFor.get(link.itemId) || []) {
+            const current = out[card];
+            if (!current || current.at < at) out[card] = { label: linkStatusLabel(link, latest), at };
+        }
     }
     return out;
 }
