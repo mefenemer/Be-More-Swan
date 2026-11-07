@@ -37,6 +37,7 @@
       const token    = params.get('token');
       const orgId    = params.get('orgId');
       const role     = params.get('role') || 'member';
+      const sig      = params.get('sig') || '';
 
       if (!token || !orgId) {
         showError('Invalid invite link. Please ask your workspace admin to resend the invite.');
@@ -45,7 +46,7 @@
 
       // Redirect to the serverless function which sets cookie + redirects to workspace
       // The function handles the full logic (expiry check, user activation, org join).
-      window.location.href = `/.netlify/functions/accept-invite?token=${encodeURIComponent(token)}&orgId=${encodeURIComponent(orgId)}&role=${encodeURIComponent(role)}`;
+      window.location.href = `/.netlify/functions/accept-invite?token=${encodeURIComponent(token)}&orgId=${encodeURIComponent(orgId)}&role=${encodeURIComponent(role)}&sig=${encodeURIComponent(sig)}`;
     })();
 
     function showError(msg) {

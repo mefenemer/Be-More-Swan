@@ -25,6 +25,7 @@ import { sendEmail } from '../../src/utils/email';
 import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTeamAllowance, canAddSeat, seatRefusal } from '../../src/utils/team-seats';
+import { signInvite } from '../../src/utils/invite-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret  = process.env.JWT_SECRET;
@@ -197,11 +198,11 @@ export default withLambda(async (event) => {
         }).onConflictDoNothing();
     }
 
-    // Store intended role in metadata so accept-invite.ts can apply it
-    // We store it as JSON in the user's existing metadata field or via a custom column.
-    // Since there's no dedicated invitations table, we store role info in tokenExpiresAt + encode
-    // in the URL so accept-invite can apply it. The role is appended as a second param.
-    const acceptUrl = `${BASE_URL}/accept-invite.html?token=${plainToken}&orgId=${orgId}&role=${encodeURIComponent(role)}`;
+    // There is no invitations table, so the workspace and role travel in the URL. The signature stops
+    // them being changed, and stops a login token being used as an invite (src/utils/invite-link.ts).
+    if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
+    const sig = signInvite(plainToken, orgId, role, jwtSecret);
+    const acceptUrl = `${BASE_URL}/accept-invite.html?token=${plainToken}&orgId=${orgId}&role=${encodeURIComponent(role)}&sig=${sig}`;
 
     // SC4: Send invite email with all required content
     sendEmail({
