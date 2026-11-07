@@ -18510,12 +18510,16 @@ function _rqReviewRenderActive() {
     // every scheduled, approved or published post threw "Can't find variable: when" on open.
     const when = post.publishDate ? new Date(post.publishDate).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
     const noteEl = document.getElementById('post-review-archive');
-    if (post.status === 'rejected') {
+    if (post.status === 'rejected' || post.status === 'cancelled') {
+        // Removed ('cancelled') and rejected posts both sit in Archived. A cancelled one used to open
+        // with no note at all, and neither could be brought back (2026-11-07) — see restore-post.ts.
         const days = post.daysRemaining;
         noteEl.className = 'mt-4 text-xs rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-600';
-        noteEl.innerHTML = `<p class="font-semibold text-gray-700">Archived</p>
-          ${post.rejectionReason ? `<p class="mt-0.5">Reason: <span class="italic">"${_rqEsc(post.rejectionReason)}"</span></p>` : ''}
-          <p class="mt-0.5 text-gray-400">${days != null ? `Deletes in ${days} day${days === 1 ? '' : 's'}.` : 'Scheduled for deletion.'}</p>`;
+        noteEl.innerHTML = `<p class="font-semibold text-gray-700">${post.status === 'cancelled' ? 'Removed' : 'Archived'}</p>
+          ${post.status === 'rejected' && post.rejectionReason ? `<p class="mt-0.5">Reason: <span class="italic">"${_rqEsc(post.rejectionReason)}"</span></p>` : ''}
+          ${post.status === 'rejected' ? `<p class="mt-0.5 text-gray-400">${days != null ? `Deletes in ${days} day${days === 1 ? '' : 's'}.` : 'Scheduled for deletion.'}</p>` : ''}
+          <button type="button" id="post-review-restore-btn" onclick="rqReviewRestorePost()" class="btn-secondary mt-2 py-1.5 px-3 text-xs font-bold border rounded-lg cursor-pointer">Bring back</button>
+          <p class="mt-1 text-gray-400">It goes back to Review for you to check and approve again.</p>`;
         noteEl.classList.remove('hidden');
     } else if (post.status === 'scheduled' || post.status === 'approved') {
         noteEl.className = 'mt-4 text-xs rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-blue-700';
@@ -18811,8 +18815,8 @@ async function rqReviewDiscardDraft() {
     // because the difference from Reject is the whole point of the button.
     const ownDraft = (_rqPostCache[_rqReviewPostId] || {}).status === 'draft';
     const ok = await window.confirmModal(ownDraft
-        ? 'This cannot be undone from here.'
-        : 'It disappears from your queue. Your assistant won’t learn anything from it or write a replacement — if it got something wrong, use Reject and redraft instead. This cannot be undone from here.', {
+        ? 'It moves to Archived, where you can open it and bring it back.'
+        : 'It moves to Archived, where you can open it and bring it back. Your assistant won’t learn anything from it or write a replacement — if it got something wrong, use Reject and redraft instead.', {
         title: `Remove ${what}?`,
         confirmLabel: 'Yes, remove it',
         cancelLabel: 'Keep it',
@@ -18836,6 +18840,39 @@ async function rqReviewDiscardDraft() {
     rqRefreshVisibleReviewSurface();
     _rqSessionContinue(ids[0]);
 }
+
+/**
+ * "Bring back" on a removed or rejected post (restore-post.ts): the post and its archived platform
+ * rows go back to Review, and the editor reopens on it so it can be checked and approved.
+ */
+async function rqReviewRestorePost() {
+    const postId = _rqReviewPostId;
+    if (postId == null) return;
+    const btn = document.getElementById('post-review-restore-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Bringing it back…'; }
+    let data = {};
+    try {
+        const res = await fetch('/.netlify/functions/restore-post', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ postId }),
+        });
+        data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
+    } catch (err) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Bring back'; }
+        window.showToast?.(err.message || 'The post could not be brought back.', { icon: '⚠️' });
+        return;
+    }
+    const ids = [postId, ...(_rqReviewGroupIds || []), ...(data.restoredIds || [])];
+    ids.forEach(id => { delete _rqPostCache[id]; });
+    window.showToast?.(data.mediaGone
+        ? 'Brought back to Review. Its picture had already been deleted, so add a new one before approving.'
+        : 'Brought back — it’s in Review.', { icon: '↩️' });
+    rqRefreshVisibleReviewSurface();
+    document.dispatchEvent(new CustomEvent('posts:changed', { detail: {} }));
+    await openPostReview(postId);
+}
+window.rqReviewRestorePost = rqReviewRestorePost;
 
 function closePostReview() {
     window.ScrollLock?.release('post-review');

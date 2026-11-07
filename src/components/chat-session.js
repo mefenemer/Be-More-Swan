@@ -991,6 +991,12 @@
           if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
           if (!(data.cancelledIds || []).length) throw new Error('It had already gone out or been removed.');
           message = 'Removed — it’s in the "Archived" column.';
+        } else if (d.action === 'restore') {
+          // The post editor's "Bring back" — restore-post.ts brings the whole cross-post back.
+          const r = await postActionCall('restore-post', { postId: d.postId });
+          message = r.mediaGone
+            ? 'Brought back to "Review". Its picture had already been deleted, so open the post and add a new one before approving.'
+            : 'Brought back — it’s in the "Review" column, waiting for you to approve it.';
         } else if (d.action === 'shorter' || d.action === 'longer') {
           // The post editor's two buttons, per platform: rewrite-post-text writes the new caption,
           // the editor's own PATCH saves it. A rewrite over a platform's limit is NOT saved — the
