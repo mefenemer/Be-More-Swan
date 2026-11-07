@@ -104,7 +104,7 @@ check('the same two locks as My Content: assistant feature AND plan tier', () =>
 check('the video part of the hold is settled on its own, as video', () => {
     const fn = span(engine, 'export async function endRound', '\n}\n', 'endRound');
     assert.match(fn, /credit_hold_video = 0/, 'zeroed in the same statement as the rest');
-    assert.match(fn, /RETURNING b\.organisation_id, old\.held, old\.held_video/);
+    assert.match(fn, /RETURNING b\.organisation_id, b\.ai_assistant_id, old\.held, old\.held_video/);
     assert.match(fn, /success: outcome\.chargeVideo === true, mediaType: 'video'/, 'absent = refunded');
     const run = span(engine, 'export async function runRound', '\n}\n', 'runRound');
     assert.match(run, /brief\.creditHoldVideo >= VIDEO_CREDIT_COST \? aiVideoOptions/, 'the hold is the authority — no hold, no clip');

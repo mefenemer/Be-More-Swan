@@ -6,7 +6,7 @@
 // `reviewDay`, Monday by default) — dispatchDueReviews, called daily by dispatch-mentor-reviews.ts
 // (production) and run-mentor-review-dispatch.ts (staging, from .github/workflows/staging-crons.yml).
 // A missed day is caught up later the same week. Skipped: Quiet mode, the review switched off, no paid
-// plan (§2.7), or the task allowance used up (§2.1). "Review my week now" (queueReviewNow — the Overview
+// plan (§2.7), or the task allowance used up (§2.1). "Review my week now" (queueReviewNow — the Results
 // tab's button and the chat card, through mentor.ts) runs one on demand for an owner or admin.
 //
 // WHAT IT READS: Results across ACTIVE assistants only (roi-activity.ts, this week against last), goals,
@@ -236,10 +236,10 @@ export function notEnoughDataReview(i: Pick<ReviewInputs, 'data' | 'figures' | '
 }
 
 /**
- * The review is read beside the Overview tab, so every claim is checked against the rest of the page.
+ * The review is read beside the rest of the Mentor's page, so every claim is checked against the rest of the page.
  * Each rule is one contradiction found on staging, 27 Oct (Nova's "Week of 26 Oct" review).
  */
-export const REVIEW_CONSISTENCY_RULES = `CONSISTENCY — the owner reads this beside the rest of your Overview tab, so it must agree with itself and with the blocks above:
+export const REVIEW_CONSISTENCY_RULES = `CONSISTENCY — the owner reads this beside the rest of your page, so it must agree with itself and with the blocks above:
 - Name an assistant as producing work only if its figure THIS WEEK is above 0. One with 0 is "not producing yet", never in a list of those producing.
 - Use each figure's own unit from its breakdown ("social posts", "leads", "newsletter issues"); never "items".
 - The two-sentence summary names only what the sections stand behind. Something a section calls "not a trend yet" is never a headline.
@@ -419,7 +419,7 @@ export async function triggerMentorReview(reviewId: number): Promise<boolean> {
 
 export type QueueReviewResult = { ok: true; review: ReviewView } | { ok: false; status: number; error: string; code?: string };
 
-/** "Review my week now" — the Overview tab's button (mentor.ts `review_now`). Owners and admins only (§2.5). */
+/** "Review my week now" — the Results tab's button (mentor.ts `review_now`). Owners and admins only (§2.5). */
 export async function queueReviewNow(db: Db, orgId: number, userId: number, role: string | null | undefined, now = new Date()): Promise<QueueReviewResult> {
     if (!REVIEW_ROLES.includes(String(role))) return { ok: false, status: 403, error: 'Only the workspace owner or an admin can ask for a review — it goes to them.' };
     if (await isGlobalAiDisabled()) return { ok: false, status: 503, error: 'AI services are temporarily unavailable. Please try again later.' };
@@ -681,5 +681,5 @@ export function mentorReviewLink(base: string, mentorId: number, chatSessionId: 
 export function renderReviewSettingsForMentor(mentorId: number, ctx: unknown): string {
     const st = reviewSettings(ctx);
     const state = st.quiet ? 'off while Quiet mode is on' : st.on ? `on, every ${st.day[0].toUpperCase()}${st.day.slice(1)}` : 'switched off';
-    return `YOUR WEEKLY REVIEW: ${state}. It goes to the workspace's owners and admins, in their chat with you, and its suggestions also wait in Notifications ▸ Needs you; how each is told is "Business Mentor weekly review" in My Account ▸ Notifications. An owner or admin can ask for one now with "Review my week now" on your Overview tab (1 task). To change the day or switch it off when they ask, use setup_field_proposal with assistantId ${mentorId} and key "reviewDay" ("Monday" … "Sunday") or "weeklyReview" ("on" / "off"), "asked": true.`;
+    return `YOUR WEEKLY REVIEW: ${state}. It goes to the workspace's owners and admins, in their chat with you, and its suggestions also wait in Notifications ▸ Needs you; how each is told is "Business Mentor weekly review" in My Account ▸ Notifications. An owner or admin can ask for one now with "Review my week now" on your Results tab (1 task). To change the day or switch it off when they ask, use setup_field_proposal with assistantId ${mentorId} and key "reviewDay" ("Monday" … "Sunday") or "weeklyReview" ("on" / "off"), "asked": true.`;
 }

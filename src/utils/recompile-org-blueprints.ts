@@ -7,7 +7,7 @@
 // compiled, and drafting reads the snapshot: blog-generate.ts takes the newest blueprint, social
 // jobs carry a blueprint id. Nothing recompiled on an asset change — only a rule, goal or profile
 // edit did — so a brand guide uploaded after an assistant's first draft never reached its drafts,
-// while the Brand Knowledge card said it was "applied as a strict rule" (owner, 2026-10-23).
+// while the "Your brand" card said it was "applied as a strict rule" (owner, 2026-10-23).
 //
 // Workspace assets are org-wide, so every assistant in the org that already has a blueprint is
 // recompiled. Assistants with none compile on their first draft anyway, from current data.

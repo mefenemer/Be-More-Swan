@@ -3092,6 +3092,14 @@ export const aiCreditLedger = pgTable("ai_credit_ledger", {
   index("ai_credit_ledger_assistant_idx").on(t.organisationId, t.assistantId, t.createdAt),
 ]);
 
+// Delivered chat replies per month, for 1 task per 10 (db/z-chat-task-tally.sql, src/utils/basic-work.ts).
+export const chatTaskTally = pgTable("chat_task_tally", {
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  periodStart: timestamp("period_start").notNull(),
+  messages: integer().notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [primaryKey({ columns: [t.organisationId, t.periodStart] })]);
+
 // One task allowance (db/task-ledger.sql, docs/task-metering.md): what every task paid for.
 // usage_counters.task_count is the fast counter; this is the itemised breakdown behind it.
 export const taskLedger = pgTable("task_ledger", {
@@ -5460,6 +5468,17 @@ export const visualBriefs = pgTable("visual_briefs", {
   check("visual_briefs_status_check", sql`${t.status} IN ('open','generating','in_review','approved','cancelled')`),
   check("visual_briefs_origin_check", sql`${t.origin} IN ('user','chat','campaign','assistant')`),
 ]);
+
+// Saved designs a workspace can start from (db/z-design-templates.sql, src/utils/design-templates.ts).
+export const designTemplates = pgTable("design_templates", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  name: text().notNull(),
+  design: jsonb().notNull(),
+  createdBy: integer("created_by"),
+  createdAt: timestamp("created_at", { mode: 'date' }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { mode: 'date' }).defaultNow().notNull(),
+});
 
 export const visualBriefOptions = pgTable("visual_brief_options", {
   id: serial().primaryKey(),

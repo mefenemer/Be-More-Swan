@@ -36,7 +36,7 @@ check('every role\'s Goals tab is "Results" and holds its results — goal-less 
 });
 
 check('the move keeps the cards\' ids and puts them above the goals list', () => {
-    assert.match(page, /<div id="performance-metrics-card" class="mb-8" style="order:-1">/);
+    assert.match(page, /<div id="performance-metrics-card" data-fold-section class="mb-8" style="order:-1">/);
     const apply = js.slice(js.indexOf('const goalsTab = cfg.goalsTab ||'), js.indexOf('const showDataHub'));
     assert.match(apply, /\['goal-progress-card', 'performance-metrics-card', 'autopilot-status-card'\]/);
     assert.match(apply, /panel\.insertBefore\(card, goalsList\)/);

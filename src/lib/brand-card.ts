@@ -14,9 +14,7 @@
 // Two polarities, per the brief: 'light' = brand type on a light canvas, 'bold' = light type on a
 // brand-colour field. Which one a given post gets is decided by pickVariant() below.
 
-import satori from 'satori';
-import { Resvg } from '@resvg/resvg-js';
-import { brandCardFonts, BRAND_CARD_FONT_FAMILY } from './brand-card-fonts';
+import { BRAND_CARD_FONT_FAMILY, rasterLibs } from './render-libs';
 import { loadWebFont } from './brand-card-webfont';
 import {
     contrastRatio, readableInkOn, MIN_DISPLAY_CONTRAST,
@@ -343,9 +341,10 @@ export async function renderBrandCard(opts: {
 
     // The org's own display font when we can serve it, the bundled family otherwise. Both are
     // fetched together — a slow logo host shouldn't serialise behind a slow font CDN.
-    const [logoSrc, webFont] = await Promise.all([
+    const [logoSrc, webFont, { satori, Resvg, brandCardFonts }] = await Promise.all([
         opts.kit.logoUrl ? inlineLogo(opts.kit.logoUrl) : Promise.resolve(null),
         loadWebFont(opts.kit.fontFamily),
+        rasterLibs(),
     ]);
     // The bundled family stays registered as a fallback so a glyph missing from the web font
     // (a curly quote, an accent) still draws instead of becoming a blank box.

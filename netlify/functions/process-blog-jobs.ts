@@ -33,6 +33,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { isUpstreamBlocked } from '../../src/lib/ai-gateway';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 import { recordPlatformIncident } from '../../src/utils/platform-incident';
+import { chargeHelper } from '../../src/utils/basic-work';
 
 const BACKOFF_SECS = [30, 120, 300];
 /**
@@ -281,6 +282,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
                 .set({ status: 'completed', errorMessage: null, updatedAt: new Date() })
                 .where(eq(contentGenerationJobs.id, job.id));
             jobCompleted = true;
+            await chargeHelper(db, job.organisation_id, job.assistant_id, job.job_id);
             console.log(`[process-blog-jobs] job ${job.job_id}: resized post ${job.result_blog_post_id} ${resize ?? 'revise'} (${before} → ${after} words)`);
             return;
         }

@@ -291,7 +291,7 @@
     // `collapsed` holds the group headings the user has folded shut. A Set, and part of the
     // view rather than the DOM, for the same reason `selected` is: paintRows() rewrites every
     // row on each keystroke, so a fold recorded in the markup would spring open as you typed.
-    view: { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, collapsed: new Set() },
+    view: { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, opened: new Set() },
     // Ids ticked for a bulk action. A Set of record ids rather than DOM state, because rows are
     // re-rendered on every filter keystroke and after every PATCH.
     selected: new Set(),
@@ -2814,7 +2814,7 @@
       // Folds belong to the column they were made in: "Rejected" folded under Approval must not
       // silently fold a Rating group that happens to share a label. A different grouping is a
       // different set of headings, so it starts open.
-      state.view.collapsed.clear();
+      state.view.opened.clear();
       resetPage();
       paintRows();
     });
@@ -2824,7 +2824,7 @@
       state.view.filters = {};
       state.view.groupKey = null;
       state.view.sortKey = null;
-      state.view.collapsed.clear();
+      state.view.opened.clear();
       resetPage();
       state.selected.clear();
       renderTable();                                  // the controls themselves have to reset too
@@ -2928,7 +2928,8 @@
       // A group is FOLDED by its label, not its index. Grouping by Approval and folding "Rejected"
       // has to keep that group shut when the sort order moves it, when a filter shrinks it, and
       // when the tab refetches — all of which reorder the array underneath it.
-      const collapsed = group.label !== null && state.view.collapsed.has(group.label);
+      // Groups start closed (owner, 2026-11-06): their headings are the list until one is opened.
+      const collapsed = group.label !== null && !state.view.opened.has(group.label);
       if (group.label !== null) {
         const head = document.createElement('tr');
         head.className = 'bg-gray-50';
@@ -2945,8 +2946,8 @@
           </button>
         </td>`;
         head.querySelector('[data-hub-group-toggle]').addEventListener('click', () => {
-          if (state.view.collapsed.has(group.label)) state.view.collapsed.delete(group.label);
-          else state.view.collapsed.add(group.label);
+          if (state.view.opened.has(group.label)) state.view.opened.delete(group.label);
+          else state.view.opened.add(group.label);
           // Repaint rather than hide the rows in place: each row carries a sibling <tr> holding its
           // (lazily built) detail panel, and toggling two <tr>s per row by hand is how one of them
           // ends up visible on its own.
@@ -3994,7 +3995,7 @@
     // A different assistant is a different table: its columns, its vocabularies, and any row the
     // user had ticked all belong to the one being left. refresh() deliberately does NOT do this —
     // returning to a tab you had filtered should find it as you left it.
-    state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, collapsed: new Set() };
+    state.view = { search: '', filters: {}, sortKey: null, sortDir: 'asc', groupKey: null, page: 1, opened: new Set() };
     state.selected.clear();
     // Same reasoning as the view reset above: a different assistant is a different table, and both
     // the graveyard and the last send-back outcome belong to the one being left.
@@ -4038,5 +4039,7 @@
     if (state.hub && state.hub.recordType === 'campaign_order') refresh();
   }
 
-  window.AssistantDataHub = { init, refresh, activate, focusRecord, openRecordModal, editLead: openEditLeadModal };
+  // The name is read when something is drawn from now on (assistants.js _assistantRenamed): no repaint of the table.
+  const rename = (name) => { state.assistantName = name || state.assistantName; };
+  window.AssistantDataHub = { rename, init, refresh, activate, focusRecord, openRecordModal, editLead: openEditLeadModal };
 })();

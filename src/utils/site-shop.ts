@@ -25,7 +25,9 @@ import { aiAssistants, orgProducts, siteOrders, sites, stripeConnectAccounts, us
 import { createNotification } from './notify';
 import { sendEmail } from './email';
 import { checkRateLimit } from './rate-limit';
-import { getStripe } from './stripe';
+// Stripe's SDK (~0.7 MB) loads on first use, not at cold start: site-store.ts imports this module for
+// connectAccountFor, and chat-orchestrator imports site-store. See src/lib/render-libs.ts.
+const stripeClient = async () => (await import('./stripe')).getStripe();
 import { currentEnv } from './env-context';
 import { esc, formatPrice, FORM_SENT_PATH } from './site-render';
 import type { SiteDefinition } from './site-definition';
@@ -81,7 +83,7 @@ async function announcePaymentsReady(db: Db, orgId: number): Promise<void> {
  * owner to. Creates the Standard account the first time. Owner/admin only (sites.ts checks).
  */
 export async function connectOnboardingLink(db: Db, opts: { orgId: number; userId: number; email: string | null; returnUrl: string; refreshUrl: string }): Promise<string> {
-    const stripe = getStripe();
+    const stripe = await stripeClient();
     let row = await connectAccountFor(db, opts.orgId);
     if (!row) {
         const account = await stripe.accounts.create({
@@ -106,7 +108,7 @@ export async function connectOnboardingLink(db: Db, opts: { orgId: number; userI
 export async function refreshConnectAccount(db: Db, orgId: number): Promise<ConnectRow | null> {
     const row = await connectAccountFor(db, orgId);
     if (!row) return null;
-    const account = await getStripe().accounts.retrieve(row.stripeAccountId);
+    const account = await (await stripeClient()).accounts.retrieve(row.stripeAccountId);
     return (await syncConnectAccount(db, account)) ?? row;
 }
 
@@ -218,7 +220,7 @@ export async function startCheckout(db: Db, req: BuyRequest): Promise<BuyOutcome
         console.error('[site-shop] rate limiter unavailable — allowing the checkout', err);
     }
     try {
-        const session = await getStripe().checkout.sessions.create(
+        const session = await (await stripeClient()).checkout.sessions.create(
             checkoutParams({
                 origin: req.origin, site: req.site, sectionId, product, collectAddress: section.props.collectAddress, backPath: back,
                 imageUrl: product.imageAssetId ? (req.assetUrl?.(product.imageAssetId) ?? null) : null,

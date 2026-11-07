@@ -74,6 +74,27 @@ check('Email Studio drafts and rewrites are metered, charged after the model ret
         'generate charges before the draft exists');
 });
 
+check('charges are credited to the assistant that did the work', () => {
+    const credited: Array<[string, RegExp]> = [
+        ['src/utils/visual-briefs.ts', /mediaType: 'image', userId: outcome\.userId \?\? null, assistantId: row\.ai_assistant_id/],
+        ['src/utils/visual-briefs.ts', /mediaType: 'video', userId: outcome\.userId \?\? null, assistantId: row\.ai_assistant_id/],
+        ['src/utils/flyer-words.ts', /'flyer_words', \{.*assistantId: brief\.aiAssistantId/],
+        ['src/utils/design-options.ts', /'background_removal', \{.*assistantId:/],
+        ['netlify/functions/process-discovery-jobs.ts', /'lead_search', \{[^}]*assistantId:/],
+        ['netlify/functions/draft-newsletter-issues.ts', /'email_issue', \{[^}]*assistantId: a\.id/],
+        ['netlify/functions/newsletter-issues.ts', /'email_issue', \{[^}]*assistantId: issue\.assistantId/],
+        ['src/utils/campaign-email-order.ts', /'email_campaign', \{[^}]*assistantId: target\.id/],
+        ['src/utils/site-audit.ts', /'site_audit', \{[^}]*assistantId: audit\.aiAssistantId/],
+        ['src/utils/site-import-store.ts', /'site_draft', \{[^}]*assistantId: site\.aiAssistantId/],
+        ['src/utils/site-store.ts', /'site_draft', \{[^}]*assistantId: site\.aiAssistantId/],
+        ['src/utils/site-store.ts', /'site_words', \{[^}]*assistantId: site\.aiAssistantId/],
+        ['netlify/functions/regenerate-post-media.ts', /success: true, mediaType: 'image', userId, assistantId: post\.assistantId/],
+        ['src/utils/blog-add-images.ts', /success: true, mediaType: 'image', userId: opts\.userId, assistantId: post\.assistantId/],
+        ['netlify/functions/generate-voiceover.ts', /mediaType: 'voiceover', userId, jobId: made\.jobId, assistantId:/],
+    ];
+    for (const [file, pattern] of credited) assert.match(read(file), pattern, file);
+});
+
 check('admin test generations are never charged to the tenant', () => {
     assert.match(read('netlify/functions/process-content-jobs.ts'), /if \(!isAdminTest\) await recordCompletedWork/);
 });

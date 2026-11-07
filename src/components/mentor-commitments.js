@@ -145,6 +145,8 @@
   document.addEventListener('mentor:commitmentsChanged', () => { if (host() && state.data) load(); });
 
   window.MentorCommitments = {
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; render(); },
     init({ assistantName }) {
       state.assistantName = assistantName || 'Your Mentor';
       state.data = null; state.error = null; state.note = null; state.openMiss = null; state.busy = false;

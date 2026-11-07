@@ -229,7 +229,7 @@ const SOURCES = [
     },
 ];
 
-// When this grid is rendered inside the Assistant Profile slide-over (assistant-detail.html),
+// When this grid is rendered inside the Assistant Settings slide-over (assistant-detail.html),
 // every connector popup opens on top of a drawer that is still covering the right half of the
 // screen — and the modals are z-50 against the drawer's z-9001, so they render behind it.
 // Close the drawer first: the popup becomes the one thing on screen, and the drawer's own

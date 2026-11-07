@@ -64,6 +64,9 @@
  *                //   with hideGoals still gets the tab, with its cards and no goals section.
  *   cfg.resultsTabAfter // → optional tab key (e.g. 'review-queue'); the Results tab is moved to sit
  *                //   straight after that tab instead of its default place before Activity.
+ *   cfg.tabChat // → optional { tabs, placeholder }: the chat panel docked beside these main tabs, one
+ *                //   conversation across them (assistants.js _setupTabChat). A role with its own dock
+ *                //   (Briefs, Videos, Campaigns, Mentor) leaves this out.
  *   cfg.inspoTab // → optional Inspo tab config (assistant-inspo.js); the content roles
  *                //   (social_media_manager, blog_writer) only — { label, description }
  *   cfg.myContentTab // → optional My Content tab config (assistant-my-content.js); the content
@@ -125,6 +128,7 @@
       // landing tab (defaultMainTab) so users open straight into their content pipeline.
       reviewQueue: { kind: 'posts', label: 'Posts' },
       defaultMainTab: 'review-queue',
+      tabChat: { tabs: ['review-queue'], placeholder: 'Ask for a post or a change…' },
       // The old "Content Library" Data Hub tab is retired for social — the Posts pipeline is the
       // single home for every drafted/scheduled/published post, so the separate library tab is hidden.
       hideDataHub: true,
@@ -649,6 +653,8 @@
       // Rules tab: read by every AI draft of the site and by its chat (site-store.ts, RULE_READING_ROLES).
       rulesScope: 'site',
       defaultMainTab: 'sitebuilder',
+      // The card beside the hero: enquiries, orders and bookings to deal with (assistant-site-editor.js).
+      needsYou: { tab: 'siteenquiries', where: 'Enquiries' },
     },
 
     // Mystery Shopper (docs/mystery-shopper-plan.md §4). Its work is CHECKS of the business's website
@@ -656,14 +662,14 @@
     // every social module is off and the Review Queue / Data Hub are hidden — its review surface is
     // the fix list on the Website tab, and its history is the checks listed there.
     business_mentor: {
-      // docs/business-mentor-plan.md. Phase 1a: Overview (set-up checklist, "What I can see",
-      // Dismissed suggestions — the §14 screen twins of its chat cards), Results and Activity; chat
+      // docs/business-mentor-plan.md. Suggestions (what it produces, by stage — the §14 screen
+      // twin of its chat cards), Results and Activity; chat
       // from the header button. It publishes nothing, so no review queue, data hub, posting schedule
       // or content modules.
       // ⚠️ Rename this tab and businessMentorSurfaces() in chat-orchestrator.ts must change too
       // (tests/mentor-page.test.ts).
       mentorTab: {
-        label: 'Overview',
+        label: 'Suggestions',
       },
       // Phase 2 (§4): the idea check, business and marketing plans, break-even calculator, research and
       // the playbook in use (assistant-mentor-plan.js → mentor.ts ?plan=1). Same rename rule as above.
@@ -673,6 +679,8 @@
       // Phase 3 (§5.1): the Commitments list at the top of its Results tab (mentor-commitments.js).
       mentorCommitments: true,
       defaultMainTab: 'mentor',
+      // The card beside the hero: its suggestions waiting (assistant-mentor-overview.js feeds it).
+      needsYou: { tab: 'mentor', where: 'Suggestions' },
       hideReviewQueue: true,
       hideDataHub: true,
       hideGoals: true,
@@ -733,6 +741,8 @@
       // Rules tab: read by its chat AND by the rewrites every check suggests (site-audit.ts).
       rulesScope: 'audit',
       defaultMainTab: 'website',
+      // The card beside the hero: suggested fixes not decided on (assistant-site-audit.js).
+      needsYou: { tab: 'website', where: 'Website' },
     },
 
     lead_qualifier: {
@@ -1051,6 +1061,8 @@
       // should see first. Stated explicitly rather than relying on _activateDefaultMainTab's
       // "first visible tab" fallback, which gave the right answer only by accident of tab order.
       defaultMainTab: 'signals',
+      // Searches, All leads and Outreach: the Lead Generator's working tabs, with one conversation across them.
+      tabChat: { tabs: ['signals', 'datahub', 'review-queue'], placeholder: 'Ask about your leads…' },
       // ⚠️ There is no `memoryPanel` key any more, and re-adding one wires up nothing — the
       // component is deleted. It declared the "Ask your memory" panel that sat above this tab's
       // table (Phase 3 §5.5): an account picker, a question box and an Ask button, answering from

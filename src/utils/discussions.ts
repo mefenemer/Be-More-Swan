@@ -17,7 +17,6 @@
 // the person posts it themselves. See src/config/discussion-sites.ts for why that is the design.
 
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
-import * as cheerio from 'cheerio';
 import type { getDb } from '../../db/client';
 import { aiAssistants, discussions, discussionWatches } from '../../db/schema';
 import {
@@ -40,6 +39,7 @@ import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work
 import { meterInteraction } from './task-credit';
 import { isGlobalAiDisabled } from './platform-config';
 import { resolveBaseUrl } from './base-url';
+import { chargeHelper } from './basic-work';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -219,6 +219,9 @@ async function readThread(url: string): Promise<string> {
         const u = new URL(url);
         if (!(await robotsAllows(u.hostname, u.pathname, CRAWLERS.leadDiscovery))) return '';
         const { body } = await safeFetchText(url, { timeoutMs: PAGE_FETCH_MS, maxBytes: PAGE_MAX_BYTES, userAgent: CRAWLERS.leadDiscovery.userAgent });
+        // cheerio (and undici, parse5, iconv-lite under it) loads on the first scan, not at cold start:
+        // chat-orchestrator imports this module for its Discussions snapshot. See src/lib/render-libs.ts.
+        const cheerio = await import('cheerio');
         const $ = cheerio.load(body);
         $('script, style, noscript, svg, nav, header, footer').remove();
         return $('body').text().replace(/\s+/g, ' ').trim().slice(0, THREAD_TEXT_CHARS);
@@ -474,6 +477,7 @@ export async function suggestTopicWording(
     const [sender, roleKey] = await Promise.all([loadDiscussionSender(db, organisationId, assistantId), roleKeyOfAssistant(db, assistantId)]);
     const modelChoice = await loadRoleModel(db, roleKey ?? 'lead_qualifier');
     const suggestions = await improveTopicWording(list, sender, w.sites.map((s) => sourceInfo(s).label), modelChoice, { workspaceId: organisationId, assistantId });
+    if (suggestions) await chargeHelper(db, organisationId, assistantId, `topic-wording-${assistantId}`);
     return suggestions ? { ok: true, suggestions } : { ok: false, status: 502, error: 'I couldn’t suggest new wording just now — please try again.' };
 }
 

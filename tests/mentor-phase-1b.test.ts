@@ -285,8 +285,8 @@ test('hire: the card, the "Recommended next" panel and the catalogue badge read 
     assert.match(fn, /only === 'recommended'[\s\S]{0,300}findMentor\(db, orgId\)[\s\S]{0,200}recommendHires\(/);
     assert.match(read('assistant-catalogue.html'), /fetch\('\/\.netlify\/functions\/mentor\?only=recommended'/);
     assert.match(read('assistant-catalogue.html'), />Recommended<\/div>/);
-    assert.match(read('src/components/assistant-mentor-overview.js'), /Recommended next/);
-    assert.match(renderMentorSnapshot(base), /WHO TO HIRE NEXT \(the same list as "Recommended next" on your Overview tab\):\n1\. Website Assistant/);
+    assert.match(read('src/components/assistant-mentor-plan.js'), /Recommended next/);
+    assert.match(renderMentorSnapshot(base), /WHO TO HIRE NEXT \(the same list as "Recommended next" on your Plan tab\):\n1\. Website Assistant/);
     assert.strictEqual(proposalKind({ type: 'mentor_hire_recommendation', summary: '', asked: false }), 'hire_recommendation');
 });
 
@@ -346,7 +346,7 @@ test('feedback: the screen calls mentor.ts, metered as a helper, on the Mentor\'
     assert.match(src, /meterInteraction\(db, orgId, 'helpers'\)/);
     assert.match(src, /loadRoleModel\(db, MENTOR_ROLE_KEY\)/);
     assert.ok(src.indexOf('meterInteraction(') < src.indexOf('anthropic.messages.create'), 'metered before the model call');
-    const tab = read('src/components/assistant-mentor-overview.js');
+    const tab = read('src/components/assistant-mentor-plan.js');
     assert.match(tab, /action: 'feedback', text: f\.text/);
     assert.match(tab, /<h2 class="text-base font-bold text-gray-900">Get feedback<\/h2>/);
     assert.match(read('netlify.toml'), /\[functions\.mentor\]\n {2}timeout = 26/);
@@ -401,8 +401,8 @@ test('review all: the same gap suggested twice is one row', () => {
 test('the prompt names the new screens exactly as the page labels them', () => {
     const o = read('netlify/functions/chat-orchestrator.ts');
     const surfaces = o.slice(o.indexOf('function businessMentorSurfaces'), o.indexOf('function mysteryShopperSurfaces'));
-    const tab = read('src/components/assistant-mentor-overview.js');
-    for (const name of ['Suggestions waiting', 'Review all', 'Recommended next', 'See this assistant', 'Get feedback', 'Open a text file']) {
+    const tab = read('src/components/assistant-mentor-overview.js') + read('src/components/assistant-mentor-plan.js');
+    for (const name of ['To review', 'Review all', 'Recommended next', 'See this assistant', 'Get feedback', 'Open a text file']) {
         assert.ok(surfaces.includes(`"${name}"`), `prompt names ${name}`);
         assert.ok(tab.includes(name), `page shows ${name}`);
     }

@@ -6,7 +6,10 @@
 //   get    { assistantId }                    → the draft definition, what the gate changed, the page cap,
 //                                               placeholders still to fill, whether an AI draft is running
 //   apply  { assistantId, ops: SiteOperation[] } → all or nothing; refused with the reason and which op
-//   draft  { assistantId, request? }          → start an AI draft of the whole site (1 task, on success)
+//   draft  { assistantId, request?, media? }  → start an AI draft of the whole site (1 task, on success).
+//                                               media { images, videos }: 'stock' | 'ai' | 'none', the
+//                                               placeholder media to add; absent, their set-up answers.
+//   draft_options { assistantId }             → what they may choose there, and what AI media costs
 //   address   { assistantId, slug }           → choose / change <slug>.bemoreswan.site
 //   publish   { assistantId }                 → freeze the draft as the next version and make it live
 //   unpublish { assistantId }                 → take the site offline (versions kept)
@@ -105,6 +108,8 @@ import {
     proposeOwnWords, publishBlocker, publishSite, restoreVersionToDraft, setSiteAddress, unpublishSite, DRAFT_TIMEOUT_MS, SITE_SETUP_KEYS, type SiteRow,
 } from '../../src/utils/site-store';
 import { triggerSiteDraft } from '../../src/utils/trigger-site-draft';
+import { DRAFT_NOTE_ADDING_MEDIA, DRAFT_NOTE_MEDIA_STOPPED, draftNoteIsFailure, resolveDraftMedia } from '../../src/utils/site-draft-media';
+import { draftMediaOptions } from '../../src/utils/site-draft-media-options';
 import { acceptImport, discardImport, importView, loadImport, startSiteImport } from '../../src/utils/site-import-store';
 import { cleanImportUrl } from '../../src/utils/site-import';
 import { refreshDirectoryAfterAddressChange, refreshDirectoryAfterPublish } from '../../src/utils/site-directory-store';
@@ -154,12 +159,14 @@ export default withLambda(async (event) => {
         // A read whose worker never answered: say so rather than "Reading your site…" for ever.
         if (imp && imp.status === 'reading' && !drafting) Object.assign(imp, { status: 'failed', message: 'The import didn\'t finish. Nothing was charged — try again.' });
         const [orgRow] = await db.select({ websiteUrl: organisations.websiteUrl }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+        // A worker that stopped while adding media: the words are saved, so that's what they're told.
+        const draftNote = !drafting && s.draftNote === DRAFT_NOTE_ADDING_MEDIA ? DRAFT_NOTE_MEDIA_STOPPED : s.draftNote;
         return {
             // The address to offer for import: their set-up answer "Do you already have a website?",
             // else the website in Business Information.
             import: imp, importSuggestUrl: setupSiteUrl() ?? orgRow?.websiteUrl ?? null,
             site: {
-                id: s.id, status: s.status, credit: s.credit, drafting, draftNote: s.draftNote, updatedAt: s.updatedAt,
+                id: s.id, status: s.status, credit: s.credit, drafting, draftNote, draftNoteIsFailure: draftNoteIsFailure(draftNote), updatedAt: s.updatedAt,
                 // Their own domain once it's live; the bemoreswan.site address redirects there.
                 slug: s.slug, url: ownDomain?.status === 'live' ? `https://${ownDomain.domain}` : s.slug ? siteOrigin(s.slug) : null, domain: sitesDomain(),
                 freeUrl: s.slug ? siteOrigin(s.slug) : null,
@@ -173,6 +180,8 @@ export default withLambda(async (event) => {
                 suspendedReason: s.status === 'suspended' ? (s.suspendedReason || 'Taken offline by Be More Swan.') : null,
                 publishBlocker: publishBlocker(s, definition),
             },
+            // Placeholder pictures and videos for a draft: what they may choose and what it costs.
+            draftMedia: await draftMediaOptions(db, orgId, assistant.onboardingContext),
             definition, warnings: [...new Set([...warnings, ...extraWarnings])], maxPages,
             placeholders: placeholdersIn(definition),
             // Thumbnails for the editor's picture fields: library picture id → its link.
@@ -244,6 +253,8 @@ export default withLambda(async (event) => {
         return json(200, await view(r.site, r.warnings));
     }
 
+    if (action === 'draft_options') return json(200, await draftMediaOptions(db, orgId, assistant.onboardingContext));
+
     if (action === 'draft') {
         const request = typeof body.request === 'string' ? body.request.trim().slice(0, 2000) : '';
         if (request) {
@@ -252,8 +263,10 @@ export default withLambda(async (event) => {
         }
         // Checked here as well as in the worker: out of tasks, say so now — not after "a minute or two".
         if (!(await hasTaskCapacity(db, orgId))) return json(402, { error: TASK_LIMIT_MESSAGE, code: 'task_limit' });
+        const media = resolveDraftMedia(body.media, await draftMediaOptions(db, orgId, assistant.onboardingContext));
+        if ('error' in media) return json(403, { error: media.error });
         if (!(await claimDraft(db, site.id))) return json(409, { error: 'Your site is already being drafted — it will appear here in a minute or two.' });
-        if (!(await triggerSiteDraft(site.id, request || null))) {
+        if (!(await triggerSiteDraft(site.id, request || null, { media: media.choice }))) {
             await endDraft(db, site.id, 'The draft couldn\'t be started. Nothing was charged — try again.');
             return json(503, { error: 'The draft couldn\'t be started. Nothing was charged — try again.' });
         }

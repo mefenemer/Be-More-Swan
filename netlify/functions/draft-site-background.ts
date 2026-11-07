@@ -9,6 +9,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { runSiteDraft } from '../../src/utils/site-store';
 import { runSiteImport } from '../../src/utils/site-import-store';
+import { cleanDraftMediaSource, NO_DRAFT_MEDIA, type DraftMediaChoice } from '../../src/utils/site-draft-media';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -27,15 +28,17 @@ export default withLambda(async (event) => {
     let siteId = 0;
     let request: string | null = null;
     let isImport = false;
+    let media: DraftMediaChoice = NO_DRAFT_MEDIA;
     try {
         const b = JSON.parse(event.body || '{}');
         siteId = Number(b.siteId);
         request = typeof b.request === 'string' ? b.request : null;
         isImport = b.import === true;
+        if (b.media) media = { images: cleanDraftMediaSource(b.media.images) ?? 'none', videos: cleanDraftMediaSource(b.media.videos) ?? 'none' };
     } catch { /* handled below */ }
     if (!Number.isInteger(siteId) || siteId <= 0) return { statusCode: 400, body: JSON.stringify({ ok: false, error: 'siteId required.' }) };
 
     if (isImport) await runSiteImport(getDb(), siteId);
-    else await runSiteDraft(getDb(), siteId, request);
+    else await runSiteDraft(getDb(), siteId, request, media);
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
 });

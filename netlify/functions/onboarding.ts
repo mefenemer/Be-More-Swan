@@ -275,7 +275,7 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
       return {
         statusCode: 409,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ error: `${sameRole.name} is already your ${assistantRecord.name} — a workspace has one of each assistant. You can change ${sameRole.name}'s set-up from its Assistant Profile.`, code: 'ALREADY_HIRED', assistantId: sameRole.id }),
+        body: JSON.stringify({ error: `${sameRole.name} is already your ${assistantRecord.name} — a workspace has one of each assistant. You can change ${sameRole.name}'s set-up from its Assistant Settings.`, code: 'ALREADY_HIRED', assistantId: sameRole.id }),
       };
     }
 

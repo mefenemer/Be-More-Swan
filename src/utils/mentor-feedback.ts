@@ -21,6 +21,7 @@ import { meterInteraction } from './task-credit';
 import { logAiUsage } from './ai-usage';
 import { sanitizeForModel } from './text-safe';
 import { isGlobalAiDisabled } from './platform-config';
+import { chargeHelper } from './basic-work';
 
 type Db = any;
 
@@ -65,7 +66,7 @@ ${MENTOR_FEEDBACK_CRAFT}
 
 - Never invent anything about the business: only what is listed above. If something the draft says isn't above, say you can't check it.
 - No statistic or benchmark unless you can say where it comes from; otherwise call it your own judgement.
-- This is the "Get feedback" box on your Overview tab: nothing is saved or changed, so never say you have changed anything.
+- This is the "Get feedback" box on your Plan tab: nothing is saved or changed, so never say you have changed anything.
 
 ${SPECIAL_CATEGORY_RULE}`;
 }
@@ -108,5 +109,6 @@ export async function mentorDraftFeedback(db: Db, orgId: number, userId: number,
     });
     const feedback = replyText(response.content).trim();
     if (!feedback) return { ok: false, status: 502, error: 'Your Mentor didn’t come back with anything — please try again.' };
+    await chargeHelper(db, orgId, null, 'mentor-feedback');
     return { ok: true, feedback };
 }

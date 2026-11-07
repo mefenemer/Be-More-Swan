@@ -3375,7 +3375,7 @@
     chat.pane = window.ChatPane.mount($('nl-chat-host'), {
       assistantId: Number(assistant.id), assistantName: assistant.name, roleKey: assistant.roleKey,
       rememberKey: `bms-email-chat:${key}`,
-      placeholder: 'Ask for a change to this email, or 🎯 Select a part of it…',
+      placeholder: 'Ask for a change to this email…',
       starterPrompts: editable()
         ? ['Make this email shorter and easier to read.', 'Give me a stronger subject line.', 'What would make more people click?']
         : null,

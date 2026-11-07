@@ -61,6 +61,7 @@ import { CAMPAIGN_CADENCES } from '../../src/config/email-campaign-cadences';
 import { requesterNamesForOrders } from '../../src/utils/requested-by';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
+import { chargeHelper, helperCapacity } from '../../src/utils/basic-work';
 
 
 /**
@@ -874,7 +875,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 tone: body.tone,
                 purpose: body.purpose,
             });
-            await recordCompletedWork(db, orgId, 'email_issue', 1, id);
+            await recordCompletedWork(db, orgId, 'email_issue', { ref: id, assistantId: issue.assistantId });
 
             // ⚠️ generateIssueBody writes body_markdown directly, which is right for a plain issue
             // and would leave a DESIGNED one showing the old copy in its blocks while the mirror
@@ -901,6 +902,7 @@ export default withLambda(async (event: HandlerEvent) => {
         // An editing helper: free, but counted against the daily fair-use limit.
         const fair = await checkFairUse(db, orgId, 'helpers');
         if (!fair.allowed) return json(429, { error: fair.message, code: 'FAIR_USE_LIMIT' });
+        if (!(await helperCapacity(db, orgId))) return json(429, { error: TASK_LIMIT_MESSAGE });
         const field = body.field === 'preheader' ? 'preheader' : 'subject';
         try {
             const suggestions = await suggestEmailLine(db, {
@@ -911,6 +913,7 @@ export default withLambda(async (event: HandlerEvent) => {
                     body: typeof body.bodyMarkdown === 'string' ? body.bodyMarkdown : undefined,
                 },
             });
+            await chargeHelper(db, orgId, issue.assistantId, `email-line-${id}`);
             return json(200, { suggestions });
         } catch (err) {
             const msg = err instanceof Error ? err.message : '';
@@ -934,7 +937,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 instruction: body.instruction,
             });
             // A rewrite is a piece of work, like the social editor's Rewrite button (one task).
-            await recordCompletedWork(db, orgId, 'email_issue', 1, id);
+            await recordCompletedWork(db, orgId, 'email_issue', { ref: id, assistantId: issue.assistantId });
             return json(200, result);
         } catch (err) {
             if (err instanceof IssueNotFoundError) return json(404, { error: err.message });

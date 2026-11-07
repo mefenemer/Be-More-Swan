@@ -12,6 +12,7 @@
 // Item shape = get-assistant-activity's (one renderer, one meaning of "Needs attention"). The
 // descriptions carry user and model text (titles, subjects); the renderer escapes them.
 
+import { draftNoteIsFailure } from './site-draft-media';
 import { and, desc, eq, gte, inArray, isNotNull } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
@@ -220,7 +221,7 @@ async function websiteItems(db: Db, args: { orgId: number; assistantId: number; 
         items.push({ id: `site-draft-${w.id}`, type: 'site_draft', icon: 'sparkles', description: 'Wrote a draft of your whole site (1 task). Nothing went live.', createdAt: w.at, status: 'success' });
     }
     if (site.draftingAt) items.push({ id: `site-drafting-${site.id}`, type: 'site_draft', icon: 'sparkles', description: 'Writing a draft of your whole site now.', createdAt: site.draftingAt, status: 'in_progress' });
-    else if (site.draftNote) items.push({ id: `site-draft-note-${site.id}`, type: 'site_draft', icon: 'alert', description: `A draft didn't finish: ${clip(site.draftNote, 110)}`, createdAt: site.updatedAt, status: 'failed' });
+    else if (draftNoteIsFailure(site.draftNote)) items.push({ id: `site-draft-note-${site.id}`, type: 'site_draft', icon: 'alert', description: `A draft didn't finish: ${clip(site.draftNote!, 110)}`, createdAt: site.updatedAt, status: 'failed' });
 
     const versions = await db.select({ id: siteVersions.id, version: siteVersions.version, at: siteVersions.publishedAt })
         .from(siteVersions).where(and(eq(siteVersions.siteId, site.id), ...since(siteVersions.publishedAt)))

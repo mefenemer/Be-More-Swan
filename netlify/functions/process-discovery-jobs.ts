@@ -1067,7 +1067,10 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
         if (claimed.length === 0) return; // already published by an earlier tick
         // One task per finished search run — counted here because this claim happens exactly once
         // per logical run, however many slices and retries it took (never throws).
-        await recordCompletedWork(db, job.organisation_id, 'lead_search', 1, job.job_id);
+        // A failed lookup must not lose the charge or stop the signals below: it is then just unattributed.
+        const owner = (await db.select({ assistantId: discoveryCampaigns.aiAssistantId }).from(discoveryCampaigns)
+            .where(eq(discoveryCampaigns.id, job.campaign_id)).limit(1).catch(() => []))[0];
+        await recordCompletedWork(db, job.organisation_id, 'lead_search', { ref: job.job_id, assistantId: owner?.assistantId ?? null });
 
         const found = claimed[0].leadsFound ?? 0;
         // ⚠️ A ZERO-LEAD RUN USED TO NOTIFY NOBODY — `if (found === 0) return`. The user started a

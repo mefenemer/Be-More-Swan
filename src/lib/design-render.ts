@@ -3,16 +3,14 @@
 // what prints here. The flyer's first layout comes from src/lib/flyer.ts, so a page opened in the studio starts where
 // the round drew it.
 
-import satori from 'satori';
-import { Resvg } from '@resvg/resvg-js';
-import QRCode from 'qrcode';
-import { PDFDocument, clip, endPath, popGraphicsState, pushGraphicsState, rectangle, rgb } from 'pdf-lib';
-import { brandCardFonts, BRAND_CARD_FONT_FAMILY } from './brand-card-fonts';
+import { BRAND_CARD_FONT_FAMILY, pdfLib, qrToDataURL, rasterLibs } from './render-libs';
+
+type PdfLib = Awaited<ReturnType<typeof pdfLib>>;
 import { loadWebFont, type SatoriFont } from './brand-card-webfont';
 import { inlineLogo } from './brand-card';
 import { PREVIEW_DPI, PRINT_DPI, blockSpecs, fitBlocks, flyerGeometry, flyerPageStyle, olderPageStyle, pdfCanEmbed, type FlyerPageStyle, type FlyerPhoto } from './flyer';
 import { PAPER_SPECS, type FlyerContent, type FlyerLayout, type PaperSize } from '../config/flyer-vocab';
-import { BOX_PAD_RATIO, LINE_HEIGHT, type Design, type DesignLayer, type DesignPhotoRef, type TextLayer } from '../utils/design-doc';
+import { BOX_PAD_RATIO, LINE_HEIGHT, cropRect, pageFill, sideOf, type Design, type DesignCrop, type DesignLayer, type DesignPhotoRef, type TextLayer } from '../utils/design-doc';
 import type { BrandKit } from '../utils/brand-kit';
 
 type Node = { type: string; props: Record<string, unknown> };
@@ -24,12 +22,54 @@ function rgba(hex: string, alpha: number): string {
 }
 
 export interface DesignRender { png: Buffer; width: number; height: number }
+/** The added pictures' files, by layer id. A layer with none here is left off. */
+export type DesignPictures = Map<string, FlyerPhoto>;
+
+// The bundled and Google fonts have no italic to load for every family, so a slope is drawn: the browser does the same
+// for a font with no italic of its own, which keeps the screen and the print alike.
+const ITALIC_SLOPE = 'skewX(-12deg)';
+
+/** A picture's real size, from its own bytes: what a library row says can be missing. */
+export function imageSize(bytes: Buffer): { width: number; height: number } | null {
+    if (bytes.length > 24 && bytes.readUInt32BE(0) === 0x89504e47) return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+    if (bytes.length > 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+        let i = 2;
+        while (i + 9 < bytes.length) {
+            if (bytes[i] !== 0xff) { i++; continue; }
+            const marker = bytes[i + 1];
+            if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) return { height: bytes.readUInt16BE(i + 5), width: bytes.readUInt16BE(i + 7) };
+            i += 2 + bytes.readUInt16BE(i + 2);
+        }
+        return null;
+    }
+    if (bytes.length > 30 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') {
+        const kind = bytes.toString('ascii', 12, 16);
+        if (kind === 'VP8X') return { width: bytes.readUIntLE(24, 3) + 1, height: bytes.readUIntLE(27, 3) + 1 };
+        if (kind === 'VP8 ') return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
+        if (kind === 'VP8L') { const b = bytes.readUInt32LE(21); return { width: (b & 0x3fff) + 1, height: ((b >> 14) & 0x3fff) + 1 }; }
+    }
+    return null;
+}
+
+/** A picture in its frame. Uncropped it is the plain cover it always was; cropped, it is placed inside a clipped frame. */
+function pictureNode(photo: FlyerPhoto, box: { left: number; top: number; width: number; height: number }, opacity: number, crop?: DesignCrop): Node {
+    const src = `data:${photo.mimeType};base64,${photo.bytes.toString('base64')}`;
+    const size = crop ? imageSize(photo.bytes) ?? (photo.width && photo.height ? { width: photo.width, height: photo.height } : null) : null;
+    if (!crop || !size) {
+        return { type: 'img', props: { src, width: box.width, height: box.height, style: { position: 'absolute', ...box, objectFit: 'cover', opacity } } };
+    }
+    const r = cropRect(size.width, size.height, box.width, box.height, crop);
+    const inner = { left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };
+    return el({ position: 'absolute', ...box, overflow: 'hidden', display: 'flex', opacity }, [
+        { type: 'img', props: { src, width: inner.width, height: inner.height, style: { position: 'absolute', ...inner } } },
+    ]);
+}
 
 /**
  * The page at `width` × `height` px of TRIMMED page, plus `bleedPx` all round. `words: true` draws only the layers on
  * a transparent page, which the PDF lays over the page colour and the picture embedded as itself.
  */
-export async function renderDesign(opts: { design: Design; photo: FlyerPhoto | null; width: number; height: number; bleedPx?: number; words?: boolean }): Promise<DesignRender> {
+export async function renderDesign(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; width: number; height: number; bleedPx?: number; words?: boolean; seeThrough?: boolean }): Promise<DesignRender> {
     const { design, width: W, height: H } = opts;
     const bleed = opts.bleedPx ?? 0;
     const canvasW = W + bleed * 2;
@@ -38,7 +78,8 @@ export async function renderDesign(opts: { design: Design; photo: FlyerPhoto | n
     const Y = (f: number) => Math.round(bleed + f * H);
 
     const families = [...new Set(design.layers.filter((l): l is TextLayer => l.kind === 'text').map((l) => l.fontFamily).filter((f): f is string => !!f))];
-    const loaded = (await Promise.all(families.map((f) => loadWebFont(f)))).filter((f): f is SatoriFont[] => !!f);
+    const [fontSets, { satori, Resvg, brandCardFonts }] = await Promise.all([Promise.all(families.map((f) => loadWebFont(f))), rasterLibs()]);
+    const loaded = fontSets.filter((f): f is SatoriFont[] => !!f);
     const fonts = [...loaded.flat(), ...brandCardFonts];
     const familyOf = (name: string | null) => {
         const hit = name ? loaded.find((f) => f[0].name.toLowerCase() === name.toLowerCase()) : null;
@@ -46,16 +87,13 @@ export async function renderDesign(opts: { design: Design; photo: FlyerPhoto | n
     };
 
     const nodes: Node[] = [];
-    if (!opts.words) nodes.push(el({ position: 'absolute', left: 0, top: 0, width: canvasW, height: canvasH, backgroundColor: design.pageColor }));
+    // seeThrough: no page colour at all, for a download someone will lay over something else.
+    if (!opts.words && !opts.seeThrough) nodes.push(el({ position: 'absolute', left: 0, top: 0, width: canvasW, height: canvasH, backgroundColor: pageFill(design) }));
     if (design.photo && opts.photo && !opts.words) {
-        const b = photoBox(design, W, H, bleed);
-        nodes.push({ type: 'img', props: {
-            src: `data:${opts.photo.mimeType};base64,${opts.photo.bytes.toString('base64')}`, width: b.width, height: b.height,
-            style: { position: 'absolute', left: b.left, top: b.top, width: b.width, height: b.height, objectFit: 'cover', opacity: design.photo.opacity },
-        } });
+        nodes.push(pictureNode(opts.photo, photoBox(design, W, H, bleed), design.photo.opacity, design.photo.crop));
     }
     for (const l of design.layers) {
-        const node = await layerNode(l, { X, Y, W, H, familyOf });
+        const node = await layerNode(l, { X, Y, W, H, familyOf, pictures: opts.pictures });
         if (node) nodes.push(node);
     }
     const svg = await satori(
@@ -79,7 +117,11 @@ function photoBox(design: Design, W: number, H: number, bleed: number) {
     return { left: Math.round(left), top: Math.round(top), width: Math.round(right - left), height: Math.round(bottom - top) };
 }
 
-async function layerNode(l: DesignLayer, g: { X: (f: number) => number; Y: (f: number) => number; W: number; H: number; familyOf: (n: string | null) => string }): Promise<Node | null> {
+async function layerNode(l: DesignLayer, g: { X: (f: number) => number; Y: (f: number) => number; W: number; H: number; familyOf: (n: string | null) => string; pictures?: DesignPictures }): Promise<Node | null> {
+    if (l.kind === 'picture') {
+        const photo = g.pictures?.get(l.id);
+        return photo ? pictureNode(photo, { left: g.X(l.x), top: g.Y(l.y), width: Math.round(l.w * g.W), height: Math.round(l.h * g.H) }, l.opacity, l.crop) : null;
+    }
     if (l.kind === 'shape') {
         return el({ position: 'absolute', left: g.X(l.x), top: g.Y(l.y), width: Math.round(l.w * g.W), height: Math.round(l.h * g.H), backgroundColor: l.color, opacity: l.opacity, borderRadius: l.round ? 99999 : 0 });
     }
@@ -97,6 +139,7 @@ function textNode(l: TextLayer, g: { X: (f: number) => number; Y: (f: number) =>
     if (!l.text.trim()) return null;
     const size = l.fontSizePct * g.H;
     const pad = l.boxFill ? Math.round(size * BOX_PAD_RATIO) : 0;
+    const lineHeight = l.lineHeight ?? LINE_HEIGHT;
     const justify = l.align === 'center' ? 'center' : l.align === 'right' ? 'flex-end' : 'flex-start';
     return el({
         position: 'absolute', left: g.X(l.x), top: g.Y(l.y), width: Math.round(l.w * g.W), display: 'flex', flexDirection: 'column',
@@ -104,38 +147,50 @@ function textNode(l: TextLayer, g: { X: (f: number) => number; Y: (f: number) =>
         fontFamily: g.familyOf(l.fontFamily),
     }, l.text.split('\n').map((row) => el({
         display: 'flex', width: '100%', justifyContent: justify, textAlign: l.align, wordBreak: 'break-word',
-        fontSize: size, lineHeight: LINE_HEIGHT, fontWeight: l.bold ? 800 : 400, color: l.color,
-        minHeight: Math.round(size * LINE_HEIGHT),
+        fontSize: size, lineHeight, fontWeight: l.bold ? 800 : 400, color: l.color,
+        minHeight: Math.round(size * lineHeight),
+        ...(l.italic ? { transform: ITALIC_SLOPE } : {}),
+        ...(l.underline ? { textDecoration: 'underline' } : {}),
     }, row)));
 }
 
 // ── The print PDF ───────────────────────────────────────────────────────────────────────────────
 
-function hexRgb(hex: string) {
+function hexRgb(rgb: PdfLib['rgb'], hex: string) {
     return rgb(parseInt(hex.slice(1, 3), 16) / 255, parseInt(hex.slice(3, 5), 16) / 255, parseInt(hex.slice(5, 7), 16) / 255);
 }
 
-/** A PDF at the paper size plus bleed: page colour, the picture embedded as itself, the layers over it. */
-async function onePdf(opts: { design: Design; photo: FlyerPhoto | null; title: string; bleedMm: number }): Promise<Buffer> {
-    const { design } = opts;
-    const spec = PAPER_SPECS[(design.paperSize as PaperSize) ?? 'A5'] ?? PAPER_SPECS.A5;
-    const px = (mm: number) => Math.round(mm * PRINT_DPI / 25.4);
-    const W = px(spec.widthMm);
-    const H = px(spec.heightMm);
-    const bleed = px(opts.bleedMm);
-    const layered = !opts.photo || pdfCanEmbed(opts.photo.mimeType);
-    const words = await renderDesign({ design, photo: opts.photo, width: W, height: H, bleedPx: bleed, words: layered });
+/** One side's files. */
+export interface DesignSideFiles { photo: FlyerPhoto | null; pictures?: DesignPictures }
 
-    const k = 72 / PRINT_DPI;
+/** A PDF at the paper size plus bleed, a page for each side: page colour, the picture embedded as itself, the layers over it. */
+async function onePdf(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; backFiles?: DesignSideFiles; title: string; bleedMm: number }): Promise<Buffer> {
+    const { PDFDocument } = await pdfLib();
     const doc = await PDFDocument.create();
     doc.setTitle(opts.title.slice(0, 200));
     doc.setCreator('Be More Swan');
     doc.setProducer('Be More Swan');
+    await drawPdfSide(doc, sideOf(opts.design), opts.photo, opts.pictures, opts.bleedMm);
+    if (opts.design.back) await drawPdfSide(doc, sideOf(opts.design, 'back'), opts.backFiles?.photo ?? null, opts.backFiles?.pictures, opts.bleedMm);
+    return Buffer.from(await doc.save());
+}
+
+async function drawPdfSide(doc: Awaited<ReturnType<PdfLib['PDFDocument']['create']>>, design: Design, photo: FlyerPhoto | null, pictures: DesignPictures | undefined, bleedMm: number): Promise<void> {
+    const opts = { photo, pictures, bleedMm };
+    const px = (mm: number) => Math.round(mm * PRINT_DPI / 25.4);
+    // A picture has no paper: its page is its own shape, and with no trim there is nothing to bleed past.
+    const { width: W, height: H } = designPixels(design, PRINT_DPI, 4096);
+    const bleed = design.kind === 'flyer' ? px(opts.bleedMm) : 0;
+    const layered = !opts.photo || pdfCanEmbed(opts.photo.mimeType);
+    const words = await renderDesign({ design, photo: opts.photo, pictures: opts.pictures, width: W, height: H, bleedPx: bleed, words: layered });
+
+    const k = 72 / PRINT_DPI;
+    const { clip, endPath, popGraphicsState, pushGraphicsState, rectangle, rgb } = await pdfLib();
     const pageW = words.width * k;
     const pageH = words.height * k;
     const page = doc.addPage([pageW, pageH]);
     if (layered) {
-        page.drawRectangle({ x: 0, y: 0, width: pageW, height: pageH, color: hexRgb(design.pageColor) });
+        page.drawRectangle({ x: 0, y: 0, width: pageW, height: pageH, color: hexRgb(rgb, pageFill(design)) });
         if (design.photo && opts.photo) {
             const img = /png/i.test(opts.photo.mimeType) ? await doc.embedPng(opts.photo.bytes) : await doc.embedJpg(opts.photo.bytes);
             const b = photoBox(design, W, H, bleed);
@@ -143,11 +198,10 @@ async function onePdf(opts: { design: Design; photo: FlyerPhoto | null; title: s
             const bw = b.width * k;
             const bh = b.height * k;
             const by = pageH - b.top * k - bh;
-            const s = Math.max(bw / img.width, bh / img.height);
-            const dw = img.width * s;
-            const dh = img.height * s;
+            const r = cropRect(img.width, img.height, bw, bh, design.photo.crop);
             page.pushOperators(pushGraphicsState(), rectangle(bx, by, bw, bh), clip(), endPath());
-            page.drawImage(img, { x: bx + (bw - dw) / 2, y: by + (bh - dh) / 2, width: dw, height: dh, opacity: design.photo.opacity });
+            // A PDF measures up from the bottom; the crop measures down from the top.
+            page.drawImage(img, { x: bx + r.left, y: by + bh - r.top - r.height, width: r.width, height: r.height, opacity: design.photo.opacity });
             page.pushOperators(popGraphicsState());
         }
     }
@@ -158,17 +212,27 @@ async function onePdf(opts: { design: Design; photo: FlyerPhoto | null; title: s
         page.setBleedBox(0, 0, pageW, pageH);
         page.setTrimBox(b, b, pageW - b * 2, pageH - b * 2);
     }
-    return Buffer.from(await doc.save());
 }
 
-export async function renderDesignPdfs(opts: { design: Design; photo: FlyerPhoto | null; title: string; bleedMm: number }): Promise<{ home: Buffer; printShop: Buffer }> {
+/** One PDF to download: both sides of a flyer, with `bleedMm` for a print shop or 0 for printing at home. */
+export function renderDesignPdf(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; backFiles?: DesignSideFiles; title: string; bleedMm: number }): Promise<Buffer> {
+    return onePdf(opts);
+}
+
+export async function renderDesignPdfs(opts: { design: Design; photo: FlyerPhoto | null; pictures?: DesignPictures; backFiles?: DesignSideFiles; title: string; bleedMm: number }): Promise<{ home: Buffer; printShop: Buffer }> {
     return { home: await onePdf({ ...opts, bleedMm: 0 }), printShop: await onePdf(opts) };
 }
 
+/** A PNG to download: a flyer at print quality, a picture at its own size. Only here does the page's colour stay off. */
+export async function renderDesignDownload(design: Design, photo: FlyerPhoto | null, pictures: DesignPictures, seeThrough: boolean): Promise<DesignRender> {
+    const { width, height } = designPixels(design, PRINT_DPI, 4096);
+    return renderDesign({ design, photo, pictures, width, height, seeThrough });
+}
+
 /** The preview: a flyer at PREVIEW_DPI, a picture at its own size (capped, so a save stays quick). */
-export async function renderDesignPreview(design: Design, photo: FlyerPhoto | null): Promise<DesignRender> {
+export async function renderDesignPreview(design: Design, photo: FlyerPhoto | null, pictures?: DesignPictures): Promise<DesignRender> {
     const { width, height } = designPixels(design, PREVIEW_DPI, 1600);
-    return renderDesign({ design, photo, width, height });
+    return renderDesign({ design, photo, pictures, width, height });
 }
 
 export function designPixels(design: Design, dpi: number, maxImageWidth: number): { width: number; height: number } {
@@ -227,7 +291,7 @@ export async function flyerDesign(args: {
         layers.push(words('contact', contactLines.join('\n'), box.left, bottom - h, box.width - (qrSize ? qrSize + gap : 0), contactSize));
     }
     if (content.qr) {
-        const src = await QRCode.toDataURL(content.qr.url, { errorCorrectionLevel: 'M', margin: 4, width: 400, color: { dark: '#000000', light: '#ffffff' } });
+        const src = await qrToDataURL(content.qr.url, { errorCorrectionLevel: 'M', margin: 4, width: 400, color: { dark: '#000000', light: '#ffffff' } });
         layers.push({ id: 'qr', kind: 'qr', role: 'qr', x: (box.left + box.width - qrSize) / W, y: (bottom - qrSize) / H, w: qrSize / W, h: qrSize / H, src });
     }
 

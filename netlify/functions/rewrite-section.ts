@@ -19,6 +19,8 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { stripCodeFences } from '../../src/utils/model-json';
+import { chargeHelper, helperCapacity } from '../../src/utils/basic-work';
+import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_SELECTION_CHARS = 6000;
@@ -71,7 +73,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
     // Tenant guard: the post must belong to the caller's active organisation.
     const [post] = await db
-        .select({ id: blogPosts.id, title: blogPosts.title })
+        .select({ id: blogPosts.id, title: blogPosts.title, assistantId: blogPosts.assistantId })
         .from(blogPosts)
         .where(and(eq(blogPosts.id, Number(blogPostId)), eq(blogPosts.organisationId, ctx.organisationId)))
         .limit(1);
@@ -80,6 +82,7 @@ export default withLambda(async (event: HandlerEvent) => {
     // An editing helper: free, but counted against the daily fair-use limit (src/utils/fair-use.ts).
     const fair = await checkFairUse(db, ctx.organisationId, 'helpers');
     if (!fair.allowed) return fairUseResponse(fair);
+    if (!(await helperCapacity(db, ctx.organisationId))) return { statusCode: 403, body: JSON.stringify({ error: TASK_LIMIT_MESSAGE, upgradeRequired: true }) };
 
     const directive = buildInstruction(action, tone, instruction);
 
@@ -116,6 +119,7 @@ export default withLambda(async (event: HandlerEvent) => {
             outputTokens: response.usage?.output_tokens ?? 0,
         });
 
+        await chargeHelper(db, ctx.organisationId, post.assistantId, `rewrite-section-blog-${post.id}`);
         return { statusCode: 200, body: JSON.stringify({ rewrittenText }) };
     } catch (error) {
         console.error('[rewrite-section] error:', error);

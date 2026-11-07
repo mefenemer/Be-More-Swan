@@ -46,7 +46,30 @@
   const state = {
     assistantId: null, assistantName: null, setup: {}, videos: [], loaded: false, loadError: null,
     rendered: false, form: false, editing: null, replanning: null, notes: {}, busy: new Set(), pollTimer: null,
+    stage: null, userStage: false, opened: new Set(), full: false,
   };
+
+  // Stages as pills, like the Brand Designer's Briefs (owner, 2026-11-06: the Briefs tab's patterns on
+  // every assistant's work tab). "To check" is what waits for the owner, so the tab opens there.
+  const STAGES = [
+    { key: 'check', label: 'To check', statuses: ['planned', 'failed'], urgent: true },
+    { key: 'making', label: 'Being made', statuses: ['planning', 'building'] },
+    { key: 'made', label: 'Made', statuses: ['built'] },
+    { key: 'cancelled', label: 'Cancelled', statuses: ['cancelled'] },
+  ];
+  const inStage = (key) => {
+    const st = STAGES.find((x) => x.key === key) || STAGES[0];
+    return state.videos.filter((v) => st.statuses.includes(v.status));
+  };
+  // Videos start closed; the ones opened are remembered per assistant in this browser (as the Briefs are).
+  // A new key: the old one listed the ones hidden.
+  const foldKey = () => `bms-video-open:${state.assistantId}`;
+  function loadFolded() {
+    try { state.opened = new Set(JSON.parse(localStorage.getItem(foldKey()) || '[]').map(Number)); } catch { state.opened = new Set(); }
+  }
+  function saveFolded() {
+    try { localStorage.setItem(foldKey(), JSON.stringify([...state.opened])); } catch { /* private window */ }
+  }
 
   const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const host = () => document.getElementById('videos-host');
@@ -93,6 +116,9 @@
     const n = state.videos.filter((v) => v.status === 'planned').length;
     // The page's "Needs you" strip counts the same storyboards (assistants.js _renderNeedsYou 'videos').
     window._setNeedsYouCount?.(n);
+    // The compact header's Needs-you card names the storyboards waiting (each opens its video).
+    window._setNeedsYouItems?.(state.videos.filter((v) => v.status === 'planned').slice(0, 4)
+      .map((v) => ({ id: v.id, label: v.title || 'Untitled video', sub: 'storyboard to check' })));
     const el = document.getElementById('videos-review-badge');
     if (!el) return;
     el.textContent = n > 99 ? '99+' : String(n);
@@ -217,11 +243,16 @@
     const cost = v.estimate == null ? '' : (v.estimate === 0 ? ' — free' : ` — uses ${v.estimate} ${unit}${v.estimate === 1 ? '' : 's'}`);
     const replanning = state.replanning === v.id;
     const note = state.notes[v.id];
+    // Closed until opened (owner, 2026-11-06), and remembered in this browser.
+    const folded = !state.opened.has(v.id) && !replanning && !(state.editing && state.editing.id === v.id);
     return `
-      <article class="bg-white border border-gray-200 rounded-xl p-4" data-video="${v.id}">
+      <article data-no-fold class="bg-white border border-gray-200 rounded-xl p-4" data-video="${v.id}">
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0">
-            <p class="text-sm font-bold text-gray-900 break-words">${esc(v.title)}</p>
+            <button type="button" data-vid-act="fold" data-id="${v.id}" aria-expanded="${folded ? 'false' : 'true'}" title="${folded ? 'Show this video' : 'Hide this video'}"
+              class="flex items-start gap-1.5 text-left text-sm font-bold text-gray-900 break-words cursor-pointer hover:text-gray-700">
+              <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              <span>${esc(v.title)}</span></button>
             <p class="text-xs text-gray-600 mt-0.5">${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'render_failed' : v.status] || v.status)}</p>
             ${v.note ? `<p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mt-1.5">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
@@ -229,6 +260,7 @@
           ${chatPaneAvailable() ? `<button type="button" data-vid-act="talk" data-id="${v.id}" class="text-xs font-bold text-indigo-700 hover:underline shrink-0 whitespace-nowrap">Talk it through</button>` : ''}
           ${v.status === 'built' ? `<button type="button" data-vid-act="open-review" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg shrink-0">Open the Review Queue</button>` : ''}
         </div>
+        ${folded ? '' : `<div data-vid-body>
         ${Array.isArray(v.changes) && v.changes.length && (v.status === 'planned' || v.status === 'failed')
           ? `<details class="mt-2"><summary class="text-xs text-gray-500 cursor-pointer">What ${who()} adjusted (${v.changes.length})</summary><ul class="list-disc ml-5 mt-1 text-xs text-gray-600">${v.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></details>` : ''}
         ${sb && sb.scenes && sb.scenes.length ? `<ol class="mt-3 space-y-2">${sb.scenes.map((s, i) => sceneHtml(v, s, i)).join('')}</ol>` : ''}
@@ -246,6 +278,7 @@
             ${!replanning ? `<button type="button" data-vid-act="replan" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Plan it again</button>` : ''}
             <button type="button" data-vid-act="cancel" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-utility px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Cancel</button>
           </div>` : ''}
+        </div>`}
       </article>`;
   }
 
@@ -259,19 +292,67 @@
   function render() {
     const el = host();
     if (!el) return;
-    const visible = state.videos.filter((v) => v.status !== 'cancelled');
+    // Opens on "To check" while anything waits there. Until the user picks a stage themselves, an empty
+    // stage gives way to the first one with something in it (the first paint can come before the load).
+    if (!state.stage || (!state.userStage && !inStage(state.stage).length)) {
+      state.stage = (STAGES.find((st) => inStage(st.key).length) || STAGES[0]).key;
+    }
+    const visible = inStage(state.stage);
+    const stageLabel = (STAGES.find((st) => st.key === state.stage) || STAGES[0]).label;
+    const anyOpen = visible.some((v) => state.opened.has(v.id));
+    const pills = STAGES.map((st) => {
+      const n = inStage(st.key).length;
+      const on = st.key === state.stage;
+      return `<button type="button" role="tab" aria-selected="${on ? 'true' : 'false'}" tabindex="${on ? 0 : -1}" data-vid-stage="${st.key}"
+        class="flex-shrink-0 min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}">
+        ${esc(st.label)} <span class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center ${st.urgent && n ? 'bg-amber-100 text-amber-900' : on ? 'bg-gray-100 text-gray-700' : 'bg-gray-200 text-gray-700'}">${n}</span></button>`;
+    }).join('');
+    const empty = state.stage === 'check'
+      ? `No videos to check. Press “New video”, or tell ${who()} in chat what you’d like a video about.`
+      : `No videos ${esc(stageLabel.toLowerCase())}.`;
     el.innerHTML = `
-      <div class="flex items-center justify-between gap-3 mb-4">
-        <p class="text-sm text-gray-600">Short vertical videos for Reels, Shorts and Facebook — planned, voiced and captioned by ${who()}.</p>
-        ${chatPaneAvailable() ? `<button type="button" data-vid-act="chat-toggle" aria-pressed="${chatDock && chatDock.isOn() ? 'true' : 'false'}" title="Show or hide the chat beside your videos" class="btn-assistant border px-4 py-2 text-sm font-bold rounded-lg shrink-0">💬 Chat with ${who()}</button>` : ''}
-        ${state.form ? '' : '<button type="button" data-vid-act="new" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg shrink-0">New video</button>'}
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <h2 class="text-base font-bold text-gray-900 shrink-0"><span data-explain="video-videos">Videos</span></h2>
+        <div class="flex flex-wrap items-center justify-end gap-2">
+          <button type="button" data-vid-act="full" aria-pressed="${state.full ? 'true' : 'false'}" title="${state.full ? 'Back to the page (Esc)' : 'Use the whole screen for your videos and the chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg">${state.full ? 'Exit full screen' : 'Full screen'}</button>
+          ${state.form ? '' : '<button type="button" data-vid-act="new" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg shrink-0">New video</button>'}
+        </div>
       </div>
       ${formHtml()}
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
+        ${''/* Pills in a grey track, as on the Briefs tab; overflow-y hidden so the row has no stray scrollbar. */}
+        <div role="tablist" aria-label="Videos by stage" class="inline-flex max-w-full gap-1 p-1 rounded-xl bg-gray-100" style="overflow-x:auto;overflow-y:hidden">${pills}</div>
+        ${visible.length > 1 ? `<button type="button" data-vid-act="fold-all" class="text-xs font-bold text-gray-600 hover:text-gray-900 px-1 py-1">${anyOpen ? 'Hide all' : 'Show all'}</button>` : ''}
+      </div>
       ${!state.loaded ? '<p class="text-sm text-gray-500">Loading your videos…</p>'
         : state.loadError ? `<p class="text-sm text-red-600">Your videos couldn’t be loaded: ${esc(state.loadError)}</p>`
         : visible.length ? `<div class="space-y-4">${visible.map(videoHtml).join('')}</div>`
-        : `<div class="text-center py-10 text-sm text-gray-500">No videos yet. Press “New video”, or tell ${who()} in chat what you’d like a video about.</div>`}`;
+        : `<div class="text-center py-10 text-sm text-gray-500">${empty}</div>`}`;
   }
+
+  // ── Full screen (as on the Briefs and Website tabs) ─────────────────────────────────────────────
+  // The videos and the docked chat over the whole page; Exit full screen or Esc comes back.
+  function setFull(on) {
+    state.full = !!on;
+    const box = document.getElementById('videos-layout') || host();
+    if (box) box.toggleAttribute('data-videos-full', state.full);
+    if (window.ScrollLock) { if (state.full) window.ScrollLock.lock('videos-full'); else window.ScrollLock.release('videos-full'); }
+    if (!document.getElementById('videos-full-css')) {
+      const css = document.createElement('style');
+      css.id = 'videos-full-css';
+      // z 60: over the top bar (50), under the voice and caption pop-ups (70) this tab opens.
+      css.textContent = `[data-videos-full] { position: fixed; inset: 0; z-index: 60; background: #fff; overflow: auto; padding: 12px; }
+        .chatpane-dock[data-videos-full].is-on > .chatpane-dock-col { top: 12px; height: calc(100vh - 24px); }`;
+      document.head.appendChild(css);
+    }
+    render();
+    host()?.querySelector('[data-vid-act="full"]')?.focus();
+  }
+  // An OPEN dialog takes Esc first. Not just "a dialog": the settings drawer is always in the page as one (inert while shut).
+  const dialogOpen = () => [...document.querySelectorAll('[role="dialog"]')].some((d) => !d.inert && !d.hidden && d.getClientRects().length && getComputedStyle(d).visibility !== 'hidden');
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.full && !dialogOpen()) setFull(false);
+  });
 
   // ── Actions ────────────────────────────────────────────────────────────────
   async function act(id, body, okText) {
@@ -289,6 +370,12 @@
   }
 
   document.addEventListener('click', (e) => {
+    const pill = e.target.closest('[data-vid-stage]');
+    if (pill && host() && host().contains(pill)) {
+      state.stage = pill.dataset.vidStage; state.userStage = true; render();
+      host()?.querySelector(`[data-vid-stage="${state.stage}"]`)?.focus();
+      return;
+    }
     const b = e.target.closest('[data-vid-act]');
     if (!b || !host() || !host().contains(b)) return;
     const id = Number(b.dataset.id);
@@ -313,7 +400,20 @@
         break;
       }
       case 'close-form': state.form = false; render(); break;
-      case 'chat-toggle': { const d = getChatDock(); if (d) d.setOn(!d.isOn(), true); break; }
+      case 'fold': {
+        if (state.opened.has(id)) state.opened.delete(id); else state.opened.add(id);
+        saveFolded(); render();
+        host()?.querySelector(`[data-vid-act="fold"][data-id="${id}"]`)?.focus();
+        break;
+      }
+      case 'fold-all': {
+        const shown = inStage(state.stage);
+        const anyOpen = shown.some((v) => state.opened.has(v.id));
+        shown.forEach((v) => { if (anyOpen) state.opened.delete(v.id); else state.opened.add(v.id); });
+        saveFolded(); render();
+        break;
+      }
+      case 'full': setFull(!state.full); break;
       case 'talk': {
         const v = state.videos.find((x) => x.id === id);
         if (v) getChatDock()?.refer({ label: `Video “${v.title}”`, message: `About my video ${v.id} “${v.title}”.` });
@@ -400,11 +500,10 @@
     if (chatDock && chatDock.connected()) return chatDock;
     chatDock = window.ChatPane.dock(el, {
       prefix: 'videos', storageKey: 'bms-video-chat-on',
-      onToggle: (on) => document.querySelector('[data-vid-act="chat-toggle"]')?.setAttribute('aria-pressed', on ? 'true' : 'false'),
       pane: () => ({
         assistantId: state.assistantId, assistantName: state.assistantName || 'your Video Producer', roleKey: 'video_producer',
         rememberKey: `bms-video-chat:${state.assistantId}`,
-        placeholder: 'Ask for a video, or 🎯 Select a scene…',
+        placeholder: 'Ask for a video…',
         starterPrompts: ['Plan me a 30-second video about what we do.', 'Make the opening of my video grab attention.', 'What would make this video work better?'],
         composerRows: 3,
       }),
@@ -419,9 +518,15 @@
       state.assistantId = assistantId;
       state.assistantName = assistantName || null;
       state.setup = setup && typeof setup === 'object' ? setup : {};
+      // A new view: the old full-screen box went with the old page, so only the lock is left to drop.
+      if (state.full) { state.full = false; window.ScrollLock?.release('videos-full'); }
       state.rendered = false; state.form = false; state.editing = null; state.replanning = null; state.notes = {};
+      state.stage = null; state.userStage = false;
+      loadFolded();
       load();   // eager: the planned count is the tab badge
     },
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; if (state.rendered) render(); },
     activate() {
       if (state.rendered) return;
       state.rendered = true;

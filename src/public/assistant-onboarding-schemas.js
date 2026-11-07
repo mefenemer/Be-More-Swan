@@ -268,6 +268,8 @@
     // Website Assistant (docs/website-assistant-plan.md). pagesWanted, siteStyle and siteGoal are read
     // by every AI draft of the site (src/utils/site-store.ts runSiteDraft, SITE_SETUP_KEYS) — the keys
     // must match there. currentWebsite fills "Import my current site" (sites.ts importSuggestUrl).
+    // sitePictures and siteVideos are what a from-scratch draft starts with (site-draft-media.ts,
+    // values 'stock' | 'ai' | 'none'); costs are shown on the Website tab, from the live weights.
     // Business name, description and audience come from Business Information, not from here.
     website_assistant: [
       {
@@ -297,6 +299,32 @@
             required: false,
             placeholder: 'e.g. Friendly and plain-spoken, like talking to a neighbour. No jargon.',
             helpText: 'Optional. Colours, font and logo come from your brand kit.',
+          },
+          {
+            key: 'sitePictures',
+            label: 'What placeholder pictures should a new site start with?',
+            type: 'dropdown',
+            required: false,
+            placeholder: 'Choose one…',
+            helpText: 'Optional. They go in your sections until you swap in your own. An imported site keeps its own pictures. AI-made ones use tasks: the Website tab shows how many before anything is made.',
+            options: [
+              { value: 'stock', label: 'Stock photos (free)' },
+              { value: 'ai', label: 'AI-made pictures' },
+              { value: 'none', label: 'No pictures for now' },
+            ],
+          },
+          {
+            key: 'siteVideos',
+            label: 'And placeholder videos?',
+            type: 'dropdown',
+            required: false,
+            placeholder: 'Choose one…',
+            helpText: 'Optional. AI-made video uses tasks and depends on your plan: the Website tab shows the cost before anything is made.',
+            options: [
+              { value: 'stock', label: 'Stock videos (free)' },
+              { value: 'ai', label: 'AI-made video' },
+              { value: 'none', label: 'No videos for now' },
+            ],
           },
         ],
       },

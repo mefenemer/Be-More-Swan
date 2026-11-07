@@ -56,11 +56,34 @@ test.beforeEach(async ({ page, api }) => {
     api.set('site-preview', async (route) => { await route.fulfill({ contentType: 'text/html; charset=utf-8', body: previewHtml }); });
 });
 
+test('Set up, Design, Pages and Publish are sub tabs of Website, with the chat beside each', async ({ page, api, pageErrors }) => {
+    await page.setViewportSize({ width: 1400, height: 900 });
+    api.set('sites', { ...siteView, placeholders: [{ path: '/', text: '[phone]' }], site: { ...siteView.site, status: 'published', unpublishedChanges: true } });
+    await page.goto('/e2e-website-chat.html');
+    const tabs = page.locator('[role="tablist"][aria-label="Your website"] [role="tab"]');
+    await expect(tabs).toHaveText(['Preview', 'Set up', 'Design', 'Pages1', /^Publish/]);
+    await expect(page.locator('#site-subtab-chat')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('iframe[data-site-preview]')).toBeVisible();
+    const input = page.locator('[data-sb-chat] [data-chat-input]');
+    for (const [key, words] of [['setup', 'Start again from scratch'], ['design', 'How your site is laid out'], ['pages', 'Add'], ['publish', 'Publish']] as const) {
+        await page.locator(`#site-subtab-${key}`).click();
+        await expect(page.locator(`#site-subtab-${key}`)).toHaveAttribute('aria-selected', 'true');
+        await expect(page.locator('#site-subtab-panel')).toHaveAttribute('aria-labelledby', `site-subtab-${key}`);
+        await expect(page.locator('[data-sb-blocks]').getByText(words).first()).toBeAttached();
+        await expect(input).toBeVisible();
+        await expect(page.locator('iframe[data-site-preview]')).toBeHidden();
+    }
+    // The same grey track of pills as the Briefs tab.
+    await expect(page.locator('[role="tablist"][aria-label="Your website"]')).toHaveClass(/bg-gray-100/);
+    await page.screenshot({ path: 'test-results/website-subtabs.png' });
+    await page.locator('#site-subtab-chat').click();
+    await expect(page.locator('iframe[data-site-preview]')).toBeVisible();
+    expect(pageErrors).toEqual([]);
+});
+
 test('preview on the left, the chat docked on the right and open first', async ({ page, pageErrors }) => {
     await page.setViewportSize({ width: 1400, height: 900 });
     await page.goto('/e2e-website-chat.html');
-    const chatTab = page.getByRole('tab', { name: 'Chat' });
-    await expect(chatTab).toHaveAttribute('aria-selected', 'true');
     const input = page.locator('[data-sb-chat] [data-chat-input]');
     await expect(input).toBeVisible();
     const frame = page.locator('iframe[data-site-preview]');
@@ -77,13 +100,15 @@ test('preview on the left, the chat docked on the right and open first', async (
     const chatBox = await page.locator('[data-sb-chatbox]').boundingBox();
     expect(Math.abs((previewCard!.y + previewCard!.height) - (chatBox!.y + chatBox!.height))).toBeLessThan(3);
     const paneWidth = (await page.locator('[data-sb-pane]').boundingBox())!.width;
-    // Another sub-tab swaps the chat for its panel; coming back finds the same chat, not a new one.
+    // Pages (the page's own tab, owner 2026-11-06): its work replaces the preview, the chat stays where it is.
     await input.fill('kept while I look at Pages');
-    await page.getByRole('tab', { name: 'Pages' }).click();
-    await expect(input).toBeHidden();
-    // Every sub-tab keeps the same pane width.
+    await page.evaluate(() => (window as any).AssistantSiteEditor.activate('website', 'pages'));
+    await expect(input).toBeVisible();
+    await expect(frame).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Preview my site' })).toBeVisible();
     expect((await page.locator('[data-sb-pane]').boundingBox())!.width).toBeCloseTo(paneWidth, 0);
-    await chatTab.click();
+    await page.evaluate(() => (window as any).AssistantSiteEditor.activate('website', 'chat'));
+    await expect(frame).toBeVisible();
     await expect(input).toHaveValue('kept while I look at Pages');
     await page.screenshot({ path: 'test-results/website-chat-layout.png' });
     expect(pageErrors).toEqual([]);

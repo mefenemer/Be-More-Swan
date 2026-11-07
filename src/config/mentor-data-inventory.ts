@@ -29,7 +29,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ], 'Your business: Business Information, Products & Services and your offers'),
     ...group('always', 'The team: every assistant, its state and its set-up answers', ['ai_assistants'], 'Your team: each assistant, whether it is active or paused, and its set-up answers'),
     ...group('always', 'Goals and their progress across the team', ['goals'], 'Goals and how close each one is'),
-    ...group('always', 'Brand Knowledge, as every chat reads it (business-knowledge.ts)', ['workspace_assets'], 'Brand Knowledge documents and links'),
+    ...group('always', 'Your brand files and links, as every chat reads it (business-knowledge.ts)', ['workspace_assets'], 'Your brand files and links (Brand Assets)'),
     ...group('always', 'The website\'s pages and the pages it lacks, as every chat reads it (site-directory.ts)', ['site_directories'], 'Your website\'s pages and what each one offers'),
     ...group('always', 'What the team did and has booked, as every chat reads it (team-activity.ts)', [
         'scheduled_posts', 'blog_posts', 'newsletter_issues',
@@ -49,7 +49,7 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('always', 'Its morning summaries (docs/morning-summary-plan.md): the newest sent in the last two days', ['mentor_mornings'], 'Its morning summaries'),
     ...group('always', 'Commitments and why a missed one was missed (§5.1), with each owner\'s name', ['mentor_commitments'], 'What you and your team committed to each week, and why any were missed'),
     ...group('always', 'Its track record: accepted suggestions and what happened since (§5.3)', ['mentor_outcomes'], 'What changed since you accepted its suggestions'),
-    ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus']),
+    ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus', 'chat_task_tally']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),
     ...group('on_request', 'Results: goal measurements and post performance', ['goal_telemetry', 'post_insights', 'manual_follower_counts']),
     // Phase 3b (§5.2): read by src/utils/mentor-customers.ts — in chat when the user asks about their
@@ -122,13 +122,13 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'campaign_experiments', 'campaign_links', 'campaign_spend_events', 'class_waitlist', 'content_assets', 'kb_articles',
         'newsletter_sequence_enrolments', 'newsletter_sequence_sends', 'newsletter_sequence_steps', 'outreach_sequences',
         'post_idea_suggestions', 'posted_assets', 'relationship_building_tasks', 'sequence_enrolments', 'sequence_steps',
-        'strategy_proposals', 'visual_brief_options',
+        'strategy_proposals', 'visual_brief_options', 'design_templates',
     ]),
 };
 
 /**
- * What the customer is told the Mentor sees and never sees: the "What I can see" panel on its Overview
- * tab (netlify/functions/mentor.ts) and the same list in its prompt, so chat and page say the same.
+ * What the customer is told the Mentor sees and never sees: the "What I can see" section of its Assistant
+ * Settings (netlify/functions/mentor.ts) and the same list in its prompt, so chat and page say the same.
  * `sees` is only what it reads today (`always`); other workspaces and other assistants' chats are never
  * tables of this workspace, so they are added in words.
  */
@@ -144,7 +144,7 @@ export function mentorVisibility(): { sees: string[]; never: string[] } {
 /** The same list for the Mentor's prompt, so "what can you see?" in chat matches the panel. */
 export function mentorVisibilityPromptBlock(): string {
     const v = mentorVisibility();
-    return `WHAT YOU CAN SEE — if asked, answer from this list only (the same list is on your Overview tab, under "What I can see"):
+    return `WHAT YOU CAN SEE — if asked, answer from this list only (the same list is in your Assistant Settings, under "What I can see"):
 Sees: ${v.sees.join('; ')}.
 Never sees: ${v.never.join('; ')}.`;
 }

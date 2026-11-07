@@ -3,6 +3,11 @@
  * The Business Mentor's Plan tab — docs/business-mentor-plan.md §4 and §14. The screen twins of what the
  * Mentor does in chat, through the SAME server actions (netlify/functions/mentor.ts):
  *
+ *   Set-up checklist        — the same gaps it raises as cards (mentor-snapshot.ts setupChecklist); each opens its
+ *                             Business Information tab. Top of the tab, and gone once everything is done
+ *   Recommended next        — who to hire next (mentor-hire.ts — the same list as the chat card and the catalogue's
+ *                             "Recommended" badge); "See this assistant" opens the catalogue
+ *                             (both read through the Suggestions tab's module: `mentor:overviewLoaded`)
  *   Your plans              — "Idea check", "Business plan" and "Marketing plan" (strategy-documents.ts)
  *     Idea check            — the eight interview questions one step at a time ("Back" / "Next" saves),
  *                             the "Lean Canvas" (nine editable boxes) and "Riskiest assumptions"
@@ -14,6 +19,8 @@
  *   Break-even calculator   — worked out in code (break-even.ts); every input shown, guesses labelled
  *   Look this up / Research — a sourced answer in about two minutes (1 task), and every past answer
  *   The playbook I'm using  — the reviewed playbook for this kind of business, or that there isn't one
+ *   Get feedback            — paste a draft (or open a .txt/.md file) and get the Mentor's critique inline
+ *                             (action 'feedback' → mentor-feedback.ts, the same craft as chat)
  *
  * A chat card saved or approved dispatches `mentor:planChanged`, which reloads this tab; a break-even card's
  * "Open in the calculator" dispatches `mentor:openCalculator`. Handlers are bound to `document` once, at
@@ -28,7 +35,10 @@
     kind: null, edits: {}, notes: {}, busy: {}, ideaStep: 0, showChanges: false, dismissedDrafts: {},
     calc: { inputs: {}, result: null, error: null, busy: false },
     research: { question: '', busy: false, error: null },
+    feedback: { text: '', busy: false, result: null, error: null },
+    setup: null,
   });
+  const FEEDBACK_MAX = 12000;
   let state = fresh();
   let pollTimer = null;
 
@@ -368,11 +378,93 @@
         <p class="text-sm text-gray-600 mt-1">None yet for your kind of business. ${esc(state.assistantName)} only coaches from a playbook once a person at Be More Swan has reviewed it${(p.awaitingReview || []).length ? ' — one for your kind of business is being reviewed' : ''}. Until then, general advice is labelled as its own judgement.</p>`, 'data-mplan-panel="playbook"');
     }
     const list = (title, pts) => pts && pts.length ? `<h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">${esc(title)}</h3><ul class="mt-1 space-y-1">${pts.map((x) => `<li class="text-sm text-gray-800 break-words">${esc(x.text)}${x.judgement ? ' <span class="text-[11px] text-gray-500">(reviewer’s judgement)</span>' : ''}${(x.sources || []).map((s) => ` <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" class="text-[11px] text-pink-700 underline">${esc(s.title)}</a>`).join('')}</li>`).join('')}</ul>` : '';
-    return card(`<details><summary class="cursor-pointer text-base font-bold text-gray-900">The playbook I’m using</summary>
+    return card(`<h2 class="text-base font-bold text-gray-900">The playbook I’m using</h2>
       <p class="text-sm font-semibold text-gray-900 mt-2">${esc(b.title)}</p>
       <p class="text-[11px] text-gray-500">Reviewed by ${esc(b.reviewed.by)} on ${esc(ukDate(b.reviewed.on))}</p>
       ${list('What good looks like', b.whatGoodLooksLike)}${list('The usual first 90 days', b.first90Days)}${list('Common mistakes', b.commonMistakes)}${list('The measures that matter', b.measures)}
-    </details>`, 'data-mplan-panel="playbook"');
+    `, 'data-mplan-panel="playbook"');
+  }
+
+  function checklistHtml(items) {
+    const done = items.filter((i) => i.done).length;
+    if (!items.length || done === items.length) return '';
+    const pct = Math.round((done / items.length) * 100);
+    const rows = items.map((i) => `
+      <li class="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0">
+        <span class="mt-0.5 w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center text-xs font-bold ${i.done ? 'border-green-500 bg-green-600 text-white' : 'border-gray-300'}" aria-hidden="true">${i.done ? '✓' : ''}</span>
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2">
+            ${i.done
+              ? `<span class="text-sm text-gray-700">${esc(i.label)}</span><span class="sr-only">(done)</span>`
+              : `<button type="button" data-mentor-open-field="${esc(i.tab)}" class="text-sm font-semibold text-pink-700 hover:underline text-left">${esc(i.label)}</button>
+                 ${i.optional ? '<span class="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-gray-100 text-gray-600">Optional</span>' : '<span class="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200">To do</span>'}`}
+          </div>
+          ${i.done ? '' : `<p class="text-xs text-gray-500 mt-0.5">${esc(i.why)}</p>`}
+        </div>
+      </li>`).join('');
+    // The bar is in the heading row, so it still shows when the card is closed (fold.js).
+    return card(`
+      <div>
+        <div class="flex items-center justify-between gap-2">
+          <h2 class="text-base font-bold text-gray-900">Set-up checklist</h2>
+          <span class="text-xs font-semibold text-gray-500 shrink-0">${done} of ${items.length} done</span>
+        </div>
+        <div class="mt-2 h-1.5 rounded-full bg-gray-100 overflow-hidden" role="progressbar" aria-label="Set-up checklist" aria-valuemin="0" aria-valuemax="${items.length}" aria-valuenow="${done}"><div class="h-full rounded-full bg-green-600" style="width:${pct}%"></div></div>
+      </div>
+      <p class="text-xs text-gray-500 mb-2">The same gaps ${esc(state.assistantName)} raises in chat. Each opens its place in Business Information.</p>
+      <ul>${rows}</ul>`, 'data-mentor-panel="checklist"');
+  }
+
+  function recommendedHtml(rec) {
+    const picks = (rec && rec.picks) || [];
+    const cap = (rec && rec.capacity) || {};
+    const rows = picks.map((p, i) => `
+      <li class="py-2 border-b border-gray-100 last:border-0">
+        <p class="text-sm font-semibold text-gray-900">${i + 1}. ${esc(p.name)}</p>
+        <p class="text-xs text-gray-600 mt-0.5 break-words">${esc(p.reason)}</p>
+        <button type="button" data-mentor-see-role="${esc(p.roleKey)}" class="btn-swan-link mt-1 px-0 py-1 text-xs font-bold">See this assistant</button>
+      </li>`).join('');
+    return card(`
+      <h2 class="text-base font-bold text-gray-900">Recommended next</h2>
+      ${picks.length
+        ? `<p class="text-xs text-gray-500 mt-1">Who ${esc(state.assistantName)} would hire next, and why. Nothing is hired from here.</p><ol class="mt-1">${rows}</ol>`
+        : cap.remaining === 0
+          ? '<p class="text-sm text-gray-600 mt-1">You already have every assistant on offer.</p>'
+          : '<p class="text-sm text-gray-600 mt-1">No clear gap for another assistant right now.</p>'}
+      ${cap.note ? `<p class="mt-2 text-xs rounded-lg px-2.5 py-1.5 ${cap.needsUpgrade ? 'border border-amber-200 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-700'}">${esc(cap.note)}</p>` : ''}`, 'data-mentor-panel="recommended"');
+  }
+
+  function feedbackHtml() {
+    const f = state.feedback;
+    return card(`
+      <h2 class="text-base font-bold text-gray-900">Get feedback</h2>
+      <p class="text-xs text-gray-500 mt-1">Paste something you wrote — a sales email, a post, a flyer — and ${esc(state.assistantName)} will say what works and what to change, for your customers. Nothing is saved or changed.</p>
+      <label for="mplan-feedback-text" class="sr-only">Your draft</label>
+      <textarea id="mplan-feedback-text" data-mplan-feedback-text rows="6" maxlength="${FEEDBACK_MAX}" class="mt-2 w-full rounded-lg border border-gray-300 p-2.5 text-sm" placeholder="Paste your draft here…" ${f.busy ? 'disabled' : ''}>${esc(f.text)}</textarea>
+      <div class="flex flex-wrap items-center gap-2 mt-2">
+        <button type="button" data-mplan-feedback-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${f.busy ? 'disabled' : ''}>${f.busy ? 'Reading…' : 'Get feedback'}</button>
+        <label class="btn-secondary px-3 py-2 border text-xs font-bold rounded-lg transition cursor-pointer">
+          Open a text file<input type="file" accept=".txt,.md,text/plain,text/markdown" data-mplan-feedback-file class="sr-only">
+        </label>
+        <span class="text-[11px] text-gray-500" data-mplan-feedback-count>${f.text.length.toLocaleString('en-GB')} / ${FEEDBACK_MAX.toLocaleString('en-GB')}</span>
+      </div>
+      ${f.error ? `<p class="mt-2 text-xs font-semibold text-red-600" role="alert" data-fold-open>${esc(f.error)}</p>` : ''}
+      ${f.result ? `<div class="mt-3 rounded-lg border border-pink-200 bg-pink-50 p-3" data-mplan-feedback-result data-fold-open role="status" aria-live="polite"><p class="text-xs font-bold text-pink-800 uppercase tracking-wide">${esc(state.assistantName)}’s feedback</p><p class="text-sm text-gray-800 mt-1 whitespace-pre-line break-words">${esc(f.result)}</p></div>` : ''}`, 'data-mentor-panel="feedback"');
+  }
+
+  async function getFeedback() {
+    const f = state.feedback;
+    if (f.busy) return;
+    if (f.text.trim().length < 20) { f.error = 'Paste a little more of your draft so there’s something to judge.'; render(); return; }
+    f.busy = true; f.error = null; f.result = null; render();
+    try {
+      const body = await call({ action: 'feedback', text: f.text });
+      f.result = body.feedback;
+    } catch (err) {
+      f.error = err.message || 'Your Mentor couldn’t read that just now — please try again.';
+    }
+    f.busy = false;
+    render();
   }
 
   function render() {
@@ -388,19 +480,18 @@
     // …and the caret or selection inside it (a repaint just after clicking into a box must not move it).
     let caret = [];
     try { if (active && el.contains(active) && typeof active.selectionStart === 'number') caret = [active.selectionStart, active.selectionEnd]; } catch (e) { /* number inputs */ }
-    const focusKey = active && el.contains(active) ? (active.getAttribute('data-mplan-field') || active.getAttribute('data-mplan-assumption') || active.getAttribute('data-mplan-calc') || (active.hasAttribute('data-mplan-research-q') ? 'research' : null)) : null;
+    const focusKey = active && el.contains(active) ? (active.getAttribute('data-mplan-field') || active.getAttribute('data-mplan-assumption') || active.getAttribute('data-mplan-calc') || (active.hasAttribute('data-mplan-research-q') ? 'research' : active.hasAttribute('data-mplan-feedback-text') ? 'feedback' : null)) : null;
     el.innerHTML = `
-      ${chatPaneAvailable() ? `<div class="flex justify-end mb-3"><button type="button" data-mplan-chat-toggle aria-pressed="${chatDock && chatDock.isOn() ? 'true' : 'false'}" title="Show or hide the chat beside your plans" class="btn-assistant border px-4 py-2 text-sm font-bold rounded-lg">💬 Chat with ${esc(state.assistantName)}</button></div>` : ''}
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
-        <div class="space-y-4 min-w-0 lg:col-span-2">${plansHtml()}${researchHtml()}</div>
-        <div class="space-y-4 min-w-0">${calcHtml()}${playbookHtml()}
+        <div class="space-y-4 min-w-0 lg:col-span-2">${checklistHtml(state.setup?.checklist || [])}${plansHtml()}${researchHtml()}${feedbackHtml()}</div>
+        <div class="space-y-4 min-w-0">${state.setup ? recommendedHtml(state.setup.recommended) : ''}${calcHtml()}${playbookHtml()}
           ${card(chatPaneAvailable()
             ? `<p class="text-xs text-gray-600">Prefer to talk it through? 🎯 Select a part of a plan and ask ${esc(state.assistantName)} — “challenge this”, “make it shorter”. It changes the same plans, and nothing is saved without your click.</p>`
             : `<p class="text-xs text-gray-600">Prefer to talk it through? Ask ${esc(state.assistantName)} in chat — it fills in the same plans, and nothing is saved without your click.</p>`)}
         </div>
       </div>`;
     if (focusKey) {
-      const sel = focusKey === 'research' ? '[data-mplan-research-q]' : `[data-mplan-field="${focusKey}"],[data-mplan-assumption="${focusKey}"],[data-mplan-calc="${focusKey}"]`;
+      const sel = focusKey === 'research' ? '[data-mplan-research-q]' : focusKey === 'feedback' ? '[data-mplan-feedback-text]' : `[data-mplan-field="${focusKey}"],[data-mplan-assumption="${focusKey}"],[data-mplan-calc="${focusKey}"]`;
       const again = el.querySelector(sel);
       if (again) { again.focus(); try { const n = again.value.length; again.setSelectionRange(Math.min(caret[0] ?? n, n), Math.min(caret[1] ?? n, n)); } catch (e) { /* number inputs */ } }
     }
@@ -469,7 +560,15 @@
   document.addEventListener('click', (e) => {
     const t = e.target;
     if (!(t instanceof Element) || !host()?.contains(t)) return;
-    if (t.closest('[data-mplan-chat-toggle]')) { const d = getChatDock(); if (d) d.setOn(!d.isOn(), true); return; }
+    if (t.closest('[data-mplan-feedback-go]')) { getFeedback(); return; }
+    const openField = t.closest('[data-mentor-open-field]');
+    if (openField) {
+      window._bizinfoInitialTab = openField.getAttribute('data-mentor-open-field');
+      if (window.loadView) window.loadView('assets');
+      return;
+    }
+    const see = t.closest('[data-mentor-see-role]');
+    if (see) { window.MentorOpenCatalogue?.(see.getAttribute('data-mentor-see-role')); return; }
     const sel = t.closest('[data-mplan-select], [data-mplan-select-assumption]');
     if (sel) { const ref = selectionRef(sel); if (ref) getChatDock()?.refer(ref); return; }
     const k = t.closest('[data-mplan-kind]');
@@ -524,7 +623,7 @@
   // below), which would swap the button out between the press and the click, and the click would be lost.
   document.addEventListener('mousedown', (e) => {
     const t = e.target;
-    if (t instanceof Element && host()?.contains(t) && t.closest('[data-mplan-select], [data-mplan-select-assumption], [data-mplan-chat-toggle]')) e.preventDefault();
+    if (t instanceof Element && host()?.contains(t) && t.closest('[data-mplan-select], [data-mplan-select-assumption]')) e.preventDefault();
   });
   // Typing is kept in state (never lost to a repaint from a chat card or a poll).
   document.addEventListener('input', (e) => {
@@ -546,11 +645,28 @@
       return;
     }
     if (t.matches('[data-mplan-research-q]')) state.research.question = t.value;
+    // The draft is kept as it is typed, so a repaint (a card saved in chat) never loses it.
+    if (t.matches('[data-mplan-feedback-text]')) {
+      state.feedback.text = t.value.slice(0, FEEDBACK_MAX);
+      const n = host().querySelector('[data-mplan-feedback-count]');
+      if (n) n.textContent = `${state.feedback.text.length.toLocaleString('en-GB')} / ${FEEDBACK_MAX.toLocaleString('en-GB')}`;
+    }
   });
   // Status pills and buttons follow the edits once the field is left (a full repaint on every key would be noisy).
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (!(t instanceof Element) || !host()?.contains(t)) return;
+    if (t.matches('[data-mplan-feedback-file]')) {
+      const file = t.files && t.files[0];
+      if (!file) return;
+      if (file.size > 200000) { state.feedback.error = 'That file is too big — paste the part you want feedback on instead.'; render(); return; }
+      file.text().then((txt) => {
+        state.feedback.text = String(txt).slice(0, FEEDBACK_MAX);
+        state.feedback.error = txt.length > FEEDBACK_MAX ? `Only the first ${FEEDBACK_MAX.toLocaleString('en-GB')} characters were kept.` : null;
+        render();
+      }, () => { state.feedback.error = 'That file couldn’t be read — paste the text instead.'; render(); });
+      return;
+    }
     const g = t.getAttribute('data-mplan-calc-guess');
     if (g) {
       const prev = state.calc.inputs[g] || {};
@@ -565,6 +681,9 @@
   // Unsaved typing elsewhere is kept, but a part the chat has just changed shows the chat's words: the
   // user approved that card, and their older typing over it would hide the change and then overwrite it
   // on "Save draft".
+  // The Suggestions tab read the checklist and who to hire next, and re-reads them when a card or Business
+  // Information saves: one read for the two tabs.
+  document.addEventListener('mentor:overviewLoaded', (e) => { state.setup = e.detail; render(); });
   document.addEventListener('mentor:planChanged', async () => {
     if (!state.assistantId || !host()) return;
     const before = Object.fromEntries(KINDS.map((k) => [k, JSON.stringify(baseOf(k))]));
@@ -607,11 +726,10 @@
     if (chatDock && chatDock.connected()) return chatDock;
     chatDock = window.ChatPane.dock(el, {
       prefix: 'mentorplan', storageKey: 'bms-mentorplan-chat-on',
-      onToggle: (on) => document.querySelector('[data-mplan-chat-toggle]')?.setAttribute('aria-pressed', on ? 'true' : 'false'),
       pane: () => ({
         assistantId: state.assistantId, assistantName: state.assistantName, roleKey: 'business_mentor',
         rememberKey: `bms-mentorplan-chat:${state.assistantId}`,
-        placeholder: 'Ask about your plans, or 🎯 Select a part…',
+        placeholder: 'Ask about your plans…',
         starterPrompts: ['Which part of my business plan is weakest?', 'Challenge my riskiest assumption.', 'Help me write my marketing plan.'],
         composerRows: 3,
       }),
@@ -650,9 +768,12 @@
       state.assistantId = assistantId;
       state.assistantName = assistantName || 'Your Mentor';
       if (keepCalc) state.calc = keepCalc;
+      state.setup = window.AssistantMentorOverview?.data?.() || null;
       render();
       load();
     },
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; render(); },
     activate() {
       if (!state.data && !state.loading) load(); else { render(); schedulePoll(); }
       const dock = getChatDock();

@@ -26,7 +26,8 @@
 // (VOICEOVER_CREDIT_COST, owner decision 2026-10-31), held before the call, refunded on any failure.
 
 import { getDb } from '../../db/client';
-import { mediaGenerationJobs } from '../../db/schema';
+import { and, eq } from 'drizzle-orm';
+import { mediaGenerationJobs, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/utils/assistant-capabilities';
 import { enforcePromptModeration } from '../../src/utils/moderation';
@@ -131,7 +132,10 @@ export default withLambda(async (event) => {
             error: e?.kind === 'policy' ? 'That script could not be read aloud. Please change the wording.' : 'The voiceover could not be made. Your credit was not used.',
         });
     }
-    await settleHold(db, { orgId, amount: VOICEOVER_CREDIT_COST, success: true, mediaType: 'voiceover', userId, jobId: made.jobId });
+    // Made for a post: credit that post's assistant. Without one, or if the lookup fails, it stays unattributed.
+    const owner = postId == null ? null : (await db.select({ assistantId: scheduledPosts.assistantId }).from(scheduledPosts)
+        .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, orgId))).limit(1).catch(() => []))[0];
+    await settleHold(db, { orgId, amount: VOICEOVER_CREDIT_COST, success: true, mediaType: 'voiceover', userId, jobId: made.jobId, assistantId: owner?.assistantId ?? null });
     const url = await presignR2Get(made.storageKey).catch(() => null);
     let clip = null;
     for (const id of postIds) {

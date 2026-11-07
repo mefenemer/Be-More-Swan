@@ -39,7 +39,26 @@ export const TASK_WEIGHTS = {
     mentor_review: 1,
     // "Draft the words" for a printed flyer (docs/brand-designer-flyers-plan.md §3.7). Drawing the pages is free.
     flyer_words: 1,
+    // Taking the background out of a picture in the design editor (owner, 2026-11-06): a paid AI call per picture.
+    background_removal: 1,
+    // Behind basicWorkCharged below (docs/basic-work-charging.md).
+    chat_messages: 1,
+    editing_helper: 1,
+    design_round: 1,
+    finished_design: 1,
 } as const;
+
+/**
+ * Chat, editing helpers, free design rounds and finished designs start costing tasks on this switch
+ * (owner, 2026-11-06). Terms 5.4 promise they do not, so it needs 30 days' notice first.
+ * Netlify env BASIC_WORK_CHARGED_FROM: 'on', or the date it starts (src/config/dated-switch.ts). Unset = free.
+ */
+export function basicWorkCharged(now: Date = new Date()): boolean {
+    return switchedOn(process.env.BASIC_WORK_CHARGED_FROM, now);
+}
+
+/** Chat costs one task per this many delivered messages. */
+export const CHAT_MESSAGES_PER_TASK = 10;
 
 /**
  * AI video by length (owner, 2026-11-01): 4 tasks a second, because the models bill by the second
@@ -99,4 +118,9 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     mentor_strategy: 'Business Mentor plan drafts',
     mentor_review: 'Business Mentor weekly reviews',
     flyer_words: 'Flyer words',
+    background_removal: 'Background removals',
+    chat_messages: 'Chat (every 10 messages)',
+    editing_helper: 'Editing helpers',
+    design_round: 'Design rounds',
+    finished_design: 'Finished designs',
 };

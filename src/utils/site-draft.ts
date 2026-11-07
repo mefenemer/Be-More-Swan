@@ -43,6 +43,8 @@ export interface DraftBrief {
     /** What they asked for just now, in their words (the button's text box or the chat card). */
     request: string | null;
     maxPages: number;
+    /** Placeholder pictures or videos will be added to this draft afterwards (site-draft-media.ts). */
+    mediaWanted?: boolean;
 }
 
 /** The brand kit as a site theme. A neutral default where the workspace has none. */
@@ -143,7 +145,7 @@ export function buildDraftPrompt(brief: DraftBrief): { system: string; user: str
 - NEVER invent facts: no testimonials, reviews, customer names, prices, numbers, years, awards, guarantees or results that are not in the business details or products above. Where a page genuinely needs one, write a clear placeholder in square brackets — e.g. "[number] customers since [year]" — for the owner to fill in.
 - Answer the questions buyers ask (price, process, timescale, who it suits) in a "faq" section where you can do so from the facts above.
 - Every page gets an seo.title (max ${LIMITS.seoTitle} chars) and seo.description (max ${LIMITS.seoDescription} chars).
-- Reply with the JSON object only.
+${brief.mediaWanted ? '- Pictures and videos are added to the hero and "text" sections after you write, so never write an image yourself. Give each main page at least one "text" section as well as its hero, so there is somewhere to put one.\n' : ''}- Reply with the JSON object only.
 </rules>`,
         SITE_COPY_CRAFT,
         SECTION_SCHEMA,

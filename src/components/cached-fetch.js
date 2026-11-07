@@ -16,6 +16,7 @@
  *   - ANY non-GET request to a function (/.netlify/functions/*, /api/*) clears the whole cache, so
  *     whatever the user just did (hire, pause, archive, rename, switch organisation) is never
  *     answered from a copy taken before it.
+ *     (A POST that only reads says so with `bmsRead: true` on its init, and leaves the cache alone.)
  *   - Nothing is kept for longer than ttlMs (30 s by default), which bounds how stale a change made
  *     by a background job (provisioning finishing, a worker moving an assistant's status) can be.
  *   - A caller that must see the server's current answer — a poll — passes { fresh: true }, which
@@ -56,7 +57,10 @@
     window.fetch = function (input, init) {
         try {
             const method = String((init && init.method) || (input && typeof input === 'object' && input.method) || 'GET').toUpperCase();
-            if (method !== 'GET' && method !== 'HEAD') {
+            // `bmsRead: true` on init marks a POST that only READS (brand-briefs' list / performance /
+            // calendar): it changes nothing, so it must not throw away every cached list. Without this,
+            // the Brand Designer page emptied the cache on every load and Settings re-fetched it all.
+            if (method !== 'GET' && method !== 'HEAD' && !(init && init.bmsRead === true)) {
                 const url = typeof input === 'string' ? input : (input && input.url) || String(input);
                 if (url.includes('/.netlify/functions/') || url.includes('/api/')) cache.clear();
             }

@@ -3,7 +3,7 @@
  * "Review all" (docs/business-mentor-plan.md §3.13, §14): every Business Mentor suggestion still waiting,
  * together, each with its preview and its own tick. ONE component for the three places it appears:
  *   - the chat's `mentor_review_all` card (disruptive-ui-registry.js mounts it inline),
- *   - the Mentor's Overview tab (assistant-mentor-overview.js, a "Review all" button → openDialog),
+ *   - the Mentor's Suggestions tab (assistant-mentor-overview.js, a "Review all" button → openDialog),
  *   - Inbox "Needs you" (notifications.js, the Mentor strip → openDialog).
  *
  * Rules: nothing is pre-ticked; one click applies only the ticked ones, one after another, each through
@@ -143,7 +143,7 @@
     load();
   }
 
-  /** "Review all" as a dialog (Overview tab, Inbox). Marked data-dialog so /dialogs.js holds focus and Escape. */
+  /** "Review all" as a dialog (Suggestions tab, Inbox). Marked data-dialog so /dialogs.js holds focus and Escape. */
   function openDialog() {
     const overlay = document.createElement('div');
     overlay.setAttribute('data-dialog', '');

@@ -121,11 +121,39 @@
     </button>
   </nav>
 
+  <!-- Right-hand menu (compactHeader roles, md and up): the Assistant Settings' sections as a side
+       menu that mirrors the left one — closed to icons by default, opened with the same toggle. It
+       replaces the header's Assistant Settings button; each item opens the profile drawer at that
+       section. Items are built from the drawer's own cards by _renderRightMenu (assistants.js), so a
+       role's renamed or hidden sections read the same here. Inside #assistant-detail-content, so it
+       only shows once the page has loaded, and goes when the view is swapped out. -->
+  <aside id="detail-right-menu" aria-label="Assistant settings">
+    <div class="rm-toggle-row">
+      <button id="rm-toggle" type="button" aria-expanded="false" aria-label="Expand settings menu" data-tip="Expand settings menu"
+        class="text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg p-1.5 transition-colors cursor-pointer">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M15 4v16"/><path id="rm-toggle-chevron" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10l-2 2 2 2"/></svg>
+      </button>
+    </div>
+    <!-- The header's Chat button is hidden while this menu shows, so the chat lives here: every role
+         keeps a way into its chat on every tab (issue #197), docked chat pane or not. -->
+    <button id="rm-chat" type="button" class="rm-item"><svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg><span class="nav-label">Chat</span></button>
+    <p class="rm-heading nav-label">Assistant Settings</p>
+    <nav id="rm-items" class="space-y-0.5"></nav>
+  </aside>
+
   <!-- Hero header — condensed for maximum content real estate -->
   <!-- z-20 makes the card its own stacking context ABOVE the Overview cards that follow it, so the
        avatar's letter + colour menu (#assistant-color-menu), which hangs past the card's bottom edge,
        paints over Goal Progress & co. and stays clickable there. Stays under the fixed top nav (z-50). -->
-  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm px-5 py-4 mb-6 relative z-20">
+  <!-- #detail-top-row: for a role with `compactHeader` (registry), the hero takes just under half the
+       width and the "Needs you" strip is moved up beside it (_applyCompactHeader, assistants.js). For
+       every other role the row is a plain block and nothing moves. -->
+  <!-- The wrapper is the size container the compact header's grid reads (the page's own width, not the
+       window's: with both menus and a settings section open, a 1600px window leaves ~850px here). Not on
+       #assistant-detail-content, because containment would trap its position:fixed menus and drawer. -->
+  <div id="detail-top-wrap">
+  <div id="detail-top-row">
+  <div id="detail-hero" class="bg-white rounded-2xl border border-gray-200 shadow-sm px-5 py-4 mb-6 relative z-20">
     <!-- Issue #65 follow-up: overflow-hidden used to live on the card itself, which clipped the
          "More actions" dropdown when it extended past the card's bottom edge. Scope the clip to
          just this decorative blur instead, so the card can host overflowing popovers. -->
@@ -167,7 +195,7 @@
           <!-- Name, pencil, swan on ONE line (nowrap): the swan belongs to the name it suggests.
                The input is sized to its text by _fitDetailNameInput (assistants.js), so the pencil
                and the swan sit right after the name rather than at the end of a 280px field. -->
-          <div class="flex items-center gap-2" style="flex-wrap:nowrap">
+          <div id="detail-name-row" class="flex items-center gap-2" style="flex-wrap:nowrap">
             <input id="detail-name-input" type="text" value="Loading…"
               title="Click to rename your assistant" aria-label="Assistant name (click to rename)"
               class="text-lg font-extrabold text-gray-900 bg-transparent focus:outline-none focus:ring-0 transition-colors min-w-0"
@@ -177,7 +205,7 @@
               onclick="const i=document.getElementById('detail-name-input'); i.focus(); i.select();">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536M9 13l6.232-6.232a2.5 2.5 0 113.536 3.536L12.536 16.536a4 4 0 01-1.768 1.022L7 19l1.442-3.768A4 4 0 019 13z"/></svg>
             </button>
-            <button id="btn-generate-name" title="Let Be More Swan suggest a name" aria-label="Suggest a name" class="btn-swan-link cursor-pointer shrink-0" type="button">
+            <button id="btn-generate-name" onmousedown="event.preventDefault()" title="Let Be More Swan suggest a name" aria-label="Suggest a name" class="btn-swan-link cursor-pointer shrink-0" type="button">
               <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="ai-wand-img"> <span class="detail-suggest-name-label">Suggest a name</span>
             </button>
           </div>
@@ -212,14 +240,14 @@
         <button id="btn-assistant-profile" onclick="window._openProfileDrawer()" type="button"
           class="btn-secondary flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-bold border rounded-xl transition-colors shadow-sm cursor-pointer">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-          <span id="profile-btn-label">Assistant Profile</span>
+          <span id="profile-btn-label">Assistant Settings</span>
         </button>
         <!-- Issue #65 follow-up: Pause / Archive moved OUT of the header (too easy to mis-click) to
-             the bottom of the Assistant Profile drawer — see #assistant-lifecycle-actions below. -->
+             the bottom of the Assistant Settings drawer — see #assistant-lifecycle-actions below. -->
       </div>
     </div>
     <!-- No "Manage connections" button on the Overview, for any role (owner, 2026-10-22): two roles
-         showed one and the rest didn't. Connections are managed in Assistant Profile ▸ Connections, the
+         showed one and the rest didn't. Connections are managed in Assistant Settings ▸ Connections, the
          same place for every assistant. -->
     <!-- Issue #206: Time/Money Saved moved out of the Impact & ROI card to sit under the assistant's
          name and job title. The Week/Month toggle came with them — it only ever drove these two
@@ -275,6 +303,8 @@
       <p class="text-[11px] text-gray-500 mt-1.5" id="task-share-note"></p>
     </div>
   </div>
+  </div><!-- /detail-top-row -->
+  </div><!-- /detail-top-wrap -->
 
   <!-- Kick Off Meeting — readiness checklist + activation gate, shown when the assistant
        hasn't been kicked off yet (issue #193: moved here from the removed Progress Reviews tab). -->
@@ -493,7 +523,7 @@
     </div>
   </div>
 
-  <!-- The status row holds only the Autopilot card (Connections live in Assistant Profile). -->
+  <!-- The status row holds only the Autopilot card (Connections live in Assistant Settings). -->
 
   </div>
   <!-- ── end status row ── -->
@@ -503,7 +533,7 @@
        order:-1 pulls this above the status row within the flex-column wrapper.
        A role with goalsTab.bringsResults (Social Media, 2026-10-21 trial) has this card and Goal
        Progress moved into its Goals tab, renamed "Results" — see _applyDashboardRegistry. -->
-  <div id="performance-metrics-card" class="mb-8" style="order:-1">
+  <div id="performance-metrics-card" data-fold-section class="mb-8" style="order:-1">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
       <span id="metrics-status-note" class="text-xs text-gray-500 font-medium">Last 30 days</span>
@@ -691,13 +721,15 @@
              Without it an empty amber pill shows until the first count lands. -->
         <span id="campaigns-live-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
-      <!-- Overview — Business Mentor only (mentorTab: business_mentor). Set-up checklist, "What I can see",
-           Dismissed suggestions and this week's count: the screen twins of its chat cards
+      <!-- Suggestions — Business Mentor only (mentorTab: business_mentor). What it produces, as one list with a
+           pill per stage: the screen twin of its chat cards
            (docs/business-mentor-plan.md §14). assistant-mentor-overview.js → mentor.ts.
            ⚠️ Rename a panel and businessMentorSurfaces() in chat-orchestrator.ts must change too
            (tests/mentor-page.test.ts). -->
       <button type="button" role="tab" aria-selected="false" tabindex="-1" aria-controls="maintab-mentor" id="maintab-btn-mentor" data-maintab="mentor" class="main-tab-btn hidden">
-        <span id="mentor-tab-label">Overview</span>
+        <span id="mentor-tab-label">Suggestions</span>
+        <!-- `hidden` loses to `inline-flex` (equal specificity, later in style.css): pinned inline too. -->
+        <span id="mentor-review-badge" style="display:none" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
       <!-- Plan — Business Mentor only (mentorPlanTab: business_mentor). Idea check, business and marketing
            plans, break-even calculator, research and the playbook in use (docs/business-mentor-plan.md §4,
@@ -852,10 +884,13 @@
       <button type="button" id="needs-you-go" class="hidden btn-secondary min-h-[44px] sm:min-h-0 px-3 py-1.5 border text-xs font-bold rounded-lg transition"></button>
     </div>
     <p id="next-up-text" class="hidden text-xs text-gray-600 mt-1"></p>
+    <!-- Compact header only: what is waiting, each one a button to it (_setNeedsYouItems). -->
+    <ul id="needs-you-list" class="hidden"></ul>
   </div>
 
   <!-- ── MAIN TAB: Activity ─────────────────────────────────────────── -->
-  <div id="maintab-activity" role="tabpanel" aria-labelledby="maintab-btn-activity" class="main-tab-content hidden">
+  <!-- data-no-fold: the feed is the tab, one line per thing done (fold.js) -->
+  <div data-no-fold id="maintab-activity" role="tabpanel" aria-labelledby="maintab-btn-activity" class="main-tab-content hidden">
 
   <!-- AC6: Daily Relationship-Building Checklist (relocated here by issue #181) — hidden until
        loaded; only shown for social assistants. -->
@@ -903,19 +938,31 @@
   </div><!-- /maintab-activity -->
 
   <!-- ── MAIN TAB: Review Queue ──────────────────────────────────────── -->
-  <div id="maintab-review-queue" role="tabpanel" aria-labelledby="maintab-btn-review-queue" class="main-tab-content hidden">
+  <!-- data-no-fold: its cards fold themselves (_rqToggleCard) (fold.js) -->
+  <div data-no-fold id="maintab-review-queue" role="tabpanel" aria-labelledby="maintab-btn-review-queue" class="main-tab-content hidden">
 
-    <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+    <!-- One header row (owner, 2026-11-06, as on the Brand Designer's Briefs): the title and its ⓘ on
+         the left, the buttons on the right. The description is kept in #detail-rq-subtitle for the
+         registry to write, and shown inside the ⓘ (_applyDashboardRegistry); it only shows here when
+         the explainer script is missing. -->
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
         <h2 id="detail-rq-heading" class="text-lg font-extrabold text-gray-900">Review</h2>
         <!-- Subtitle + primary button copy adapt to the role's reviewQueue kind (posts vs records)
              in _applyDashboardRegistry. -->
-        <p id="detail-rq-subtitle" class="text-sm text-gray-500 mt-1">Items awaiting your review — approve, edit or reject before anything is scheduled.</p>
+        <p id="detail-rq-subtitle" class="hidden text-sm text-gray-500 mt-1">Items awaiting your review — approve, edit or reject before anything is scheduled.</p>
         <!-- Blog Writer only (_renderAutopilotCard): whether autopilot is writing more drafts. -->
         <button type="button" id="detail-rq-autopilot-chip" style="display:none" onclick="window._activateMainTab && window._activateMainTab('goals')"
           class="hidden mt-2 inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition cursor-pointer"></button>
       </div>
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex flex-wrap items-center justify-end gap-2">
+        <!-- Show all / Hide all for a records queue's cards (each opens from its title). -->
+        <button type="button" id="detail-rq-foldall" style="display:none" onclick="window._rqFoldAll()"
+          class="hidden text-xs font-bold text-gray-600 hover:text-gray-900 px-1 py-1 cursor-pointer">Show all</button>
+        <!-- Full screen, as on the Briefs and Website tabs: this list over the whole page, Esc to leave. -->
+        <button type="button" id="detail-rq-full-btn" onclick="window._rqSetFull(!document.getElementById('maintab-review-queue').hasAttribute('data-rq-full'))"
+          aria-pressed="false" title="Use the whole screen for this list"
+          class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Full screen</button>
         <!-- Blog Writer only: Search Console and the blog widget, set once for the whole blog
              (Blog Studio's mode:'setup'). They used to be sections 7–8 of every post's editor. -->
         <button type="button" id="detail-rq-setup-btn" style="display:none"
@@ -939,7 +986,7 @@
 
     <div id="detail-rq-card" class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
       <!-- Lifecycle columns -->
-      <div id="detail-rq-colstrip" class="tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Items by stage">
+      <div id="detail-rq-colstrip" class="stage-pills tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Items by stage">
         <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="true" tabindex="0" class="detail-rq-col px-4 py-2 text-sm font-semibold rounded-t border-b-2 border-emerald-800 text-emerald-800 whitespace-nowrap"
           data-status="review" onclick="detailRqOpenStatus('review', this)">
           Review
@@ -997,7 +1044,8 @@
        enrichment diffs / meeting notes / ledger / tickets. Populated by
        assistant-data-hub.js from the hubTab config; records live in
        assistant_records (netlify/functions/assistant-records.ts). -->
-  <div id="maintab-datahub" role="tabpanel" aria-labelledby="maintab-btn-datahub" class="main-tab-content">
+  <!-- data-no-fold: a table, whose groups start closed (fold.js) -->
+  <div data-no-fold id="maintab-datahub" role="tabpanel" aria-labelledby="maintab-btn-datahub" class="main-tab-content">
 
     <!-- Primary action bar (Epic 2.1; relocated here by issue #181) — the role's one "do the thing"
          intent, front and centre on its workspace tab.
@@ -1043,7 +1091,8 @@
        renders the global calendar (calendar.js) scoped to _currentAssistantId:
        scheduled posts (get-social-drafts), records with scheduled_for
        (assistant-records) and completed task runs (get-calendar-activity). -->
-  <div id="maintab-calendar" role="tabpanel" aria-labelledby="maintab-btn-calendar" class="main-tab-content hidden">
+  <!-- data-no-fold: a calendar (fold.js) -->
+  <div data-no-fold id="maintab-calendar" role="tabpanel" aria-labelledby="maintab-btn-calendar" class="main-tab-content hidden">
     <div id="assistant-calendar-host"></div>
   </div><!-- /maintab-calendar -->
 
@@ -1051,7 +1100,8 @@
        The org-wide content library (uploads/links/AI-generated media, not
        assistant-scoped). Populated by assistant-my-content.js, which reuses the
        standalone my-content.html fragment + my-content.js controller. -->
-  <div id="maintab-mycontent" role="tabpanel" aria-labelledby="maintab-btn-mycontent" class="main-tab-content hidden">
+  <!-- data-no-fold: columns of pictures (fold.js) -->
+  <div data-no-fold id="maintab-mycontent" role="tabpanel" aria-labelledby="maintab-btn-mycontent" class="main-tab-content hidden">
     <!-- Shown inside one assistant, the library read as THAT assistant's — and deleting here removes
          a picture from every assistant's posts. Say so before anything is touched (UX review,
          2026-10-21). -->
@@ -1094,7 +1144,7 @@
 
   <!-- Briefs — Brand Designer only. Rendered lazily by assistant-briefs.js on first activation;
        init() fetches eagerly because the count of briefs needing a decision drives the tab badge. -->
-  <!-- Overview — Business Mentor only. Rendered by assistant-mentor-overview.js. -->
+  <!-- Suggestions — Business Mentor only. Rendered by assistant-mentor-overview.js. -->
   <div id="maintab-mentor" role="tabpanel" aria-labelledby="maintab-btn-mentor" class="main-tab-content hidden">
     <div id="mentor-overview-host"></div>
   </div>
@@ -1149,7 +1199,7 @@
   </div><!-- /maintab-strategy -->
 
   <!-- ── Persona / config slide-over (Epic 1) ──────────────────────────
-       Opened from the header "Assistant Profile" button (#btn-assistant-profile),
+       Opened from the header "Assistant Settings" button (#btn-assistant-profile),
        no longer a main tab. The Operating File card index is the drawer "home";
        clicking a card swaps to that section panel with a back arrow. -->
   <div id="brief-drawer-backdrop" onclick="window._closeBriefDrawer()" style="display:none;opacity:0;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:9000;transition:opacity .2s ease" aria-hidden="true"></div>
@@ -1160,12 +1210,12 @@
     style="position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);z-index:9001;display:flex;flex-direction:column;background:#fff;box-shadow:-4px 0 32px rgba(0,0,0,0.12);transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);overflow:hidden">
     <!-- Drawer header -->
     <div style="display:flex;align-items:center;gap:0.5rem;padding:1.25rem 1.5rem;border-bottom:1px solid #e5e7eb;flex-shrink:0">
-      <button type="button" id="brief-drawer-back" onclick="window._openProfileDrawer()" aria-label="Back to profile" hidden
+      <button type="button" id="brief-drawer-back" onclick="window._openProfileDrawer()" aria-label="Back to settings" hidden
         style="width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;border-radius:0.5rem;border:none;background:none;cursor:pointer;color:#6b7280;transition:background .12s ease;flex-shrink:0"
         onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">
         <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
       </button>
-      <h2 id="brief-drawer-title" tabindex="-1" style="outline:none;"font-size:1.0625rem;font-weight:700;color:#111827;margin:0;flex:1;min-width:0">Assistant Profile</h2>
+      <h2 id="brief-drawer-title" tabindex="-1" style="outline:none;font-size:1.0625rem;font-weight:700;color:#111827;margin:0;flex:1;min-width:0">Assistant Settings</h2>
       <span id="brief-drawer-save" role="status" aria-live="polite" style="font-size:0.75rem;font-weight:600;color:#d6006b;flex-shrink:0"></span>
       <button type="button" onclick="window._closeBriefDrawer()" aria-label="Close"
         style="width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;border-radius:0.5rem;border:none;background:none;cursor:pointer;color:#6b7280;transition:background .12s ease;flex-shrink:0"
@@ -1221,6 +1271,16 @@
       </div>
     </button>
 
+    <button type="button" data-tab="brand" class="detail-tab-btn brief-card w-full text-left">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-bold text-gray-900">Your brand</p>
+          <p class="text-xs text-gray-500 mt-0.5">Brand style, picture guidelines, files and links — shared by all your assistants</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </button>
+
     <button type="button" data-tab="platforms" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
@@ -1256,6 +1316,17 @@
         <div>
           <p class="text-sm font-bold text-gray-900">Notifications</p>
           <p class="text-xs text-gray-500 mt-0.5">How you're alerted about this assistant's work</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </button>
+
+    <!-- Business Mentor only: shown by assistants.js where mentorTab is set. -->
+    <button type="button" data-tab="mentorsees" class="detail-tab-btn brief-card w-full text-left hidden" style="display:none">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-bold text-gray-900">What I can see</p>
+          <p class="text-xs text-gray-500 mt-0.5">What your Mentor reads, and what it never sees</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
       </div>
@@ -1575,17 +1646,6 @@
   <!-- ── TAB: Creative Strategy ────────────────────────────────── -->
   <div id="tab-strategy" class="detail-tab-content hidden space-y-6">
 
-    <!-- Business Information & Brand Knowledge (always applied — strict, non-overridable) -->
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-      <div class="mb-5">
-        <h3 class="text-lg font-bold text-gray-900">Business Information &amp; Brand Knowledge</h3>
-        <p class="text-sm text-gray-500 mt-1">Your business details and any documents or links added in <a href="#" onclick="window.loadView('assets')" class="text-emerald-800 hover:underline font-medium">Business Information</a> are automatically applied to this assistant.</p>
-      </div>
-      <div id="business-knowledge-content">
-        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading brand knowledge…</div>
-      </div>
-    </div>
-
     <div id="module-creative-objective" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
         <h3 class="text-lg font-bold text-gray-900">Objective &amp; Message</h3>
@@ -1854,6 +1914,29 @@
     </div><!-- /module-social-strategy -->
   </div>
 
+  <!-- ── TAB: Your brand (owner 2026-11-06) ──────────────────────────────
+       The workspace's Brand Assets, inside the assistant: the same saves as Business Information ▸ Brand Assets
+       (brand-kit.ts for the style and picture guidelines, the storage-* / upload-asset / delete-workspace-asset
+       functions for files and links), so a change here IS the change there and reaches every assistant. -->
+  <div id="tab-brand" class="detail-tab-content hidden space-y-6">
+    <div class="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-900">
+      <svg class="w-4 h-4 shrink-0 mt-0.5 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      <span><strong>Shared by all your assistants.</strong> Anything you change here also changes in <a href="#" onclick="window._bizinfoInitialTab='assets'; window.loadView('assets'); return false;" class="font-semibold underline">Business Information ▸ Brand Assets</a>, and every assistant uses it from then on.</span>
+    </div>
+    <div id="module-brand-style" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <p class="text-sm text-gray-500">Loading your brand style…</p>
+    </div>
+    <div id="module-brand-files" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="mb-5">
+        <h3 class="text-lg font-bold text-gray-900">Files and links</h3>
+        <p class="text-sm text-gray-500 mt-1">Logos, brand guidelines, product sheets and links. Your business details and everything here are read whenever your assistants write or design, and that can't be turned off.</p>
+      </div>
+      <div id="business-knowledge-content">
+        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-500">Loading your files and links…</div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── TAB: Connections (full connect/manage, scoped to this assistant) ── -->
   <div id="tab-platforms" class="detail-tab-content hidden space-y-6">
     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -2065,6 +2148,12 @@
 
   </div>
 
+  <!-- What I can see — Business Mentor only (mentorTab). Painted by assistant-mentor-overview.js from
+       src/config/mentor-data-inventory.ts, the same list its prompt reads. -->
+  <div id="tab-mentorsees" class="detail-tab-content hidden space-y-6">
+    <div id="mentor-sees-host"></div>
+  </div>
+
   <!-- ── TAB: Notifications ────────────────────────────────────────
        Assistant-work notification preferences (Approvals, Tasks, Content,
        Connections) for THIS assistant. Rows are the scope:'assistant'
@@ -2147,6 +2236,8 @@
        Rendered by src/components/mentor-commitments.js → mentor.ts; the chat's mentor_commitments card
        calls the same actions. -->
   <div id="mentor-commitments-host" class="hidden mb-8"></div>
+  <!-- Reviews and Customers — Business Mentor only. Painted by assistant-mentor-overview.js, whose data they share. -->
+  <div id="mentor-results-host" class="hidden mb-8"></div>
 
   <!-- ── Goals (SMART Goals — Feature 1) ───── -->
   <div id="tab-goals" class="space-y-6 mb-8">
@@ -2789,6 +2880,25 @@ window._revokeConnection = async function (connectionId, onSuccess) {
   /* The selected column's underline follows aria-selected, so look and announced state cannot
      disagree. (border-emerald-700 is not in the compiled style.css.) */
   .detail-rq-col[aria-selected="true"], .site-subtab[aria-selected="true"] { border-bottom-color: #ff007f; }
+  /* Stages as pills in a grey track (owner, 2026-11-06, as on the Briefs tab): these filter a list,
+     so they must not look like the page's own underlined tabs above. Overrides the underline classes
+     detailRqOpenStatus and the Lead Generator's strip still toggle. */
+  .stage-pills:not(.hidden) { display: inline-flex !important; }   /* :not(.hidden): the Lead Generator hides the shared strip */
+  .stage-pills { max-width: calc(100% - 2rem); gap: .25rem; padding: .25rem !important;
+    margin: .75rem 1rem .25rem; border-radius: .75rem; background: #f3f4f6; border-bottom: 0 !important; overflow-x: auto; overflow-y: hidden; }
+  .stage-pills > [role="tab"] { border-bottom: 0 !important; border-radius: .5rem !important; padding: .375rem .75rem !important;
+    font-weight: 700 !important; color: #4b5563 !important; background: transparent; transition: background .15s ease, color .15s ease; }
+  .stage-pills > [role="tab"]:hover { color: #111827 !important; }
+  .stage-pills > [role="tab"][aria-selected="true"] { background: #fff; color: #111827 !important; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  /* Review full screen: over the top bar (z 50), UNDER the post, blog and email pop-ups (70–90) it opens. */
+  #maintab-review-queue[data-rq-full] { position: fixed; inset: 0; z-index: 60; background: #f9fafb; overflow: auto; padding: 16px 20px; }
+  /* A role's docked chat (assistants.js _setupTabChat) stays beside the list in full screen, as on the Briefs tab. */
+  #tabchat-layout.is-on:has(#maintab-review-queue[data-rq-full]) > .chatpane-dock-col { position: fixed; top: 16px; right: 20px; bottom: 16px; height: auto; width: min(380px, calc(100vw - 40px)); z-index: 61; }
+  @media (min-width: 1280px) {
+    #tabchat-layout.is-on #maintab-review-queue[data-rq-full] { padding-right: 424px; }
+    /* Beside the chat, All leads' three buttons (they never shrink) squeezed its description into a column one word wide. */
+    #tabchat-layout.is-on #datahub-toolbar > div:first-child { flex-direction: column; }
+  }
   /* A tab strip wider than the screen fades at the edge that has more, so the tabs past it read as
      "scroll for more" rather than not existing. .is-clipped-* is kept current by assistants.js. */
   .tab-scroller.is-clipped-end { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 2.5rem), transparent); }
@@ -2824,6 +2934,95 @@ window._revokeConnection = async function (connectionId, onSuccess) {
     box-shadow: 0 2px 8px rgba(255,0,127,.1);
     background: #fff0f5;
   }
+  /* ── Compact header + right-hand menu (registry `compactHeader`; .detail-v2 on
+     #assistant-detail-content). Piloted on the Brand Designer 2026-11-05; every assistant from
+     2026-11-06 (owner). ── */
+  #detail-right-menu { display: none; }
+  .detail-v2 #detail-top-wrap { container-type: inline-size; }
+  @container (min-width: 900px) {
+    .detail-v2 #detail-top-row:has(> #detail-needs-you:not(.hidden)) {
+      display: grid; grid-template-columns: minmax(0, 48%) minmax(0, 1fr); gap: 1.5rem; align-items: stretch; margin-bottom: 1.5rem; }
+    .detail-v2 #detail-top-row:has(> #detail-needs-you:not(.hidden)) > #detail-hero { margin-bottom: 0; }
+  }
+  /* The strip as a card beside the hero: top-aligned with the hero's name, what is waiting listed,
+     and one primary button to it. */
+  #detail-top-row > #detail-needs-you:not(.hidden) { display: flex; flex-direction: column; justify-content: flex-start;
+    margin: 0 0 1.5rem; padding: 1rem 1.25rem; border-radius: 1rem; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+  @container (min-width: 900px) { .detail-v2 #detail-top-row > #detail-needs-you:not(.hidden) { margin: 0; } }
+  #detail-top-row #needs-you-text { font-size: 1.125rem; line-height: 1.75rem; }
+  #detail-top-row #next-up-text { font-size: .8125rem; margin-top: .125rem; }
+  #detail-top-row #needs-you-list:not(.hidden) { display: flex; flex-direction: column; gap: .375rem; margin: .75rem 0 0; padding: 0; list-style: none; }
+  #needs-you-list .ny-item { display: flex; align-items: center; justify-content: space-between; gap: .75rem; width: 100%;
+    padding: .5rem .75rem; border-radius: .625rem; background: #fff; border: 1px solid #fde68a; text-align: left; cursor: pointer;
+    transition: border-color .15s ease, box-shadow .15s ease; }
+  #needs-you-list .ny-item:hover { border-color: #f59e0b; box-shadow: 0 1px 4px rgba(245,158,11,.2); }
+  #needs-you-list .ny-item:focus-visible { outline: 2px solid #ff007f; outline-offset: 2px; }
+  #needs-you-list .ny-title { font-size: .875rem; font-weight: 700; color: #111827; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #needs-you-list .ny-sub { font-size: .75rem; color: #92400e; white-space: nowrap; flex-shrink: 0; }
+  #needs-you-list .ny-more { font-size: .75rem; color: #6b7280; padding-left: .25rem; }
+  #detail-top-row #needs-you-go:not(.hidden) { align-self: flex-start; margin-top: .875rem; }
+  /* The card a Needs-you item opened, marked for a moment so the eye lands on it. */
+  .ny-flash { border-radius: .75rem; box-shadow: 0 0 0 2px #f59e0b; background: #fffbeb; transition: box-shadow .3s ease, background .3s ease; }
+
+  /* Status pill: green for working, amber for waiting on you, grey for idle. Tailwind's emerald is the
+     brand pink in this build (only the 500 dot stayed green), so "Working" read as pink with a green dot. */
+  .detail-v2 #detail-status.bg-emerald-50 { background: #ecfdf3; color: #067647; border-color: #abefc6; }
+  .detail-v2 #detail-status .bg-emerald-500 { background: #17b26a; }
+
+  /* One quiet edit affordance: no dashed underline; the pencils show on hover or keyboard focus (always
+     on touch screens, which cannot hover); "Suggest a name" only while the name is being edited. */
+  .detail-v2 #detail-name-input { border-bottom-color: transparent; }
+  .detail-v2 #detail-name-input:hover { border-bottom-color: #e5e7eb; }
+  .detail-v2 #detail-name-input:focus { border-bottom-color: #ff007f; }
+  .detail-v2 #btn-generate-name { display: none; }
+  .detail-v2 #detail-name-row:focus-within #btn-generate-name { display: inline-flex; }
+  @media (hover: hover) {
+    .detail-v2 .detail-name-edit, .detail-v2 .detail-avatar-pencil { opacity: 0; transition: opacity .15s ease; }
+    .detail-v2 #detail-name-row:hover .detail-name-edit, .detail-v2 #detail-name-row:focus-within .detail-name-edit,
+    .detail-v2 .detail-avatar-btn:hover .detail-avatar-pencil, .detail-v2 .detail-avatar-btn:focus-visible .detail-avatar-pencil { opacity: 1; }
+  }
+
+  /* Time / Money Saved: neutral tiles, the figures in brand pink — the amber Needs-you card is the loud one. */
+  .detail-v2 #detail-roi-strip .rounded-xl { background: #f9fafb; border-color: #e5e7eb; }
+  .detail-v2 #detail-roi-strip .rounded-xl > p:first-child { color: #6b7280; }
+  .detail-v2 #detail-roi-strip .text-2xl { color: #d6006b; }
+  .detail-v2 #task-share-note .ts-key { display: inline-flex; align-items: center; gap: .3rem; margin-right: .75rem; white-space: nowrap; }
+  .detail-v2 #task-share-note .ts-dot { width: .5rem; height: .5rem; border-radius: 9999px; display: inline-block; }
+  @media (min-width: 768px) {
+    /* Both header buttons go where the right-hand menu shows; on phones (no menu) they stay. */
+    .detail-v2 #btn-assistant-profile, .detail-v2 #btn-detail-chat { display: none !important; }
+    /* Same look as the left menu (components/sidebar.html + workspace.html): 16rem open, 4.5rem of
+       icons closed, under the 64px header. The page makes room for it the way it does on the left. */
+    .detail-v2 #detail-right-menu { display: flex; flex-direction: column; position: fixed; top: 64px; right: 0; bottom: 0;
+      width: 4.5rem; z-index: 30; background: #fff; border-left: 1px solid #e5e7eb; overflow-y: auto; overflow-x: hidden;
+      padding: .75rem .75rem 1.25rem; transition: width .2s ease-in-out; }
+    .detail-v2 #detail-right-menu.is-open { width: 16rem; }
+    html:has(.detail-v2 #detail-right-menu) #workspace-main { margin-right: 4.5rem; transition: margin .2s ease-in-out; }
+    html:has(.detail-v2 #detail-right-menu.is-open) #workspace-main { margin-right: 16rem; }
+    #detail-right-menu .rm-toggle-row { display: flex; justify-content: center; margin-bottom: .25rem; }
+    #detail-right-menu.is-open .rm-toggle-row { justify-content: flex-start; }
+    #detail-right-menu .rm-heading { font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase;
+      letter-spacing: .05em; padding: .75rem .75rem .5rem; white-space: nowrap; }
+    #detail-right-menu .rm-item { display: flex; align-items: center; gap: .75rem; width: 100%; padding: .625rem .75rem;
+      border-radius: .5rem; font-weight: 500; color: #4b5563; background: none; border: 0; cursor: pointer; text-align: left;
+      white-space: nowrap; transition: background .15s ease, color .15s ease; }
+    #detail-right-menu .rm-item:hover { background: #f3f4f6; color: #111827; }
+    #detail-right-menu .rm-item.is-active { background: #fff0f5; color: #d6006b; }
+    #detail-right-menu .rm-item:focus-visible, #rm-toggle:focus-visible { outline: none; box-shadow: 0 0 0 2px #D6006B; }
+    /* An open section docks against the menu's left edge as one panel: under the header, no backdrop
+       or shadow, no back arrow (the menu beside it is the list), and the page moves over for it.
+       !important because the drawer's base layout is inline (it is the pop-over everywhere else). */
+    .detail-v2 #brief-drawer { top: 64px !important; right: 4.5rem !important; width: 28rem !important; z-index: 29 !important;
+      box-shadow: none !important; border-left: 1px solid #e5e7eb; transition: transform .2s ease-in-out !important; }
+    html:has(#detail-right-menu.is-open) .detail-v2 #brief-drawer { right: 16rem !important; }
+    .detail-v2 #brief-drawer-backdrop, .detail-v2 #brief-drawer-back { display: none !important; }
+    html:has(.detail-v2 #detail-right-menu) body.brief-drawer-open #workspace-main { margin-right: calc(4.5rem + 28rem); }
+    html:has(.detail-v2 #detail-right-menu.is-open) body.brief-drawer-open #workspace-main { margin-right: calc(16rem + 28rem); }
+    #detail-right-menu:not(.is-open) .rm-item { justify-content: center; gap: 0; padding-left: 0; padding-right: 0; }
+    #detail-right-menu:not(.is-open) .nav-label { position: absolute; width: 1px; height: 1px; overflow: hidden;
+      clip: rect(0 0 0 0); white-space: nowrap; }
+  }
+
   /* hide detail-tab-content panels until drawer is open — they render inside the drawer */
   .detail-tab-content { display: none !important; }
   .brief-drawer-open .detail-tab-content.active-drawer-tab { display: block !important; }

@@ -21,47 +21,19 @@ import { mediaGenerationJobs, contentAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/utils/assistant-capabilities';
 import { enforcePromptModeration } from '../../src/utils/moderation';
-import { resolveBaseUrl } from '../../src/utils/base-url';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
-import {
-    submitVideo, submitFramedVideo, imageToVideoEnabled, imageToVideoInput, billedSecondsFor, i2vModel, falConfigured, ASPECT_RATIOS, VIDEO_DURATIONS,
-    FalContentPolicyError, FalError, type AspectRatio, type VideoDurationSeconds,
-} from '../../src/lib/fal-gateway';
-import { holdCredits, settleHold, tierCanGenerateVideo, VIDEO_CREDIT_COST } from '../../src/utils/ai-credits';
-import { aiVideoTasks } from '../../src/config/task-weights';
+import { imageToVideoEnabled, ASPECT_RATIOS, VIDEO_DURATIONS, type AspectRatio, type VideoDurationSeconds } from '../../src/lib/fal-gateway';
+import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
+import { startAiVideoJob } from '../../src/utils/ai-video-job';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const PROMPT_MAX = 1000;
-const VIDEO_MODEL = process.env.FAL_VIDEO_MODEL ?? 'fal-ai/minimax/hailuo-2.3/standard/text-to-video';
 // Hailuo 2.3 text-to-video only accepts 6s or 10s clips (see VIDEO_DURATIONS in fal-gateway).
 const VALID_DURATIONS = VIDEO_DURATIONS;
 // The frame of the clip. Image-to-video honours it (the start frame is drawn at it); the Hailuo
 // fallback has no aspect input and only records it. Defaults to a vertical/Reel frame.
 const DEFAULT_ASPECT: AspectRatio = '9:16';
-
-// Kick the background poller. MUST be awaited: on Lambda the runtime freezes as soon as the handler
-// returns, so an un-awaited fetch gets frozen mid-flight and never reaches the worker — leaving the
-// job stuck 'queued'. Posting to a -background function returns 202 before the work runs, so the
-// await only costs the trigger round-trip; the AbortController caps a stalled trigger.
-async function triggerWorker(headers: Record<string, string | undefined>, jobId: number): Promise<void> {
-    const baseUrl = resolveBaseUrl(headers);
-    if (!baseUrl) { console.error('[generate-ai-video] no base URL — worker not triggered for job', jobId); return; }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
-    try {
-        await fetch(`${baseUrl}/.netlify/functions/process-media-job-background`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jobId }),
-            signal: controller.signal,
-        });
-    } catch (err) {
-        console.error('[generate-ai-video] failed to trigger worker:', err);
-    } finally {
-        clearTimeout(timer);
-    }
-}
 
 export default withLambda(async (event) => {
     const db = getDb();
@@ -146,53 +118,16 @@ export default withLambda(async (event) => {
         if (!startImageUrl) return { statusCode: 400, body: JSON.stringify({ error: 'That picture has no file to animate.' }) };
     }
 
-    // Hold 5 credits; insufficient → 402 with upgrade CTA payload.
-    const hold = await holdCredits(db, { orgId, amount: VIDEO_CREDIT_COST, mediaType: 'video', tasks: aiVideoTasks(billedSecondsFor(durationSeconds)) });
-    if (!hold.ok) {
-        return { statusCode: 402, body: JSON.stringify({ error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit }) };
+    // The hold, the job and waking the worker: one path, shared with the Website Assistant's first draft.
+    const started = await startAiVideoJob(db, { orgId, userId, prompt, aspectRatio, durationSeconds, startImageUrl, headers: event.headers as Record<string, string | undefined> });
+    if (started.ok) {
+        return { statusCode: 202, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(started.mock ? { jobId: started.jobId, mock: true } : { jobId: started.jobId }) };
     }
-
-    // Submit to Fal. A synchronous content-policy rejection refunds immediately.
-    if (!falConfigured()) {
-        // Mock mode — create a processing job; the worker completes it with a placeholder.
-        const [job] = await db.insert(mediaGenerationJobs).values({
-            organisationId: orgId, userId, mediaType: 'video', prompt, aspectRatio, durationSeconds,
-            model: VIDEO_MODEL, creditCost: VIDEO_CREDIT_COST, status: 'processing',
-        }).returning({ id: mediaGenerationJobs.id });
-        await triggerWorker(event.headers as any, job.id);
-        return { statusCode: 202, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job.id, mock: true }) };
+    if (started.reason === 'no_tasks') {
+        return { statusCode: 402, body: JSON.stringify({ error: 'insufficient_credits', cost: started.cost, balance: started.balance, unit: started.unit }) };
     }
-
-    // No picture to start from: the worker draws the frame and submits (see the header). The job's
-    // durationSeconds is the length that will be BILLED, so the cost log prices the real clip.
-    if (imageToVideoEnabled() && !startImageUrl) {
-        const model = i2vModel();
-        const billed = imageToVideoInput(model, { imageUrl: '', prompt, durationSeconds }).billedSeconds;
-        const [job] = await db.insert(mediaGenerationJobs).values({
-            organisationId: orgId, userId, mediaType: 'video', prompt, aspectRatio, durationSeconds: billed,
-            model, creditCost: VIDEO_CREDIT_COST, status: 'processing',
-        }).returning({ id: mediaGenerationJobs.id });
-        await triggerWorker(event.headers as any, job.id);
-        return { statusCode: 202, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job.id }) };
+    if (started.reason === 'policy') {
+        return { statusCode: 422, body: JSON.stringify({ error: 'Prompt flagged for policy violation. Please adjust your text and try again.', code: 'POLICY_FLAGGED' }) };
     }
-
-    try {
-        const sub = imageToVideoEnabled()
-            ? await submitFramedVideo({ prompt, startImageUrl, aspectRatio, durationSeconds, usage: { workspaceId: orgId, userId } })
-            : { ...(await submitVideo({ prompt, durationSeconds })), model: VIDEO_MODEL, billedSeconds: durationSeconds };
-        const [job] = await db.insert(mediaGenerationJobs).values({
-            organisationId: orgId, userId, mediaType: 'video', prompt, aspectRatio, durationSeconds: sub.billedSeconds,
-            model: sub.model, creditCost: VIDEO_CREDIT_COST, status: 'processing',
-            falRequestId: sub.requestId, falStatusUrl: sub.statusUrl, falResponseUrl: sub.responseUrl,
-        }).returning({ id: mediaGenerationJobs.id });
-        await triggerWorker(event.headers as any, job.id);
-        return { statusCode: 202, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job.id }) };
-    } catch (err) {
-        await settleHold(db, { orgId, amount: VIDEO_CREDIT_COST, success: false, mediaType: 'video', userId });
-        if (err instanceof FalContentPolicyError) {
-            return { statusCode: 422, body: JSON.stringify({ error: 'Prompt flagged for policy violation. Please adjust your text and try again.', code: 'POLICY_FLAGGED' }) };
-        }
-        console.error('[generate-ai-video] submit error:', err instanceof FalError ? err.message : err);
-        return { statusCode: 502, body: JSON.stringify({ error: 'Video generation could not be started. Please try again.' }) };
-    }
+    return { statusCode: 502, body: JSON.stringify({ error: 'Video generation could not be started. Please try again.' }) };
 });

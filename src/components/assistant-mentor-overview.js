@@ -1,24 +1,24 @@
 /**
  * src/components/assistant-mentor-overview.js
- * The Business Mentor's Overview tab — docs/business-mentor-plan.md §14 and the approved mockup
- * (docs/mockups/business-mentor-mockup.html). The screen twins of what the Mentor does in chat:
+ * The Business Mentor's first tab, Suggestions: what it produces, as one list with a pill per stage, the way
+ * Posts and Briefs work on the other assistants (redesigned 2026-11-06, docs/business-mentor-plan.md §14). This
+ * file keeps its old name; the tab's key is still `mentor`.
  *
- *   Set-up checklist       — the same gaps it raises as cards (mentor-snapshot.ts setupChecklist);
- *                            each opens its Business Information tab
- *   What I can see         — generated from src/config/mentor-data-inventory.ts, the list its prompt reads
- *   Dismissed suggestions  — what the user dismissed from a card, with the reason; "Bring back"
- *   Suggestions this week  — n of 3 (§3.13)
- *   Suggestions waiting    — the open ones, with "Review all" (mentor-review-all.js, the same list as the
- *                            chat card and Inbox "Needs you"; nothing pre-ticked)
- *   Recommended next       — who to hire next (mentor-hire.ts — the same list as the chat card and the
- *                            catalogue's "Recommended" badge); "See this assistant" opens the catalogue
- *   Get feedback           — paste a draft (or open a .txt/.md file) and get the Mentor's critique inline
- *                            (mentor.ts action 'feedback' → mentor-feedback.ts, the same craft as chat)
+ * Suggestions (#mentor-overview-host)
+ *   To review              — the open ones, each with its own answer: the same button words and server action as
+ *                            its chat card, and "Dismiss…" with the same reasons. "Review all" (mentor-review-all.js,
+ *                            the same list as the chat card and Inbox "Needs you"; nothing pre-ticked) does several
+ *   Accepted               — accepted suggestions and what changed SINCE (mentor-outcomes.ts)
+ *   Dismissed              — what the user dismissed, with the reason; "Bring back"
+ * Results tab (#mentor-results-host)
  *   Reviews (Phase 3)      — every weekly review, its suggestions and what was answered; "Review my week now"
  *                            (mentor.ts review_now, owners and admins); its day and on/off are on the profile
- *   Track record           — accepted suggestions and what changed SINCE (mentor-outcomes.ts)
  *   Customers (Phase 3b)   — quiet customers, deals, reviews and tickets, only from active assistants
  *                            (mentor-customers.ts, the same summary the Mentor reads)
+ * Assistant Settings (#mentor-sees-host)
+ *   What I can see         — generated from src/config/mentor-data-inventory.ts, the list its prompt reads
+ *
+ * The Plan tab shows the Set-up checklist and Recommended next from this module's read: `mentor:overviewLoaded`.
  *
  * Backed by netlify/functions/mentor.ts, the SAME action a card's Dismiss calls (chat-session.js →
  * mentor:decide). A save from a card dispatches `mentor:changed` / `bizinfo:*Changed`, which reload this
@@ -27,15 +27,27 @@
 (function () {
   const API = '/.netlify/functions/mentor';
   const state = { assistantId: null, assistantName: 'Your Mentor', data: null, error: null, loading: false, notes: {},
-    feedback: { text: '', busy: false, result: null, error: null },
+    stage: 'review', busyRow: null, dismissing: null,
     reviews: null, customers: null, reviewBusy: false, reviewNote: null, poll: null };
-  const FEEDBACK_MAX = 12000;
+  const STAGES = ['review', 'accepted', 'dismissed'];
+  // The same reasons as a chat card's "Dismiss…" (disruptive-ui-registry.js MENTOR_DISMISS_REASONS).
+  const DISMISS_REASONS = [['not_relevant', 'Not relevant'], ['already_done', 'Already done'], ['disagree', 'Disagree'], ['not_now', 'Not now']];
+  /** The same words as this suggestion's chat card. */
+  function acceptLabel(c) {
+    if (c && c.type === 'mentor_products') return (c.products || []).length > 1 ? `Add these ${c.products.length}` : 'Add this';
+    if (c && c.type === 'mentor_draft_request') return 'Ask for this post';
+    return 'Save this';
+  }
 
   function esc(v) {
     return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => (
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
   const host = () => document.getElementById('mentor-overview-host');
+  const resultsHost = () => document.getElementById('mentor-results-host');
+  const seesHost = () => document.getElementById('mentor-sees-host');
+  /** A click in any of the three places this module paints. */
+  const isOurs = (el) => [host(), resultsHost(), seesHost()].some((h) => h && h.contains(el));
   const ukDate = (iso) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Europe/London' });
 
   async function getJson(url) {
@@ -49,16 +61,33 @@
     if (!host()) return;
     state.loading = true;
     const [main, reviews, customers] = await Promise.allSettled([getJson(API), getJson(`${API}?reviews=1`), getJson(`${API}?customers=1`)]);
-    if (main.status === 'fulfilled') { state.data = main.value; state.error = null; }
+    if (main.status === 'fulfilled') {
+      state.data = main.value; state.error = null;
+      document.dispatchEvent(new CustomEvent('mentor:overviewLoaded', { detail: state.data }));
+    }
     else state.error = main.reason?.message || 'Couldn’t load your Mentor’s overview.';
     state.reviews = reviews.status === 'fulfilled' ? reviews.value : { error: reviews.reason?.message || 'Couldn’t load your reviews.' };
     state.customers = customers.status === 'fulfilled' ? customers.value.customers : { error: customers.reason?.message || 'Couldn’t load your customers.' };
     state.loading = false;
+    feedNeedsYou();
     render();
     schedulePoll();
   }
 
   // While a review is being written, look again every 15 s (it takes a minute or two).
+  /** The card beside the hero says what is waiting, as every assistant's does. */
+  function feedNeedsYou() {
+    const open = state.data?.open || [];
+    window._setNeedsYouItems?.(open.slice(0, 4).map((s) => ({ id: s.id, label: s.title || 'A suggestion', sub: 'Waiting' })));
+    window._setNeedsYouCount?.(open.length);
+    const badge = document.getElementById('mentor-review-badge');
+    if (badge) {
+      badge.textContent = String(open.length);
+      badge.classList.toggle('hidden', !open.length);
+      badge.style.display = open.length ? 'inline-flex' : 'none';   // `hidden` loses to inline-flex
+    }
+  }
+
   function schedulePoll() {
     clearTimeout(state.poll);
     const writing = (state.reviews?.reviews || []).some((r) => r.status === 'queued' || r.status === 'running');
@@ -124,17 +153,18 @@
   }
 
   const VERDICT = { up: 'text-green-700', down: 'text-red-700', same: 'text-gray-700', too_early: 'text-gray-500', too_small: 'text-gray-500', no_measure: 'text-gray-500', drafted: 'text-gray-500' };
-  function trackRecordHtml() {
+  function acceptedPane() {
     const r = state.reviews;
-    if (!r || r.error || !r.trackReady) return '';
+    if (!r) return '<p class="text-sm text-gray-400 animate-pulse">Loading…</p>';
+    if (r.error) return `<p class="text-sm text-red-600">${esc(r.error)}</p>`;
+    if (!r.trackReady) return '<p class="text-sm text-gray-600">I can’t follow accepted suggestions in this workspace yet.</p>';
     const list = r.trackRecord || [];
+    if (!list.length) return '<p class="text-sm text-gray-500">Nothing yet. When you accept a suggestion, I follow what happens next here.</p>';
     const items = list.map((t) => `<li class="py-2 border-b border-gray-100 last:border-0"><p class="text-xs break-words ${VERDICT[t.verdict] || 'text-gray-700'}">${esc(t.line)}</p>${t.target ? `<p class="text-[11px] text-gray-500">${esc(t.target)}</p>` : ''}</li>`).join('');
     // Said once, not on every row (it repeated four times on staging, 27 Oct).
     const early = list.some((t) => t.verdict === 'too_early');
-    return card(`
-      <h2 class="text-base font-bold text-gray-900">Track record</h2>
-      <p class="text-xs text-gray-500 mt-1">Suggestions you accepted and what changed since. “Since”, not “because” — other things change too.${early ? ' I look at each one again a week after you accept it.' : ''}</p>
-      ${items ? `<ul class="mt-1">${items}</ul>` : '<p class="text-sm text-gray-500 mt-2">Nothing yet. When you accept a suggestion, I follow what happens next here.</p>'}`, 'data-mentor-panel="track-record"');
+    return `<p class="text-xs text-gray-500">Suggestions you accepted and what changed since. “Since”, not “because” — other things change too.${early ? ' I look at each one again a week after you accept it.' : ''}</p>
+      <ul class="mt-1">${items}</ul>`;
   }
 
   function customersHtml() {
@@ -170,57 +200,18 @@
     return `<section class="bg-white border border-gray-200 rounded-2xl shadow-sm p-4 sm:p-5 min-w-0" ${attrs}>${inner}</section>`;
   }
 
-  function checklistHtml(items) {
-    const done = items.filter((i) => i.done).length;
-    const rows = items.map((i) => `
-      <li class="flex items-start gap-3 py-2 border-b border-gray-100 last:border-0">
-        <span class="mt-0.5 w-5 h-5 shrink-0 rounded-md border-2 flex items-center justify-center text-xs font-bold ${i.done ? 'border-green-500 bg-green-600 text-white' : 'border-gray-300'}" aria-hidden="true">${i.done ? '✓' : ''}</span>
-        <div class="min-w-0 flex-1">
-          <div class="flex flex-wrap items-center gap-2">
-            ${i.done
-              ? `<span class="text-sm text-gray-700">${esc(i.label)}</span><span class="sr-only">(done)</span>`
-              : `<button type="button" data-mentor-open-field="${esc(i.tab)}" class="text-sm font-semibold text-pink-700 hover:underline text-left">${esc(i.label)}</button>
-                 ${i.optional ? '<span class="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-gray-100 text-gray-600">Optional</span>' : '<span class="text-[11px] font-semibold rounded-full px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200">To do</span>'}`}
-          </div>
-          ${i.done ? '' : `<p class="text-xs text-gray-500 mt-0.5">${esc(i.why)}</p>`}
-        </div>
-      </li>`).join('');
-    // Collapsible. The viewer's choice is kept (a repaint after a chat card must not reopen it);
-    // until they choose, it is open while anything is left to do.
-    const open = checklistOpenPref() ?? done < items.length;
-    return card(`
-      <details data-mentor-checklist class="group" ${open ? 'open' : ''}>
-        <summary class="cursor-pointer flex items-center justify-between gap-2">
-          <h2 class="text-base font-bold text-gray-900">Set-up checklist</h2>
-          <span class="flex items-center gap-2 shrink-0">
-            <span class="text-xs font-semibold text-gray-500">${done} of ${items.length} done</span>
-            <svg class="w-4 h-4 text-gray-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-          </span>
-        </summary>
-        <p class="text-xs text-gray-500 mt-1 mb-2">The same gaps I raise in chat. Each opens its place in Business Information.</p>
-        <ul>${rows}</ul>
-      </details>`, 'data-mentor-panel="checklist"');
-  }
-
-  const CHECKLIST_OPEN_KEY = 'mentorChecklistOpen';
-  function checklistOpenPref() {
-    try { const v = localStorage.getItem(CHECKLIST_OPEN_KEY); return v === null ? null : v === '1'; } catch { return null; }
-  }
-
   function visibilityHtml(v) {
     const list = (xs) => `<ul class="mt-1 space-y-1">${xs.map((x) => `<li class="text-sm text-gray-700 flex gap-2"><span aria-hidden="true" class="text-gray-400">•</span><span class="min-w-0">${esc(x)}</span></li>`).join('')}</ul>`;
     return card(`
-      <details>
-        <summary class="cursor-pointer text-base font-bold text-gray-900">What I can see</summary>
-        <p class="text-xs text-gray-500 mt-2">I work from this list, and never change anything without your click.</p>
-        <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Sees</h3>
-        ${list(v.sees || [])}
-        <h3 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-3">Never sees</h3>
-        ${list(v.never || [])}
-      </details>`, 'data-mentor-panel="visibility"');
+      <h3 class="text-lg font-bold text-gray-900">What I can see</h3>
+      <p class="text-sm text-gray-500 mt-1">I work from this list, and never change anything without your click.</p>
+      <h4 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-4">Sees</h4>
+      ${list(v.sees || [])}
+      <h4 class="text-xs font-bold uppercase tracking-wide text-gray-500 mt-4">Never sees</h4>
+      ${list(v.never || [])}`, 'data-mentor-panel="visibility"');
   }
 
-  function dismissedHtml(rows) {
+  function dismissedPane(rows) {
     const items = rows.map((d) => {
       const back = d.reason === 'not_now' && d.snoozedUntil && new Date(d.snoozedUntil) > new Date() ? ` · back on ${esc(ukDate(d.snoozedUntil))}` : '';
       return `<li class="py-2 border-b border-gray-100 last:border-0">
@@ -234,93 +225,68 @@
         </div>
       </li>`;
     }).join('');
-    return card(`
-      <details ${rows.length ? 'open' : ''}>
-        <summary class="cursor-pointer text-base font-bold text-gray-900">Dismissed suggestions (${rows.length})</summary>
-        ${rows.length
-          ? `<p class="text-xs text-gray-500 mt-2">I won’t suggest these again. "Bring back" lets me.</p><ul class="mt-1">${items}</ul>`
-          : `<p class="text-sm text-gray-500 mt-2">Nothing dismissed. When you dismiss a suggestion in chat, it’s listed here with your reason.</p>`}
-      </details>`, 'data-mentor-panel="dismissed"');
+    return rows.length
+      ? `<p class="text-xs text-gray-500">I won’t suggest these again. "Bring back" lets me.</p><ul class="mt-1">${items}</ul>`
+      : '<p class="text-sm text-gray-500">Nothing dismissed. When you dismiss a suggestion in chat, it’s listed here with your reason.</p>';
   }
 
-  function weekHtml(week) {
-    const used = week && week.used != null ? week.used : null;
-    return card(`
-      <h2 class="text-base font-bold text-gray-900">Suggestions this week</h2>
-      <p class="text-sm text-gray-700 mt-1">${used == null ? 'Not available just now.' : `${Math.min(used, week.cap)} of ${week.cap} used since Monday`}</p>
-      <p class="text-xs text-gray-500 mt-1">I make at most ${week ? week.cap : 3} suggestions a week, picking the ones with the most evidence. Anything you ask for in chat doesn’t count, and nor does answering one from an earlier week.</p>`, 'data-mentor-panel="week"');
-  }
-
-  function waitingHtml(open) {
-    if (!open.length) return '';
-    return card(`
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div class="min-w-0">
-          <h2 class="text-base font-bold text-gray-900">Suggestions waiting (${open.length})</h2>
-          <p class="text-xs text-gray-500 mt-0.5">My suggestions you haven’t answered yet. Review them together and tick the ones you want.</p>
-        </div>
-        <button type="button" data-mentor-review-all class="btn-primary shrink-0 px-4 py-2 text-sm font-bold rounded-lg transition">Review all</button>
-      </div>`, 'data-mentor-panel="waiting"');
-  }
-
-  function recommendedHtml(rec) {
-    const picks = (rec && rec.picks) || [];
-    const cap = (rec && rec.capacity) || {};
-    const rows = picks.map((p, i) => `
-      <li class="py-2 border-b border-gray-100 last:border-0">
-        <p class="text-sm font-semibold text-gray-900">${i + 1}. ${esc(p.name)}</p>
-        <p class="text-xs text-gray-600 mt-0.5 break-words">${esc(p.reason)}</p>
-        <button type="button" data-mentor-see-role="${esc(p.roleKey)}" class="btn-swan-link mt-1 px-0 py-1 text-xs font-bold">See this assistant</button>
-      </li>`).join('');
-    return card(`
-      <h2 class="text-base font-bold text-gray-900">Recommended next</h2>
-      ${picks.length
-        ? `<p class="text-xs text-gray-500 mt-1">Who I would hire next, and why. Nothing is hired from here.</p><ol class="mt-1">${rows}</ol>`
-        : cap.remaining === 0
-          ? '<p class="text-sm text-gray-600 mt-1">You already have every assistant on offer.</p>'
-          : '<p class="text-sm text-gray-600 mt-1">No clear gap for another assistant right now.</p>'}
-      ${cap.note ? `<p class="mt-2 text-xs rounded-lg px-2.5 py-1.5 ${cap.needsUpgrade ? 'border border-amber-200 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-700'}">${esc(cap.note)}</p>` : ''}`, 'data-mentor-panel="recommended"');
-  }
-
-  function feedbackHtml() {
-    const f = state.feedback;
-    return card(`
-      <h2 class="text-base font-bold text-gray-900">Get feedback</h2>
-      <p class="text-xs text-gray-500 mt-1">Paste something you wrote — a sales email, a post, a flyer — and I’ll say what works and what to change, for your customers. Nothing is saved or changed.</p>
-      <label for="mentor-feedback-text" class="sr-only">Your draft</label>
-      <textarea id="mentor-feedback-text" data-mentor-feedback-text rows="6" maxlength="${FEEDBACK_MAX}" class="mt-2 w-full rounded-lg border border-gray-300 p-2.5 text-sm" placeholder="Paste your draft here…" ${f.busy ? 'disabled' : ''}>${esc(f.text)}</textarea>
+  function rowHtml(it) {
+    const busy = state.busyRow === it.id;
+    const note = state.notes[it.id];
+    const preview = window.MentorReviewAll?.previewHtml?.(it.card) || '';
+    return `<li class="py-3 border-b border-gray-100 last:border-0" data-mentor-suggestion="${Number(it.id)}">
+      <p class="text-sm font-semibold text-gray-900 break-words">${esc(it.title || 'A suggestion')}</p>
+      ${preview ? `<div class="mt-1">${preview}</div>` : ''}
+      ${it.why ? `<p class="mt-1 text-xs text-blue-800 break-words"><span class="font-bold">Why?</span> ${esc(it.why)}</p>` : ''}
       <div class="flex flex-wrap items-center gap-2 mt-2">
-        <button type="button" data-mentor-feedback-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${f.busy ? 'disabled' : ''}>${f.busy ? 'Reading…' : 'Get feedback'}</button>
-        <label class="btn-secondary px-3 py-2 border text-xs font-bold rounded-lg transition cursor-pointer">
-          Open a text file<input type="file" accept=".txt,.md,text/plain,text/markdown" data-mentor-feedback-file class="sr-only">
-        </label>
-        <span class="text-[11px] text-gray-500" data-mentor-feedback-count>${f.text.length.toLocaleString('en-GB')} / ${FEEDBACK_MAX.toLocaleString('en-GB')}</span>
+        <button type="button" data-mentor-accept class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50" ${busy ? 'disabled' : ''}>${esc(acceptLabel(it.card))}</button>
+        <button type="button" data-mentor-dismiss aria-expanded="${state.dismissing === it.id}" class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${busy ? 'disabled' : ''}>Dismiss…</button>
       </div>
-      ${f.error ? `<p class="mt-2 text-xs font-semibold text-red-600" role="alert">${esc(f.error)}</p>` : ''}
-      ${f.result ? `<div class="mt-3 rounded-lg border border-pink-200 bg-pink-50 p-3" data-mentor-feedback-result role="status" aria-live="polite"><p class="text-xs font-bold text-pink-800 uppercase tracking-wide">${esc(state.assistantName)}’s feedback</p><p class="text-sm text-gray-800 mt-1 whitespace-pre-line break-words">${esc(f.result)}</p></div>` : ''}`, 'data-mentor-panel="feedback"');
+      ${state.dismissing === it.id ? `<div class="flex flex-wrap items-center gap-2 mt-2">
+        <span class="text-xs text-gray-500">Why?</span>
+        ${DISMISS_REASONS.map(([k, label]) => `<button type="button" data-mentor-dismiss-reason="${k}" class="btn-secondary px-2.5 py-1 border text-xs font-semibold rounded-full transition disabled:opacity-50" ${busy ? 'disabled' : ''}>${label}</button>`).join('')}
+      </div>` : ''}
+      ${note ? `<p class="mt-2 text-xs font-semibold ${note.error ? 'text-red-600' : 'text-pink-700'}" role="status">${esc(note.text)}</p>` : ''}
+    </li>`;
   }
 
-  async function getFeedback() {
-    const f = state.feedback;
-    if (f.busy) return;
-    if (f.text.trim().length < 20) { f.error = 'Paste a little more of your draft so there’s something to judge.'; render(); return; }
-    f.busy = true; f.error = null; f.result = null; render();
-    try {
-      const res = await fetch(API, {
-        method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'feedback', text: f.text }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || 'Your Mentor couldn’t read that just now — please try again.');
-      f.result = body.feedback;
-    } catch (err) {
-      f.error = err.message;
-    }
-    f.busy = false;
-    render();
+  function reviewPane(open, week) {
+    const used = week && week.used != null ? week.used : null;
+    const list = open.length
+      ? `<p class="text-xs text-gray-500">My suggestions you haven’t answered yet. Nothing changes until you say so.</p>
+        <ul class="mt-1">${open.map(rowHtml).join('')}</ul>`
+      : '<p class="text-sm text-gray-500">Nothing to review. New suggestions appear here and in chat.</p>';
+    return `${list}
+      <div class="mt-3 pt-3 border-t border-gray-100">
+        <p class="text-xs font-semibold text-gray-700">Suggestions this week: ${used == null ? 'not available just now' : `${Math.min(used, week.cap)} of ${week.cap} used since Monday`}</p>
+        <p class="text-xs text-gray-500 mt-0.5">I make at most ${week ? week.cap : 3} suggestions a week, picking the ones with the most evidence. Anything you ask for in chat doesn’t count, and nor does answering one from an earlier week.</p>
+      </div>`;
+  }
+
+  /** The tab's one list, its stages as pills like the Review and Briefs tabs. Never folded: it's what the tab is for. */
+  function suggestionsHtml(d) {
+    const open = d.open || [];
+    const dismissed = d.dismissed || [];
+    const accepted = state.reviews?.trackRecord || [];
+    const pills = [['review', 'To review', open.length], ['accepted', 'Accepted', accepted.length], ['dismissed', 'Dismissed', dismissed.length]].map(([key, label, n]) => {
+      const on = state.stage === key;
+      const count = !n ? '' : key === 'review' ? ` <span class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 py-0.5 rounded-full">${n}</span>` : ` <span class="text-xs font-semibold text-gray-500">${n}</span>`;
+      return `<button type="button" role="tab" id="mentor-stage-${key}" aria-controls="mentor-stage-panel" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-mentor-stage="${key}" class="text-sm whitespace-nowrap">${label}${count}</button>`;
+    }).join('');
+    const pane = state.stage === 'accepted' ? acceptedPane() : state.stage === 'dismissed' ? dismissedPane(dismissed) : reviewPane(open, d.week);
+    return card(`
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div class="stage-pills tab-scroller" style="margin:0;max-width:100%" role="tablist" aria-label="Suggestions by stage">${pills}</div>
+        ${state.stage === 'review' && open.length > 1 ? '<button type="button" data-mentor-review-all class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Review all</button>' : ''}
+      </div>
+      <div id="mentor-stage-panel" role="tabpanel" aria-labelledby="mentor-stage-${esc(state.stage)}" tabindex="0">${pane}</div>`, 'data-mentor-panel="suggestions" data-no-fold');
   }
 
   function render() {
+    const results = resultsHost();
+    if (results) results.innerHTML = state.data || state.reviews ? `<div class="space-y-4 min-w-0">${reviewsHtml()}${customersHtml()}</div>` : '';
+    const sees = seesHost();
+    if (sees) sees.innerHTML = state.data ? visibilityHtml(state.data.visibility || { sees: [], never: [] }) : card('<p class="text-sm text-gray-400 animate-pulse">Loading…</p>');
     const el = host();
     if (!el) return;
     if (state.error && !state.data) {
@@ -331,12 +297,41 @@
     if (!state.data) { el.innerHTML = card('<p class="text-sm text-gray-400 animate-pulse">Loading…</p>'); return; }
     const d = state.data;
     el.innerHTML = `
-      <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
-        <div class="space-y-4 min-w-0 lg:col-span-2">${waitingHtml(d.open || [])}${reviewsHtml()}${checklistHtml(d.checklist || [])}${customersHtml()}${feedbackHtml()}${dismissedHtml(d.dismissed || [])}</div>
-        <div class="space-y-4 min-w-0">${recommendedHtml(d.recommended)}${weekHtml(d.week)}${trackRecordHtml()}${visibilityHtml(d.visibility || { sees: [], never: [] })}
-          ${card(`<p class="text-xs text-gray-600">Need help with Be More Swan? Ask me in chat, or use <button type="button" data-mentor-help class="font-semibold text-pink-700 hover:underline">Help &amp; Support</button>.</p>`)}
-        </div>
-      </div>`;
+      ${suggestionsHtml(d)}
+      <p class="text-xs text-gray-600 px-1 mt-4">Need help with Be More Swan? Ask me in chat, or use <button type="button" data-mentor-help class="font-semibold text-pink-700 hover:underline">Help &amp; Support</button>.</p>`;
+  }
+
+  /** The same two steps as "Review all": the change, then recording it, whose failure isn't the user's problem. */
+  async function accept(id) {
+    const it = (state.data?.open || []).find((x) => x.id === id);
+    if (!it || state.busyRow || !window.MentorApply) return;
+    state.busyRow = id; state.notes[id] = { text: 'Saving…' }; render();
+    try {
+      await window.MentorApply.applyCard({ ...it.card, proposalId: it.id });
+      await window.MentorApply.decide(it.id, 'accepted').catch(() => {});
+      delete state.notes[id];
+      state.busyRow = null;
+      await load();
+    } catch (err) {
+      state.busyRow = null;
+      state.notes[id] = { text: `Not saved: ${err.message || 'that couldn’t be saved.'}`, error: true };
+      render();
+    }
+  }
+
+  async function dismiss(id, reason) {
+    if (state.busyRow || !window.MentorApply) return;
+    state.busyRow = id; state.notes[id] = { text: 'Saving…' }; render();
+    try {
+      await window.MentorApply.decide(id, 'dismissed', reason);
+      delete state.notes[id];
+      state.busyRow = null; state.dismissing = null;
+      await load();
+    } catch (err) {
+      state.busyRow = null;
+      state.notes[id] = { text: err.message || 'That couldn’t be saved.', error: true };
+      render();
+    }
   }
 
   async function bringBack(id) {
@@ -360,63 +355,84 @@
   // ── Handlers: bound once, to document ──────────────────────────────────────
   document.addEventListener('click', (e) => {
     const t = e.target;
-    if (!(t instanceof Element) || !host()?.contains(t)) return;
-    // The viewer opening/closing the checklist (click, or Enter/Space on the summary). Not `toggle`:
-    // that also fires when a render inserts it open, which would save a choice nobody made.
-    const checklist = t.closest('[data-mentor-checklist] > summary')?.parentElement;
-    if (checklist) { try { localStorage.setItem(CHECKLIST_OPEN_KEY, checklist.open ? '0' : '1'); } catch { /* per-viewer nicety only */ } return; }
-    const open = t.closest('[data-mentor-open-field]');
-    if (open) {
-      window._bizinfoInitialTab = open.getAttribute('data-mentor-open-field');
-      if (window.loadView) window.loadView('assets');
+    if (!(t instanceof Element) || !isOurs(t)) return;
+    const stage = t.closest('[data-mentor-stage]');
+    if (stage) {
+      state.stage = stage.getAttribute('data-mentor-stage');
+      render();
+      document.getElementById(`mentor-stage-${state.stage}`)?.focus();   // the repaint replaced the pill
       return;
+    }
+    const row = t.closest('[data-mentor-suggestion]');
+    if (row) {
+      const id = Number(row.getAttribute('data-mentor-suggestion'));
+      if (t.closest('[data-mentor-accept]')) { accept(id); return; }
+      if (t.closest('[data-mentor-dismiss]')) { state.dismissing = state.dismissing === id ? null : id; render(); return; }
+      const reason = t.closest('[data-mentor-dismiss-reason]');
+      if (reason) { dismiss(id, reason.getAttribute('data-mentor-dismiss-reason')); return; }
     }
     const back = t.closest('[data-mentor-bring-back]');
     if (back) { bringBack(Number(back.getAttribute('data-mentor-bring-back'))); return; }
     if (t.closest('[data-mentor-retry]')) { load(); return; }
     if (t.closest('[data-mentor-review-all]')) { window.MentorReviewAll?.openDialog(); return; }
-    const see = t.closest('[data-mentor-see-role]');
-    if (see) { window.MentorOpenCatalogue?.(see.getAttribute('data-mentor-see-role')); return; }
-    if (t.closest('[data-mentor-feedback-go]')) { getFeedback(); return; }
     if (t.closest('[data-mentor-review-now]')) { reviewNow(); return; }
     const openReview = t.closest('[data-mentor-open-review]');
     if (openReview) { window.openAssistantChat?.({ assistantId: state.assistantId, sessionId: Number(openReview.getAttribute('data-mentor-open-review')) }); return; }
     if (t.closest('[data-mentor-help]') && window.loadView) window.loadView('help');
   });
-  // The draft is kept as it is typed, so a repaint (a card saved in chat) never loses it.
-  document.addEventListener('input', (e) => {
+  // The pills, by keyboard, as every other row of tabs on this page.
+  document.addEventListener('keydown', (e) => {
     const t = e.target;
-    if (!(t instanceof Element) || !t.matches('[data-mentor-feedback-text]') || !host()?.contains(t)) return;
-    state.feedback.text = t.value.slice(0, FEEDBACK_MAX);
-    const n = host().querySelector('[data-mentor-feedback-count]');
-    if (n) n.textContent = `${state.feedback.text.length.toLocaleString('en-GB')} / ${FEEDBACK_MAX.toLocaleString('en-GB')}`;
-  });
-  document.addEventListener('change', (e) => {
-    const t = e.target;
-    if (!(t instanceof Element) || !t.matches('[data-mentor-feedback-file]') || !host()?.contains(t)) return;
-    const file = t.files && t.files[0];
-    if (!file) return;
-    if (file.size > 200000) { state.feedback.error = 'That file is too big — paste the part you want feedback on instead.'; render(); return; }
-    file.text().then((txt) => {
-      state.feedback.text = String(txt).slice(0, FEEDBACK_MAX);
-      state.feedback.error = txt.length > FEEDBACK_MAX ? `Only the first ${FEEDBACK_MAX.toLocaleString('en-GB')} characters were kept.` : null;
-      render();
-    }, () => { state.feedback.error = 'That file couldn’t be read — paste the text instead.'; render(); });
+    if (!(t instanceof Element) || !t.matches('[data-mentor-stage]') || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+    e.preventDefault();
+    const at = STAGES.indexOf(state.stage);
+    state.stage = e.key === 'Home' ? STAGES[0] : e.key === 'End' ? STAGES[STAGES.length - 1] : STAGES[(at + (e.key === 'ArrowRight' ? 1 : -1) + STAGES.length) % STAGES.length];
+    render();
+    document.getElementById(`mentor-stage-${state.stage}`)?.focus();
   });
   // A card applied or dismissed in chat, or Business Information saved: repaint from the server.
   ['mentor:changed', 'bizinfo:profileChanged', 'bizinfo:productsChanged', 'assistant:settingsChanged'].forEach((ev) =>
     document.addEventListener(ev, () => { if (state.assistantId && host()) load(); }));
 
+  // The chat panel beside the list, as on the landing tab of the other assistants (owner, 2026-11-06). The
+  // same thread as the Plan tab's: it is one conversation with the Mentor.
+  let chatDock = null;
+  function getChatDock() {
+    const el = host();
+    if (!el || !window.ChatPane?.available?.() || !state.assistantId) return null;
+    if (chatDock && chatDock.connected()) return chatDock;
+    chatDock = window.ChatPane.dock(el, {
+      prefix: 'mentoroverview', storageKey: 'bms-mentorplan-chat-on',
+      pane: () => ({
+        assistantId: state.assistantId, assistantName: state.assistantName, roleKey: 'business_mentor',
+        rememberKey: `bms-mentorplan-chat:${state.assistantId}`,
+        placeholder: 'Ask your Mentor…',
+        starterPrompts: ['What should I focus on this week?', 'Where is my business weakest right now?', 'Which assistant would help me most next?'],
+        composerRows: 3,
+      }),
+    });
+    return chatDock;
+  }
+
   window.AssistantMentorOverview = {
     init({ assistantId, assistantName }) {
+      chatDock?.destroy();
+      chatDock = null;
       state.assistantId = assistantId;
       state.assistantName = assistantName || 'Your Mentor';
-      state.data = null; state.error = null; state.notes = {};
-      state.feedback = { text: '', busy: false, result: null, error: null };
+      state.data = null; state.error = null; state.notes = {}; state.stage = 'review'; state.busyRow = null; state.dismissing = null;
       state.reviews = null; state.customers = null; state.reviewNote = null; clearTimeout(state.poll);
       render();
       load();
     },
-    activate() { if (!state.data && !state.loading) load(); else render(); },
+    /** The last read, for the Plan tab's Set-up checklist and Recommended next. */
+    data() { return state.data; },
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; render(); },
+    activate() {
+      if (!state.data && !state.loading) load(); else render();
+      const dock = getChatDock();
+      if (dock && !dock.isOn() && dock.wanted()) dock.setOn(true, false);
+    },
   };
 })();

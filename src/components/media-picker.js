@@ -15,6 +15,7 @@
  *   documents: { onFiles(files) } adds "Attach a document" (Word, PDF, text) — the chat's paperclip
  *     (chat-session.js), where a document is read rather than shown. The window closes and hands the files back.
  *   topic: what the picture is for — the stock search and the AI prompt start from it.
+ *   findNow: open on stock with `topic` already searched (the chat's "Choose a picture", design-studio.js).
  *
  * Used by the Website Assistant's editor (assistant-site-editor.js). Uploads go through the
  * workspace's own uploader (window.gpUploadContentAsset), which handles moderation — a flagged
@@ -259,6 +260,7 @@
     $('[data-mp-stock-go]').addEventListener('click', () => searchStock(false));
     $('[data-mp-stock-q]').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); searchStock(false); } });
     more.addEventListener('click', () => searchStock(true));
+    if (opts.findNow && opts.topic) { showTab('stock'); searchStock(false); }
     stockGrid.addEventListener('click', async (e) => {
       const b = e.target.closest('[data-mp-stock-pick]');
       if (!b) return;

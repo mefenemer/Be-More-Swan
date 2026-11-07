@@ -141,7 +141,7 @@
 
     return `
       <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mb-4">
-        <div class="tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Outreach stages">${buttons}</div>
+        <div class="stage-pills tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Outreach stages">${buttons}</div>
         ${subs}
         <div class="flex flex-wrap items-start justify-between gap-2 px-4 py-3">
           <p class="text-xs text-gray-500 flex-1 min-w-0" data-lo-note>${esc(noteText())}</p>

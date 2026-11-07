@@ -82,12 +82,15 @@
   const purposeLabel = (k) => (V().purposes.find((p) => p.key === k) || { label: k }).label;
 
   // ── Server ─────────────────────────────────────────────────────────────────
+  // Actions that only read: they leave the shared GET cache alone (cached-fetch.js `bmsRead`).
+  const READ_ACTIONS = new Set(['list', 'performance', 'calendar']);
   async function post(payload) {
     const res = await fetch(API, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       body: JSON.stringify(payload),
+      bmsRead: READ_ACTIONS.has(payload && payload.action),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(errorText(data, res.status));
@@ -160,6 +163,11 @@
     // The page's Needs-you strip counts the same briefs as this badge.
     window._setNeedsYouCount?.(n);
     window._setNextUp?.(nextUpLine());
+    // The compact header's Needs-you card lists them, each opening its brief on "To do".
+    window._setNeedsYouItems?.(inTab('todo').filter(hasOptionsWaiting).slice(0, 3).map((b) => {
+      const w = b.options.filter((o) => o.status === 'proposed').length;
+      return { id: b.id, label: b.title || 'Untitled brief', sub: `${w} option${w === 1 ? '' : 's'} to choose from` };
+    }));
     el.classList.toggle('hidden', n === 0);
     // `hidden` loses to inline-flex (equal specificity, later in style.css) — pin it inline too.
     el.style.display = n === 0 ? 'none' : '';
@@ -169,10 +177,11 @@
   // ── Tabs ───────────────────────────────────────────────────────────────
   // Left to right, the order a brief moves through, each named for where it is. Every brief is in exactly
   // one, and the count on each shows where the work is without opening it (owner, 2026-11-05).
+  // "To do" is "Not started" and "To review" together (owner, 2026-11-06): everything waiting on the user in one place,
+  // with each brief's own sentence saying what it needs. Those with options to choose from come first.
   const TABS = [
-    { key: 'todo', label: 'Not started', help: 'Ask for options on a brief to get it going.', empty: 'Nothing waiting to start. Press "New brief" to begin one.' },
-    { key: 'making', label: 'Being made', help: 'Nothing to do here. Options move to "To review" when they are ready.', empty: 'Nothing is being made right now.' },
-    { key: 'review', label: 'To review', help: 'Choose "Use this" on the one you like, or "Not this" and say why.', empty: 'Nothing is waiting for you to review.' },
+    { key: 'todo', label: 'To do', help: 'Choose "Use this" on the option you like, or "Not this" and say why. A brief with no options yet needs you to ask for them.', empty: 'Nothing to do. Press "New brief" to begin one.' },
+    { key: 'making', label: 'Being made', help: 'Nothing to do here. Options move to "To do" when they are ready.', empty: 'Nothing is being made right now.' },
     { key: 'approved', label: 'Approved', help: 'Finished, and in My Content for your assistants to use.', empty: 'Nothing approved yet.' },
     { key: 'archived', label: 'Archived', help: 'Briefs you stopped. Anything you had approved stays in My Content.', empty: 'Nothing archived.' },
   ];
@@ -180,19 +189,26 @@
     if (b.status === 'cancelled') return 'archived';
     if (b.status === 'generating') return 'making';
     if (b.status === 'approved' || progress(b).done) return 'approved';
-    return b.options.some((o) => o.status === 'proposed') ? 'review' : 'todo';
+    return 'todo';
   }
-  const inTab = (key) => state.briefs.filter((b) => tabOf(b) === key);
+  const hasOptionsWaiting = (b) => b.options.some((o) => o.status === 'proposed');
+  const inTab = (key) => {
+    const list = state.briefs.filter((b) => tabOf(b) === key);
+    return key === 'todo' ? [...list.filter(hasOptionsWaiting), ...list.filter((b) => !hasOptionsWaiting(b))] : list;
+  };
   function tabsHtml() {
     return `
-      <div role="tablist" aria-label="Briefs by stage" class="flex overflow-x-auto gap-1 border-b border-gray-200 mb-4" data-brief-tabs>
+      ${''/* Pills in a grey track, not underlined tabs (owner, 2026-11-06): the page's own tabs above are
+         underlined, and these filter a list rather than move round the page. overflow-y is hidden inline:
+         overflow-x:auto alone gave the row a stray vertical scrollbar. */}
+      <div role="tablist" aria-label="Briefs by stage" class="inline-flex max-w-full gap-1 p-1 rounded-xl bg-gray-100 mb-4" style="overflow-x:auto;overflow-y:hidden" data-brief-tabs>
         ${TABS.map((t) => {
           const n = inTab(t.key).length;
           const on = state.tab === t.key;
-          const urgent = t.key === 'review' && n > 0;
+          const urgent = t.key === 'todo' && inTab('todo').some(hasOptionsWaiting);
           return `<button type="button" role="tab" id="brief-tab-${t.key}" aria-selected="${on}" aria-controls="brief-tab-panel" tabindex="${on ? 0 : -1}" data-brief-tab="${t.key}"
-            class="flex-shrink-0 min-h-[44px] px-3 py-2 text-sm font-bold whitespace-nowrap border-b-2 -mb-px transition ${on ? 'border-emerald-700 text-gray-900' : 'border-transparent text-gray-600 hover:text-gray-900'}">
-            ${esc(t.label)} <span class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center ${urgent ? 'bg-amber-100 text-amber-900' : 'bg-gray-100 text-gray-700'}">${n}</span>
+            class="flex-shrink-0 min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}">
+            ${esc(t.label)} <span class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center ${urgent ? 'bg-amber-100 text-amber-900' : on ? 'bg-gray-100 text-gray-700' : 'bg-gray-200 text-gray-700'}">${n}</span>
           </button>`;
         }).join('')}
       </div>`;
@@ -210,7 +226,7 @@
     if (b.status === 'cancelled') return `<span class="${base} bg-gray-50 text-gray-500 border-gray-200">Archived</span>`;
     if (b.status === 'approved') return `<span class="${base} bg-emerald-50 text-emerald-800 border-emerald-200">Approved</span>`;
     if (waiting) return `<span class="${base} bg-amber-50 text-amber-800 border-amber-200">Needs you</span>`;
-    return `<span class="${base} bg-gray-50 text-gray-600 border-gray-200">Not started</span>`;
+    return `<span class="${base} bg-gray-50 text-gray-600 border-gray-200">${roundsUsedUp(b) ? 'All rounds used' : b.rounds > 0 ? 'Needs more options' : 'Not started'}</span>`;
   }
 
   /** "What happens next" for the page's Needs-you strip. */
@@ -230,6 +246,10 @@
     const chosen = b.options.filter((o) => o.status === 'approved').length;
     return { needed, chosen, left: Math.max(0, needed - chosen), done: chosen >= needed };
   }
+
+  /** The server refuses another round past this (startRound), so the page says so rather than only greying the button. */
+  const roundCap = (b) => b.maxRounds || V().maxRounds;
+  const roundsUsedUp = (b) => b.rounds >= roundCap(b);
 
   /** What the pictures are for, in the campaign's words: its social posts, its articles, its emails. */
   function forWhat(b) {
@@ -252,13 +272,16 @@
         : 'Done — you have chosen the picture this brief needs. Nothing else to do here.';
     }
     const tally = p.needed > 1 ? `${p.chosen} of ${p.needed} chosen for ${forWhat(b)} — ${p.left} more needed. ` : '';
+    const usedUp = roundsUsedUp(b) ? `This brief has used all ${roundCap(b)} of its rounds, so for something different, start a new brief.` : '';
     if (waiting) {
       // Fewer options here than pictures still needed: say where the rest come from.
-      return waiting >= p.left
-        ? `${tally}Choose ${p.left === 1 ? 'the one you like' : `${p.left} you like`} with "Use this".`
+      if (waiting >= p.left) return `${tally}Choose ${p.left === 1 ? 'the one you like' : `${p.left} you like`} with "Use this".${usedUp ? ` ${usedUp}` : ''}`;
+      return usedUp
+        ? `${tally}Choose the ones you like with "Use this". ${usedUp}`
         : `${tally}Choose the ones you like with "Use this", then ask ${name()} for more options for the rest.`;
     }
     if (b.waitingOn) return `${tally}Waiting on ${b.waitingOn} to add their own — they use "Add your own" on this brief. Nothing is sent to them; tell them yourself.`;
+    if (usedUp) return `${tally}${usedUp}`;
     if (b.rounds > 0) return `${tally}Ask ${name()} for more options — the next round reads why you turned any down.`;
     return `${tally}Not started. Ask ${name()} for options when the brief says what you want.`;
   }
@@ -330,8 +353,9 @@
             ${V().rejectReasons.map((r) => `<button type="button" data-brief-reject-reason="${esc(r.key)}" data-option="${o.id}"
               class="btn-secondary min-h-[44px] sm:min-h-0 px-2 py-1 border text-xs font-bold rounded-lg">${esc(r.label)}</button>`).join('')}
           </div>
-          <input type="text" data-brief-reject-note="${o.id}" maxlength="300" placeholder="In your words (optional)" aria-label="Why not this one (optional)"
+          <input type="text" data-brief-reject-note="${o.id}" maxlength="300" placeholder="Or say why in your words" aria-label="Why not this one, in your words"
             class="w-full mt-1 px-2 py-1 border border-gray-200 rounded-lg text-base sm:text-xs">
+          <button type="button" data-brief-reject-reason="other" data-brief-reject-own data-option="${o.id}" class="btn-primary min-h-[44px] sm:min-h-0 px-3 py-1 text-xs font-bold rounded-lg">Not this one</button>
           <button type="button" data-brief-reject-cancel class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1 text-xs font-bold">Keep it</button>
         </div>`;
     } else if (o.status === 'proposed' && b.status !== 'cancelled' && !progress(b).done) {
@@ -347,7 +371,7 @@
           ? `<button type="button" data-brief-preview="${o.id}" aria-label="${esc(`Preview ${o.prompt || 'this flyer'} larger`)}" class="block w-full h-full" style="cursor:zoom-in">${img}</button>`
           : img}</div>
         <p class="text-[11px] font-bold text-gray-600 mt-1">${o.flyer ? esc(o.prompt || 'Flyer') : esc(sourceLabel(o.source).replace(/s$/, ''))} · round ${o.round}</p>
-        ${chatPaneAvailable() ? `<button type="button" data-brief-select="${o.id}" data-brief="${b.id}" title="Ask ${esc(name())} about this one" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">🎯 Select</button>` : ''}
+        ${chatPaneAvailable() && !canEdit(o) ? `<button type="button" data-brief-select="${o.id}" data-brief="${b.id}" title="Ask ${esc(name())} about this one" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">🎯 Select</button>` : ''}
         ${canEdit(o) ? `<button type="button" data-brief-open-studio="${o.id}" data-brief="${b.id}" class="btn-primary w-full min-h-[44px] sm:min-h-0 px-2 py-1.5 mt-1 text-xs font-bold rounded-lg">Open in editor</button>` : ''}
         ${o.flyer && o.url ? `<button type="button" data-brief-preview="${o.id}" class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold mt-0.5">Preview</button>` : ''}
         ${o.flyer && o.flyer.lowResPhoto ? '<p class="text-[11px] text-amber-700 mt-1">This photo may look soft when printed — try a smaller paper size or another round.</p>' : ''}
@@ -442,16 +466,22 @@
       flyer ? (b.sources.length ? `photo from ${b.sources.map(sourceLabel).join(' or ')}` : 'words only') : b.sources.map(sourceLabel).join(', '), b.dueDate ? `due ${b.dueDate}` : '', b.origin === 'chat' ? 'from chat' : '', b.origin === 'campaign' && !b.requestedBy ? 'from a campaign' : '', b.origin === 'assistant' && !b.requestedBy ? 'raised by your Social Media Assistant' : '']
       .filter(Boolean).map(esc).join(' · ');
     const live = b.status !== 'cancelled';
+    const open = !isCollapsed(b.id);
     return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5" data-brief-card="${b.id}">
+      <div data-no-fold class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5" data-brief-card="${b.id}">
         <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
-            <p class="text-sm font-bold text-gray-900 break-words">${esc(b.title)}</p>
-            <p class="text-xs text-gray-500 mt-0.5">${meta}</p>
-            ${b.requestedBy && window.rqRequestedPill ? `<div class="flex mt-1.5">${window.rqRequestedPill(b.requestedBy)}</div>` : ''}
-          </div>
+          <button type="button" data-brief-toggle="${b.id}" aria-expanded="${open}" aria-controls="brief-body-${b.id}" class="min-w-0 flex items-start gap-2 text-left flex-1 rounded-lg -m-1 p-1 hover:bg-gray-50">
+            <span aria-hidden="true" class="text-gray-500 text-xs mt-0.5 inline-block transition-transform" style="transform:rotate(${open ? 90 : 0}deg)">▶</span>
+            <span class="min-w-0">
+              <span class="block text-sm font-bold text-gray-900 break-words">${esc(b.title)}</span>
+              <span class="block text-xs text-gray-500 mt-0.5">${meta}</span>
+              <span class="sr-only">${open ? 'Hide details' : 'Show details'}</span>
+            </span>
+          </button>
           ${chip(b)}
         </div>
+        ${b.requestedBy && window.rqRequestedPill ? `<div class="flex mt-1.5">${window.rqRequestedPill(b.requestedBy)}</div>` : ''}
+        <div id="brief-body-${b.id}" data-brief-body="${b.id}" ${open ? '' : 'hidden'}>
         ${b.scheduledPostId ? '<p class="text-xs text-gray-700 mt-1">For a social post that found no picture — the one you approve goes onto that post if it still has none.</p>' : ''}
         ${b.campaign ? `<p class="text-xs text-gray-700 mt-1 break-words">For the campaign “${esc(b.campaign.objective)}” — the picture you approve joins that campaign's pictures.</p>` : ''}
         ${b.message ? `<p class="text-sm text-gray-700 mt-2 break-words">${esc(b.message)}</p>` : ''}
@@ -468,20 +498,85 @@
         ${live ? ownPanelHtml(b) : ''}
         ${live ? `
           <div class="flex flex-wrap items-center gap-2 mt-4">
-            ${progress(b).done ? '' : `<button type="button" data-brief-generate="${b.id}" ${b.status === 'generating' || b.rounds >= (b.maxRounds || V().maxRounds) || (flyer && !words) ? 'disabled' : ''}
+            ${progress(b).done ? '' : `<button type="button" data-brief-generate="${b.id}" ${b.status === 'generating' || roundsUsedUp(b) || (flyer && !words) ? 'disabled' : ''}
               class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(roundButtonLabel(b))}</button>`}
             ${flyer ? '' : `<button type="button" data-brief-own-open="${b.id}"
               class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Add your own</button>`}
             <button type="button" data-brief-edit="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
-              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">${flyer ? (progress(b).done ? 'Change this flyer' : 'Edit flyer') : 'Edit brief'}</button>
-            <button type="button" data-brief-chat="${b.id}"
-              class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1.5 text-xs font-bold">Talk it through with ${esc(name())}</button>
+              class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50">${flyer && progress(b).done ? 'Change this flyer' : 'Edit brief'}</button>
+            ${/* Flyers and pictures are talked through in the editor, with the chat beside it (owner 2026-11-06: the link
+               duplicated the chat pane). A video has no editor, and with no docked chat this is the only way in. */
+              isVideoBrief(b) || !chatPaneAvailable() ? `<button type="button" data-brief-chat="${b.id}"
+              class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1.5 text-xs font-bold">Talk it through with ${esc(name())}</button>` : ''}
             <button type="button" data-brief-cancel="${b.id}" ${b.status === 'generating' ? 'disabled' : ''}
               class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg transition disabled:opacity-50">Archive brief</button>
           </div>
-          ${progress(b).done ? '' : `<p class="text-[11px] text-gray-500 mt-1">${esc(flyer ? flyerCostLine(b) : roundCostLine(b))}</p>
+          ${progress(b).done ? '' : `${roundsUsedUp(b) ? '' : `<p class="text-[11px] text-gray-500 mt-1">${esc(flyer ? flyerCostLine(b) : roundCostLine(b))}</p>`}
           ${flyer ? '' : videoOfferHtml(b)}`}` : ''}
+        </div>
       </div>`;
+  }
+
+  // ── Full screen (owner 2026-11-06: "like the Website assistant") ──────────────────────
+  // The briefs and the docked chat over the whole page. The editor's Full screen shows and leaves this one too
+  // (pageIsFull, leavePageFull), or it offers full screen to someone already in it.
+  function setFull(on) {
+    state.full = !!on;
+    const host = document.getElementById('briefs-host');
+    const box = document.getElementById('briefs-layout') || host;
+    if (box) box.toggleAttribute('data-briefs-full', state.full);
+    if (window.ScrollLock) { if (state.full) window.ScrollLock.lock('briefs-full'); else window.ScrollLock.release('briefs-full'); }
+    if (!document.getElementById('briefs-full-css')) {
+      const css = document.createElement('style');
+      css.id = 'briefs-full-css';
+      css.textContent = `[data-briefs-full] { position: fixed; inset: 0; z-index: 10500; background: #fff; overflow: auto; padding: 12px; }
+        .chatpane-dock[data-briefs-full].is-on > .chatpane-dock-col { top: 12px; height: calc(100vh - 24px); }`;
+      document.head.appendChild(css);
+    }
+    render();
+    document.querySelector('[data-brief-full]')?.focus();
+  }
+
+  // "Your brand style" is in every assistant's "Your brand" section now (2026-11-06), mounted by
+  // assistants.js (_fetchAndRenderWorkspaceDefaults), so the Brand Designer no longer adds its own.
+
+  // ── "It is being made" pop-up (owner 2026-11-05: half see-through, over the page, not a screen of its own) ──
+  function makingNotice(b) {
+    const what = isFlyer(b) ? 'your flyer' : isVideoBrief(b) ? 'your video' : 'your pictures';
+    showNotice(`${name()} is making ${what}. It will be under “To do” in about a minute, ready to open in the editor.`);
+  }
+  function showNotice(text) {
+    document.getElementById('brief-notice')?.remove();
+    const el = document.createElement('div');
+    el.id = 'brief-notice';
+    el.setAttribute('role', 'status');
+    el.setAttribute('aria-live', 'polite');
+    el.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:10600;max-width:min(420px,calc(100vw - 32px));'
+      + 'background:rgba(17,24,39,0.5);color:#fff;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);border-radius:16px;padding:18px 22px;'
+      + 'font-size:15px;font-weight:700;line-height:1.4;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.2);cursor:pointer;text-shadow:0 1px 2px rgba(0,0,0,.4)';
+    el.textContent = text;
+    el.title = 'Click to close';
+    el.addEventListener('click', () => el.remove());
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 6000);
+  }
+
+  // ── Show or hide a brief (owner 2026-11-05: every tab's briefs expandable/collapsible) ─────
+  // Remembered per assistant in this browser. Closed until opened (owner, 2026-11-06); "Hide all" / "Show all"
+  // per tab. What is kept is the ones OPEN, under a new key: the old key listed the ones hidden.
+  const collapseKey = () => `bms-briefs-open-${state.assistantId}`;
+  let collapsedIds = null;
+  function collapsedSet() {
+    if (collapsedIds) return collapsedIds;
+    try { collapsedIds = new Set(JSON.parse(localStorage.getItem(collapseKey()) || '[]').map(Number)); }
+    catch { collapsedIds = new Set(); }
+    return collapsedIds;
+  }
+  const isCollapsed = (id) => !collapsedSet().has(Number(id));
+  function setCollapsed(ids, hide) {
+    const set = collapsedSet();
+    ids.forEach((id) => (hide ? set.delete(Number(id)) : set.add(Number(id))));
+    try { localStorage.setItem(collapseKey(), JSON.stringify([...set].slice(-500))); } catch { /* private window */ }
   }
 
   /** A flyer round: the pages are drawn free; only an AI photo costs. Said before the click. */
@@ -518,7 +613,8 @@
     const draftCost = state.unit === 'tasks' ? ' (1 task)' : '';
     return `
       <form data-flyer-form class="bg-white rounded-2xl border-2 border-emerald-200 shadow-sm p-5 mb-4 space-y-3">
-        <p class="text-sm font-bold text-gray-900">${state.form.fork ? 'Change this flyer' : editing ? 'Edit flyer' : 'New printed flyer'}</p>
+        <p class="text-sm font-bold text-gray-900">${state.form.fork ? 'Change this flyer' : editing ? 'Edit brief' : 'New printed flyer'}</p>
+        ${editing && !state.form.fork ? editKeepsMadeHtml(editing, true) : ''}
         ${state.form.fork ? '<p class="text-xs text-gray-600">This makes a new version. The flyer you approved stays in My Content until you delete it.</p>' : ''}
         <p class="text-xs text-gray-500">${esc(name())} draws the pages in your brand. When you approve one, a print-ready PDF goes into My Content — print it at home, or send it to a print shop.</p>
         ${field('Name', input('title', v.title, 'e.g. November open day flyer', 120))}
@@ -576,6 +672,14 @@
       </form>`;
   }
 
+  /** What saving an edit does to what is already made (owner 2026-11-05 asked): nothing; the next round uses it. */
+  function editKeepsMadeHtml(b, flyer) {
+    const made = b && Array.isArray(b.options) ? b.options.filter((o) => o.status === 'proposed' || o.status === 'approved').length : 0;
+    if (!made) return '';
+    const what = flyer ? (made === 1 ? 'flyer page' : 'flyer pages') : (made === 1 ? 'option' : 'options');
+    return `<p class="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2" data-brief-edit-keeps>Saving changes only this brief. The ${made} ${what} already made stay as they are${flyer ? ': change one with "Open in editor", or press "Save and make the flyer" for new pages from these words' : ', and the next options you ask for use these changes'}.</p>`;
+  }
+
   function formHtml() {
     if (!state.form) return '';
     const editing = state.form.mode === 'edit' ? state.briefs.find((b) => b.id === state.form.id) : null;
@@ -590,6 +694,7 @@
     return `
       <form data-brief-form class="bg-white rounded-2xl border-2 border-emerald-200 shadow-sm p-5 mb-4 space-y-3">
         <p class="text-sm font-bold text-gray-900">${editing ? 'Edit brief' : 'New brief'}</p>
+        ${editKeepsMadeHtml(editing, false)}
         ${field('Name', input('title', v.title, 'e.g. Spring launch — hero image', 120))}
         ${field('What should it show, or say?', `<textarea data-keep="brief-message" name="message" maxlength="1000" rows="3" placeholder="e.g. A small team celebrating in a bright studio — the feeling of finally having time back" class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">${esc(v.message || '')}</textarea>`)}
         ${field('Exact words for a branded card (optional)', input('headline', v.headline, 'e.g. Your Monday, sorted.', 120))}
@@ -628,18 +733,21 @@
 
   function toolbarHtml() {
     // Tasks: 1,000,000 means an uncapped plan, so there is no "left" worth showing.
-    const credits = state.credits == null || (state.unit === 'tasks' && state.credits >= 1000000) ? ''
-      : `<span class="text-xs text-gray-500">${state.unit === 'tasks' ? 'Tasks left this month' : 'AI credits left this month'}: <span class="font-bold">${esc(Number(state.credits).toLocaleString('en-GB'))}</span></span>`;
+    // One header row (owner, 2026-11-06): the title on the left, the buttons on the right, and the long
+    // description gone (the ⓘ beside the title explains Briefs). What is left this month is a small badge,
+    // and not shown at all where the page's own "Tasks this month" bar is already on screen above.
+    const leftText = Number(state.credits).toLocaleString('en-GB');
+    const allowanceShown = !!document.querySelector('.detail-v2 #detail-task-share:not(.hidden)');
+    const creditsLabel = `${state.unit === 'tasks' ? 'Tasks left this month' : 'AI credits left this month'}: ${leftText}`;
+    const credits = state.credits == null || (state.unit === 'tasks' && state.credits >= 1000000) || allowanceShown ? ''
+      : `<span class="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 text-[11px] font-semibold text-gray-600 whitespace-nowrap" title="${esc(creditsLabel)}">${esc(leftText)} ${state.unit === 'tasks' ? 'tasks' : 'credits'} left</span>`;
     return `
-      <div class="flex flex-wrap items-center justify-between gap-3 mb-4" data-brief-toolbar>
-        <div>
-          <h2 class="text-base font-bold text-gray-900"><span data-explain="brand-briefs">Briefs</span></h2>
-          <p class="text-xs text-gray-500">Say what you need, whether a picture, a printed flyer or a video. Approve the option that fits and it goes into your library for every assistant to use.</p>
-        </div>
-        <div class="flex flex-wrap items-center gap-3">
+      <div class="flex items-center justify-between gap-3 mb-3" data-brief-toolbar>
+        <h2 class="text-base font-bold text-gray-900 shrink-0"><span data-explain="brand-briefs">Briefs</span></h2>
+        <div class="flex flex-wrap items-center justify-end gap-2">
           ${credits}
-          ${chatPaneAvailable() ? `<button type="button" data-brief-pick aria-pressed="${state.picking ? 'true' : 'false'}" title="Choose an option or a brief to talk about" class="${state.picking ? 'btn-primary' : 'btn-secondary border'} min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">🎯 ${state.picking ? 'Selecting…' : 'Select'}</button>` : ''}
-          ${chatPaneAvailable() && !chatIsOn() ? `<button type="button" data-brief-chat-toggle aria-pressed="false" title="Show the chat beside your briefs" class="btn-assistant border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition">Chat with ${esc(name())}</button>` : ''}
+          ${''/* Select lives in the editor, where the design is changed (owner 2026-11-05): not beside New brief. */}
+          <button type="button" data-brief-full aria-pressed="${state.full ? 'true' : 'false'}" title="${state.full ? 'Back to the page (Esc)' : 'Use the whole screen for your briefs and the chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg">${state.full ? 'Exit full screen' : 'Full screen'}</button>
           ${state.form ? '' : `<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
         </div>
       </div>`;
@@ -649,34 +757,7 @@
    * What every round starts from: the brand kit and the picture guidelines, both changed in a pop-up here
    * (brand-style-dialog.js) or in chat, so nobody has to leave the Brand Designer to see or change them.
    */
-  function styleHtml() {
-    const g = state.guidelines;
-    if (g === undefined) return '';
-    const kit = state.brandKit;
-    const link = '<button type="button" data-brief-edit-style class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-1.5 text-xs font-bold rounded-lg flex-shrink-0">View or change</button>';
-    if (g === null || !kit) return `<div class="flex items-center justify-between gap-3 bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4"><p class="text-xs text-gray-600">Your brand style could not be read just now.</p>${link}</div>`;
-    const unset = kit.source !== 'manual' && kit.source !== 'website';
-    const swatch = (c, label) => `<span title="${esc(label)}: ${esc(c)}" class="inline-block w-6 h-6 rounded-full border border-gray-300" style="background:${esc(c)}"></span>`;
-    const parts = [
-      g.photoStyle ? `<span class="font-bold">Style:</span> ${esc(g.photoStyle)}` : '',
-      g.mustInclude ? `<span class="font-bold">Include:</span> ${esc(g.mustInclude)}` : '',
-      g.mustAvoid ? `<span class="font-bold">Never show:</span> ${esc(g.mustAvoid)}` : '',
-    ].filter(Boolean);
-    if (kit.fontFamily) window.FontPicker?.loadFamily(kit.fontFamily);
-    return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 mb-4" data-brief-style>
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex flex-wrap items-center gap-3 min-w-0">
-            <p class="text-xs font-bold text-gray-700"><span data-explain="brand-guidelines">Your brand style</span></p>
-            <span class="inline-flex items-center gap-1">${unset ? '' : `${swatch(kit.primaryColor, 'Main colour')}${swatch(kit.backgroundColor, 'Background')}${swatch(kit.textColor, 'Text')}`}${(g.secondaryColors || []).map((c) => swatch(c, 'Extra colour')).join('')}</span>
-            ${unset ? '<span class="text-xs font-semibold text-amber-900">No brand colours chosen yet</span>' : ''}
-            <span class="text-sm text-gray-900 truncate" ${kit.fontFamily ? `style="font-family:'${esc(kit.fontFamily)}', system-ui, sans-serif"` : ''}>${esc(kit.fontFamily || 'Our standard font')}</span>
-          </div>
-          ${link}
-        </div>
-        <p class="text-xs text-gray-600 mt-2">${parts.length ? parts.join(' · ') : 'No picture guidelines yet. Add a photo style and anything pictures must never show.'}</p>
-      </div>`;
-  }
+  // "Your brand style" is in the profile's "Your brand" section: src/components/brand-style-card.js.
 
   function emptyState() {
     return `
@@ -710,19 +791,21 @@
     const keptNotes = {};
     host.querySelectorAll('[data-brief-reject-note]').forEach((el) => { keptNotes[el.dataset.briefRejectNote] = el.value; });
 
-    // Always opens at the start of the row (owner, 2026-11-05). The count on "To review" says when something waits.
-    if (!state.tab) state.tab = 'todo';
+    // Opens on "To do". Until the user picks a tab themselves, an empty tab gives way to it too, since the first
+    // paint can come before the briefs have loaded.
+    if (!state.tab || (!state.userTab && !inTab(state.tab).length && inTab('todo').length)) state.tab = 'todo';
     // The brief being watched is finished: follow it, rather than leaving an empty "Being made".
-    if (state.tab === 'making' && !inTab('making').length && inTab('review').length) state.tab = 'review';
+    if (state.tab === 'making' && !inTab('making').length && inTab('todo').some(hasOptionsWaiting)) state.tab = 'todo';
     const tab = TABS.find((t) => t.key === state.tab);
     const shown = inTab(state.tab);
     host.innerHTML = `
       ${toolbarHtml()}
-      ${styleHtml()}
       ${formHtml()}
       ${state.briefs.length || state.form ? tabsHtml() : ''}
       <div id="brief-tab-panel" role="tabpanel" aria-labelledby="brief-tab-${tab.key}" class="${state.picking ? 'brief-picking' : ''}">
-        ${!state.briefs.length && !state.form ? emptyState() : shown.length ? `<p class="text-xs text-gray-600 mb-3">${esc(tab.help)}</p>` : `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-600">${esc(tab.empty)}</p></div>`}
+        ${!state.briefs.length && !state.form ? emptyState() : shown.length ? `<div class="flex flex-wrap items-center justify-between gap-2 mb-3"><p class="text-xs text-gray-600">${esc(tab.help)}</p>${shown.length > 1 ? (shown.every((b) => isCollapsed(b.id))
+          ? '<button type="button" data-brief-expand-all class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold">Show all</button>'
+          : '<button type="button" data-brief-collapse-all class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold">Hide all</button>') : ''}</div>` : `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-600">${esc(tab.empty)}</p></div>`}
         <div class="space-y-4">${shown.map(briefCard).join('')}</div>
       </div>`;
     ensurePickCss();
@@ -757,14 +840,10 @@
     closeStudioInstance();
     const first = state.studio.optionId || (b.options.filter(canEdit)[0] || {}).id;
     if (!first) {
-      // Still being made, or the round stopped with nothing to edit: never a blank editor.
-      const making = b.status === 'generating';
-      host.innerHTML = `
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center" data-brief-studio-wait>
-          <p class="text-base font-bold text-gray-900">${making ? `${esc(name())} is making “${esc(b.title)}”` : `Nothing to edit on “${esc(b.title)}” yet`}</p>
-          <p class="text-sm text-gray-600 mt-2">${making ? 'It opens here as soon as it is ready, usually in about a minute.' : esc(b.generationNote || 'Ask for options on the brief to get it going.')}</p>
-          <button type="button" data-brief-studio-back class="btn-secondary border min-h-[44px] sm:min-h-0 px-4 py-2 mt-4 text-sm font-bold rounded-lg">Back to briefs</button>
-        </div>`;
+      // Nothing to edit (still being made, or nothing came back): back to the brief on its tab, never a waiting screen.
+      state.studio = null;
+      state.tab = tabOf(b);
+      render();
       return;
     }
     state.studio.optionId = first;
@@ -772,9 +851,11 @@
       brief: b, optionId: first, assistantName: name(), chatAvailable: chatPaneAvailable(),
       options: () => studioOptions(state.briefs.find((x) => x.id === b.id) || b),
       post,
+      onOptionsChanged: () => load(),
       onRefer: (ref) => chatRefer(ref),
-      onClose: () => { state.studio = null; closeStudioInstance(); state.tab = tabOf(state.briefs.find((x) => x.id === b.id) || b); load(); },
-      onMore: () => { state.tab = tabOf(b); render(); },
+      onClose: () => leaveStudio(b.id),
+      pageIsFull: () => state.full,
+      leavePageFull: () => setFull(false),
       onApprove: async (optionId) => {
         await post({ action: 'decide', optionId, decision: 'approve' });
         state.studio = null;
@@ -785,8 +866,47 @@
     });
     studioInstance.briefId = b.id;
   }
+  /**
+   * "Back to brief": out of the editor, onto the tab the brief is on now, with the brief open and in view and its round
+   * button with it, however the editor was reached. A brief starts closed, and one that came from the chat has never
+   * been opened. The list is painted at once and read again, because a round started from the chat while the editor was
+   * open moves the brief.
+   */
+  async function leaveStudio(briefId) {
+    const tabNow = () => {
+      const b = state.briefs.find((x) => x.id === briefId);
+      return b ? tabOf(b) : state.tab;
+    };
+    const bring = () => {
+      const card = document.querySelector(`[data-brief-card="${Number(briefId)}"]`);
+      card?.scrollIntoView({ block: 'start' });
+      card?.querySelector('[data-brief-toggle]')?.focus({ preventScroll: true });
+    };
+    state.studio = null;
+    closeStudioInstance();
+    setCollapsed([briefId], false);
+    state.tab = tabNow();
+    render();
+    bring();
+    await load();
+    if (state.studio || tabNow() === state.tab) return;
+    state.tab = tabNow();
+    render();
+    bring();
+  }
   function openStudio(briefId, optionId) {
     state.picking = false;
+    // Nothing to edit yet (it is still being made): the brief on its tab and a pop-up, never a waiting screen.
+    const b = state.briefs.find((x) => x.id === briefId);
+    if (b && !optionId && !b.options.some(canEdit)) {
+      state.studio = null;
+      closeStudioInstance();
+      state.tab = tabOf(b);
+      setCollapsed([b.id], false);
+      render();
+      if (b.status === 'generating') makingNotice(b);
+      return;
+    }
     state.studio = { briefId, optionId: optionId || null };
     render();
     document.getElementById('briefs-host')?.scrollIntoView({ block: 'start' });
@@ -857,9 +977,10 @@
       await post({ action: 'generate', briefId });
       say(briefId, null);
       state.tab = 'making';
-      // Pictures and flyers: watch it being made in the editor, which opens on it when ready. Videos stay on the tabs.
+      // Stay on the Briefs tab, on "Being made", with a pop-up saying so (owner 2026-11-05: no waiting screen).
       const b = state.briefs.find((x) => x.id === briefId);
-      if (b && !isVideoBrief(b) && window.DesignStudio) state.studio = { briefId, optionId: null };
+      setCollapsed([briefId], false);
+      if (b) makingNotice(b);
     } catch (err) {
       say(briefId, err.message, 'error');
     } finally {
@@ -890,25 +1011,26 @@
       }
     }
     if (t('[data-brief-pick]')) { setPicking(!state.picking); return; }
+    if (t('[data-brief-full]')) { setFull(!state.full); return; }
+    const toggle = t('[data-brief-toggle]');
+    if (toggle && !state.picking) {
+      const id = Number(toggle.dataset.briefToggle);
+      setCollapsed([id], !isCollapsed(id));
+      render();
+      document.querySelector(`[data-brief-toggle="${id}"]`)?.focus();
+      return;
+    }
+    if (t('[data-brief-collapse-all]') || t('[data-brief-expand-all]')) {
+      setCollapsed(inTab(state.tab).map((b) => b.id), !!t('[data-brief-collapse-all]'));
+      render();
+      return;
+    }
     const toStudio = t('[data-brief-open-studio]');
     if (toStudio) { openStudio(Number(toStudio.dataset.brief), Number(toStudio.dataset.briefOpenStudio)); return; }
     if (t('[data-brief-studio-back]')) { state.studio = null; render(); return; }
     const tabBtn = t('[data-brief-tab]');
-    if (tabBtn) { openTab(tabBtn.dataset.briefTab, false); return; }
+    if (tabBtn) { state.userTab = true; openTab(tabBtn.dataset.briefTab, false); return; }
     if (t('[data-brief-new]')) { startNewBrief(); return; }
-    if (t('[data-brief-edit-style]')) {
-      if (window.BrandStyleDialog && window.FontPicker) {
-        window.BrandStyleDialog.open({
-          assistantName: name(),
-          onSaved: () => load(),
-          onAskChat: chatPaneAvailable() ? () => askChat('Help me choose my brand colours and font. Ask me a few quick questions first.') : null,
-        });
-        return;
-      }
-      window._bizinfoInitialTab = 'assets';
-      if (window.loadView) window.loadView('assets');
-      return;
-    }
     if (t('[data-brief-form-close]')) { state.form = null; render(); return; }
     if (t('[data-brief-reject-cancel]')) { state.rejecting = null; render(); return; }
 
@@ -971,7 +1093,6 @@
     }
 
     if (t('[data-brief-library]')) { window.loadView?.('my-content'); return; }
-    if (t('[data-brief-chat-toggle]')) { setChatOn(!chatIsOn(), true); return; }
     const select = t('[data-brief-select]');
     if (select) {
       const b = state.briefs.find((x) => x.id === Number(select.dataset.brief));
@@ -1035,6 +1156,12 @@
       const optionId = Number(reason.dataset.option);
       const note = document.querySelector(`[data-brief-reject-note="${optionId}"]`)?.value || '';
       const brief = state.briefs.find((b) => b.options.some((o) => o.id === optionId));
+      // Their own words, sent with the button under them (owner 2026-11-05: typed a reason, then nothing to press).
+      if (reason.hasAttribute('data-brief-reject-own') && !note.trim()) {
+        const box = document.querySelector(`[data-brief-reject-note="${optionId}"]`);
+        if (box) { box.placeholder = 'Type why, or choose a reason above'; box.focus(); }
+        return;
+      }
       try {
         await post({ action: 'decide', optionId, decision: 'reject', reason: reason.dataset.briefRejectReason, note });
         state.rejecting = null;
@@ -1097,11 +1224,17 @@
   // The tabs' arrow keys, and Escape to stop selecting.
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.picking) { setPicking(false); return; }
+    // Esc leaves full screen, unless a dialog or the editor (which has its own full screen) is taking it.
+    // An OPEN dialog takes Esc first. "Any dialog" never let Esc work: the settings drawer is always in the page as
+    // one, inert while shut.
+    const dialogOpen = [...document.querySelectorAll('[role="dialog"]')].some((d) => !d.inert && !d.hidden && d.getClientRects().length && getComputedStyle(d).visibility !== 'hidden');
+    if (e.key === 'Escape' && state.full && !state.studio && !dialogOpen) { setFull(false); return; }
     const tab = e.target.closest && e.target.closest('[data-brief-tab]');
     if (!tab || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
     e.preventDefault();
     const at = TABS.findIndex((t) => t.key === tab.dataset.briefTab);
     const next = e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : (at + (e.key === 'ArrowRight' ? 1 : -1) + TABS.length) % TABS.length;
+    state.userTab = true;
     openTab(TABS[next].key, true);
   });
 
@@ -1210,6 +1343,21 @@
     }
   });
 
+  // "Choose a picture" on the chat's card: on the design on screen if this brief is open, because that is the one they
+  // mean, and otherwise on the card's option, opened first.
+  document.addEventListener('design:findPicture', (e) => {
+    const d = e.detail || {};
+    const b = state.rendered ? state.briefs.find((x) => x.id === d.briefId) : null;
+    if (!b) return;
+    if (!studioInstance || studioInstance.briefId !== b.id) {
+      const option = b.options.find((o) => o.id === d.optionId && canEdit(o));
+      openStudio(b.id, option ? option.id : null);
+    }
+    if (!state.studio || !studioInstance) return;
+    d.handled = true;
+    studioInstance.findPicture(d.target, d.shows);
+  });
+
   // A brief created, or options decided, from the chat (chat-session.js).
   // The questions finished and the design is being made (brief-from-chat.ts): go there.
   document.addEventListener('brief:openStudio', (e) => {
@@ -1256,7 +1404,6 @@
   // at any scroll position, on a phone too. The layout is ChatPane.dock's.
   let chatDock = null;
   const chatPaneAvailable = () => !!window.ChatPane?.available?.() && !!state.assistantId;
-  const chatIsOn = () => !!chatDock && chatDock.isOn();
   function getChatDock() {
     const host = document.getElementById('briefs-host');
     if (!host || !chatPaneAvailable()) return null;
@@ -1272,14 +1419,13 @@
       pane: () => ({
         assistantId: state.assistantId, assistantName: name(), roleKey: 'brand_designer',
         rememberKey: `bms-brief-chat:${state.assistantId}`,
-        placeholder: 'Ask for a picture or a flyer, or 🎯 Select an option…',
+        placeholder: 'Ask for a picture or a flyer…',
         starterPrompts: ['I need a picture for a post.', 'Make me a printed flyer.', 'Which of these options would you choose?'],
         composerRows: 3,
       }),
     });
     return chatDock;
   }
-  function setChatOn(on, remember) { getChatDock()?.setOn(on, remember); }
   function chatRefer(ref) { getChatDock()?.refer(ref); }
   function referOption(b, o) {
     const what = o.flyer ? (o.prompt || 'Flyer') : sourceLabel(o.source).replace(/s$/, '');
@@ -1319,11 +1465,14 @@
     init({ assistantId, assistantName }) {
       chatDock?.destroy();
       chatDock = null;
+      if (state.full) setFull(false);
       state.assistantId = assistantId;
       state.assistantName = assistantName || null;
+      collapsedIds = null;
       state.rendered = false;
       state.form = null;
       state.tab = null;
+      state.userTab = false;
       state.picking = false;
       state.studio = null;
       closeStudioInstance();
@@ -1333,7 +1482,20 @@
       // Eager: the count drives the tab badge, visible from every tab.
       load();
     },
+    /** The Needs-you card's buttons: the Briefs tab on "To do", one brief opened and in view. */
+    openReview(briefId) {
+      window._activateMainTab?.('briefs');
+      if (briefId != null) setCollapsed([briefId], false);
+      state.tab = 'todo';
+      state.rendered = true;
+      render();
+      if (briefId != null) {
+        setTimeout(() => document.querySelector(`[data-brief-card="${Number(briefId)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+      }
+    },
     /** Called on first activation of the tab. */
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; if (state.rendered) render(); },
     activate() {
       if (state.rendered) return;
       state.rendered = true;

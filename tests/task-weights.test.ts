@@ -104,7 +104,7 @@ check('every place an AI clip is charged passes its length', () => {
     assert.match(vp, /n \+= aiVideoTasks\(billedSecondsFor\(aiClipSeconds\(s\.targetS\)\)\);/, 'the estimate and hold use the same rule');
     const vb = read('src/utils/visual-briefs.ts');
     assert.strictEqual((vb.match(/aiVideoTasks\(billedSecondsFor\(BRIEF_CLIP_SECONDS\)\)/g) || []).length, 2, 'Brand Designer hold and settle');
-    assert.match(read('netlify/functions/generate-ai-video.ts'), /tasks: aiVideoTasks\(billedSecondsFor\(durationSeconds\)\)/);
+    assert.match(read('src/utils/ai-video-job.ts'), /tasks: aiVideoTasks\(billedSecondsFor\(durationSeconds\)\)/);
     assert.match(read('netlify/functions/process-media-job-background.ts'), /tasks: aiVideoTasks\(job\.durationSeconds\)/);
     assert.match(read('src/utils/work-metering.ts'), /CEIL\(COALESCE\(duration_seconds, 6\)\)::int \* \$\{AI_VIDEO_TASKS_PER_SECOND\}::int/);
     assert.match(read('src/utils/task-balance.ts'), /SUM\(\$\{inFlightWeightSql\(\)\}\)/);

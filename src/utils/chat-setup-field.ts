@@ -141,7 +141,7 @@ ${CARD_SHAPE}`;
 export function assistantSetupFieldBlock(roleKey: string | null | undefined, assistantId: number, ctx: unknown): string | null {
     const lines = renderSetupFields(roleKey ?? '', (ctx as Record<string, unknown> | null) ?? null);
     if (!lines.length) return null;
-    return `YOUR SET-UP ANSWERS (what the user told you when they set you up; also on your Assistant Profile):
+    return `YOUR SET-UP ANSWERS (what the user told you when they set you up; also on your Assistant Settings):
 ${lines.join('\n')}
 To change ONE of these when the user asks (or agrees to your suggestion), put this card in "uiElement" — nothing changes until they click "Save this". The value replaces the whole answer (shown in full above): to add to one, write the current text plus the addition:
 ${CARD_SHAPE.replace('<id>', String(assistantId))}

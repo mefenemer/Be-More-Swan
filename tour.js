@@ -87,7 +87,7 @@
       prepare: ensureAssistantDetail,
       targets: ['#btn-assistant-profile'],
       title: 'Shape Your Assistant',
-      copy: 'The Assistant Profile is where you define who your assistant is — its persona, skills, strategy and the tools it connects to. Adjust it any time; your assistant adapts instantly.',
+      copy: 'The Assistant Settings is where you define who your assistant is — its persona, skills, strategy and the tools it connects to. Adjust it any time; your assistant adapts instantly.',
       placement: 'bottom',
     },
     {

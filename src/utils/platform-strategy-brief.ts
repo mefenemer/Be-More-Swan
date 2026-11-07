@@ -1,5 +1,5 @@
 // Single source of truth for turning the structured per-platform hashtag/algorithm strategy
-// (captured at onboarding and editable in the Assistant Profile → context.platform_strategy)
+// (captured at onboarding and editable in the Assistant Settings → context.platform_strategy)
 // into human-readable brief directives. Previously a handful of these choices were compiled
 // ad-hoc into the "strict rules" list at onboarding time (and most toggles — IG format, trending
 // audio, LI carousels, X length/media — were silently dropped). Rendering the whole object here,

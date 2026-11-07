@@ -382,7 +382,7 @@ async function main() {
     await check('the import waits for review: only import_accept writes sites.draft, and it is charged once a draft exists', () => {
         const run = store.slice(store.indexOf('export async function runSiteImport'), store.indexOf('export async function acceptImport'));
         assert.ok(!run.includes('draft: '), 'the worker never writes the draft itself');
-        assert.ok(run.indexOf("status: 'ready'") < run.indexOf("recordCompletedWork(db, site.organisationId, 'site_draft', 1, site.id)"));
+        assert.ok(run.indexOf("status: 'ready'") < run.indexOf("recordCompletedWork(db, site.organisationId, 'site_draft'"));
         assert.ok(run.indexOf('if (!outcome.ok)') < run.indexOf('recordCompletedWork('), 'a thin site costs nothing');
         const accept = store.slice(store.indexOf('export async function acceptImport'), store.indexOf('export async function discardImport'));
         assert.ok(accept.includes('verifySiteAssets(') && accept.includes('db.update(sites).set({ draft: checked.definition'));

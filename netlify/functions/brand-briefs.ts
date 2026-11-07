@@ -35,13 +35,18 @@ import {
 } from '../../src/utils/visual-briefs';
 import { readBrandGuidelines } from '../../src/utils/brand-guidelines';
 import { normalizeBrandKit } from '../../src/utils/brand-kit';
-import { applyDesignCard, openDesign, saveDesign } from '../../src/utils/design-options';
+import { applyDesignCard, openDesign, saveDesign, copyDesignAtSize, downloadDesignPng, removePictureBackground, saveAsTemplate, useTemplate, downloadDesignPdf } from '../../src/utils/design-options';
+import { PRINT_BLEED_MM } from '../../src/config/flyer-vocab';
+import { deleteDesignTemplate, listDesignTemplates } from '../../src/utils/design-templates';
+import { presignR2Attachment } from '../../src/utils/social-publish';
 import { DESIGN_EDIT_TYPE, designEditFromUiElement } from '../../src/utils/design-doc';
 import { FlyerFitError } from '../../src/lib/flyer';
 import { triggerBriefRound } from '../../src/utils/trigger-brief-round';
 import { contactDefaults, draftFlyerWords, offerLine } from '../../src/utils/flyer-words';
 import { loadIntroOffer } from '../../src/utils/intro-offer';
 import { normaliseFlyerContent } from '../../src/config/flyer-vocab';
+import { chargeFinishedDesign, finishedDesignCapacity } from '../../src/utils/basic-work';
+import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -153,7 +158,8 @@ export default withLambda(async (event) => {
     if (action === 'performance') {
         const designer = await requireDesigner(body.assistantId);
         if (!designer) return json(404, { error: 'Assistant not found.' });
-        const [counts] = await db.execute<{ approved: number; rejected: number; waiting: number; briefs: number }>(sql`
+        // Both counts at once: they are independent, and on one connection they pipeline.
+        const [[counts], [spent]] = await Promise.all([db.execute<{ approved: number; rejected: number; waiting: number; briefs: number }>(sql`
             SELECT count(*) FILTER (WHERE o.status = 'approved')::int AS approved,
                    count(*) FILTER (WHERE o.status = 'rejected' AND coalesce(o.reject_reason, '') NOT LIKE 'other: brief cancelled%')::int AS rejected,
                    (SELECT count(*)::int FROM visual_briefs b2
@@ -162,12 +168,12 @@ export default withLambda(async (event) => {
                    (SELECT count(*)::int FROM visual_briefs b3 WHERE b3.ai_assistant_id = ${designer.id} AND b3.organisation_id = ${orgId}) AS briefs
               FROM visual_brief_options o
               JOIN visual_briefs b ON b.id = o.brief_id
-             WHERE b.ai_assistant_id = ${designer.id} AND b.organisation_id = ${orgId}`);
+             WHERE b.ai_assistant_id = ${designer.id} AND b.organisation_id = ${orgId}`),
         // Credits are read from the generation jobs this assistant ran, completed only — a failed or
         // refused round was refunded and cost nothing.
-        const [spent] = await db.execute<{ credits: number }>(sql`
+            db.execute<{ credits: number }>(sql`
             SELECT coalesce(sum(credit_cost), 0)::int AS credits FROM media_generation_jobs
-             WHERE organisation_id = ${orgId} AND assistant_id = ${designer.id} AND status = 'completed'`);
+             WHERE organisation_id = ${orgId} AND assistant_id = ${designer.id} AND status = 'completed'`)]);
         const approved = Number(counts?.approved ?? 0);
         const rejected = Number(counts?.rejected ?? 0);
         return json(200, {
@@ -273,28 +279,73 @@ export default withLambda(async (event) => {
     }
 
     // The studio: an option as an editable design (src/utils/design-options.ts).
-    if (action === 'open_design' || action === 'save_design' || action === 'apply_design_edit') {
+    if (action === 'open_design' || action === 'save_design' || action === 'apply_design_edit' || action === 'resize_design' || action === 'remove_background' || action === 'download_png' || action === 'download_pdf' || action === 'save_template' || action === 'use_template') {
         try {
             const optionId = Number(body.optionId);
             if (action !== 'apply_design_edit' && (!Number.isInteger(optionId) || optionId <= 0)) return json(400, { error: 'Option not found.' });
             if (action === 'open_design') {
                 const r = await openDesign(db, orgId, optionId);
-                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl }) : json(r.status, { error: r.error });
+                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls }) : json(r.status, { error: r.error });
+            }
+            if (action === 'save_template') {
+                const r = await saveAsTemplate(db, { orgId, userId, optionId, design: body.design, name: body.name });
+                return r.ok ? json(200, { ok: true, templates: await listDesignTemplates(db, orgId) }) : json(r.status, { error: r.error });
+            }
+            if (action === 'use_template') {
+                const r = await useTemplate(db, { orgId, optionId, design: body.design, templateId: Number(body.templateId) || null });
+                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls }) : json(r.status, { error: r.error });
+            }
+            if (action === 'remove_background') {
+                const r = await removePictureBackground(db, { orgId, userId, optionId, design: body.design, target: String(body.target ?? ''), side: body.side === 'back' ? 'back' : null });
+                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls, addedId: r.addedId }) : json(r.status, { error: r.error });
+            }
+            if ((action === 'download_pdf' || action === 'download_png') && !(await finishedDesignCapacity(db, orgId, optionId))) {
+                return json(402, { error: TASK_LIMIT_MESSAGE, code: 'task_limit' });
+            }
+            if (action === 'download_pdf') {
+                const r = await downloadDesignPdf(db, { orgId, optionId, design: body.design, bleedMm: body.printShop === true ? PRINT_BLEED_MM : 0, title: String(body.title ?? '').slice(0, 200) || 'Design' });
+                if (!r.ok) return json(r.status, { error: r.error });
+                await chargeFinishedDesign(db, orgId, optionId);
+                return json(200, { ok: true, url: await presignR2Attachment(r.storageKey, body.printShop === true ? 'design-print-shop.pdf' : 'design.pdf') });
+            }
+            if (action === 'download_png') {
+                const r = await downloadDesignPng(db, { orgId, optionId, design: body.design, seeThrough: body.seeThrough === true, side: body.side === 'back' ? 'back' : null });
+                if (!r.ok) return json(r.status, { error: r.error });
+                await chargeFinishedDesign(db, orgId, optionId);
+                // Saved, not opened: a browser ignores the `download` attribute on another site's address.
+                return json(200, { ok: true, url: await presignR2Attachment(r.storageKey, 'design.png') });
+            }
+            if (action === 'resize_design') {
+                const r = await copyDesignAtSize(db, { orgId, optionId, design: body.design, size: String(body.size ?? '') });
+                return r.ok ? json(200, { ok: true, optionId: r.optionId }) : json(r.status, { error: r.error });
             }
             if (action === 'save_design') {
-                const other = Number(body.usePhotoFromOption);
-                const r = await saveDesign(db, { orgId, optionId, design: body.design, finish: body.finish === true, usePhotoFromOption: Number.isInteger(other) && other > 0 ? other : null });
-                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl }) : json(r.status, { error: r.error });
+                const positive = (v: unknown) => { const n = Number(v); return Number.isInteger(n) && n > 0 ? n : null; };
+                const replace = body.replacePicture as { assetId?: unknown; target?: unknown } | null | undefined;
+                const replaceAsset = positive(replace?.assetId);
+                const r = await saveDesign(db, {
+                    orgId, optionId, design: body.design, finish: body.finish === true, usePhotoFromOption: positive(body.usePhotoFromOption),
+                    addPicture: positive(body.addPicture), side: body.side === 'back' ? 'back' : null,
+                    replacePicture: replaceAsset && typeof replace?.target === 'string' ? { assetId: replaceAsset, target: replace.target } : null,
+                });
+                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls, addedId: r.addedId }) : json(r.status, { error: r.error });
             }
             // Rebuilt from what the card says, however it got here.
             const card = designEditFromUiElement({ ...(body.card as Record<string, unknown>), type: DESIGN_EDIT_TYPE });
             if (!card) return json(400, { error: 'That change could not be read.' });
             const r = await applyDesignCard(db, { orgId, card });
-            return r.ok ? json(200, { ok: true, optionId: card.optionId, design: r.design, photoUrl: r.photoUrl }) : json(r.status, { error: r.error });
+            return r.ok ? json(200, { ok: true, optionId: card.optionId, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls }) : json(r.status, { error: r.error });
         } catch (err) {
             console.error('[brand-briefs] design failed:', action, err instanceof Error ? err.message : err);
             return json(err instanceof FlyerFitError ? 409 : 500, { error: err instanceof FlyerFitError ? err.message : 'That could not be done just now. Please try again.' });
         }
+    }
+
+    if (action === 'list_design_templates') return json(200, { templates: await listDesignTemplates(db, orgId) });
+    if (action === 'delete_design_template') {
+        const id = Number(body.templateId);
+        if (Number.isInteger(id) && id > 0) await deleteDesignTemplate(db, orgId, id);
+        return json(200, { ok: true, templates: await listDesignTemplates(db, orgId) });
     }
 
     if (action === 'decide') {

@@ -1,6 +1,6 @@
 // tests/chat-platforms.test.ts
 // Chats see which connected platforms their assistant posts to — the "Use for this assistant"
-// switches in Assistant Profile ▸ Connections — and propose turning them on or off through a card
+// switches in Assistant Settings ▸ Connections — and propose turning them on or off through a card
 // that saves exactly as the switch does (update-assistant-context.ts).
 //
 // WHY THIS EXISTS. "Stop posting to Facebook" could only be done with the switch. These pin the parts

@@ -32,6 +32,8 @@ function stubVideos(api: ApiStub, status = 'planned') {
 }
 
 async function openTab(page: Page) {
+    // Videos start closed (owner, 2026-11-06); these tests are about what is inside one.
+    await page.addInitScript(() => localStorage.setItem('bms-video-open:6', '[21]'));
     await page.route('**/e2e-videos.html', (r) => r.fulfill({ contentType: 'text/html; charset=utf-8', body: PAGE }));
     await page.goto('/e2e-videos.html');
     await expect(page.locator('[data-video="21"]')).toBeVisible();
@@ -49,17 +51,14 @@ const CARD = {
 test.describe('wide screen', () => {
     test.use({ viewport: { width: 1600, height: 950 } });
 
-    test('the videos on the left, the chat docked on the right; the button hides it', async ({ page, api, pageErrors }) => {
+    test('the videos on the left, the chat docked on the right, with no button for it', async ({ page, api, pageErrors }) => {
         stubVideos(api);
         await openTab(page);
         await expect(input(page)).toBeVisible();
         const card = await page.locator('[data-video="21"]').boundingBox();
         const box = await input(page).boundingBox();
         expect(card!.x + card!.width).toBeLessThanOrEqual(box!.x);
-        await page.locator('[data-vid-act="chat-toggle"]').click();
-        await expect(input(page)).toBeHidden();
-        await page.locator('[data-vid-act="chat-toggle"]').click();
-        await expect(input(page)).toBeVisible();
+        await expect(page.locator('[data-vid-act="chat-toggle"]')).toHaveCount(0);
         expect(pageErrors).toEqual([]);
     });
 

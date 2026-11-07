@@ -2,7 +2,7 @@
  * src/components/mentor-apply.js
  * What a click on a Business Mentor card does (docs/business-mentor-plan.md §3.3–3.7, §3.13, §14), in
  * ONE place for the three screens that apply them: the chat (chat-session.js), "Review all" on the
- * Mentor's Overview tab and in Inbox "Needs you" (mentor-review-all.js). Each card calls the endpoint its
+ * Mentor's Suggestions tab and in Inbox "Needs you" (mentor-review-all.js). Each card calls the endpoint its
  * own screen uses — the same server action, whichever way in:
  *
  *   mentor_business_profile → organisation-profile.ts POST, read-merge-write of only the profile fields
@@ -22,7 +22,7 @@
  *   mentor_commitments      → mentor.ts commitments_add / commitment_close — the Results tab's Commitments list (Phase 3)
  *   mentor_draft_request    → generate-post.ts, exactly as "Create a Post" on that assistant's Posts tab, with the
  *                             suggestion's id so the draft carries "Requested by" the Mentor (Phase 3)
- *   reviewNow               → mentor.ts review_now — "Review my week now" on the Overview tab
+ *   reviewNow               → mentor.ts review_now — "Review my week now" on the Results tab
  *
  * Every function resolves to nothing or throws an Error whose message is for the user. After a write it
  * dispatches the `document` event the screen behind listens for. Nothing here is bound to the DOM.

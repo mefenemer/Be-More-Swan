@@ -29,6 +29,7 @@ import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { platformFormat } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { stripCodeFences } from '../../src/utils/model-json';
+import { chargeHelper } from '../../src/utils/basic-work';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_CAPTION_CHARS = 5000;
@@ -180,10 +181,12 @@ export default withLambda(async (event: HandlerEvent) => {
             // sentence, and that sentence would otherwise be saved into the hashtags field.
             const tags = (text.match(/#[\p{L}\p{N}_]+/gu) || []).slice(0, 12).join(' ');
             if (!tags) throw new Error('No hashtags returned.');
+            await chargeHelper(db, ctx.organisationId, post.assistantId, `rewrite-post-${post.id}`);
             return json(200, { hashtags: tags });
         }
         // A rewrite that blows the platform limit is not usable — say so rather than silently
         // truncating mid-sentence, which is how a caption ends up ending in the middle of a word.
+        await chargeHelper(db, ctx.organisationId, post.assistantId, `rewrite-post-${post.id}`);
         return json(200, { caption: text.slice(0, MAX_CAPTION_CHARS), overLimit: text.length > limit });
     } catch (error) {
         console.error('[rewrite-post-text] error:', error);

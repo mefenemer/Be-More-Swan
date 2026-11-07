@@ -5,7 +5,7 @@
 //        Each row carries per-channel { value, locked } for inApp + email and
 //        { available } for sms + whatsapp. Locked channels are forced ON.
 //        Rows also carry `scope`: 'account' rows render in Account Settings,
-//        'assistant' rows in the Assistant Profile drawer.
+//        'assistant' rows in the Assistant Settings drawer.
 //        ?assistantId=N → assistant-scope rows resolve that assistant's per-user
 //        overrides: value becomes the EFFECTIVE value and the row gains
 //        { overridden: { inApp, email } } so the UI can show "Custom" vs default.

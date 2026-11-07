@@ -406,8 +406,9 @@ check('every utility class the Conversations UI uses is already compiled into st
     const escapeSel = (t: string) => t.replace(/([:[\].])/g, '\\$1');
     // Not utilities: behaviour hooks styled in assistant-detail.html's own <style> block.
     // `tab-scroller` gives the stage strip the same edge fade as every other tab strip
-    // (assistants.js _syncTabScrollerFade).
-    const HOOK_CLASSES = new Set(['tab-scroller']);
+    // (assistants.js _syncTabScrollerFade). `stage-pills` draws the stages as pills in a grey track,
+    // as on every work tab (owner, 2026-11-06).
+    const HOOK_CLASSES = new Set(['tab-scroller', 'stage-pills']);
     const missing = [...tokens].filter((t) => !HOOK_CLASSES.has(t) && !cssText.includes(escapeSel(t)));
     assert.deepEqual(missing, [], `not compiled into style.css: ${missing.join(', ')}`);
 });

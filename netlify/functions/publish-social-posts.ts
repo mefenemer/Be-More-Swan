@@ -415,7 +415,7 @@ async function pauseForXCredits(
         : source === 'tasks'
         ? {
             httpStatus: null,
-            errorMessage: 'An X post with a link uses 10 tasks and your monthly task allowance doesn\'t have enough left — paused until it resets on the 1st.',
+            errorMessage: 'An X post with a link uses 10 extra tasks and your monthly task allowance doesn\'t have enough left — paused until it resets on the 1st.',
             isRetryable: false,
             reason: 'task_limit',
         }

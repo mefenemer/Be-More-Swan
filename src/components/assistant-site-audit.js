@@ -153,6 +153,8 @@
     // `hidden` loses to inline-flex in style.css — set style.display too.
     el.classList.toggle('hidden', !n);
     el.style.display = n ? '' : 'none';
+    window._setNeedsYouItems?.((state.data?.fixes || []).filter((f) => f.status === 'open').slice(0, 4).map((f) => ({ id: f.id, label: f.title || 'A suggested fix', sub: 'Decide' })));
+    window._setNeedsYouCount?.(n);
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -814,10 +816,11 @@
     const audit = state.data?.audit;
     renderResults(audit, state.data?.latest);
     if (!audit) {
-      el.innerHTML = card(`
+      // The one thing to do here before the first check: not hidden behind a click.
+      el.innerHTML = '<div data-no-fold>' + card(`
         <h3 class="text-base font-black text-gray-900">Which website should ${esc(state.assistantName || 'your Mystery Shopper')} check?</h3>
         <p class="text-xs text-gray-600 mt-1 mb-4">It reads your homepage the way a buyer would and tells you what is costing you customers. You can also just tell it in chat.</p>
-        ${settingsForm(null)}${noteHtml()}`);
+        ${settingsForm(null)}${noteHtml()}`) + '</div>';
       restoreTyped(el, typed);
       return;
     }
@@ -1136,6 +1139,8 @@
       load();
     },
     /** Called on first activation of the tab. */
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; if (state.rendered) render(); },
     activate() {
       if (state.rendered) return;
       state.rendered = true;

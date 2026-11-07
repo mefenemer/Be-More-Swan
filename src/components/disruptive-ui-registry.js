@@ -2118,7 +2118,9 @@
   }
   register('site_changes', renderSiteChangesCard);
 
-  // { type: 'site_draft_request', request }
+  // { type: 'site_draft_request', request, images?, videos? } — images and videos: 'stock' | 'ai' | 'none',
+  // the placeholder media they chose. What AI costs and who may have it comes from the server
+  // (site:draftOptions → sites.ts draft_options), so a card reopened later still states the true price.
   function renderSiteDraftRequestCard(ui, esc) {
     const request = typeof ui.request === 'string' ? ui.request.replace(/\s+/g, ' ').trim().slice(0, 2000) : '';
     const el = document.createElement('div');
@@ -2127,6 +2129,13 @@
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Draft your whole site</p>
       ${request ? `<p class="text-xs text-gray-700 mt-2"><span class="font-bold">Your wishes:</span> ${esc(request)}</p>` : ''}
       <p class="text-xs text-gray-600 mt-2">Writes every page again, replacing your current draft. Nothing is live. Uses 1 task from your monthly allowance.</p>
+      <div class="grid gap-2 mt-3">
+        <label class="block text-xs font-bold text-gray-700">Placeholder pictures
+          <select data-sd-images class="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal bg-white"></select></label>
+        <label class="block text-xs font-bold text-gray-700">Placeholder videos
+          <select data-sd-videos class="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal bg-white"></select></label>
+      </div>
+      <p class="hidden mt-1 text-xs text-gray-500" data-sd-why></p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-sd-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Draft my whole site</button>
         <button type="button" data-sd-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2134,19 +2143,42 @@
       <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sd-status></p>`;
     const status = el.querySelector('[data-sd-status]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
-    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    const setBusy = (b) => el.querySelectorAll('button, select').forEach((x) => { x.disabled = b; });
+    const words = (n) => `${n} task${n === 1 ? '' : 's'}`;
+    const fillChoices = (o) => {
+      const fill = (select, kind, given, fallback, stock, none, aiText) => {
+        const allowed = !!(o && o[kind] && o[kind].aiAllowed);
+        const answer = o && o.answers && o.answers[kind];
+        const want = given || answer || fallback;
+        select.innerHTML = `<option value="stock">${stock}</option>${allowed ? `<option value="ai">${esc(aiText(o[kind]))}</option>` : ''}<option value="none">${none}</option>`;
+        select.value = want === 'ai' && !allowed ? fallback : want;
+      };
+      fill(el.querySelector('[data-sd-images]'), 'images', ui.images, 'stock', 'Stock photos (free)', 'No pictures', (x) => `AI-made: ${words(x.aiTasksEach)} each, up to ${words(x.aiTasksEach * x.aiMax)}`);
+      fill(el.querySelector('[data-sd-videos]'), 'videos', ui.videos, 'none', 'Stock videos (free)', 'No videos', (x) => `AI-made: ${words(x.aiTasksEach * x.aiMax)} for one clip`);
+      const why = o ? [o.images.aiAllowed ? '' : o.images.aiWhyNot, o.videos.aiAllowed ? '' : o.videos.aiWhyNot].filter(Boolean).join(' ') : '';
+      const whyEl = el.querySelector('[data-sd-why]');
+      whyEl.textContent = why;
+      whyEl.classList.toggle('hidden', !why);
+    };
+    fillChoices(null);
+    // The card is rendered before it is in the page, so ask once it has been added.
+    setTimeout(() => {
+      el.dispatchEvent(new CustomEvent('site:draftOptions', { bubbles: true, detail: { respond: (o) => { if (o) fillChoices(o); } } }));
+    }, 0);
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-sd-cancel]')) { setBusy(true); say('Not started.'); return; }
       if (!e.target.closest('[data-sd-go]')) return;
+      const media = { images: el.querySelector('[data-sd-images]').value, videos: el.querySelector('[data-sd-videos]').value };
       setBusy(true);
       say('Starting…');
       el.dispatchEvent(new CustomEvent('site:draft', {
         bubbles: true,
         detail: {
           request,
+          media,
           respond({ ok, error }) {
             if (!ok) { setBusy(false); say(error || 'Could not start the draft.', 'error'); return; }
-            say('Drafting your site — it appears on the Website tab in a minute or two, and you\'ll be notified.');
+            say('Drafting your site — it appears on the Website tab in a few minutes, and you\'ll be notified.');
             // Moving dots while it works (the preview says when it's done).
             if (!document.getElementById('cq-dots-style')) {
               const st = document.createElement('style');
@@ -2158,7 +2190,7 @@
             // The Website tab says when the draft has landed (site:drafted); stop the dots then.
             document.addEventListener('site:drafted', (ev) => {
               const ok = !(ev.detail && ev.detail.error);
-              say(ok ? 'Done — your new draft is in the preview.' : (ev.detail.error || 'The draft didn\'t finish.'), ok ? '' : 'error');
+              say(ok ? (ev.detail && ev.detail.note) || 'Done — your new draft is in the preview.' : (ev.detail.error || 'The draft didn\'t finish.'), ok ? '' : 'error');
             }, { once: true });
           },
         },
@@ -2192,7 +2224,8 @@
     let sent = false;
     const qid = `cq-${Math.random().toString(36).slice(2, 8)}`;
     const el = document.createElement('div');
-    el.className = 'bg-white border-2 border-gray-200 rounded-xl shadow-sm p-4 w-full max-w-md';
+    const openClass = 'bg-white border-2 border-gray-200 rounded-xl shadow-sm p-4 w-full max-w-md';
+    el.className = openClass;
     el.setAttribute('data-questions-open', '');
     const pill = (on) => `display:inline-flex;align-items:center;gap:6px;text-align:left;border-radius:10px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;border:1.5px solid ${on ? '#db2777' : '#e5e7eb'};background:${on ? '#fdf2f8' : '#fff'};color:${on ? '#831843' : '#1f2937'}`;
     const answerText = (a) => [...a.picked, a.other.trim()].filter(Boolean).join(', ');
@@ -2235,10 +2268,29 @@
         });
         answeredHere = true;
       }
-      const rows = qs.map((q, i) => `<li class="text-xs text-gray-700"><span class="font-bold">${esc(q.question)}</span><br>${esc(answerText(answers[i]) || 'Skipped')}</li>`).join('');
-      el.innerHTML = answeredHere
-        ? `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">Your answers</p><ul class="mt-2 space-y-2">${rows}</ul>`
-        : `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">A few quick questions</p><p class="text-xs text-gray-500 mt-1">Answered in the chat.</p>`;
+      // What THEY said, so it sits on their side like their own messages, in their colour, with the
+      // answers (not the questions) as the thing to read at a glance.
+      const rows = qs.map((q, i) => {
+        const v = answerText(answers[i]);
+        return `<li><p style="font-size:0.75rem;line-height:1.1rem" class="text-gray-500">${esc(q.question)}</p><p style="font-size:0.875rem" class="font-bold ${v ? 'text-gray-900' : 'text-gray-400'}">${esc(v || 'Skipped')}</p></li>`;
+      }).join('');
+      if (answeredHere) {
+        el.className = 'rounded-2xl rounded-br-md shadow-sm px-4 py-3';
+        el.style.cssText = 'align-self:flex-end;width:85%;max-width:24rem;background:var(--color-emerald-50,#fdf2f8);border:1px solid var(--color-emerald-100,#fbcfe8)';
+        el.innerHTML = `<div class="flex items-center justify-between gap-2"><p class="text-xs font-bold text-gray-500 tracking-wider uppercase">Your answers</p><button type="button" data-cq-change class="text-xs font-bold text-emerald-800 hover:underline" style="background:none;border:0;cursor:pointer" title="Go through the questions again and send new answers">Change answers</button></div><ul class="mt-2 space-y-2">${rows}</ul>`;
+      } else {
+        el.innerHTML = `<p class="text-xs font-bold text-gray-500 tracking-wider uppercase">A few quick questions</p><p class="text-xs text-gray-500 mt-1">Answered in the chat.</p>`;
+      }
+    }
+    // "Change answers": the questions again, filled in with what they said; sending sends new answers.
+    function reopen() {
+      sent = false;
+      at = 0;
+      el.className = openClass;
+      el.style.cssText = '';
+      el.setAttribute('data-questions-open', '');
+      paint();
+      el.querySelector('[data-cq-opt], [data-cq-other]')?.focus();
     }
     el.addEventListener('questions:closed', (e) => done(sent, !sent && e.detail && e.detail.answers));
     el.addEventListener('input', (e) => {
@@ -2266,6 +2318,7 @@
         el.querySelector(`[data-cq-opt="${opt.dataset.cqOpt}"]`)?.focus();
         return;
       }
+      if (e.target.closest('[data-cq-change]')) { reopen(); return; }
       if (e.target.closest('[data-cq-back]')) { at = Math.max(0, at - 1); paint(); el.querySelector('[data-cq-opt], [data-cq-other]')?.focus(); return; }
       if (e.target.closest('[data-cq-skip]')) { at = Math.min(qs.length - 1, at + 1); paint(); el.querySelector('[data-cq-opt], [data-cq-other]')?.focus(); return; }
       const skipAll = !!e.target.closest('[data-cq-skipall]');
@@ -2662,7 +2715,7 @@
   // `answered` (chat-card-refresh.ts → mentor-proposal-cards.ts): the suggestion was answered somewhere else —
   // this chat, another member's, Inbox "Needs you" or "Review all" — so the card says so instead of offering
   // its buttons again.
-  const MENTOR_ANSWERED = { accepted: 'Done — this suggestion was accepted.', dismissed: 'Dismissed — listed under Dismissed suggestions on your Mentor’s Overview tab.', expired: 'This suggestion has expired.', failed: 'This suggestion couldn’t be applied.' };
+  const MENTOR_ANSWERED = { accepted: 'Done — this suggestion was accepted.', dismissed: 'Dismissed — listed under Dismissed on your Mentor’s Suggestions tab.', expired: 'This suggestion has expired.', failed: 'This suggestion couldn’t be applied.' };
   function mentorCard(esc, { eyebrow, summary, why, bodyHtml, goLabel, eventName, detail, doneText, note, proposalId, noGo, answered }) {
     const suggestion = Number.isInteger(proposalId) && proposalId > 0;
     const el = document.createElement('div');
@@ -2721,9 +2774,9 @@
           if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved.', 'error'); return; }
           reasons.style.display = 'none';
           outcome('dismissed', reason);
-          say(reason === 'not_now' ? 'Dismissed for now — your Mentor may raise it again in two weeks. It\'s listed under Dismissed suggestions on its Overview tab.'
+          say(reason === 'not_now' ? 'Dismissed for now — your Mentor may raise it again in two weeks. It\'s listed under Dismissed on its Suggestions tab.'
             : reason === 'already_done' ? 'Dismissed — thanks for letting your Mentor know.'
-              : 'Dismissed — your Mentor won\'t suggest this again. Bring it back from its Overview tab any time.');
+              : 'Dismissed — your Mentor won\'t suggest this again. Bring it back from its Suggestions tab any time.');
         });
         return;
       }
@@ -3028,7 +3081,7 @@
       eyebrow: 'Who to hire next', summary: ui.summary, why: ui.why, noGo: true, proposalId: ui.proposalId, answered: ui.answered,
       bodyHtml: `<ol class="mt-2">${rows}</ol>
         ${cap.note ? `<p class="mt-2 text-xs rounded-lg px-2.5 py-1.5 ${cap.needsUpgrade ? 'border border-amber-200 bg-amber-50 text-amber-900' : 'bg-gray-50 text-gray-700'}">${esc(String(cap.note))}</p>` : ''}`,
-      note: 'Nothing is hired from here. The same list is under "Recommended next" on your Mentor’s Overview tab.',
+      note: 'Nothing is hired from here. The same list is under "Recommended next" on your Mentor’s Plan tab.',
     });
     el.addEventListener('click', (e) => {
       const b = e.target.closest('[data-mhr-open]');
@@ -3050,7 +3103,7 @@
       <div class="mt-2" data-mra-host></div>`;
     const host = el.querySelector('[data-mra-host]');
     if (window.MentorReviewAll) window.MentorReviewAll.mount(host);
-    else host.innerHTML = '<p class="text-xs text-gray-600">Open your Mentor’s Overview tab to review them.</p>';
+    else host.innerHTML = '<p class="text-xs text-gray-600">Open your Mentor’s Suggestions tab to review them.</p>';
     return el;
   });
 
@@ -4027,10 +4080,31 @@
   }
   register('design_started', renderDesignStartedCard);
 
-  // { type: 'design_edit', briefId, optionId, summary, pageColor?, photoOpacity?, font?, changes: [...], add: [...] }
+  // { type: 'design_edit', briefId, optionId, summary, pageColor?, pageOpacity?, photoOpacity?, photoCrop?, font?, putBack?, shapes?, changes: [...], add: [...] }
   // A change to a design, asked for in chat (src/utils/design-doc.ts). Costs nothing. chat-session.js → brand-briefs.ts.
   function renderDesignEditCard(ui, esc) {
-    if (!Number.isInteger(Number(ui.optionId)) || !(Array.isArray(ui.changes) || ui.pageColor || ui.font || ui.photoOpacity !== undefined)) return null;
+    // A different picture: the user chooses it in the editor's picture window, so nothing changes on this click.
+    if (ui.findPicture && ui.findPicture.shows && Number.isInteger(Number(ui.optionId))) {
+      const card = document.createElement('div');
+      card.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
+      card.innerHTML = `
+        <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change the picture</p>
+        <p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary || `A picture of ${ui.findPicture.shows}`).slice(0, 300))}</p>
+        <p class="text-xs text-gray-600 mt-2">Nothing changes until you choose one.</p>
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+          <button type="button" data-de-find class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Choose a picture</button>
+        </div>
+        <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-de-status></p>`;
+      card.querySelector('[data-de-find]').addEventListener('click', () => {
+        const detail = { briefId: Number(ui.briefId), optionId: Number(ui.optionId), target: ui.findPicture.target, shows: ui.findPicture.shows, handled: false };
+        document.dispatchEvent(new CustomEvent('design:findPicture', { detail }));
+        const status = card.querySelector('[data-de-status]');
+        status.classList.remove('hidden');
+        status.textContent = detail.handled ? 'Choose one in the window. Undo in the editor takes it back.' : 'Open this design in the editor on your Briefs tab, then press this again.';
+      });
+      return card;
+    }
+    if (!Number.isInteger(Number(ui.optionId)) || !(Array.isArray(ui.changes) || Array.isArray(ui.shapes) || Array.isArray(ui.putBack) || Array.isArray(ui.group) || Array.isArray(ui.ungroup) || ui.setBackground || ui.detachBackground || ui.saveTemplate || ui.useTemplate || ui.addBack || ui.removeBack || ui.removeBackground || ui.resizeCopy || ui.pageColor || ui.font || ui.pageOpacity !== undefined || ui.photoOpacity !== undefined || ui.photoCrop !== undefined)) return null;
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
     el.innerHTML = `
@@ -5307,7 +5381,7 @@
             <ol class="mt-1 space-y-1.5">
               ${f.steps.map((st) => `<li class="text-xs text-gray-700"><span class="font-bold text-gray-900">Day ${esc(String(st.daysAfterOpener))}:</span> ${esc(st.brief)}</li>`).join('')}
             </ol>
-            <p class="text-xs text-gray-500 mt-1.5">These aren’t written yet — each one is written when it’s due, from the brief above, and they stop the moment they reply. To send one email only, change “Chase leads who do not reply?” in Assistant Profile.</p>
+            <p class="text-xs text-gray-500 mt-1.5">These aren’t written yet — each one is written when it’s due, from the brief above, and they stop the moment they reply. To send one email only, change “Chase leads who do not reply?” in Assistant Settings.</p>
           </div>`;
       } else if (f && !f.enabled) {
         followHtml = '<p class="mt-3 text-xs text-gray-600">No follow-ups: this assistant is set to send one email only.</p>';
@@ -5517,7 +5591,7 @@
   //   monthlyCap, blocked, settled? }
   // A change to the assistant's OWN settings. Every fact on it was read from its row by the
   // orchestrator (src/utils/chat-assistant-settings.ts). The click dispatches `settings:change`;
-  // chat-session.js calls the endpoint the Assistant Profile uses for that setting.
+  // chat-session.js calls the endpoint the Assistant Settings uses for that setting.
   const SETTINGS_COPY = {
     pause: { head: 'Pause this assistant', button: 'Yes, pause', busy: 'Pausing…', danger: true },
     resume: { head: 'Start this assistant', button: 'Start it', busy: 'Starting…' },

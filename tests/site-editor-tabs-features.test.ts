@@ -53,6 +53,15 @@ check('the AI draft keeps their choice and drafts nothing switched off; the chat
 
 console.log('\nTabs');
 
+check('Set up, Design, Pages and Publish are sub tabs of Website, not the page\'s tabs; an old name opens the sub tab', () => {
+    const html = read('assistant-detail.html');
+    for (const k of ['setup', 'design', 'pages', 'publish']) assert.ok(!html.includes(`maintab-btn-site${k}`), k);
+    assert.ok(!html.includes('site-pages-badge') && !html.includes('site-publish-dot'), 'their marks are on the sub tabs');
+    const a = read('assistants.js');
+    assert.ok(a.includes("const _SITE_SUBTAB_OF = { sitesetup: 'setup', sitedesign: 'design', sitepages: 'pages', sitepublish: 'publish' };"));
+    assert.ok(a.includes("if (siteSubtab) name = 'sitebuilder';") && a.includes("ed.activate('website', siteSubtab)"));
+});
+
 check('Website, Enquiries, Orders, Bookings — each its own tab, in that order, rendered into its own host', () => {
     const html = read('assistant-detail.html');
     const at = (id: string) => html.indexOf(`id="maintab-btn-${id}"`);
@@ -61,7 +70,7 @@ check('Website, Enquiries, Orders, Bookings — each its own tab, in that order,
     const a = read('assistants.js');
     assert.ok(a.includes("if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));"));
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes("const SUBTABS_ALL = [['chat', 'Chat'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];") && ed.includes("['templates', templatesCard(false), { keep: true }]"), 'the Website tab keeps only its own panels — Templates its own, or nobody with a site finds it');
+    assert.ok(ed.includes("const SUBTABS = [['chat', 'Preview'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];") && ed.includes("['templates', templatesCard(false), { keep: true }]"), 'the Website tab keeps only its own panels — Templates its own, or nobody with a site finds it');
     assert.ok(ed.includes("show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings'));"));
     assert.ok(read('netlify/functions/sites.ts').includes('&tab=siteorders&payments=return'), 'back from Stripe on the Orders tab');
     assert.ok(read('notifications.js').includes("site_order_received: ['Open orders', 'siteorders']"));
@@ -78,7 +87,7 @@ check('a swan on every section (list and preview) sends the request to the chat,
 });
 check('"Draft my whole site": up front on a new site, otherwise "Start again" folded into Details', () => {
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes("['draft', step === 3 || s.drafting ? draftCard('start') : '']") && ed.includes("['draft', !fresh && (s.drafting || (def().settings.template && !s.publishedVersion)) ? draftCard('start') : '']") && ed.includes("['draft-again', draftCard('again')]"), 'step 3 of a new site, or up front on one started from a template');
+    assert.ok(ed.includes("['first-draft', step === 3 || s.drafting ? draftCard('start') : '', stepOpen]") && ed.includes("['draft', !fresh && (s.drafting || (def().settings.template && !s.publishedVersion)) ? draftCard('start') : '']") && ed.includes("['draft-again', draftCard('again')]"), 'step 3 of a new site, or up front on one started from a template');
     assert.ok(ed.includes("['details', detailsPanel()],\n      ['draft-again', draftCard('again')],") && ed.includes('Start again from scratch'));
     assert.ok(!ed.includes('          ${draftCard()}'), 'no longer under every panel');
 });
@@ -91,7 +100,7 @@ check('a click or the drafting poll no longer reloads the preview or wipes what 
     assert.ok(ed.includes("if (frame.dataset.src !== src) { frame.dataset.src = src; frame.src = src; }"));
     assert.ok(!/host\.innerHTML = `[\s\S]{0,200}previewHtml/.test(ed), 'the whole tab is no longer one innerHTML write');
     // The template galleries are rewritten only when their HTML changed.
-    assert.ok(ed.includes("['templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true }]"));
+    assert.ok(ed.includes("['first-templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true, ...stepOpen }]"));
     // A poll with nothing new does not repaint.
     assert.ok(/const same = state\.loaded && sig === state\.dataSig;[\s\S]{0,120}if \(!same\) \{ keepEditing\(\); state\.version\+\+; rerender\(\); \}/.test(ed));
     // Typed text is kept unless the server changed that box; the section form keeps its own (by position).
@@ -128,7 +137,7 @@ check('narrow screens: a Preview button in reach opens it full screen; no device
     assert.ok(ed.includes("slot.toggleAttribute('data-sb-full', !!state.previewFull)") && ed.includes("btn('data-site-preview-close', 'Close preview', true)"));
     assert.ok(/<span class="flex gap-1" data-sb-wide-only>/.test(ed));
     assert.ok(ed.includes('height:min(720px, 70vh)'));
-    assert.ok(/activate\(surface\) \{\s*setPreviewFull\(false\);/.test(ed), 'leaving the tab never leaves the preview covering the page');
+    assert.ok(/activate\(surface, panel\) \{[\s\S]{0,300}setPreviewFull\(false\);/.test(ed), 'leaving the tab never leaves the preview covering the page');
 });
 
 check('dialogs built here keep keyboard focus and give it back; switching device or mode changes only the frame', () => {
@@ -162,7 +171,7 @@ console.log('\nLow items (UI review, 2026-10-21)');
 
 check('tabs say which is selected; loading text is readable; Publish says why it is greyed out; no second accent colour', () => {
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes('role="tab" id="site-subtab-${k}" data-site-subtab="${k}" aria-selected="${on}"') && ed.includes('data-site-page="${esc(x.id)}" aria-pressed="${x.id === p.id}"'));
+    assert.ok(ed.includes('data-site-page="${esc(x.id)}" aria-pressed="${x.id === p.id}"'));
     assert.ok(!/text-gray-400[^"]*">Loading/.test(ed), 'loading text at least gray-500');
     assert.ok(ed.includes("${s.publishBlocker ? `<p class=\"text-xs font-semibold text-amber-800 mt-2\">${esc(s.publishBlocker)}</p>` : ''}"), 'shown before an address exists too');
     assert.ok(!ed.includes('indigo'), 'emphasis uses the brand pink (emerald-200/800, remapped in input.css)');

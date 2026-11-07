@@ -176,7 +176,7 @@ export async function runSiteImport(db: Db, siteId: number): Promise<void> {
         // The success latch: charged only if this import still held the claim.
         const [held] = await db.update(sites).set({ draftingAt: null, draftNote: null }).where(and(eq(sites.id, site.id), sql`${sites.draftingAt} IS NOT NULL`)).returning({ id: sites.id });
         if (!saved || !held) return;
-        await recordCompletedWork(db, site.organisationId, 'site_draft', 1, site.id);
+        await recordCompletedWork(db, site.organisationId, 'site_draft', { ref: site.id, assistantId: site.aiAssistantId });
         if (assistant) {
             await createNotification(db, 'site_draft_ready', {
                 userId: assistant.userId, assistantId: assistant.id, category: 'state_change',

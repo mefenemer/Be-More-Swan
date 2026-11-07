@@ -217,12 +217,12 @@ test('"What I can see" credits overdue invoices to Accounts Receivable', () => {
 });
 
 // ── 11, 12. One voice; deals as the review says them ─────────────────────────────────────────────
-test('the Overview speaks in the first person throughout', () => {
+test('the Suggestions tab speaks in the first person throughout', () => {
     const ui = read('src/components/assistant-mentor-overview.js');
     for (const third of ['raises in chat', 'works from this list', 'makes at most', '’s suggestions you haven’t answered', 'Who ${esc(state.assistantName)} would hire', 'will say what works', 'lets it.']) {
         assert.ok(!ui.includes(third), `third person left: ${third}`);
     }
-    for (const first of ['The same gaps I raise in chat', 'I work from this list', 'I make at most', 'My suggestions you haven’t answered yet', 'Who I would hire next', 'I’ll say what works', 'Ask me in chat']) {
+    for (const first of ['I work from this list', 'I make at most', 'My suggestions you haven’t answered yet', 'Ask me in chat']) {
         assert.ok(ui.includes(first), `missing: ${first}`);
     }
 });

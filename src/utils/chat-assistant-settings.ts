@@ -7,7 +7,7 @@
 // Every capability is meant to be reachable from the GUI and from chat, through the same server
 // action. The chat read the assistant's setup answers (onboardingContext) and nothing else on its row:
 // "are you paused?", "how far ahead are you drafting?" and "how are my goals going?" got a guess or
-// directions to the Assistant Profile, and "pause for a week" or "draft two weeks ahead" could only be
+// directions to the Assistant Settings, and "pause for a week" or "draft two weeks ahead" could only be
 // done there. The parity audit of 2026-10-22 listed these as the largest gap.
 //
 // ── How ──────────────────────────────────────────────────────────────────────────────────────────
@@ -123,13 +123,13 @@ export async function buildAssistantSettingsSnapshot(
         const available = settingsForRole(roleKey);
         const lines = [`- Status: ${STATUS_WORDS[row.lifecycleStatus] ?? row.lifecycleStatus}.`];
         if (available.includes('draft_horizon')) {
-            lines.push(`- "Generate posts ahead" (Assistant Profile ▸ When and how I ${roleKey === 'blog_writer' ? 'work' : 'post'}): ${days(row.draftHorizonDays)} — you keep drafts ready this far ahead (${MIN_HORIZON_DAYS}–${MAX_HORIZON_DAYS} days).`);
+            lines.push(`- "Generate posts ahead" (Assistant Settings ▸ When and how I ${roleKey === 'blog_writer' ? 'work' : 'post'}): ${days(row.draftHorizonDays)} — you keep drafts ready this far ahead (${MIN_HORIZON_DAYS}–${MAX_HORIZON_DAYS} days).`);
         }
         if (available.includes('review_alerts')) {
-            lines.push(`- "Review alerts" (Assistant Profile ▸ Notifications): ${reviewLabel(row.reviewNotifPreference)} — how urgently the user is chased when drafts wait for approval. The choices are Immediate, Urgent only and Daily digest.`);
+            lines.push(`- "Review alerts" (Assistant Settings ▸ Notifications): ${reviewLabel(row.reviewNotifPreference)} — how urgently the user is chased when drafts wait for approval. The choices are Immediate, Urgent only and Daily digest.`);
         }
         if (available.includes('content_suggestions')) {
-            lines.push(`- "Autonomous Content Suggestions" (Assistant Profile ▸ When and how I post):${suggestionsWords(row.autonomousMediaEnabled, row.autonomousMediaMonthlyCap)} — you draft posts with AI pictures on your own to fill empty slots. It stops when the plan's monthly tasks run out; nothing is ever charged extra.`);
+            lines.push(`- "Autonomous Content Suggestions" (Assistant Settings ▸ When and how I post):${suggestionsWords(row.autonomousMediaEnabled, row.autonomousMediaMonthlyCap)} — you draft posts with AI pictures on your own to fill empty slots. It stops when the plan's monthly tasks run out; nothing is ever charged extra.`);
         }
 
         return [

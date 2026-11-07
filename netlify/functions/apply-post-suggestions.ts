@@ -46,6 +46,7 @@ import {
     MAX_SUGGESTION_ROUNDS, openWarnings, persistReview, readCachedReview, runQualityReview,
 } from '../../src/utils/post-quality-review';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { chargeHelper } from '../../src/utils/basic-work';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const QUALITY_REVIEW_FEATURE = 'quality_reviewer';
@@ -284,6 +285,7 @@ ${before}
         const after = (gw.text || '').trim().replace(/^["']|["']$/g, '');
         if (!after) return json(502, { error: 'The rewrite came back empty. Please try again.' });
 
+        await chargeHelper(db, post.organisationId!, post.assistantId, `apply-suggestions-post-${post.id}`);
         return json(200, {
             applied: false,
             before,

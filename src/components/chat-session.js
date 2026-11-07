@@ -134,7 +134,7 @@
       ? `
           <div class="max-w-md mx-auto text-center py-8" data-chat-empty>
             <div class="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">👋</div>
-            <p class="text-lg font-bold text-gray-900">Hi, I'm ${displayName}.</p>
+            <p class="text-lg font-bold text-gray-900">Hi, I'm <span data-chat-name>${displayName}</span>.</p>
             <p class="text-sm text-gray-500 mt-1 mb-6">Here's how I can help — pick one to get started, or type your own message below.</p>
             <div class="flex flex-col gap-2.5 text-left">
               ${starterPrompts.map((prompt, i) => `
@@ -148,17 +148,17 @@
       : `
           <div class="text-center py-10" data-chat-empty>
             <div class="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center text-2xl mx-auto mb-3">💬</div>
-            <p class="font-bold text-gray-900">${escapeHtml(assistantName || 'Your assistant')} is ready</p>
+            <p class="font-bold text-gray-900"><span data-chat-name>${escapeHtml(assistantName || 'Your assistant')}</span> is ready</p>
             <p class="text-sm text-gray-500 mt-1">Send a message below to get started.</p>
           </div>`;
 
     // ── Shell ──
     container.innerHTML = cardOnly ? '<div data-chat-root><div data-chat-scroll></div></div>' : `
       <div class="flex flex-col h-full bg-gray-50" data-chat-root>
-        <div class="grow overflow-y-auto px-4 sm:px-6 py-6 space-y-4" data-chat-scroll>${emptyStateHtml}
+        <div class="grow overflow-y-auto px-4 sm:px-6 py-6 space-y-4" style="scrollbar-width:thin;scrollbar-color:#d1d5db transparent" data-chat-scroll>${emptyStateHtml}
         </div>
         ${readOnly ? readOnlyFooterHtml : `
-        <div class="border-t border-gray-200 bg-white px-4 sm:px-6 py-4">
+        <div class="border-t border-gray-200 bg-white ${props.compactComposer ? 'px-3 py-2.5' : 'px-4 sm:px-6 py-4'}">
           <div class="hidden mb-2 text-sm text-red-600 font-semibold" data-chat-error role="alert"></div>
           ${canAttach ? '<div class="hidden flex-wrap gap-2 mb-2" data-chat-chips></div>' : ''}
           <div class="mb-2" data-chat-ref style="display:none"></div>
@@ -187,7 +187,25 @@
     const refEl = container.querySelector('[data-chat-ref]');
     // A tall message box (props.composerRows > 1, the Website tab's chat pane) takes the full width,
     // with the paperclip and Send on a row under it.
-    if (formEl && Number(props.composerRows) > 1) {
+    if (formEl && props.compactComposer) {
+      // A docked pane (chat-pane.js): ONE line that grows as they type, with a round Send inside its
+      // right edge, so the box doesn't take a quarter of the pane and hide the newest card above it.
+      formEl.className = 'flex items-end gap-2';
+      const box = document.createElement('div');
+      box.className = 'relative grow min-w-0';
+      inputEl.replaceWith(box);
+      box.appendChild(inputEl);
+      box.appendChild(sendBtn);
+      inputEl.rows = 1;
+      inputEl.className = 'w-full border border-gray-300 rounded-xl py-2.5 pl-3 pr-12 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition bg-white resize-none block';
+      inputEl.style.maxHeight = '160px';
+      sendBtn.className = 'btn-primary absolute right-1.5 bottom-1.5 w-8 h-8 rounded-lg inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed';
+      sendBtn.setAttribute('aria-label', 'Send');
+      sendBtn.title = 'Send (Enter)';
+      sendBtn.innerHTML = '<svg aria-hidden="true" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6"/></svg>';
+      const clip = formEl.querySelector('label');
+      if (clip) clip.className = 'btn-secondary border w-10 h-10 rounded-xl cursor-pointer shrink-0 text-sm inline-flex items-center justify-center';
+    } else if (formEl && Number(props.composerRows) > 1) {
       formEl.style.cssText = 'display:grid;grid-template-columns:auto 1fr auto;grid-template-areas:"text text text" "clip . send";gap:8px;align-items:center';
       inputEl.style.gridArea = 'text';
       sendBtn.style.gridArea = 'send';
@@ -302,7 +320,17 @@
 
     function scrollToBottom() {
       scrollEl.scrollTop = scrollEl.scrollHeight;
+      pinned = true;
     }
+    // Stay at the newest message while a card grows after it arrives (a status that fills in, a
+    // picture that loads, questions turning into the answers) — unless they have scrolled up to read.
+    let pinned = true;
+    const onScroll = () => { pinned = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 80; };
+    const keepPinned = () => { if (pinned) scrollEl.scrollTop = scrollEl.scrollHeight; };
+    scrollEl.addEventListener('scroll', onScroll, { passive: true });
+    scrollEl.addEventListener('load', keepPinned, true);   // pictures inside cards
+    const pinObserver = typeof MutationObserver === 'function' ? new MutationObserver(keepPinned) : null;
+    if (pinObserver) pinObserver.observe(scrollEl, { childList: true, subtree: true, characterData: true });
 
     // Null-safe: the error strip and the composer live in the same footer, which read-only
     // mode replaces wholesale.
@@ -569,6 +597,13 @@
         if (startedUi && startedUi.type === 'design_started') {
           document.dispatchEvent(new CustomEvent('brief:openStudio', { detail: { assistantId, briefId: startedUi.briefId } }));
         }
+        // This reply saved a post or a record (its link says where): the list may be right beside a docked chat.
+        if (startedUi && startedUi.hubLink) {
+          window.detailRqRefresh?.();
+          window._detailRqRefreshColumnCounts?.();
+          window.AssistantDataHub?.refresh?.();
+          document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId } }));
+        }
       } catch (err) {
         console.error('[ChatSession] send failed:', err);
         showError('Connection problem — please check your internet and try again.');
@@ -607,7 +642,7 @@
 
     function onInput() {
       inputEl.style.height = 'auto';
-      inputEl.style.height = `${Math.min(inputEl.scrollHeight, Number(props.composerRows) > 1 ? 280 : 160)}px`;
+      inputEl.style.height = `${Math.min(inputEl.scrollHeight, Number(props.composerRows) > 1 && !props.compactComposer ? 280 : 160)}px`;
     }
 
     // HITL handoff approvals bubble up from HandoffProposalCard (disruptive-ui-registry.js).
@@ -1208,7 +1243,7 @@
     const LEAD_FINAL = new Set(['draft_changed', 'personal_inbox_unconfirmed', 'no_recipient', 'suppressed', 'unsubscribed', 'paused', 'do_not_contact', 'no_postal_address', 'generator_declined']);
     const leadWhy = (r) => r.detail || LEAD_NOT_SENT[r.reason] || `Not sent (${String(r.reason || 'unknown').replace(/_/g, ' ')}).`;
 
-    // Settings cards → the endpoint the Assistant Profile uses for that setting, with its method, so
+    // Settings cards → the endpoint the Assistant Settings uses for that setting, with its method, so
     // its gates apply unchanged (owner/admin to pause, Kick Off's readiness checks to start, 1–30
     // days). Then `assistant:settingsChanged` on document repaints the page behind the chat.
     async function onSettingsChange(e) {
@@ -1799,7 +1834,7 @@
     }
 
     // The writes themselves are window.MentorApply (src/components/mentor-apply.js), shared with
-    // "Review all" on the Mentor's Overview tab and in Inbox "Needs you", so each card calls its
+    // "Review all" on the Mentor's Suggestions tab and in Inbox "Needs you", so each card calls its
     // screen's own endpoint the same way wherever it is applied.
     function mentorRun(e, work) {
       const d = e.detail || {};
@@ -1871,7 +1906,7 @@
     }
 
     // A suggestion answered (§3.13): accepted after its click saved, or dismissed with a reason →
-    // mentor.ts, the same action the Overview tab's "Bring back" uses. Repaints an open Overview.
+    // mentor.ts, the same action the Suggestions tab's "Bring back" uses. Repaints it if open.
     async function onMentorDecide(e) {
       if (mentorAlreadyHandled(e)) return;
       mentorRun(e, (A, d) => A.decide(d.proposalId, d.decision, d.reason));
@@ -2119,9 +2154,14 @@
     function onSiteDraft(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      sitePost({ action: 'draft', assistantId, request: d.request || '' })
+      sitePost({ action: 'draft', assistantId, request: d.request || '', media: d.media })
         .then(() => { respond({ ok: true }); siteChanged(); })
         .catch((err) => respond({ ok: false, error: err.message }));
+    }
+    // What the draft card may offer, and the live cost of AI media (sites.ts draft_options).
+    function onSiteDraftOptions(e) {
+      const respond = (e.detail && e.detail.respond) || (() => {});
+      sitePost({ action: 'draft_options', assistantId }).then(respond).catch(() => respond(null));
     }
 
     // "Save guidelines" on a brand_guideline_proposal card — brand-kit.ts `save_guidelines`, the same
@@ -2498,6 +2538,7 @@
     container.addEventListener('siteaudit:handoff', onSiteAuditHandoff);
     container.addEventListener('site:apply', onSiteApply);
     container.addEventListener('site:draft', onSiteDraft);
+    container.addEventListener('site:draftOptions', onSiteDraftOptions);
     container.addEventListener('site:import', onSiteImport);
     container.addEventListener('site:importDecision', onSiteImportDecision);
     container.addEventListener('site:words', onSiteWords);
@@ -2553,7 +2594,15 @@
       setReference,
       focus() { if (inputEl) inputEl.focus(); },
       getSessionId: () => chatSessionId,
+      /** The assistant was renamed: an empty chat's greeting says the new name; later turns already read it. */
+      setAssistantName(name) {
+        props.assistantName = name;
+        container.querySelectorAll('[data-chat-name]').forEach((el) => { el.textContent = name || 'your assistant'; });
+      },
       destroy() {
+        scrollEl.removeEventListener('scroll', onScroll);
+        scrollEl.removeEventListener('load', keepPinned, true);
+        if (pinObserver) pinObserver.disconnect();
         if (!readOnly) {
           formEl.removeEventListener('submit', onSubmit);
           inputEl.removeEventListener('keydown', onKeydown);
@@ -2611,6 +2660,7 @@
         container.removeEventListener('siteaudit:handoff', onSiteAuditHandoff);
         container.removeEventListener('site:apply', onSiteApply);
         container.removeEventListener('site:draft', onSiteDraft);
+        container.removeEventListener('site:draftOptions', onSiteDraftOptions);
         container.removeEventListener('site:import', onSiteImport);
         container.removeEventListener('site:importDecision', onSiteImportDecision);
         container.removeEventListener('site:words', onSiteWords);

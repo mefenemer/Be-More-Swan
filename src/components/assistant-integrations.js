@@ -1,5 +1,5 @@
 // src/components/assistant-integrations.js
-// Assistant Profile › Connections › "Synced actions" — surfaces the Integration Scenario
+// Assistant Settings › Connections › "Synced actions" — surfaces the Integration Scenario
 // Library (netlify/functions/integration-scenarios.ts) INSIDE the assistant detail Connections
 // tab, scoped to this assistant and filtered to the recipes relevant to its role. The workspace
 // hub (integrations.html) shows every recipe for a picked assistant; this embeds just the ones
@@ -131,7 +131,10 @@
     const h = host();
     if (!h) return;
     try {
-      const res = await fetch(API + '/scenarios?assistantId=' + encodeURIComponent(state.assistantId));
+      // Shared GET cache (cached-fetch.js): the page load and opening Settings → Connections asked for
+      // the same list seconds apart. Any activate / toggle / remove (a POST) clears it.
+      const url = API + '/scenarios?assistantId=' + encodeURIComponent(state.assistantId);
+      const res = await (window.bmsCachedFetch ? window.bmsCachedFetch(url, { ttlMs: 300000 }) : fetch(url));
       if (!res.ok) throw new Error('status ' + res.status);
       state.scenarios = (await res.json()).scenarios || [];
       render();
@@ -172,7 +175,7 @@
 
   function openModal(s) {
     editing = s;
-    // This list is rendered inside the Assistant Profile slide-over, which would otherwise
+    // This list is rendered inside the Assistant Settings slide-over, which would otherwise
     // stay open over the top of this modal (the drawer sits at z-9001, this at z-60).
     if (document.body.classList.contains('brief-drawer-open')) window._closeBriefDrawer?.();
     const m = ensureModal();

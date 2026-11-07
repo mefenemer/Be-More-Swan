@@ -177,7 +177,7 @@
     enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false,
     thumbs: {}, bookings: null, timetable: null,
     words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
-    importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false,
+    importForm: { url: null, own: false, pictures: null, error: null }, draftMedia: { images: null, videos: null }, previewImport: false,
     dataSig: null, noteShown: null, focusSection: null, focusEditor: false, setupStep: null, setupSkipped: false, adding: null, previewFull: false, focusSel: null, busy: false, trigger: null, noteAt: null, refocus: null, undo: null,
   };
 
@@ -238,15 +238,18 @@
     const nowDrafting = !!(state.data && state.data.site.drafting);
     if (state.wasDrafting && !nowDrafting && state.data && chatPane.session && chatPane.session.session && chatPane.assistantId === state.assistantId) {
       const imp = state.data.import;
-      chatPane.session.session.appendMessage({ role: 'assistant', content: state.data.site.draftNote
+      chatPane.session.session.appendMessage({ role: 'assistant', content: draftFailed()
         ? `The draft didn't finish: ${state.data.site.draftNote}`
+        : state.data.site.draftNote ? state.data.site.draftNote
         : imp && imp.status === 'ready' ? 'Your current site has been read — have a look at it on the Set up tab, then choose whether to use it as your draft.'
         : imp && imp.status === 'failed' ? (imp.message || 'The import didn\'t work.')
         // Where the preview is depends on the width: beside the chat, or behind "Preview my site".
         : `Your draft is ready — ${window.matchMedia('(min-width: 1024px)').matches ? 'it\'s in the preview on the left' : 'press "Preview my site" to see it'}. Tell me what to change, or use 🎯 Select to point at any part of it.` });
     }
     if (state.wasDrafting && !nowDrafting && state.data) {
-      document.dispatchEvent(new CustomEvent('site:drafted', { detail: { assistantId: state.assistantId, error: state.data.site.draftNote || null } }));
+      document.dispatchEvent(new CustomEvent('site:drafted', { detail: { assistantId: state.assistantId, error: draftFailed() ? state.data.site.draftNote : null, note: draftFailed() ? null : state.data.site.draftNote || null } }));
+      // Ready, but some media didn't arrive: said on the tab too, as the draft card may be folded away.
+      if (state.data.site.draftNote && !draftFailed()) { state.note = { text: state.data.site.draftNote, tone: 'warn' }; state.noteAt = null; }
     }
     state.wasDrafting = nowDrafting;
     const sig = state.loadError || JSON.stringify(state.data);
@@ -354,10 +357,12 @@
       '@media (max-width: 639px) { .sb-tap { min-height: 44px; min-width: 44px; } [data-sb-wide-only] { display: none !important; } }',
       '@media (min-width: 1024px) { [data-sb-narrow-only] { display: none !important; } }',
       'iframe[data-site-preview] { max-width: 100%; }',
-      // Preview on the left, the pane (Chat or one of the sub-tabs) on the right — narrow screens keep
-      // the pane first, with the preview a button away (owner, 2026-11-04, after trying Lovable).
-      // One pane width on every sub-tab, so the preview never jumps when the tab changes (owner, 2026-11-05).
-      '@media (min-width: 1024px) { [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(380px, 460px) !important; } [data-sb-preview-col] { order: 1; } [data-sb-pane] { order: 2; } }',
+      // The tab's work on the left (on the Website tab, the preview), the chat on the right on every tab.
+      // Narrow screens keep the chat first on the Website tab; on the others the header's Chat button
+      // opens it, because it would push the work off the screen.
+      '@media (min-width: 1024px) { [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(380px, 460px) !important; } [data-sb-mode="edit"] [data-sb-pane] { position: sticky; top: 76px; align-self: start; } [data-sb-mode="edit"] [data-sb-chatbox] { height: calc(100vh - 92px); } }',
+      '@media (max-width: 1023px) { [data-sb-mode="chat"] [data-sb-pane] { order: -1; } [data-sb-mode="edit"] [data-sb-pane] { display: none; } }',
+      '[data-sb-mode="edit"] [data-sb-preview-col]:not([data-sb-full]) { display: none; }',
       '[data-sb-chatbox] { height: clamp(460px, calc(100vh - 150px), 880px); }',
       // Wide screens: the preview sets the height and the chat fills the pane to exactly match it.
       '@media (min-width: 1024px) { iframe[data-site-preview] { height: clamp(408px, calc(100vh - 202px), 828px) !important; }',
@@ -1461,7 +1466,7 @@
   }
   function paintChat(box) {
     if (!box) return;
-    const show = state.panel === 'chat' && chatAvailable();
+    const show = chatAvailable();
     box.hidden = !show;
     if (!show) return;
     if (chatPane.session && chatPane.assistantId === state.assistantId && chatPane.mountEl && box.contains(chatPane.mountEl)) return;
@@ -1484,6 +1489,7 @@
         'What do you already know about my business?',
       ] : null,
       // A bigger box to describe a site in (owner, 2026-11-05).
+      tallComposer: true,
       composerRows: 4,
     });
     chatPane.assistantId = state.assistantId;
@@ -1707,22 +1713,29 @@
   // "Chat" (2026-11-04): this assistant's chat, docked beside the preview, first because it is the
   // quickest way to build — every change it proposes still waits for the user's click on its card.
   const chatAvailable = () => !!(window.ChatSession && typeof window.ChatSession.mount === 'function' && window.ChatPane);
-  const SUBTABS_ALL = [['chat', 'Chat'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];
-  function siteSubtabsHtml() {
-    const SUBTABS = SUBTABS_ALL.filter(([k]) => k !== 'chat' || chatAvailable());
-    const s = state.data.site;
-    const brackets = (state.data.placeholders || []).length;
-    // What a tab is waiting on, said on the tab so the owner needn't open each to find out.
-    const badge = {
-      pages: brackets ? `<span class="ml-1 bg-amber-100 text-amber-800 text-[10px] font-black px-1.5 py-0.5 rounded-full" title="Parts in [square brackets] to fill in">${brackets}</span><span class="sr-only"> parts to fill in</span>` : '',
-      publish: s.status === 'published' && s.unpublishedChanges ? '<span class="ml-1 inline-block w-2 h-2 rounded-full bg-amber-500 align-middle" aria-hidden="true" title="Changes not live yet"></span><span class="sr-only"> (changes not live yet)</span>' : '',
-    };
-    return `<div class="tab-scroller border-b border-gray-200 overflow-x-auto overflow-y-hidden">
-      <div class="flex gap-1" role="tablist" aria-label="Your website">${SUBTABS.map(([k, l]) => {
-        const on = state.panel === k;
-        return `<button type="button" role="tab" id="site-subtab-${k}" data-site-subtab="${k}" aria-selected="${on}" tabindex="${on ? 0 : -1}"
-          class="site-subtab px-3 py-2 text-sm whitespace-nowrap border-b-2 ${on ? 'font-bold text-emerald-800' : 'font-medium text-gray-500 hover:text-gray-700 border-transparent'}">${esc(l)}${badge[k] || ''}</button>`;
-      }).join('')}</div></div>`;
+  // Sub tabs of the Website tab (owner, 2026-11-06), as pills in a grey track like the Briefs tab's, above both columns
+  // so the chat stays on the right on all of them. "Preview" is `chat`: the preview beside the chat.
+  const SUBTABS = [['chat', 'Preview'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];
+  function subtabsHtml() {
+    const d = state.data || {};
+    const fill = (d.placeholders || []).length;
+    const unpublished = !!(d.site && d.site.status === 'published' && d.site.unpublishedChanges);
+    return `<div role="tablist" aria-label="Your website" class="inline-flex max-w-full gap-1 p-1 rounded-xl bg-gray-100 mb-4" style="overflow-x:auto;overflow-y:hidden">${SUBTABS.map(([k, label]) => {
+      const on = state.panel === k;
+      const mark = k === 'pages' && fill
+        ? `<span title="Parts in [square brackets] to fill in" class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center bg-amber-100 text-amber-900">${fill}</span>`
+        : k === 'publish' && unpublished
+          ? '<span title="Changes not live yet" class="ml-1 inline-block w-2 h-2 rounded-full bg-amber-500"></span><span class="sr-only"> (changes not live yet)</span>'
+          : '';
+      return `<button type="button" role="tab" id="site-subtab-${k}" aria-selected="${on}" aria-controls="site-subtab-panel" tabindex="${on ? 0 : -1}" data-site-subtab="${k}"
+        class="site-subtab flex-shrink-0 min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}">${esc(label)}${mark}</button>`;
+    }).join('')}</div>`;
+  }
+  /** Only when something on it changed: redrawing would take the keyboard's place off the tab. */
+  function paintSubtabs(host) {
+    const bar = host.querySelector(':scope > [data-site-subtabs]');
+    const html = subtabsHtml();
+    if (bar && bar.dataset.painted !== html) { bar.innerHTML = html; bar.dataset.painted = html; }
   }
 
   // ── A new site's first steps (UI review 2026-10-21) ─────────────────────────
@@ -1757,21 +1770,66 @@
   // A new site: nothing written yet beyond the starter (never published, two sections at most).
   const isFresh = () => !state.data.site.publishedVersion && def().pages.reduce((n, p) => n + p.sections.length, 0) <= 2;
 
+  // A note on the draft usually means it failed; "your draft is ready, but…" doesn't (site-draft-media.ts).
+  function draftFailed() {
+    const site = state.data && state.data.site;
+    return !!(site && site.draftNote && site.draftNoteIsFailure !== false);
+  }
+
+  // ── Placeholder pictures and videos for a draft (site-draft-media.ts) ─────
+  // The chat's site_draft_request card asks the same two questions. Costs come from the server.
+  const taskWord = (n) => `${n} task${n === 1 ? '' : 's'}`;
+  function draftMediaValue(kind, where) {
+    const o = state.data.draftMedia;
+    const fresh = where === 'start' && !def().settings.template;
+    const fallback = kind === 'images' && fresh ? 'stock' : 'none';
+    const chosen = state.draftMedia[kind] || (o && o.answers && o.answers[kind]) || fallback;
+    return chosen === 'ai' && !(o && o[kind].aiAllowed) ? fallback : chosen;
+  }
+  function draftMediaFields(where) {
+    const o = state.data.draftMedia;
+    const template = !!def().settings.template;
+    const select = (kind, label, stock, none, ai) => {
+      const v = draftMediaValue(kind, where);
+      const opt = (value, text, off) => `<option value="${value}"${v === value ? ' selected' : ''}${off ? ' disabled' : ''}>${esc(text)}</option>`;
+      return `<label class="block text-xs font-bold text-gray-700">${esc(label)}
+        <select data-site-draft-${kind} class="${inputCls} mt-1 font-normal">${opt('stock', stock)}${o ? opt('ai', ai.text, !o[kind].aiAllowed) : ''}${opt('none', none)}</select></label>`;
+    };
+    const aiImages = !o ? {} : { text: o.images.aiAllowed ? `AI-made: ${taskWord(o.images.aiTasksEach)} each, up to ${taskWord(o.images.aiTasksEach * o.images.aiMax)}` : 'AI-made: not on your workspace' };
+    const aiVideos = !o ? {} : { text: o.videos.aiAllowed ? `AI-made: ${taskWord(o.videos.aiTasksEach * o.videos.aiMax)} for one clip` : 'AI-made: not on your plan' };
+    const why = o && [o.images.aiAllowed ? '' : o.images.aiWhyNot, o.videos.aiAllowed ? '' : o.videos.aiWhyNot].filter(Boolean).join(' ');
+    return `<div class="grid gap-3 sm:grid-cols-2 mt-3" data-site-draft-media>
+        ${select('images', 'Placeholder pictures', 'Stock photos (free)', template ? 'Keep the template\'s pictures' : 'No pictures', aiImages)}
+        ${select('videos', 'Placeholder videos', 'Stock videos (free)', 'No videos', aiVideos)}
+      </div>
+      <p class="text-xs text-gray-500 mt-1">Saved to your library and placed in your sections, ready to swap for your own.${why ? ` ${esc(why)}` : ''}</p>`;
+  }
+  /** What the chosen media adds to the 1 task, for the confirmation. Empty when it adds nothing. */
+  function draftMediaCostText(images, videos) {
+    const o = state.data.draftMedia;
+    if (!o) return '';
+    const bits = [];
+    if (images === 'ai') bits.push(`up to ${taskWord(o.images.aiTasksEach * o.images.aiMax)} for AI pictures`);
+    if (videos === 'ai') bits.push(`${taskWord(o.videos.aiTasksEach * o.videos.aiMax)} for an AI video`);
+    return bits.length ? `, plus ${bits.join(' and ')} (only what is made is charged)` : '';
+  }
+
   // The AI writing every page from the business's details. Up front on a new site (Pages); on a site
   // that has been worked on it is "Start again", folded away at the end of Details — it replaces the
   // whole draft, so it should never sit under every panel looking like a next step (owner, 2026-10-16).
   function draftCard(where) {
     const s = state.data.site;
     if (s.drafting && state.data.import && state.data.import.status === 'reading') return '';
-    if (s.drafting) return card('<p class="text-sm font-semibold text-emerald-800">Drafting your whole site <span class="sb-dots" aria-hidden="true"><i></i><i></i><i></i></span> — this takes a minute or two. You can leave this page; you\'ll be notified when it\'s ready.</p>');
+    if (s.drafting) return card(`<p class="text-sm font-semibold text-emerald-800">${s.draftNote ? esc(s.draftNote) : 'Drafting your whole site'} <span class="sb-dots" aria-hidden="true"><i></i><i></i><i></i></span> — this takes a few minutes. You can leave this page; you'll be notified when it's ready.</p>`);
     const who = esc(state.assistantName || 'Your Website Assistant');
     const form = `
       <textarea data-site-draft-request rows="2" class="${inputCls} mt-3" placeholder="Anything to include? e.g. a page for each service, a friendly tone, mention free delivery"></textarea>
+      ${draftMediaFields(where)}
       ${s.draftNote ? `<p class="text-xs font-semibold text-amber-800 mt-2">${esc(s.draftNote)}</p>` : ''}`;
     if (where === 'start') {
       return card(`
         ${def().settings.template ? `<p class="text-sm font-black text-gray-900">Let ${who} write the words</p>
-        <p class="text-xs text-gray-500 mt-1">It rewrites every section of your template for your business, from your details, products and set-up answers — the layout, pictures and design stay as they are. Anything it doesn't know stays in [square brackets] for you. Uses 1 task.</p>`
+        <p class="text-xs text-gray-500 mt-1">It rewrites every section of your template for your business, from your details, products and set-up answers — the layout and design stay as they are, and so do its pictures unless you choose others below. Anything it doesn't know stays in [square brackets] for you. Uses 1 task.</p>`
         : `<p class="text-sm font-black text-gray-900">Let ${who} write your site</p>
         <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you chose for your website. You then change anything you like. Uses 1 task.</p>`}
         ${form}
@@ -2093,33 +2151,35 @@
       return;
     }
     if (!host.querySelector(':scope > [data-site-layout]')) {
-      host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div data-sb-pane class="min-w-0"><div data-sb-blocks class="space-y-4"></div><div data-sb-chat class="mt-4"></div></div><div data-sb-preview-col class="min-w-0"></div></div>';
+      host.innerHTML = '<div data-site-subtabs></div><div data-site-layout id="site-subtab-panel" role="tabpanel" class="grid gap-4 lg:grid-cols-2"><div data-sb-work class="min-w-0"><div data-sb-blocks class="space-y-4"></div><div data-sb-preview-col class="min-w-0"></div></div><div data-sb-pane class="min-w-0"><div data-sb-chat></div></div></div>';
     }
-    const layout = host.firstElementChild;
+    const layout = host.querySelector(':scope > [data-site-layout]');
     const blocksEl = layout.querySelector('[data-sb-blocks]');
     const s = state.data.site;
     const fresh = isFresh();
     const step = fresh ? setupStep() : 0;
     const imp = state.data.import;
-    // Which sub-tab. A new site (or one whose imported draft is waiting to be looked at) opens on
-    // Set up, where its steps are; a site under way opens on Pages. Finishing set-up moves on to
-    // Pages once, so the words just written are what the owner sees next.
-    // With the chat available it opens first (an imported draft waiting still opens on Set up).
-    if (state.panel === 'chat' && !chatAvailable()) state.panel = null;
-    if (!state.panel) state.panel = imp && imp.status === 'ready' ? 'setup' : chatAvailable() ? 'chat' : fresh ? 'setup' : 'pages';
+    // Which tab. The Website tab (preview and chat) opens first, unless an imported draft is waiting to be
+    // looked at, which is on Set up. Finishing set-up moves on to Pages once, so the words just written are
+    // what the owner sees next.
+    if (!state.landed) { state.landed = true; if (imp && imp.status === 'ready') state.panel = 'setup'; }
+    if (!state.panel) state.panel = 'chat';
     if (state.wasFresh && !fresh && state.panel === 'setup') state.panel = 'pages';
     state.wasFresh = fresh;
-    const tabbar = siteSubtabsHtml();
     // During set-up the other tabs are for looking around: their buttons give way to the step's.
     quietPrimary = fresh && !state.editing && state.panel !== 'setup';
     const P = state.panel;
+    paintSubtabs(host);
+    layout.setAttribute('aria-labelledby', `site-subtab-${P}`);
+    // A new site's steps are one at a time, so none is hidden behind a click (fold.js).
+    const stepOpen = { attrs: { 'data-no-fold': '' } };
     const blocks = P === 'chat' ? [] : P === 'setup' ? (fresh ? [
-      ['setup', setupStepsHtml(step)],
-      ['features', step === 1 ? featuresCard(true) : ''],
-      ['templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true }],
-      ['import', imp || step === 2 ? importCard('start') : ''],
-      ['setup-skip', step === 2 && !imp ? setupSkipHtml() : ''],
-      ['draft', step === 3 || s.drafting ? draftCard('start') : ''],
+      ['first-setup', setupStepsHtml(step), stepOpen],
+      ['first-features', step === 1 ? featuresCard(true) : '', stepOpen],
+      ['first-templates', step === 2 && !def().settings.template ? templatesCard(true) : '', { keep: true, ...stepOpen }],
+      ['first-import', imp || step === 2 ? importCard('start') : '', stepOpen],
+      ['first-skip', step === 2 && !imp ? setupSkipHtml() : '', stepOpen],
+      ['first-draft', step === 3 || s.drafting ? draftCard('start') : '', stepOpen],
     ] : [
       ['import', imp ? importCard('start') : ''],
       ['details', detailsPanel()],
@@ -2135,24 +2195,27 @@
       ['pages', pagesPanel()],
     ] : [
       ['placeholders', placeholdersCard()],
-      ['publish', fresh ? card(`<p class="text-sm font-black text-gray-900">Publish your site</p><p class="text-xs text-gray-500 mt-1">There's nothing to publish yet. Finish setting up your website first — ${btn('data-site-subtab="setup"', 'Go to Set up')}</p>`) : publishCard()],
+      // The tab's one job, so its buttons aren't behind a click.
+      ['publish', fresh ? card(`<p class="text-sm font-black text-gray-900">Publish your site</p><p class="text-xs text-gray-500 mt-1">There's nothing to publish yet. Finish setting up your website first — ${btn('data-site-subtab="setup"', 'Go to Set up')}</p>`) : publishCard(), { attrs: { 'data-no-fold': '' } }],
     ];
     // Drafting takes a minute or two and can be started from more than one tab: say it on all of them.
-    const drafting = s.drafting && !blocks.some(([k, h]) => (k === 'draft') && h) ? draftCard('start') : '';
+    const drafting = s.drafting && !blocks.some(([k, h]) => (k === 'draft' || k === 'first-draft') && h) ? draftCard('start') : '';
     quietPrimary = false;
     layout.setAttribute('data-sb-mode', P === 'chat' ? 'chat' : 'edit');
     paintBlocks(blocksEl, [
-      ['tabs', tabbar],
       ['note', noteHtml(), { live: true }],
       ['drafting', drafting],
-      ...blocks.map(([k, h, o]) => [`${P}-${k}`, h, { ...(o || {}), attrs: { role: 'tabpanel', 'aria-labelledby': `site-subtab-${P}` } }]),
-      // Narrow screens: the preview is below everything, so a button that stays in reach opens it.
+      ...blocks.map(([k, h, o]) => [`${P}-${k}`, h, o || {}]),
+      // The preview is a button away: below everything on a narrow Website tab, and not on the page at all
+      // on the others, where the chat has its column. It opens over the page.
       // Sticky on the wrapper itself — inside it, it could only stick within its own height.
-      ['preview-jump', btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site'),
+      ['preview-jump', P === 'chat' ? btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site') : '',
         { attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
+      ['preview-open', P === 'chat' ? '' : btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site'),
+        { attrs: { style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
     ]);
     paintChat(layout.querySelector('[data-sb-chat]'));
-    paintPreview(layout.lastElementChild);
+    paintPreview(layout.querySelector('[data-sb-preview-col]'));
     afterPaint(host);
   }
 
@@ -2171,6 +2234,12 @@
     // The Calendar tab is this assistant's bookings calendar (assistant-calendar.js), so it goes with them.
     if (state.data) { show('maintab-btn-siteorders', featureOn('shop')); show('maintab-btn-sitebookings', featureOn('bookings')); show('maintab-btn-calendar', featureOn('bookings')); show('maintab-btn-sitelistings', listingsOn()); }
     set('site-listings-badge', (state.listings && state.listings.pending) || 0);
+    // The card beside the hero: people waiting on an answer.
+    if (state.data) {
+      const waiting = [['siteenquiries', 'Enquiries', d.newEnquiries || 0], ['siteorders', 'Orders', d.newOrders || 0], ['sitebookings', 'Bookings', (d.booking && d.booking.waiting) || 0]].filter((x) => x[2]);
+      window._setNeedsYouItems?.(waiting.map(([tab, label, n]) => ({ id: tab, tab, label, count: n, sub: `${n} new` })));
+      window._setNeedsYouCount?.(waiting.reduce((sum, x) => sum + x[2], 0));
+    }
     set('site-enquiries-badge', d.newEnquiries || 0);
     set('site-orders-badge', d.newOrders || 0);
     set('site-bookings-badge', (d.booking && d.booking.waiting) || 0);
@@ -2847,16 +2916,22 @@
       return;
     }
     if (t('[data-site-draft]')) {
+      const form = hostOf(e);
+      const mediaImages = form.querySelector('[data-site-draft-images]');
+      const mediaVideos = form.querySelector('[data-site-draft-videos]');
+      const media = { images: mediaImages ? mediaImages.value : 'none', videos: mediaVideos ? mediaVideos.value : 'none' };
+      const costs = draftMediaCostText(media.images, media.videos);
+      const keepsPictures = media.images === 'none' && media.videos === 'none';
       const ok = typeof window.confirmModal === 'function'
         ? await window.confirmModal(def().settings.template
-            ? `Your Website Assistant rewrites the words in every section for your business. The layout, pictures and design stay. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task.`
-            : `Your Website Assistant writes every page again, replacing your current draft. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task.`,
+            ? `Your Website Assistant rewrites the words in every section for your business. The layout and design stay${keepsPictures ? ', and so do the pictures' : ''}. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task${costs}.`
+            : `Your Website Assistant writes every page again, replacing your current draft. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task${costs}.`,
           { title: def().settings.template ? 'Write the words?' : 'Draft your whole site?', confirmLabel: def().settings.template ? 'Write the words' : 'Draft my site', cancelLabel: 'Not now' })
         : true;
       if (!ok || state.busy) return;
       const release = markBusy();
       try {
-        state.data = await post({ action: 'draft', assistantId: state.assistantId, request: hostOf(e).querySelector('[data-site-draft-request]').value });
+        state.data = await post({ action: 'draft', assistantId: state.assistantId, request: form.querySelector('[data-site-draft-request]').value, media });
         state.note = null;
       } catch (err) {
         // Out of tasks (402): said straight away, with the way to more.
@@ -2880,6 +2955,12 @@
   }
   document.addEventListener('input', (e) => { if (e.target.closest && e.target.closest('[data-site-import-url]')) keepImportForm(hostOf(e)); });
   document.addEventListener('change', (e) => { if (e.target.closest && e.target.closest('[data-site-import-own], input[name="site-import-pictures"]')) keepImportForm(hostOf(e)); });
+  // Their picture and video choice, kept across re-renders (a poll redraws the tab).
+  document.addEventListener('change', (e) => {
+    if (!e.target.closest) return;
+    if (e.target.closest('[data-site-draft-images]')) state.draftMedia.images = e.target.value;
+    if (e.target.closest('[data-site-draft-videos]')) state.draftMedia.videos = e.target.value;
+  });
 
   // The words file: picked, or dropped on the box (bound once, like every handler here).
   document.addEventListener('change', (e) => {
@@ -2931,16 +3012,21 @@
       if (picker.off) { picker.off(); picker.off = null; }
       if (chatPane.assistantId !== assistantId) unmountChat();
       setEditorFull(false);
-      Object.assign(state, { assistantId, assistantName: assistantName || null, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
+      Object.assign(state, { assistantId, assistantName: assistantName || null, landed: false, data: null, loaded: false, rendered: false, editing: null, pageId: null, previewPath: '/', note: null, editingAddress: false, slugTyped: null, versions: null, publishNote: null, enquiries: null, enquiryShown: 20, orders: null, orderShown: 20, refreshedPayments: false, domainChecked: false, domainTyped: null,
         words: { open: false, busy: false, file: null, error: null, proposal: null, pageId: null, text: '', note: '' },
-        importForm: { url: null, own: false, pictures: null, error: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false, wasDrafting: false, listings: null, listingEdit: null, listingError: null });
+        importForm: { url: null, own: false, pictures: null, error: null }, draftMedia: { images: null, videos: null }, previewImport: false, dataSig: null, noteShown: null, focusSection: null, setupStep: null, setupSkipped: false, adding: null, panel: null, wasFresh: false, wasDrafting: false, listings: null, listingEdit: null, listingError: null });
       load();
       // The Listings tab's badge (visitors' entries waiting) is visible from every tab.
       loadListings();
     },
     // surface: 'website' (pages, design, details, preview) or 'enquiries' | 'orders' | 'bookings',
     // each its own tab. A list re-reads every time its tab is opened.
-    activate(surface) {
+    /** The assistant was renamed: this tab says the new name (assistants.js _assistantRenamed). */
+    rename(name) { state.assistantName = name || state.assistantName; rerender(); },
+    activate(surface, panel) {
+      // Only a tab the user chose beats the landing rule (an imported draft opens on Set up): the Website
+      // tab is also what the page opens on, before the site has loaded.
+      if (panel) { state.panel = panel; if (panel !== 'chat') state.landed = true; }
       setPreviewFull(false);
       setEditorFull(false);
       if (picker.on && (surface || 'website') !== 'website') { picker.on = false; if (picker.off) { picker.off(); picker.off = null; } }

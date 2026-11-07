@@ -314,7 +314,7 @@ test('the SQL is idempotent and drops nothing', () => {
 test('the prompt names the real screens (§14)', () => {
     const o = read('netlify/functions/chat-orchestrator.ts');
     const page = read('src/components/assistant-mentor-overview.js') + read('src/components/mentor-commitments.js');
-    for (const name of ['Reviews', 'Customers', 'Track record', 'Commitments', 'Review my week now', 'Add one for this week', 'Earlier weeks', 'Missed…']) {
+    for (const name of ['Reviews', 'Customers', 'Accepted', 'Commitments', 'Review my week now', 'Add one for this week', 'Earlier weeks', 'Missed…']) {
         assert.ok(o.includes(`"${name}`), `prompt names ${name}`);
         assert.ok(page.includes(name), `page has ${name}`);
     }

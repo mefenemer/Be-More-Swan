@@ -80,6 +80,11 @@
     html.sb-collapsed #sidebar-container .nav-lock-icon { position: absolute; top: 1px; right: 4px; margin: 0; }
     html.sb-collapsed #sidebar-container .nav-lock-icon svg { width: .75rem; height: .75rem; }
   }
+  /* Icon tooltip bubble: side menus and header icons (script: sideMenuTooltips). */
+  #side-menu-tip { position: fixed; z-index: 9999; pointer-events: none; padding: .3rem .55rem; border-radius: .375rem;
+    background: #111827; color: #fff; font-size: 12px; font-weight: 500; line-height: 1.3; white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,.15); opacity: 0; transition: opacity .1s ease; left: -9999px; top: 0; }
+  #side-menu-tip.is-on { opacity: 1; }
   /* The post editor as a PAGE (see the note on #post-review-modal). 64px = the workspace header;
      --sidebar-w = the side menu, which is only on screen from md up. */
   #post-review-modal.pr-page { top: 64px; left: 0; padding: 0; background: #f9fafb;
@@ -2480,7 +2485,7 @@ window.showComplianceModals = function showComplianceModals(force) {
          Filled on open from get-assistants; logic in the "Assistant quick switcher" script below. -->
     <div class="relative" id="nav-assistant-switcher">
       <button type="button" id="nav-assistant-switcher-btn" aria-label="Go to an assistant" aria-haspopup="true" aria-expanded="false"
-        class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors cursor-pointer" title="Go to an assistant">
+        class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors cursor-pointer" data-tip="">
         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
       </button>
       <div id="nav-assistant-switcher-panel" role="menu" style="display:none" class="hidden absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-200 z-50 overflow-hidden" data-no-i18n>
@@ -2498,7 +2503,7 @@ window.showComplianceModals = function showComplianceModals(force) {
     </div>
 
     <!-- Issue #106: Notifications moved here from the side menu -->
-    <button id="nav-notifications" aria-label="Notifications" class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors">
+    <button id="nav-notifications" aria-label="Notifications" data-tip="" class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors">
       <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
       <span id="sidebar-nav-badge" class="absolute top-0.5 right-0.5 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full hidden">0</span>
       <!-- Nothing needs you, but there is something unread: a dot, not a number (notifications.js). -->
@@ -2511,7 +2516,7 @@ window.showComplianceModals = function showComplianceModals(force) {
          that opens from it — four lines of identity next to every page title was clutter. The ids
          are unchanged, so loadHeaderProfile() and refreshPlanPill() fill the panel as before. -->
     <div class="relative" id="header-user-menu">
-      <button type="button" id="header-user-initials" aria-haspopup="true" aria-expanded="false" aria-controls="header-user-panel" aria-label="Your account"
+      <button type="button" id="header-user-initials" aria-haspopup="true" aria-expanded="false" aria-controls="header-user-panel" aria-label="Your account" data-tip=""
         class="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 font-bold shrink-0 text-sm cursor-pointer hover:ring-2 hover:ring-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-400">
       </button>
       <div id="header-user-panel" role="menu" class="hidden absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50" style="display:none" data-no-i18n>
@@ -2535,7 +2540,7 @@ window.showComplianceModals = function showComplianceModals(force) {
   <!-- Collapse the side menu to icons (md and up) — the menu's own top-right corner, above
        Dashboard and below the header. Wired in the "Side menu collapse" script. -->
   <div id="sidebar-collapse-row">
-      <button id="sidebar-collapse-btn" type="button" aria-controls="sidebar-container" aria-expanded="true" aria-label="Collapse menu" title="Collapse menu"
+      <button id="sidebar-collapse-btn" type="button" aria-controls="sidebar-container" aria-expanded="true" aria-label="Collapse menu" data-tip="Collapse menu"
         class="text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg p-1.5 transition-colors cursor-pointer">
         <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" stroke-width="2"/><path stroke-linecap="round" stroke-width="2" d="M9 4v16"/><path id="sidebar-collapse-chevron" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l-2 2 2 2"/></svg>
       </button>
@@ -2910,7 +2915,8 @@ function formatCurrency(amount, currency) {
 
     // Side menu collapse (md and up): icons only, so the page gets the width. The class on <html>
     // is set before first paint by the inline script in <head>; the CSS beside it does the layout.
-    // Collapsed links get a title tooltip from their (translated) label, since the text is hidden.
+    // Collapsed links get a tooltip (data-tip, shown by the side-menu tooltip below) from their
+    // (translated) label, since the text is hidden.
     const sidebarCollapseBtn = document.getElementById('sidebar-collapse-btn');
     function applySidebarCollapsed(collapsed) {
       document.documentElement.classList.toggle('sb-collapsed', collapsed);
@@ -2918,13 +2924,14 @@ function formatCurrency(amount, currency) {
         const label = collapsed ? 'Expand menu' : 'Collapse menu';
         sidebarCollapseBtn.setAttribute('aria-expanded', String(!collapsed));
         sidebarCollapseBtn.setAttribute('aria-label', label);
-        sidebarCollapseBtn.title = label;
+        sidebarCollapseBtn.dataset.tip = label;
         const chevron = document.getElementById('sidebar-collapse-chevron');
         if (chevron) chevron.setAttribute('d', collapsed ? 'M13 10l2 2-2 2' : 'M15 10l-2 2 2 2');
       }
       sidebarContainer.querySelectorAll('aside a').forEach((a) => {
         const label = a.querySelector('.nav-label');
-        if (collapsed && label) a.title = label.textContent.trim(); else a.removeAttribute('title');
+        a.removeAttribute('title');
+        if (collapsed && label) a.dataset.tip = label.textContent.trim(); else delete a.dataset.tip;
       });
     }
     applySidebarCollapsed(document.documentElement.classList.contains('sb-collapsed'));
@@ -2937,6 +2944,49 @@ function formatCurrency(amount, currency) {
         setTimeout(() => window.dispatchEvent(new Event('resize')), 220);
       });
     }
+
+    // Icon tooltips: anything with data-tip (the collapsed left menu's links, the assistant page's
+    // right-hand settings menu, both toggles, the header's assistants / notifications / account
+    // icons) shows its name in a dark bubble straight away on hover or keyboard focus — a native
+    // title waits about a second and is easy to miss. An empty data-tip reads the aria-label, which
+    // i18n translates. The bubble sits on the page side: right of the left menu, left of the right
+    // one, under the header. Not while the icon's own panel is open.
+    (function sideMenuTooltips() {
+      const tip = document.createElement('div');
+      tip.id = 'side-menu-tip';
+      tip.setAttribute('role', 'tooltip');
+      document.body.appendChild(tip);
+      let current = null;
+      function show(el) {
+        const text = el.dataset.tip || el.getAttribute('aria-label');
+        const inHeader = !!el.closest('#app-header');
+        if (!text || (!inHeader && window.innerWidth < 768) || el.getAttribute('aria-expanded') === 'true') return hide();
+        current = el;
+        tip.textContent = text;
+        tip.classList.add('is-on');
+        const r = el.getBoundingClientRect();
+        const onRight = !!el.closest('#detail-right-menu');
+        const w = tip.offsetWidth, h = tip.offsetHeight;
+        let left = onRight ? r.left - w - 8 : r.right + 8;
+        let top = Math.min(Math.max(4, r.top + r.height / 2 - h / 2), window.innerHeight - h - 4);
+        if (inHeader) { left = r.left + r.width / 2 - w / 2; top = r.bottom + 6; }
+        tip.style.left = Math.min(Math.max(4, left), window.innerWidth - w - 4) + 'px';
+        tip.style.top = top + 'px';
+      }
+      function hide() { current = null; tip.classList.remove('is-on'); }
+      document.addEventListener('mouseover', (e) => {
+        const el = e.target.closest?.('[data-tip]');
+        if (el && el !== current) show(el); else if (!el && current) hide();
+      });
+      document.addEventListener('focusin', (e) => {
+        const el = e.target.closest?.('[data-tip]');
+        if (el && el.matches(':focus-visible')) show(el); else hide();
+      });
+      document.addEventListener('focusout', hide);
+      document.addEventListener('click', hide, true);
+      window.addEventListener('scroll', hide, true);
+      window.addEventListener('resize', hide);
+    })();
 
     // Consolidated path definitions mapping navigation links to standard modular components
     const routes = {
@@ -5073,7 +5123,7 @@ function formatCurrency(amount, currency) {
         const { categories } = await res.json();
 
         // Account settings shows customer-level categories only; assistant-scoped
-        // categories render in the Assistant Profile drawer (assistants.js).
+        // categories render in the Assistant Settings drawer (assistants.js).
         const accountCategories = categories.filter(cat => cat.scope !== 'assistant');
 
         bodyEl.innerHTML = accountCategories.map(cat => {
@@ -6125,7 +6175,7 @@ function formatCurrency(amount, currency) {
      assistant-detail.html: Disruptive UI renderers reused for record detail,
      CSV import (Spreadsheet Fallback), and the hub table itself. -->
 <script src="/src/components/disruptive-ui-registry.js"></script>
-<!-- Business Mentor cards' clicks, and "Review all" (chat, the Mentor's Overview tab, Inbox "Needs you"). -->
+<!-- Business Mentor cards' clicks, and "Review all" (chat, the Mentor's Suggestions tab, Inbox "Needs you"). -->
 <script src="/src/components/mentor-apply.js"></script>
 <script src="/src/components/redraft-upcoming.js"></script>
 <script src="/src/components/mentor-review-all.js"></script>
@@ -6134,6 +6184,8 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/assistant-starter-prompts.js"></script>
 <script src="/src/components/assistant-welcome-messages.js"></script>
 <script src="/src/components/chat-session.js"></script>
+<!-- Every item in an assistant's tabs opens and closes, and starts closed: fold.js -->
+<script src="/src/components/fold.js"></script>
 <!-- An assistant's chat docked beside what it works on (Website tab, Blog Studio): chat-pane.js -->
 <script src="/src/components/chat-pane.js"></script>
 <!-- "Past conversations" drawer shared by every chat surface — lists threads from
@@ -6175,6 +6227,8 @@ function formatCurrency(amount, currency) {
 <!-- Briefs tab (brand_designer) — briefs, a grid of options, approve into the library (brand-briefs.ts). -->
 <script src="/src/components/font-picker.js"></script>
 <script src="/src/components/brand-style-dialog.js"></script>
+<script src="/src/components/brand-style-card.js"></script>
+<script src="/src/components/brand-files.js"></script>
 <script src="/src/components/design-studio.js"></script>
 <script src="/src/components/assistant-briefs.js"></script>
 <script src="/src/components/voice-picker.js"></script>
@@ -14084,6 +14138,8 @@ function _railRender() {
     window.addEventListener('error', (ev) => {
         // Resource loads (a 404 on an image) also arrive here and are not what this is for.
         if (!ev || !ev.message) return;
+        // The browser's note that a resize was put off to the next frame: harmless, never the customer's problem.
+        if (/^ResizeObserver loop/.test(ev.message)) return;
         const at = ev.filename ? `${String(ev.filename).split('/').pop().split('?')[0]}:${ev.lineno}` : frameOf(ev.error);
         show(ev.message, at);
     });
@@ -21379,7 +21435,7 @@ async function _pceChatSync() {
         pane: window.ChatPane.mount(document.getElementById('pce-chat-host'), {
             assistantId: post.assistantId, assistantName: meta.name, roleKey: meta.roleKey,
             rememberKey: `bms-post-chat:${key}`,
-            placeholder: 'Ask for a change to this post, or 🎯 Select a part of it…',
+            placeholder: 'Ask for a change to this post…',
             starterPrompts: editable
                 ? ['Make this post punchier.', 'Give it a stronger opening line.', 'What would make this post do better?']
                 : null,
@@ -23570,14 +23626,27 @@ async function gpSubmitReject() {
         </button>`;
     }).join('');
   }
+  // One request at a time: hover, focus and the click can all ask within a few milliseconds.
+  let loading = null;
   async function load() {
     if (cache && Date.now() - cachedAt < 60000) return;
-    try {
-      const d = await (await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants'))).json();
-      cache = (d.assistants || []).filter((a) => a.lifecycleStatus !== 'archived').sort((x, y) => String(x.name).localeCompare(String(y.name)));
-      cachedAt = Date.now();
-    } catch { cache = cache || []; }
+    if (loading) return loading;
+    loading = (async () => {
+      try {
+        const d = await (await (window.bmsCachedFetch ? window.bmsCachedFetch.assistants() : fetch('/.netlify/functions/get-assistants'))).json();
+        cache = (d.assistants || []).filter((a) => a.lifecycleStatus !== 'archived').sort((x, y) => String(x.name).localeCompare(String(y.name)));
+        cachedAt = Date.now();
+      } catch { cache = cache || []; }
+    })().finally(() => { loading = null; });
+    return loading;
   }
+  // Have the list before the click (measured 2026-11-06: the first open showed "Loading…" for
+  // ~280 ms warm, longer cold, and again after any save emptied the shared cache). The page has
+  // usually just read get-assistants itself, so the idle fill is a cache hit, not a new request.
+  // A list older than a minute still paints at once on open (render() above) while it refreshes.
+  btn.addEventListener('pointerenter', () => { load(); });
+  btn.addEventListener('focus', () => { load(); });
+  (window.requestIdleCallback || ((f) => setTimeout(f, 2000)))(() => { load(); });
   btn.addEventListener('click', async (e) => {
     e.stopPropagation();
     const open = panel.classList.contains('hidden');

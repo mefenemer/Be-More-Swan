@@ -20,6 +20,28 @@ window._paintDetailAvatarLetter = function () {
 };
 
 // The name input is sized to its text, so the pencil and the swan sit right after the name.
+/**
+ * The new name reaches everything on the page holding the old one, as the save lands (owner, 2026-11-06:
+ * it took a browser refresh). The tabs were handed the name once, at init; each has rename(), which repaints
+ * it. The shared list is dropped so the assistants list, the chat and the other pages read the new name.
+ */
+function _assistantRenamed(assistantId, name) {
+    window._currentAssistantName = name;
+    const data = window._detailCurrentData;
+    if (data && Number(data.id) === assistantId) data.name = name;
+    window._assistantProfileTitle = `${name}'s Settings`;
+    const backBtn = document.getElementById('brief-drawer-back');
+    const title = document.getElementById('brief-drawer-title');
+    // The settings home names the assistant (a section's title doesn't); the back arrow is hidden only there.
+    if (title && backBtn && backBtn.hidden && document.body.classList.contains('brief-drawer-open')) title.textContent = window._assistantProfileTitle;
+    window.bmsCachedFetch?.invalidate?.();
+    window.ChatPane?.renameAll?.(assistantId, name);
+    [window.AssistantDataHub, window.AssistantCampaigns, window.AssistantMentorOverview, window.AssistantMentorPlan, window.MentorCommitments,
+        window.AssistantBriefs, window.AssistantVideos, window.AssistantSiteEditor, window.AssistantSiteAudit, window.AssistantDiscussions, window.AssistantInspo]
+        .forEach((m) => { try { m?.rename?.(name); } catch (e) { console.warn('[assistant-detail] a tab could not take the new name', e); } });
+    document.dispatchEvent(new CustomEvent('assistant:renamed', { detail: { assistantId, name } }));
+}
+
 window._fitDetailNameInput = function () {
     const i = document.getElementById('detail-name-input');
     if (!i) return;
@@ -456,7 +478,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const dReg = window.AssistantDashboardRegistry ? window.AssistantDashboardRegistry.get(assistant.roleKey) : null;
     const quickActions = dReg ? [
         ...(dReg.hideDataHub ? [] : [['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub']]),
-        ...(dReg.mentorTab ? [['🧭', dReg.mentorTab.label || 'Overview', 'mentor']] : []),
+        ...(dReg.mentorTab ? [['🧭', dReg.mentorTab.label || 'Suggestions', 'mentor']] : []),
         ...(dReg.mentorPlanTab ? [['🗺️', dReg.mentorPlanTab.label || 'Plan', 'mentorplan']] : []),
         ...(dReg.briefsTab ? [['🎨', dReg.briefsTab.label || 'Briefs', 'briefs']] : []),
         ...(dReg.videosTab ? [['🎬', dReg.videosTab.label || 'Videos', 'videos']] : []),
@@ -979,6 +1001,35 @@ function _renderPillarChips() {
 // AI-wand fields), so they're rendered as textareas that expand to keep everything visible —
 // no inner scrollbar, no truncation. Heights must be recomputed when a hidden tab is revealed,
 // since scrollHeight is 0 while the panel is display:none.
+/**
+ * A GET through the shared, write-invalidated cache (src/components/cached-fetch.js), for lists the
+ * detail page and its Settings sections both read: the page load read the assistant's rules twice,
+ * and opening Settings read them (and the notification choices) again. Any write clears the cache,
+ * so a change the user makes is never answered from an old copy.
+ */
+function _cachedGet(url) {
+    return window.bmsCachedFetch ? window.bmsCachedFetch(url, { ttlMs: 300000 }) : fetch(url);
+}
+
+/**
+ * One-shot prefetch for the detail page. initAssistantDetail used to wait for get-assistant-context
+ * before starting any of the page's other reads, so on a first visit two waves of cold functions ran
+ * one after the other (measured on staging 2026-11-06: ~1.7 s, then 1.4–3.6 s more). The reads that
+ * need only the assistant's id start beside it instead; each loader takes its answer ONCE, and any
+ * later call (a refresh, a period toggle) goes to the network as before, so nothing is served stale.
+ */
+const _detailPrefetched = new Map();
+function _prefetchDetail(urls) {
+    _detailPrefetched.clear();
+    urls.forEach((u) => _detailPrefetched.set(u, fetch(u, { credentials: 'same-origin' }).catch(() => null)));
+}
+function _fetchPrefetched(url) {
+    const p = _detailPrefetched.get(url);
+    if (!p) return fetch(url);
+    _detailPrefetched.delete(url);
+    return p.then((r) => r || fetch(url));
+}
+
 const _AUTOGROW_FIELDS = ['edit_problem', 'edit_core_message', 'edit_audience', 'edit_tone', 'edit_pillars', 'edit_objections'];
 
 // The Website Assistant's editor (src/components/assistant-site-editor.js, ~2,000 lines) is loaded the
@@ -1046,7 +1097,48 @@ function _resizeBriefAutoGrow() {
 
 // Activate a main tab by name ('datahub' | 'goals' | 'activity'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
+// Set up, Design, Pages and Publish are the Website tab's sub tabs (owner, 2026-11-06). An old name opens that sub tab.
+const _SITE_SUBTAB_OF = { sitesetup: 'setup', sitedesign: 'design', sitepages: 'pages', sitepublish: 'publish' };
+// The chat panel beside a role's work tabs (registry: cfg.tabChat; owner, 2026-11-06: the Social Media Assistant
+// and the Lead Generator). The tabs are moved into ONE box and that box is docked (ChatPane.dock), so switching
+// between them keeps the same conversation on screen, mid-sentence. No draftTarget: nothing is open here, so a
+// post drafted in this chat is saved as a new post, as in the pop-up chat. On any other tab the panel steps aside
+// and the page's Chat button opens the pop-up. The view is re-injected per load, so nothing here needs undoing.
+let _tabChat = null;
+function _setupTabChat(cfg, data) {
+    _tabChat?.dock.destroy();
+    _tabChat = null;
+    const conf = cfg.tabChat;
+    const panels = (conf?.tabs || []).map((t) => document.getElementById(`maintab-${t}`)).filter(Boolean);
+    if (!panels.length || !window.ChatPane?.available?.()) return;
+    const work = document.createElement('div');
+    work.id = 'tabchat-work';
+    panels[0].parentNode.insertBefore(work, panels[0]);
+    panels.forEach((p) => work.appendChild(p));
+    _tabChat = {
+        tabs: conf.tabs,
+        dock: window.ChatPane.dock(work, {
+            prefix: 'tabchat', storageKey: 'bms-tab-chat-on',
+            pane: () => ({
+                assistantId: data.id, assistantName: data.name, roleKey: data.roleKey,
+                rememberKey: `bms-tab-chat:${data.id}`,
+                placeholder: conf.placeholder,
+                draftTarget: () => null,
+            }),
+        }),
+    };
+    _syncTabChat(document.querySelector('.main-tab-btn.active-tab')?.dataset.maintab);
+}
+function _syncTabChat(name) {
+    if (!_tabChat) return;
+    const here = _tabChat.tabs.includes(name);
+    // Inline: the dock's own CSS sets display:grid, which would beat the hidden attribute.
+    _tabChat.dock.layout.style.display = here ? '' : 'none';
+    if (here && !_tabChat.dock.isOn() && _tabChat.dock.wanted()) _tabChat.dock.setOn(true, false);
+}
 window._activateMainTab = function(name) {
+    const siteSubtab = _SITE_SUBTAB_OF[name];
+    if (siteSubtab) name = 'sitebuilder';
     // The retired Conversations tab is now stages 2–4 of a staged Outreach tab. Old links,
     // bookmarks and in-app buttons still say 'conversations'; they land on Outreach instead.
     if (name === 'conversations' && window.AssistantLeadOutreach?.isStaged()) {
@@ -1055,6 +1147,7 @@ window._activateMainTab = function(name) {
     }
     // The strip belongs to the landing tab only; re-judged after the tab has switched.
     setTimeout(() => window._renderNeedsYou?.(), 0);
+    _syncTabChat(name);
     document.querySelectorAll('.main-tab-btn').forEach(b => {
         const on = b.dataset.maintab === name;
         b.classList.toggle('active-tab', on);
@@ -1087,7 +1180,8 @@ window._activateMainTab = function(name) {
     // Website (Mystery Shopper) likewise — init() already fetched for the badge.
     if (name === 'website') window.AssistantSiteAudit?.activate();
     // Website (Website Assistant) — the editor and preview; init() already fetched the site.
-    if (name === 'sitebuilder') siteEditor((ed) => ed.activate('website'));
+    // No sub tab named: it comes back on the one that was open.
+    if (name === 'sitebuilder') siteEditor((ed) => ed.activate('website', siteSubtab));
     // …and what the site brings in, each its own tab, rendered by the same editor.
     if (name === 'siteenquiries') siteEditor((ed) => ed.activate('enquiries'));
     if (name === 'siteorders') siteEditor((ed) => ed.activate('orders'));
@@ -1310,8 +1404,52 @@ window.detailRqOpenStatus = function(statusKey, btn) {
     });
     // border-emerald-800 too: border-b-2 alone draws the default grey, so only the text turned pink.
     if (active) { active.classList.add('border-b-2', 'border-emerald-800', 'text-emerald-800'); active.classList.remove('text-gray-500'); }
-    return _detailRqRenderGroups(statusKey);
+    const done = _detailRqRenderGroups(statusKey);
+    Promise.resolve(done).then(_rqSyncFoldAll, _rqSyncFoldAll);
+    return done;
 };
+
+// ── Review tab: Show all / Hide all, and Full screen (owner, 2026-11-06: the Briefs tab's patterns) ──
+// A records card opens from its title (_rqToggleCard); this opens or closes every card in the column.
+function _rqSyncFoldAll() {
+    const btn = document.getElementById('detail-rq-foldall');
+    if (!btn) return;
+    const cards = document.querySelectorAll('#detail-rq-groups [data-rq-record] .rq-card-body');
+    const on = cards.length > 1;
+    btn.classList.toggle('hidden', !on);
+    btn.style.display = on ? '' : 'none';
+    btn.textContent = [...cards].some((b) => !b.classList.contains('hidden')) ? 'Hide all' : 'Show all';
+}
+window._rqFoldAll = function() {
+    const cards = [...document.querySelectorAll('#detail-rq-groups [data-rq-record]')];
+    const anyOpen = cards.some((c) => !c.querySelector('.rq-card-body')?.classList.contains('hidden'));
+    cards.forEach((c) => {
+        const body = c.querySelector('.rq-card-body');
+        const isOpen = body && !body.classList.contains('hidden');
+        if (body && isOpen === anyOpen) window._rqToggleCard(c.querySelector('[aria-expanded]'));
+    });
+    _rqSyncFoldAll();
+};
+window._rqSetFull = function(on) {
+    const panel = document.getElementById('maintab-review-queue');
+    const btn = document.getElementById('detail-rq-full-btn');
+    if (!panel) return;
+    panel.toggleAttribute('data-rq-full', !!on);
+    if (window.ScrollLock) { if (on) window.ScrollLock.lock('rq-full', { scoped: true }); else window.ScrollLock.release('rq-full'); }
+    if (btn) {
+        btn.textContent = on ? 'Exit full screen' : 'Full screen';
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        btn.title = on ? 'Back to the page (Esc)' : 'Use the whole screen for this list';
+        btn.focus({ preventScroll: true });
+    }
+};
+// Esc leaves it, unless an OPEN dialog (a post, blog or email pop-up) is taking Esc. "Any dialog" is
+// not enough: the settings drawer is always in the page as one, inert while shut.
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !document.getElementById('maintab-review-queue')?.hasAttribute('data-rq-full')) return;
+    const dialogOpen = [...document.querySelectorAll('[role="dialog"]')].some((d) => !d.inert && !d.hidden && !d.classList.contains('hidden') && d.getClientRects().length && getComputedStyle(d).visibility !== 'hidden');
+    if (!dialogOpen) window._rqSetFull(false);
+});
 
 // Re-render whichever column is currently open, e.g. after a new post is added elsewhere
 // (the Create Post sheet) so the list reflects it without the user manually switching tabs.
@@ -3245,6 +3383,7 @@ window._rqToggleCard = function (btn) {
     card.querySelector('.rq-card-chevron')?.classList.toggle('rotate-180', open);
     const id = Number(card.getAttribute('data-rq-record'));
     if (open) _rqExpanded.add(id); else _rqExpanded.delete(id);
+    _rqSyncFoldAll();
 };
 
 async function _detailRqRenderRecords(statusKey) {
@@ -4231,8 +4370,8 @@ window._detailRqRecordAct = async function (btn, action) {
                 : action === 'backToEnrichment' ? `Moved to ${_rqHubTabLabel()}. It has left the Outreach columns — move it back when it's ready to be emailed. Nothing was looked up: "Send back for enrichment" is the button that researches a lead.`
                 : action === 'reject' && patch.feedback
                     ? (patchResult.feedbackSaved === false
-                        ? 'Rejected, but your note couldn’t be saved. Add it under Do’s and don’ts in Assistant Profile instead.'
-                        : 'Rejected. Your assistant will follow that from now on — it’s listed under Learned Directives in Do’s and don’ts, in Assistant Profile.')
+                        ? 'Rejected, but your note couldn’t be saved. Add it under Do’s and don’ts in Assistant Settings instead.'
+                        : 'Rejected. Your assistant will follow that from now on — it’s listed under Learned Directives in Do’s and don’ts, in Assistant Settings.')
                 : action === 'reject' ? 'Rejected.' : 'Updated.';
             window.showToast?.(toast);
         }
@@ -4805,7 +4944,7 @@ window._detailRqBlogAct = async function (btn, action) {
             } else if (!sent.length) {
                 // The case that started all this: nothing connected, so nothing happened, and the
                 // old code path said nothing at all.
-                showErr('No other platforms are connected — add one in Assistant Profile ▸ Connections first.');
+                showErr('No other platforms are connected — add one in Assistant Settings ▸ Connections first.');
             } else {
                 window.showToast?.(`Sent to ${sent.map((d) => d.label).join(', ')}.`);
             }
@@ -4888,7 +5027,7 @@ window._detailRqToggleGroup = function(key) {
 // File card index) and one panel per section (#tab-problem, #tab-operation, …).
 // _openProfileDrawer lands on home; clicking a card calls _openBriefDrawer(section),
 // which swaps panels in place and reveals a back arrow. It is reached from the header
-// "Assistant Profile" button — there is no longer a setup tab in the main nav.
+// "Assistant Settings" button — there is no longer a setup tab in the main nav.
 
 // Show exactly one drawer panel by element id (CSS hides all .detail-tab-content
 // unless they carry .active-drawer-tab while the drawer is open).
@@ -4896,6 +5035,116 @@ function _briefShowPanel(panelId) {
     document.querySelectorAll('.detail-tab-content').forEach(c => c.classList.remove('active-drawer-tab'));
     const panel = document.getElementById(panelId);
     if (panel) panel.classList.add('active-drawer-tab');
+    _syncRightMenuActive(panelId);
+}
+
+// ── Right-hand profile menu (compactHeader roles) ─────────────────────────────
+// The Assistant Settings' sections as a side menu that mirrors the left one: icons when closed (the
+// default), labels when open, remembered per browser. Built from the drawer's own Operating File
+// cards so a role's renamed sections ("How I write", "When and how I work") read the same here.
+const _RM_ICONS = {
+    'profile-home': 'M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+    problem: 'M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+    operation: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z',
+    strategy: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z',
+    brand: 'M7 21a4 4 0 01-4-4V5a2 2 0 012-2h4a2 2 0 012 2v12a4 4 0 01-4 4zm0 0h12a2 2 0 002-2v-4a2 2 0 00-2-2h-2.343M11 7.343l1.657-1.657a2 2 0 012.828 0l2.829 2.829a2 2 0 010 2.828l-8.486 8.485M7 17h.01',
+    platforms: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1',
+    rules: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4',
+    guardrails: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
+    notifications: 'M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9',    mentorsees: 'M15 12a3 3 0 11-6 0 3 3 0 016 0zM2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z',
+};
+// The settings sections dock beside the right-hand menu when that menu is on screen (compact header, md+).
+function _settingsDocked() {
+    const menu = document.getElementById('detail-right-menu');
+    return !!(menu && document.querySelector('.detail-v2') && getComputedStyle(menu).display !== 'none');
+}
+function _syncRightMenuActive(panelId) {
+    document.querySelectorAll('#rm-items .rm-item').forEach((b) => {
+        b.classList.toggle('is-active', !!panelId && `tab-${b.dataset.rmTab}` === panelId);
+    });
+}
+function _applyRightMenuOpen(open) {
+    const menu = document.getElementById('detail-right-menu');
+    const btn = document.getElementById('rm-toggle');
+    if (!menu) return;
+    menu.classList.toggle('is-open', open);
+    if (btn) {
+        const label = open ? 'Collapse settings menu' : 'Expand settings menu';
+        btn.setAttribute('aria-expanded', String(open));
+        btn.setAttribute('aria-label', label);
+        btn.dataset.tip = label;
+        document.getElementById('rm-toggle-chevron')?.setAttribute('d', open ? 'M7 10l2 2-2 2' : 'M9 10l-2 2 2 2');
+    }
+    menu.querySelectorAll('.rm-item').forEach((b) => {
+        if (open) delete b.dataset.tip; else b.dataset.tip = b.querySelector('.nav-label')?.textContent.trim() || '';
+    });
+}
+function _renderRightMenu() {
+    const menu = document.getElementById('detail-right-menu');
+    const list = document.getElementById('rm-items');
+    if (!menu || !list) return;
+    const icon = (k) => `<svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${_RM_ICONS[k] || _RM_ICONS['profile-home']}"/></svg>`;
+    const items = [{ tab: 'profile-home', label: 'Overview' }];
+    document.querySelectorAll('#tab-profile-home .detail-tab-btn[data-tab]').forEach((card) => {
+        if (card.classList.contains('hidden') || card.style.display === 'none') return;
+        const label = card.querySelector('p')?.textContent.trim();
+        if (label) items.push({ tab: card.dataset.tab, label });
+    });
+    list.innerHTML = items.map((it) => `
+        <button type="button" class="rm-item" data-rm-tab="${it.tab}">${icon(it.tab)}<span class="nav-label">${_escapeHtml(it.label)}</span></button>`).join('');
+    list.onclick = (e) => {
+        const b = e.target.closest('.rm-item');
+        if (!b) return;
+        if (b.dataset.rmTab === 'profile-home') window._openProfileDrawer();
+        else window._openBriefDrawer(b.dataset.rmTab);
+    };
+    // Warm a section's data while the pointer is on its item (or a key lands on it), so it is in the
+    // shared cache by the click: these are the sections that read on open. Same URLs as their loaders.
+    const aid = window._currentAssistantId;
+    const warm = (e) => {
+        const tab = e.target.closest?.('.rm-item')?.dataset.rmTab;
+        const url = tab === 'notifications' ? `/.netlify/functions/notification-preferences?assistantId=${aid}`
+            : tab === 'rules' ? `/.netlify/functions/content-rules?assistantId=${aid}`
+            : tab === 'platforms' ? `/api/integrations/scenarios?assistantId=${encodeURIComponent(aid)}`
+            : null;
+        if (url && aid) _cachedGet(url).catch(() => {});
+    };
+    list.onpointerover = warm;
+    list.onfocusin = warm;
+    // Chat: the same as the header's Chat button, which this menu replaces (md and up).
+    const chat = document.getElementById('rm-chat');
+    // On a tab with a chat panel it brings that up (its Chat with … button is gone); elsewhere the pop-up.
+    if (chat) chat.onclick = () => document.getElementById('btn-detail-chat')?.click();
+    const btn = document.getElementById('rm-toggle');
+    if (btn) btn.onclick = () => {
+        const open = !menu.classList.contains('is-open');
+        _applyRightMenuOpen(open);
+        try { localStorage.setItem('bms.rightMenuOpen', open ? '1' : '0'); } catch (e) {}
+        // Pages that measure their width re-measure on resize (same as the left menu's toggle).
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 220);
+    };
+    let open = false;
+    try { open = localStorage.getItem('bms.rightMenuOpen') === '1'; } catch (e) {}
+    _applyRightMenuOpen(open);
+}
+
+// compactHeader (registry): hero at just under half width with the "Needs you" strip beside it, the
+// header's Chat / Assistant Settings buttons gone (CSS), and the profile as the right-hand menu.
+// ON for every role since 2026-11-06 (owner, after the Brand Designer pilot); a role can still opt
+// out with `compactHeader: false`.
+// The view is re-injected on every load, so nothing here needs undoing for the next assistant.
+function _applyCompactHeader(cfg) {
+    const root = document.getElementById('assistant-detail-content');
+    if (!root) return;
+    const on = !!cfg && cfg.compactHeader !== false;
+    root.classList.toggle('detail-v2', on);
+    if (!on) return;
+    const row = document.getElementById('detail-top-row');
+    const strip = document.getElementById('detail-needs-you');
+    if (row && strip && strip.parentNode !== row) row.appendChild(strip);
+    // The button goes under the list (heading, what happens next, the briefs, then the one action).
+    const go = document.getElementById('needs-you-go');
+    if (strip && go && go.parentNode !== strip) strip.appendChild(go);
 }
 
 // Run the open animation/backdrop/scroll-lock. Idempotent: safe to call when the
@@ -4911,13 +5160,24 @@ function _briefOpenChrome() {
         window._briefDrawerOpener = opener && !drawer.contains(opener) ? opener : null;
     }
     drawer.inert = false;
+    // Compact header (md and up): the section docks beside the right-hand menu as part of it — no
+    // backdrop, the page stays usable and moves over (CSS in assistant-detail.html), and the menu
+    // drops to icons while a section is open so the two fit. Below md it is the old pop-over.
+    const docked = _settingsDocked();
+    drawer.setAttribute('aria-modal', docked ? 'false' : 'true');
+    if (docked && !document.body.classList.contains('brief-drawer-open')) {
+        const menu = document.getElementById('detail-right-menu');
+        window._rmWasOpen = !!menu?.classList.contains('is-open');
+        if (window._rmWasOpen) _applyRightMenuOpen(false);
+    }
     document.body.classList.add('brief-drawer-open');
-    if (backdrop) { backdrop.style.display = 'block'; setTimeout(() => backdrop.style.opacity = '1', 10); }
+    if (backdrop && !docked) { backdrop.style.display = 'block'; setTimeout(() => backdrop.style.opacity = '1', 10); }
     drawer.style.transform = 'translateX(0)';
     // Scoped: the drawer markup lives in assistant-detail.html, i.e. *inside* the swappable
     // view, so navigating away destroys it without running _closeBriefDrawer. The scoped flag
-    // lets loadView drop this lock on teardown instead of stranding it.
-    window.ScrollLock.lock('brief-drawer', { scoped: true });
+    // lets loadView drop this lock on teardown instead of stranding it. Docked, the page scrolls.
+    if (!docked) window.ScrollLock.lock('brief-drawer', { scoped: true });
+    else setTimeout(() => window.dispatchEvent(new Event('resize')), 260);
     const body = document.getElementById('brief-drawer-body');
     if (body) body.scrollTop = 0;
     _resizeBriefAutoGrow();
@@ -4930,7 +5190,7 @@ function _briefOpenChrome() {
 window._openProfileDrawer = function() {
     _briefShowPanel('tab-profile-home');
     const titleEl = document.getElementById('brief-drawer-title');
-    if (titleEl) titleEl.textContent = window._assistantProfileTitle || 'Assistant Profile';
+    if (titleEl) titleEl.textContent = window._assistantProfileTitle || 'Assistant Settings';
     const backBtn = document.getElementById('brief-drawer-back');
     if (backBtn) backBtn.hidden = true;
     _briefOpenChrome();
@@ -4939,12 +5199,12 @@ window._openProfileDrawer = function() {
 // Open (or swap to) a specific section panel, with a back arrow to the home index.
 window._openBriefDrawer = function(tabKey) {
     _briefShowPanel('tab-' + tabKey);
-    const titles = { problem: 'What I do', operation: 'When and how I post', strategy: 'What I post about', platforms: 'Connections', rules: 'Do’s and don’ts', guardrails: 'Safety and legal', notifications: 'Notifications' };
+    const titles = { mentorsees: 'What I can see', problem: 'What I do', operation: 'When and how I post', strategy: 'What I post about', brand: 'Your brand', platforms: 'Connections', rules: 'Do’s and don’ts', guardrails: 'Safety and legal', notifications: 'Notifications' };
     // The 'strategy' card is the one the role registry RENAMES: roles with hasCreativeBrief:false
     // (every non-social role) lose the marketing cards, so _applyRoleDashboard rewrites the nav
-    // card's title to "Brand Knowledge". Reading that element back keeps the drawer header saying
-    // whatever the card the user just clicked says — a static map here shipped a "Creative Brief"
-    // header above a panel the user had opened from a "Brand Knowledge" card.
+    // card's title to "How I write" (or _syncStrategyCard hides it). Reading that element back keeps
+    // the drawer header saying whatever the card the user just clicked says — a static map here
+    // shipped a "Creative Brief" header above a panel opened from a differently named card.
     // 'operation' is renamed the same way ("When and how I work" for a role that doesn't post).
     const cardTitle = document.getElementById(`opcard-${tabKey}-title`);
     if ((tabKey === 'strategy' || tabKey === 'operation') && cardTitle && cardTitle.textContent.trim()) titles[tabKey] = cardTitle.textContent.trim();
@@ -4968,7 +5228,7 @@ window._openBriefDrawer = function(tabKey) {
     _briefOpenChrome();
 };
 
-// ── Assistant Profile › Notifications panel ───────────────────────────────────
+// ── Assistant Settings › Notifications panel ───────────────────────────────────
 // Renders the scope:'assistant' categories of the unified notification preference
 // matrix (Approvals, Assistant Tasks, Content & Publishing, Connections) for THIS
 // assistant. Values come from /notification-preferences?assistantId=N — the
@@ -5005,7 +5265,7 @@ async function _initAssistantNotifPrefs() {
     };
 
     try {
-        const res = await fetch(`/.netlify/functions/notification-preferences?assistantId=${assistantId}`);
+        const res = await _cachedGet(`/.netlify/functions/notification-preferences?assistantId=${assistantId}`);
         if (!res.ok) throw new Error('Load failed');
         const { categories } = await res.json();
         // Role-aware: post/publishing alerts only apply to roles that actually publish
@@ -5147,6 +5407,12 @@ window._closeBriefDrawer = function() {
     const drawer = document.getElementById('brief-drawer');
     const backdrop = document.getElementById('brief-drawer-backdrop');
     if (drawer) drawer.style.transform = 'translateX(100%)';
+    _syncRightMenuActive(null);
+    if (_settingsDocked()) {
+        if (window._rmWasOpen) _applyRightMenuOpen(true);
+        window._rmWasOpen = false;
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 260);
+    }
     if (backdrop) { backdrop.style.opacity = '0'; setTimeout(() => { backdrop.style.display = 'none'; }, 250); }
     document.body.classList.remove('brief-drawer-open');
     window.ScrollLock.release('brief-drawer');
@@ -5205,6 +5471,12 @@ window._setNeedsYouCount = function(n) {
     window._renderStatusPill?.();
     window._renderNeedsYou();
 };
+// What is waiting, by name, for the compact header's Needs-you card: [{ id, label, sub }]. Only the
+// Brand Designer's Briefs feed it so far; with none, the card shows the count and the button alone.
+window._setNeedsYouItems = function(items) {
+    window._detailNeedsYouItems = Array.isArray(items) ? items : [];
+    window._renderNeedsYou();
+};
 window._setNextUp = function(text) {
     window._detailNextUp = text ? String(text) : null;
     window._renderNeedsYou();
@@ -5245,17 +5517,20 @@ window._renderNeedsYou = function() {
     const source = window._detailNeedsYouSource;   // 'review' | 'briefs' | null
     const landing = window._detailDefaultMainTab || 'datahub';
     const onLanding = document.querySelector('.main-tab-btn.active-tab')?.dataset.maintab === landing;
-    if (!source || !onLanding) { strip.classList.add('hidden'); return; }
+    // In the compact header the strip sits beside the hero, above every tab, so it stays on all tabs.
+    const inHeader = strip.parentNode?.id === 'detail-top-row';
+    if (!source || (!onLanding && !inHeader)) { strip.classList.add('hidden'); return; }
 
     const reviewN = window._detailOpSignals?.pendingReview || 0;
     const reviewLabel = (window._detailReviewQueue || {}).label || 'Review';
     // 'videos': storyboards waiting for "Make the video" (assistant-videos.js) + finished videos to approve.
     const boards = source === 'videos' ? (window._detailNeedsYouOverride || 0) : 0;
-    const n = source === 'briefs' ? (window._detailNeedsYouOverride || 0) : source === 'videos' ? boards + reviewN : reviewN;
-    const where = source === 'briefs' ? 'Briefs'
+    const own = source === 'module' ? window._detailNeedsYouModule : null;
+    const n = source === 'briefs' || own ? (window._detailNeedsYouOverride || 0) : source === 'videos' ? boards + reviewN : reviewN;
+    const where = own ? own.where : source === 'briefs' ? 'Briefs'
         : source === 'videos' ? (boards && reviewN ? `Videos and ${reviewLabel}` : boards ? 'Videos' : reviewLabel)
         : reviewLabel;
-    const targetTab = source === 'briefs' ? 'briefs' : (source === 'videos' && boards) ? 'videos' : 'review-queue';
+    const targetTab = own ? own.tab : source === 'briefs' ? 'briefs' : (source === 'videos' && boards) ? 'videos' : 'review-queue';
     const text = document.getElementById('needs-you-text');
     const go = document.getElementById('needs-you-go');
     const next = document.getElementById('next-up-text');
@@ -5266,14 +5541,62 @@ window._renderNeedsYou = function() {
         text.textContent = n ? `Needs you: ${n} waiting in ${where}` : 'Nothing needs you right now.';
     }
     // A button only when the waiting things are on ANOTHER tab — on the landing tab they are below.
-    const showGo = n > 0 && targetTab !== landing;
+    // In the compact header the button is always there while something waits (a primary one), since
+    // the card is the page's call to action; on the landing tab strip, only when the work is elsewhere.
+    const showGo = n > 0 && (inHeader || targetTab !== landing);
+    const openTarget = (id, tab) => {
+        // An item of a 'module' role can say which tab it is on (Website: Enquiries, Orders, Bookings).
+        if (own) { window._activateMainTab(tab || targetTab); return; }
+        if (source === 'briefs' && window.AssistantBriefs?.openReview) { window.AssistantBriefs.openReview(id); return; }
+        // A post named in the compact header opens straight into its review, as its card does.
+        const rqKind = (window._detailReviewQueue || {});
+        if (id && targetTab === 'review-queue' && rqKind.kind === 'posts' && !rqKind.source && typeof window.openPostReview === 'function') {
+            window.openPostReview(Number(id)); return;
+        }
+        window._activateMainTab(targetTab);
+        if (targetTab === 'review-queue') window.detailRqOpenStatus?.('review');
+        // Anything else named: scroll to its card once the column has painted, and mark it briefly.
+        if (id && (targetTab === 'review-queue' || targetTab === 'videos')) {
+            const attrs = targetTab === 'videos' ? ['data-video'] : ['data-rq-record', 'data-rq-blog', 'data-rq-newsletter', 'data-post-id'];
+            const sel = attrs.map((a) => `[${a}="${CSS.escape(String(id))}"]`).join(',');
+            const scope = targetTab === 'videos' ? '#videos-host' : '#detail-rq-groups';
+            let tries = 0;
+            const find = () => {
+                let el = document.querySelector(`${scope} :is(${sel})`);
+                if (el) {
+                    // A video starts closed: open the one named, on its repainted card.
+                    const shut = el.querySelector('[data-vid-act="fold"][aria-expanded="false"]');
+                    if (shut) { shut.click(); el = document.querySelector(`${scope} :is(${sel})`) || el; }
+                    window.Fold?.reveal(el);
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    el.classList.add('ny-flash');
+                    setTimeout(() => el.classList.remove('ny-flash'), 1800);
+                } else if (++tries < 20) setTimeout(find, 150);
+            };
+            setTimeout(find, 150);
+        }
+    };
     if (go) {
         go.classList.toggle('hidden', !showGo);
         go.style.display = showGo ? '' : 'none';
-        go.textContent = `Open ${where}`;
-        go.onclick = () => {
-            window._activateMainTab(targetTab);
-            if (targetTab === 'review-queue') window.detailRqOpenStatus?.('review');
+        go.className = `${showGo ? '' : 'hidden '}${inHeader ? 'btn-primary px-4 py-2 text-sm' : 'btn-secondary px-3 py-1.5 border text-xs'} min-h-[44px] sm:min-h-0 font-bold rounded-lg transition`;
+        go.textContent = inHeader && source === 'briefs' ? `Review ${n} brief${n === 1 ? '' : 's'} →` : `Open ${where}${inHeader ? ' →' : ''}`;
+        go.onclick = () => openTarget(null);
+    }
+    const list = document.getElementById('needs-you-list');
+    if (list) {
+        const items = inHeader && n > 0 ? (window._detailNeedsYouItems || []) : [];
+        const shownCount = items.reduce((sum, it) => sum + (Number(it.count) || 1), 0);
+        list.classList.toggle('hidden', !items.length);
+        list.innerHTML = items.map((it) => `
+            <li><button type="button" class="ny-item" data-ny-id="${_escapeHtml(String(it.id))}"${it.tab ? ` data-ny-tab="${_escapeHtml(it.tab)}"` : ''}>
+              <span class="ny-title">${_escapeHtml(it.label)}</span><span class="ny-sub">${_escapeHtml(it.sub || '')}</span>
+            </button></li>`).join('')
+            // An item can stand for several ("Enquiries, 2 new").
+            + (n > shownCount && items.length ? `<li class="ny-more">and ${n - shownCount} more</li>` : '');
+        list.onclick = (e) => {
+            const b = e.target.closest('.ny-item');
+            if (b) openTarget(b.dataset.nyId, b.dataset.nyTab);
         };
     }
     if (next) {
@@ -5716,6 +6039,10 @@ window._openAutopilotSettings = function() {
 async function _loadAutopilotNext(assistantId) {
     const el = document.getElementById('autopilot-next');
     if (!el || !assistantId) return;
+    // A role without the Autopilot card (registry hasPostingSchedule:false, e.g. the Brand Designer)
+    // still has a schedule-shaped context, so this used to run three post reads for a line nobody sees.
+    // _applyDashboardRegistry has hidden the card by the time this runs.
+    if (document.getElementById('autopilot-status-card')?.classList.contains('hidden')) return;
     try {
         const statuses = ['pending_approval', 'approved', 'scheduled'];
         const results = await Promise.all(statuses.map(s =>
@@ -5895,7 +6222,7 @@ window._renderRunbookDirectives = async function(assistantId) {
     if (!aid) return;
     let rules = [];
     try {
-        const res = await fetch(`/.netlify/functions/content-rules?assistantId=${aid}`);
+        const res = await _cachedGet(`/.netlify/functions/content-rules?assistantId=${aid}`);
         if (res.ok) rules = (await res.json()).rules || [];
     } catch { /* non-critical */ }
     rules.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
@@ -6756,9 +7083,19 @@ function _applyDashboardRegistry(data) {
     // Briefs badge, the Video Producer's storyboards PLUS its review queue (it lands on Videos, so a
     // review-only count said "Nothing needs you" over two waiting storyboards — staging, 2026-10-31),
     // or nothing for a role with none. Its figures are reset per assistant.
-    window._detailNeedsYouSource = cfg.videosTab ? 'videos' : !cfg.hideReviewQueue ? 'review' : (cfg.briefsTab ? 'briefs' : null);
+    // cfg.needsYou: a role with no review queue whose own tab says what is waiting, so every role has the card
+    // (owner, 2026-11-06: the Business Mentor's hero sat alone at full width with nothing beside it).
+    window._detailNeedsYouSource = cfg.videosTab ? 'videos' : !cfg.hideReviewQueue ? 'review' : cfg.briefsTab ? 'briefs' : cfg.needsYou ? 'module' : null;
+    window._detailNeedsYouModule = cfg.needsYou || null;
+    _applyCompactHeader(cfg);
+    _setupTabChat(cfg, data);
     window._detailNeedsYouOverride = 0;
+    window._detailNeedsYouItems = [];
     window._detailNextUp = null;
+    // Everything starts closed on each assistant's page (fold.js).
+    window.Fold?.reset();
+    // A role whose count arrives later still takes its place beside the hero from the start.
+    if (window._detailNeedsYouSource === 'module') setTimeout(() => window._renderNeedsYou?.(), 0);
     // Results sits right after the landing tab: "your work, then how it is going". It was near the
     // end of a 6–8 tab row, past the fade on a phone (review, 2026-10-22). Moved in the DOM, so
     // keyboard order and the scroller follow; the view is re-injected per load, so it never stacks.
@@ -6894,6 +7231,22 @@ function _applyDashboardRegistry(data) {
             : rqIsNewsletter
                 ? 'Emails awaiting your review — open in the Email Studio to edit and approve before anything is sent to your subscribers.'
                 : 'Items awaiting your review — approve, edit or reject before anything is scheduled.');
+    // One header row (owner, 2026-11-06, as on the Briefs tab): the description moves into the
+    // heading's ⓘ, joined to the role's own explainer when it names one. Without the explainer
+    // script the line stays visible under the heading instead.
+    {
+        const sub = document.getElementById('detail-rq-subtitle');
+        const about = sub?.textContent.trim() || '';
+        const G = window.BMSExplainers?.GLOSSARY;
+        const base = window._detailReviewQueue.explain && G?.[window._detailReviewQueue.explain];
+        const into = !!(rqHeading && G && about);
+        if (into) {
+            G['detail-rq-about'] = { term: base?.term || rqLabel, emoji: base?.emoji || '✅', plain: base ? `${base.plain} ${about}` : about, ...(base?.example ? { example: base.example } : {}) };
+            rqHeading.removeAttribute('data-explain-ready');
+            rqHeading.setAttribute('data-explain', 'detail-rq-about');
+        }
+        if (sub) { sub.classList.toggle('hidden', into); sub.style.display = into ? 'none' : ''; }
+    }
     // Records queues have no post-generation button; blog re-points it at Blog Studio.
     toggleBtn('detail-rq-primary-btn', !rqIsRecords);
     toggle('detail-rq-col-posted', !rqIsRecords);
@@ -6990,10 +7343,12 @@ function _applyDashboardRegistry(data) {
     toggle('module-empty-library', mods.hasEmptyLibraryFallback !== false);
     toggle('module-review-cadence', mods.hasReviewCadence !== false);
     // Operating File nav-card subtitles — when the social cards inside are hidden, the subtitle
-    // shouldn't promise them. Creative Brief collapses to just Business Knowledge for these roles.
+    // shouldn't promise them. For these roles the card keeps only the voice builder / content mix
+    // (Blog, Email); the brand moved to its own "Your brand" card (2026-11-06), and a role with neither
+    // loses the card altogether — _syncStrategyCard, once the data has said which cards show.
     if (mods.hasCreativeBrief === false) {
-        setText('opcard-strategy-title', 'Brand Knowledge');
-        setText('opcard-strategy-sub', 'Business information and brand context your assistant applies');
+        setText('opcard-strategy-title', 'How I write');
+        setText('opcard-strategy-sub', 'Voice and the kinds of piece I write');
         // "When and how I post" is the social role's card; every other role's is about its work.
         setText('opcard-operation-title', 'When and how I work');
         setText('operation-heading', 'When and how I work');
@@ -7110,12 +7465,20 @@ function _applyDashboardRegistry(data) {
         document.getElementById('campaign-control-strip')?.classList.add('hidden');
     }
 
-    // Overview tab — Business Mentor only (mentorTab: business_mentor): set-up checklist, "What I can
-    // see" and Dismissed suggestions (assistant-mentor-overview.js → mentor.ts).
+    // Suggestions tab — Business Mentor only (mentorTab: business_mentor): what it suggests, by stage
+    // (assistant-mentor-overview.js → mentor.ts). The same module paints
+    // Reviews and Customers on its Results tab, and "What I can see" in its Assistant Settings.
     const mentorTab = cfg.mentorTab;
     toggle('maintab-btn-mentor', !!mentorTab);
+    const mentorResultsHost = document.getElementById('mentor-results-host');
+    const mentorSeesCard = document.querySelector('#tab-profile-home .detail-tab-btn[data-tab="mentorsees"]');
+    [mentorResultsHost, mentorSeesCard].forEach((el) => {
+        if (!el) return;
+        el.classList.toggle('hidden', !mentorTab);
+        el.style.display = mentorTab ? '' : 'none';
+    });
     if (mentorTab) {
-        setText('mentor-tab-label', mentorTab.label || 'Overview');
+        setText('mentor-tab-label', mentorTab.label || 'Suggestions');
         window.AssistantMentorOverview?.init({ assistantId: data.id, assistantName: data.name });
     }
     // Plan tab — Business Mentor only (mentorPlanTab): plans, calculator, research, playbook (assistant-mentor-plan.js).
@@ -7471,6 +7834,7 @@ function _detailHydrate(data) {
     _detailSetVal('edit_tone', ctx.tone_of_voice || '');
     _renderContentMix(data);
     _renderVoiceBuilder(data);
+    _syncStrategyCard();
     _detailSetVal('edit_pillars', Array.isArray(ctx.content_pillars) ? ctx.content_pillars.join(', ') : (ctx.content_pillars || ''));
     _renderPillarChips();
     // Sales context — feeds the auto-responder objection playbook (P4) and DM drafting.
@@ -7930,6 +8294,18 @@ function _vbDefaults() {
         neverSay: [], sample: '' };
 }
 
+// The "What I post about" / "How I write" card only shows while its panel has something in it. Since the brand
+// moved to "Your brand" (2026-11-06), a role without the social cards, voice builder or content mix (every role
+// but Social, Blog and Email) would open an empty panel, so its card goes, and the right-hand menu with it.
+function _syncStrategyCard() {
+    const tab = document.getElementById('tab-strategy');
+    const card = document.querySelector('#tab-profile-home .detail-tab-btn[data-tab="strategy"]');
+    if (!tab || !card) return;
+    const shown = [...tab.children].some((c) => !c.classList.contains('hidden') && c.style.display !== 'none');
+    card.classList.toggle('hidden', !shown);
+    if (document.getElementById('assistant-detail-content')?.classList.contains('detail-v2')) _renderRightMenu();
+}
+
 function _renderVoiceBuilder(data) {
     const card = document.getElementById('module-voice-builder');
     if (!card) return;
@@ -8377,6 +8753,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     const btnChat = document.getElementById('btn-detail-chat');
     if (btnChat) {
         btnChat.onclick = () => {
+            if (window.ChatPane?.focusOnScreen?.()) return;
             if (typeof window.openAssistantChat === 'function') {
                 window.openAssistantChat({ assistantId });
             } else {
@@ -8445,6 +8822,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 body: JSON.stringify(body),
             });
             if (res.ok) {
+                const renamed = !!newName && newName !== currentData.name;
                 // A change to what the posts are ABOUT (pillars, core message, audience…) only reaches
                 // posts drafted after it, weeks out — offer to redraft the upcoming ones
                 // (src/components/redraft-upcoming.js). Compared before currentData is overwritten.
@@ -8463,6 +8841,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                     currentData.name = newName;
                     window._paintDetailAvatarLetter();
                 }
+                if (renamed) _assistantRenamed(parseInt(assistantId), newName);
                 // Keep the in-memory record in step, so a later save that rebuilds newConfiguration
                 // from currentData carries the colour rather than a stale one.
                 currentData.configuration = { ...(currentData.configuration || {}) };
@@ -8570,6 +8949,15 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     }
 
     // ── Load & hydrate ────────────────────────────────────────────
+    // Started beside the context read, not after it (see _prefetchDetail). Same URLs as their loaders.
+    _prefetchDetail([
+        `/.netlify/functions/get-assistant-readiness?id=${assistantId}`,
+        `/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=all`,
+        `${GOALS_API}?assistantId=${parseInt(assistantId)}`,
+    ]);
+    // Shared-cache reads the page makes later (check-capacity / get-usage-summary for the task strip).
+    window.bmsCachedFetch?.('/.netlify/functions/check-capacity').catch(() => {});
+    window.bmsCachedFetch?.('/.netlify/functions/get-usage-summary').catch(() => {});
     try {
         const res = await fetch(`/.netlify/functions/get-assistant-context?id=${assistantId}`);
         if (res.status === 403) {
@@ -8609,9 +8997,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             }
         }
 
-        // Assistant Profile slide-over title — "[Name]'s Profile" (header button keeps its
-        // static "Assistant Profile" label; the personalised title shows on the drawer home).
-        window._assistantProfileTitle = (currentData.name || 'Your Assistant') + "'s Profile";
+        // Assistant Settings slide-over title — "[Name]'s Profile" (header button keeps its
+        // static "Assistant Settings" label; the personalised title shows on the drawer home).
+        window._assistantProfileTitle = (currentData.name || 'Your Assistant') + "'s Settings";
         const homeTitleEl = document.getElementById('brief-drawer-title');
         if (homeTitleEl && !document.body.classList.contains('brief-drawer-open')) {
             homeTitleEl.textContent = window._assistantProfileTitle;
@@ -8813,6 +9201,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         _hydrateAutonomousToggle(currentData);
         window._renderAutopilotCard(currentData);
         attachAutoSave();
+        if (document.getElementById('assistant-detail-content')?.classList.contains('detail-v2')) _renderRightMenu();
         _wirePostingSchedule();
         _renderKickOff(assistantId);
 
@@ -8833,7 +9222,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             }
             // :not(.hidden) — a role-hidden tab (e.g. social's retired Data Hub) must not be
             // reachable by deep-link either, or activating it re-shows a panel the role retired.
-            if (document.querySelector(`.main-tab-btn[data-maintab="${wanted}"]:not(.hidden)`)) {
+            if (_SITE_SUBTAB_OF[wanted] && !document.getElementById('maintab-btn-sitebuilder')?.classList.contains('hidden')) {
+                window._activateMainTab?.(wanted);
+            } else if (document.querySelector(`.main-tab-btn[data-maintab="${wanted}"]:not(.hidden)`)) {
                 window._activateMainTab?.(wanted);
             } else {
                 const target = document.querySelector(`.detail-tab-btn[data-tab="${wanted}"]`);
@@ -9061,7 +9452,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         _fetchAndRenderBlogDestinations();
     } else if (_audienceSource === 'newsletter_list') {
         _fetchAndRenderNewsletterList();
-    } else {
+    } else if (_skelAutopilot) {
+        // The follower bars live inside the Autopilot card: with the card hidden (the Brand Designer)
+        // there is nothing to fill, and the read asks every connected platform.
         _fetchAndRenderFollowerCounts();
     }
 
@@ -9293,40 +9686,78 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     _results.forEach(r => { if (r.status === 'rejected') console.error('[initAssistantDetail] a section failed to load:', r.reason); });
 };
 
+// "3 Nov" / "today" for a Needs-you line; '' when there is no date.
+function _nyWhen(v) {
+    if (!v) return '';
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return '';
+    if (d.toDateString() === new Date().toDateString()) return 'today';
+    return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
 async function _prefetchDetailRqBadge(assistantId) {
     const rq = window._detailReviewQueue || {};
     try {
         let count = 0;
+        let items = [];   // [{ id, label, sub }] for the Needs-you card
+        // A role with no Review tab (hideReviewQueue, e.g. the Brand Designer) has no posts to count:
+        // this read always answered 0. Say 0 without asking, so the signals settle exactly as before.
+        if (rq.__defaulted) {
+            window._setPendingReviewCount?.(0);
+            window._updateOpSignals?.({ pendingReview: 0 });
+            return;
+        }
         if (rq.kind === 'records' && rq.recordType) {
             // Records-backed queue (data-hub roles): count assistant_records awaiting approval.
             const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${assistantId}&recordType=${encodeURIComponent(rq.recordType)}&approvalStatus=pending_approval`);
             if (!res.ok) return;
-            count = ((await res.json()).records || []).length;
+            const records = (await res.json()).records || [];
+            count = records.length;
+            items = records.map((r) => ({ id: r.id, label: r.title || 'Untitled', sub: _nyWhen(r.createdAt) }));
         } else if (rq.source === 'blog_posts') {
             // Blog Writer: count long-form drafts awaiting review.
             const posts = await _fetchBlogPosts(assistantId).catch(() => null);
             if (!posts) return;
             const wanted = new Set(['draft', 'pending_approval', 'in_review']);
-            count = posts.filter((p) => wanted.has(p.status)).length;
+            const waiting = posts.filter((p) => wanted.has(p.status));
+            count = waiting.length;
+            items = waiting.map((p) => ({ id: p.id, label: p.title || 'Untitled article', sub: _nyWhen(p.updatedAt || p.createdAt) }));
         } else if (rq.source === 'newsletter_issues') {
             // Email Marketing: the Review column's statuses. This fell through to get-social-drafts,
             // which holds no emails, and zeroed the Emails badge and the Autopilot card's waiting
             // count after the queue had painted them (2026-10-22).
             const res = await fetch(`/.netlify/functions/newsletter-issues?assistantId=${assistantId}`);
             if (!res.ok) return;
-            count = ((await res.json()).issues || []).filter((i) => _RQ_NEWSLETTER_WAITING.includes(i.status)).length;
+            const waiting = ((await res.json()).issues || []).filter((i) => _RQ_NEWSLETTER_WAITING.includes(i.status));
+            count = waiting.length;
+            items = waiting.map((i) => ({ id: i.id, label: i.subject || 'Untitled email', sub: _nyWhen(i.scheduledFor || i.updatedAt) }));
         } else {
             // ⚠️ Paged (limit=1) so the server returns `total` counted in POSTS. Unpaged, this counted
             // ROWS — one per platform, capped at 50 — so a post going to three platforms counted
             // three, and the assistant's pop-up ("N things are waiting") disagreed with the Review
             // tab it pointed at (2026-11-04).
-            const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}&limit=1&offset=0`);
+            // limit=5 (not 1) so the compact header's Needs-you card can name the first few posts.
+            const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}&limit=5&offset=0`);
             if (!res.ok) return;
             const j = await res.json();
             count = typeof j.total === 'number' ? j.total : (j.drafts || []).length;
+            // One row per platform: name each post once.
+            const seen = new Set();
+            for (const d of j.drafts || []) {
+                const key = `${(d.caption || '').slice(0, 80)}|${d.publishDate || ''}`;
+                if (seen.has(key)) continue;
+                seen.add(key);
+                const words = String(d.caption || '').replace(/\s+/g, ' ').trim();
+                items.push({ id: d.id, label: words ? (words.length > 70 ? words.slice(0, 70) + '…' : words) : 'Post with no caption yet', sub: _nyWhen(d.publishDate) });
+            }
         }
         _setDetailRqTabBadge(count);
         window._setPendingReviewCount?.(count);
+        // The compact header's Needs-you card names the first few (the Brand Designer's Briefs feed
+        // their own). Not for the Video Producer, whose count also holds storyboards.
+        if (Number(window._currentAssistantId) === Number(assistantId) && window._detailNeedsYouSource === 'review') {
+            window._setNeedsYouItems?.(items.slice(0, 4));
+        }
         // Feed the operational status pill (Epic 1 AC1.1.2): pending drafts → "Needs you".
         window._updateOpSignals?.({ pendingReview: count });
     } catch { /* non-critical */ }
@@ -9479,7 +9910,9 @@ async function _fetchAndRenderWrittenRoi(assistantId, period = 'all') {
     });
 
     try {
-        const res = await fetch(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
+        // The same one-shot prefetch as _fetchAndRenderAssistantMetrics: whichever loader the role runs
+        // first takes it (the Brand Designer's ROI strip reads metrics here, not there).
+        const res = await _fetchPrefetched(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
         if (!res.ok) return;
         const d = await res.json();
         if (roiStrip.dataset.roleHidden === '1') return;   // role switched while we were awaiting
@@ -9581,16 +10014,27 @@ async function _renderAssistantTaskShare(assistantId) {
         // Use that rounds to 0 reads as "under 1%", never as nothing used.
         const label = (v) => (v > 0 && pct(v) === 0 ? 'under 1%' : `${Math.min(100, pct(v))}%`);
         const name = document.getElementById('detail-name-input')?.value?.trim() || 'This assistant';
-        document.getElementById('task-share-pct').textContent = `${label(mine)} of your allowance`;
+        // Compact header: the headline is the whole bar (every assistant's use), and the note is its key —
+        // "0% of your allowance" over a bar 4% full read as a contradiction (UX review, 2026-11-05).
+        const compact = !!document.querySelector('.detail-v2');
+        document.getElementById('task-share-pct').textContent = compact ? `${label(total)} of allowance used` : `${label(mine)} of your allowance`;
         document.getElementById('task-share-mine').style.width = `${minePct}%`;
         document.getElementById('task-share-others').style.width = `${othersPct}%`;
         document.getElementById('task-share-bar').setAttribute('aria-label', `${name} used ${minePct}% of the monthly task allowance; all assistants together ${Math.min(100, pct(total))}%`);
         // Bonus tasks sit on top of the allowance, and other screens count them in "tasks left" —
         // so a Briefs tab said 11,252 left under a strip that said "of 10,500" (SWAN-8).
         const bonus = Number(cap.bonusTasks) || 0;
-        document.getElementById('task-share-note').textContent =
-            `${name}: ${n(mine)} task${mine === 1 ? '' : 's'} · all assistants: ${n(total)} of ${n(limit)} (${label(total)})`
-            + (bonus > 0 ? ` · plus ${n(bonus)} bonus task${bonus === 1 ? '' : 's'}` : '');
+        const noteEl = document.getElementById('task-share-note');
+        if (compact) {
+            const others = Math.max(0, total - mine);
+            noteEl.innerHTML = `<span class="ts-key"><span class="ts-dot" style="background:#ec4899"></span>${_escapeHtml(name)}: ${n(mine)} task${mine === 1 ? '' : 's'}</span>`
+                + `<span class="ts-key"><span class="ts-dot" style="background:#fbcfe8"></span>Other assistants: ${n(others)}</span>`
+                + `<span class="ts-key">${n(total)} of ${n(limit)} this month${bonus > 0 ? ` · plus ${n(bonus)} bonus` : ''}</span>`;
+        } else {
+            noteEl.textContent =
+                `${name}: ${n(mine)} task${mine === 1 ? '' : 's'} · all assistants: ${n(total)} of ${n(limit)} (${label(total)})`
+                + (bonus > 0 ? ` · plus ${n(bonus)} bonus task${bonus === 1 ? '' : 's'}` : '');
+        }
         strip.classList.remove('hidden');
     } catch { /* the strip just stays hidden */ }
 }
@@ -9636,7 +10080,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     });
 
     try {
-        const res = await fetch(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
+        const res = await _fetchPrefetched(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
         if (!res.ok) return;
         const d = await res.json();
 
@@ -9855,7 +10299,7 @@ async function _fetchAndRenderBlogDestinations() {
         // own blog first. A reader seeing "0 connected" should not conclude nothing gets published.
         setFooter(connectedCount
             ? 'Every published post goes to your own blog first, then syndicates to the platforms above.'
-            : 'Published posts go to your own blog. Add more in <span class="font-semibold">Assistant Profile ▸ Connections</span> to syndicate them further.');
+            : 'Published posts go to your own blog. Add more in <span class="font-semibold">Assistant Settings ▸ Connections</span> to syndicate them further.');
     } catch (err) {
         console.error('[blog-destinations] load failed:', err);
         // Its own copy, for the same reason the KPI cards keep error and no-data apart: a network
@@ -10349,12 +10793,15 @@ window._goToDisclosureField = function() {
 function _kickoffFixLink(key) {
     const fix = _KICKOFF_FIX[key];
     if (!fix) return '';
-    // The strategy card is retitled per role ("Brand Knowledge" for roles that post nothing), so read
-    // the name off the card rather than promising "What I post about" (review, 2026-10-22).
-    const where = key === 'brand_strategy'
-        ? (document.getElementById('opcard-strategy-title')?.textContent.trim() || fix.where)
+    // The strategy card is retitled per role ("How I write"), and hidden for a role with nothing on it,
+    // where "Brand & strategy" is about the brand — so send it to "Your brand" (2026-11-06).
+    const strategyCard = document.querySelector('#tab-profile-home .detail-tab-btn[data-tab="strategy"]');
+    const toBrand = key === 'brand_strategy' && strategyCard?.classList.contains('hidden');
+    const where = toBrand ? 'Your brand'
+        : key === 'brand_strategy' ? (document.getElementById('opcard-strategy-title')?.textContent.trim() || fix.where)
         : fix.where;
-    return ` <button type="button" onclick="${fix.go}" title="Opens ${_escapeHtml(where)}" class="link font-semibold cursor-pointer">${fix.label || 'Do this now →'}</button>`;
+    const go = toBrand ? "window._openBriefDrawer('brand')" : fix.go;
+    return ` <button type="button" onclick="${go}" title="Opens ${_escapeHtml(where)}" class="link font-semibold cursor-pointer">${fix.label || 'Do this now →'}</button>`;
 }
 
 // Kick Off Meeting — readiness checklist + activation gate. Fetches
@@ -10394,7 +10841,7 @@ async function _renderKickOff(assistantId) {
 
     let data;
     try {
-        const res = await fetch(`/.netlify/functions/get-assistant-readiness?id=${assistantId}`);
+        const res = await _fetchPrefetched(`/.netlify/functions/get-assistant-readiness?id=${assistantId}`);
         if (!res.ok) { card.classList.add('hidden'); return; }
         data = await res.json();
     } catch { card.classList.add('hidden'); return; }
@@ -11190,6 +11637,7 @@ async function _loadBrandMetrics(assistantId) {
         const res = await fetch('/.netlify/functions/brand-briefs', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
             body: JSON.stringify({ action: 'performance', assistantId }),
+            bmsRead: true,   // a read: leaves the shared GET cache alone (cached-fetch.js)
         });
         if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
@@ -11630,77 +12078,17 @@ window.fetchAndRenderIntegrations = async function() {
 async function _fetchAndRenderWorkspaceDefaults(assistantId, currentData, triggerAutoSave) {
     // ── Assistant Rules now live per-assistant — see _fetchAndRenderAssistantRules() ──
 
-    // ── Business Information & Brand Knowledge ─────────────────────
-    // There is no longer a separate "Brand Profile". The documents and links the user adds in
-    // Business Information are mandatory context: they're always applied to this assistant as a
-    // strict rule that can't be turned off — so this panel is informational only, no toggle.
-    const knowledgeContainer = document.getElementById('business-knowledge-content');
-    if (knowledgeContainer) {
-        let assets = [];
-        try {
-            const aRes = await fetch('/.netlify/functions/get-workspace-assets');
-            if (aRes.ok) assets = (await aRes.json()).assets || [];
-        } catch { /* non-fatal — still show the strict-rule notice below */ }
-
-        const strictNote = `
-            <div class="flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800 mb-4">
-                <svg class="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                <span>Your business details and every document or link in Business Information are considered by Be More Swan AI whenever it generates content. This is applied as a <strong>strict rule that can't be turned off</strong>.</span>
-            </div>`;
-
-        const catLabel = (c) => ({ tone_of_voice: 'Tone of Voice', logo: 'Brand Logo', product_info: 'Product Knowledge', general: 'General Context' }[c] || 'General Context');
-
-        // Only assets the blueprint actually injects count as "applied": status ∈ {ready, confirmed}
-        // (mirrors assemble-blueprint § 11 in src/utils/blueprint.ts). Anything still processing or
-        // failed is shown separately so we don't claim it's an active strict rule when it isn't.
-        const APPLIED_STATUSES = ['ready', 'confirmed'];
-        const applied = assets.filter(a => APPLIED_STATUSES.includes(a.status));
-        const pending = assets.filter(a => !APPLIED_STATUSES.includes(a.status));
-
-        // Plain-language reason an asset isn't applied yet (mirrors STATUS_HINTS in assets.js).
-        const notAppliedHint = (s) => ({
-            processing: 'Still processing — will apply automatically once ready.',
-            pending:    "Upload didn't finish, so it isn't applied. Remove it and try again.",
-            failed:     "Upload failed, so it isn't applied. Remove it and try again.",
-        }[s] || 'Not applied yet.');
-
-        const appliedList = applied.length ? `
-                <ul class="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
-                    ${applied.map(a => `
-                        <li class="flex items-center justify-between gap-3 px-4 py-3">
-                            <div class="min-w-0">
-                                <p class="text-sm font-semibold text-gray-800 truncate">${_escapeHtml(a.name)}</p>
-                                <p class="text-xs text-gray-500 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
-                            </div>
-                            ${(a.externalUrl && !a.isFile) ? `<a href="${_escapeHtml(a.externalUrl)}" target="_blank" rel="noopener" class="text-xs font-bold text-emerald-700 hover:underline shrink-0">Open</a>` : ''}
-                        </li>`).join('')}
-                </ul>` : `
-                <div class="flex flex-col items-center justify-center py-4 text-center gap-2">
-                    <p class="text-sm text-gray-500">No documents or links applied yet.</p>
-                    <a href="#" onclick="window.loadView('assets')" class="text-sm font-bold text-emerald-600 hover:underline cursor-pointer">Add documents or links in Business Information →</a>
-                </div>`;
-
-        // Muted section for assets that exist but aren't feeding the assistant yet.
-        const pendingList = pending.length ? `
-                <div class="mt-4">
-                    <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Not applied yet</p>
-                    <ul class="divide-y divide-gray-100 border border-dashed border-gray-200 rounded-xl overflow-hidden">
-                        ${pending.map(a => `
-                            <li class="flex items-center justify-between gap-3 px-4 py-3 bg-gray-50/50">
-                                <div class="min-w-0">
-                                    <p class="text-sm font-semibold text-gray-500 truncate">${_escapeHtml(a.name)}</p>
-                                    <p class="text-xs text-gray-500 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
-                                </div>
-                                <span class="text-xs font-medium text-gray-500 shrink-0" title="${_escapeHtml(notAppliedHint(a.status))}">${_escapeHtml(a.status)}</span>
-                            </li>`).join('')}
-                    </ul>
-                </div>` : '';
-
-        knowledgeContainer.innerHTML = strictNote + appliedList + pendingList + `
-                <div class="mt-3 text-right">
-                    <a href="#" onclick="window.loadView('assets')" class="text-sm font-bold text-emerald-600 hover:underline cursor-pointer">Manage in Business Information →</a>
-                </div>`;
+    // ── Your brand (owner 2026-11-06) ─────────────────────────────
+    // The workspace's Brand Assets inside the assistant: style + picture guidelines (brand-style-card.js →
+    // brand-style-dialog.js → brand-kit.ts) and the files and links (brand-files.js, the same functions as
+    // assets.js). Nothing is per assistant, so a change here is the change in Business Information ▸ Brand
+    // Assets. The files are a strict rule every assistant reads; nothing here turns them off.
+    const styleEl = document.getElementById('module-brand-style');
+    if (styleEl && window.BrandStyleCard) {
+        window.BrandStyleCard.mount(styleEl, { assistantName: document.getElementById('detail-name-input')?.value.trim() || null });
     }
+    const knowledgeContainer = document.getElementById('business-knowledge-content');
+    if (knowledgeContainer && window.BrandFiles) window.BrandFiles.mount(knowledgeContainer);
 }
 
 function _escapeHtml(str) {
@@ -11750,7 +12138,7 @@ async function _fetchAndRenderAssistantRules(assistantId) {
 
     let rules = [];
     try {
-        const res = await fetch(`${RULES_API}?assistantId=${_rulesAssistantId}`);
+        const res = await _cachedGet(`${RULES_API}?assistantId=${_rulesAssistantId}`);
         if (res.ok) rules = (await res.json()).rules || [];
     } catch (e) {
         console.warn('Could not load assistant rules:', e);
@@ -12104,7 +12492,7 @@ async function _fetchAndRenderGoals(assistantId) {
 
     let goals = [];
     try {
-        const res = await fetch(`${GOALS_API}?assistantId=${_goalsAssistantId}`);
+        const res = await _fetchPrefetched(`${GOALS_API}?assistantId=${_goalsAssistantId}`);
         _goalsLoadFailed = !res.ok;
         if (res.ok) {
             const data = await res.json();

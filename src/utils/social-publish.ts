@@ -42,6 +42,12 @@ function r2Client(): S3Client {
  * URL is new to the browser, and a page that re-reads its list (My Content polls every 12 s)
  * downloads every private image again on every read.
  */
+/** A short-lived address that saves the file under `filename` rather than opening it. */
+export async function presignR2Attachment(key: string, filename: string, expiresSec = 600): Promise<string> {
+    const safe = filename.replace(/[^\w.-]/g, '-');
+    return getSignedUrl(r2Client(), new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key, ResponseContentDisposition: `attachment; filename="${safe}"` }), { expiresIn: expiresSec });
+}
+
 export async function presignR2Get(key: string, expiresSec = 600, opts: { stableWindowSec?: number } = {}): Promise<string> {
     const command = new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key });
     const w = opts.stableWindowSec;

@@ -65,19 +65,14 @@ const CARD = {
 test.describe('wide screen', () => {
     test.use({ viewport: { width: 1600, height: 950 } });
 
-    test('the plans on the left, the chat docked on the right; the button hides it', async ({ page, api, pageErrors }) => {
+    test('the plans on the left, the chat docked on the right, with no button for it', async ({ page, api, pageErrors }) => {
         stubMentor(api);
         await openTab(page);
         await expect(input(page)).toBeVisible();
         const field = await page.locator('[data-mplan-field="business_plan:offer"]').boundingBox();
         const box = await input(page).boundingBox();
         expect(field!.x + field!.width).toBeLessThanOrEqual(box!.x);
-        const toggle = page.locator('[data-mplan-chat-toggle]');
-        await expect(toggle).toHaveText(/Chat with Iris/);
-        await toggle.click();
-        await expect(input(page)).toBeHidden();
-        await toggle.click();
-        await expect(input(page)).toBeVisible();
+        await expect(page.locator('[data-mplan-chat-toggle]')).toHaveCount(0);
         expect(pageErrors).toEqual([]);
     });
 
