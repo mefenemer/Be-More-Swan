@@ -19,7 +19,7 @@ import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
 import { safeFetchBinary } from './safe-fetch';
 import { normaliseSiteDefinition, type SiteDefinition } from './site-definition';
-import { fetchSiteHtml } from './site-fetch';
+import { fetchSiteHtml, fetchSiteJson } from './site-fetch';
 import { createPageRenderer, type PageRenderer } from './site-js-render';
 import { runImport, type ImportDeps, type ImportReport, type PictureChoice } from './site-import';
 import { claimDraft, definitionOf, endDraft, maxPagesFor, verifySiteAssets, type SiteRow, SITE_WRITE_DEADLINE_MS } from './site-store';
@@ -104,6 +104,7 @@ function liveDeps(db: Db, site: SiteRow, userId: number, renderer: PageRenderer)
         fetchHtml: (url) => fetchSiteHtml(url, CRAWLERS.siteImport, { timeoutMs: PAGE_TIMEOUT_MS, maxBytes: PAGE_MAX_BYTES }),
         // Only after fetchHtml read the same page — so robots.txt has already said yes to it.
         renderHtml: (url) => renderer.render(url),
+        fetchJson: (url) => fetchSiteJson(url, CRAWLERS.siteImport, { timeoutMs: PAGE_TIMEOUT_MS, maxBytes: PAGE_MAX_BYTES }),
         async plan(prompt) {
             const res = await gatewayGenerate({
                 system: prompt.system, messages: [{ role: 'user', content: prompt.user }], maxTokens: 6000,

@@ -26,7 +26,8 @@ import { buildTasterResult, tasterToken, unreadableResult, type TasterResult } f
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
 import { CRAWLERS } from '../lib/robots';
-import { fetchSiteHtml } from './site-fetch';
+import { fetchSiteHtml, fetchSiteJson } from './site-fetch';
+import { inlineEmbeds } from './site-embeds';
 import { fillSitePlanPrices } from './site-plan-prices';
 import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
@@ -312,7 +313,17 @@ export async function fetchSitePageLive(url: string): Promise<FetchResult> {
     if (!r.ok) return r;
     // Our own pages fill plan prices with a script the audit doesn't run (site-plan-prices.ts).
     const html = await fillSitePlanPrices(r.html, r.finalUrl, CRAWLERS.mysteryShopper, FETCH_TIMEOUT_MS);
-    return { ok: true, page: extractSitePage(html, r.finalUrl) };
+    const page = extractSitePage(html, r.finalUrl);
+    if (!page.thin) return { ok: true, page };
+    // A page whose words sit inside an embedded HTML box (Wix "Embed HTML") — read the box too (site-embeds.ts).
+    const opts = { timeoutMs: FETCH_TIMEOUT_MS, maxBytes: FETCH_MAX_BYTES };
+    const embeds = await inlineEmbeds(html, r.finalUrl, {
+        html: (u) => fetchSiteHtml(u, CRAWLERS.mysteryShopper, opts),
+        json: (u) => fetchSiteJson(u, CRAWLERS.mysteryShopper, opts),
+    });
+    if (!embeds.read) return { ok: true, page };
+    const fuller = extractSitePage(embeds.html, r.finalUrl);
+    return { ok: true, page: fuller.wordCount > page.wordCount ? fuller : page };
 }
 
 // ── Database layer ──────────────────────────────────────────────────────────────────────────
