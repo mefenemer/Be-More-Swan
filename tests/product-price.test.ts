@@ -7,7 +7,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { buyablePence, cleanPrice, formatPounds, poundsToPence, priceDisplay, priceFromText } from '../src/utils/product-price';
+import { buyablePence, cleanDeposit, cleanPrice, depositFor, formatMoney, formatPounds, poundsToPence, priceDisplay, priceFromText } from '../src/utils/product-price';
 import { productFields } from '../netlify/functions/org-products';
 
 let passed = 0;
@@ -49,11 +49,11 @@ check('only a fixed price of at least 30p can be bought online', () => {
 });
 
 check('a save is checked, and stores the structure AND the displayed wording', () => {
-    assert.deepStrictEqual(cleanPrice({ priceType: 'fixed', priceAmount: '24.50', priceUnit: ' per  kg ' }), { priceType: 'fixed', priceAmount: 2450, priceUnit: 'per kg', price: '£24.50 per kg' });
+    assert.deepStrictEqual(cleanPrice({ priceType: 'fixed', priceAmount: '24.50', priceUnit: ' per  kg ' }), { priceType: 'fixed', priceAmount: 2450, priceUnit: 'per kg', priceCurrency: 'GBP', price: '£24.50 per kg' });
     assert.ok('error' in cleanPrice({ priceType: 'fixed', priceAmount: 'abc' }));
     assert.ok('error' in cleanPrice({ priceType: 'text', price: '  ' }));
     assert.ok('error' in cleanPrice({ priceType: 'discounted' }));
-    assert.deepStrictEqual(cleanPrice({ priceType: '' }), { priceType: null, priceAmount: null, priceUnit: null, price: null });
+    assert.deepStrictEqual(cleanPrice({ priceType: '' }), { priceType: null, priceAmount: null, priceUnit: null, priceCurrency: 'GBP', price: null });
 });
 
 check('an older written price is read into the structure where simple, else kept as their words', () => {
@@ -80,6 +80,55 @@ check('the migration adds the structure, keeps old prices as words, and reads th
     assert.ok(read('db/schema.ts').includes('priceAmount: integer("price_amount")'));
     const ui = read('assets.html');
     assert.ok(ui.includes('function priceFieldsHtml(v)') && ui.includes("opt('fixed', 'A fixed price')") && ui.includes('This is the one place prices live'));
+});
+
+console.log('\nCurrencies');
+
+check('a price can be in pounds, dollars or euros — shown with its own symbol', () => {
+    assert.strictEqual(formatMoney(4900, 'USD'), '$49');
+    assert.strictEqual(formatMoney(4950, 'eur'), '€49.50');
+    assert.strictEqual(formatMoney(120000, 'AUD'), 'A$1,200');
+    assert.strictEqual(formatMoney(4900, null), '£49', 'no currency = pounds, as every older price');
+    assert.strictEqual(poundsToPence('$49'), 4900);
+    assert.strictEqual(poundsToPence('A$ 1,200.50'), 120050);
+    assert.strictEqual(poundsToPence('€9.99'), 999);
+    assert.strictEqual(priceDisplay({ priceType: 'from', priceAmount: 45000, priceUnit: 'a month', priceCurrency: 'CAD' }), 'from C$450 a month');
+    assert.deepStrictEqual(cleanPrice({ priceType: 'fixed', priceAmount: '49', priceCurrency: 'usd' }), { priceType: 'fixed', priceAmount: 4900, priceUnit: null, priceCurrency: 'USD', price: '$49' });
+    assert.ok('error' in cleanPrice({ priceType: 'fixed', priceAmount: '49', priceCurrency: 'JPY' }), 'only the currencies we list');
+});
+
+check('a fixed price in any listed currency can be bought, above that currency\'s Stripe minimum', () => {
+    assert.strictEqual(buyablePence({ priceType: 'fixed', priceAmount: 4900, priceCurrency: 'USD' }), 4900);
+    assert.strictEqual(buyablePence({ priceType: 'fixed', priceAmount: 40, priceCurrency: 'USD' }), null, '50¢ minimum');
+    assert.strictEqual(buyablePence({ priceType: 'fixed', priceAmount: 40, priceCurrency: 'GBP' }), 40, '30p minimum');
+    assert.strictEqual(buyablePence({ priceType: 'fixed', priceAmount: 4900, priceCurrency: 'XYZ' }), null);
+});
+
+check('deposits stay in pounds: refused on another currency, and a price moved out of pounds drops its deposit', () => {
+    assert.ok('error' in cleanDeposit({ depositType: 'fixed', depositAmount: '10' }, { priceType: 'fixed', priceAmount: 4900, priceCurrency: 'USD' }));
+    assert.ok(!('error' in cleanDeposit({ depositType: 'fixed', depositAmount: '10' }, { priceType: 'fixed', priceAmount: 4900, priceCurrency: 'GBP' })));
+    assert.strictEqual(depositFor({ depositType: 'fixed', depositAmount: 1000, priceType: 'fixed', priceAmount: 4900, priceCurrency: 'EUR' }), null);
+    assert.strictEqual(depositFor({ depositType: 'fixed', depositAmount: 1000, priceType: 'fixed', priceAmount: 4900 }), 1000);
+    const moved = productFields({ priceType: 'fixed', priceAmount: 49, priceCurrency: 'USD' }, true);
+    assert.ok('values' in moved && moved.values.depositType === null && moved.values.price === '$49');
+    assert.ok('error' in productFields({ priceType: 'fixed', priceAmount: 49, priceCurrency: 'USD', depositType: 'fixed', depositAmount: 10 }, true));
+});
+
+check('older written prices: unambiguous symbols are read with their currency; a bare "$" stays their words', () => {
+    assert.deepStrictEqual(priceFromText('€25'), { priceType: 'fixed', priceAmount: 2500, priceUnit: null, priceCurrency: 'EUR' });
+    assert.deepStrictEqual(priceFromText('from US$450'), { priceType: 'from', priceAmount: 45000, priceUnit: null, priceCurrency: 'USD' });
+    assert.deepStrictEqual(priceFromText('$49'), { priceType: 'text', priceAmount: null, priceUnit: null, priceText: '$49' });
+});
+
+check('checkout charges in the product\'s currency; the editor, API and migration carry it', () => {
+    assert.ok(read('src/utils/site-shop.ts').includes("currency: (product.currency || 'GBP').toLowerCase()"));
+    assert.ok(!read('src/utils/site-shop.ts').includes("currency: 'gbp',"), 'no hard-coded sterling charge');
+    assert.ok(read('netlify/functions/org-products.ts').includes('priceCurrency: orgProducts.priceCurrency'));
+    const sql = read('db/z-product-price-currency.sql');
+    assert.ok(sql.includes("ADD COLUMN IF NOT EXISTS price_currency TEXT NOT NULL DEFAULT 'GBP'") && sql.includes("IN ('GBP', 'USD', 'EUR', 'AUD', 'CAD')"));
+    assert.ok(read('db/schema.ts').includes('priceCurrency: text("price_currency")'));
+    const ui = read('assets.html');
+    assert.ok(ui.includes('id="op-price-currency"') && ui.includes("priceCurrency: get('op-price-currency')"));
 });
 
 console.log(`\n${passed}/${total} passed`);

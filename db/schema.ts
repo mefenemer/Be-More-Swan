@@ -5526,6 +5526,7 @@ export const orgProducts = pgTable("org_products", {
   // the server from these (product-price.ts). Only 'fixed' can be bought online.
   priceType: text("price_type"),          // 'fixed' | 'from' | 'on_request' | 'text' | null
   priceAmount: integer("price_amount"),   // pence
+  priceCurrency: text("price_currency").notNull().default("GBP"),  // db/z-product-price-currency.sql: GBP | USD | EUR | AUD | CAD
   priceUnit: text("price_unit"),
   durationMinutes: integer("duration_minutes"),
   // Deposit when booked from the website (db/z-booking-deposits.sql): 'fixed' pence | 'percent' of a fixed price.

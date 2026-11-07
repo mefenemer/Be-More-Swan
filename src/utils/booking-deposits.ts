@@ -39,7 +39,7 @@ export const holdUntil = (now: Date) => new Date(now.getTime() + HOLD_MINUTES * 
 /** The deposit a service or class asks, for `places`, if this workspace can take card payments. */
 export async function depositToTake(db: Db, orgId: number, serviceId: number | null, places: number): Promise<number | null> {
     if (!serviceId) return null;
-    const [p] = await db.select({ depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount })
+    const [p] = await db.select({ depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceCurrency: orgProducts.priceCurrency })
         .from(orgProducts).where(and(eq(orgProducts.id, serviceId), eq(orgProducts.organisationId, orgId))).limit(1);
     const pence = p ? depositFor(p, places) : null;
     if (pence === null) return null;
