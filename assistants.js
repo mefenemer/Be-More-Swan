@@ -1148,6 +1148,9 @@ window._activateMainTab = function(name) {
     // The strip belongs to the landing tab only; re-judged after the tab has switched.
     setTimeout(() => window._renderNeedsYou?.(), 0);
     _syncTabChat(name);
+    // A link from a docked chat can change tab while one is full screen: its panel hides, and the page must scroll again.
+    const fullPanel = document.querySelector('.main-tab-content[data-rq-full]');
+    if (fullPanel && fullPanel.id !== `maintab-${name}`) window._tabSetFull(fullPanel.id.replace('maintab-', ''), false);
     document.querySelectorAll('.main-tab-btn').forEach(b => {
         const on = b.dataset.maintab === name;
         b.classList.toggle('active-tab', on);
@@ -1396,14 +1399,8 @@ window.detailRqOpenStatus = function(statusKey, btn) {
     // Brand pink: emerald-700/800 are remapped to neon / deep pink; emerald-600 is still real green.
     // Deep pink for the text — neon pink on white is 3.8:1, too faint for small text.
     const active = btn || document.querySelector(`.detail-rq-col[data-status="${statusKey}"]`);
-    document.querySelectorAll('.detail-rq-col').forEach(t => {
-        t.classList.remove('border-b-2', 'border-emerald-800', 'text-emerald-800');
-        t.classList.add('text-gray-500');
-        t.setAttribute('aria-selected', t === active ? 'true' : 'false');
-        t.tabIndex = t === active ? 0 : -1;
-    });
-    // border-emerald-800 too: border-b-2 alone draws the default grey, so only the text turned pink.
-    if (active) { active.classList.add('border-b-2', 'border-emerald-800', 'text-emerald-800'); active.classList.remove('text-gray-500'); }
+    _rqMarkCol(active);
+    _rqShowBlogSetup(false);
     const done = _detailRqRenderGroups(statusKey);
     Promise.resolve(done).then(_rqSyncFoldAll, _rqSyncFoldAll);
     return done;
@@ -1430,26 +1427,65 @@ window._rqFoldAll = function() {
     });
     _rqSyncFoldAll();
 };
-window._rqSetFull = function(on) {
-    const panel = document.getElementById('maintab-review-queue');
-    const btn = document.getElementById('detail-rq-full-btn');
+// Full screen for any main tab (owner, 2026-11-07: every live assistant has one, at the right of the tab's header,
+// with its New button beside it). The tab's panel goes over the page; a chat docked beside it stays beside it.
+// Briefs, Videos and the Website tab have their own, because each also repaints what it holds.
+const _TAB_FULL_CLASS = 'btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap';
+window._tabSetFull = function(name, on) {
+    const panel = document.getElementById(`maintab-${name}`);
     if (!panel) return;
     panel.toggleAttribute('data-rq-full', !!on);
     if (window.ScrollLock) { if (on) window.ScrollLock.lock('rq-full', { scoped: true }); else window.ScrollLock.release('rq-full'); }
-    if (btn) {
+    document.querySelectorAll(`[data-tab-full-btn="${name}"]`).forEach((btn) => {
         btn.textContent = on ? 'Exit full screen' : 'Full screen';
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-        btn.title = on ? 'Back to the page (Esc)' : 'Use the whole screen for this list';
+        btn.title = on ? 'Back to the page (Esc)' : 'Use the whole screen for this tab';
         btn.focus({ preventScroll: true });
-    }
+    });
+};
+window._rqSetFull = (on) => window._tabSetFull('review-queue', on);
+/** The button, for a tab that paints its own header. Reads the panel, so a repaint keeps saying the right thing. */
+window._tabFullBtn = function(name) {
+    const on = !!document.getElementById(`maintab-${name}`)?.hasAttribute('data-rq-full');
+    return `<button type="button" data-tab-full-btn="${name}" onclick="window._tabSetFull('${name}', !document.getElementById('maintab-${name}').hasAttribute('data-rq-full'))" aria-pressed="${on}" title="${on ? 'Back to the page (Esc)' : 'Use the whole screen for this tab'}" class="${_TAB_FULL_CLASS}">${on ? 'Exit full screen' : 'Full screen'}</button>`;
 };
 // Esc leaves it, unless an OPEN dialog (a post, blog or email pop-up) is taking Esc. "Any dialog" is
 // not enough: the settings drawer is always in the page as one, inert while shut.
 document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || !document.getElementById('maintab-review-queue')?.hasAttribute('data-rq-full')) return;
+    if (e.key !== 'Escape') return;
+    const panel = document.querySelector('.main-tab-content[data-rq-full]');
+    if (!panel) return;
     const dialogOpen = [...document.querySelectorAll('[role="dialog"]')].some((d) => !d.inert && !d.hidden && !d.classList.contains('hidden') && d.getClientRects().length && getComputedStyle(d).visibility !== 'hidden');
-    if (!dialogOpen) window._rqSetFull(false);
+    if (!dialogOpen) window._tabSetFull(panel.id.replace('maintab-', ''), false);
 });
+
+// Blog setup: the last sub tab of the Blog Writer's Blogs (owner, 2026-11-07, as on the Website tab). It holds
+// Search Console and the blog widget, which belong to the whole blog; Blog Studio lends them to this panel.
+function _rqMarkCol(active) {
+    document.querySelectorAll('.detail-rq-col').forEach(t => {
+        t.classList.remove('border-b-2', 'border-emerald-800', 'text-emerald-800');
+        t.classList.add('text-gray-500');
+        t.setAttribute('aria-selected', t === active ? 'true' : 'false');
+        t.tabIndex = t === active ? 0 : -1;
+    });
+    // border-emerald-800 too: border-b-2 alone draws the default grey, so only the text turned pink.
+    if (active) { active.classList.add('border-b-2', 'border-emerald-800', 'text-emerald-800'); active.classList.remove('text-gray-500'); }
+}
+function _rqShowBlogSetup(on) {
+    const panel = document.getElementById('detail-rq-blog-setup');
+    const groups = document.getElementById('detail-rq-groups');
+    if (panel) { panel.classList.toggle('hidden', !on); panel.style.display = on ? '' : 'none'; }
+    if (groups) { groups.classList.toggle('hidden', !!on); groups.style.display = on ? 'none' : ''; }
+    if (!on) window.unmountBlogSetup?.();
+}
+window._rqOpenBlogSetup = function(btn) {
+    const pill = btn || document.getElementById('detail-rq-col-setup');
+    const panel = document.getElementById('detail-rq-blog-setup');
+    if (!pill || !panel) return;
+    _rqMarkCol(pill);
+    _rqShowBlogSetup(true);
+    window.mountBlogSetup?.(panel, window._currentAssistantId);
+};
 
 // Re-render whichever column is currently open, e.g. after a new post is added elsewhere
 // (the Create Post sheet) so the list reflects it without the user manually switching tabs.
@@ -2022,7 +2058,7 @@ const _RQ_RECORD_STATE = { review: 'pending_approval', approved: 'approved', sch
 // The label is presentation only — renaming one must never touch these keys.
 const _RQ_COLUMN_LABELS = {
     review: 'Review', approved: 'Approved', scheduled: 'Scheduled',
-    posted: 'Posted', attention: 'Needs attention', archived: 'Archived',
+    posted: 'Posted', attention: 'Needs attention', archived: 'Archived', setup: 'Blog setup',
 };
 
 /**
@@ -7266,8 +7302,8 @@ function _applyDashboardRegistry(data) {
     toggle('detail-rq-col-approved', rqIsRecords || rqIsNewsletter);
     // "Sent" for emails and "Published" for blogs (set below); every other role keeps "Posted".
     setText('detail-rq-col-label-posted', 'Posted');
-    const setupBtn = document.getElementById('detail-rq-setup-btn');
-    if (setupBtn) setupBtn.style.display = rqIsBlog ? '' : 'none';
+    const setupBtn = document.getElementById('detail-rq-col-setup');
+    if (setupBtn) { setupBtn.classList.toggle('hidden', !rqIsBlog); setupBtn.style.display = rqIsBlog ? '' : 'none'; }
     // Named after the role's own tab ("Emails", "Outreach"…) — every non-blog role was announced
     // as "Posts by stage" (review, 2026-10-22).
     document.querySelector('#maintab-review-queue [role="tablist"]')?.setAttribute('aria-label',
@@ -9985,20 +10021,32 @@ window._refreshAssistantMetrics = function() {
     }, 250);
 };
 
+// Work finishes in the background and the page stays open, with a chat beside the list now: the strip used to
+// keep the number from when the page opened. Refreshed, quietly, whenever a post moved or a notification came in.
+let _taskShareTimer = null;
+function _refreshTaskShareSoon() {
+    clearTimeout(_taskShareTimer);
+    _taskShareTimer = setTimeout(() => {
+        const id = window._currentAssistantId;
+        if (id && document.getElementById('detail-task-share')) _renderAssistantTaskShare(id, { fresh: true });
+    }, 1500);
+}
+document.addEventListener('posts:changed', _refreshTaskShareSoon);
+document.addEventListener('bms:notifications-arrived', _refreshTaskShareSoon);
 // This assistant's share of the month's task allowance (#detail-task-share), beside what every other
 // assistant used. Totals are the org's (check-capacity: usage_counters); the split is task_ledger by
 // assistant (get-usage-summary) — the same two numbers the dashboard's "Tasks this month" card uses.
 // Hidden when the plan has no task limit or the workspace is still on the old credits.
-async function _renderAssistantTaskShare(assistantId) {
+async function _renderAssistantTaskShare(assistantId, opts = {}) {
     const strip = document.getElementById('detail-task-share');
     if (!strip) return;
-    strip.classList.add('hidden');
+    if (!opts.fresh) strip.classList.add('hidden');
     // The Campaign Orchestrator's Budget & Control strip already states the month's allowance, with
     // the work committed to campaigns beside it — two counts of one number (review, 2026-10-22).
     const roleKey = (window._detailCurrentData || {}).roleKey;
     if ((window.AssistantDashboardRegistry?.get?.(roleKey) || {}).allowanceInControlStrip) return;
     try {
-        const get = (u) => (window.bmsCachedFetch ? window.bmsCachedFetch(u) : fetch(u)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const get = (u) => (window.bmsCachedFetch ? window.bmsCachedFetch(u, { fresh: !!opts.fresh }) : fetch(u)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         const [cap, us] = await Promise.all([get('/.netlify/functions/check-capacity'), get('/.netlify/functions/get-usage-summary')]);
         // The user may have opened another assistant while this was loading.
         if (Number(window._currentAssistantId) !== Number(assistantId)) return;

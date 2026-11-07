@@ -132,7 +132,7 @@
     el('bms-chat-close').addEventListener('click', closeAssistantChat);
     el('bms-chat-mode-chat').addEventListener('click', function () { setMode('chat'); });
     el('bms-chat-mode-team').addEventListener('click', function () { setMode('team'); });
-    // Team Chat is Notifications → Messages now; open it on this assistant's thread.
+    // Team Chat is a tab of Notifications now; open it on this assistant's thread.
     el('bms-chat-team-open').addEventListener('click', function () {
       var id = Number(state.assistantId) || null;
       closeAssistantChat();

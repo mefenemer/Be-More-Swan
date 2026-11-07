@@ -82,7 +82,7 @@ check('a non-publishing assistant no longer fetches posts, blogs and emails it c
 console.log('\n──── Activity ────');
 
 check('every non-social role has its own work in the feed (prod showed only "Terms accepted")', () => {
-    for (const r of ['newsletter_editor', 'blog_writer', 'campaign_orchestrator', 'brand_designer', 'accounts_receivable_clerk', 'tier1_support_agent', 'crm_enricher', 'meeting_note_taker']) {
+    for (const r of ['business_mentor', 'video_producer', 'newsletter_editor', 'blog_writer', 'campaign_orchestrator', 'brand_designer', 'accounts_receivable_clerk', 'tier1_support_agent', 'crm_enricher', 'meeting_note_taker']) {
         assert.ok(ROLE_ACTIVITY_ROLES.has(r), `${r} has no activity source`);
     }
     for (const [role, type] of Object.entries(ROLE_RECORD_TYPES)) {

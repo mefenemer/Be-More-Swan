@@ -817,7 +817,7 @@
     renderResults(audit, state.data?.latest);
     if (!audit) {
       // The one thing to do here before the first check: not hidden behind a click.
-      el.innerHTML = '<div data-no-fold>' + card(`
+      el.innerHTML = `<div class="mb-3 flex justify-end">${window._tabFullBtn?.('website') || ''}</div><div data-no-fold>` + card(`
         <h3 class="text-base font-black text-gray-900">Which website should ${esc(state.assistantName || 'your Mystery Shopper')} check?</h3>
         <p class="text-xs text-gray-600 mt-1 mb-4">It reads your homepage the way a buyer would and tells you what is costing you customers. You can also just tell it in chat.</p>
         ${settingsForm(null)}${noteHtml()}`) + '</div>';
@@ -830,6 +830,7 @@
     const panel = { checks: () => checksPanel(audit, latest), review: () => reviewPanel(b), progress: () => progressPanel(b), done: () => donePanel(b), attention: () => attentionPanel(b), archived: () => archivedPanel(b) }[state.tab] || (() => checksPanel(audit, latest));
     el.innerHTML = `
       <div class="space-y-4">
+        <div class="flex items-center justify-between gap-3"><h2 class="text-base font-bold text-gray-900 shrink-0">Website</h2><div class="flex flex-wrap items-center justify-end gap-2">${window._tabFullBtn?.('website') || ''}</div></div>
         ${subtabsHtml(counts(b))}
         ${noteHtml()}
         <div role="tabpanel" aria-labelledby="sa-subtab-${state.tab}" class="space-y-4">${panel()}</div>

@@ -634,11 +634,12 @@
     }
 
     return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
+      <div data-no-fold class="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
         <div class="p-4 flex flex-wrap items-center gap-2">
-          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mr-auto">Lead searches</p>
+          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide" style="margin-right:auto">Lead searches</p>
           <button type="button" data-si-lead-ideas
             class="btn-secondary min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg border transition">Review Lead Ideas</button>
+          ${window._tabFullBtn?.('signals') || ''}
           <button type="button" data-si-new-search
             class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">Find New Leads</button>
         </div>

@@ -31,7 +31,7 @@ export const TAKE_ME_THERE_PLACES: Readonly<Record<string, TakeMeTherePlace>> = 
     calendar: { label: 'Content Calendar', view: 'calendar' },
     review_queue: { label: 'Review', view: 'review-queue' },
     notifications: { label: 'Notifications', view: 'notifications' },
-    team_chat: { label: 'Notifications ▸ Messages (Team Chat)', view: 'notifications', notificationsTab: 'messages' },
+    team_chat: { label: 'Notifications ▸ Team Chat', view: 'notifications', notificationsTab: 'messages' },
     audience: { label: 'Audience', view: 'audience' },
     orders: { label: 'Orders', view: 'orders' },
     my_assistants: { label: 'My Assistants', view: 'assistants' },

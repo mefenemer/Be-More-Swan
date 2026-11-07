@@ -18,7 +18,7 @@ import type { getDb } from '../../db/client';
 import {
     assistantRecords, blogPosts, bookings, campaignDecisions, campaignOrders, campaigns, newsletterIssues, newsletterSequences,
     siteAuditFixes, siteAuditRuns, siteAudits, siteEnquiries, siteImports, siteOrders, sites, siteVersions, taskLedger,
-    taskRuns, visualBriefOptions, visualBriefs,
+    mentorJobs, mentorProposals, mentorReviews, taskRuns, videoProjects, visualBriefOptions, visualBriefs,
 } from '../../db/schema';
 
 type Db = ReturnType<typeof getDb>;
@@ -34,7 +34,7 @@ const RECORD_NOUNS: Record<string, { type: string; made: string; noun: string }>
 };
 
 /** The roles this module adds rows for. Anything else gets the shared feed unchanged. */
-export const ROLE_ACTIVITY_ROLES = new Set([...Object.keys(RECORD_NOUNS), 'newsletter_editor', 'blog_writer', 'campaign_orchestrator', 'brand_designer', 'mystery_shopper', 'website_assistant']);
+export const ROLE_ACTIVITY_ROLES = new Set([...Object.keys(RECORD_NOUNS), 'newsletter_editor', 'blog_writer', 'campaign_orchestrator', 'brand_designer', 'mystery_shopper', 'website_assistant', 'business_mentor', 'video_producer']);
 
 const clip = (s: string | null | undefined, n = 70) => {
     const t = (s ?? '').replace(/\s+/g, ' ').trim();
@@ -180,7 +180,66 @@ export async function roleActivityItems(db: Db, args: {
     }
 
     if (roleKey === 'website_assistant') items.push(...await websiteItems(db, { orgId, assistantId, since, limit }));
+    if (roleKey === 'business_mentor') items.push(...await mentorItems(db, { orgId, assistantId, since, limit }));
+    if (roleKey === 'video_producer') items.push(...await videoItems(db, { orgId, assistantId, since, limit }));
 
+    return items;
+}
+
+/**
+ * The Business Mentor: its suggestions and what became of them, its weekly reviews, and the research and
+ * plan drafts it did. Before this its tab held little beyond "Terms accepted". Its tables are created by
+ * later SQL files, and their readers tolerate them being missing, so a failed read is simply no rows.
+ */
+async function mentorItems(db: Db, args: { orgId: number; assistantId: number; since: (col: any) => any[]; limit: number }): Promise<ActivityItem[]> {
+    const { orgId, assistantId, since, limit } = args;
+    const items: ActivityItem[] = [];
+    const proposals = await db.select({ id: mentorProposals.id, title: mentorProposals.title, status: mentorProposals.status, shownAt: mentorProposals.shownAt, decidedAt: mentorProposals.decidedAt })
+        .from(mentorProposals).where(and(eq(mentorProposals.organisationId, orgId), eq(mentorProposals.aiAssistantId, assistantId), ...since(mentorProposals.shownAt)))
+        .orderBy(desc(mentorProposals.shownAt)).limit(limit).catch(() => []);
+    for (const p of proposals) {
+        items.push({ id: `mentor-suggestion-${p.id}`, type: 'mentor_suggestion', icon: 'lightbulb', description: `Suggested: ${clip(p.title)}.`, createdAt: p.shownAt, status: p.status === 'shown' ? 'needs_input' : 'info' });
+        if (p.decidedAt && (p.status === 'accepted' || p.status === 'dismissed')) {
+            const accepted = p.status === 'accepted';
+            items.push({ id: `mentor-decided-${p.id}`, type: 'mentor_decision', icon: accepted ? 'check-circle' : 'clock', description: `You ${accepted ? 'accepted' : 'dismissed'} a suggestion: ${clip(p.title)}.`, createdAt: p.decidedAt, status: accepted ? 'success' : 'info' });
+        }
+    }
+    const reviews = await db.select({ id: mentorReviews.id, status: mentorReviews.status, outcome: mentorReviews.outcome, createdAt: mentorReviews.createdAt, finishedAt: mentorReviews.finishedAt })
+        .from(mentorReviews).where(and(eq(mentorReviews.organisationId, orgId), eq(mentorReviews.aiAssistantId, assistantId), ...since(mentorReviews.createdAt)))
+        .orderBy(desc(mentorReviews.createdAt)).limit(limit).catch(() => []);
+    for (const r of reviews) {
+        if (r.status !== 'done' && r.status !== 'failed') continue;
+        const failed = r.status === 'failed';
+        items.push({ id: `mentor-review-${r.id}`, type: 'mentor_review', icon: failed ? 'alert' : 'check-circle', description: failed ? 'A weekly review could not be finished.' : r.outcome === 'not_enough_data' ? 'Looked at your week: not enough to review yet.' : 'Wrote your weekly review.', createdAt: r.finishedAt ?? r.createdAt, status: failed ? 'failed' : 'success' });
+    }
+    const jobs = await db.select({ id: mentorJobs.id, kind: mentorJobs.kind, status: mentorJobs.status, createdAt: mentorJobs.createdAt, finishedAt: mentorJobs.finishedAt })
+        .from(mentorJobs).where(and(eq(mentorJobs.organisationId, orgId), eq(mentorJobs.aiAssistantId, assistantId), ...since(mentorJobs.createdAt)))
+        .orderBy(desc(mentorJobs.createdAt)).limit(limit).catch(() => []);
+    for (const j of jobs) {
+        if (j.status !== 'done' && j.status !== 'failed') continue;
+        const failed = j.status === 'failed';
+        const what = j.kind === 'research' ? 'a question you asked it to look up' : 'a plan you asked it to draft';
+        items.push({ id: `mentor-job-${j.id}`, type: 'mentor_job', icon: failed ? 'alert' : 'sparkles', description: failed ? `Could not finish ${what}.` : `Finished ${what}.`, createdAt: j.finishedAt ?? j.createdAt, status: failed ? 'failed' : 'success' });
+    }
+    return items;
+}
+
+/**
+ * The Video Producer: each video from its brief. Finished videos are posts, which the shared feed already
+ * lists; this adds what comes before that, the part that had no row at all: storyboards and failed makes.
+ */
+async function videoItems(db: Db, args: { orgId: number; assistantId: number; since: (col: any) => any[]; limit: number }): Promise<ActivityItem[]> {
+    const { orgId, assistantId, since, limit } = args;
+    const rows = await db.select({ id: videoProjects.id, title: videoProjects.title, status: videoProjects.status, createdAt: videoProjects.createdAt, updatedAt: videoProjects.updatedAt })
+        .from(videoProjects).where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, assistantId), ...since(videoProjects.updatedAt)))
+        .orderBy(desc(videoProjects.updatedAt)).limit(limit).catch(() => []);
+    const items: ActivityItem[] = [];
+    for (const v of rows) {
+        items.push({ id: `video-${v.id}`, type: 'video_project', icon: 'video', description: `New video: ${clip(v.title)}.`, createdAt: v.createdAt, status: 'info' });
+        if (v.status === 'planned') items.push({ id: `video-planned-${v.id}`, type: 'video_planned', icon: 'edit', description: `Storyboard ready to check: ${clip(v.title)}.`, createdAt: v.updatedAt, status: 'needs_input' });
+        else if (v.status === 'built') items.push({ id: `video-built-${v.id}`, type: 'video_built', icon: 'check-circle', description: `Finished making: ${clip(v.title)}.`, createdAt: v.updatedAt, status: 'success' });
+        else if (v.status === 'failed') items.push({ id: `video-failed-${v.id}`, type: 'video_failed', icon: 'alert', description: `Could not make: ${clip(v.title)}.`, createdAt: v.updatedAt, status: 'failed' });
+    }
     return items;
 }
 

@@ -588,7 +588,7 @@
       briefsTab: {
         label: 'Briefs',
       },
-      // Calendar tab: briefs on their due date (calendar.js _datedItems).
+      // Calendar tab: each brief received, drafted, approved and due (calendar.js _datedItems).
       calendarItems: 'briefs',
       // Rules tab: read by its art direction and its chat (visual-briefs.ts, RULE_READING_ROLES).
       rulesScope: 'designer',

@@ -3100,7 +3100,7 @@ function formatCurrency(amount, currency) {
     });
 
     async function loadView(routeKey, param = null) {
-      // Team Chat is the Messages tab of Notifications now (2026-10-23). The old key keeps working —
+      // Team Chat is a tab of Notifications now (2026-10-23). The old key keeps working —
       // the chat pop-up's "Open Team Chat", a remembered last view, an old deep link.
       if (routeKey === 'team') { routeKey = 'notifications'; param = { tab: 'messages' }; }
       if (!routes[routeKey]) return;
@@ -6378,11 +6378,12 @@ async function refreshPendingBadge(opts = {}) {
         // learn by clicking it.
         // `attention` = the tab's family; emails come from newsletter-issues `review=1` (see below).
         // Articles count too (the To approve tab includes them) — see _rqBlogReviewCount.
-        const [socialRes, failedRes, emailRes, blogAwaiting] = await Promise.all([
+        const [socialRes, failedRes, emailRes, blogAwaiting, waiting] = await Promise.all([
             only ? Promise.resolve({ ok: false }) : fetch('/.netlify/functions/get-social-drafts?status=pending_approval&limit=1&offset=0'),
             fetch('/.netlify/functions/get-social-drafts?status=attention&limit=1&offset=0'),
             _rqNewsletterReviewRes(),
             only ? 0 : _rqBlogReviewCount(),
+            only ? null : _rqWaiting(),
         ]);
         const body = socialRes.ok ? await socialRes.json() : {};
         // `total` is the grouped count. Fall back to grouping the page only if it is missing.
@@ -6394,7 +6395,7 @@ async function refreshPendingBadge(opts = {}) {
         const emails = emailRes && emailRes.ok ? await emailRes.json().catch(() => ({})) : {};
         const emailAwaiting = Number(emails.awaiting) || 0;
         const emailFailed = Number(emails.failed) || 0;
-        const reviewCount = socialCount + emailAwaiting + blogAwaiting;
+        const reviewCount = socialCount + emailAwaiting + blogAwaiting + (waiting?.total || 0);
         if (!only) _rqSetPendingBadge(reviewCount);
 
         if (failedRes.ok) {
@@ -6423,6 +6424,32 @@ async function refreshPendingBadge(opts = {}) {
         }
         _rqLastSocialCount = reviewCount;
     } catch { /* non-blocking */ }
+}
+
+// Everything else waiting on the user, from every assistant (review-waiting.ts): leads, invoices, decisions, designs,
+// storyboards, fixes, enquiries, bookings, suggestions. Shared the same way as the emails below, so the pill and
+// the list add up. Null when the feed is unreachable: the page still lists what it has.
+let _rqWaitingReq = null;   // { at, p }
+function _rqWaiting() {
+    if (!_rqWaitingReq || Date.now() - _rqWaitingReq.at > 3000) {
+        _rqWaitingReq = { at: Date.now(), p: fetch('/.netlify/functions/review-waiting').then(r => (r.ok ? r.json() : null)).catch(() => null) };
+    }
+    return _rqWaitingReq.p;
+}
+// One row of it: opens that assistant's own tab, where it is approved by that tab's own rules.
+function _rqOpenWaiting(assistantId, tab) {
+    window._assistantDetailInitialTab = tab;
+    window.routeToAssistantDetail?.(assistantId);
+}
+function rqRenderWaitingRow(g, item) {
+    return `<button type="button" onclick="_rqOpenWaiting(${Number(g.assistantId)}, '${_rqEsc(g.tab)}')" data-rq-waiting="${_rqEsc(g.key)}"
+        class="focus-ring w-full text-left flex items-center gap-3 py-3 cursor-pointer hover:bg-gray-50 -mx-4 px-4 transition">
+        <span class="flex-1 min-w-0">
+          <span class="block text-sm font-semibold text-gray-900 truncate">${_rqEsc(item.title)}</span>
+          <span class="block text-xs text-gray-600 truncate">${item.at ? `${_rqEsc(rqTimeAgo(item.at))} · ` : ''}open it on ${_rqEsc(g.assistantName)}’s page</span>
+        </span>
+        <svg class="w-4 h-4 text-gray-400 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </button>`;
 }
 
 // newsletter-issues?review=1, shared: the badge poll and the Review list both ask for it as the page
@@ -6627,15 +6654,17 @@ async function rqRenderGroups(statusKey, opts = {}) {
         try { const bw = await window.resolveBlogWriter(); _rqBlogWriterActive = !!bw; _rqBlogWriterName = bw?.name || null; } catch { /* non-blocking */ }
     }
 
-    let posts = [], blogPosts = [], emails = [], emailsShown = false;
+    let posts = [], blogPosts = [], emails = [], emailsShown = false, waiting = null;
     let pj;
     try {
         const wantEmail = !!RQ_EMAIL_STATUSES[statusKey];
-        const [pRes, allBlog, eRes] = await Promise.all([
+        const [pRes, allBlog, eRes, w] = await Promise.all([
             fetch(_rqPostsUrl(col, limit, 0)),
             _rqBlogWriterActive ? _rqFetchBlogPosts(quiet) : Promise.resolve(null),
             wantEmail ? _rqNewsletterReviewRes() : Promise.resolve(null),
+            statusKey === 'review' ? _rqWaiting() : Promise.resolve(null),
         ]);
+        waiting = w;
         // A non-OK answer is a FAILURE, not "no posts": it used to render "No social media posts
         // awaiting review", a false all-clear from a server that didn't answer.
         if (!pRes.ok) throw new Error('posts load failed');
@@ -6687,7 +6716,7 @@ async function rqRenderGroups(statusKey, opts = {}) {
         // the current page, which would report "10 awaiting review" on a queue of 24.
         const pending = _rqPostsTotal ?? postGroups.length;
         // The TAB counts every group under it, so the group pills add up to it.
-        const tabCount = pending + (_rqBlogWriterActive ? blogPosts.length : 0) + emails.length;
+        const tabCount = pending + (_rqBlogWriterActive ? blogPosts.length : 0) + emails.length + (waiting?.total || 0);
         const badge = document.getElementById('rq-col-count-review');
         if (badge) { badge.textContent = tabCount || ''; badge.classList.toggle('hidden', !tabCount); }
         // The sidebar pill: the same sum as the tab and as the 60s poll, so the two writers can't
@@ -6697,11 +6726,20 @@ async function rqRenderGroups(statusKey, opts = {}) {
     // The cards on screen — a session covers what is loaded, and says so at the end if more wait.
     _rqSyncReviewAllButton(statusKey === 'review' ? postGroups.length : 0);
 
-    const groups = [...RQ_GROUPS, ...(_rqBlogWriterActive ? [RQ_BLOG_GROUP] : []), ...(emailsShown ? [RQ_EMAIL_GROUP] : [])];
+    // Posts, articles and emails first, as they can be decided here; then one section per kind of work waiting on
+    // another assistant's page. A section with nothing in it isn't drawn.
+    const waitingGroups = (waiting?.groups || []).filter(g => g.count > 0);
+    const groups = [...RQ_GROUPS, ...(_rqBlogWriterActive ? [RQ_BLOG_GROUP] : []), ...(emailsShown ? [RQ_EMAIL_GROUP] : []),
+        ...waitingGroups.map(g => ({ key: `w-${g.key}`, label: `${_rqEsc(g.label)} · ${_rqEsc(g.assistantName)}`, empty: '', emptyReview: '' }))];
     const itemsByGroup = { posts: postGroups, blog: blogPosts, email: emails };
     const renderByGroup = { posts: rqRenderSocialCard, blog: rqRenderBlogCard, email: rqRenderEmailCard };
     // Posts are paged by the server; blog posts and emails arrive whole, so loaded count IS total.
     const totalByGroup = { posts: _rqPostsTotal ?? postGroups.length, blog: blogPosts.length, email: emails.length };
+    for (const g of waitingGroups) {
+        itemsByGroup[`w-${g.key}`] = g.items;
+        renderByGroup[`w-${g.key}`] = (item) => rqRenderWaitingRow(g, item);
+        totalByGroup[`w-${g.key}`] = g.count;
+    }
     // The write replaces every node, so a keyboard user on card 6 was dropped back to <body> by the
     // background refresh. Remember the focused card (or control) and put focus back on its successor.
     const active = document.activeElement;

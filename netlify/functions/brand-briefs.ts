@@ -19,7 +19,7 @@
 //   calendar     { assistantId, from, to }          → brief due dates, for the Calendar tab
 //   draft_flyer_words { briefId }                   → a flyer's words drafted and saved (1 task; flyers plan §3.2)
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, sql, desc } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { aiAssistants, organisations, visualBriefs } from '../../db/schema';
@@ -187,21 +187,40 @@ export default withLambda(async (event) => {
         });
     }
 
-    // The Calendar tab: briefs on their due date. Cancelled briefs are left off; an approved one stays
-    // (it shows the deadline was met). Light on purpose — no options, no signed URLs.
+    // The Calendar tab (owner, 2026-11-07): each brief on the day it was received, the day its first options
+    // were drafted (not the user's own uploads), the day one was approved, and its due date if it has one.
+    // Cancelled briefs are left off. Light on purpose: no options, no signed URLs. The range is a day wider
+    // on each side, because the browser sorts timestamps into its own local days.
     if (action === 'calendar') {
         const designer = await requireDesigner(body.assistantId);
         if (!designer) return json(404, { error: 'Assistant not found.' });
         const from = typeof body.from === 'string' ? body.from.slice(0, 10) : null;
         const to = typeof body.to === 'string' ? body.to.slice(0, 10) : null;
-        const rows = await db.select({ id: visualBriefs.id, title: visualBriefs.title, status: visualBriefs.status, dueDate: visualBriefs.dueDate })
-            .from(visualBriefs).where(and(
-                eq(visualBriefs.organisationId, orgId), eq(visualBriefs.aiAssistantId, designer.id),
-                sql`${visualBriefs.dueDate} IS NOT NULL`, sql`${visualBriefs.status} <> 'cancelled'`,
-                ...(from && /^\d{4}-\d{2}-\d{2}$/.test(from) ? [sql`${visualBriefs.dueDate} >= ${from}`] : []),
-                ...(to && /^\d{4}-\d{2}-\d{2}$/.test(to) ? [sql`${visualBriefs.dueDate} <= ${to}`] : []),
-            )).limit(500);
-        return json(200, { items: rows.map((b) => ({ id: b.id, title: b.title, status: b.status, dueDate: String(b.dueDate) })) });
+        // ⚠️ visual_briefs.id written out, not ${visualBriefs.id}: in a single-table select Drizzle drops the table
+        // name from a column in a sql`` field, and a bare "id" here would mean the option's own id.
+        const rows = await db.select({
+            id: visualBriefs.id, title: visualBriefs.title, dueDate: visualBriefs.dueDate, createdAt: visualBriefs.createdAt,
+            draftedAt: sql<string | null>`(SELECT min(o.created_at) FROM visual_brief_options o WHERE o.brief_id = visual_briefs.id AND o.source <> 'own')`,
+            approvedAt: sql<string | null>`(SELECT min(o.decided_at) FROM visual_brief_options o WHERE o.brief_id = visual_briefs.id AND o.status = 'approved')`,
+        }).from(visualBriefs).where(and(
+            eq(visualBriefs.organisationId, orgId), eq(visualBriefs.aiAssistantId, designer.id),
+            sql`${visualBriefs.status} <> 'cancelled'`,
+        )).orderBy(desc(visualBriefs.createdAt)).limit(500);
+        const shift = (d: string, days: number) => new Date(Date.parse(`${d}T12:00:00Z`) + days * 86400000).toISOString().slice(0, 10);
+        const min = from && /^\d{4}-\d{2}-\d{2}$/.test(from) ? shift(from, -1) : null;
+        const max = to && /^\d{4}-\d{2}-\d{2}$/.test(to) ? shift(to, 1) : null;
+        const inRange = (at: string) => (!min || at.slice(0, 10) >= min) && (!max || at.slice(0, 10) <= max);
+        // Raw timestamps in a sql`` select come back as strings with no zone on some drivers: these columns are UTC.
+        const iso = (v: Date | string) => (v instanceof Date ? v.toISOString() : new Date(/[zZ]|[+-]\d\d(:?\d\d)?$/.test(v) ? v : `${v.replace(' ', 'T')}Z`).toISOString());
+        const items: Array<{ id: number; kind: string; title: string; at: string }> = [];
+        for (const b of rows) {
+            const add = (kind: string, at: string) => { if (inRange(at)) items.push({ id: b.id, kind, title: b.title, at }); };
+            add('brief_received', iso(b.createdAt));
+            if (b.draftedAt) add('brief_drafted', iso(b.draftedAt));
+            if (b.approvedAt) add('brief_approved', iso(b.approvedAt));
+            if (b.dueDate) add('brief_due', String(b.dueDate));
+        }
+        return json(200, { items });
     }
 
     if (action === 'create') {

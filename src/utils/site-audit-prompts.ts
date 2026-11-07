@@ -20,6 +20,7 @@ import { SITE_AUDIT_CRAFT } from '../constants/site-audit-craft';
 import { currentDatePromptBlock } from './current-date-prompt';
 import type { SitePage } from './site-extract';
 import { LENS_LABEL, rubricFor, type AuditScore, type Lens, type SuggestedFix } from './site-score';
+import { OUTSIDE_PRODUCTS_RULE } from '../constants/assistant-shared-prompts';
 
 export interface AuditBrief {
     url: string;
@@ -86,6 +87,7 @@ function systemPrompt(role: string): string {
     return [
         role,
         currentDatePromptBlock(),
+        OUTSIDE_PRODUCTS_RULE,
         SPECIAL_CATEGORY_RULE,
         AURA_SAFE_CONTENT_BENCHMARK,
     ].join('\n\n');

@@ -42,6 +42,7 @@ import { sanitizeForModel } from './text-safe';
 import { isGlobalAiDisabled } from './platform-config';
 import { resolveBaseUrl } from './base-url';
 import { recordPlatformIncident } from './platform-incident';
+import { OUTSIDE_PRODUCTS_RULE } from '../constants/assistant-shared-prompts';
 
 type Db = any;
 
@@ -306,6 +307,7 @@ async function runStrategyDraft(db: Db, job: any): Promise<{ result: Record<stri
     const playbook = renderPlaybookForMentor(playbookFor(parts.data.offerKinds)).join('\n');
     const system = [
         MENTOR_STRATEGY_CRAFT,
+        OUTSIDE_PRODUCTS_RULE,
         SPECIAL_CATEGORY_RULE,
         parts.text, playbook, strategyDraftBrief(kind, (draft ?? approved)?.body ?? null, ideaText),
     ].join('\n\n');

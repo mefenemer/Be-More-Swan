@@ -278,6 +278,7 @@
     + '#bms-blog-backdrop.bs-setup .bs-sec:not([data-bs-sec=search]):not([data-bs-sec=widget]){display:none;}'
     + '#bms-blog-backdrop.bs-setup #bs-workspace{grid-template-columns:minmax(0,1fr);max-width:680px;}'
     + '#bms-blog-backdrop.bs-setup #bs-workspace > div:nth-child(2),#bms-blog-backdrop.bs-setup #bs-setup-link,#bms-blog-backdrop.bs-setup .bs-sec-num{display:none;}'
+    + '#detail-rq-blog-setup .bs-sec-num{display:none;}'
     + '.bs-setup-link{display:block;width:100%;text-align:left;background:none;border:1px dashed #d1d5db;border-radius:12px;padding:10px 12px;'
     + 'font-size:13px;font-weight:600;color:#374151;cursor:pointer;}'
     + '.bs-setup-link:hover{border-color:#f9a8d4;color:#9d174d;background:#fff;}'
@@ -2403,6 +2404,12 @@
     el('bs-setup-link').addEventListener('click', function () {
       var aid = state.assistantId;
       closeBlogStudio();
+      // On this assistant's own page it is a sub tab of Blogs. Opened from anywhere else, the studio shows it.
+      if (document.getElementById('detail-rq-col-setup') && window._rqOpenBlogSetup && Number(window._currentAssistantId) === Number(aid)) {
+        if (window._activateMainTab) window._activateMainTab('review-queue');
+        window._rqOpenBlogSetup();
+        return;
+      }
       openBlogStudio({ mode: 'setup', assistantId: aid });
     });
     el('bs-decide-approve').addEventListener('click', function () { el('bs-approve').click(); });
@@ -3154,6 +3161,7 @@
   function openBlogStudio(opts) {
     opts = opts || {};
     inject();
+    returnSetupSections();   // the studio's own code expects them in the page whenever it is open
     state.assistantId = opts.assistantId != null ? opts.assistantId : null;
     state.reviewIntent = opts.intent === 'review';
     state.nextPostId = null;
@@ -3230,6 +3238,7 @@
     setSelecting(false);
     el('bms-blog-backdrop').classList.remove('bs-open');
     window.ScrollLock.release('blog-studio');
+    if (setupTab.host && setupTab.host.isConnected && !setupTab.host.classList.contains('hidden')) mountBlogSetup(setupTab.host, setupTab.assistantId);
     // Edits that never moved the post between lifecycle columns still change what the list behind
     // this modal draws — its title and its excerpt. Those had no refresh at all: notifyChanged was
     // wired only to publish/approve/schedule/unschedule, so renaming a post or writing its body and
@@ -3251,6 +3260,40 @@
   // tests/blog-destinations-panel-copy.test.ts calls them directly — the claims they make about
   // WHEN a post is sent and WHO releases it are the kind that render perfectly while being false.
   window._blogStudioCopy = { distributionTiming: distributionTiming, destinationNote: destinationNote };
+  // Blog setup as a sub tab of Blogs (assistants.js _rqOpenBlogSetup): Search Console and the blog widget, the same
+  // two sections and handlers as the studio's mode:'setup', moved into the tab's panel while it is open. They go
+  // back whenever the tab closes or the studio opens, because opening an article reads and writes them by id.
+  var setupTab = { host: null, assistantId: null, sections: null, home: null, before: null };
+  function returnSetupSections() {
+    if (!setupTab.sections) return;
+    setupTab.sections.forEach(function (s) { if (s.parentNode !== setupTab.home) setupTab.home.insertBefore(s, setupTab.before); });
+  }
+  function mountBlogSetup(host, assistantId) {
+    inject();
+    if (!setupTab.sections) {
+      var search = document.querySelector('#bms-blog-backdrop [data-bs-sec="search"]');
+      var widget = document.querySelector('#bms-blog-backdrop [data-bs-sec="widget"]');
+      if (!search || !widget) return;
+      setupTab.sections = [search, widget];
+      setupTab.home = widget.parentNode;
+      setupTab.before = widget.nextSibling;
+    }
+    setupTab.host = host;
+    setupTab.assistantId = assistantId;
+    state.assistantId = assistantId != null ? assistantId : null;
+    setupTab.sections.forEach(function (s) { s.open = true; host.appendChild(s); });
+    loadWidget();
+    loadSearchConsole();
+  }
+  function unmountBlogSetup() {
+    if (!setupTab.host) return;
+    if (state.flushWidgetSettings) state.flushWidgetSettings();
+    setupTab.host = null;
+    returnSetupSections();
+  }
+  window.mountBlogSetup = mountBlogSetup;
+  window.unmountBlogSetup = unmountBlogSetup;
+
   window.openBlogStudio = openBlogStudio;
   window.closeBlogStudio = closeBlogStudio;
   window.blogStudioAvailable = blogStudioAvailable;

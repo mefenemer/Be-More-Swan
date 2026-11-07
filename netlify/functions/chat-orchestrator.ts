@@ -141,6 +141,7 @@ import { mentorVisibilityPromptBlock } from '../../src/config/mentor-data-invent
 import { buildBreakEvenCard, buildStrategyCard } from '../../src/utils/mentor-plan-cards';
 import { loadStrategyDocs } from '../../src/utils/strategy-documents';
 import { recordPlatformIncident } from '../../src/utils/platform-incident';
+import { ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, SUPPORT_REQUEST_PROMPT } from '../../src/constants/assistant-shared-prompts';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -750,6 +751,7 @@ PROPOSING A CAMPAIGN — when the user gives you an objective, emit the campaign
 function brandDesignerSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
 - "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Ask <your name> for options" / "Ask <your name> for more options" (the cost of a round costs), "Edit brief" and "Archive brief". The briefs sit on tabs, in the order they move through: "To do" (waiting on the user: options to choose from, or a brief that needs them to ask for options), "Being made", "Approved", "Archived". "New brief" at the top asks them your questions here in this chat (it covers pictures, printed flyers and video alike), and answering them opens the editor with the design being made. There is no form to fill in instead: this chat is the way in. The editor shows the design on the left and this chat on the right: they can click, drag and change anything on it, with Undo, "🎯 Select" and "Full screen". "Open in editor" on any option waiting goes there too. "Use this design" approves it. "Select" lets them point at an option or brief to talk about it. "View or change" opens their brand style and picture guidelines in a pop-up. Everything you can do here, the user can also do there by hand.
+- "Calendar" tab — each brief on the day it was received, the day its first options were drafted, the day one was approved and, when it has one, its due date. Opening one goes to the "Briefs" tab.
 - Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles. An approved flyer is there too, with "Print", "PDF for home printing" and "PDF for a print shop". Every flyer is also listed on the "Briefs" tab, where "Preview" shows its page large, an approved one has "Print", and "Change this flyer" starts a new version with its words filled in.`;
 }
 
@@ -774,6 +776,7 @@ function websiteAssistantSurfaces(): string {
 - "Website" tab — the tab the user lands on, with five sub tabs along its top. "Preview" opens first: the live preview on the left and, on the right, this chat, where they talk to you while watching the preview change. This chat stays on the right on the other four sub tabs too, left to right in the order a site is made, each with a "Preview my site" button: "Set up" (what the website does, business details and footer, "Import my current site", and "Start again from scratch" with "Replace my draft"), "Design" (templates — start from a ready-made layout — one page or several, colours, lettering, corners, logo), "Pages" (each page's title, address, search title and description, and its sections, each with "Edit", "↑", "↓" and "Remove", plus "Add a section", "+ Page" and "Add your own words", and the parts in [square brackets] still to fill in) and "Publish" (below). The "Preview" has "Desktop" and "Phone", and "Select": they click any part of the preview and it is attached to their next message to you, so they can ask for a change to exactly that part.
 - A new site is set up on the Website tab's "Set up" sub tab, in three steps: what it does, then a template or "Import my current site" (reads their old website into a draft to review), then "Write my site" ("Write the words" once a template is chosen), which writes every page for 1 task. After that it moves on to "Pages".
 - The Website tab's "Publish" sub tab puts the site live at its address ("Publish"; once it is live, "Publish changes", "View live site" and "Take offline"). It refuses while any [square brackets] are left. Publishing is always a click the user makes there — never something you do; changes stay in the draft until they publish.
+- "Calendar" tab — their bookings on one month: each day's booking hours and how many are booked and free, classes ("3 of 12"), and each booking, which they open to confirm, decline or cancel. A day reads "Not taking bookings" until bookings are set up. Nothing here is about posts.
 - "Results" tab — "Visitors", "Page Views" and "Brought In" (enquiries, orders and bookings) for the last 30 days on the live site, with "Most-read pages" and "Where visitors came from". Visitors are counted without cookies, so the site needs no cookie banner.
 - "Enquiries" tab — messages from the site's contact form. "Orders" and "Bookings" tabs appear when the site sells things or takes bookings, and a "Listings" tab when it has listings (events or a directory): "Add a listing", and each entry's "Edit", "Hide" / "Show" and "Delete", with visitors' entries "Waiting for you" to "Approve" or "Decline".
 Everything you can change here, the user can also change there by hand.`;
@@ -788,7 +791,7 @@ function businessMentorSurfaces(): string {
 - Each assistant's own page — its settings, set-up answers, goals ("Results" tab) and rules. Only mention assistants listed as active below.
 - "My Account" — its "Billing & Subscription" tab (the plan, payments, resubscribing and changing plan), tasks used, notifications and "Your data". Always say "My Account ▸ Billing & Subscription", never "the Billing page".
 - "Help & Support" — Help Centre articles, contacting support, and "Report an Issue".
-Your own page has a "Suggestions" tab, a "Plan" tab, a "Results" tab and an "Activity" tab; the user chats with you from the "Chat" button at the top. The "Plan" tab holds:
+Your own page has a "Suggestions" tab, a "Plan" tab, a "Results" tab and an "Activity" tab; the user chats with you from the "Chat" icon at the top of the menu down the right of the page, and the chat sits beside the "Suggestions" and "Plan" tabs on a wide screen. The "Plan" tab holds:
   - "Your plans" — "Idea check", "Business plan" and "Marketing plan". The idea check is the same questions you ask, one at a time with "Back" and "Next", then the "Lean Canvas" (nine boxes they can edit) and "Riskiest assumptions". Each plan has "Save draft", "Approve" (owner or admin only), "Changes" since the approved version and "Earlier versions"; "Draft it for me" (or "Draft my canvas") drafts it for 1 task, and the result waits there with "Use this draft". An existing workspace's plans start pre-filled from Business Information, not saved until "Save draft".
   - "Look this up" — a question box (1 task, about two minutes) and the "Research" list of past answers with their links. Each section of a plan has a "Look this up" link too.
   - "Break-even calculator" — price of one sale, cost per sale, fixed costs, marketing spend and how many leads become a sale, each with "A guess"; "Work it out".
@@ -841,7 +844,7 @@ function socialSurfaces(): string {
 - "My Content" tab — the pictures and videos the user has uploaded or approved, which posts can use.
 - "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, the "Autopilot" card (whether it is drafting on a schedule, with "Adjust schedule"; how many posts are created, scheduled and published; posts per platform; and audience size), and the goals themselves (set or change one here).
 - "Activity" tab — a log of what this assistant has done.
-- "Assistant Settings" button (top of the page) — this assistant's settings, as cards: "What I do" (the job it was hired for), "When and how I post" (how posts are triggered, where content comes from, and the posting schedule), "What I post about" (objective, audience, voice and content pillars), "Your brand" (the brand style, picture guidelines, files and links — shared by every assistant and the same as Business Information ▸ Brand Assets, so a change there or here changes both), "Connections" (the social accounts it posts to — reconnect an account here), "Do’s and don’ts" (its rules), "Safety and legal" (AI disclosure and brand safety) and "Notifications".
+- "Assistant Settings" (the menu down the right of the page; a button at the top on a phone) — this assistant's settings, as cards: "What I do" (the job it was hired for), "When and how I post" (how posts are triggered, where content comes from, and the posting schedule), "What I post about" (objective, audience, voice and content pillars), "Your brand" (the brand style, picture guidelines, files and links — shared by every assistant and the same as Business Information ▸ Brand Assets, so a change there or here changes both), "Connections" (the social accounts it posts to — reconnect an account here), "Do’s and don’ts" (its rules), "Safety and legal" (AI disclosure and brand safety) and "Notifications".
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
@@ -866,13 +869,13 @@ const PROFILE_CARDS_NON_SOCIAL = `"What I do" (the job it was hired for), "When 
 
 function blogSurfaces(): string {
     return `YOUR OWN DASHBOARD — these are the tabs and buttons on YOUR page inside this platform, and the only names you may use for places in it:
-- "Blogs" tab — the page opens here. Every article you draft, in columns: "Review" (drafts waiting for the user), "Scheduled" (booked to publish), "Published" (live), "Needs attention" (failed to publish, paused, or approved but not booked — "Pick a new time" puts it back in the queue) and "Archived". Opening an article there opens it in Blog Studio, where it is edited, given pictures and SEO, approved, scheduled or published. "Write Blog Post" at the top starts one. "Blog setup" beside it holds the settings for the whole blog: Google Search Console, and the blog widget (its look, the embed snippet for the user's website, the RSS feed and the hosted blog page link).
+- "Blogs" tab — the page opens here. Every article you draft, in columns: "Review" (drafts waiting for the user), "Scheduled" (booked to publish), "Published" (live), "Needs attention" (failed to publish, paused, or approved but not booked — "Pick a new time" puts it back in the queue) and "Archived". Opening an article there opens it in Blog Studio, where it is edited, given pictures and SEO, approved, scheduled or published. "Write Blog Post" at the top starts one. "Blog setup", the last sub tab of "Blogs", holds the settings for the whole blog: Google Search Console, and the blog widget (its look, the embed snippet for the user's website, the RSS feed and the hosted blog page link).
 - "Calendar" tab — the same articles laid out by date.
 - "Inspo" tab — writing the user admires; you write in that style.
 - "My Content" tab — the pictures the user has uploaded or approved, which articles can use.
 - "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, the "Autopilot" card (its drafting schedule, with "Adjust schedule", and how many articles are created, scheduled and published), and the goals themselves (set or change one here).
 - "Activity" tab — a log of what this assistant has done.
-- "Assistant Settings" button (top of the page) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
+- "Assistant Settings" (the menu down the right of the page; a button at the top on a phone) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or Blog Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
@@ -889,7 +892,7 @@ function emailSurfaces(): string {
 - "Calendar" tab — the same emails laid out by date.
 - "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, and the goals themselves (set or change one here).
 - "Activity" tab — a log of what this assistant has done.
-- "Assistant Settings" button (top of the page) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
+- "Assistant Settings" (the menu down the right of the page; a button at the top on a phone) — this assistant's settings, as cards: ${PROFILE_CARDS_NON_SOCIAL}.
 - Outside this page: the "Audience" page holds subscribers, segments and sign-up forms.
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above, or the Email Studio. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
@@ -3392,7 +3395,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
         ].join('\n\n');
     })() : '';
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE].filter(Boolean).join('\n\n');
 
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3605,6 +3608,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         let content = parsed.content;
         // §2.7 help-only mode: the support card is the only one drawn, so nothing else is recorded or offered.
         if (mentorNoPlan && !['mentor_support_request', 'mentor_take_me_there'].includes(String((uiElement as { type?: unknown } | null)?.type))) uiElement = null;
+        // A ticket or issue report the user asked for (owner, 2026-11-07): the Business Mentor's own card, on every
+        // structured route. Taken now and put back after each route has rebuilt its card from its own list below,
+        // because those lists would drop it. `from` says which assistant's chat it came from.
+        let supportCard: Record<string, unknown> | null = null;
+        if (route !== defaultRoute && route !== ROUTES.business_mentor && (uiElement as { type?: unknown } | null)?.type === 'mentor_support_request') {
+            const card = mentorCardFromUiElement(uiElement, session.aiAssistantId);
+            if (card && 'error' in card) { uiElement = null; content = `${content}\n\n(${card.error})`; }
+            else if (card) { supportCard = { ...card, from: assistantRow.jobRole || assistantRow.name || 'Assistant' }; uiElement = supportCard; }
+        }
         // "Redraft upcoming posts" (src/utils/redraft-upcoming.ts): the Social Media route's own card. The
         // server names the assistant (this one); the click previews, and a second click redrafts.
         if ((uiElement as { type?: unknown } | null)?.type === 'redraft_upcoming_proposal') {
@@ -3908,7 +3920,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (!uiElement) content = 'I couldn’t read your website pages just now, so I haven’t changed anything. Please try again in a moment, or use Business Information ▸ Website Pages.';
         }
         // One card for the "keep it" checks below: a change to the assistant's own profile.
-        const profileCard: SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | FollowUpPlanCard | CtaCard | SetupFieldCard | null = settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? followUpPlanCard ?? ctaCard ?? setupFieldCard;
+        const profileCard = (settingsCard ?? ruleCard ?? goalCard ?? scheduleCard ?? platformsCard ?? libraryCard ?? introOfferCard ?? outreachOfferCard ?? followUpPlanCard ?? ctaCard ?? setupFieldCard ?? supportCard) as SettingsCard | RuleCard | GoalCard | ScheduleCard | PlatformsCard | LibraryCard | IntroOfferCard | OutreachOfferCard | FollowUpPlanCard | CtaCard | SetupFieldCard | null;
         // The Blog Writer's twin (src/utils/chat-blog-action.ts): same checks, built from blog_posts
         // rows; a time in the user's words is worked out here so the card shows the exact instant.
         let blogAction: BlogActionCard | null = null;
@@ -4154,6 +4166,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 : emailAction ?? emailPartCard ?? audienceCard ?? reviewsCard ?? profileCard;
         }
 
+        if (supportCard) uiElement = supportCard;
         // ── Reply ↔ persistence reconciliation ────────────────────────────────────
         // The reply text and the scheduled_posts row come from the same model response but by
         // independent paths, and nothing used to compare them — so "all three posts are drafted

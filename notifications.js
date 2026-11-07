@@ -653,7 +653,7 @@ window.initNotifications = async function(param) {
         dismissBtnHTML, kindOf, fmtDate, typeLabel, avatarHTML, actorEyebrowHTML, sanitizeText,
         actorColor, escHtml,
     } = window.NotifKit;
-    const TABS = ['needs', 'messages', 'updates'];
+    const TABS = ['needs', 'updates', 'messages'];
     // null until the first load picks the tab that has something waiting.
     let activeTab = param && TABS.includes(param.tab) ? param.tab : null;
     let teamThread = param && param.thread ? param.thread : null;
@@ -1402,7 +1402,7 @@ window.NotificationPopover = (function () {
         markAllBtn.addEventListener('click', markAllRead);
         tabActionBtn.addEventListener('click', () => { activeTab = 'action'; render(); });
         tabUpdatesBtn.addEventListener('click', () => { activeTab = 'updates'; render(); });
-        // Team Chat is a conversation, not a list — a link to Notifications → Messages, not a popover tab.
+        // Team Chat is a conversation, not a list — a link to the Team Chat tab of Notifications, not a popover tab.
         teamChatBtn = panel.querySelector('#notif-pop-team-chat');
         teamChatBtn.addEventListener('click', () => {
             close();
