@@ -38,6 +38,13 @@
       <button type="button" id="join-btn" class="btn-primary">Join workspace</button>
     </div>
 
+    <!-- Opened again after joining, and not logged in -->
+    <div id="state-joined" class="hidden bg-white rounded-2xl border border-gray-200 p-8 text-center shadow-sm">
+      <h1 id="joined-title" class="text-lg font-bold text-gray-900 mb-2">You've already joined this workspace</h1>
+      <p class="text-gray-500 text-sm mb-4">Log in to open it. We'll email you a link.</p>
+      <a href="/login.html" class="btn-primary" style="display:inline-block;text-decoration:none">Log in</a>
+    </div>
+
     <!-- Error state -->
     <div id="state-error" class="hidden bg-white rounded-2xl border border-red-200 p-8 text-center shadow-sm">
       <div class="text-4xl mb-4">❌</div>
@@ -48,7 +55,7 @@
 
   <script>
     const FN = '/.netlify/functions/accept-invite';
-    const STATES = ['state-loading', 'state-confirm', 'state-error'].map((id) => document.getElementById(id));
+    const STATES = ['state-loading', 'state-confirm', 'state-joined', 'state-error'].map((id) => document.getElementById(id));
     const show = (id) => STATES.forEach((el) => el.classList.toggle('hidden', el.id !== id));
     const joinBtn = document.getElementById('join-btn');
 
@@ -56,6 +63,11 @@
       document.getElementById('error-title').textContent = expired ? 'This invite has expired' : 'Something went wrong';
       document.getElementById('error-message').textContent = msg;
       show('state-error');
+    }
+
+    function showJoined(invite) {
+      if (invite.orgName) document.getElementById('joined-title').textContent = `You've already joined ${invite.orgName}`;
+      show('state-joined');
     }
 
     function showConfirm(invite) {
@@ -72,13 +84,16 @@
     (async function () {
       const params = new URLSearchParams(window.location.search);
       const link = {
-        token: params.get('token'),
         orgId: params.get('orgId'),
         role:  params.get('role') || 'member',
         sig:   params.get('sig') || '',
       };
+      // A link names its invite and expiry. One emailed before 2026-11-07 names a token.
+      for (const name of ['invite', 'exp', 'token']) {
+        if (params.get(name)) link[name] = params.get(name);
+      }
 
-      if (!link.token || !link.orgId) {
+      if ((!link.invite && !link.token) || !link.orgId) {
         showError('Invalid invite link. Please ask your workspace admin to resend the invite.');
         return;
       }
@@ -94,7 +109,9 @@
             body: JSON.stringify(link),
           });
           const data = await response.json().catch(() => ({}));
-          if (response.ok) {
+          if (response.ok && data.alreadyJoined && !data.redirect) {
+            showJoined(data);
+          } else if (response.ok) {
             window.location.href = data.redirect || '/workspace.html';
           } else {
             showError(data.error || 'Please ask your admin to resend the invite.', data.expired);
@@ -109,7 +126,10 @@
       try {
         const response = await fetch(`${FN}?${new URLSearchParams(link)}`);
         const data = await response.json().catch(() => ({}));
-        if (response.ok) showConfirm(data);
+        if (response.ok && data.alreadyJoined) {
+          if (data.redirect) window.location.href = data.redirect;
+          else showJoined(data);
+        } else if (response.ok) showConfirm(data);
         else showError(data.error || 'Please ask your admin to resend the invite.', data.expired);
       } catch (error) {
         // Nothing has been spent, so the button can still work.

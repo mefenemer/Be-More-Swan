@@ -12,8 +12,9 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import Module from 'node:module';
+import jwt from 'jsonwebtoken';
 import { PgDialect } from 'drizzle-orm/pg-core';
-import { signInvite, verifyInviteSignature } from '../src/utils/invite-link';
+import { signInvite, signInviteLink, verifyInviteLink, verifyInviteSignature } from '../src/utils/invite-link';
 import { users, userOrganisations } from '../db/schema';
 
 const SECRET = 'test-secret-for-invite-links';
@@ -23,9 +24,9 @@ process.env.BASE_URL = 'https://example.test';
 const USER = { id: 7, email: 'someone@example.test', firstName: null, tokenExpiresAt: new Date(Date.now() + 60_000), status: 'pending_verification' };
 
 // What the stubbed database holds and what the handler did to it.
-let state: { tokenFindsUser: boolean; user: typeof USER; hasInvitedRow: boolean; selects: number; updates: Array<{ set: Record<string, unknown>; where: string }>; inserts: number };
+let state: { tokenFindsUser: boolean; user: typeof USER; hasInvitedRow: boolean; rowRole: string; selects: number; updates: Array<{ set: Record<string, unknown>; where: string }>; inserts: number };
 function reset(over: Partial<typeof state> = {}) {
-    state = { tokenFindsUser: true, user: USER, hasInvitedRow: true, selects: 0, updates: [], inserts: 0, ...over };
+    state = { tokenFindsUser: true, user: USER, hasInvitedRow: true, rowRole: 'invited', selects: 0, updates: [], inserts: 0, ...over };
 }
 const dialect = new PgDialect();
 const whereText = (cond: any) => { const q = dialect.sqlToQuery(cond); return `${q.sql} ${JSON.stringify(q.params)}`; };
@@ -37,7 +38,7 @@ const fakeDb = {
                 limit: async () => {
                     state.selects++;
                     if (table === users) return state.tokenFindsUser ? [state.user] : [];
-                    if (table === userOrganisations) return state.hasInvitedRow ? [{ id: 1 }] : [];
+                    if (table === userOrganisations) return state.hasInvitedRow ? [{ id: 1, userId: USER.id, role: state.rowRole }] : [];
                     return [{ name: 'Acme' }];
                 },
             }),
@@ -71,20 +72,25 @@ const handler = require('../netlify/functions/accept-invite').default as (r: Req
 
 const URL_BASE = 'https://example.test/.netlify/functions/accept-invite';
 /** Accepting: what the Join button sends. */
-function call(params: Record<string, string>): Promise<Response> {
-    return handler(new Request(URL_BASE, { method: 'POST', headers: { host: 'example.test', 'content-type': 'application/json' }, body: JSON.stringify(params) }), { requestId: 'test' });
+function call(params: Record<string, string>, cookie?: string): Promise<Response> {
+    return handler(new Request(URL_BASE, { method: 'POST', headers: { host: 'example.test', 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify(params) }), { requestId: 'test' });
 }
 /** Opening the link: what a scanner, or the page on load, sends. */
-function open(params: Record<string, string>, method = 'GET'): Promise<Response> {
-    return handler(new Request(`${URL_BASE}?${new URLSearchParams(params)}`, { method, headers: { host: 'example.test' } }), { requestId: 'test' });
+function open(params: Record<string, string>, method = 'GET', cookie?: string): Promise<Response> {
+    return handler(new Request(`${URL_BASE}?${new URLSearchParams(params)}`, { method, headers: { host: 'example.test', ...(cookie ? { cookie } : {}) } }), { requestId: 'test' });
 }
 function assertNothingWritten(res: Response) {
     assert.equal(res.headers.get('set-cookie'), null, 'opening a link must not sign anyone in');
     assert.equal(state.updates.length, 0, 'opening a link must not update anything');
     assert.equal(state.inserts, 0, 'opening a link must not add anything');
 }
+// Links emailed before 2026-11-07 name a token. Every rule below must hold for both kinds.
 const signed = (token: string, orgId: number, role: string) =>
     ({ token, orgId: String(orgId), role, sig: signInvite(token, orgId, role, SECRET) });
+const IN_A_WEEK = Date.now() + 7 * 24 * 60 * 60 * 1000;
+const rowLink = (invite: number, orgId: number, role: string, exp = IN_A_WEEK) =>
+    ({ invite: String(invite), orgId: String(orgId), role, exp: String(exp), sig: signInviteLink(invite, orgId, role, exp, SECRET) });
+const sessionFor = (userId: number) => `aura_session=${jwt.sign({ userId }, SECRET)}`;
 
 function assertRefused(res: Response) {
     assert.equal(res.status, 400);
@@ -224,11 +230,136 @@ async function test(name: string, fn: () => void | Promise<void>) {
         assert.ok(!/httponly/i.test(res.headers.get('set-cookie') || ''), 'must not be HttpOnly');
     });
 
+    await test('row link: a real invite signs in with the invited role and leaves the shared token alone', async () => {
+        const res = await call(rowLink(1, 42, 'viewer'));
+        assert.equal(res.status, 200);
+        assert.ok(res.headers.get('set-cookie')?.includes('aura_session='));
+        assert.deepEqual(state.updates[0].set, { role: 'viewer' }, 'the membership is claimed first');
+        assert.ok(state.updates[0].where.includes('"invited"'), 'only an invited row can be claimed');
+        assert.equal(state.updates[1].set.status, 'active');
+        assert.ok(!('verificationToken' in state.updates[1].set), 'a login or sign-up link in flight survives');
+        assert.ok(!('tokenExpiresAt' in state.updates[1].set));
+    });
+
+    await test('row link: a changed role, workspace, row or expiry is refused before any read', async () => {
+        const link = rowLink(1, 42, 'viewer');
+        for (const forged of [
+            { ...link, role: 'admin' },
+            { ...link, orgId: '43' },
+            { ...link, invite: '2' },
+            { ...link, exp: String(IN_A_WEEK + 1000) },
+            { ...link, sig: '' },
+            rowLink(1, 42, 'owner'),
+        ]) {
+            reset();
+            assertRefused(await call(forged));
+            assert.equal(state.selects, 0, 'refused before reading the database');
+        }
+    });
+
+    await test('row link: a token signature cannot be replayed as one, or the reverse', async () => {
+        const link = rowLink(1, 42, 'admin');
+        assertRefused(await call({ invite: '1', orgId: '42', role: 'admin', exp: link.exp, sig: signInvite('1', 42, 'admin', SECRET) }));
+        reset();
+        assertRefused(await call({ token: '1', orgId: '42', role: 'admin', sig: link.sig }));
+    });
+
+    await test('row link: replaced by a resend, or withdrawn, it stops working', async () => {
+        reset({ hasInvitedRow: false });
+        assertRefused(await call(rowLink(1, 42, 'member')));
+        reset({ hasInvitedRow: false });
+        const res = await open(rowLink(1, 42, 'member'));
+        assert.equal(res.status, 400);
+        assertNothingWritten(res);
+    });
+
+    await test('row link: an expired invite is refused and writes nothing', async () => {
+        const stale = rowLink(1, 42, 'member', Date.now() - 1000);
+        const res = await call(stale);
+        assert.equal(res.status, 410);
+        assertNothingWritten(res);
+        reset();
+        assert.equal((await open(stale)).status, 410);
+    });
+
+    await test('row link: opening it writes nothing and describes it', async () => {
+        const res = await open(rowLink(1, 42, 'viewer'));
+        assert.equal(res.status, 200);
+        assertNothingWritten(res);
+        assert.deepEqual(await res.json(), { orgName: 'Acme', role: 'viewer', email: 's•••@example.test' });
+    });
+
+    await test('a locked account cannot get back in through an invite, on either kind of link', async () => {
+        for (const link of [rowLink(1, 42, 'member'), signed('tok', 42, 'member')]) {
+            reset({ user: { ...USER, status: 'locked' } });
+            assertRefused(await call(link));
+            assert.equal(state.updates.length, 0);
+        }
+    });
+
+    await test('opening an accepted invite while logged in as that person goes to the workspace', async () => {
+        reset({ rowRole: 'viewer' });
+        const res = await open(rowLink(1, 42, 'viewer'), 'GET', sessionFor(USER.id));
+        assert.equal(res.status, 200);
+        assertNothingWritten(res);
+        const body = await res.json();
+        assert.equal(body.alreadyJoined, true);
+        assert.ok(body.redirect.includes('/workspace.html'));
+    });
+
+    await test('opening an accepted invite when logged out, or as someone else, signs nobody in', async () => {
+        for (const cookie of [undefined, sessionFor(99), 'aura_session=not-a-jwt']) {
+            reset({ rowRole: 'viewer' });
+            for (const res of [await open(rowLink(1, 42, 'viewer'), 'GET', cookie), await call(rowLink(1, 42, 'viewer'), cookie)]) {
+                assert.equal(res.status, 200);
+                assertNothingWritten(res);
+                const body = await res.json();
+                assert.equal(body.alreadyJoined, true);
+                assert.equal(body.redirect, undefined);
+            }
+        }
+    });
+
+    await test('an accepted invite still says joined after its expiry, and never changes a role', async () => {
+        reset({ rowRole: 'member' });
+        const res = await call(rowLink(1, 42, 'admin', Date.now() - 1000));
+        assert.equal((await res.json()).alreadyJoined, true);
+        assert.equal(state.updates.length, 0);
+    });
+
+    await test('a used token-based link: joined if logged in as a member, refused otherwise', async () => {
+        reset({ tokenFindsUser: false, rowRole: 'member' });
+        const joined = await open(signed('tok', 42, 'member'), 'GET', sessionFor(USER.id));
+        assert.equal((await joined.json()).alreadyJoined, true);
+        assertNothingWritten(joined);
+
+        reset({ tokenFindsUser: false, rowRole: 'invited' });
+        assert.equal((await open(signed('tok', 42, 'member'), 'GET', sessionFor(USER.id))).status, 400);
+
+        reset({ tokenFindsUser: false, rowRole: 'member' });
+        assert.equal((await open(signed('tok', 42, 'member'))).status, 400);
+    });
+
+    await test('invite-member sends no token, keeps stubs alive, and replaces the row on resend', () => {
+        const fn = readFileSync(path.resolve(__dirname, '../netlify/functions/invite-member.ts'), 'utf8');
+        assert.ok(!fn.includes('verificationToken'), 'an invite must not touch the shared token');
+        assert.ok(fn.includes('signInviteLink('));
+        assert.ok(/status: +'pending_verification',\s+tokenExpiresAt: expiresAt/.test(fn), 'purge-ghost-accounts reads this date');
+        assert.ok(fn.includes("existingUser.status === 'pending_verification'"), 'a verified account keeps its own date');
+        assert.ok(fn.includes('tx.delete(userOrganisations)'), 'a resend retires the old link');
+        assert.ok(fn.includes('joinedAt: previous.joinedAt'), 'a resend keeps the join date');
+    });
+
     await test('signature helper rejects missing and malformed values', () => {
         const good = signInvite('tok', 42, 'member', SECRET);
         assert.equal(verifyInviteSignature('tok', 42, 'member', good, SECRET), true);
         assert.equal(verifyInviteSignature('tok', 42, 'member', null, SECRET), false);
         assert.equal(verifyInviteSignature('tok', 42, 'member', 'short', SECRET), false);
+        const link = signInviteLink(1, 42, 'member', 1000, SECRET);
+        assert.equal(verifyInviteLink(1, 42, 'member', 1000, link, SECRET), true);
+        assert.equal(verifyInviteLink(1, 42, 'member', 1000, null, SECRET), false);
+        assert.equal(verifyInviteLink(1, 42, 'member', 1000, 'short', SECRET), false);
+        assert.equal(verifyInviteLink(1, 42, 'owner', 1000, signInviteLink(1, 42, 'owner', 1000, SECRET), SECRET), false);
     });
 
     await test('the invite email and the page both carry the signature', () => {

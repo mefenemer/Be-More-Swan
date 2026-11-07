@@ -46,10 +46,10 @@ export default withLambda(async (event) => {
     if (session.adminRole) payload.adminRole = session.adminRole;
 
     const token = jwt.sign(payload, jwtSecret, { expiresIn: '7d' });
+    // ⚠️ NOT HttpOnly: auth-check.js reads this cookie from document.cookie (see review-login.ts).
     const cookieOpts = [
         `aura_session=${token}`,
         'Path=/',
-        'HttpOnly',
         'SameSite=Lax',
         'Max-Age=604800',
         ...(COOKIE_DOMAIN ? [`Domain=${COOKIE_DOMAIN}`] : []),
