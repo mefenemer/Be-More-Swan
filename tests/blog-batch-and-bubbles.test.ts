@@ -77,12 +77,12 @@ check('Needs you items can be marked done without running their action', () => {
     assert.match(n, /pop-done[\s\S]{0,400}patch\(n\.id, \{ resolved: true \}\)/);
 });
 
-check('Lead Generator: All leads, a divider before supporting tabs, and Conversations folded into a staged Outreach', () => {
+check('Lead Generator: All leads, no divider in the tab row (owner, 2026-11-07), and Conversations folded into a staged Outreach', () => {
     const registry = read('src/components/assistant-dashboard-registry.js');
     assert.match(registry, /label: 'All leads'/);
     assert.match(read('assistant-detail.html'), /id="maintab-support-divider"/);
     const js = read('assistants.js');
-    assert.match(js, /supportDivider\.classList\.toggle\('hidden', !goalsAnchor\)/);
+    assert.match(js, /supportDivider\.classList\.add\('hidden'\)/);
     // Was: the Awaiting reply column pointed at the Conversations tab. Both are now stages of one
     // Outreach tab (docs/lead-outreach-restructure-plan.md), with Results straight after it.
     assert.match(registry, /staged: true/);

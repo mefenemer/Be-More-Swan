@@ -941,31 +941,26 @@
   <!-- data-no-fold: its cards fold themselves (_rqToggleCard) (fold.js) -->
   <div data-no-fold id="maintab-review-queue" role="tabpanel" aria-labelledby="maintab-btn-review-queue" class="main-tab-content hidden">
 
-    <!-- One header row (owner, 2026-11-06, as on the Brand Designer's Briefs): the title and its ⓘ on
-         the left, the buttons on the right. The description is kept in #detail-rq-subtitle for the
-         registry to write, and shown inside the ⓘ (_applyDashboardRegistry); it only shows here when
-         the explainer script is missing. -->
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-      <div>
-        <h2 id="detail-rq-heading" class="text-lg font-extrabold text-gray-900">Review</h2>
-        <!-- Subtitle + primary button copy adapt to the role's reviewQueue kind (posts vs records)
-             in _applyDashboardRegistry. -->
-        <p id="detail-rq-subtitle" class="hidden text-sm text-gray-500 mt-1">Items awaiting your review — approve, edit or reject before anything is scheduled.</p>
+    <!-- The standard tab header (owner, 2026-11-07; same markup as window._tabHead): the title and its ⓘ, the
+         Blog Writer's autopilot chip beside it, then Full screen and the one "+ New …" on the right. The
+         description is kept in #detail-rq-subtitle for the registry to write, and shown inside the ⓘ
+         (_applyDashboardRegistry); it only shows here when the explainer script is missing. -->
+    <div class="tab-head">
+      <div class="tab-head-left">
+        <h2 id="detail-rq-heading" class="tab-head-title">Review</h2>
         <!-- Blog Writer only (_renderAutopilotCard): whether autopilot is writing more drafts. -->
         <button type="button" id="detail-rq-autopilot-chip" style="display:none" onclick="window._activateMainTab && window._activateMainTab('goals')"
-          class="hidden mt-2 inline-flex items-center px-2.5 py-1 text-xs font-semibold rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 transition cursor-pointer"></button>
+          class="hidden tab-head-chip"></button>
+        <p id="detail-rq-subtitle" class="hidden text-sm text-gray-500 w-full">Items awaiting your review — approve, edit or reject before anything is scheduled.</p>
       </div>
-      <div class="flex flex-wrap items-center justify-end gap-2">
-        <!-- Show all / Hide all for a records queue's cards (each opens from its title). -->
-        <button type="button" id="detail-rq-foldall" style="display:none" onclick="window._rqFoldAll()"
-          class="hidden text-xs font-bold text-gray-600 hover:text-gray-900 px-1 py-1 cursor-pointer">Show all</button>
-        <!-- Full screen, as on the Briefs and Website tabs: this list over the whole page, Esc to leave. -->
+      <div class="tab-head-right">
+        <!-- Full screen, as on every tab: this list over the whole page, Esc to leave. -->
         <button type="button" id="detail-rq-full-btn" data-tab-full-btn="review-queue" onclick="window._rqSetFull(!document.getElementById('maintab-review-queue').hasAttribute('data-rq-full'))"
           aria-pressed="false" title="Use the whole screen for this list"
-          class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Full screen</button>
-        <button type="button" id="detail-rq-primary-btn" onclick="openGeneratePostSheet()" class="btn-assistant px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer flex items-center gap-1.5">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          <span id="detail-rq-primary-label">Assign Task</span>
+          class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap">Full screen</button>
+        <button type="button" id="detail-rq-primary-btn" onclick="openGeneratePostSheet()" class="tab-head-new btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer inline-flex items-center gap-1.5 whitespace-nowrap">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          <span id="detail-rq-primary-label">New post</span>
         </button>
       </div>
     </div>
@@ -979,13 +974,14 @@
          lose the caret mid-sentence. -->
     <div id="lead-follow-up-plan" class="hidden"></div>
 
-    <div id="detail-rq-card" class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      <!-- Lifecycle columns -->
-      <div id="detail-rq-colstrip" class="stage-pills tab-scroller flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto" role="tablist" aria-label="Items by stage">
+    <div id="detail-rq-card" class="tab-card overflow-hidden">
+      <!-- The pill row (owner, 2026-11-07): stages on the left, the list's own links on the right. -->
+      <div class="tab-pillbar">
+      <div id="detail-rq-colstrip" class="stage-pills tab-scroller" role="tablist" aria-label="Items by stage">
         <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="true" tabindex="0" class="detail-rq-col px-4 py-2 text-sm font-semibold rounded-t border-b-2 border-emerald-800 text-emerald-800 whitespace-nowrap"
           data-status="review" onclick="detailRqOpenStatus('review', this)">
           Review
-          <span id="detail-rq-col-count-review" class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+          <span id="detail-rq-col-count-review" class="pill-n hidden"></span>
         </button>
         <!-- Approved is hidden for post-backed queues (social / blog): approve-post.ts commits an
              approved post straight to 'scheduled' because that is what approval MEANS here — the
@@ -994,15 +990,15 @@
              where 'approved' is a real resting state. -->
         <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="false" tabindex="-1" id="detail-rq-col-approved" class="detail-rq-col hidden px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="approved" onclick="detailRqOpenStatus('approved', this)">Approved
-          <span id="detail-rq-col-count-approved" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+          <span id="detail-rq-col-count-approved" class="pill-n hidden"></span>
         </button>
         <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="false" tabindex="-1" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="scheduled" onclick="detailRqOpenStatus('scheduled', this)">Scheduled
-          <span id="detail-rq-col-count-scheduled" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+          <span id="detail-rq-col-count-scheduled" class="pill-n hidden"></span>
         </button>
         <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="false" tabindex="-1" id="detail-rq-col-posted" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="posted" onclick="detailRqOpenStatus('posted', this)"><span id="detail-rq-col-label-posted">Posted</span>
-          <span id="detail-rq-col-count-posted" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+          <span id="detail-rq-col-count-posted" class="pill-n hidden"></span>
         </button>
         <!-- Posts that tried to publish and stopped. 'failed' is not 'rejected', so Archived never
              showed them and no other column did either — they were reachable only from the calendar.
@@ -1014,18 +1010,25 @@
              hides it for those roles. -->
         <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="false" tabindex="-1" id="detail-rq-col-attention" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="attention" onclick="detailRqOpenStatus('attention', this)">Needs attention
-          <span id="detail-rq-col-count-attention" class="ml-1 bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+          <span id="detail-rq-col-count-attention" class="pill-n hidden"></span>
         </button>
         <!-- Archived covers rejected AND cancelled (expanded server-side): both mean "not going out",
              differing only in who stopped it. Cancelled posts previously appeared nowhere. -->
         <button type="button" role="tab" aria-controls="detail-rq-groups" aria-selected="false" tabindex="-1" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="archived" onclick="detailRqOpenStatus('archived', this)">Archived
-          <span id="detail-rq-col-count-archived" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+          <span id="detail-rq-col-count-archived" class="pill-n hidden"></span>
         </button>
         <!-- Blog Writer only: Search Console and the blog widget, set once for the whole blog
              (assistants.js _rqOpenBlogSetup). A sub tab, not a stage: no count, and no list behind it. -->
+        <!-- A section, not a stage: a thin line before it, and no count (owner, 2026-11-07). -->
+        <span id="detail-rq-setup-divider" class="pill-divider" aria-hidden="true" style="display:none"></span>
         <button type="button" role="tab" aria-controls="detail-rq-blog-setup" aria-selected="false" tabindex="-1" id="detail-rq-col-setup" style="display:none" class="detail-rq-col hidden px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="setup" onclick="window._rqOpenBlogSetup(this)">Blog setup</button>
+      </div>
+      <div class="tab-pillbar-actions">
+        <!-- Show all / Hide all for a records queue's cards (each opens from its title). -->
+        <button type="button" id="detail-rq-foldall" style="display:none" onclick="window._rqFoldAll()" class="hidden tab-link">Show all</button>
+      </div>
       </div>
       <!-- Content -->
       <div id="detail-rq-groups" role="tabpanel" class="px-4 py-2 min-h-[200px]"></div>
@@ -2880,16 +2883,8 @@ window._revokeConnection = async function (connectionId, onSuccess) {
   /* The selected column's underline follows aria-selected, so look and announced state cannot
      disagree. (border-emerald-700 is not in the compiled style.css.) */
   .detail-rq-col[aria-selected="true"], .site-subtab[aria-selected="true"] { border-bottom-color: #ff007f; }
-  /* Stages as pills in a grey track (owner, 2026-11-06, as on the Briefs tab): these filter a list,
-     so they must not look like the page's own underlined tabs above. Overrides the underline classes
-     detailRqOpenStatus and the Lead Generator's strip still toggle. */
-  .stage-pills:not(.hidden) { display: inline-flex !important; }   /* :not(.hidden): the Lead Generator hides the shared strip */
-  .stage-pills { max-width: calc(100% - 2rem); gap: .25rem; padding: .25rem !important;
-    margin: .75rem 1rem .25rem; border-radius: .75rem; background: #f3f4f6; border-bottom: 0 !important; overflow-x: auto; overflow-y: hidden; }
-  .stage-pills > [role="tab"] { border-bottom: 0 !important; border-radius: .5rem !important; padding: .375rem .75rem !important;
-    font-weight: 700 !important; color: #4b5563 !important; background: transparent; transition: background .15s ease, color .15s ease; }
-  .stage-pills > [role="tab"]:hover { color: #111827 !important; }
-  .stage-pills > [role="tab"][aria-selected="true"] { background: #fff; color: #111827 !important; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  /* Stages as pills in a grey track (.stage-pills): src/components/tab-head.js, with the rest of the tab header. */
+  /* The standard tab header and its card (.tab-head, .tab-card, .tab-pillbar, .pill-n …): src/components/tab-head.js. */
   /* Review full screen: over the top bar (z 50), UNDER the post, blog and email pop-ups (70–90) it opens. */
   .main-tab-content[data-rq-full] { position: fixed; inset: 0; z-index: 60; background: #f9fafb; overflow: auto; padding: 16px 20px; }
   /* A role's docked chat (assistants.js _setupTabChat) stays beside the list in full screen, as on the Briefs tab. */

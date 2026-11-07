@@ -1449,6 +1449,7 @@ window._tabFullBtn = function(name) {
     const on = !!document.getElementById(`maintab-${name}`)?.hasAttribute('data-rq-full');
     return `<button type="button" data-tab-full-btn="${name}" onclick="window._tabSetFull('${name}', !document.getElementById('maintab-${name}').hasAttribute('data-rq-full'))" aria-pressed="${on}" title="${on ? 'Back to the page (Esc)' : 'Use the whole screen for this tab'}" class="${_TAB_FULL_CLASS}">${on ? 'Exit full screen' : 'Full screen'}</button>`;
 };
+// The standard tab header, its "+ New …" button and pill counts: src/components/tab-head.js (window._tabHead …).
 // Esc leaves it, unless an OPEN dialog (a post, blog or email pop-up) is taking Esc. "Any dialog" is
 // not enough: the settings drawer is always in the page as one, inert while shut.
 document.addEventListener('keydown', (e) => {
@@ -1600,11 +1601,14 @@ async function _detailRqColumnCount(statusKey, assistantId) {
     } catch { return 0; }
 }
 
+// One count style on every pill (owner, 2026-11-07): a plain grey number, 0 included, so the pills never
+// shift; amber on Review when something waits, red on Needs attention when something failed.
 function _detailRqSetColumnBadge(statusKey, count) {
     const badge = document.getElementById('detail-rq-col-count-' + statusKey);
     if (!badge) return;
-    badge.textContent = count || '';
-    badge.classList.toggle('hidden', !count);
+    const n = Number(count) || 0;
+    badge.textContent = String(n);
+    badge.className = n > 0 && statusKey === 'review' ? 'pill-wait' : n > 0 && statusKey === 'attention' ? 'pill-alert' : 'pill-n';
 }
 
 // A notification arriving usually MEANS the queue changed — the assistant finished drafting, a
@@ -1802,8 +1806,7 @@ async function _detailRqRenderGroups(statusKey) {
     // paging, not the length of the first page — otherwise a queue of 24 would report "10".
     if (statusKey === 'review') {
         const groupedCount = _detailRqTotal ?? postGroups.length;
-        const colBadge = document.getElementById('detail-rq-col-count-review');
-        if (colBadge) { colBadge.textContent = groupedCount || ''; colBadge.classList.toggle('hidden', !groupedCount); }
+        _detailRqSetColumnBadge('review', groupedCount);
         _setDetailRqTabBadge(groupedCount);
         // Keep the Autopilot card + status pill in sync as the queue changes (e.g. after approving).
         window._setPendingReviewCount?.(groupedCount);
@@ -1899,7 +1902,7 @@ function _detailRqEmptyReviewHtml(emptyMsg) {
         ? next.textContent.trim()
         : (document.getElementById('autopilot-headline')?.textContent.trim() || '');
     const primary = document.getElementById('detail-rq-primary-btn');
-    const label = document.getElementById('detail-rq-primary-label')?.textContent.trim() || 'Create a Post';
+    const label = document.getElementById('detail-rq-primary-label')?.textContent.trim() || 'New post';
     const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     return `<div class="py-8 text-center">
         <p class="text-sm font-semibold text-gray-900">${emptyMsg}</p>
@@ -3288,7 +3291,7 @@ const _RQ_BRIEF_LABELS = [
  * order carried neither, the card listed a bare "Narrow the targeting", and approving changed nothing.
  */
 const _RQ_NARROW_LABELS = [['previousIdea', 'Search now'], ['idea', 'Changes to']];
-const _RQ_NARROW_PAUSE = 'Pauses this search. No narrower description could be worked out from its cold leads, so it stops running until you edit who it looks for on Find New Leads and resume it.';
+const _RQ_NARROW_PAUSE = 'Pauses this search. No narrower description could be worked out from its cold leads, so it stops running until you edit who it looks for on the Searches tab and resume it.';
 const _RQ_EMAIL_TRIGGER_LABELS = {
     form: 'A follow-up for people who sign up through a form — saved switched off',
     custom: 'Emails you send to a group yourself — saved as drafts',
@@ -3316,7 +3319,7 @@ function _rqDecisionDetail(r, statusKey) {
             .map(([k, label]) => line(label, brief[k]));
         if (narrow && !fields.length) {
             fields.push(line('What happens', brief.pauseSearch === true ? _RQ_NARROW_PAUSE
-                : 'Nothing — this was raised before proposals carried a new description, so there is nothing to apply. Edit who the search looks for on Find New Leads instead.'));
+                : 'Nothing — this was raised before proposals carried a new description, so there is nothing to apply. Edit who the search looks for on the Searches tab instead.'));
         }
         return `<li class="rounded-lg border border-gray-200 bg-white px-3 py-2">
             <p class="text-sm font-bold text-gray-900">${_rqEsc(actionLabel(o && o.action))}</p>
@@ -3500,8 +3503,7 @@ async function _detailRqRenderRecords(statusKey) {
     // client-side precisely so these numbers keep describing the column: "10 awaiting review" on a
     // queue of sixty is worse than no badge at all.
     if (statusKey === 'review') {
-        const colBadge = document.getElementById('detail-rq-col-count-review');
-        if (colBadge) { colBadge.textContent = records.length || ''; colBadge.classList.toggle('hidden', !records.length); }
+        _detailRqSetColumnBadge('review', records.length);
         _setDetailRqTabBadge(records.length);
         window._setPendingReviewCount?.(records.length);
         window._updateOpSignals?.({ pendingReview: records.length });
@@ -3509,8 +3511,7 @@ async function _detailRqRenderRecords(statusKey) {
         // The other columns' badges were never populated for records queues at all
         // (_detailRqRefreshColumnCounts returns early for them), so Approved / Scheduled / Archived
         // sat blank however much was in them. The open column can at least state its own count.
-        const colBadge = document.getElementById('detail-rq-col-count-' + statusKey);
-        if (colBadge) { colBadge.textContent = records.length || ''; colBadge.classList.toggle('hidden', !records.length); }
+        _detailRqSetColumnBadge(statusKey, records.length);
     }
 
     // Keep the rendered records addressable by id: PATCH replaces `data` wholesale, so editing
@@ -4917,7 +4918,7 @@ async function _detailRqRenderBlog(statusKey) {
         : (statusKey === 'review'
             ? `<div class="py-10 text-center">
                  <p class="text-sm text-gray-500">No blog drafts waiting for you. Nothing publishes until you approve it.</p>
-                 <button type="button" onclick="window.openBlogStudio && window.openBlogStudio({ assistantId: window._currentAssistantId })" class="btn-primary min-h-[44px] sm:min-h-0 mt-3 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Write Blog Post</button>
+                 <button type="button" onclick="window.openBlogStudio && window.openBlogStudio({ assistantId: window._currentAssistantId })" class="btn-primary min-h-[44px] sm:min-h-0 mt-3 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">New blog post</button>
                </div>`
             : '<p class="text-sm text-gray-500 py-10 text-center">Nothing here yet.</p>');
 }
@@ -7174,10 +7175,8 @@ function _applyDashboardRegistry(data) {
     else if (goalsBtn) document.getElementById('maintab-btn-activity')?.before(goalsBtn);
     // …and the divider that marks Calendar and Activity as supporting views, on the same roles.
     const supportDivider = document.getElementById('maintab-support-divider');
-    if (supportDivider) {
-        supportDivider.classList.toggle('hidden', !goalsAnchor);
-        supportDivider.style.display = goalsAnchor ? '' : 'none';
-    }
+    // Owner, 2026-11-07: no dividers in the tab row on any assistant — kept hidden (the markup stays for old links).
+    if (supportDivider) { supportDivider.classList.add('hidden'); supportDivider.style.display = 'none'; }
     if (window._detailResultsInGoalsTab) {
         const panel = document.getElementById('maintab-goals');
         const goalsList = document.getElementById('tab-goals');
@@ -7304,23 +7303,25 @@ function _applyDashboardRegistry(data) {
     setText('detail-rq-col-label-posted', 'Posted');
     const setupBtn = document.getElementById('detail-rq-col-setup');
     if (setupBtn) { setupBtn.classList.toggle('hidden', !rqIsBlog); setupBtn.style.display = rqIsBlog ? '' : 'none'; }
+    const setupDivider = document.getElementById('detail-rq-setup-divider');
+    if (setupDivider) setupDivider.style.display = rqIsBlog ? '' : 'none';
     // Named after the role's own tab ("Emails", "Outreach"…) — every non-blog role was announced
     // as "Posts by stage" (review, 2026-10-22).
     document.querySelector('#maintab-review-queue [role="tablist"]')?.setAttribute('aria-label',
         `${(window._detailReviewQueue || {}).label || (rqIsBlog ? 'Blogs' : 'Posts')} by stage`);
     if (rqIsBlog) {
-        setText('detail-rq-primary-label', 'Write Blog Post');
+        setText('detail-rq-primary-label', 'New blog post');
         setText('detail-rq-col-label-posted', 'Published');
         const rqBtn = document.getElementById('detail-rq-primary-btn');
         if (rqBtn) rqBtn.onclick = () => { window.openBlogStudio?.({ assistantId: data.id }); };
     } else if (rqIsNewsletter) {
-        setText('detail-rq-primary-label', 'Write Email');
+        setText('detail-rq-primary-label', 'New email');
         setText('detail-rq-col-label-posted', 'Sent');
         const rqBtn = document.getElementById('detail-rq-primary-btn');
         if (rqBtn) rqBtn.onclick = () => { window._newsletterAssistantId = window._currentAssistantId || null; window.loadView?.('newsletter'); };
     } else if (!rqIsRecords) {
         // Posts queues: keep the in-queue CTA in step with the header ("Create a Post" for SMM).
-        setText('detail-rq-primary-label', cfg.primaryAction?.label || 'Create a Post');
+        setText('detail-rq-primary-label', cfg.primaryAction?.label || 'New post');
     }
 
     // The Lead Generator's "Review Lead Ideas" is no longer wired here: like "Find New Leads"
@@ -7424,13 +7425,13 @@ function _applyDashboardRegistry(data) {
     // the next CSS rebuild.
     toggleBtn('detail-action-bar', showPrimaryAction);
     if (data.roleKey === 'blog_writer') {
-        if (paLabel) paLabel.textContent = 'Write Blog Post';
+        if (paLabel) paLabel.textContent = 'New blog post';
         if (paBtn) paBtn.onclick = () => { if (window.openBlogStudio) window.openBlogStudio({ assistantId: data.id }); };
     } else if (data.roleKey === 'newsletter_editor') {
         // The Email Studio is a VIEW rather than a modal (unlike Blog Studio): an issue is
         // edited alongside its list and its audience, which does not fit a dialog. Routed through
         // the workspace router so it is a view swap, not a page reload that drops app state.
-        if (paLabel) paLabel.textContent = 'Write Email';
+        if (paLabel) paLabel.textContent = 'New email';
         // ⚠️ Hand the Studio the assistant on the way in. Without it the Studio has no name to put
         // on its buttons ("the assistant" about somebody the user named themselves) AND every issue
         // it creates has a null assistant_id — invisible on the Issues tab of the very page the

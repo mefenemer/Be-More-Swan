@@ -59,7 +59,7 @@ check('a selected part rides in front of the next message, visibly, then clears'
 
 check('the pane: Chat first, preview on the left, the chat mounted once and kept across repaints', () => {
     assert.ok(editor.includes("const SUBTABS = [['chat', 'Preview'], ['setup', 'Set up']"));
-    assert.ok(editor.includes('<div data-sb-work class="min-w-0">') && editor.includes('[data-sb-mode="edit"] [data-sb-preview-col]:not([data-sb-full]) { display: none; }'));
+    assert.ok(editor.includes('<div data-sb-work class="min-w-0 tab-card">') && editor.includes('[data-sb-mode="edit"] [data-sb-preview-col]:not([data-sb-full]) { display: none; }'));
     assert.ok(editor.includes("const blocks = P === 'chat' ? [] :"));
     const paint = slice(editor, 'function paintChat(', 'function mountChat(');
     assert.ok(paint.includes('box.contains(chatPane.mountEl)) return;'), 'a repaint must not remount the chat');

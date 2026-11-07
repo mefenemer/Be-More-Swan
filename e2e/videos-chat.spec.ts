@@ -8,7 +8,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
   <link rel="stylesheet" href="/style.css"></head><body class="bg-gray-50">
   <div class="page-wide p-4"><div id="maintab-videos"><div id="videos-host"></div></div></div>
   <script src="/src/components/scroll-lock.js"></script><script src="/dialogs.js"></script>
-  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/chat-pane.js"></script>
+  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/tab-head.js"></script><script src="/src/components/chat-pane.js"></script>
   <script src="/src/components/assistant-videos.js"></script>
   <script>AssistantVideos.init({ assistantId: 6, assistantName: 'Cleo', setup: {} }); setTimeout(() => AssistantVideos.activate(), 50);</script>
 </body></html>`;

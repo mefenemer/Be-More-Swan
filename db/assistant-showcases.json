@@ -126,7 +126,7 @@
       },
       {
         "q": "Can I write some posts myself?",
-        "a": "Yes. Press Write Blog Post, give it a subject, and either write it yourself or ask the assistant to draft it for you."
+        "a": "Yes. Press New blog post, give it a subject, and either write it yourself or ask the assistant to draft it for you."
       },
       {
         "q": "Does it use tasks?",

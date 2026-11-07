@@ -270,16 +270,18 @@
     const accepted = state.reviews?.trackRecord || [];
     const pills = [['review', 'To review', open.length], ['accepted', 'Accepted', accepted.length], ['dismissed', 'Dismissed', dismissed.length]].map(([key, label, n]) => {
       const on = state.stage === key;
-      const count = !n ? '' : key === 'review' ? ` <span class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 py-0.5 rounded-full">${n}</span>` : ` <span class="text-xs font-semibold text-gray-500">${n}</span>`;
+      const count = window._tabPillCount ? window._tabPillCount(n, key === 'review') : ` ${n}`;
       return `<button type="button" role="tab" id="mentor-stage-${key}" aria-controls="mentor-stage-panel" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-mentor-stage="${key}" class="text-sm whitespace-nowrap">${label}${count}</button>`;
     }).join('');
     const pane = state.stage === 'accepted' ? acceptedPane() : state.stage === 'dismissed' ? dismissedPane(dismissed) : reviewPane(open, d.week);
-    return card(`
-      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <div class="stage-pills tab-scroller" style="margin:0;max-width:100%" role="tablist" aria-label="Suggestions by stage">${pills}</div>
-        ${state.stage === 'review' && open.length > 1 ? '<button type="button" data-mentor-review-all class="btn-secondary px-3 py-1.5 border text-xs font-bold rounded-lg transition">Review all</button>' : ''}
+    // The standard tab card (owner, 2026-11-07): pills first, list links at their right, then the list.
+    return `<section class="tab-card min-w-0" data-mentor-panel="suggestions" data-no-fold>
+      <div class="tab-pillbar">
+        <div class="stage-pills tab-scroller" role="tablist" aria-label="Suggestions by stage">${pills}</div>
+        <div class="tab-pillbar-actions">${state.stage === 'review' && open.length > 1 ? '<button type="button" data-mentor-review-all class="tab-link">Review all</button>' : ''}</div>
       </div>
-      <div id="mentor-stage-panel" role="tabpanel" aria-labelledby="mentor-stage-${esc(state.stage)}" tabindex="0">${pane}</div>`, 'data-mentor-panel="suggestions" data-no-fold');
+      <div id="mentor-stage-panel" role="tabpanel" aria-labelledby="mentor-stage-${esc(state.stage)}" tabindex="0" class="px-4 sm:px-5 pb-4 sm:pb-5 pt-2">${pane}</div>
+    </section>`;
   }
 
   function render() {
@@ -297,7 +299,7 @@
     if (!state.data) { el.innerHTML = card('<p class="text-sm text-gray-400 animate-pulse">Loading…</p>'); return; }
     const d = state.data;
     el.innerHTML = `
-      <div class="flex items-center justify-between gap-3 mb-3"><h2 class="text-base font-bold text-gray-900 shrink-0">Suggestions</h2><div class="flex flex-wrap items-center justify-end gap-2">${window._tabFullBtn?.('mentor') || ''}</div></div>
+      ${window._tabHead({ title: 'Suggestions', explain: 'mentor-suggestions', emoji: '💡', about: 'What your Business Mentor suggests you change, picked from the evidence in your workspace. Nothing changes until you accept one, here or in chat.', right: window._tabFullBtn?.('mentor') || '' })}
       ${suggestionsHtml(d)}
       <p class="text-xs text-gray-600 px-1 mt-4">Need help with Be More Swan? Ask me in chat, or use <button type="button" data-mentor-help class="font-semibold text-pink-700 hover:underline">Help &amp; Support</button>.</p>`;
   }

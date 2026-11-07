@@ -304,30 +304,28 @@
       const n = inStage(st.key).length;
       const on = st.key === state.stage;
       return `<button type="button" role="tab" aria-selected="${on ? 'true' : 'false'}" tabindex="${on ? 0 : -1}" data-vid-stage="${st.key}"
-        class="flex-shrink-0 min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}">
-        ${esc(st.label)} <span class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center ${st.urgent && n ? 'bg-amber-100 text-amber-900' : on ? 'bg-gray-100 text-gray-700' : 'bg-gray-200 text-gray-700'}">${n}</span></button>`;
+        class="flex-shrink-0 min-h-[44px] sm:min-h-0 text-sm whitespace-nowrap">${esc(st.label)}${window._tabPillCount(n, !!st.urgent)}</button>`;
     }).join('');
     const empty = state.stage === 'check'
       ? `No videos to check. Press “New video”, or tell ${who()} in chat what you’d like a video about.`
       : `No videos ${esc(stageLabel.toLowerCase())}.`;
+    // The standard tab header and card (owner, 2026-11-07).
+    const full = `<button type="button" data-vid-act="full" aria-pressed="${state.full ? 'true' : 'false'}" title="${state.full ? 'Back to the page (Esc)' : 'Use the whole screen for your videos and the chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg whitespace-nowrap">${state.full ? 'Exit full screen' : 'Full screen'}</button>`;
     el.innerHTML = `
-      <div class="flex items-center justify-between gap-3 mb-3">
-        <h2 class="text-base font-bold text-gray-900 shrink-0"><span data-explain="video-videos">Videos</span></h2>
-        <div class="flex flex-wrap items-center justify-end gap-2">
-          <button type="button" data-vid-act="full" aria-pressed="${state.full ? 'true' : 'false'}" title="${state.full ? 'Back to the page (Esc)' : 'Use the whole screen for your videos and the chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg">${state.full ? 'Exit full screen' : 'Full screen'}</button>
-          ${state.form ? '' : '<button type="button" data-vid-act="new" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg shrink-0">New video</button>'}
-        </div>
-      </div>
+      ${window._tabHead({ title: 'Videos', explain: 'video-videos', right: `${full}${state.form ? '' : window._tabNewBtn('New video', 'data-vid-act="new"')}` })}
       ${formHtml()}
-      <div class="flex flex-wrap items-center justify-between gap-2 mb-4">
-        ${''/* Pills in a grey track, as on the Briefs tab; overflow-y hidden so the row has no stray scrollbar. */}
-        <div role="tablist" aria-label="Videos by stage" class="inline-flex max-w-full gap-1 p-1 rounded-xl bg-gray-100" style="overflow-x:auto;overflow-y:hidden">${pills}</div>
-        ${visible.length > 1 ? `<button type="button" data-vid-act="fold-all" class="text-xs font-bold text-gray-600 hover:text-gray-900 px-1 py-1">${anyOpen ? 'Hide all' : 'Show all'}</button>` : ''}
-      </div>
-      ${!state.loaded ? '<p class="text-sm text-gray-500">Loading your videos…</p>'
-        : state.loadError ? `<p class="text-sm text-red-600">Your videos couldn’t be loaded: ${esc(state.loadError)}</p>`
-        : visible.length ? `<div class="space-y-4">${visible.map(videoHtml).join('')}</div>`
-        : `<div class="text-center py-10 text-sm text-gray-500">${empty}</div>`}`;
+      <div class="tab-card">
+        <div class="tab-pillbar">
+          <div role="tablist" aria-label="Videos by stage" class="stage-pills tab-scroller">${pills}</div>
+          <div class="tab-pillbar-actions">${visible.length > 1 ? `<button type="button" data-vid-act="fold-all" class="tab-link">${anyOpen ? 'Hide all' : 'Show all'}</button>` : ''}</div>
+        </div>
+        <div class="px-4 pb-4 pt-2">
+        ${!state.loaded ? '<p class="text-sm text-gray-500">Loading your videos…</p>'
+          : state.loadError ? `<p class="text-sm text-red-600">Your videos couldn’t be loaded: ${esc(state.loadError)}</p>`
+          : visible.length ? `<div class="space-y-4">${visible.map(videoHtml).join('')}</div>`
+          : `<div class="text-center py-10 text-sm text-gray-500">${empty}</div>`}
+        </div>
+      </div>`;
   }
 
   // ── Full screen (as on the Briefs and Website tabs) ─────────────────────────────────────────────
