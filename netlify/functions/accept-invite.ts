@@ -1,7 +1,11 @@
 // netlify/functions/accept-invite.ts
 // US-GAP-5.1.1: Accept an organisation invite via magic link
 //
-// GET ?token=<plainToken>&orgId=<id>&role=<role>
+// GET ?token=<plainToken>&orgId=<id>&role=<role>&sig=<signature>
+//
+// SECURITY: the token column is shared with the sign-up and magic-link emails, so a valid token does
+// NOT prove an invite. Two checks do, both before anything is written: the signature made by
+// invite-member.ts (src/utils/invite-link.ts), and this user's pending 'invited' row for this org.
 //
 // SC2:  Resolves the stub user, sets password/status, joins org with correct role
 // SC5:  If token expired (> 7 days) — returns friendly expiry page
@@ -15,11 +19,19 @@ import { getDb } from '../../db/client';
 import { users, userOrganisations, organisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { recordLogin } from '../../src/utils/login-events';
+import { isInviteRole, verifyInviteSignature } from '../../src/utils/invite-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET!;
 const BASE_URL  = process.env.BASE_URL || '';
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || '';
+
+/** One reply for every refusal, so it never reveals whether a workspace or an invite exists. */
+const INVALID_INVITE = {
+    statusCode: 400,
+    headers: { 'Content-Type': 'text/html' },
+    body: '<p>Invalid invite link. Please ask your admin to send a new invite.</p>',
+};
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -29,13 +41,9 @@ export default withLambda(async (event) => {
     const orgId      = parseInt(qs.orgId || '');
     const role       = qs.role || 'member';
 
-    if (!plainToken || !orgId) {
-        return {
-            statusCode: 400,
-            headers: { 'Content-Type': 'text/html' },
-            body: '<p>Invalid invite link. Please ask your admin to send a new invite.</p>',
-        };
-    }
+    if (!plainToken || !orgId || !isInviteRole(role)) return INVALID_INVITE;
+    if (!jwtSecret) return { statusCode: 500, body: 'Server misconfigured.' };
+    if (!verifyInviteSignature(plainToken, orgId, role, qs.sig, jwtSecret)) return INVALID_INVITE;
 
     const hashedToken = crypto.createHash('sha256').update(plainToken).digest('hex');
     const db = getDb();
@@ -89,10 +97,18 @@ export default withLambda(async (event) => {
         };
     }
 
-    // Validate the role
-    const validRoles = ['member', 'admin', 'viewer'] as const;
-    type OrgRole = typeof validRoles[number];
-    const assignedRole: OrgRole = validRoles.includes(role as OrgRole) ? (role as OrgRole) : 'member';
+    // An invite must be waiting for this person in this workspace. Claiming the row is the first
+    // write, and only an 'invited' row can be claimed, so a member's or owner's role never changes here.
+    const assignedRole = role;
+    const claimed = await db.update(userOrganisations)
+        .set({ role: assignedRole })
+        .where(and(
+            eq(userOrganisations.userId, user.id),
+            eq(userOrganisations.organisationId, orgId),
+            eq(userOrganisations.role, 'invited'),
+        ))
+        .returning({ id: userOrganisations.id });
+    if (claimed.length === 0) return INVALID_INVITE;
 
     // Mark user as verified + clear token
     await db.update(users)
@@ -103,26 +119,6 @@ export default withLambda(async (event) => {
             updatedAt:         now,
         })
         .where(eq(users.id, user.id));
-
-    // SC2: Update the org membership from 'invited' → assigned role
-    const [existingMembership] = await db
-        .select({ id: userOrganisations.id })
-        .from(userOrganisations)
-        .where(and(
-            eq(userOrganisations.userId, user.id),
-            eq(userOrganisations.organisationId, orgId),
-        ))
-        .limit(1);
-
-    if (existingMembership) {
-        await db.update(userOrganisations)
-            .set({ role: assignedRole })
-            .where(eq(userOrganisations.id, existingMembership.id));
-    } else {
-        await db.insert(userOrganisations).values({
-            userId: user.id, organisationId: orgId, role: assignedRole,
-        }).onConflictDoNothing();
-    }
 
     // In-app notification: welcome to the org
     const [org] = await db
