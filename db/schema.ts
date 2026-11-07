@@ -6737,6 +6737,40 @@ export const siteVisitCounts = pgTable("site_visit_counts", {
   index("site_visit_counts_day_idx").on(t.day),
 ]);
 
+// Free guest review links (db/review-links.sql, docs/review-link-plan.md). One link opens one item.
+// The token is never stored, and neither is a guest's email or IP address.
+export const reviewLinks = pgTable("review_links", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  itemKind: text("item_kind").notNull(), // 'social_post' | 'design_brief'
+  itemId: integer("item_id").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  label: text("label"),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  viewCount: integer("view_count").notNull().default(0),
+  firstViewedAt: timestamp("first_viewed_at"),
+  trialClicks: integer("trial_clicks").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("review_links_item").on(t.organisationId, t.itemKind, t.itemId),
+]);
+
+export const reviewLinkResponses = pgTable("review_link_responses", {
+  id: serial("id").primaryKey(),
+  linkId: integer("link_id").notNull().references(() => reviewLinks.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  guestName: text("guest_name").notNull(),
+  decision: text("decision").notNull(), // 'approved' | 'changes' | 'comment'
+  optionId: integer("option_id"),
+  body: text("body"),
+  contentHash: text("content_hash").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("review_link_responses_link").on(t.linkId, t.createdAt),
+]);
+
 // The source a new account arrived with (src/utils/visit-source.ts cleanSignupSource), when known.
 export const signupSources = pgTable("signup_sources", {
   userId: integer("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),

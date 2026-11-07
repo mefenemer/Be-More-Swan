@@ -14,6 +14,7 @@ import { randomUUID } from 'crypto';
 import { getDb } from '../../db/client';
 import { aiBlueprints, auditLogs, contentGenerationJobs, scheduledPosts } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
+import { enforcePromptModeration } from '../../src/utils/moderation';
 import { requireTenant } from '../../src/utils/tenant';
 import { triggerContentDrain } from '../../src/utils/trigger-drain';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -40,6 +41,10 @@ export default withLambda(async (event) => {
     if (feedback.length > MAX_FEEDBACK) {
         return { statusCode: 400, body: JSON.stringify({ error: `feedback must be ${MAX_FEEDBACK} characters or fewer.` }) };
     }
+
+    // This box can hold a guest's comments from a review link, once the user chooses to use them.
+    const modBlock = await enforcePromptModeration({ text: feedback, userId, organisationId, source: 'request-post-changes' });
+    if (modBlock) return modBlock;
 
     // Load the post and verify it belongs to the active org.
     const [post] = await db

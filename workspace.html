@@ -1955,6 +1955,8 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div id="post-review-archive" class="hidden mt-4 text-xs"></div>
       <!-- "Make a video version" (Video Producer Phase 7, src/utils/video-handoff.ts) — painted by _rqVideoPaint. -->
       <div id="post-review-video" class="hidden mt-3 text-xs"></div>
+      <!-- Guest review links (src/components/review-links.js). Filled for a post that is still going out. -->
+      <div id="post-review-share" class="hidden mt-3 text-xs"></div>
     </div>
     <!-- Footer: actions -->
     <div id="post-review-actions" class="border-t border-gray-100 p-4 space-y-3 shrink-0">
@@ -6178,6 +6180,7 @@ function formatCurrency(amount, currency) {
 <!-- Business Mentor cards' clicks, and "Review all" (chat, the Mentor's Suggestions tab, Inbox "Needs you"). -->
 <script src="/src/components/mentor-apply.js"></script>
 <script src="/src/components/redraft-upcoming.js"></script>
+<script src="/src/components/review-links.js"></script>
 <script src="/src/components/mentor-review-all.js"></script>
 <!-- Chat modal (workspace "💬 Chat" card action) — same mountable widget assistant-chat.html
      uses, embedded in-page instead of navigating to a separate page. -->
@@ -7204,6 +7207,7 @@ function rqRenderSocialCard(draft, opts) {
         ${draft.caption ? `<span class="block text-sm text-gray-700 line-clamp-2 mt-0.5 ${isArchived ? 'line-through opacity-60' : ''}">${_rqEsc(draft.caption)}</span>` : ''}
         ${failureLine}
         ${chips}
+        ${!isArchived ? `<span data-review-status="${group.map(g => g.id).join(',')}" class="hidden mt-1 w-fit text-[11px] font-bold px-2 py-0.5 rounded-full border bg-sky-50 border-sky-200 text-sky-800"></span>` : ''}
         ${statusChipPhone}
         ${anyMediaMissing ? '<span class="sm:hidden inline-flex mt-1 ml-1 text-[11px] font-bold px-2 py-0.5 rounded-full border bg-red-50 border-red-200 text-red-700"><span aria-hidden="true">⚠ </span>Media deleted</span>' : ''}
       </span>
@@ -18432,6 +18436,11 @@ function _rqReviewRenderActive() {
     const reviewable = ['pending_approval', 'draft', 'in_review'].includes(post.status);
     document.getElementById('post-review-actions').classList.toggle('hidden', !reviewable);
     _rqVideoPaint(post);
+    const _rqShareEl = document.getElementById('post-review-share');
+    if (_rqShareEl) {
+        _rqShareEl.classList.add('hidden');
+        if (!['rejected', 'cancelled'].includes(post.status)) window.ReviewLinks?.paint(post.id, _rqShareEl);
+    }
 
     // ── Step 7 labels + which footer you get ──────────────────────────────────────────────────
     // The footer's own Approve/Reject buttons are gone: approving and rejecting BOTH live in step 7

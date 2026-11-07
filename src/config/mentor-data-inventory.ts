@@ -85,6 +85,9 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('on_request', 'Its own chat history with this user (never other assistants\' — §2.8)', ['chat_sessions']),
 
     // ── never ─────────────────────────────────────────────────────────────────────────────────
+    ...group('never', 'Guest review links: private addresses, and names and comments typed by people outside the workspace. Guest text reaches a model only on the user\'s click', [
+        'review_links', 'review_link_responses',
+    ]),
     ...group('never', 'Secrets and connection credentials', [
         'vault_secrets', 'api_keys', 'system_connections', 'workspace_integrations', 'stripe_connect_accounts',
         'newsletter_sending_domains', 'webhook_endpoints',

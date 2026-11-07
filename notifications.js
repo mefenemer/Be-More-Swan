@@ -389,6 +389,13 @@ window.NotifKit = (function () {
                 return window.loadView?.('review-queue', { postId: meta.postId });
             } };
         }
+        // A guest responded to a review link: straight to the post, where the response is shown.
+        if (notif.type === 'review_link_response' && meta.postId) {
+            return { label: 'See their response', run: () => {
+                if (typeof window.openPostReview === 'function') return window.openPostReview(meta.postId);
+                return window.loadView?.('review-queue', { postId: meta.postId });
+            } };
+        }
         // The long-form twin of the above. process-blog-jobs stamps blogPostId (not postId — a blog
         // lives in blog_posts, not scheduled_posts), so the check above never matched and the card
         // rendered with no button at all. Opens the draft in the Blog Studio modal in place, with

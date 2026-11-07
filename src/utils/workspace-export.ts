@@ -57,6 +57,8 @@ function stripDeep(v: unknown): unknown {
 export const WORKSPACE_TABLES: Record<string, any> = {
     assistants: s.aiAssistants,
     scheduledPosts: s.scheduledPosts,
+    reviewLinks: s.reviewLinks,
+    reviewLinkResponses: s.reviewLinkResponses,
     postInsights: s.postInsights,
     postIdeas: s.postIdeaSuggestions,
     postedAssets: s.postedAssets,
