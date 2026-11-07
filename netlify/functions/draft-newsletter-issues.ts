@@ -24,6 +24,7 @@ import { createNotification } from '../../src/utils/notify';
 import { postsPerWeekFor } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { capacityMemo, recordCompletedWork } from '../../src/utils/work-metering';
+import { recordPlatformIncident } from '../../src/utils/platform-incident';
 
 /** Statuses that mean "a human still owes this issue a decision". */
 const AWAITING_HUMAN = ['draft', 'pending_approval', 'in_review'];
@@ -163,6 +164,7 @@ export default withLambda(async () => {
         } catch (err) {
             out.failed++;
             console.error('[draft-newsletter-issues] assistant failed', { assistantId: a.id }, err);
+            await recordPlatformIncident(db, { kind: 'email_draft', error: err, organisationId: a.organisationId, assistantId: a.id, role: 'newsletter_editor', view: 'draft-newsletter-issues' });
         }
     }
 

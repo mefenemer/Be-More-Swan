@@ -942,7 +942,7 @@ window._mcGenerateAI = async function () {
         const res = await fetch('/.netlify/functions/generate-ai-image', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt, aspectRatio: aspectEl.value }),
+            body: JSON.stringify({ prompt, aspectRatio: aspectEl.value, assistantId: window._currentAssistantId || undefined }),
         });
 
         if (res.status === 403) {

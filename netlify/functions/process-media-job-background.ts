@@ -22,6 +22,7 @@ import { settleHold } from '../../src/utils/ai-credits';
 import { aiVideoTasks } from '../../src/config/task-weights';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { recordPlatformIncident } from '../../src/utils/platform-incident';
 
 const POLL_INTERVAL_MS = 5_000;
 const POLL_TIMEOUT_MS = 12 * 60 * 1000;   // 12 min, under the 15-min background ceiling
@@ -141,6 +142,7 @@ export default withLambda(async (event: HandlerEvent) => {
             await fail('Prompt flagged for policy violation.', 'flagged');
         } else {
             console.error('[process-media-job-background] error:', err);
+            await recordPlatformIncident(db, { kind: 'media_job', error: err, organisationId: orgId, assistantId: job.assistantId, view: 'process-media-job-background', ids: { jobId: job.id } });
             await fail(err instanceof Error ? err.message : 'Video generation failed.', 'failed');
         }
         return { statusCode: 200, body: 'failed' };

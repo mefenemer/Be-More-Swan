@@ -49,6 +49,7 @@ import {
 import type { VideoClip, VideoEdit } from '../lib/video-edit';
 import type { AudioOverlay } from '../lib/audio-overlays';
 import { PAD_RATIO, type Overlay } from '../lib/overlay-geometry';
+import { recordPlatformIncident } from './platform-incident';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -235,6 +236,8 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
         }).where(eq(videoProjects.id, projectId));
     } catch (err) {
         console.error(`[video-producer] plan ${projectId} failed:`, err);
+        const [owner] = await db.select({ orgId: videoProjects.organisationId, assistantId: videoProjects.aiAssistantId }).from(videoProjects).where(eq(videoProjects.id, projectId)).limit(1).catch(() => []);
+        if (owner) await recordPlatformIncident(db, { kind: 'video_plan', error: err, organisationId: owner.orgId, assistantId: owner.assistantId, role: 'video_producer', view: 'video-producer', ids: { projectId } });
         await db.update(videoProjects).set({
             status: 'failed', note: err instanceof Error ? err.message.slice(0, 400) : 'The storyboard could not be written.', updatedAt: new Date(),
         }).where(eq(videoProjects.id, projectId));
@@ -576,6 +579,10 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         await save({ status: 'built', scheduledPostId: firstPostId, crosspostGroupId: group, note: null });
     } catch (err) {
         console.error(`[video-producer] build ${projectId} failed:`, err);
+        // Not a fault: the user is told to change those scenes; the person who started it has left.
+        if (!/^(Couldn't find pictures|The person who started)/.test(err instanceof Error ? err.message : '')) {
+            await recordPlatformIncident(db, { kind: 'video_build', error: err, organisationId: orgId, role: 'video_producer', view: 'video-producer', ids: { projectId } });
+        }
         if (held > 0) { await settleHold(db, { orgId, amount: held, success: false, mediaType: 'image', userId }).catch(() => {}); held = 0; }
         await save({ status: 'failed', note: err instanceof Error ? err.message.slice(0, 400) : 'The video could not be made.' }).catch(() => {});
     }

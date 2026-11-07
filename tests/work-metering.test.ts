@@ -42,7 +42,7 @@ for (const [file, kind, marker] of WORKERS) {
         assert.match(src, /hasTaskCapacity\(|hasCapacity\(/);
     });
     check(`${file} records '${kind}' only after the work is delivered`, () => {
-        const rec = src.indexOf(`'${kind}'`);
+        const rec = src.indexOf(`, '${kind}'`);   // the charge's argument, not a failure report's kind: '…'
         const ok = src.indexOf(marker);
         assert.ok(rec > -1, `no recordCompletedWork(..., '${kind}') call`);
         assert.ok(ok > -1, `success marker not found: ${marker}`);

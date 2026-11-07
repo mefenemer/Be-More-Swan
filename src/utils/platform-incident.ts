@@ -31,6 +31,15 @@ export const INCIDENT_KINDS = {
     mentor_job: 'Business Mentor background job',
     mentor_review: 'Business Mentor weekly review',
     mentor_morning: 'Business Mentor morning summary',
+    lead_search_job: 'Lead search',
+    video_plan: 'Video storyboard',
+    video_build: 'Video making',
+    media_job: 'AI video',
+    design_round: 'Brand Designer options',
+    site_draft: 'Website drafting',
+    site_import: 'Website import',
+    site_audit: 'Website check',
+    email_draft: 'Email drafting',
 } as const;
 
 export type IncidentKind = keyof typeof INCIDENT_KINDS;

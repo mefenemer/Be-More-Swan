@@ -193,6 +193,32 @@ test.describe('wide screen', () => {
         expect(pageErrors).toEqual([]);
     });
 
+    test('a post opened while a card from the chat beside the list is running: it picks up the new caption, and can\'t save the old one back', async ({ page, api, signedIn: _signedIn, pageErrors }) => {
+        const store = stubPost(api);
+        const SHORT = 'It’s exhausting.';
+        let release = () => {};
+        const held = new Promise<void>((r) => { release = r; });
+        api.set('rewrite-post-text', async (route) => { await held; await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ caption: SHORT }) }); });
+        api.set('get-assistant-context', { id: 7, name: 'Felix', role: 'Role', roleKey: 'social_media_manager', status: 'working', lifecycleStatus: 'active', context: {}, goals: [], configuration: {} });
+        api.set('chat-orchestrator', { chatSessionId: 9, message: { id: 1, role: 'assistant', content: 'A card is ready.', uiElement: {
+            type: 'post_action_proposal', action: 'shorter', postId: 601, postIds: [601, FACEBOOK_ID], platforms: ['instagram', 'facebook'], status: 'pending_approval', text: CAPTION,
+        } } });
+        await openWorkspace(page);
+        await page.evaluate(() => (window as any).loadView('assistant-detail', 7));
+        const dock = page.locator('#tabchat-chat-host');
+        await dock.locator('[data-chat-input]').fill('Shorter');
+        await dock.locator('[data-chat-input]').press('Enter');
+        await dock.locator('[data-action-go], button').filter({ hasText: /shorter/i }).first().click();
+        await expect.poll(() => api.called('rewrite-post-text').length).toBeGreaterThan(0);
+
+        await page.evaluate(() => (window as any).openPostReview(601));
+        await expect(page.locator('#post-review-caption')).toHaveValue(CAPTION);
+        release();
+        await expect(page.locator('#post-review-caption')).toHaveValue(SHORT, { timeout: 8000 });
+        expect(store.caption).toBe(SHORT);
+        expect(pageErrors).toEqual([]);
+    });
+
     test('a remove card closes the editor and says so, because the chat closes with it', async ({ page, api, signedIn: _signedIn, pageErrors }) => {
         stubPost(api);
         api.set('scheduled-posts', { cancelledIds: [601, FACEBOOK_ID] });

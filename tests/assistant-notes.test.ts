@@ -93,6 +93,18 @@ const has = (calls: Array<{ text: string }>, s: string) => calls.some((c) => c.t
     assert.ok(orch.indexOf('extractAssistantNote(replyText(response.content))') < orch.indexOf('route.parseResponse(raw)'));
     assert.ok(readFileSync('netlify/functions/admin-issue-reports.ts', 'utf8').includes("source <> 'suspected'"));
     assert.match(PLATFORM_NOTE_PROMPT, /NEVER put in it: any name, email/);
+    // Automatic reports leave out what isn't our fault: a refused prompt, a site we couldn't read, a scene to change.
+    const read = (f: string) => readFileSync(f, 'utf8');
+    assert.match(read('src/utils/visual-briefs.ts'), /!\(err instanceof FalContentPolicyError\)\) await recordPlatformIncident/);
+    assert.match(read('src/utils/site-audit.ts'), /outcome\.error === REVIEW_FAILED_MESSAGE\) await recordPlatformIncident/);
+    assert.match(read('src/utils/video-producer.ts'), /Couldn't find pictures\|The person who started/);
+
+    // A picture is credited to the assistant in view, only if it is this workspace's.
+    const image = read('netlify/functions/generate-ai-image.ts');
+    assert.ok(image.includes('eq(aiAssistants.id, asked), eq(aiAssistants.organisationId, orgId)'));
+    assert.ok(image.includes('assistantId: await creditedAssistant(db, orgId, body)'));
+    for (const f of ['my-content.js', 'src/components/media-picker.js', 'src/components/disruptive-ui-registry.js']) assert.ok(read(f).includes('assistantId: window._currentAssistantId || undefined'), f);
+
     console.log('assistant-notes: all checks passed');
     process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });

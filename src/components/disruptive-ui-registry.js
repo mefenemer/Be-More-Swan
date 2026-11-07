@@ -3744,7 +3744,7 @@
           $('[data-sp-more]').innerHTML = '<button type="button" data-sp-again class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Show different ones</button>';
         } else if (!video) {
           say('Creating four for you to choose from — about half a minute…');
-          const res = await call('generate-ai-image', { prompt: desc, aspectRatio: '16:9' });
+          const res = await call('generate-ai-image', { prompt: desc, aspectRatio: '16:9', assistantId: window._currentAssistantId || undefined });
           if (mine !== run) return;
           if (!res.ok) throw new Error(res.body && res.body.error === 'insufficient_credits' ? 'Your monthly tasks are used up — they reset on the 1st.' : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be created.');
           job = res.body.jobId;

@@ -2935,7 +2935,7 @@
       mediaEls.picker.innerHTML = '<div class="bs-media-empty">Generating…</div>';
       // Blank reads the SAVED article, so save what is on screen first.
       (prompt ? Promise.resolve() : flushDraft())
-        .then(function () { return api('generate-ai-image', { method: 'POST', body: JSON.stringify({ prompt: prompt, blogPostId: state.postId, aspectRatio: '16:9' }) }); })
+        .then(function () { return api('generate-ai-image', { method: 'POST', body: JSON.stringify({ assistantId: state.assistantId || undefined, prompt: prompt, blogPostId: state.postId, aspectRatio: '16:9' }) }); })
         .then(function (res) {
           if (!res.ok) {
             mediaEls.picker.innerHTML = '';
