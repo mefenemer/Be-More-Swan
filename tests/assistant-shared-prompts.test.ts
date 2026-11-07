@@ -26,7 +26,7 @@ function fakeDb(fixtures: Map<unknown, unknown[]>) {
     // Every chat turn reads both, last so they win; the background advice reads the rule too.
     const orch = read('netlify/functions/chat-orchestrator.ts');
     const line = orch.slice(orch.indexOf('const promptWithRules = ['), orch.indexOf('\n', orch.indexOf('const promptWithRules = [')));
-    assert.ok(line.includes('offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE]'), 'every turn reads both');
+    assert.ok(line.includes('offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT]'), 'every turn reads both');
     for (const f of ['src/utils/mentor-review.ts', 'src/utils/mentor-jobs.ts', 'src/utils/site-audit-prompts.ts']) assert.ok(read(f).includes('OUTSIDE_PRODUCTS_RULE'), f);
 
     // It handles the moment, and doesn't stop assistants talking about what the user already uses.

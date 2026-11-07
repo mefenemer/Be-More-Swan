@@ -2,6 +2,7 @@
 //
 // ONE helper every incident source calls. The trigger is deterministic code at the call site (a job
 // failed after its last retry, a chat turn errored, a Mentor action threw), never the model's opinion.
+// (What an assistant itself noticed is src/utils/assistant-notes.ts, owner's decision 2026-11-07: same queue, source 'suspected'.)
 // Rows go to issue_reports with source 'system', user_id NULL, so the admin portal's Report an Issue
 // queue — and Pass to Developer — works on them unchanged, while no user ever sees or is told about one.
 //

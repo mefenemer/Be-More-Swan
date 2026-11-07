@@ -51,7 +51,7 @@ check('other assistants: a Mentor pointer only when the workspace has an active 
     const block = ORCH.slice(at, at + 1400);
     assert.match(block, /eq\(aiAssistants\.lifecycleStatus, 'working'\)/);
     assert.match(block, /Never pass work to it or say you have asked it/);
-    assert.match(ORCH, /myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards \? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE\]\.filter\(Boolean\)/);
+    assert.match(ORCH, /myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards \? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT\]\.filter\(Boolean\)/);
 });
 
 check('pricing: the Business Mentor row is in the SQL and the seed, ticked on every plan', () => {
