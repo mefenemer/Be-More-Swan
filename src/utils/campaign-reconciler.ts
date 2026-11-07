@@ -242,7 +242,7 @@ async function judgeLeadSearchOrder(db: Db, order: { artefactId: number | null }
         .limit(1);
 
     if (!row) return { kind: 'failed', summary: 'That saved search no longer exists' };
-    if (row.status === 'draft') return { kind: 'in_review', summary: 'Saved search ready — start it from Find New Leads' };
+    if (row.status === 'draft') return { kind: 'in_review', summary: 'Saved search ready — start it from the Searches tab' };
     if (row.status === 'archived') return { kind: 'rejected', summary: 'Saved search archived without being run' };
     return { kind: 'delivered', summary: 'Saved search is running' };
 }

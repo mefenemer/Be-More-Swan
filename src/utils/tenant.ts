@@ -16,12 +16,15 @@ import type { getDb } from '../../db/client';
 import { userOrganisations } from '../../db/schema';
 import { requireSession, type JsonResponse } from './session';
 import { resolveImpersonation, impersonationWriteBlock } from './impersonation';
+import { accessForMembership, firstBlockedAssistant, type AssistantAccess } from './assistant-access';
 
 type Db = ReturnType<typeof getDb>;
 
 export interface OrgMembership {
     organisationId: number;
     role: string;
+    /** user_organisations.assistant_ids as stored; read it through accessForMembership. */
+    assistantIds?: number[] | null;
 }
 
 export interface TenantContext {
@@ -29,6 +32,12 @@ export interface TenantContext {
     organisationId: number;
     /** The caller's role *within* organisationId, e.g. 'owner' | 'admin' | 'member' | 'viewer'. */
     role: string;
+    /**
+     * The assistants this person can use: null = all of them (src/utils/assistant-access.ts).
+     * requireTenant has already refused a request naming one outside the list; lists filter with
+     * filterToAccessible.
+     */
+    assistantAccess: AssistantAccess;
     /**
      * Present only when an admin is viewing this workspace through impersonation. `userId` is
      * then the TARGET user; the real admin is here. Such a request is always a GET — see below.
@@ -53,12 +62,16 @@ export async function resolveActiveOrg(
 ): Promise<OrgMembership | null> {
     if (claimedOrgId !== undefined) {
         const membership = await requireOrgMembership(db, userId, claimedOrgId);
-        if (membership) return { organisationId: claimedOrgId, role: membership.role };
+        if (membership) return { organisationId: claimedOrgId, role: membership.role, assistantIds: membership.assistantIds ?? null };
         // Claim points at an org the user is no longer in — ignore it and fall back.
     }
 
     const [fallback] = await db
-        .select({ organisationId: userOrganisations.organisationId, role: userOrganisations.role })
+        .select({
+            organisationId: userOrganisations.organisationId,
+            role: userOrganisations.role,
+            assistantIds: userOrganisations.assistantIds,
+        })
         .from(userOrganisations)
         .where(eq(userOrganisations.userId, userId))
         .orderBy(desc(userOrganisations.joinedAt))
@@ -76,9 +89,9 @@ export async function requireOrgMembership(
     userId: number,
     orgId: number,
     roles?: string[],
-): Promise<{ role: string } | null> {
+): Promise<{ role: string; assistantIds?: number[] | null } | null> {
     const [membership] = await db
-        .select({ role: userOrganisations.role })
+        .select({ role: userOrganisations.role, assistantIds: userOrganisations.assistantIds })
         .from(userOrganisations)
         .where(and(eq(userOrganisations.userId, userId), eq(userOrganisations.organisationId, orgId)))
         .limit(1);
@@ -142,6 +155,8 @@ export async function requireTenant(
             userId: imp.impersonatingUserId,
             organisationId: targetOrg.organisationId,
             role: targetOrg.role,
+            // Support sees the whole workspace, read-only, whoever they are viewing as.
+            assistantAccess: null,
             impersonation: { realAdminId: imp.realAdminId, sessionId: imp.sessionId },
         };
     }
@@ -157,5 +172,17 @@ export async function requireTenant(
         return { error: { statusCode: 403, body: JSON.stringify({ error: 'Insufficient permissions for this organisation.' }) } };
     }
 
-    return { userId: session.userId, organisationId: org.organisationId, role: org.role };
+    // A teammate given some assistants, not all: refuse any request that names another one, before
+    // the function runs (src/utils/assistant-access.ts).
+    const assistantAccess = accessForMembership(org.role, org.assistantIds);
+    if (firstBlockedAssistant(assistantAccess, event) !== null) {
+        return {
+            error: {
+                statusCode: 403,
+                body: JSON.stringify({ error: "You don't have access to this assistant. Ask the workspace owner to add it for you.", code: 'ASSISTANT_ACCESS' }),
+            },
+        };
+    }
+
+    return { userId: session.userId, organisationId: org.organisationId, role: org.role, assistantAccess };
 }

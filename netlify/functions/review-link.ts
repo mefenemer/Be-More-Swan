@@ -5,6 +5,7 @@
 // GET  ?postIds=1,2,3                           → { statuses: { postId: { label, at } } } for card chips
 // POST { action:'create', postId, label?, email? } → { url, linkId, expiresAt, emailed }
 // POST { action:'revoke', linkId }              → { revoked }
+// POST { action:'resolve', responseId, resolution:'done'|'ignored'|null } → { resolved }
 //
 // The link's address is only ever returned by create, because only its hash is stored. Chat's card
 // calls this same endpoint on the user's click.
@@ -18,7 +19,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { sendEmail } from '../../src/utils/email';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import {
-    MAX_EMAILS_PER_ORG_PER_DAY, createReviewLink, listReviewLinks, reviewStatusForPosts, revokeReviewLink,
+    MAX_EMAILS_PER_ORG_PER_DAY, createReviewLink, listReviewLinks, resolveReviewResponse, reviewStatusForPosts, revokeReviewLink,
 } from '../../src/utils/review-links';
 import { requireTenant } from '../../src/utils/tenant';
 
@@ -68,6 +69,16 @@ export default withLambda(async (event) => {
         const linkId = Number(body.linkId);
         if (!Number.isInteger(linkId) || linkId <= 0) return json(400, { error: 'linkId is required.' });
         return json(200, { revoked: await revokeReviewLink(db, orgId, linkId) });
+    }
+
+    if (body.action === 'resolve') {
+        const responseId = Number(body.responseId);
+        if (!Number.isInteger(responseId) || responseId <= 0) return json(400, { error: 'responseId is required.' });
+        const resolution = body.resolution ?? null;
+        if (resolution !== null && resolution !== 'done' && resolution !== 'ignored') return json(400, { error: 'Unknown resolution.' });
+        const resolved = await resolveReviewResponse(db, orgId, ctx.userId, responseId, resolution);
+        if (!resolved) return json(404, { error: 'That comment could not be found.' });
+        return json(200, { resolved });
     }
 
     if (body.action !== 'create') return json(400, { error: 'Unknown action.' });

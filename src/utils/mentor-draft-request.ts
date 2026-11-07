@@ -57,6 +57,6 @@ export async function resolveDraftRequest(db: Db, orgId: number, ui: unknown): P
 }
 
 export function draftRequestPromptLine(): string {
-    return `Ask an ACTIVE Social Media assistant (listed under YOUR TEAM) for one post, when a post would clearly help — for example to back a goal that's behind or answer a theme from their reviews. The brief is what the post should say, from facts above only (under ${BRIEF_MAX} characters). Their click asks that assistant exactly as "Create a Post" does; the draft lands in its "Posts" tab for review, marked "Requested by" you:
+    return `Ask an ACTIVE Social Media assistant (listed under YOUR TEAM) for one post, when a post would clearly help — for example to back a goal that's behind or answer a theme from their reviews. The brief is what the post should say, from facts above only (under ${BRIEF_MAX} characters). Their click asks that assistant exactly as "New post" does; the draft lands in its "Posts" tab for review, marked "Requested by" you:
 {"type":"${DRAFT_REQUEST_TYPE}","summary":"<one sentence>","why":"<the figures it's based on>","asked":false,"assistantId":<its assistantId>,"brief":"<what the post should say>"}`;
 }

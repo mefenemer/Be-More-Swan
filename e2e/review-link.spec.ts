@@ -98,13 +98,18 @@ test('the subscriber shares a post, sees the response, and nothing acts until th
             ? { drafts: [draft], total: 1, hasMore: false }
             : { drafts: [], total: 0, hasMore: false }
     ));
+    let resolution: string | null = null;
     api.set('review-link', (route) => {
         const req = route.request();
         const url = new URL(req.url());
-        if (req.method() === 'POST') return { url: `https://example.test/r/${TOKEN}`, linkId: 1, expiresAt: slot, emailed: false };
+        if (req.method() === 'POST') {
+            const body = JSON.parse(req.postData() || '{}');
+            if (body.action === 'resolve') { resolution = body.resolution; return { resolved: true }; }
+            return { url: `https://example.test/r/${TOKEN}`, linkId: 1, expiresAt: slot, emailed: false };
+        }
         if (url.searchParams.get('postIds')) return { statuses: { 601: { label: 'Sarah <b>asked for changes', at: slot } } };
         return { links: [{ id: 1, label: 'for Sarah', state: 'live', viewed: true, createdAt: slot, expiresAt: slot, responses: [
-            { id: 9, guestName: 'Sarah <img src=x onerror=window.__hacked=1>', decision: 'changes', body: 'Shorter <b>please</b>', createdAt: slot, changedSince: true },
+            { id: 9, guestName: 'Sarah <img src=x onerror=window.__hacked=1>', decision: 'changes', body: 'Shorter <b>please</b>', createdAt: slot, changedSince: true, resolution },
         ] }] };
     });
 
@@ -130,5 +135,13 @@ test('the subscriber shares a post, sees the response, and nothing acts until th
     await expect(page.locator('#post-review-feedback')).toHaveValue('Shorter <b>please</b>');
     expect(api.called('request-post-changes')).toEqual([]);
     expect(api.called('approve-post')).toEqual([]);
+    // Using it did not put it away: only Mark as done or Ignore does, and Undo brings it back.
+    await expect(share.getByRole('button', { name: 'Mark as done' })).toBeVisible();
+    await share.getByRole('button', { name: 'Mark as done' }).click();
+    await expect(share.getByText('Marked as done')).toBeVisible();
+    expect(api.called('review-link').find((c) => c.method === 'POST' && (c.body as { action?: string })?.action === 'resolve')?.body)
+        .toMatchObject({ action: 'resolve', responseId: 9, resolution: 'done' });
+    await share.getByRole('button', { name: 'Undo' }).click();
+    await expect(share.getByRole('button', { name: 'Ignore' })).toBeVisible();
     expect(pageErrors).toEqual([]);
 });

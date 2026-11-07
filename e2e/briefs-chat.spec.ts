@@ -10,7 +10,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
   <link rel="stylesheet" href="/style.css"></head><body class="bg-gray-50">
   <div class="page-wide p-4"><div id="module-brand-style"></div><div id="maintab-briefs"><div id="briefs-host"></div></div></div>
   <script src="/src/components/scroll-lock.js"></script><script src="/dialogs.js"></script>
-  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/chat-history-panel.js"></script><script src="/src/components/chat-pane.js"></script>
+  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/chat-history-panel.js"></script><script src="/src/components/tab-head.js"></script><script src="/src/components/chat-pane.js"></script>
   <script src="/src/generated/platform-constants.js"></script><script src="/src/components/font-picker.js"></script><script src="/src/components/brand-style-dialog.js"></script>
   <script src="/src/components/brand-style-card.js"></script><script src="/src/components/assistant-briefs.js"></script>
   <script>AssistantBriefs.init({ assistantId: 4, assistantName: 'Mira' }); setTimeout(() => AssistantBriefs.activate(), 50);

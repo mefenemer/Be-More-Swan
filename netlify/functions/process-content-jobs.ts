@@ -35,6 +35,7 @@ import { raiseBriefForPost } from '../../src/utils/visual-briefs';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { isUnifiedTaskMetering } from '../../src/utils/task-metering-flag';
 import { directPostImage } from '../../src/utils/post-image-direction';
+import { loadPreviousDraft, previousDraftBlock } from '../../src/utils/post-revision';
 import { triggerContentDrain } from '../../src/utils/trigger-drain';
 import { generateAndPersistImage, renderAndPersistBrandCard, r2IsConfigured } from '../../src/lib/media-persist';
 import { headlineFromCaption, MAX_HEADLINE_CHARS } from '../../src/lib/brand-card';
@@ -697,10 +698,22 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             `Return JSON: { "caption": "...", ${needsShort ? '"captionShort": "...", ' : ''}"hashtags": "...", "suggestedMediaDescription": "...", "imageSearchQuery": "...", ${isVideo ? '' : '"cardHeadline": "...", '}"pillar": ${pillarList.length ? '"<one of the pillars above>"' : 'null'}, ${isVideo ? '"reelScript": "...", "textOverlays": ["..."], ' : ''}"conflictNotice": null }`,
         ].filter(Boolean).join('\n');
 
+        // A revision sees the draft it replaces (src/utils/post-revision.ts). Without it, "the image is
+        // too dark" redrafted from nothing and the new picture came out just as dark. Best-effort: a
+        // failed read costs the comparison, never the draft.
+        const previousDraft = job.revised_from_post_id
+            ? await loadPreviousDraft(db, job.organisation_id, job.revised_from_post_id).catch((err: Error) => {
+                console.warn('[process-content-jobs] previous draft unreadable (non-fatal):', err.message);
+                return null;
+            })
+            : null;
+
         const messages: Anthropic.MessageParam[] = [{ role: 'user', content: baseInstruction }];
         if (job.context_prompt) {
             messages.push({ role: 'assistant', content: '{"status":"understood"}' });
-            messages.push({ role: 'user', content: `Additional context from the user: ${job.context_prompt}` });
+            messages.push({ role: 'user', content: previousDraft
+                ? `${previousDraftBlock(previousDraft)}\n\nThe user's feedback: ${job.context_prompt}`
+                : `Additional context from the user: ${job.context_prompt}` });
         } else if (inspoTopic) {
             messages.push({ role: 'assistant', content: '{"status":"understood"}' });
             messages.push({ role: 'user', content: inspoTopic.brief });
@@ -1060,6 +1073,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                                 request: aiMediaContext.slice(0, 1000),
                                 requestIsCaption: !generated.suggestedMediaDescription,
                                 wordsOnPicture: false,
+                                revision: job.revised_from_post_id && job.context_prompt
+                                    ? { feedback: job.context_prompt, previousPicturePrompt: previousDraft?.picturePrompt ?? null }
+                                    : null,
                             })).scene
                             : aiMediaContext;
                         const assetId = await generateAndPersistImage(db, {

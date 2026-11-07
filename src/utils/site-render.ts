@@ -35,7 +35,7 @@ export interface SiteSignupForm {
 /** Where forms post, on the site's own origin (sites-host forwards it to site-serve.ts). */
 export const FORM_ACTION = '/_form';
 /** A product as drawn: from Business Information, never typed into the site (site-shop.ts SiteProduct). */
-export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; imageAssetId: number | null; durationMinutes?: number | null; dietary?: unknown; allergens?: string | null; }
+export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; currency?: string; imageAssetId: number | null; durationMinutes?: number | null; dietary?: unknown; allergens?: string | null; }
 
 /** "45 min", "1 hr", "1 hr 30 min". */
 export function formatDuration(minutes: number): string {
@@ -651,7 +651,7 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
                 '@context': 'https://schema.org', '@type': 'Product', name: pr.name,
                 ...(pr.description ? { description: pr.description } : {}),
                 ...(img ? { image: img } : {}),
-                ...(pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: 'GBP', seller: { '@type': 'Organization', name: s.siteName } } } : {}),
+                ...(pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', seller: { '@type': 'Organization', name: s.siteName } } } : {}),
             });
         }
     }

@@ -136,6 +136,9 @@ export const userOrganisations = pgTable("user_organisations", {
       .notNull()
       .references(() => organisations.id, { onDelete: "cascade" }),
   role: text("role").notNull().default("member"),
+  // Which assistants this person can use. NULL = all of them (owners and admins always). A list =
+  // only those ai_assistants ids. src/utils/assistant-access.ts; db/z-member-assistant-access.sql.
+  assistantIds: integer("assistant_ids").array(),
   joinedAt: timestamp("joined_at").defaultNow().notNull(),
 }, (t) => [
   // US-DB-1.3.1: unique membership — prevents duplicate invite rows
@@ -5526,6 +5529,7 @@ export const orgProducts = pgTable("org_products", {
   // the server from these (product-price.ts). Only 'fixed' can be bought online.
   priceType: text("price_type"),          // 'fixed' | 'from' | 'on_request' | 'text' | null
   priceAmount: integer("price_amount"),   // pence
+  priceCurrency: text("price_currency").notNull().default("GBP"),  // db/z-product-price-currency.sql: GBP | USD | EUR | AUD | CAD
   priceUnit: text("price_unit"),
   durationMinutes: integer("duration_minutes"),
   // Deposit when booked from the website (db/z-booking-deposits.sql): 'fixed' pence | 'percent' of a fixed price.
@@ -6767,6 +6771,10 @@ export const reviewLinkResponses = pgTable("review_link_responses", {
   body: text("body"),
   contentHash: text("content_hash").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  // The subscriber's own call on a comment: 'done' | 'ignored' | null (db/review-link-response-resolved.sql).
+  resolution: text("resolution"),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: integer("resolved_by").references(() => users.id, { onDelete: "set null" }),
 }, (t) => [
   index("review_link_responses_link").on(t.linkId, t.createdAt),
 ]);

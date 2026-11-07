@@ -31,7 +31,7 @@ const stripeClient = async () => (await import('./stripe')).getStripe();
 import { currentEnv } from './env-context';
 import { esc, formatPrice, FORM_SENT_PATH } from './site-render';
 import type { SiteDefinition } from './site-definition';
-import { buyablePence } from './product-price';
+import { buyablePence, cleanCurrency, formatMoney } from './product-price';
 import type { SiteRow } from './site-store';
 
 type Db = ReturnType<typeof getDb>;
@@ -125,8 +125,10 @@ export interface SiteProduct {
     description: string | null;
     /** The displayed price ("£24", "from £450", "Price on request", their own words), or null. */
     price: string | null;
-    /** Pence, when it can be bought online (a fixed price); else null. */
+    /** Minor units (pence / cents) of `currency`, when it can be bought online (a fixed price); else null. */
     buyPence: number | null;
+    /** The price's currency, ISO 4217 (product-price.ts PRICE_CURRENCIES); GBP for every older product. */
+    currency?: string;
     imageAssetId: number | null;
     /** Minutes, for a service with a length (shown on a menu / price list when asked). */
     durationMinutes?: number | null;
@@ -142,11 +144,11 @@ export async function loadSiteProducts(db: Db, orgId: number, def: SiteDefinitio
     if (!ids.length) return {};
     const rows = await db.select({
         id: orgProducts.id, name: orgProducts.name, description: orgProducts.description, price: orgProducts.price,
-        priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, imageAssetId: orgProducts.imageAssetId,
+        priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceCurrency: orgProducts.priceCurrency, imageAssetId: orgProducts.imageAssetId,
         durationMinutes: orgProducts.durationMinutes, dietary: orgProducts.dietary, allergens: orgProducts.allergens,
     }).from(orgProducts).where(and(inArray(orgProducts.id, ids), eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active')));
     return Object.fromEntries(rows.map((r) => [r.id, {
-        id: r.id, name: r.name, description: r.description, price: r.price, buyPence: buyablePence(r), imageAssetId: r.imageAssetId,
+        id: r.id, name: r.name, description: r.description, price: r.price, buyPence: buyablePence(r), currency: r.priceCurrency ?? 'GBP', imageAssetId: r.imageAssetId,
         durationMinutes: r.durationMinutes ?? null, dietary: r.dietary ?? null, allergens: r.allergens ?? null,
     }]));
 }
@@ -173,7 +175,7 @@ export function checkoutParams(req: { origin: string; site: SiteRow; sectionId: 
             quantity: 1,
             adjustable_quantity: { enabled: true, minimum: 1, maximum: MAX_QUANTITY },
             price_data: {
-                currency: 'gbp',
+                currency: (product.currency || 'GBP').toLowerCase(),
                 unit_amount: product.buyPence!,
                 product_data: {
                     name: product.name,
@@ -274,7 +276,8 @@ export async function recordPaidCheckout(db: Db, accountId: string, session: Str
     const [owner] = await db.select({ userId: aiAssistants.userId, name: aiAssistants.name, email: users.email })
         .from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId))
         .where(eq(aiAssistants.id, site.aiAssistantId)).limit(1);
-    const total = order.currency === 'gbp' ? formatPrice(order.amountTotal) : `${(order.amountTotal / 100).toFixed(2)} ${order.currency.toUpperCase()}`;
+    const total = order.currency === 'gbp' ? formatPrice(order.amountTotal)
+        : cleanCurrency(order.currency) ? formatMoney(order.amountTotal, order.currency) : `${(order.amountTotal / 100).toFixed(2)} ${order.currency.toUpperCase()}`;
     if (owner?.userId) {
         await createNotification(db, 'site_order_received', {
             userId: owner.userId, assistantId: site.aiAssistantId, category: 'state_change',

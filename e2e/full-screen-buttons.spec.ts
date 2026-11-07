@@ -17,13 +17,13 @@ test.use({ viewport: { width: 1600, height: 1000 } });
 
 // role, its tab, the New button's words ('' = it has none)
 const TABS: [string, string, string][] = [
-    ['social_media_manager', 'review-queue', 'Create a Post'],
-    ['blog_writer', 'review-queue', 'Write Blog Post'],
-    ['newsletter_editor', 'review-queue', 'Write Email'],
+    ['social_media_manager', 'review-queue', 'New post'],
+    ['blog_writer', 'review-queue', 'New blog post'],
+    ['newsletter_editor', 'review-queue', 'New email'],
     ['campaign_orchestrator', 'campaigns', 'New campaign'],
     ['brand_designer', 'briefs', 'New brief'],
     ['video_producer', 'videos', 'New video'],
-    ['lead_qualifier', 'signals', 'Find New Leads'],
+    ['lead_qualifier', 'signals', 'New search'],
     ['lead_qualifier', 'datahub', 'Add Lead'],
     ['accounts_receivable_clerk', 'datahub', 'Chase an Invoice'],
     ['business_mentor', 'mentor', ''],

@@ -101,7 +101,7 @@ const TARGET_ORG = 37;
         const ctx = await requireTenant(ev(cookie(session(ADMIN), impToken())), db);
         assert.ok(!('error' in ctx), JSON.stringify(ctx));
         assert.deepStrictEqual(ctx, {
-            userId: TARGET, organisationId: TARGET_ORG, role: 'owner',
+            userId: TARGET, organisationId: TARGET_ORG, role: 'owner', assistantAccess: null,
             impersonation: { realAdminId: ADMIN, sessionId: 'sess-1' },
         });
     });

@@ -6,7 +6,8 @@
 //
 // Handlers are bound once on `document`, never from a render path. A guest's name and comment are
 // untrusted, so they are always escaped. Responses never act on a post: Use these comments only
-// fills the subscriber's own "What should I change?" box, and they press Regenerate themselves.
+// fills the subscriber's own "What should I change?" box, and they press Regenerate themselves. The
+// comment stays (on the redraft too) until they choose Mark as done or Ignore.
 (function () {
   'use strict';
 
@@ -55,12 +56,28 @@
     </div>`;
   }
 
+  const RESOLVED_WORDS = { done: 'Marked as done', ignored: 'Ignored' };
+
+  // A comment stays here after it is used to redraft (the redraft follows it, src/utils/review-links.ts
+  // revisionAncestors): only the subscriber's own Mark as done or Ignore puts it away, and Undo brings it back.
   function responseHtml(r) {
     if (r.body) commentsById.set(String(r.id), r.body);
-    return `<div class="mt-2 border-l-2 border-gray-200 pl-2">
-      <p><span class="font-semibold text-gray-900">${esc(r.guestName)}</span> ${esc(DECISION_WORDS[r.decision] || 'responded')}${r.changedSince ? ' <span class="text-amber-800 font-semibold">· Changed since this response</span>' : ''}</p>
-      ${r.body ? `<p class="text-gray-700 whitespace-pre-wrap break-words">${esc(r.body)}</p>
-        <button type="button" data-rl-use="${esc(r.id)}" class="mt-1 text-xs font-semibold underline cursor-pointer">Use these comments</button>` : ''}
+    const head = `<p><span class="font-semibold text-gray-900">${esc(r.guestName)}</span> ${esc(DECISION_WORDS[r.decision] || 'responded')}${r.changedSince ? ' <span class="text-amber-800 font-semibold">· Changed since this response</span>' : ''}</p>`;
+    if (r.resolution && RESOLVED_WORDS[r.resolution]) {
+      return `<div class="mt-2 border-l-2 border-gray-200 pl-2 text-gray-500" data-rl-response="${esc(r.id)}">
+        ${head}
+        ${r.body ? `<p class="whitespace-pre-wrap break-words line-through decoration-gray-300">${esc(r.body)}</p>` : ''}
+        <p class="mt-1 text-xs">${RESOLVED_WORDS[r.resolution]} · <button type="button" data-rl-resolve="${esc(r.id)}" data-rl-resolution="" class="font-semibold underline cursor-pointer">Undo</button></p>
+      </div>`;
+    }
+    return `<div class="mt-2 border-l-2 border-gray-200 pl-2" data-rl-response="${esc(r.id)}">
+      ${head}
+      ${r.body ? `<p class="text-gray-700 whitespace-pre-wrap break-words">${esc(r.body)}</p>` : ''}
+      <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+        ${r.body ? `<button type="button" data-rl-use="${esc(r.id)}" class="font-semibold underline cursor-pointer">Use these comments</button>` : ''}
+        <button type="button" data-rl-resolve="${esc(r.id)}" data-rl-resolution="done" class="font-semibold underline cursor-pointer">Mark as done</button>
+        <button type="button" data-rl-resolve="${esc(r.id)}" data-rl-resolution="ignored" class="font-semibold text-gray-500 underline cursor-pointer">Ignore</button>
+      </div>
     </div>`;
   }
 
@@ -158,6 +175,12 @@
       copy(t.closest('[data-rl-copy]').getAttribute('data-rl-copy'));
     } else if (t.closest('[data-rl-use]')) {
       useComments(t.closest('[data-rl-use]').getAttribute('data-rl-use'));
+    } else if (t.closest('[data-rl-resolve]')) {
+      const btn = t.closest('[data-rl-resolve]');
+      btn.disabled = true;
+      postJson({ action: 'resolve', responseId: Number(btn.getAttribute('data-rl-resolve')), resolution: btn.getAttribute('data-rl-resolution') || null })
+        .then(() => paint(paintedPostId, paintedEl))
+        .catch((err) => { btn.disabled = false; toast(err.message, true); });
     } else if (t.closest('[data-rl-revoke]')) {
       const id = Number(t.closest('[data-rl-revoke]').getAttribute('data-rl-revoke'));
       window.confirmModal?.('Revoke this link? Anyone who has it will no longer be able to open it.', { danger: true }).then((ok) => {

@@ -29,7 +29,7 @@ type Db = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 export interface BookableService { id: number; name: string; price: string | null; durationMinutes: number; description: string | null;
-    depositType: string | null; depositAmount: number | null; priceType: string | null; priceAmount: number | null; }
+    depositType: string | null; depositAmount: number | null; priceType: string | null; priceAmount: number | null; priceCurrency?: string | null; }
 export interface BookingSetup {
     exists: boolean;
     settings: typeof BOOKING_DEFAULTS;
@@ -43,7 +43,7 @@ export async function loadBookingSetup(db: Db | Tx, orgId: number): Promise<Book
         .where(and(eq(bookableResources.organisationId, orgId), eq(bookableResources.status, 'active')))
         .orderBy(asc(bookableResources.sortOrder), asc(bookableResources.id));
     const svc = await db.select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price, durationMinutes: orgProducts.durationMinutes, description: orgProducts.description,
-        depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount })
+        depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceCurrency: orgProducts.priceCurrency })
         .from(orgProducts)
         .where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active'), isNotNull(orgProducts.durationMinutes)))
         .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id));

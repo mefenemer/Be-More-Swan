@@ -35,7 +35,7 @@ const page = (surface: string) => `<!doctype html><html><head><meta charset="utf
   <div class="page-wide p-4"><div data-site-host="${surface}"></div></div>
   <button id="maintab-btn-sitelistings" class="hidden">Listings <span id="site-listings-badge" style="display:none"></span></button>
   <script src="/src/components/scroll-lock.js"></script><script src="/dialogs.js"></script>
-  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/chat-pane.js"></script>
+  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/tab-head.js"></script><script src="/src/components/chat-pane.js"></script>
   <script src="/src/components/assistant-site-editor.js"></script>
   <script>AssistantSiteEditor.init({ assistantId: 7, assistantName: 'Wren' }); AssistantSiteEditor.activate('${surface}');</script>
 </body></html>`;

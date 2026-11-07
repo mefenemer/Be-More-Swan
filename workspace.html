@@ -2347,22 +2347,13 @@ window.showComplianceModals = function showComplianceModals(force) {
 
   // US2 AC2.3: workspace owner invites the requester into their org (reuses the member-invite
   // flow, so billing stays consolidated). Triggered from the suggested_action notification CTA.
-  window._inviteFromAccessRequest = async function (email, notifId) {
+  // Opens the invite form on Business Information → Team Members with the email filled in, so the
+  // owner picks a role and which assistants they can use rather than handing over every one.
+  window._inviteFromAccessRequest = function (email) {
     if (!email) { window.showToast?.('Could not determine which user to invite.', { icon: '⚠️' }); return; }
-    window.showConfirmModal(
-      `Invite ${email} to your workspace? They'll join your team and your billing stays consolidated.`,
-      async () => {
-        try {
-          const r = await fetch('/.netlify/functions/invite-member', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }),
-          });
-          const d = await r.json().catch(() => ({}));
-          if (!r.ok) { window.showToast?.(d.error || 'Could not send the invite.', { icon: '⚠️' }); return; }
-          window.showToast?.(`Invite sent to ${email}.`, { icon: '✅' });
-        } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
-      },
-      { title: 'Invite to workspace?', confirmLabel: 'Yes, send invite', cancelLabel: 'Cancel' }
-    );
+    window._bizinfoInitialTab = 'team';
+    window._teamInviteEmail = email;
+    if (window.loadView) window.loadView('assets');
   };
 </script>
 
@@ -6129,6 +6120,7 @@ function formatCurrency(amount, currency) {
 <!-- One pillar splitter for the profile and the post writer (see the file). Before assistants.js. -->
 <script src="/src/public/content-pillars.js"></script>
 <script src="/src/public/assistant-sectors.js"></script>
+<script src="/src/components/tab-head.js"></script>
 <script src="/assistants.js"></script>
 <script src="/help.js"></script>
 <script src="/my-content.js"></script>

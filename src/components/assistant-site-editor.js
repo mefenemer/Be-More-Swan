@@ -361,13 +361,19 @@
       // Narrow screens keep the chat first on the Website tab; on the others the header's Chat button
       // opens it, because it would push the work off the screen.
       '@media (min-width: 1024px) { [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(380px, 460px) !important; } [data-sb-mode="edit"] [data-sb-pane] { position: sticky; top: 76px; align-self: start; } [data-sb-mode="edit"] [data-sb-chatbox] { height: calc(100vh - 92px); } }',
+      // The standard tab header (owner, 2026-11-07) sits over the work, and the chat's top lines up with it, as on
+      // every assistant: header and work share the left column, the chat spans both rows on the right.
+      '[data-site-layout] { grid-template-rows: auto 1fr; } [data-site-layout] > [data-site-head] { order: -2; } [data-site-head] > .tab-head { margin-bottom: 0; }',
+      '@media (min-width: 1024px) { [data-site-layout] > [data-site-head] { grid-column: 1; grid-row: 1; } [data-site-layout] > [data-sb-work] { grid-column: 1; grid-row: 2; } [data-site-layout] > [data-sb-pane] { grid-column: 2; grid-row: 1 / span 2; } }',
+      // The preview is the tab card's own content on Preview, not a second card inside it.
+      '.tab-card [data-sb-preview-col]:not([data-sb-full]) > div { border: 0 !important; box-shadow: none !important; border-radius: 0 !important; padding: 0 !important; background: transparent !important; }',
       '@media (max-width: 1023px) { [data-sb-mode="chat"] [data-sb-pane] { order: -1; } [data-sb-mode="edit"] [data-sb-pane] { display: none; } }',
       '[data-sb-mode="edit"] [data-sb-preview-col]:not([data-sb-full]) { display: none; }',
       '[data-sb-chatbox] { height: clamp(460px, calc(100vh - 150px), 880px); }',
       // An empty row has no margin: the empty note's collapsed through the empty list above the preview and pushed the preview 16px below the chat.
       '[data-sb-blocks] > :empty { margin-top: 0 !important; margin-bottom: 0 !important; }',
       // Wide screens: the preview sets the height and the chat fills the pane to exactly match it.
-      '@media (min-width: 1024px) { iframe[data-site-preview] { height: clamp(408px, calc(100vh - 202px), 828px) !important; }',
+      '@media (min-width: 1024px) { iframe[data-site-preview] { height: clamp(380px, calc(100vh - 290px), 828px) !important; }',
       '  [data-sb-mode="chat"] [data-sb-pane] { display: flex; flex-direction: column; }',
       '  [data-sb-mode="chat"] [data-sb-chat]:not([hidden]) { flex: 1; min-height: 0; display: flex; flex-direction: column; }',
       '  [data-sb-mode="chat"] [data-sb-chatbox] { height: auto; flex: 1; min-height: 0; } }',
@@ -1417,10 +1423,25 @@
   // The preview card is painted once and then kept: its header is rewritten and the frame's width
   // set on each render, but the frame reloads only when its address changes (the draft changed, or
   // another page / the import is shown) — not on every click.
+  // Select and Desktop / Phone (owner, 2026-11-07): at the right of the pill row while Preview is open, where other
+  // tabs keep their list links. Neither is pink: pink is only the tab's one main button. Desktop / Phone is a grey toggle.
+  function previewToolsHtml(inPreviewHead) {
+    const showImport = state.previewImport && state.data && state.data.import && state.data.import.status === 'ready';
+    const seg = (dev, label) => {
+      const on = state.device === dev;
+      return `<button type="button" data-site-device="${dev}" aria-pressed="${on}" class="sb-tap px-3 py-1 text-xs font-bold rounded-md transition ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}">${label}</button>`;
+    };
+    const select = !showImport && chatAvailable() ? btn(`data-site-pick aria-pressed="${!!picker.on}" title="Click any part of the preview to ask ${esc(state.assistantName || 'your assistant')} to change it"`, `<span aria-hidden="true">🎯</span> ${picker.on ? 'Click a part… (Esc to stop)' : 'Select'}`, false) : '';
+    return `<div class="flex flex-wrap items-center gap-2">${select}<span class="inline-flex gap-1 p-1 rounded-lg bg-gray-100" data-sb-wide-only role="group" aria-label="Preview size">${seg('desktop', 'Desktop')}${seg('mobile', 'Phone')}</span></div>`;
+  }
   function previewHeadHtml(showImport) {
+    // In full-screen preview the pill row is out of sight, so the tools come with the preview.
+    const note = showImport ? 'your imported site (not your draft yet)' : state.data.site.status === 'published' ? 'your draft' : '';
+    // On the Preview pill a bare "Preview" heading only repeats the pill: it shows when it has something to add.
+    if (!note && !state.previewFull && state.panel === 'chat') return '';
     return `<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
-        <p class="text-sm font-black text-gray-900">Preview <span class="text-xs font-semibold text-gray-500">— ${showImport ? 'your imported site (not your draft yet)' : state.data.site.status === 'published' ? 'your draft' : 'not live yet'}</span></p>
-        <div class="flex flex-wrap gap-1">${!showImport && chatAvailable() ? btn(`data-site-pick aria-pressed="${!!picker.on}" title="Click any part of the preview to ask ${esc(state.assistantName || 'your assistant')} to change it"`, `<span aria-hidden="true">🎯</span> ${picker.on ? 'Click a part… (Esc to stop)' : 'Select'}`, picker.on) : ''}<span class="flex gap-1" data-sb-wide-only>${btn(`data-site-device="desktop" aria-pressed="${state.device === 'desktop'}"`, 'Desktop', state.device === 'desktop')}${btn(`data-site-device="mobile" aria-pressed="${state.device === 'mobile'}"`, 'Phone', state.device === 'mobile')}</span></div>
+        <p class="text-sm font-black text-gray-900">Preview${note ? ` <span class="text-xs font-semibold text-gray-500">— ${note}</span>` : ''}</p>
+        ${state.previewFull || state.panel !== 'chat' ? previewToolsHtml(true) : ''}
         ${state.previewFull ? btn('data-site-preview-close', 'Close preview', true) : ''}
       </div>`;
   }
@@ -1718,28 +1739,41 @@
   // Sub tabs of the Website tab (owner, 2026-11-06), as pills in a grey track like the Briefs tab's, above both columns
   // so the chat stays on the right on all of them. "Preview" is `chat`: the preview beside the chat.
   const SUBTABS = [['chat', 'Preview'], ['setup', 'Set up'], ['design', 'Design'], ['pages', 'Pages'], ['publish', 'Publish']];
+  // The standard tab header (owner, 2026-11-07): "Website" ⓘ with the site's state as its chip, then Full screen
+  // and "+ New page". The sub tabs are sections, not stages: no counts, an amber badge only when one waits for you.
+  function headHtml() {
+    const d = state.data || {};
+    const site = d.site || {};
+    const chip = site.status === 'published'
+      ? (site.unpublishedChanges ? '<span class="tab-head-chip" style="background:#fef3c7;color:#92400e">Changes not live yet</span>' : '<span class="tab-head-chip" style="background:#ecfdf3;color:#067647">Live</span>')
+      : '<span class="tab-head-chip">Not live yet</span>';
+    const full = `<button type="button" data-site-editor-full data-sb-wide-only aria-pressed="${!!state.editorFull}" title="${state.editorFull ? 'Back to the normal view (Esc)' : 'Use the whole window for your website and chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap shrink-0">${state.editorFull ? 'Exit full screen' : 'Full screen'}</button>`;
+    const newPage = state.data && !isFresh() ? window._tabNewBtn('New page', 'data-site-add-page') : '';
+    return window._tabHead({ title: 'Website', explain: 'website-builder', emoji: '🌐',
+      about: 'Your website: preview it beside the chat, set it up, change its design and pages, and publish it. Nothing goes live until you press Publish.',
+      chip, right: `${full}${newPage}` });
+  }
   function subtabsHtml() {
     const d = state.data || {};
     const fill = (d.placeholders || []).length;
     const unpublished = !!(d.site && d.site.status === 'published' && d.site.unpublishedChanges);
-    // Full screen at the right of this row, where every assistant's tab has it (owner, 2026-11-07), not in the preview's header.
-    const full = `<button type="button" data-site-editor-full data-sb-wide-only aria-pressed="${!!state.editorFull}" title="${state.editorFull ? 'Back to the normal view (Esc)' : 'Use the whole window for your website and chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap shrink-0">${state.editorFull ? 'Exit full screen' : 'Full screen'}</button>`;
-    return `<div class="flex items-center justify-between gap-3 mb-4"><div role="tablist" aria-label="Your website" class="inline-flex max-w-full min-w-0 gap-1 p-1 rounded-xl bg-gray-100" style="overflow-x:auto;overflow-y:hidden">${SUBTABS.map(([k, label]) => {
+    return `<div class="tab-pillbar"><div role="tablist" aria-label="Your website" class="stage-pills tab-scroller">${SUBTABS.map(([k, label]) => {
       const on = state.panel === k;
       const mark = k === 'pages' && fill
-        ? `<span title="Parts in [square brackets] to fill in" class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center bg-amber-100 text-amber-900">${fill}</span>`
+        ? `<span title="Parts in [square brackets] to fill in" class="pill-wait">${fill}</span>`
         : k === 'publish' && unpublished
           ? '<span title="Changes not live yet" class="ml-1 inline-block w-2 h-2 rounded-full bg-amber-500"></span><span class="sr-only"> (changes not live yet)</span>'
           : '';
       return `<button type="button" role="tab" id="site-subtab-${k}" aria-selected="${on}" aria-controls="site-subtab-panel" tabindex="${on ? 0 : -1}" data-site-subtab="${k}"
-        class="site-subtab flex-shrink-0 min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}">${esc(label)}${mark}</button>`;
-    }).join('')}</div>${full}</div>`;
+        class="site-subtab flex-shrink-0 min-h-[44px] sm:min-h-0 text-sm whitespace-nowrap">${esc(label)}${mark}</button>`;
+    }).join('')}</div>${state.panel === 'chat' && !state.previewFull ? `<div class="tab-pillbar-actions" data-site-preview-tools>${previewToolsHtml()}</div>` : ''}</div>`;
   }
   /** Only when something on it changed: redrawing would take the keyboard's place off the tab. */
   function paintSubtabs(host) {
-    const bar = host.querySelector(':scope > [data-site-subtabs]');
-    const html = subtabsHtml();
-    if (bar && bar.dataset.painted !== html) { bar.innerHTML = html; bar.dataset.painted = html; }
+    for (const [sel, html] of [['[data-site-head]', headHtml()], ['[data-site-subtabs]', subtabsHtml()]]) {
+      const bar = host.querySelector(sel);
+      if (bar && bar.dataset.painted !== html) { bar.innerHTML = html; bar.dataset.painted = html; }
+    }
   }
 
   // ── A new site's first steps (UI review 2026-10-21) ─────────────────────────
@@ -2155,7 +2189,7 @@
       return;
     }
     if (!host.querySelector(':scope > [data-site-layout]')) {
-      host.innerHTML = '<div data-site-subtabs></div><div data-site-layout id="site-subtab-panel" role="tabpanel" class="grid gap-4 lg:grid-cols-2"><div data-sb-work class="min-w-0"><div data-sb-blocks class="space-y-4"></div><div data-sb-preview-col class="min-w-0"></div></div><div data-sb-pane class="min-w-0"><div data-sb-chat></div></div></div>';
+      host.innerHTML = '<div data-site-layout class="grid gap-4 lg:grid-cols-2"><div data-site-head class="min-w-0"></div><div data-sb-work class="min-w-0 tab-card"><div data-site-subtabs></div><div id="site-subtab-panel" role="tabpanel" class="px-4 pb-4 pt-2"><div data-sb-blocks class="space-y-4"></div><div data-sb-preview-col class="min-w-0"></div></div></div><div data-sb-pane class="min-w-0"><div data-sb-chat></div></div></div>';
     }
     const layout = host.querySelector(':scope > [data-site-layout]');
     const blocksEl = layout.querySelector('[data-sb-blocks]');
@@ -2174,7 +2208,7 @@
     quietPrimary = fresh && !state.editing && state.panel !== 'setup';
     const P = state.panel;
     paintSubtabs(host);
-    layout.setAttribute('aria-labelledby', `site-subtab-${P}`);
+    layout.querySelector('#site-subtab-panel')?.setAttribute('aria-labelledby', `site-subtab-${P}`);
     // A new site's steps are one at a time, so none is hidden behind a click (fold.js).
     const stepOpen = { attrs: { 'data-no-fold': '' } };
     const blocks = P === 'chat' ? [] : P === 'setup' ? (fresh ? [
@@ -2724,7 +2758,8 @@
       const title = typeof window.promptModal === 'function'
         ? await window.promptModal('What is the new page called?', { title: 'Add a page', confirmLabel: 'Add page', placeholder: 'e.g. Services' })
         : null;
-      if (title && title.trim()) await apply([{ op: 'add_page', title: title.trim() }]);
+      // From the header's "+ New page" on any sub tab: the new page is shown where pages are changed.
+      if (title && title.trim()) { state.panel = 'pages'; await apply([{ op: 'add_page', title: title.trim() }]); }
       return;
     }
     if (t('[data-site-remove-page]')) {

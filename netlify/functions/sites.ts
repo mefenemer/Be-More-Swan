@@ -190,7 +190,7 @@ export default withLambda(async (event) => {
             // Business Information ▸ Products & Services — the ONE place products and prices live.
             catalogue: (await db.select({
                 id: orgProducts.id, name: orgProducts.name, kind: orgProducts.kind, price: orgProducts.price,
-                priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, imageAssetId: orgProducts.imageAssetId,
+                priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceCurrency: orgProducts.priceCurrency, imageAssetId: orgProducts.imageAssetId,
             }).from(orgProducts).where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active')))
                 .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id)))
                 .map((r) => ({ id: r.id, name: r.name, kind: r.kind, price: r.price, buyable: buyablePence(r) !== null,
