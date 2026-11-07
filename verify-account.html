@@ -9,8 +9,7 @@
     .card { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; max-width: 400px; width: 100%; box-sizing: border-box; }
     .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 1rem; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    #loading-state, #error-message { display: none; }
-    #error-message { color: #ef4444; margin-top: 1rem; }
+    #confirm-state, #error-message { display: none; }
     /* .btn-primary colours (style.css isn't loaded on this page) */
     .btn-primary { background: #d6006b; color: #fff; border: 0; border-radius: 8px; padding: 14px 28px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 0.5rem; }
     .btn-primary:hover { background: #b0005a; }
@@ -23,91 +22,122 @@
 <body>
 
 <div class="card">
-  <!-- Ready state: the token is only used when the person clicks. Email link scanners (Outlook /
-       Hotmail Safe Links) open the page and run its script but never click — when this page used
-       the token on load, the scanner logged in and the person's own click found the single-use
-       link already spent ("Verification Failed", prod user 39, 2026-10-27). -->
-  <div id="ready-state">
-    <h2>Log in to Be More Swan</h2>
-    <p>Click below to finish logging in.</p>
-    <button type="button" id="login-btn" class="btn-primary">Log me in</button>
-  </div>
+  <!-- Email link scanners (Outlook / Hotmail Safe Links) open this page and run its script, so
+       loading it must never spend the single-use token (prod user 39, 2026-10-27). On load, verify.ts
+       only logs in the browser that asked for the link. Anyone else sees the confirm state, and
+       scanners don't click. See src/utils/login-link.ts. -->
   <div id="loading-state">
     <div class="spinner"></div>
-    <h2>Verifying your account...</h2>
-    <p>Please wait while we securely log you in.</p>
+    <h2>Logging you in...</h2>
+  </div>
+  <div id="confirm-state">
+    <h2>You're nearly in</h2>
+    <p id="confirm-text">Continue to Be More Swan.</p>
+    <button type="button" id="continue-btn" class="btn-primary">Continue</button>
   </div>
   <div id="error-message">
-    <h2>Verification Failed</h2>
+    <h2 id="error-title">We couldn't log you in</h2>
     <p id="error-text">The link is invalid or has expired.</p>
-    <a href="/login.html">Return to Login</a>
+    <button type="button" id="new-link-btn" class="btn-primary">Email me a new link</button>
+    <p><a href="/login.html">Back to login</a></p>
   </div>
 </div>
 
 <script>
   document.addEventListener('DOMContentLoaded', () => {
-    // 1. Extract the token from the URL (?token=XYZ)
+    // 1. Read the link (?token=XYZ)
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
-    const tier = urlParams.get('tier');
+    const tier = urlParams.get('tier'); // Survives email client cross-tab navigation
     // US-ONB-2.1.2 AC9: post-login redirect preserved through magic-link URL
-    const redirect = urlParams.get('redirect');
+    const redirect = urlParams.get('redirect') || undefined;
+    const browserProof = urlParams.get('b') || undefined;
+    const accountRef = urlParams.get('r') || undefined;
 
-    const readyState = document.getElementById('ready-state');
-    const loadingState = document.getElementById('loading-state');
-    const errorMessage = document.getElementById('error-message');
+    const states = ['loading-state', 'confirm-state', 'error-message'].map((id) => document.getElementById(id));
+    const show = (el) => states.forEach((state) => { state.style.display = state === el ? 'block' : 'none'; });
+    const [loadingState, confirmState, errorMessage] = states;
+    const continueBtn = document.getElementById('continue-btn');
+    const newLinkBtn = document.getElementById('new-link-btn');
+    const errorTitle = document.getElementById('error-title');
     const errorText = document.getElementById('error-text');
-    const loginBtn = document.getElementById('login-btn');
 
-    const showError = (text) => {
-      readyState.style.display = 'none';
-      loadingState.style.display = 'none';
-      errorMessage.style.display = 'block';
-      if (text) errorText.textContent = text;
+    const showError = (text, { spent = false, canRequestNew = false } = {}) => {
+      errorTitle.textContent = spent ? 'This link has already been used or has expired' : "We couldn't log you in";
+      errorText.textContent = spent ? 'Login links work once and only last a short time.' : text;
+      newLinkBtn.style.display = canRequestNew ? 'inline-block' : 'none';
+      show(errorMessage);
+      if (canRequestNew) newLinkBtn.focus();
     };
 
-    if (!token) {
-      showError();
-      return;
-    }
+    const showConfirm = (email) => {
+      if (email) document.getElementById('confirm-text').textContent = `Continue as ${email}`;
+      continueBtn.disabled = false;
+      show(confirmState);
+      continueBtn.focus();
+    };
 
-    loginBtn.addEventListener('click', async () => {
-      loginBtn.disabled = true;
-      readyState.style.display = 'none';
-      loadingState.style.display = 'block';
-
+    const logIn = async (auto) => {
+      show(loadingState);
       try {
         // 2. Safely POST the token to the backend
         const response = await fetch('/.netlify/functions/verify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            token: token,
-            tier: tier, // Read from URL param — survives email client cross-tab navigation
-            redirect: redirect || undefined, // US-ONB-2.1.2 AC9: post-login redirect destination
-          })
+          body: JSON.stringify({ token, tier, redirect, b: browserProof, r: accountRef, auto }),
         });
+        const data = await response.json().catch(() => ({}));
 
         // 3. Handle the response
-        if (response.ok) {
-          const data = await response.json();
-          // The backend successfully set the HTTPOnly cookie.
-          // Mark this as a fresh login so the workspace can run its one-time "focus the inbox"
-          // bell count-up once (consumed there). sessionStorage is per-tab and survives the
-          // redirect + any reload within this session, so it fires once per login, not per reload.
-          try { sessionStorage.setItem('bms_freshLogin', '1'); } catch {}
-          // Redirect the user to the protected dashboard.
-          window.location.href = data.redirect || '/onboarding.html';
+        if (!response.ok) {
+          showError(data.error || 'Invalid or expired link.', data);
+        } else if (data.confirm) {
+          showConfirm(data.email);
         } else {
-          const errorData = await response.json().catch(() => ({}));
-          showError(errorData.error || 'Invalid or expired link.');
+          // The backend set the session cookie. Mark a fresh login so the workspace can run its
+          // one-time "focus the inbox" bell count-up once (consumed there). sessionStorage is
+          // per-tab and survives the redirect + any reload, so it fires once per login, not per reload.
+          if (!data.alreadyLoggedIn) {
+            try { sessionStorage.setItem('bms_freshLogin', '1'); } catch {}
+          }
+          window.location.href = data.redirect || '/onboarding.html';
         }
       } catch (error) {
-        showError('A network error occurred. Please try again.');
+        // Nothing has been spent if the check on load failed, so the button can still work.
+        if (auto) showConfirm();
+        else showError('A network error occurred. Please try again.');
+      }
+    };
+
+    if (!token) {
+      showError('The link is invalid or has expired.');
+      return;
+    }
+
+    continueBtn.addEventListener('click', () => {
+      continueBtn.disabled = true;
+      logIn(false);
+    });
+
+    newLinkBtn.addEventListener('click', async () => {
+      newLinkBtn.disabled = true;
+      try {
+        const response = await fetch('/.netlify/functions/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ref: accountRef, redirect, tier: tier || undefined }),
+        });
+        if (!response.ok) throw new Error(String(response.status));
+        errorTitle.textContent = 'Check your email';
+        errorText.textContent = "We've sent you a new link. It can take a minute to arrive.";
+        newLinkBtn.style.display = 'none';
+      } catch (error) {
+        errorText.textContent = "We couldn't send a new link just now. Please try again in a minute.";
+        newLinkBtn.disabled = false;
       }
     });
 
-    loginBtn.focus();
+    logIn(true);
   });
 </script>
 

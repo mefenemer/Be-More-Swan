@@ -2,6 +2,7 @@
 import { Handler } from '@netlify/functions';
 import { eq, and } from 'drizzle-orm';
 import * as crypto from 'crypto';
+import { loginBrowserCookie, loginLinkParams } from '../../src/utils/login-link';
 import { getDb } from '../../db/client';
 import { users, organisations, userOrganisations, userProfiles, userReferrals, referralInvites, plans, signupSources } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
@@ -133,6 +134,8 @@ export default withLambda(async (event) => {
         // --- SCENARIO 5: ENUMERATION PROTECTION ---
         // Check if user already exists BEFORE doing anything else
         phase = 'duplicate-check';
+        const browser = loginBrowserCookie(event.headers.cookie);
+        const browserHeaders: Record<string, string> = { 'Set-Cookie': browser.setCookie };
         const [existingUser] = await db.select({ id: users.id, status: users.status })
             .from(users).where(eq(users.email, email)).limit(1);
         if (existingUser) {
@@ -147,7 +150,7 @@ export default withLambda(async (event) => {
                     tokenExpiresAt: new Date(Date.now() + 15 * 60 * 1000),
                     updatedAt: new Date(),
                 }).where(eq(users.id, existingUser.id));
-                const link = `${baseUrl}/verify-account.html?token=${token}${planTier ? `&tier=${encodeURIComponent(planTier)}` : ''}`;
+                const link = `${baseUrl}/verify-account.html?token=${token}${planTier ? `&tier=${encodeURIComponent(planTier)}` : ''}${loginLinkParams({ plainToken: token, userId: existingUser.id, browser: browser.value })}`;
                 await sendMagicLinkEmail({
                     to: email,
                     subject: 'Welcome to Be More Swan - Verify your email',
@@ -171,7 +174,7 @@ export default withLambda(async (event) => {
             // An approved partner who already has an account (made after they applied): the link
             // proves they own this email, so attach the partnership to that account.
             if (partnerInvite) await claimPartnerInvite(db, partnerInvite.id, existingUser.id).catch((err) => console.error('[register] partner claim (existing account) failed:', err));
-            return { statusCode: 200, body: JSON.stringify({ success: true }) };
+            return { statusCode: 200, headers: browserHeaders, body: JSON.stringify({ success: true }) };
         }
 
         // --- US4: CORPORATE DOMAIN CONSOLIDATION ---
@@ -309,7 +312,7 @@ export default withLambda(async (event) => {
         // Send the First-Time Verification Email — baseUrl was resolved above (prefers BASE_URL env,
         // falls back to the request host for deploy previews). Resolved before the DB transaction
         // so a missing config fails fast rather than orphaning a half-created user.
-        const magicLink = `${baseUrl}/verify-account.html?token=${plainToken}${planTier ? `&tier=${encodeURIComponent(planTier)}` : ''}`;
+        const magicLink = `${baseUrl}/verify-account.html?token=${plainToken}${planTier ? `&tier=${encodeURIComponent(planTier)}` : ''}${loginLinkParams({ plainToken, userId: resultUser.id, browser: browser.value })}`;
 
         // Verification email is BEST-EFFORT: the account + workspace are already committed
         // above, so a transient email failure (Resend outage, unverified domain, missing key)
@@ -413,6 +416,7 @@ export default withLambda(async (event) => {
 
         return {
             statusCode: 200,
+            headers: browserHeaders,
             body: JSON.stringify({
                 success: true,
                 emailSent,

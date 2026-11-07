@@ -3,6 +3,9 @@
 // the sign-up and magic-link emails: anyone with an account could join any workspace as an admin.
 // This drives the real handler with a stubbed database and tries each way in.
 //
+// Accepting is a POST sent only by a person's click, because email scanners open links and run page
+// scripts. Opening the link (GET) must write nothing, whatever the link says.
+//
 // Run:  npx tsx tests/accept-invite-security.test.ts
 
 import assert from 'node:assert';
@@ -11,6 +14,7 @@ import path from 'node:path';
 import Module from 'node:module';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { signInvite, verifyInviteSignature } from '../src/utils/invite-link';
+import { users, userOrganisations } from '../db/schema';
 
 const SECRET = 'test-secret-for-invite-links';
 process.env.JWT_SECRET = SECRET;
@@ -28,11 +32,13 @@ const whereText = (cond: any) => { const q = dialect.sqlToQuery(cond); return `$
 
 const fakeDb = {
     select: () => ({
-        from: () => ({
+        from: (table: unknown) => ({
             where: () => ({
                 limit: async () => {
                     state.selects++;
-                    return state.selects === 1 ? (state.tokenFindsUser ? [state.user] : []) : [{ name: 'Acme' }];
+                    if (table === users) return state.tokenFindsUser ? [state.user] : [];
+                    if (table === userOrganisations) return state.hasInvitedRow ? [{ id: 1 }] : [];
+                    return [{ name: 'Acme' }];
                 },
             }),
         }),
@@ -63,9 +69,19 @@ const load = (Module as any)._load;
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const handler = require('../netlify/functions/accept-invite').default as (r: Request, c: unknown) => Promise<Response>;
 
+const URL_BASE = 'https://example.test/.netlify/functions/accept-invite';
+/** Accepting: what the Join button sends. */
 function call(params: Record<string, string>): Promise<Response> {
-    const qs = new URLSearchParams(params).toString();
-    return handler(new Request(`https://example.test/.netlify/functions/accept-invite?${qs}`, { headers: { host: 'example.test' } }), { requestId: 'test' });
+    return handler(new Request(URL_BASE, { method: 'POST', headers: { host: 'example.test', 'content-type': 'application/json' }, body: JSON.stringify(params) }), { requestId: 'test' });
+}
+/** Opening the link: what a scanner, or the page on load, sends. */
+function open(params: Record<string, string>, method = 'GET'): Promise<Response> {
+    return handler(new Request(`${URL_BASE}?${new URLSearchParams(params)}`, { method, headers: { host: 'example.test' } }), { requestId: 'test' });
+}
+function assertNothingWritten(res: Response) {
+    assert.equal(res.headers.get('set-cookie'), null, 'opening a link must not sign anyone in');
+    assert.equal(state.updates.length, 0, 'opening a link must not update anything');
+    assert.equal(state.inserts, 0, 'opening a link must not add anything');
 }
 const signed = (token: string, orgId: number, role: string) =>
     ({ token, orgId: String(orgId), role, sig: signInvite(token, orgId, role, SECRET) });
@@ -137,11 +153,75 @@ async function test(name: string, fn: () => void | Promise<void>) {
 
     await test('a real invite still works: signed in with the invited role', async () => {
         const res = await call(signed('tok', 42, 'viewer'));
-        assert.equal(res.status, 302);
+        assert.equal(res.status, 200);
         assert.ok(res.headers.get('set-cookie')?.includes('aura_session='));
-        assert.ok(res.headers.get('location')?.includes('/workspace.html'));
+        assert.ok((await res.json()).redirect.includes('/workspace.html'));
         assert.deepEqual(state.updates[0].set, { role: 'viewer' }, 'the membership is claimed first');
         assert.ok('status' in state.updates[1].set, 'then the user is activated');
+    });
+
+    await test('a plain GET of a valid invite writes nothing and only describes it', async () => {
+        const res = await open(signed('tok', 42, 'viewer'));
+        assert.equal(res.status, 200);
+        assertNothingWritten(res);
+        assert.deepEqual(await res.json(), { orgName: 'Acme', role: 'viewer', email: 's•••@example.test' });
+    });
+
+    await test('a scanner opening a link twice leaves it working for the person', async () => {
+        await open(signed('tok', 42, 'viewer'));
+        await open(signed('tok', 42, 'viewer'));
+        assert.equal(state.updates.length, 0);
+        assert.equal((await call(signed('tok', 42, 'viewer'))).status, 200);
+    });
+
+    await test('a plain GET refuses a bad link the same way, and writes nothing', async () => {
+        for (const params of [
+            { token: 'login-token', orgId: '42', role: 'admin' },
+            { ...signed('tok', 42, 'viewer'), role: 'admin' },
+            { ...signed('tok', 42, 'member'), orgId: '43' },
+            signed('tok', 42, 'owner'),
+        ]) {
+            reset();
+            const res = await open(params);
+            assert.equal(res.status, 400);
+            assert.equal(state.selects, 0, 'refused before reading the database');
+            assertNothingWritten(res);
+        }
+    });
+
+    await test('a plain GET with no pending invite row, or an expired one, writes nothing', async () => {
+        reset({ hasInvitedRow: false });
+        let res = await open(signed('tok', 42, 'admin'));
+        assert.equal(res.status, 400);
+        assertNothingWritten(res);
+
+        reset({ user: { ...USER, tokenExpiresAt: new Date(Date.now() - 1000) } });
+        res = await open(signed('tok', 42, 'member'));
+        assert.equal(res.status, 410);
+        assert.equal((await res.json()).expired, true);
+        assertNothingWritten(res);
+    });
+
+    await test('no other method accepts an invite', async () => {
+        for (const method of ['PUT', 'DELETE', 'PATCH']) {
+            reset();
+            const res = await open(signed('tok', 42, 'member'), method);
+            assert.equal(res.status, 405);
+            assertNothingWritten(res);
+        }
+    });
+
+    await test('a malformed POST body is refused without throwing', async () => {
+        const post = (body: string) => handler(new Request(URL_BASE, { method: 'POST', headers: { host: 'example.test' }, body }), { requestId: 'test' });
+        for (const body of ['not json', 'null', '{"token":1,"orgId":42,"role":"admin","sig":{}}']) {
+            reset();
+            assertRefused(await post(body));
+        }
+    });
+
+    await test('the session cookie is one auth-check.js can read, or the person lands on the login page', async () => {
+        const res = await call(signed('tok', 42, 'viewer'));
+        assert.ok(!/httponly/i.test(res.headers.get('set-cookie') || ''), 'must not be HttpOnly');
     });
 
     await test('signature helper rejects missing and malformed values', () => {
@@ -154,7 +234,10 @@ async function test(name: string, fn: () => void | Promise<void>) {
     await test('the invite email and the page both carry the signature', () => {
         const root = path.resolve(__dirname, '..');
         assert.ok(readFileSync(path.join(root, 'netlify/functions/invite-member.ts'), 'utf8').includes('&sig=${sig}'));
-        assert.ok(readFileSync(path.join(root, 'accept-invite.html'), 'utf8').includes('&sig=${encodeURIComponent(sig)}'));
+        const page = readFileSync(path.join(root, 'accept-invite.html'), 'utf8');
+        assert.ok(page.includes("sig:   params.get('sig')"), 'the page reads the signature from the link');
+        assert.equal(page.match(/method: 'POST'/g)?.length, 1, 'the page has one POST');
+        assert.ok(/joinBtn\.addEventListener\('click'[\s\S]{0,300}method: 'POST'[\s\S]{0,120}JSON\.stringify\(link\)/.test(page), 'it sits in the click and sends the whole link');
     });
 
     console.log(`\n${passed}/${total} passed`);
