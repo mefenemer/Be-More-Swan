@@ -279,11 +279,12 @@ check('all three tabs print their count through the shared formatter', () => {
     }
 });
 
-check('a zero count is suppressed, not printed', () => {
-    // An empty tab says so in its own body; "Enrichment (0)" reads as a counter that failed to load.
+check('main tabs print no bracketed total (owner, 2026-11-07)', () => {
+    // One tab header everywhere: a main tab shows only its amber "needs you" pill; what it holds is counted on
+    // its own sub-tab pills. setTabCount stays the one writer of the label, and writes the bare label.
     const fn = REGISTRY.slice(landmark(REGISTRY, 'function setTabCount'), landmark(REGISTRY, '\n  }', landmark(REGISTRY, 'function setTabCount')));
-    assert.match(fn, /n > 0/, 'setTabCount no longer suppresses (0)');
-    assert.match(fn, /Number\.isFinite/, 'a missing count must leave the bare label, not print "(NaN)"');
+    assert.match(fn, /el\.textContent = baseLabel;/, 'setTabCount must write the bare label');
+    assert.ok(!/\(\$\{n\}\)/.test(fn), 'setTabCount prints a bracketed total again');
 });
 
 check('the Outreach columns all get a count, not just the open one', () => {

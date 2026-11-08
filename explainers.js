@@ -441,7 +441,7 @@
 
     'acct-product-kind': { term: 'Product or service', emoji: '📦', plain: "Something you sell and hand over (a product) or something you do for people (a service). It changes how your assistants talk about it — \"buy\" or \"book\"." },
     'acct-product-name': { term: 'Name', emoji: '🏷️', plain: "What you call it — exactly as customers see it on your website or menu. Your assistants use this name word for word.", example: 'e.g. "Sourdough Starter Kit"' },
-    'acct-product-price': { term: 'Price', emoji: '💰', plain: "The price, written the way you'd say it. Your assistants quote it exactly as typed — and never mention a price if you leave this blank.", example: 'e.g. "£29", "from £450", "£15/month"' },
+    'acct-product-price': { term: 'Price', emoji: '💰', plain: "How the price is shown, and in which currency: pounds, US dollars, euros, Australian or Canadian dollars. Your assistants and your website quote it exactly as set, and a fixed price can be bought online in that currency. Leave it as No price shown and they never mention one.", example: 'e.g. "£29", "from $450", "€15 a month"' },
     'acct-product-description': { term: 'What it is', emoji: '📝', plain: "A sentence or two on what the customer actually gets.", example: 'e.g. "A live starter, a proving basket and our step-by-step guide."' },
     'acct-product-benefits': { term: 'Key benefits', emoji: '⭐', plain: "Why people buy it — the results or features you want your assistants to mention.", example: 'e.g. "Your first loaf in 5 days. Lifetime email support."' },
     'acct-product-audience': { term: "Who it's for", emoji: '🎯', plain: "The kind of customer this one suits best, so your assistants pitch it to the right people.", example: 'e.g. "home bakers starting out"' },

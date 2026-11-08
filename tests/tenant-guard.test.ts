@@ -77,7 +77,7 @@ function mockDb(queue: unknown[][]): any {
     await check('valid claim is honoured (membership confirmed)', async () => {
         const db = mockDb([[{ role: 'admin' }]]); // requireOrgMembership → member
         const org = await resolveActiveOrg(db, 42, 5);
-        assert.deepStrictEqual(org, { organisationId: 5, role: 'admin' });
+        assert.deepStrictEqual(org, { organisationId: 5, role: 'admin', assistantIds: null });
     });
 
     await check('STALE claim is ignored, falls back to current membership', async () => {

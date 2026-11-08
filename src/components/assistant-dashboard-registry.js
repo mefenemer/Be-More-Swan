@@ -123,7 +123,7 @@
         },
       ],
       modules: { hasPostingSchedule: true, hasSocialStrategy: true },
-      primaryAction: { label: 'Create a Post', kind: 'generate_post' },
+      primaryAction: { label: 'New post', kind: 'generate_post' },
       // The Review Queue IS the social command centre — surfaced as "Posts" and used as the
       // landing tab (defaultMainTab) so users open straight into their content pipeline.
       reviewQueue: { kind: 'posts', label: 'Posts' },
@@ -244,7 +244,7 @@
       roiSource: 'newsletter',
       // Opens the Email Studio, the same way the Blog Writer opens Blog Studio — special-cased
       // in assistants.js because both are bespoke pipelines rather than a chat intake.
-      primaryAction: { kind: 'newsletter_studio', label: 'Write Email' },
+      primaryAction: { kind: 'newsletter_studio', label: 'New email' },
       defaultMainTab: 'review-queue',
       // "Emails", like the Social Media Assistant's "Posts" and the Blog Writer's "Blogs" — without a
       // label this tab fell back to "Review" and read as a different kind of thing (2026-10-06).
@@ -340,7 +340,7 @@
       },
       // Ignored for blog_writer (assistants.js special-cases the button to open Blog Studio),
       // but kept coherent for any generic reader of the registry.
-      primaryAction: { label: 'Write Blog Post', kind: 'chat' },
+      primaryAction: { label: 'New blog post', kind: 'chat' },
       // The "Blogs" tab is the single home for long-form work — create, edit, review, approve,
       // schedule and delete drafts (blog-posts.ts). It's the landing tab, and the old separate
       // Content Library / Data Hub tab is retired (hideDataHub) since it showed the same posts.
@@ -1001,7 +1001,7 @@
       // proposes lead-generation ideas; on approval it finds, scores and files leads and tags
       // a next-best-action owner (handled here vs handed off). Backed by lead-generation.ts.
       ideasReview: {
-        label: 'Review Lead Ideas',
+        label: 'Review lead ideas',
         title: 'Lead Ideas',
         description: 'Ideas for where to find your next customers. Approve one and the {role:lead_qualifier} finds matching companies, scores them into your All leads tab, and suggests the next best action for each.',
       },
@@ -1022,8 +1022,8 @@
       // tab only projects those same rows. Approving is a decision about OUTREACH, not about
       // becoming a lead, and it belongs to the Leads tab.
       discoveryCampaigns: {
-        label: 'Find New Leads',
-        title: 'Find New Leads',
+        label: 'New search',
+        title: 'New search',
       },
       // "Searches" tab (assistant-signal-inbox.js → signal-inbox.ts). Everything that came IN
       // before it became a lead. Populated from saved searches with ONLY this assistant hired;
@@ -1350,11 +1350,13 @@
    * @param {string} baseLabel  the role's label for this tab, from the registry
    * @param {number|null} count null/undefined leaves the bare label (the count is not known yet)
    */
-  function setTabCount(elId, baseLabel, count) {
+  // ⚠️ Owner, 2026-11-07 (one tab header everywhere): main tabs carry NO bracketed total any more. A tab shows only
+  // its amber "needs you" pill; what a tab holds is counted on its own sub-tab pills. Kept as the one writer of a
+  // tab's label so callers need not change, and so the label never keeps an old "(48)".
+  function setTabCount(elId, baseLabel, count) { // eslint-disable-line no-unused-vars
     const el = document.getElementById(elId);
     if (!el || !baseLabel) return;
-    const n = Number(count);
-    el.textContent = Number.isFinite(n) && n > 0 ? `${baseLabel} (${n})` : baseLabel;
+    el.textContent = baseLabel;
   }
 
   window.AssistantDashboardRegistry = { get, REGISTRY, setTabCount };

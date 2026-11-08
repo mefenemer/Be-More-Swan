@@ -115,7 +115,7 @@ check('a PATCH touches only what was sent; status and order are validated', () =
     // A price-only change writes the price group together (structured + displayed — product-price.ts),
     // and nothing else.
     const p = productFields({ price: '£35' }, true);
-    assert.ok('values' in p && Object.keys(p.values).sort().join() === 'price,priceAmount,priceType,priceUnit');
+    assert.ok('values' in p && Object.keys(p.values).sort().join() === 'price,priceAmount,priceCurrency,priceType,priceUnit');
     assert.ok('values' in p && p.values.priceType === 'fixed' && p.values.priceAmount === 3500 && p.values.price === '£35');
     assert.ok('error' in productFields({ status: 'deleted' }, true));
     assert.ok('error' in productFields({ sortOrder: -1 }, true));

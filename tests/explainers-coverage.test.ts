@@ -83,7 +83,8 @@ check('the Campaign Assistant\'s main surfaces carry an explainer', () => {
         'campaign-funnel-stage', 'campaign-audience', 'campaign-plan', 'campaign-add-work', 'campaign-human-tasks',
         'campaign-ab-test', 'campaign-pictures', 'campaign-summary', 'campaign-lessons', 'campaign-year',
     ]) {
-        assert.ok(tab.includes(`data-explain="${slug}"`), `No "i" on the ${slug} surface.`);
+        // The tab's title gets its "i" through the shared header (tab-head.js): `explain: 'campaign'` (2026-11-07).
+        assert.ok(tab.includes(`data-explain="${slug}"`) || tab.includes(`explain: '${slug}'`), `No "i" on the ${slug} surface.`);
     }
     const reg = read('src/components/assistant-dashboard-registry.js');
     assert.match(reg, /explain: 'campaign-orders'/);

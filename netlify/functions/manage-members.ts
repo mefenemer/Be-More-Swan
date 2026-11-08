@@ -4,7 +4,9 @@
  * US-GAP-5.2.1: Seat Management and Member Removal
  *
  * GET  /manage-members          → list org members + seat usage (SC1, SC2)
- * PATCH /manage-members?id=N    { role: 'member'|'viewer'|'admin' }  → change role (SC3, SC6)
+ * PATCH /manage-members?id=N    { role?: 'member'|'viewer'|'admin', assistantIds?: number[] | 'all' }
+ *                                → change role (SC3, SC6) and/or which assistants they can use
+ *                                  (src/utils/assistant-access.ts; admins always get every one)
  * DELETE /manage-members?id=N   → remove member (SC4, SC5)
  *
  * Caller must be the org owner or an admin.
@@ -20,11 +22,13 @@ import {
     userOrganisations,
     organisations,
     jwtBlocklist,
+    aiAssistants,
 } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { tombstoneOrgMemberAssets } from '../../src/utils/gdpr-asset-purge';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTeamAllowance, canAddSeat } from '../../src/utils/team-seats';
+import { accessForMembership, parseRequestedAccess } from '../../src/utils/assistant-access';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret  = process.env.JWT_SECRET;
@@ -59,6 +63,7 @@ export default withLambda(async (event) => {
                     membershipId: userOrganisations.id,
                     userId: userOrganisations.userId,
                     role: userOrganisations.role,
+                    assistantIds: userOrganisations.assistantIds,
                     joinedAt: userOrganisations.joinedAt,
                     firstName: users.firstName,
                     lastName: users.lastName,
@@ -72,10 +77,25 @@ export default withLambda(async (event) => {
             // Workspace Collaboration + seats — the same rule invite-member.ts enforces.
             const allowance = await getTeamAllowance(db, orgId);
 
+            // The assistants an invite or access change can choose from. Archived ones are left out:
+            // nobody should be handed one, and they come back with their old access if reinstated.
+            const assistants = (await db
+                .select({ id: aiAssistants.id, name: aiAssistants.name, archivedAt: aiAssistants.archivedAt })
+                .from(aiAssistants)
+                .where(eq(aiAssistants.organisationId, orgId))
+                .orderBy(aiAssistants.createdAt))
+                .filter((a) => !a.archivedAt)
+                .map((a) => ({ id: a.id, name: a.name }));
+
             return {
                 statusCode: 200,
                 body: JSON.stringify({
-                    members,
+                    // An invited row's role is 'invited', so its access is shown as stored.
+                    members: members.map((m) => ({
+                        ...m,
+                        assistantIds: m.role === 'invited' ? (m.assistantIds ?? null) : accessForMembership(m.role, m.assistantIds),
+                    })),
+                    assistants,
                     seatCount: members.length,
                     seatLimit: allowance.maxSeats,          // null = no cap
                     collaboration: allowance.collaboration,
@@ -91,7 +111,7 @@ export default withLambda(async (event) => {
 
         // Verify the target is actually a member of this org
         const [targetMembership] = await db
-            .select({ id: userOrganisations.id, role: userOrganisations.role })
+            .select({ id: userOrganisations.id, role: userOrganisations.role, assistantIds: userOrganisations.assistantIds })
             .from(userOrganisations)
             .where(and(eq(userOrganisations.userId, targetUserId), eq(userOrganisations.organisationId, orgId)))
             .limit(1);
@@ -103,8 +123,14 @@ export default withLambda(async (event) => {
         // ── PATCH: Change member role ───────────────────────────────────
         if (event.httpMethod === 'PATCH') {
             const body = JSON.parse(event.body || '{}');
-            const newRole = body.role as OrgRole;
+            const newRole = (body.role ?? targetMembership.role) as OrgRole;
 
+            if (targetMembership.role === 'owner') {
+                return { statusCode: 400, body: JSON.stringify({ error: "The owner's role and access can't be changed." }) };
+            }
+            if (targetMembership.role === 'invited') {
+                return { statusCode: 400, body: JSON.stringify({ error: 'Resend or cancel the invite to change it.' }) };
+            }
             if (!VALID_ROLES.includes(newRole)) {
                 return { statusCode: 400, body: JSON.stringify({ error: `Role must be one of: ${VALID_ROLES.join(', ')}` }) };
             }
@@ -134,11 +160,23 @@ export default withLambda(async (event) => {
                 }
             }
 
+            // Which assistants they can use. Not sent = keep what they had; an admin always has all.
+            let assistantIds: number[] | null = targetMembership.assistantIds ?? null;
+            if (newRole === 'admin') {
+                assistantIds = null;
+            } else if (body.assistantIds !== undefined) {
+                const own = await db.select({ id: aiAssistants.id }).from(aiAssistants)
+                    .where(eq(aiAssistants.organisationId, orgId));
+                const parsed = parseRequestedAccess(newRole, body.assistantIds, own.map((a) => a.id));
+                if ('error' in parsed) return { statusCode: 400, body: JSON.stringify({ error: parsed.error }) };
+                assistantIds = parsed.access;
+            }
+
             await db.update(userOrganisations)
-                .set({ role: newRole })
+                .set({ role: newRole, assistantIds })
                 .where(eq(userOrganisations.id, targetMembership.id));
 
-            return { statusCode: 200, body: JSON.stringify({ success: true, role: newRole }) };
+            return { statusCode: 200, body: JSON.stringify({ success: true, role: newRole, assistantIds }) };
         }
 
         // ── DELETE: Remove member ───────────────────────────────────────

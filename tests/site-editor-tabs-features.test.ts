@@ -135,7 +135,8 @@ check('narrow screens: a Preview button in reach opens it full screen; no device
     const ed = read('src/components/assistant-site-editor.js');
     assert.ok(ed.includes("'Preview my site'") && ed.includes("{ attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;"), 'sticky on the block wrapper, so it stays in reach');
     assert.ok(ed.includes("slot.toggleAttribute('data-sb-full', !!state.previewFull)") && ed.includes("btn('data-site-preview-close', 'Close preview', true)"));
-    assert.ok(/<span class="flex gap-1" data-sb-wide-only>/.test(ed));
+    // Desktop / Phone: a grey two-way toggle, wide screens only (owner, 2026-11-07).
+    assert.ok(/<span class="inline-flex gap-1 p-1 rounded-lg bg-gray-100" data-sb-wide-only role="group" aria-label="Preview size">/.test(ed));
     assert.ok(ed.includes('height:min(720px, 70vh)'));
     assert.ok(/activate\(surface, panel\) \{[\s\S]{0,300}setPreviewFull\(false\);/.test(ed), 'leaving the tab never leaves the preview covering the page');
 });

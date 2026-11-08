@@ -72,6 +72,18 @@ const briefing = (over: Partial<PostImageBriefing> = {}): PostImageBriefing => (
         assert.match(postImageUserPrompt(briefing()), /WHAT THE PICTURE SHOULD SHOW OR SAY/);
     });
 
+    await test('a revision (guest said "too dark") gets the feedback and the last picture, not "use a different idea"', () => {
+        const u = postImageUserPrompt(briefing({
+            currentPicturePrompt: 'old scene',
+            revision: { feedback: 'The image is too dark', previousPicturePrompt: 'A moody boiler room, deep shadows' },
+        }));
+        assert.match(u, /THIS IS A REVISION\. What they said about the last version: "The image is too dark"/);
+        assert.match(u, /A moody boiler room, deep shadows/);
+        assert.doesNotMatch(u, /use a different idea/);
+        // Without a revision, pressing the button again still means "not that one".
+        assert.match(postImageUserPrompt(briefing({ currentPicturePrompt: 'old scene' })), /use a different idea/);
+    });
+
     console.log('what it learns from');
 
     await test('pictures turned down, in the user\'s own words', () => {

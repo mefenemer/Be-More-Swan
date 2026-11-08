@@ -540,7 +540,7 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
             ok: true,
             artefactKind: 'discovery_campaign',
             artefactId: result.campaignId,
-            summary: 'Saved search created as a draft — start it from Find New Leads',
+            summary: 'Saved search created as a draft — start it from the Searches tab',
         };
     },
 
@@ -577,7 +577,7 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
             // A halt's rewrite was worked out from the wording on the day it was raised. If the user
             // has reworded the search since, theirs is the newer decision and is kept.
             if (proposedAgainst && proposedAgainst !== existing.idea.trim()) {
-                return { ok: false, message: 'The search was not changed: its description has been edited since this was proposed, so your wording was kept. Edit it on Find New Leads if you still want it narrower.' };
+                return { ok: false, message: 'The search was not changed: its description has been edited since this was proposed, so your wording was kept. Edit it on the Searches tab if you still want it narrower.' };
             }
             await db.update(discoveryCampaigns)
                 .set({ idea: refinedIdea, updatedAt: new Date() })
@@ -587,10 +587,10 @@ const EXECUTORS: Record<CampaignOrderAction, Executor> = {
 
         if (ctx.brief.pauseSearch === true) {
             if (existing.status !== 'active') {
-                return done(`Search not changed and not running (it is ${existing.status}). No narrower description could be worked out from its cold leads — edit who it looks for on Find New Leads before starting it again`);
+                return done(`Search not changed and not running (it is ${existing.status}). No narrower description could be worked out from its cold leads — edit who it looks for on the Searches tab before starting it again`);
             }
             await setDiscoverySearchStatus(db, campaignId, 'pause');
-            return done('Search paused, not changed: no narrower description could be worked out from its cold leads. Edit who it looks for on Find New Leads, then resume it');
+            return done('Search paused, not changed: no narrower description could be worked out from its cold leads. Edit who it looks for on the Searches tab, then resume it');
         }
 
         return { ok: false, message: 'Nothing was changed: no new description of who the search should find was given.' };
