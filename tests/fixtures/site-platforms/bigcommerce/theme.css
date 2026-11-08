@@ -1,0 +1,15 @@
+/* SYNTHETIC: shaped like a compiled Stencil (Cornerstone) theme stylesheet, cut down. */
+body{margin:0}
+body{background:#fbf8f3;color:#3b3a36;margin:0;padding:0;position:relative}
+body{font-family:Karla,Arial,Helvetica,sans-serif;font-weight:400;line-height:1.5}
+h1,h2,h3,h4,h5,h6{font-family:Lora,Georgia,serif;font-weight:700;color:#2f4a3a}
+a{color:#2f4a3a;text-decoration:none}
+.header{background-color:#fbf8f3}
+.navPages-action{color:#3b3a36;font-family:Karla,Arial,sans-serif;font-size:15px}
+.button{border-radius:4px;border:1px solid #ccc;font-family:Karla,Arial,sans-serif}
+.button--primary{background-color:#2f4a3a;border-color:#2f4a3a;color:#fff}
+.button--primary:hover{background-color:#c27c4e;border-color:#c27c4e}
+.card-title{font-family:Lora,Georgia,serif}
+.modal-body{background-color:#fff;border:1px solid #999;padding:1.5rem}
+.footer{background-color:#2f4a3a;color:#fbf8f3}
+.price--non-sale{color:#999;text-decoration:line-through}
