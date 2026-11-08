@@ -275,6 +275,13 @@ export interface SitePageDef {
     sections: Section[];
     /** Left out of the menu, still reachable by its address — a landing page for an ad or a post. */
     hideFromMenu: boolean;
+    /**
+     * Shown in the menu UNDER this page (its pageId), in a drop-down — "Testimonials" under "About
+     * Us", the courses under "Our Courses" (2026-11-08: the menu holds LIMITS.navItems entries, and
+     * Restorative Futures' 13 pages lost Contact and Booking from it). One level only: the parent is
+     * never the home page and never under another page itself. Absent/null = an entry of its own.
+     */
+    menuParent?: string | null;
 }
 
 export interface SiteDefinition {
@@ -298,7 +305,7 @@ export interface SiteDefinition {
 export const LIMITS = {
     siteName: 80, description: 170, locality: 80, email: 254, phone: 30,
     pageTitle: 80, seoTitle: 65, seoDescription: 170, slug: 80,
-    sectionsPerPage: 20, navItems: 7, navLabel: 30, footer: 300,
+    sectionsPerPage: 20, navItems: 7, navChildren: 12, navLabel: 30, navChildLabel: 48, footer: 300,
     headline: 120, subheadline: 300, eyebrow: 40, ctaLabel: 40, href: 500, alt: 150,
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
     features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
@@ -855,6 +862,7 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
             seo: { title: textOrNull(seo.title, LIMITS.seoTitle), description: textOrNull(seo.description, LIMITS.seoDescription) },
             sections,
             hideFromMenu: p.hideFromMenu === true,
+            menuParent: typeof p.menuParent === 'string' && ID_RE.test(p.menuParent) ? p.menuParent : null,
         });
     }
 
@@ -870,6 +878,14 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
     // Home first, so the menu and the sitemap start where a visitor does. The home page is always in the menu.
     pages.sort((a, b) => (a.slug === '' ? -1 : b.slug === '' ? 1 : 0));
     pages[0].hideFromMenu = false;
+    pages[0].menuParent = null;
+    // A drop-down parent must be a page here, not the home page, not itself, and not under another page.
+    const pageById = new Map(pages.map((p) => [p.id, p]));
+    for (const p of pages) {
+        const parent = p.menuParent ? pageById.get(p.menuParent) : undefined;
+        if (p.menuParent && (!parent || parent === p || parent.slug === '' || (parent.menuParent && pageById.get(parent.menuParent)))) p.menuParent = null;
+    }
+    for (const p of pages) if (p.menuParent && pages.some((c) => c.menuParent === p.id)) p.menuParent = null;
 
     // Internal links must point at a page that exists.
     const pagePaths = new Set(pages.map((p) => (p.slug ? `/${p.slug}` : '/')));
@@ -920,7 +936,9 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
 /** The menu entry the blog adds (pageId is not a page's — no page has it). */
 export const BLOG_MENU_ID = '_blog';
 
-export function menuOf(def: SiteDefinition): Array<{ label: string; path: string; pageId: string; sectionId?: string }> {
+export interface MenuEntry { label: string; path: string; pageId: string; sectionId?: string; children?: Array<{ label: string; path: string; pageId: string }> }
+
+export function menuOf(def: SiteDefinition): MenuEntry[] {
     const toPage = (p: SitePageDef, label?: string) => ({ label: clampText(label || p.title, LIMITS.navLabel), path: p.slug ? `/${p.slug}` : '/', pageId: p.id });
     // The blog is always last in the menu, and always fits: it takes the last place if the menu is full.
     const blog = blogOn(def) ? [{ label: def.settings.blog!.menuLabel || DEFAULT_BLOG_LABEL, path: BLOG_PATH, pageId: BLOG_MENU_ID }] : [];
@@ -931,10 +949,21 @@ export function menuOf(def: SiteDefinition): Array<{ label: string; path: string
         const others = def.pages.slice(1).filter((p) => !p.hideFromMenu).map((p) => toPage(p));
         return [...[...jumps, ...others].slice(0, room), ...blog];
     }
-    const entries = def.nav.length ? def.nav : def.pages.filter((p) => !p.hideFromMenu).slice(0, LIMITS.navItems).map((p) => ({ label: clampText(p.title, LIMITS.navLabel), pageId: p.id }));
+    // Pages with a menuParent go in that page's drop-down — unless the parent isn't in the menu, when
+    // they stand on their own rather than vanish from it.
+    const visible = def.pages.filter((p) => !p.hideFromMenu);
+    const topIds = new Set(def.nav.length ? def.nav.map((n) => n.pageId) : visible.filter((p) => !p.menuParent).map((p) => p.id));
+    const isChild = (p: SitePageDef) => !!p.menuParent && topIds.has(p.menuParent) && p.menuParent !== p.id;
+    const entries = def.nav.length
+        ? def.nav.filter((n) => { const pg = def.pages.find((p) => p.id === n.pageId); return !pg || !isChild(pg); })
+        : visible.filter((p) => !isChild(p)).slice(0, LIMITS.navItems).map((p) => ({ label: clampText(p.title, LIMITS.navLabel), pageId: p.id }));
     return [...entries.flatMap((n) => {
         const page = def.pages.find((p) => p.id === n.pageId);
-        return page ? [toPage(page, n.label)] : [];
+        if (!page) return [];
+        const entry: MenuEntry = toPage(page, n.label);
+        const kids = visible.filter((c) => isChild(c) && c.menuParent === page.id).slice(0, LIMITS.navChildren).map((c) => ({ ...toPage(c), label: clampText(c.title, LIMITS.navChildLabel) }));
+        if (kids.length) entry.children = kids;
+        return [entry];
     }).slice(0, room), ...blog];
 }
 
@@ -942,7 +971,7 @@ export function menuOf(def: SiteDefinition): Array<{ label: string; path: string
 
 export type SiteOperation =
     | { op: 'add_page'; title: string; slug?: string }
-    | { op: 'update_page'; pageId: string; title?: string; slug?: string; seo?: { title?: string | null; description?: string | null }; hideFromMenu?: boolean }
+    | { op: 'update_page'; pageId: string; title?: string; slug?: string; seo?: { title?: string | null; description?: string | null }; hideFromMenu?: boolean; menuParent?: string | null }
     | { op: 'remove_page'; pageId: string }
     | { op: 'add_section'; pageId: string; section: { type: SectionType; props: unknown; look?: Partial<SectionLook> }; index?: number }
     | { op: 'update_section'; pageId: string; sectionId: string; props?: Record<string, unknown>; look?: Partial<SectionLook> }
@@ -1099,12 +1128,27 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
                 if (page!.slug === '' && op.hideFromMenu) return { ok: false, error: 'The home page is always in the menu.' };
                 page!.hideFromMenu = op.hideFromMenu === true;
             }
+            if (op.menuParent !== undefined) {
+                if (op.menuParent === null || op.menuParent === '') page!.menuParent = null;
+                else {
+                    const parent = byIdOrSlug(op.menuParent);
+                    if (!parent) return { ok: false, error: 'The page to put it under no longer exists.' };
+                    if (page!.slug === '') return { ok: false, error: 'The home page always has its own place in the menu.' };
+                    if (parent === page) return { ok: false, error: 'A page can\'t go under itself in the menu.' };
+                    if (parent.slug === '') return { ok: false, error: 'Pages can\'t go under the home page in the menu — choose another page.' };
+                    if (parent.menuParent) return { ok: false, error: `"${parent.title}" is itself under another page in the menu. Choose a page that has its own place in the menu.` };
+                    if (next.pages.some((c) => c.menuParent === page!.id)) return { ok: false, error: `Other pages are under "${page!.title}" in the menu, so it can't go under another page. Move those first.` };
+                    page!.menuParent = parent.id;
+                }
+            }
             break;
         }
         case 'remove_page': {
             if (page!.slug === '') return { ok: false, error: 'The home page can\'t be removed — every site needs one.' };
             next.pages = next.pages.filter((p) => p !== page);
             next.nav = next.nav.filter((n) => n.pageId !== op.pageId);
+            // Pages that were under it in the menu get their own place again.
+            for (const c of next.pages) if (c.menuParent === op.pageId) c.menuParent = null;
             break;
         }
         case 'add_section': {

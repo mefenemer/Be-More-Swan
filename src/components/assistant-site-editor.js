@@ -844,7 +844,21 @@
           <div><label class="block text-xs font-bold text-gray-700">Search description</label><input data-site-seo-desc class="${inputCls}" value="${esc(p.seo.description || '')}" placeholder="One or two sentences"></div>
         </div>
         ${p.slug ? `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" data-site-page-hidden ${p.hideFromMenu ? 'checked' : ''}> Hide from the menu <span class="font-normal text-gray-500">— still there for anyone with its address, e.g. a page for an ad or an offer</span></label>` : ''}
+        ${menuPlaceHtml(p)}
         <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-page-save', 'Save page details', true)}${p.slug ? btn('data-site-remove-page', 'Remove this page') : ''}</div>`)}`;
+  }
+
+  // Where the page sits in the menu: its own entry, or in another page's drop-down (menuParent,
+  // site-definition.ts). One level only, so a page with pages under it keeps its own entry.
+  function menuPlaceHtml(p) {
+    if (!p.slug || def().structure === 'one_page') return '';
+    const kids = def().pages.filter((x) => x.menuParent === p.id);
+    if (kids.length) return `<p class="text-xs text-gray-600 mt-2">In the menu, these pages drop down from this one: ${kids.map((x) => esc(x.title)).join(', ')}.</p>`;
+    const parents = def().pages.filter((x) => x.slug && x.id !== p.id && !x.menuParent);
+    if (!parents.length) return '';
+    return `<label class="block text-xs font-bold text-gray-700 mt-3">In the menu
+      <select data-site-page-under class="${inputCls} mt-1"><option value="">On its own</option>${parents.map((x) => `<option value="${esc(x.id)}" ${p.menuParent === x.id ? 'selected' : ''}>Under “${esc(x.title)}” (a drop-down)</option>`).join('')}</select></label>
+      <p class="text-xs text-gray-500 mt-1">Put related pages under one entry, e.g. each course under “Our Courses”, so the menu stays short.</p>`;
   }
 
   // ── "Add your own words" (site-words.ts — the owner's wording is used unchanged) ──────────
@@ -1962,6 +1976,14 @@
     return `<ul class="mt-2 space-y-1">${report.pages.map((p) => `<li class="text-xs text-gray-700">${esc(p.title)} — ${p.read ? `${esc(p.words)} words read` : `<span class="text-amber-800">${esc(p.note || 'not read')}</span>`}</li>`).join('')}</ul>`;
   }
 
+  /** Their old site's colours and lettering, as the import read them (site-import-theme.ts). */
+  function importLookLine(look) {
+    if (!look) return '<p class="text-xs text-gray-700 mt-1">Look: we couldn\'t read your old site\'s colours, so your current design is kept — change it in Design.</p>';
+    const sw = (hex, name) => (hex ? `<span class="inline-flex items-center gap-1 mr-2"><span class="inline-block w-3.5 h-3.5 rounded-full border border-gray-300 align-middle" style="background:${esc(hex)}"></span>${esc(name)}</span>` : '');
+    const pairs = { editorial: 'Fraunces & Inter', classic: 'Playfair Display & Lora', elegant: 'Cormorant Garamond & Work Sans', modern: 'Manrope', bold: 'Oswald & Inter', friendly: 'Nunito', tech: 'Space Grotesk & Inter', warm: 'DM Serif Display & Work Sans', serif: 'a classic serif', sans: 'a clean sans-serif' };
+    return `<p class="text-xs text-gray-700 mt-1">Look: your old site's colours and lettering come across — ${sw(look.primaryColor, 'main colour')}${sw(look.backgroundColor, 'background')}${sw(look.textColor, 'words')}${look.font ? `lettering ${esc(pairs[look.font] || look.font)}${look.headingFont && !String(pairs[look.font] || '').includes(look.headingFont) ? ` (closest to your ${esc(look.headingFont)})` : ''}` : ''}. Using this draft sets them in Design, where you can change them.</p>`;
+  }
+
   function importReviewCard(imp) {
     const r = imp.report || {};
     const pics = r.pictures || {};
@@ -1973,17 +1995,10 @@
       ${importPagesList(r)}
       <p class="text-xs text-gray-700 mt-2">${pics.choice === 'copy' ? `Pictures: ${esc(pics.copied || 0)} copied into your library${pics.failed ? `, ${esc(pics.failed)} couldn't be copied` : ''}.` : 'Pictures: left out, as you chose — add your own with "Choose picture".'}</p>
       ${pics.undescribed ? `<p class="text-xs font-semibold text-amber-800 mt-1">${esc(pics.undescribed)} picture${pics.undescribed === 1 ? '' : 's'} had no description on your old site, so each is described by the heading near it — check them, for people using screen readers.</p>` : ''}
+      ${importLookLine(r.look)}
       ${contact.email || contact.phone ? `<p class="text-xs text-gray-700 mt-1">Contact details found: ${esc([contact.email, contact.phone].filter(Boolean).join(' · '))}.</p>` : ''}
       ${r.placeholders ? `<p class="text-xs font-semibold text-amber-800 mt-1">${esc(r.placeholders)} part${r.placeholders === 1 ? '' : 's'} in [square brackets] to fill in before you publish.</p>` : ''}
       ${list(`Prices we found (${(r.prices || []).length}) — not copied: add them in Business Information ▸ Products & Services`, r.prices, 'text-amber-800')}
-  /** Their old site's colours and lettering, as the import read them (site-import-theme.ts). */
-  function importLookLine(look) {
-    if (!look) return '<p class="text-xs text-gray-700 mt-1">Look: we couldn\'t read your old site\'s colours, so your current design is kept — change it in Design.</p>';
-    const sw = (hex, name) => (hex ? `<span class="inline-flex items-center gap-1 mr-2"><span class="inline-block w-3.5 h-3.5 rounded-full border border-gray-300 align-middle" style="background:${esc(hex)}"></span>${esc(name)}</span>` : '');
-    const pairs = { editorial: 'Fraunces & Inter', classic: 'Playfair Display & Lora', elegant: 'Cormorant Garamond & Work Sans', modern: 'Manrope', bold: 'Oswald & Inter', friendly: 'Nunito', tech: 'Space Grotesk & Inter', warm: 'DM Serif Display & Work Sans', serif: 'a classic serif', sans: 'a clean sans-serif' };
-    return `<p class="text-xs text-gray-700 mt-1">Look: your old site's colours and lettering come across — ${sw(look.primaryColor, 'main colour')}${sw(look.backgroundColor, 'background')}${sw(look.textColor, 'words')}${look.font ? `lettering ${esc(pairs[look.font] || look.font)}${look.headingFont && !String(pairs[look.font] || '').includes(look.headingFont) ? ` (closest to your ${esc(look.headingFont)})` : ''}` : ''}. Using this draft sets them in Design, where you can change them.</p>`;
-  }
-
       ${list(`Left out as menus or notices (${(r.leftOut || []).length}) — check nothing important is here`, r.leftOut)}
       ${list(`Didn't fit on its page (${(r.notCarried || []).length})`, r.notCarried, 'text-amber-800')}
       ${list(`Pages in your menu not imported (${(r.notImported || []).length}) — add them yourself with + Page`, r.notImported)}
@@ -1995,7 +2010,6 @@
       </div>
       <p class="text-xs text-gray-500 mt-2">"Use this as my draft" replaces your current draft with the imported pages, keeping your design. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing goes live until you publish.'}</p>`, 'border-emerald-200');
   }
-      ${importLookLine(r.look)}
 
   // ── Publish ────────────────────────────────────────────────────────────────
   function publishCard() {
@@ -2775,7 +2789,7 @@
       const np = def().pages.find((x) => !before.has(x.id));
       if (!np) return;   // refused (e.g. the plan's pages are full) — the note says why
       await apply([
-        { op: 'update_page', pageId: np.id, seo: u.page.seo, hideFromMenu: !!u.page.hideFromMenu },
+        { op: 'update_page', pageId: np.id, seo: u.page.seo, hideFromMenu: !!u.page.hideFromMenu, ...(u.page.menuParent && def().pages.some((x) => x.id === u.page.menuParent) ? { menuParent: u.page.menuParent } : {}) },
         ...u.page.sections.map((x) => ({ op: 'add_section', pageId: np.id, section: { type: x.type, props: x.props, look: x.look || {} } })),
       ], () => {
         state.pageId = np.id; state.previewPath = pathOf(np); state.editing = null;
@@ -2831,6 +2845,8 @@
       if (p.slug) op.slug = host.querySelector('[data-site-page-slug]').value.replace(/^\//, '');
       const hidden = host.querySelector('[data-site-page-hidden]');
       if (hidden) op.hideFromMenu = hidden.checked;
+      const under = host.querySelector('[data-site-page-under]');
+      if (under && (under.value || null) !== (p.menuParent || null)) op.menuParent = under.value || null;
       await apply([op], () => { state.previewPath = pathOf(page()); });
       return;
     }

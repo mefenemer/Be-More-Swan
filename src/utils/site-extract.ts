@@ -28,6 +28,12 @@ export interface SiteCta {
 export interface SiteLink {
     text: string;
     href: string;
+    /**
+     * Menu links only (readImportPage): the label of the drop-down this link sits in on their site
+     * ("About Us" for Testimonials), when it is in one. The import puts that page under the page of
+     * that name in the new site's menu (SitePageDef.menuParent).
+     */
+    group?: string;
 }
 
 export interface SitePage {
@@ -637,6 +643,39 @@ function detectBuilder(html: string, $: cheerio.CheerioAPI): ImportPage['builder
 }
 
 /** The owner's page as ordered blocks of their own words and pictures. `url` is the FINAL url. */
+/** A drop-down's own box (the sub-menu), by the names builders give it — never its heading. */
+const SUBMENU_CLASS = /(?:^|[\s_-])(?:sub-?menu|dropdown[-_]*(?:panel|menu|content|list|items)|folder-content|nav-group__(?:items|list|content|panel)|menu-children|children-menu|flyout|mega-?menu)(?:$|[\s_-])/i;
+const NAV_ROOT = new Set(['nav', 'header', 'body']);
+
+/**
+ * The label of the drop-down a menu link sits in, or null when it is a top-level entry. Three shapes:
+ * <details><summary>About Us</summary>…links…</details>; a list inside a list item (WordPress
+ * li > a + ul.sub-menu); a box named like a sub-menu, labelled by what comes just before it
+ * (Restorative Futures 2026-11-08: div.nav-dropdown__head "About Us" + div.nav-dropdown__panel).
+ */
+function menuGroupOf($: cheerio.CheerioAPI, el: AnyNode): string | null {
+    const label = (t: string) => { const c = clean(t); return c && c.length <= 40 ? c : null; };
+    let node = el.parent;
+    for (let depth = 0; node && depth < 8; depth++, node = node.parent) {
+        if (node.type !== 'tag') break;
+        const $n = $(node);
+        if (NAV_ROOT.has(node.name) || $n.attr('role') === 'navigation') break;
+        if (node.name === 'details') return label($n.children('summary').first().text());
+        if ((node.name === 'ul' || node.name === 'ol') && node.parent?.type === 'tag' && node.parent.name === 'li') {
+            const head = $(node.parent).children('a, button, span, summary, div').filter((_, c) => !$(c).is('ul, ol') && !!clean($(c).text())).first();
+            return label(head.text());
+        }
+        if (SUBMENU_CLASS.test(`${$n.attr('class') ?? ''} ${$n.attr('id') ?? ''}`)) {
+            for (let prev = $n.prev(); prev.length; prev = prev.prev()) {
+                const t = label(prev.text());
+                if (t) return t;
+            }
+            return null;
+        }
+    }
+    return null;
+}
+
 export function readImportPage(html: string, url: string): ImportPage {
     const $ = cheerio.load(html);
     const base = safeUrl(url);
@@ -695,7 +734,8 @@ export function readImportPage(html: string, url: string): ImportPage {
         const text = clean($(el).text()) || clean($(el).attr('aria-label'));
         if (seenNav.has(key) || !text || text.length > 40) return;
         seenNav.add(key);
-        navLinks.push({ text, href: key });
+        const group = menuGroupOf($, el);
+        navLinks.push(group && group.toLowerCase() !== text.toLowerCase() ? { text, href: key, group } : { text, href: key });
     });
 
     // The logo: the header's picture that says it is one, else the header's first picture.

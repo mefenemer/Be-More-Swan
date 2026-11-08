@@ -2046,7 +2046,7 @@
     platforms: 'platforms shown', count: 'number of posts', enabled: 'on/off' };
   const SITE_OP_WORDS = {
     add_page: (o) => `Add a page: “${o.title || ''}”`,
-    update_page: (o) => (o.title ? `Rename a page to “${o.title}”` : o.hideFromMenu === true ? 'Hide a page from the menu' : o.hideFromMenu === false ? 'Show a page in the menu' : o.seo ? 'Update a page\'s search title and description' : 'Update a page'),
+    update_page: (o) => (o.title ? `Rename a page to “${o.title}”` : typeof o.menuParent === 'string' && o.menuParent ? 'Put a page in a drop-down in the menu' : o.menuParent === null ? 'Give a page its own place in the menu' : o.hideFromMenu === true ? 'Hide a page from the menu' : o.hideFromMenu === false ? 'Show a page in the menu' : o.seo ? 'Update a page\'s search title and description' : 'Update a page'),
     remove_page: () => 'Remove a page',
     add_section: (o) => `Add a ${SITE_SECTION_WORDS[(o.section || {}).type] || 'new'} section`,
     update_section: (o) => {

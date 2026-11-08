@@ -361,6 +361,20 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         return parts.map((part, k) => ({ type: 'text', props: { heading: k === 0 && part !== titled ? titled : null, body: part, image: k === 0 ? img : null, imageSide: 'right' } }));
     };
 
+    // Their drop-downs (readImportPage SiteLink.group): a page that sat in "About Us ▾" goes under the
+    // page of that name in the new menu, so 13 pages still fit a 7-entry menu (Restorative Futures,
+    // 2026-11-08: Contact and Booking had fallen out of it). Ids are fixed here so menuParent can name them.
+    const homeNav = pages[0]?.page.navLinks ?? [];
+    const linkOf = (k: number) => homeNav.find((l) => samePath(l.href, pages[k].url));
+    const parentOf = pages.slice(0, cap).map((_, i) => {
+        const group = i > 0 ? linkOf(i)?.group : undefined;
+        if (!group) return null;
+        const own = (k: number) => k > 0 && k !== i && !linkOf(k)?.group;
+        let j = pages.slice(0, cap).findIndex((_, k) => own(k) && linkOf(k)?.text.toLowerCase() === group.toLowerCase());
+        if (j < 0) j = pages.slice(0, cap).findIndex((_, k) => own(k) && slugs[k] === slugify(group));
+        return j >= 0 ? `p${j + 1}` : null;
+    });
+
     const outPages = pages.slice(0, cap).map((p, i) => {
         // Each group of sections remembers the first of their blocks it holds, so blocks the plan
         // forgot go back where they were read — not all at the end of the page.
@@ -537,6 +551,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         }
         const fit = (s: string | null, n: number) => (s && s.length <= n ? s : null);
         return {
+            id: `p${i + 1}`, menuParent: parentOf[i],
             title: pageTitle(p, i), slug: slugs[i],
             seo: { title: fit(p.page.title, LIMITS.seoTitle), description: fit(p.page.description, LIMITS.seoDescription) },
             sections,
@@ -548,7 +563,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         const contactPage = outPages.find((p) => CONTACT_PAGE.test(p.slug));
         const form = { type: 'contact', props: { heading: null, intro: null, askPhone: true, offerUpdates: false } };
         if (contactPage && contactPage.sections.length < LIMITS.sectionsPerPage) contactPage.sections.push(form);
-        else if (outPages.length < input.maxPages) outPages.push({ title: 'Contact', slug: slugs.includes('contact') ? 'contact-us' : 'contact', seo: { title: null, description: null }, sections: [form] });
+        else if (outPages.length < input.maxPages) outPages.push({ id: '', menuParent: null, title: 'Contact', slug: slugs.includes('contact') ? 'contact-us' : 'contact', seo: { title: null, description: null }, sections: [form] });
         else if (outPages[0].sections.length < LIMITS.sectionsPerPage) outPages[0].sections.push(form);
     }
 

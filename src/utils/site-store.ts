@@ -486,7 +486,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         `Theme: main colour ${d.theme.primaryColor}, text ${d.theme.textColor}, background ${d.theme.backgroundColor}, lettering ${d.theme.font}, corners ${d.theme.radius}${d.theme.logoUrl ? ', has a logo' : ', no logo'}.`,
     ];
     for (const p of d.pages) {
-        lines.push(`- Page "${p.title}" (pageId ${p.id}, address ${p.slug ? `/${p.slug}` : '/'}${p.hideFromMenu ? ', HIDDEN from the menu' : ''}${p.seo.title ? `, search title "${clip(p.seo.title, 70)}"` : ', no search title'}):`);
+        lines.push(`- Page "${p.title}" (pageId ${p.id}, address ${p.slug ? `/${p.slug}` : '/'}${p.hideFromMenu ? ', HIDDEN from the menu' : ''}${p.menuParent ? `, in the menu UNDER "${clip(d.pages.find((x) => x.id === p.menuParent)?.title ?? p.menuParent, 40)}"` : ''}${p.seo.title ? `, search title "${clip(p.seo.title, 70)}"` : ', no search title'}):`);
         if (!p.sections.length) lines.push('    (no sections)');
         for (const s of p.sections) {
             const pr = s.props as unknown as Record<string, unknown>;

@@ -211,6 +211,8 @@ p{margin:0 0 1em}.w{max-width:1080px;margin:0 auto;padding:0 20px}.n{max-width:7
 .hd{border-bottom:1px solid rgba(0,0,0,.08)}.hd .w{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-top:14px;padding-bottom:14px}
 .brand{font-weight:800;font-size:1.15rem;text-decoration:none;color:var(--t)}.brand img{max-height:40px;width:auto}
 .nav{display:flex;flex-wrap:wrap;gap:4px 18px;margin:0;padding:0;list-style:none}.nav a{text-decoration:none;color:var(--t);font-weight:600;font-size:.95rem}.nav a[aria-current=page]{color:var(--p)}
+.hd{position:relative;z-index:30}.nav li{position:relative}.nav .sub{list-style:none;margin:0;padding:6px 0;display:none;position:absolute;left:-14px;top:100%;width:max-content;min-width:200px;max-width:320px;background:var(--b);border:1px solid rgba(0,0,0,.1);border-radius:var(--r);box-shadow:0 10px 28px rgba(0,0,0,.1)}.nav .sub a{display:block;padding:7px 14px;font-weight:500}.nav .has-sub>a::after{content:"▾";font-size:.7em;margin-left:5px}.nav .has-sub:hover>.sub,.nav .has-sub:focus-within>.sub{display:block}
+@media(max-width:720px){.nav .has-sub{flex-basis:100%}.nav .sub{display:block;position:static;min-width:0;border:0;box-shadow:none;background:none;padding:2px 0 4px 12px}.nav .sub a{padding:2px 0;font-size:.9rem}.nav .has-sub>a::after{content:none}}
 section{padding:var(--sp) 0}.alt{background:${tint ?? 'rgba(0,0,0,.035)'}}
 .hd.ctr .w{flex-direction:column;justify-content:center;gap:10px;padding-top:22px}.hd.ctr .brand{font-size:1.5rem}.hd.ctr .nav{justify-content:center}
 .btn{display:inline-block;padding:12px 22px;border-radius:var(--r);background:var(--p);color:var(--ink);font-weight:700;text-decoration:none;margin:4px 8px 4px 0}.btn.s{background:transparent;color:var(--p);border:2px solid var(--p)}
@@ -705,7 +707,7 @@ ${ld.map((x) => `<script type="application/ld+json">${jsonLd(x)}</script>`).join
 ${ctx.preview ? '<div class="pv">Preview — this version is not live yet.</div>' : ''}
 <header class="hd${def.theme.header === 'centered' ? ' ctr' : ''}"><div class="w">
 <a class="brand" href="${esc(href('/'))}">${logoSrc(def.theme) ? `<img src="${esc(logoSrc(def.theme))}" alt="${esc(s.siteName)}">` : esc(s.siteName)}</a>
-${menu.length > (def.structure === 'one_page' ? 0 : 1) ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li><a href="${esc(m.sectionId && page && page.slug !== '' ? `${href('/')}${m.path}` : href(m.path))}"${current && m.pageId === current && !m.sectionId ? ' aria-current="page"' : ''}>${esc(m.label)}</a></li>`).join('')}</ul></nav>` : ''}
+${menu.length > (def.structure === 'one_page' ? 0 : 1) ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li${m.children ? ' class="has-sub"' : ''}><a href="${esc(m.sectionId && page && page.slug !== '' ? `${href('/')}${m.path}` : href(m.path))}"${current && m.pageId === current && !m.sectionId ? ' aria-current="page"' : ''}>${esc(m.label)}</a>${m.children ? `<ul class="sub">${m.children.map((c) => `<li><a href="${esc(href(c.path))}"${current && c.pageId === current ? ' aria-current="page"' : ''}>${esc(c.label)}</a></li>`).join('')}</ul>` : ''}</li>`).join('')}</ul></nav>` : ''}
 </div></header>
 <main>
 ${body}
