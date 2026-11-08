@@ -2542,7 +2542,7 @@
   }
   register('site_words', renderSiteWordsCard);
 
-  // { type: 'booking_setup', summary, settings, section? } — hours & booking rules into Business
+  // { type: 'booking_setup', summary, settings, section?, serviceLocations? } — hours & booking rules into Business
   // Information, and (optionally) a booking section on a page: sites.ts `booking_setup`, after the
   // owner's click. The settings pass the same checks as Business Information (booking-settings.ts).
   const BK_DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
@@ -2552,14 +2552,19 @@
     const hours = settings.weeklyHours && typeof settings.weeklyHours === 'object' ? settings.weeklyHours : null;
     const hoursList = hours ? BK_DAYS.map(([k, l]) => `<li class="text-xs text-gray-700">${l}: ${Array.isArray(hours[k]) && hours[k].length ? hours[k].map((p) => `${esc(p.start)}–${esc(p.end)}`).join(', ') : 'closed'}</li>`).join('') : '';
     const kinds = { appointment: 'Appointments', consultation: 'Consultations', table: 'Tables' };
+    // Where services happen (booking-meeting.ts): [{ serviceId, location, name? }].
+    const serviceLocations = Array.isArray(ui.serviceLocations) ? ui.serviceLocations.filter((x) => x && typeof x === 'object').slice(0, 100) : [];
+    const LOC = { in_person: 'in person', phone: 'a phone call', video: 'a video call' };
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
-      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${settings.mode || section ? 'Set up bookings' : 'Hours &amp; location'} · Approval needed</p>
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${settings.mode || section || serviceLocations.length || settings.meetingUrl ? 'Set up bookings' : 'Hours &amp; location'} · Approval needed</p>
       ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
       ${hoursList ? `<p class="text-xs font-bold text-gray-800 mt-2">Opening hours</p><ul class="mt-1 space-y-0.5">${hoursList}</ul>` : ''}
       ${typeof settings.visitAddress === 'string' && settings.visitAddress.trim() ? `<p class="text-xs font-bold text-gray-800 mt-2">Address customers visit</p><p class="text-xs text-gray-700">${esc(settings.visitAddress).replace(/\n/g, '<br>')}</p>` : ''}
       ${typeof settings.whatsapp === 'string' && settings.whatsapp.trim() ? `<p class="text-xs text-gray-700 mt-1">WhatsApp: ${esc(settings.whatsapp)}</p>` : ''}
+      ${serviceLocations.length ? `<p class="text-xs font-bold text-gray-800 mt-2">Where services happen</p><ul class="mt-1 space-y-0.5">${serviceLocations.map((x) => `<li class="text-xs text-gray-700">${esc(x.name || `Service ${x.serviceId}`)}: ${esc(LOC[x.location] || 'in person')}</li>`).join('')}</ul>` : ''}
+      ${typeof settings.meetingUrl === 'string' && settings.meetingUrl.trim() ? `<p class="text-xs text-gray-700 mt-1">Video call link: ${esc(settings.meetingUrl)}</p>` : ''}
       ${settings.mode ? `<p class="text-xs text-gray-700 mt-2">${settings.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}</p>` : ''}
       ${section ? `<p class="text-xs text-gray-700 mt-1">Adds a ${esc(kinds[section.kind] || 'booking')} section to your site.</p>` : ''}
       <p class="text-xs text-gray-600 mt-2">Saved to Business Information (Hours &amp; Location, and Bookings), where you can change it any time. Uses no tasks.</p>
@@ -2579,7 +2584,7 @@
       el.dispatchEvent(new CustomEvent('site:bookingSetup', {
         bubbles: true,
         detail: {
-          settings, section,
+          settings, section, serviceLocations: serviceLocations.map((x) => ({ serviceId: x.serviceId, location: x.location })),
           respond({ ok, error }) {
             if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
             say('Bookings are set up — see the Website tab, under Bookings.');

@@ -88,6 +88,15 @@ export async function takenBySession(db: Db | Parameters<Parameters<Db['transact
     return new Map(rows.map((r) => [Number(r.id), Number(r.n)]));
 }
 
+/**
+ * The products run as classes (any session, past or future, names them). The booking link's own
+ * appointment section leaves these out, so a yoga class isn't also offered as a 1-to-1 slot.
+ */
+export async function classServiceIds(db: Db, orgId: number): Promise<Set<number>> {
+    const rows = await db.selectDistinct({ id: classSessions.serviceId }).from(classSessions).where(eq(classSessions.organisationId, orgId));
+    return new Set(rows.map((r) => r.id).filter((id): id is number => typeof id === 'number'));
+}
+
 export function viewOf(s: SessionRow, taken: number, tz: string, price: string | null = null): SessionView {
     const a = utcToZoned(new Date(s.startsAt), tz);
     const b = utcToZoned(new Date(s.endsAt), tz);
