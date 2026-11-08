@@ -2,7 +2,11 @@
 import { HandlerEvent } from '@netlify/functions';
 import { eq } from 'drizzle-orm';
 import * as cheerio from 'cheerio';
-import { PDFParse } from 'pdf-parse'; // pdf-parse v2 exports a named PDFParse class
+// pdf-parse is imported where a PDF is read, not here: when it failed to load at the top of the
+// file (prod, July → 2026-11-08, "DOMMatrix is not defined"), the whole worker died before its
+// handler ran, so no asset was marked 'failed' and nothing said why. Loaded inside the try below,
+// the same fault marks the asset failed and logs. It must also stay external (netlify.toml).
+const loadPdfParse = () => import('pdf-parse').then((m) => m.PDFParse);
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
 import { workspaceAssets } from '../../db/schema';
@@ -98,7 +102,7 @@ export default withLambda(async (event: HandlerEvent) => {
                     const obj = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: asset.r2Key }));
                     const buffer = Buffer.from(await obj.Body!.transformToByteArray());
                     if (isPdf) {
-                        const parser = new PDFParse({ data: buffer });
+                        const PDFParse = await loadPdfParse(); const parser = new PDFParse({ data: buffer });
                         try { extractedText = (await parser.getText()).text.replace(/\s+/g, ' ').trim(); }
                         finally { await parser.destroy(); }
                     } else {
@@ -144,7 +148,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 const buffer = fetched.bytes;
 
                 if (fname.endsWith('.pdf')) {
-                    const parser = new PDFParse({ data: buffer });
+                    const PDFParse = await loadPdfParse(); const parser = new PDFParse({ data: buffer });
                     try { extractedText = (await parser.getText()).text.replace(/\s+/g, ' ').trim(); }
                     finally { await parser.destroy(); }
                 } else if (fname.endsWith('.txt') || fname.endsWith('.csv')) {

@@ -1272,6 +1272,19 @@ node_bundler = "esbuild"
 # more than the 10s default allows on a slow reply.
 [functions.sites]
   timeout = 26
+  external_node_modules = ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"]
+
+# pdf-parse v2 (pdfjs-dist 5) must ship as it is, never bundled. Bundled to CJS, pdfjs loses
+# import.meta.url, can't load @napi-rs/canvas for its DOMMatrix polyfill, and throws
+# "DOMMatrix is not defined" AS THE MODULE LOADS, before the handler runs. Every brand document
+# uploaded to prod sat at 'confirmed' with no text from July to 2026-11-08 because of it, so no
+# assistant ever read one. Every function that imports pdf-parse is listed here
+# (tests/pdf-parse-external.test.ts checks).
+[functions.process-asset-background]
+  external_node_modules = ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"]
+
+[functions.process-inspo-background]
+  external_node_modules = ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"]
 
 # Website bookings: the day-before reminder (send-booking-reminders.ts). Hourly at :20 — one indexed
 # query that usually finds nothing; a booking is reminded once (reminder_sent_at).

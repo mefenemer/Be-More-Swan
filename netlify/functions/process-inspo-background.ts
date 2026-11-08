@@ -25,7 +25,8 @@
 import { HandlerEvent } from '@netlify/functions';
 import { and, eq } from 'drizzle-orm';
 import * as cheerio from 'cheerio';
-import { PDFParse } from 'pdf-parse';
+// Loaded where a PDF is read, so a load fault fails the item instead of killing the worker (see process-asset-background.ts).
+const loadPdfParse = () => import('pdf-parse').then((m) => m.PDFParse);
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
 import { inspoItems, inspoChunks, workspaceAssets, vectorEmbeddings } from '../../db/schema';
@@ -116,7 +117,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 const obj = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: asset.r2Key }));
                 const buffer = Buffer.from(await obj.Body!.transformToByteArray());
                 if (isPdf) {
-                    const parser = new PDFParse({ data: buffer });
+                    const PDFParse = await loadPdfParse(); const parser = new PDFParse({ data: buffer });
                     try { body = (await parser.getText()).text.replace(/\s+/g, ' ').trim(); }
                     finally { await parser.destroy(); }
                 } else {
