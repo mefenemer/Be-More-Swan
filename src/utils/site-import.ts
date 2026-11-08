@@ -230,6 +230,8 @@ export function picturesInPlan(plan: ImportPlan | null, blocks: NumberedBlock[])
 export interface ImportReport {
     sourceUrl: string;
     builder: ImportPage['builder'];
+    /** The platform adapter that read their home page (site-builders/ key). */
+    platform?: string | null;
     /** Every page we tried, and how many of its words we read. */
     pages: Array<{ url: string; title: string; words: number; read: boolean; note: string | null }>;
     wordsRead: number;
@@ -759,7 +761,7 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
     }
     const wordsRead = read.reduce((n, p) => n + p.page.words, 0);
     const baseReport = (): ImportReport => ({
-        sourceUrl: input.url, builder: homePage.builder, pages: reports, wordsRead,
+        sourceUrl: input.url, builder: homePage.builder, platform: homePage.platform ?? null, pages: reports, wordsRead,
         notImported: menu.filter((l) => !toRead.includes(l)).map((l) => ({ url: l.href, title: l.text })),
         pictures: { choice: input.pictures, found: read.reduce((n, p) => n + p.page.blocks.filter((b) => b.kind === 'image').length, 0) + (homePage.logo ? 1 : 0), copied: 0, failed: 0, undescribed: 0 },
         prices: [], leftOut: [], notCarried: [], contact: importedContact(read), hadForm: read.some((p) => p.page.hasForm), formFields: importedFormFields(read), placeholders: 0,

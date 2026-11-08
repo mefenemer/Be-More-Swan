@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import { socialSiteOf } from './site-definition';
+import { adapterFor } from './site-builders';
 
 export interface SiteCta {
     text: string;
@@ -593,6 +594,8 @@ export interface ImportPage {
     formFields?: string[];
     /** Their profiles on social sites, linked anywhere on the page (footer included). */
     socialLinks?: string[];
+    /** The platform adapter that read it (site-builders/ key), or null when none matched. */
+    platform?: string | null;
     /** Which builder made the page, from its generator tag or tell-tale markup. */
     builder: 'wix' | 'squarespace' | 'wordpress' | 'webflow' | 'square' | 'other';
 }
@@ -688,6 +691,10 @@ export function readImportPage(html: string, url: string): ImportPage {
     const $ = cheerio.load(html);
     const base = safeUrl(url);
     const builder = detectBuilder(html, $);
+    // The platform's own adapter (site-builders/): tidies its markup before anything is read.
+    const adapter = adapterFor(html, $);
+    try { adapter?.prepare?.($, base); } catch { /* a broken adapter never stops an import */ }
+    const fullSize = (src: string) => { try { return adapter?.fullSizeImage?.(src) ?? fullSizeImageUrl(src); } catch { return fullSizeImageUrl(src); } };
 
     // Facts from structured data, before scripts go.
     let siteName: string | null = null;
@@ -778,7 +785,8 @@ export function readImportPage(html: string, url: string): ImportPage {
     // the H1 there), so only the SITE's header and footer go.
     $('header, footer').filter((_, el) => $(el).closest('main, article').length === 0).remove();
     $('nav, form, [role="navigation"], [role="banner"], [role="contentinfo"], #SITE_HEADER, #SITE_FOOTER').remove();
-    const root = $('main').length ? $('main').first() : $('body');
+    const own = adapter?.contentRoot ? $(adapter.contentRoot).first() : null;
+    const root = own && own.length ? own : $('main').length ? $('main').first() : $('body');
 
     const blocks: ImportBlock[] = [];
     const seenText = new Set<string>();
@@ -786,7 +794,7 @@ export function readImportPage(html: string, url: string): ImportPage {
     let lastHeading: string | null = null;
     const addText = (kind: 'text' | 'item' | 'quote', raw: string, node?: AnyNode) => {
         const text = clean(raw);
-        if (!text || text.length < 2 || IMPORT_NOISE.test(text) || !/[a-z0-9]/i.test(text)) return;
+        if (!text || text.length < 2 || IMPORT_NOISE.test(text) || adapter?.noise?.test(text) || !/[a-z0-9]/i.test(text)) return;
         const k = normaliseText(text);
         if (seenText.has(k)) return;   // builders draw a block twice (desktop and phone layouts)
         seenText.add(k);
@@ -806,7 +814,7 @@ export function readImportPage(html: string, url: string): ImportPage {
         const raw = largestFromSrcset($el.attr('srcset') ?? $el.attr('data-srcset')) ?? $el.attr('data-src') ?? $el.attr('data-image') ?? $el.attr('src') ?? '';
         const abs = absolutise(raw, base);
         if (!abs || !/^https?:/.test(abs) || /\.svg(\?|$)/i.test(abs)) return;
-        const src = fullSizeImageUrl(abs);
+        const src = fullSize(abs);
         if (seenImg.has(src) || seenImg.size >= IMPORT_LIMITS.images) return;
         seenImg.add(src);
         const alt = realAlt($el.attr('alt'));
@@ -822,7 +830,7 @@ export function readImportPage(html: string, url: string): ImportPage {
         if (!m || !m[1]) return;
         const abs = absolutise(m[1], base);
         if (!abs || !/^https?:/.test(abs) || /\.svg(\?|$)/i.test(abs) || /gradient/i.test(m[1])) return;
-        const src = fullSizeImageUrl(abs);
+        const src = fullSize(abs);
         if (seenImg.has(src) || seenImg.size >= IMPORT_LIMITS.images) return;
         seenImg.add(src);
         blocks.push({ kind: 'image', src, alt: lastHeading || siteName || 'A picture from our website', altFromSite: false });
@@ -894,7 +902,8 @@ export function readImportPage(html: string, url: string): ImportPage {
         }
         for (const c of node.children) walk(c);
     };
-    for (const c of root.get(0)?.children ?? []) walk(c);
+    const rootEl = root.get(0);
+    for (const c of (rootEl && 'children' in rootEl ? rootEl.children : [])) walk(c);
 
     const words = blocks.reduce((n, b) => n + (b.kind === 'image' ? 0 : b.text.split(' ').filter((w) => /[a-z0-9]/i.test(w)).length), 0);
     return {
@@ -903,7 +912,7 @@ export function readImportPage(html: string, url: string): ImportPage {
         description: orNull(clean($('meta[name="description"]').attr('content'))),
         navLinks, blocks, words, formFields, socialLinks,
         contact: { emails: [...emails].slice(0, 3), phones: [...phones].slice(0, 3), address, locality },
-        siteName, logo, hasForm, builder,
+        siteName, logo, hasForm, builder, platform: adapter?.key ?? null,
     };
 }
 const LIMITS_ALT = 150;
