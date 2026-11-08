@@ -107,7 +107,9 @@ function liveDeps(db: Db, site: SiteRow, userId: number, renderer: PageRenderer)
         fetchJson: (url) => fetchSiteJson(url, CRAWLERS.siteImport, { timeoutMs: PAGE_TIMEOUT_MS, maxBytes: PAGE_MAX_BYTES }),
         async plan(prompt) {
             const res = await gatewayGenerate({
-                system: prompt.system, messages: [{ role: 'user', content: prompt.user }], maxTokens: 6000,
+                system: prompt.system, messages: [{ role: 'user', content: prompt.user }],
+                // Block numbers only, but up to IMPORT_MAX_PAGES pages of them (thinking room is added on top).
+                maxTokens: 12000,
                 usage: { workspaceId: site.organisationId, assistantId: site.aiAssistantId },
                 // The Website role's model (Admin ▸ Assistants ▸ Model & rules). Background: full thinking.
                 ...(await gatewayRoleModel(db, 'website_assistant')),
