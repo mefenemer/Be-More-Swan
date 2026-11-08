@@ -15,6 +15,7 @@ import { logAuditEvent } from '../../src/utils/audit';
 import { safeFetchBinary, safeFetchText } from '../../src/utils/safe-fetch';
 import { stripPromptInjection } from '../../src/utils/prompt-injection';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { workerAuthError } from '../../src/utils/worker-auth';
 
 const R2_ENDPOINT          = process.env.R2_ENDPOINT;
 const R2_ACCESS_KEY_ID     = process.env.R2_ACCESS_KEY_ID;
@@ -37,6 +38,9 @@ function getR2Client(): S3Client {
 const _stripPromptInjection = stripPromptInjection;
 
 export default withLambda(async (event: HandlerEvent) => {
+    // Only our own functions may start this (src/utils/worker-auth.ts).
+    const denied = workerAuthError(event.headers as Record<string, string | undefined>, 'process-asset-background');
+    if (denied) return denied;
     try {
         const body = JSON.parse(event.body || '{}');
         const assetId = body.assetId;
@@ -48,6 +52,12 @@ export default withLambda(async (event: HandlerEvent) => {
         // 1. Fetch the processing asset from the database
         const [asset] = await db.select().from(workspaceAssets).where(eq(workspaceAssets.id, assetId));
         if (!asset) return { statusCode: 404, body: 'Asset not found' };
+        // Nothing to read → write nothing. A typed note (asset_type 'text') keeps its words only in
+        // extractedText; running on it used to save '' over them and mark it 'ready'. Removed rows too.
+        const readable = (asset.assetType === 'url' && !!asset.externalUrl) || !!asset.r2Key || (asset.assetType === 'file' && !!asset.storageUrl);
+        if (!readable || asset.status === 'deleted' || asset.status === 'tombstoned') {
+            return { statusCode: 200, body: 'Nothing to read.' };
+        }
 
         // ── RAG Namespace safety note ────────────────────────────────
         // When a vector database is wired, ALL upserts and queries MUST

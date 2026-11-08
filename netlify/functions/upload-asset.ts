@@ -8,6 +8,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+import { workerAuthHeaders } from '../../src/utils/worker-auth';
 const parseMultipartForm = (event: HandlerEvent): Promise<any> => {
     return new Promise((resolve, reject) => {
         const fields: Record<string, string> = {};
@@ -101,7 +102,7 @@ export default withLambda(async (event: HandlerEvent) => {
             try {
                 await fetch(`${uploadBaseUrl}/.netlify/functions/process-asset-background`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: workerAuthHeaders(),
                     body: JSON.stringify({ assetId: newAsset.id }),
                     signal: controller.signal,
                 });

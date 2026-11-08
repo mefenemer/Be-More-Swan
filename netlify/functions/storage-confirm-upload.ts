@@ -18,6 +18,7 @@ import { sendMagicLinkEmail } from '../../src/utils/email';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
+import { workerAuthHeaders } from '../../src/utils/worker-auth';
 // Trigger the AI extraction job so the assistant learns from uploaded brand docs. MUST be awaited:
 // on Lambda the runtime freezes as soon as the handler returns, so an un-awaited fetch gets frozen
 // mid-flight and never reaches the worker. Posting to a -background function returns 202 before the
@@ -33,7 +34,7 @@ async function triggerExtraction(headers: Record<string, string | undefined>, as
     try {
         await fetch(`${baseUrl}/.netlify/functions/process-asset-background`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: workerAuthHeaders(),
             body: JSON.stringify({ assetId }),
             signal: controller.signal,
         });
