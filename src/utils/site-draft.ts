@@ -97,7 +97,7 @@ export function placeholdersIn(def: SiteDefinition): Array<{ pageId: string; pag
 
 const SECTION_SCHEMA = `Section types and their props (use ONLY these; any other type or prop is discarded):
 - "hero": { "layout": "centered" | "split" | "banner", "eyebrow": short label or null, "headline": max ${LIMITS.headline} chars, "subheadline": max ${LIMITS.subheadline} chars, "primaryCta": { "label", "href" } or null, "secondaryCta": { "label", "href" } or null }
-- "features": { "heading", "intro", "items": [ { "title", "body" } ] }  (1–${LIMITS.features} items)
+- "features": { "heading", "intro", "items": [ { "title", "body", "link": { "label", "href" } or null } ] }  (1–${LIMITS.features} items)
 - "steps": { "heading", "intro", "items": [ { "title", "body" } ] }  (${LIMITS.stepsMin}–${LIMITS.steps} steps)
 - "text": { "heading", "body" }  (body: paragraphs separated by a blank line)
 - "faq": { "heading", "items": [ { "q", "a" } ] }  (1–${LIMITS.faqItems})

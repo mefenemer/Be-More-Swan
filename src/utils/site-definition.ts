@@ -139,7 +139,11 @@ export interface HeroProps {
     secondaryCta: Link | null;
     image: Image | null;
 }
-export interface ItemsProps { heading: string | null; intro: string | null; items: Array<{ title: string; body: string }>; }
+/**
+ * `link` (optional, 2026-11-08): where the card leads — "Read more" to the page about that course or
+ * service. An imported site keeps its card links this way; drawn as a link under the card's words.
+ */
+export interface ItemsProps { heading: string | null; intro: string | null; items: Array<{ title: string; body: string; link?: Link | null }>; }
 /** Text, optionally with a picture beside it (left or right — on a phone it sits above the words). */
 export interface TextProps { heading: string | null; body: string; image: Image | null; imageSide: 'left' | 'right'; }
 export interface FaqProps { heading: string | null; items: Array<{ q: string; a: string }>; }
@@ -391,6 +395,12 @@ export function cleanHref(v: unknown): string | null {
     } catch { return null; }
 }
 
+/** A card with its link replaced — or taken off (null), leaving no empty `link` key behind. */
+function withItemLink(it: ItemsProps['items'][number], link: Link | null): ItemsProps['items'][number] {
+    const { link: _old, ...rest } = it;
+    return link ? { ...rest, link } : rest;
+}
+
 function cleanLink(v: unknown): Link | null {
     if (!v || typeof v !== 'object') return null;
     const o = v as Record<string, unknown>;
@@ -417,11 +427,14 @@ function cleanImage(v: unknown, warn: (m: string) => void): Image | null {
 
 // ── Sections ────────────────────────────────────────────────────────────────────────────────
 
-function items(v: unknown, max: number, warn: (m: string) => void): Array<{ title: string; body: string }> {
+function items(v: unknown, max: number, warn: (m: string) => void): ItemsProps['items'] {
     const list = Array.isArray(v) ? v : [];
     const out = list.map((x) => {
         const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
-        return { title: cleanText(o.title, LIMITS.itemTitle), body: cleanText(o.body, LIMITS.itemBody, true) };
+        const link = cleanLink(o.link);
+        const item: ItemsProps['items'][number] = { title: cleanText(o.title, LIMITS.itemTitle), body: cleanText(o.body, LIMITS.itemBody, true) };
+        if (link) item.link = link;
+        return item;
     }).filter((x) => x.title);
     if (out.length > max) warn(`Only the first ${max} items were kept.`);
     return out.slice(0, max);
@@ -875,6 +888,9 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
                 if (!button) { warn('A call-to-action section was left out: its button pointed nowhere.'); return []; }
                 return [{ ...s, props: { ...s.props, button } }];
             }
+            if ((s.type === 'features' || s.type === 'steps') && s.props.items.some((it) => it.link)) {
+                return [{ ...s, props: { ...s.props, items: s.props.items.map((it) => (it.link ? withItemLink(it, checkLink(it.link)) : it)) } }] as Section[];
+            }
             return [s];
         });
     }
@@ -1169,6 +1185,7 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
             for (const sec of home.sections) {
                 if (sec.type === 'hero') { sec.props.primaryCta = fix(sec.props.primaryCta); sec.props.secondaryCta = fix(sec.props.secondaryCta); }
                 if (sec.type === 'cta') sec.props.button = fix(sec.props.button) ?? sec.props.button;
+                if (sec.type === 'features' || sec.type === 'steps') sec.props.items = sec.props.items.map((it) => (it.link ? withItemLink(it, fix(it.link)) : it));
             }
             next.pages = [home];
             next.nav = [];
@@ -1232,6 +1249,7 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
             for (const pg of next.pages) for (const sec of pg.sections) {
                 if (sec.type === 'hero') { sec.props.primaryCta = fix(sec.props.primaryCta); sec.props.secondaryCta = fix(sec.props.secondaryCta); }
                 if (sec.type === 'cta') sec.props.button = fix(sec.props.button) ?? sec.props.button;
+                if (sec.type === 'features' || sec.type === 'steps') sec.props.items = sec.props.items.map((it) => (it.link ? withItemLink(it, fix(it.link)) : it));
             }
             next.nav = [];
             next.structure = 'pages';

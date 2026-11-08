@@ -740,6 +740,7 @@ export function readImportPage(html: string, url: string): ImportPage {
         const alt = realAlt($el.attr('alt'));
         blocks.push({ kind: 'image', src, alt: alt || lastHeading || siteName || 'A picture from our website', altFromSite: !!alt });
     };
+    const hasBlockChild = (node: AnyNode) => node.type === 'tag' && node.children.some((c) => c.type === 'tag' && (BLOCK_TAGS.has(c.name) || c.name === 'img'));
     const walk = (node: AnyNode) => {
         if (blocks.length >= IMPORT_LIMITS.blocks || node.type !== 'tag') return;
         const name = node.name;
@@ -760,16 +761,26 @@ export function readImportPage(html: string, url: string): ImportPage {
             const $el = $(node);
             const text = clean($el.text()) || clean($el.attr('aria-label'));
             const cls = `${$el.attr('class') ?? ''} ${$el.attr('id') ?? ''}`;
-            if (text && text.length <= 40 && (name === 'button' || $el.attr('role') === 'button' || BUTTONISH.test(cls))) {
-                const href = absolutise($el.attr('href') ?? '', base);
+            const href = absolutise($el.attr('href') ?? '', base);
+            // A link standing on its own (not inside a sentence — those arrive inside their paragraph)
+            // is a button whatever its class: Tailwind and hand-made sites draw "Read more" and
+            // "Book now" as plain <a> tags with utility classes (Restorative Futures, 2026-11-08).
+            const standalone = name === 'a' && !!href && !hasBlockChild(node);
+            if (text && text.length <= 40 && (name === 'button' || $el.attr('role') === 'button' || BUTTONISH.test(cls) || standalone)) {
                 if (!IMPORT_NOISE.test(text)) blocks.push({ kind: 'button', text, href });
                 $el.find('img').each((_, im) => addImage(im));
                 return;
             }
         }
         const ownText = node.children.some((c) => c.type === 'text' && /\S{2,}/.test((c as unknown as { data: string }).data));
-        const hasBlockChild = node.children.some((c) => c.type === 'tag' && (BLOCK_TAGS.has(c.name) || c.name === 'img'));
-        if (['p', 'figcaption', 'dd', 'dt', 'td', 'th', 'summary'].includes(name) || (ownText && !hasBlockChild)) {
+        const hasBlock = hasBlockChild(node);
+        // A paragraph that is nothing but one link ("See all courses →") is that link, standing alone.
+        if (name === 'p' && !ownText) {
+            const tags = node.children.filter((c) => c.type === 'tag' && c.name !== 'br') as AnyNode[];
+            const only = tags.length === 1 && tags[0].type === 'tag' && tags[0].name === 'a' ? tags[0] : null;
+            if (only && only.type === 'tag' && $(only).attr('href') && clean($(only).text()).length <= 40) { walk(only); return; }
+        }
+        if (['p', 'figcaption', 'dd', 'dt', 'td', 'th', 'summary'].includes(name) || (ownText && !hasBlock)) {
             addText('text', blockText(node));
             $(node).find('img').each((_, im) => addImage(im));
             return;

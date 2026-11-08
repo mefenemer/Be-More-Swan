@@ -44,9 +44,9 @@
       { k: 'image', kind: 'image', label: 'Picture or video', video: true },
     ],
     features: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
-      { k: 'items', kind: 'items', label: 'Features', fields: [['title', 'text', 'Title'], ['body', 'textarea', 'Text']] }],
+      { k: 'items', kind: 'items', label: 'Features', fields: [['title', 'text', 'Title'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional) — e.g. Read more']] }],
     steps: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
-      { k: 'items', kind: 'items', label: 'Steps', fields: [['title', 'text', 'Step'], ['body', 'textarea', 'Text']] }],
+      { k: 'items', kind: 'items', label: 'Steps', fields: [['title', 'text', 'Step'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional)']] }],
     text: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'body', kind: 'textarea', label: 'Text (a blank line starts a new paragraph)', rows: 8, required: true },
       { k: 'image', kind: 'image', label: 'Picture or video beside the text (optional)', video: true },
       { k: 'imageSide', kind: 'select', label: 'Picture on the', options: [['right', 'Right'], ['left', 'Left']] }],
@@ -615,11 +615,15 @@
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         <div data-items="${esc(f.k)}" class="space-y-2">${list.map((it, i) => `
           <div class="border border-gray-200 rounded-lg p-3" data-item>
-            ${f.fields.map(([k, kind, label]) => kind === 'textarea'
+            ${f.fields.map(([k, kind, label]) => kind === 'link'
+              ? `<div class="grid gap-2 md:grid-cols-2 mt-1"><input data-item-link="label" aria-label="${esc(f.label)} ${i + 1}: link text" class="${inputCls}" placeholder="${esc(label)}" value="${esc((it[k] && it[k].label) || '')}">
+                  <input data-item-link="href" aria-label="${esc(f.label)} ${i + 1}: where the link goes" class="${inputCls}" list="site-pages-list" placeholder="/page or https://…" value="${esc((it[k] && it[k].href) || '')}"></div>`
+              : kind === 'textarea'
               ? `<textarea data-item-field="${esc(k)}" aria-label="${esc(f.label)} ${i + 1}: ${esc(label)}" rows="2" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))}>${esc(it[k] || '')}</textarea>${limitNote(itemMax(k))}`
               : `<input data-item-field="${esc(k)}" aria-label="${esc(f.label)} ${i + 1}: ${esc(label)}" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))} value="${esc(it[k] || '')}">${limitNote(itemMax(k))}`).join('')}
             <div class="mt-1">${btn(`data-item-remove="${i}"`, 'Remove')}</div>
           </div>`).join('')}</div>
+        ${f.fields.some((x) => x[1] === 'link') ? `<datalist id="site-pages-list">${def().pages.map((pg) => `<option value="${esc(pathOf(pg))}">${esc(pg.title)}</option>`).join('')}</datalist>` : ''}
         <div class="mt-2">${btn(`data-item-add="${esc(f.k)}"`, '+ Add another')}</div>`;
     }
     return '';
@@ -667,6 +671,8 @@
         props[f.k] = [...form.querySelectorAll(`[data-items="${f.k}"] [data-item]`)].map((row) => {
           const o = {};
           row.querySelectorAll('[data-item-field]').forEach((el) => { o[el.dataset.itemField] = el.value; });
+          const ll = row.querySelector('[data-item-link="label"]'), lh = row.querySelector('[data-item-link="href"]');
+          if (ll && lh) { const label = ll.value.trim(), href = lh.value.trim(); o.link = label || href ? { label, href } : null; }
           return o;
         });
       }

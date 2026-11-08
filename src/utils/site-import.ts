@@ -122,13 +122,14 @@ export function buildImportPrompt(pages: ReadPage[], blocks: NumberedBlock[], op
         return `<page number="${i + 1}" address="${new URL(p.url).pathname}"${label}>\n${own.map((b) => `[${b.n}] ${shown(describe(b.block))}`).join('\n') || '(nothing readable)'}\n</page>`;
     }).join('\n\n');
     const kinds = [
-        '- {"type":"hero","headline":n,"subheadline":n|null,"button":n|null,"image":n|null}   (the opening of a page: its main heading and the line under it)',
+        '- {"type":"hero","headline":n,"subheadline":n|null,"button":n|null,"button2":n|null,"image":n|null}   (the opening of a page: its main heading, the line under it, and up to two buttons)',
         '- {"type":"text","heading":n|null,"body":[n,…],"image":n|null}   (paragraphs, or a short list, under one heading)',
-        '- {"type":"features","heading":n|null,"items":[{"title":n,"body":[n]}]}   (a set of short titled points — services, reasons to choose them)',
-        '- {"type":"steps","heading":n|null,"items":[{"title":n,"body":[n]}]}   (a numbered process: how it works)',
+        '- {"type":"features","heading":n|null,"items":[{"title":n,"body":[n],"button":n|null}]}   (a set of short titled points or cards — services, courses, reasons to choose them; "button" is the card\'s own link, e.g. "Read more")',
+        '- {"type":"steps","heading":n|null,"items":[{"title":n,"body":[n],"button":n|null}]}   (a numbered process: how it works)',
         opts.allowed('faq') ? '- {"type":"faq","heading":n|null,"items":[{"q":n,"a":[n]}]}   (questions and their answers)' : '',
         '- {"type":"testimonials","heading":n|null,"items":[{"quote":n,"name":n,"detail":n|null}]}   (ONLY quotes from customers that are on their site, with the customer\'s name block)',
         opts.pictures === 'copy' && opts.allowed('gallery') ? '- {"type":"gallery","heading":n|null,"images":[n,…]}   (a set of their pictures)' : '',
+        '- {"type":"cta","heading":n,"body":[n],"button":n}   (a call to action: a heading, a short line or none, and ONE button — e.g. "Ready to book?" with "Book now")',
         '- {"type":"contact","heading":n|null,"intro":n|null}   (an enquiry form — where their old site asked people to get in touch)',
     ].filter(Boolean).join('\n');
     const system = [
@@ -150,7 +151,7 @@ ${kinds}
 - Use each block at most once. Use every block that is the business's own content.
 - Put in "skip" ONLY blocks that are not content: leftover menu links, cookie or legal notices, "follow us", social share labels, copyright lines, a form's field labels, the same sentence repeated.
 - A heading block names the section under it. A picture goes beside the words it belongs with (a hero's or a text section's "image").${opts.pictures === 'copy' ? '' : ' Pictures will not be copied: never use picture blocks.'}
-- "button" in a hero only for a button block.
+- "button" and "button2" only for a button block. Their links matter: give every button block that is the business's own a place — a hero's buttons, a card's "button" (its "Read more" or "Course details"), or a "cta" section with the heading and line just before it.
 - If unsure, use a "text" section in their order — never drop a block.
 </rules>
 
@@ -163,9 +164,10 @@ ${kinds}
 // ── The plan ────────────────────────────────────────────────────────────────────────────────────
 
 export type PlanSection =
-    | { type: 'hero'; headline: number | null; subheadline: number | null; button: number | null; image: number | null }
+    | { type: 'hero'; headline: number | null; subheadline: number | null; button: number | null; button2?: number | null; image: number | null }
     | { type: 'text'; heading: number | null; body: number[]; image: number | null }
-    | { type: 'features' | 'steps'; heading: number | null; items: Array<{ title: number; body: number[] }> }
+    | { type: 'features' | 'steps'; heading: number | null; items: Array<{ title: number; body: number[]; button?: number | null }> }
+    | { type: 'cta'; heading: number | null; body: number[]; button: number | null }
     | { type: 'faq'; heading: number | null; items: Array<{ q: number; a: number[] }> }
     | { type: 'testimonials'; heading: number | null; items: Array<{ quote: number; name: number | null; detail: number | null }> }
     | { type: 'gallery'; heading: number | null; images: number[] }
@@ -189,10 +191,11 @@ export function readImportPlan(raw: unknown): ImportPlan | null {
         for (const s of list(pg.sections)) {
             const heading = num(s.heading);
             switch (s.type) {
-                case 'hero': sections.push({ type: 'hero', headline: num(s.headline), subheadline: num(s.subheadline), button: num(s.button), image: num(s.image) }); break;
+                case 'hero': sections.push({ type: 'hero', headline: num(s.headline), subheadline: num(s.subheadline), button: num(s.button), button2: num(s.button2), image: num(s.image) }); break;
                 case 'text': sections.push({ type: 'text', heading, body: nums(s.body), image: num(s.image) }); break;
                 case 'features': case 'steps':
-                    sections.push({ type: s.type, heading, items: list(s.items).map((x) => ({ title: num(x.title) ?? 0, body: nums(x.body) })).filter((x) => x.title > 0) }); break;
+                    sections.push({ type: s.type, heading, items: list(s.items).map((x) => ({ title: num(x.title) ?? 0, body: nums(x.body), button: num(x.button) })).filter((x) => x.title > 0) }); break;
+                case 'cta': sections.push({ type: 'cta', heading, body: nums(s.body), button: num(s.button) }); break;
                 case 'faq': sections.push({ type: 'faq', heading, items: list(s.items).map((x) => ({ q: num(x.q) ?? 0, a: nums(x.a) })).filter((x) => x.q > 0 && x.a.length) }); break;
                 case 'testimonials': sections.push({ type: 'testimonials', heading, items: list(s.items).map((x) => ({ quote: num(x.quote) ?? 0, name: num(x.name), detail: num(x.detail) })).filter((x) => x.quote > 0) }); break;
                 case 'gallery': sections.push({ type: 'gallery', heading, images: nums(s.images) }); break;
@@ -298,6 +301,13 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         const b = blocks[n - 1];
         return b.page === page ? b : null;
     };
+    /** A button block on this page that leads somewhere on the new site (not yet marked used). */
+    const buttonAt = (n: number | null | undefined, page: number): { n: number; link: { label: string; href: string } } | null => {
+        const b = onPage(n, page);
+        if (!b || b.block.kind !== 'button' || b.block.text.length > LIMITS.ctaLabel) return null;
+        const href = mapHref(b.block.href);
+        return href ? { n: b.n, link: { label: b.block.text, href } } : null;
+    };
     const text = (n: number | null | undefined, page: number): string | null => {
         const b = onPage(n, page);
         if (!b || b.block.kind === 'image' || b.block.kind === 'button') return null;
@@ -312,13 +322,16 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         const assetId = assets.get(b.n);
         return assetId ? { assetId, alt: b.block.alt.slice(0, LIMITS.alt) } : null;
     };
-    /** List items run together as lines of one paragraph; everything else is its own paragraph. */
+    /**
+     * List items run together as lines of one paragraph; everything else is its own paragraph. Callers
+     * pass no buttons, except a leftover one that is really words (an email address) — kept as words.
+     */
     const paragraphsOf = (ns: number[]): string[] => {
         const out: string[] = [];
         let prevItem = false;
         for (const n of ns) {
             const b = blocks[n - 1];
-            if (!b || b.block.kind === 'image' || b.block.kind === 'button') continue;
+            if (!b || b.block.kind === 'image') continue;
             const t = b.block.text;
             if (b.block.kind === 'item' && prevItem && out.length) out[out.length - 1] += `\n${t}`;
             else out.push(t);
@@ -367,14 +380,14 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
                 const headline = head && head.page === i && fitsHeading(head.block.kind === 'image' || head.block.kind === 'button' ? null : head.block.text) ? text(s.headline, i) : null;
                 const subB = blocks[(s.subheadline ?? 0) - 1];
                 const sub = subB && subB.page === i && subB.block.kind !== 'image' && subB.block.kind !== 'button' && subB.block.text.length <= LIMITS.subheadline ? text(s.subheadline, i) : null;
-                const btnB = onPage(s.button, i);
-                let primaryCta: { label: string; href: string } | null = null;
-                if (btnB && btnB.block.kind === 'button') {
-                    const href = mapHref(btnB.block.href);
-                    if (href && btnB.block.text.length <= LIMITS.ctaLabel) { primaryCta = { label: btnB.block.text, href }; use(btnB.n); }
-                }
+                // Buttons are taken only when the hero is made — a hero that falls back to text leaves them for the report.
+                const btn1 = headline ? buttonAt(s.button, i) : null;
+                if (btn1) use(btn1.n);
+                const btn2 = headline ? buttonAt(s.button2, i) : null;
+                if (btn2) use(btn2.n);
+                const [primary, secondary] = [btn1, btn2].filter((x): x is NonNullable<typeof x> => !!x);
                 const img = image(s.image, i);
-                if (headline) sections.push({ type: 'hero', props: { layout: img ? 'split' : 'centered', headline, subheadline: sub, primaryCta, image: img } });
+                if (headline) sections.push({ type: 'hero', props: { layout: img ? 'split' : 'centered', headline, subheadline: sub, primaryCta: primary?.link ?? null, secondaryCta: secondary?.link ?? null, image: img } });
                 else sections.push(...textSections(null, sub ? [sub] : [], img));
                 return;
             }
@@ -386,11 +399,23 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
             }
             if (s.type === 'features' || s.type === 'steps') {
                 const heading = text(s.heading, i);
-                const items = s.items.map((it) => ({ title: text(it.title, i), body: takeParagraphs(it.body, i).join('\n\n') })).filter((x) => x.title) as Array<{ title: string; body: string }>;
+                const taken = new Set<number>();
+                const items = s.items.map((it) => {
+                    const title = text(it.title, i);
+                    const body = takeParagraphs(it.body, i).join('\n\n');
+                    const btn = title ? buttonAt(it.button, i) : null;
+                    if (!btn || taken.has(btn.n)) return { title, body };
+                    taken.add(btn.n);
+                    return { title, body, link: btn.link, btnN: btn.n };
+                }).filter((x) => x.title) as Array<{ title: string; body: string; link?: { label: string; href: string }; btnN?: number }>;
                 const max = s.type === 'steps' ? LIMITS.steps : LIMITS.features;
                 const fits = items.length >= (s.type === 'steps' ? LIMITS.stepsMin : 1) && items.length <= max && (!heading || fitsHeading(heading))
                     && items.every((x) => x.title.length <= LIMITS.itemTitle && x.body.length <= LIMITS.itemBody);
-                if (fits) sections.push({ type: s.type, props: { heading, items } });
+                // Each card keeps its own link ("Read more" → the page about it); a fallback to text leaves the links for the report.
+                if (fits) {
+                    items.forEach((x) => { if (x.btnN) use(x.btnN); });
+                    sections.push({ type: s.type, props: { heading, items: items.map(({ btnN: _n, ...x }) => x) } });
+                }
                 else sections.push(...textSections(heading, items.flatMap((x) => [x.title, x.body].filter(Boolean)), null));
                 return;
             }
@@ -425,6 +450,21 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
                 else if (heading) sections.push(...textSections(heading, [], null));
                 return;
             }
+            if (s.type === 'cta') {
+                const btn = buttonAt(s.button, i);
+                const headB = onPage(s.heading, i);
+                const head = headB && headB.block.kind !== 'image' && headB.block.kind !== 'button' && fitsHeading(headB.block.text) ? headB : null;
+                const bodyNs = (s.body ?? []).filter((n) => !!onPage(n, i) && blocks[n - 1].block.kind !== 'image' && blocks[n - 1].block.kind !== 'button');
+                const body = paragraphsOf(bodyNs).join('\n\n');
+                if (btn && head && allowed('cta') && body.length <= LIMITS.subheadline) {
+                    use(head.n); bodyNs.forEach((n) => use(n)); use(btn.n);
+                    sections.push({ type: 'cta', props: { heading: (head.block as { text: string }).text, body: body || null, button: btn.link } });
+                } else {
+                    // No button that leads anywhere (or words too long for the band): the words stay, as text.
+                    sections.push(...textSections(text(s.heading, i), takeParagraphs(s.body, i), null));
+                }
+                return;
+            }
             if (s.type === 'contact') {
                 const heading = text(s.heading, i);
                 const introB = blocks[(s.intro ?? 0) - 1];
@@ -436,7 +476,16 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
 
         // Nothing silently lost: every block the plan neither used nor called clutter, in their order,
         // grouped under its own headings.
-        const left = blocks.filter((b) => b.page === i && !used.has(b.n) && !skip.has(b.n) && b.block.kind !== 'image' && b.block.kind !== 'button');
+        // A leftover "button" that is really words (an email address, a sentence) stays as words; a
+        // real button the plan found no place for is listed, never dropped quietly.
+        const wordy = (b: NumberedBlock) => b.block.kind === 'button' && (/@|\d{5,}/.test(b.block.text) || b.block.text.split(/\s+/).length >= 6);
+        for (const b of blocks) {
+            if (b.page !== i || used.has(b.n) || skip.has(b.n) || b.block.kind !== 'button' || wordy(b) || !b.block.href) continue;
+            let to = b.block.href;
+            try { const u = new URL(b.block.href); to = u.host.replace(/^www\./, '') === new URL(pages[0].url).host.replace(/^www\./, '') ? u.pathname : b.block.href; } catch { /* keep as read */ }
+            notCarried.push(`Button "${b.block.text}" (linked to ${to}) on ${pageTitle(p, i)}`.slice(0, 200));
+        }
+        const left = blocks.filter((b) => b.page === i && !used.has(b.n) && !skip.has(b.n) && b.block.kind !== 'image' && (b.block.kind !== 'button' || wordy(b)));
         let heading: string | null = null;
         let run: number[] = [];
         let groupAt = 0;
@@ -543,7 +592,11 @@ export function draftWordsAllFromSource(definition: SiteDefinition, pages: ReadP
     for (const p of definition.pages) for (const s of p.sections) {
         const pr = s.props as unknown as Record<string, unknown>;
         for (const k of ['headline', 'subheadline', 'heading', 'intro', 'body']) check(pr[k]);
-        if (Array.isArray(pr.items)) for (const it of pr.items as Array<Record<string, unknown>>) for (const k of ['title', 'body', 'q', 'a', 'quote', 'name', 'detail']) check(it[k]);
+        for (const k of ['primaryCta', 'secondaryCta', 'button']) check((pr[k] as { label?: unknown } | null | undefined)?.label);
+        if (Array.isArray(pr.items)) for (const it of pr.items as Array<Record<string, unknown>>) {
+            for (const k of ['title', 'body', 'q', 'a', 'quote', 'name', 'detail']) check(it[k]);
+            check((it.link as { label?: unknown } | null | undefined)?.label);
+        }
     }
     return strays;
 }
