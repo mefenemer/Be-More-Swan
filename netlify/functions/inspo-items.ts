@@ -37,6 +37,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { INSPO_MAX_BODY_CHARS, INSPO_MAX_ITEMS, INSPO_MAX_NOTE_CHARS, INSPO_MAX_TITLE_CHARS, deriveInspoTitle, validateInspoUrl } from '../../src/utils/library-rules';
 import { INSPO_TOPIC_CONFIG_KEY, isInspoTopicFrequency, readInspoTopicFrequency } from '../../src/utils/inspo-topics';
 
+import { workerAuthHeaders } from '../../src/utils/worker-auth';
 const WRITABLE_KINDS = new Set(['text', 'voice', 'url', 'file']);
 // Kinds whose text is already in hand — everything else needs the extraction worker.
 const INLINE_KINDS = new Set(['text', 'voice']);
@@ -156,7 +157,7 @@ async function triggerExtraction(headers: Record<string, string | undefined>, in
     try {
         await fetch(`${baseUrl}/.netlify/functions/process-inspo-background`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: workerAuthHeaders(),
             body: JSON.stringify({ inspoItemId }),
             signal: controller.signal,
         });

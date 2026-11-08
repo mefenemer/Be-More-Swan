@@ -33,6 +33,7 @@ import { inspoItems, inspoChunks, workspaceAssets, vectorEmbeddings } from '../.
 import { chunkArticle, embedTexts, embeddingsConfigured } from '../../src/utils/kb-embeddings';
 import { safeFetchText, SafeFetchError } from '../../src/utils/safe-fetch';
 import { stripPromptInjection } from '../../src/utils/prompt-injection';
+import { workerAuthError } from '../../src/utils/worker-auth';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const R2_ENDPOINT          = process.env.R2_ENDPOINT;
@@ -61,6 +62,9 @@ function extractHtmlText(html: string): string {
 }
 
 export default withLambda(async (event: HandlerEvent) => {
+    // Only our own functions may start this (src/utils/worker-auth.ts).
+    const denied = workerAuthError(event.headers as Record<string, string | undefined>, 'process-inspo-background');
+    if (denied) return denied;
     const db = getDb();
 
     let inspoItemId: number | undefined;
