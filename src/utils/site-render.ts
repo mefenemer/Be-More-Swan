@@ -54,6 +54,8 @@ export interface SiteRenderBooking { ready: boolean; services: Array<{ id: numbe
 
 /** Where every booking step lives (booking-render.ts, served by site-serve.ts). */
 export const BOOK_PATH = '/_book';
+/** The booking link of its own (site-booking-page.ts): works even before the site is published. */
+export const BOOKING_PAGE_PATH = '/book';
 
 /** A customer's review page (site-review.ts): the link in a review request email. Its form posts to FORM_ACTION. */
 export const REVIEW_PATH = '/_review';

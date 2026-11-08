@@ -53,7 +53,7 @@ import { campaignDraftFromUiElement, NEWSLETTER_CAMPAIGN_DRAFT_TYPE } from '../.
 import { campaignCadencePromptBlock } from '../../src/config/email-campaign-cadences';
 import { formDraftFromUiElement, AUDIENCE_FORM_DRAFT_TYPE } from '../../src/utils/form-chat-draft';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { parseModelJson, stripCodeFences } from '../../src/utils/model-json';
+import { parseModelJson, splitProseAndCard, stripCodeFences } from '../../src/utils/model-json';
 
 import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { voiceDirective } from '../../src/utils/voice-profile';
@@ -91,7 +91,7 @@ import { buildDiscussionsChatBlock } from '../../src/utils/discussions';
 import {
     assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
 } from '../../src/utils/chat-assistant-settings';
-import { buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, type RuleCard } from '../../src/utils/chat-rules';
+import { RULE_TEXT_MAX, buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, shortenRuleText, type RuleCard } from '../../src/utils/chat-rules';
 import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, resolveTeamGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
@@ -455,6 +455,10 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
         // One card per reply. Several used to be dropped together, with nothing said (below).
         return { content: extra ? `${content}\n\n${MORE_CARDS_NOTE}` : content, uiElement: card };
     }
+
+    // Prose, then the card as a bare object (no envelope): keep both, never show the JSON.
+    const split = splitProseAndCard(raw);
+    if (split) return { content: split.prose, uiElement: split.card };
 
     // Unparseable. Never show raw JSON scaffolding to the user: if this was clearly a
     // (broken) structured attempt, degrade to a friendly retry line; only genuine
@@ -1876,7 +1880,7 @@ FACTS. Never put a fact on their site that is not in their business details, the
 
 ${SITE_COPY_CRAFT}
 
-CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short "summary" of what changes, and "ops" — the changes, in order, using ONLY pageIds and sectionIds listed above. They land together or not at all. The operations:
+CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short "summary" of what changes, and "ops" — the changes, in order, using ONLY pageIds and sectionIds listed above — except a page you add in the same card, which has no id yet: name it by the "slug" you gave its add_page (e.g. add_page slug "retirement-coaching", then add_section pageId "retirement-coaching"). They land together or not at all, and one card holds at most 25 ops: for more (several new pages with their sections, say), send the first pages in this card and say the rest come in the next one. The operations:
 - {"op":"add_page","title":"...","slug":"..."}   (no plan limits how many pages a site has)
 - {"op":"update_page","pageId":"...","title":"...","slug":"...","seo":{"title":"...","description":"..."},"hideFromMenu":true|false}   (any subset; hideFromMenu keeps a page — e.g. a landing page for an ad — out of the menu but reachable by its address; never the home page)
 - {"op":"remove_page","pageId":"..."}   (never the home page)
@@ -1899,7 +1903,7 @@ THEIR PICTURES. Put a picture they attached on the site by its assetId in a site
 
 THEIR OWN WORDS. When they give you wording to use — an attached document, or text they wrote in this chat — NEVER retype, shorten, tidy or reword it in a site_changes card. Emit a site_words card instead: {"type":"site_words","pageId":"<a pageId above>","attachmentId":<the document's attachmentId, or null>,"quote":"<only when the words are in their chat message: copy them EXACTLY, character for character; else null>","note":"<where it should go, in their words>"}. The server places their exact words on that page and shows them where everything goes before anything changes; it uses 1 task — say so. One page per card; for words meant for two pages, ask which part goes where, then send one card per page.
 
-BOOKINGS. When they want people to book (appointments, consultations, tables): don't list settings at them. Work it out in at most three short turns — (1) from the business, suggest the kind (appointments with a service and maybe a choice of staff; consultations; or tables with a party size) and confirm it; (2) ask for their opening hours (and, for appointments, which services and how long each takes — services must already be in Business Information ▸ Products & Services with a length; if one isn't, tell them to add it there, you cannot); (3) ask whether to confirm bookings straight away or have them confirm each one. Then emit a booking_setup card. Hours are THEIR words turned into times — never assume hours they did not give. A booking uses no tasks. The booking section on a page only works once hours are set. DEPOSITS: a service or class can ask for a deposit (a fixed £ or a % of its fixed price, per place for a class) — they set it on the product in Business Information ▸ Products & Services, you cannot; it is paid by card to their own connected Stripe account (Orders tab) when someone books, and refunded in full if the customer cancels online in time or they cancel or decline. Tables never take one. THEIR CALENDAR: with no signing in, they can see bookings in Google, Outlook or Apple Calendar (a private subscribe link) and stop bookings when they're busy there (they paste their calendar's private iCal address — for the business or for each person) in Business Information ▸ Bookings ▸ Your calendar. Outlook / Microsoft 365 users can instead sign in there ("Connect Outlook calendar"): bookings then appear in their calendar straight away. Google sign-in isn't available yet. You cannot link or connect it for them; point them there.
+BOOKINGS. When they want people to book (appointments, consultations, tables): don't list settings at them. Work it out in at most three short turns — (1) from the business, suggest the kind (appointments with a service and maybe a choice of staff; consultations; or tables with a party size) and confirm it; (2) ask for their opening hours (and, for appointments, which services and how long each takes — services must already be in Business Information ▸ Products & Services with a length; if one isn't, tell them to add it there, you cannot); (3) ask whether to confirm bookings straight away or have them confirm each one. Then emit a booking_setup card. Hours are THEIR words turned into times — never assume hours they did not give. A booking uses no tasks. The booking section on a page only works once hours are set. DEPOSITS: a service or class can ask for a deposit (a fixed £ or a % of its fixed price, per place for a class) — they set it on the product in Business Information ▸ Products & Services, you cannot; it is paid by card to their own connected Stripe account (Orders tab) when someone books, and refunded in full if the customer cancels online in time or they cancel or decline. Tables never take one. THEIR CALENDAR: with no signing in, they can see bookings in Google, Outlook or Apple Calendar (a private subscribe link) and stop bookings when they're busy there (they paste their calendar's private iCal address — for the business or for each person) in Business Information ▸ Bookings ▸ Your calendar. Outlook / Microsoft 365 users can instead sign in there ("Connect Outlook calendar"): bookings then appear in their calendar straight away. Google sign-in isn't available yet. You cannot link or connect it for them; point them there. WHERE IT HAPPENS: each service is in person (the default), a phone call (the customer must give a number; the business calls them) or a video call. For video, they paste ONE reusable meeting link — a Zoom personal room, a fixed Google Meet or Teams link — for the business ("meetingUrl" in the card's settings), and a person can have their own in Business Information ▸ Bookings; customers get the link only once a booking is confirmed. Set where services happen with "serviceLocations" on the booking_setup card — only for serviceIds in the snapshot, only as they told you; never make up a meeting link. THE BOOKING LINK: the snapshot's "Booking link" is theirs to share anywhere (email signature, Instagram bio, messages) and works even before the site is published; ?svc=<serviceId> or ?res=<resourceId> links to one service or one person. Give them the exact address from the snapshot — never build one yourself; if there is none, say what it still needs. It is also on the Bookings tab ▸ "Your booking link", with a "Book now" button for another website (a plain link — other websites can't embed the booking pages).
 
 CLASSES AND EVENTS. For classes (yoga, pilates, cookery, a course) and one-off events (a workshop, a tasting night), the booking section's kind is "class": people book PLACES on dated sessions, and join a waitlist when one is full. The class itself is a Business Information product (its name, price and description — they add it there if it isn't listed; you cannot). Sessions are added with a class_sessions card — one per class: which product, the first date, start and end time, how many places, an optional teacher or room from the resources listed above, and how many more weeks it repeats (0 = a one-off event). Never invent dates, times or places they didn't give; ask. Opening hours don't limit classes.
 {"type":"class_sessions","summary":"<one sentence>","session":{"serviceId":<productId above>,"date":"YYYY-MM-DD","start":"HH:MM","end":"HH:MM","capacity":12,"resourceId":<resource id or null>,"repeatWeeks":0..26,"notes":null}}
@@ -1917,7 +1921,7 @@ WHAT THE BUSINESS OFFERS. Six ticks on Business Information ▸ Products & Servi
 {"type":"offer_profile","summary":"<one sentence>","offers":["services","bookings"]}
 
 OPENING HOURS & HOW TO REACH THEM. When they want their hours, address or "call / WhatsApp us" on the site, add an hours section (site_changes). If the snapshot shows no opening hours, or they give an address or WhatsApp number that isn't there yet, first emit a booking_setup card with ONLY those settings ("weeklyHours", "visitAddress" as lines separated by \n, "whatsapp") and "section": null — the same card saves them to Business Information — then the site_changes card. Never invent hours, an address or a number they did not give.
-{"type":"booking_setup","summary":"<one sentence>","settings":{"timezone":"Europe/London","weeklyHours":{"mon":[{"start":"09:00","end":"17:00"}],…},"mode":"request|instant","slotIntervalMinutes":30,"minNoticeMinutes":120,"maxAdvanceDays":60,"tableMinutes":90,"maxPartySize":8,"cancellationPolicy":null,"visitAddress":null,"whatsapp":null},"section":{"pageId":"<a pageId above>","kind":"appointment|consultation|table|class","serviceIds":[<serviceIds above, or [] for all>],"askStaff":false}}   (send only the settings you have agreed; "section" may be null when the section already exists)
+{"type":"booking_setup","summary":"<one sentence>","settings":{"timezone":"Europe/London","weeklyHours":{"mon":[{"start":"09:00","end":"17:00"}],…},"mode":"request|instant","slotIntervalMinutes":30,"minNoticeMinutes":120,"maxAdvanceDays":60,"tableMinutes":90,"maxPartySize":8,"cancellationPolicy":null,"visitAddress":null,"whatsapp":null,"meetingUrl":null},"section":{"pageId":"<a pageId above>","kind":"appointment|consultation|table|class","serviceIds":[<serviceIds above, or [] for all>],"askStaff":false},"serviceLocations":[{"serviceId":<serviceId above>,"name":"<its name>","location":"in_person|phone|video"}]}   (send only the settings you have agreed; "section" may be null when the section already exists; leave out "serviceLocations" unless they said where a service happens)
 
 DRAFTING THE WHOLE SITE. When they want the whole site written (or rewritten), emit a site_draft_request card with their wishes in "request". It replaces the current draft and uses 1 task from their monthly allowance — say so. The draft also places placeholder pictures and videos in the page tops and text sections, saved to their library, ready to swap for their own: put what they chose in "images" and "videos", each "stock", "ai" or "none" (leave one out if you don't know, and the card's own choice applies). The card lets them change it, and states the cost; quote costs ONLY from the "Placeholder pictures and videos" line in the snapshot, and never offer AI media that line says is not available. The media is only added by that card. An imported site keeps its own pictures and never gets placeholders. While the snapshot says a draft "is being written right now", NEVER emit another site_draft_request (or any card that changes the site): say it is still being written, that it takes a few minutes, and that it appears in the Preview on their Website tab by itself — the Website tab tells them in this chat when it lands. Do not promise to message them yourself.
 
@@ -3842,6 +3846,20 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // from content_rules; the click calls content-rules.ts, the endpoint the Do's and don'ts card uses.
         let ruleCard: RuleCard | null = null;
         const ruleReq = route !== defaultRoute && !settingsReq ? ruleProposalFromUiElement(uiElement) : null;
+        if (ruleReq?.ruleText && ruleReq.ruleText.length > RULE_TEXT_MAX) {
+            // The model can't count characters — condense an over-long rule rather than hand the user
+            // a refused card to ask again (shortenRuleText). If that fails the card still refuses it.
+            const shorter = await shortenRuleText(ruleReq.ruleText, async (system, user) => {
+                const res = await anthropic.messages.create({ model: DEFAULT_MODEL, max_tokens: 300, system, messages: [{ role: 'user', content: user }] });
+                void logAiUsage({
+                    workspaceId: orgId, userId, assistantId: assistantRow.id, model: DEFAULT_MODEL,
+                    inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens,
+                    sessionId: `chat:${session.id}:rule-shorten`, dataCategories: ['business_context'],
+                });
+                return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
+            });
+            if (shorter) ruleReq.ruleText = shorter;
+        }
         if (ruleReq) {
             ruleCard = await resolveRuleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, ruleReq);
             uiElement = ruleCard;
@@ -4256,8 +4274,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
         // The Website Assistant can't make, find or place a picture in a reply — only its site_picture
         // card can, on a click (staging 2026-11-05: "I'm generating it now… I'll add it", then nothing).
+        // Beside ANOTHER card (a site_changes that removes a picture, say) the canned "I can't make a
+        // picture from a message" answered nothing she asked (prod 2026-11-08, org 40): point at that card.
         if (assistantRow.roleKey === 'website_assistant') {
-            content = pictureReply(content, !!uiElement && (uiElement as { type?: unknown }).type === 'site_picture');
+            const cardType = (uiElement as { type?: unknown } | null)?.type;
+            if (uiElement && cardType !== 'site_picture') {
+                if (replyClaimsPicture(content)) content = 'Here it is — nothing changes until you confirm on the card below.';
+            } else {
+                content = pictureReply(content, cardType === 'site_picture');
+            }
         }
         if (postPartCard?.type === POST_PICTURE_TYPE) content = pictureReply(content, true);
         if (emailPartCard?.type === EMAIL_PICTURE_TYPE && replyClaimsPicture(content)) content = 'Here it is: press the button on the card below to choose a picture. Nothing changes until you do.';
@@ -4283,13 +4308,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // card that opens the Help & Support form. The chat never books a call itself. A reply that
         // already carries a card keeps it — the prompt line below has the model mention the option.
         if (!uiElement && asksForACall(typed)) uiElement = callbackOfferElement();
-        // The Mentor's reply never points at a card that isn't there (confirm-card-reply.ts, rubric W6).
-        if (route === ROUTES.business_mentor) {
+        // No reply points at a card that isn't there (confirm-card-reply.ts, rubric W6). Mentor-only until
+        // prod 2026-11-07 (org 40, Social Media): "confirm on the card below", no card, then "Sorry, it
+        // didn't come through last time. Here it is now" — still none. Every route now.
+        {
             const fixed = missingCardReply(content, !!uiElement);
             if (fixed !== content) {
                 // Which way the card was lost: the model sent none, sent a shape the server refused, or wrote prose, not JSON.
                 const sent = (parsed.uiElement as { type?: unknown } | null)?.type;
-                console.warn('[chat-orchestrator] mentor reply points at a card that was not drawn', { sentType: typeof sent === 'string' ? sent : null, replyWasJson: raw.trimStart().startsWith('{'), length: raw.length, end: raw.slice(-200) });
+                console.warn('[chat-orchestrator] reply points at a card that was not drawn', { role: assistantRow.roleKey, sentType: typeof sent === 'string' ? sent : null, replyWasJson: raw.trimStart().startsWith('{'), length: raw.length, end: raw.slice(-200) });
             }
             content = fixed;
         }

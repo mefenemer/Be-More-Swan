@@ -1952,6 +1952,8 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   isAutonomous: boolean("is_autonomous").default(false).notNull(),
   campaign: text("campaign"),
   pillar: text("pillar"),
+  // The pillar record this post was drafted under (db/z-content-pillars.sql). `pillar` keeps the name.
+  pillarId: integer("pillar_id").references(() => contentPillars.id, { onDelete: "set null" }),
 
   rejectedAt: timestamp("rejected_at"),
   rejectionReason: text("rejection_reason"),
@@ -5538,6 +5540,8 @@ export const orgProducts = pgTable("org_products", {
   allergens: text(),
   depositType: text("deposit_type"),
   depositAmount: integer("deposit_amount"),
+  // Where a booked service happens (db/z-booking-meeting-links.sql): 'in_person' | 'phone' | 'video'; NULL = in person.
+  meetingLocation: text("meeting_location"),
   imageAssetId: integer("image_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
   status: text().notNull().default("active"),
   sortOrder: integer("sort_order").notNull().default(0),
@@ -5998,6 +6002,8 @@ export const bookingSettings = pgTable("booking_settings", {
   busySyncedAt: timestamp("busy_synced_at"),
   busySyncError: text("busy_sync_error"),
   busyCount: integer("busy_count"),
+  // The business's reusable video link for video services (db/z-booking-meeting-links.sql).
+  meetingUrl: text("meeting_url"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("booking_settings_org_uq").on(t.organisationId),
@@ -6018,6 +6024,8 @@ export const bookableResources = pgTable("bookable_resources", {
   busySyncedAt: timestamp("busy_synced_at"),
   busySyncError: text("busy_sync_error"),
   busyCount: integer("busy_count"),
+  // This person's own video link — wins over the business's (db/z-booking-meeting-links.sql).
+  meetingUrl: text("meeting_url"),
   status: text().notNull().default("active"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -6059,6 +6067,9 @@ export const bookings = pgTable("bookings", {
   checkoutSessionId: text("checkout_session_id"),
   paymentIntentId: text("payment_intent_id"),
   holdExpiresAt: timestamp("hold_expires_at", { withTimezone: true }),
+  // Where it happens and the video link, copied when made (db/z-booking-meeting-links.sql; booking-meeting.ts).
+  meetingLocation: text("meeting_location"),
+  meetingUrl: text("meeting_url"),
 }, (t) => [
   index("bookings_org_time_idx").on(t.organisationId, t.startsAt),
   check("bookings_kind_check", sql`${t.kind} IN ('appointment','consultation','table','class')`),
@@ -6786,3 +6797,21 @@ export const signupSources = pgTable("signup_sources", {
   campaign: text("campaign").notNull().default(""),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// A Social Media assistant's content pillars, one row each (db/z-content-pillars.sql,
+// src/utils/content-pillars-store.ts). The TRUTH: onboarding_context.content_pillars is derived from
+// the active rows. Archived, never deleted, so posts keep their pillar_id.
+export const contentPillars = pgTable("content_pillars", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  archivedAt: timestamp("archived_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("content_pillars_assistant_idx").on(t.assistantId, t.sortOrder),
+]);

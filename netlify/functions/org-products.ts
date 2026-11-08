@@ -19,7 +19,7 @@
 // Prices are STRUCTURED (db/z-product-pricing.sql, src/utils/product-price.ts): priceType + priceAmount
 // (minor units) + priceUnit + priceCurrency (GBP | USD | EUR | AUD | CAD — db/z-product-price-currency.sql), or the owner's own words (priceType 'text' + price). `price` is then written by
 // the server as the displayed wording, which every assistant's prompt reads. A body that sends only
-// `price` (an older client) is read with priceFromText. Also: durationMinutes (services, for bookings)
+// `price` (an older client) is read with priceFromText. Also: durationMinutes and meetingLocation (services, for bookings)
 // and imageAssetId (a picture from this workspace's library — checked).
 // POST   { kind, name, ... }  → { product }           add one (appended to the end of the list)
 // PATCH  { id, ...fields }    → { product }           edit, archive / restore (status), or reorder (sortOrder)
@@ -36,6 +36,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { PRODUCT_LIMITS } from '../../src/utils/org-products';
 import { cleanDeposit, cleanPrice, priceFromText } from '../../src/utils/product-price';
 import { cleanAllergens, cleanDietary } from '../../src/utils/product-dietary';
+import { cleanMeetingLocation } from '../../src/utils/booking-meeting';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
 import { cleanOffers, loadOfferProfile, saveOfferProfile } from '../../src/utils/offer-profile';
 import { cleanIntroOffer, loadIntroOffer, saveIntroOffer } from '../../src/utils/intro-offer';
@@ -117,6 +118,12 @@ export function productFields(body: Record<string, unknown>, partial: boolean, c
         if (d !== null && (!Number.isInteger(d) || d <= 0 || d > 1440)) return { error: 'The length must be in whole minutes, up to 24 hours.' };
         values.durationMinutes = d;
     }
+    // Where a booked service happens: in person (null), a phone call or a video call (booking-meeting.ts).
+    if (has('meetingLocation')) {
+        const m = cleanMeetingLocation(body.meetingLocation);
+        if (!m.ok) return { error: m.error };
+        values.meetingLocation = m.value;
+    }
     if (!partial || has('imageAssetId')) {
         const a = body.imageAssetId === null || body.imageAssetId === '' || body.imageAssetId === undefined ? null : Number(body.imageAssetId);
         if (a !== null && (!Number.isInteger(a) || a <= 0)) return { error: 'That picture isn\'t valid.' };
@@ -144,7 +151,7 @@ const COLUMNS = {
     benefits: orgProducts.benefits, price: orgProducts.price, audience: orgProducts.audience, url: orgProducts.url,
     priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceUnit: orgProducts.priceUnit, priceCurrency: orgProducts.priceCurrency,
     durationMinutes: orgProducts.durationMinutes, imageAssetId: orgProducts.imageAssetId,
-    depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount,
+    depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount, meetingLocation: orgProducts.meetingLocation,
     dietary: orgProducts.dietary, allergens: orgProducts.allergens,
     status: orgProducts.status, sortOrder: orgProducts.sortOrder, updatedAt: orgProducts.updatedAt,
 };

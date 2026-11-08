@@ -25,9 +25,18 @@
     ['general', 'General Context'],
   ];
   const catLabel = (c) => (CATEGORIES.find(([k]) => k === c) || [null, 'General Context'])[1];
-  // Only these feed the assistants (assemble-blueprint § 11 in src/utils/blueprint.ts).
+  // Only these feed the assistants (assemble-blueprint § 11 in src/utils/blueprint.ts) — and a
+  // document or link only once words were read from it (src/utils/business-knowledge.ts reads
+  // extracted text, nothing else). Until 2026-11-08 a 'confirmed' PDF showed as used here while no
+  // words had ever been read from it, on every workspace (netlify.toml, pdf-parse).
   const APPLIED = ['ready', 'confirmed'];
+  const isPicture = (a) => a.assetType === 'brand_logo';
+  const isUsed = (a) => APPLIED.includes(a.status) && (isPicture(a) || a.hasText === true);
+  const stateOf = (a) => !APPLIED.includes(a.status) || isPicture(a) || a.hasText ? a.status
+    : a.status === 'confirmed' ? 'reading' : 'no_words';
   const NOT_APPLIED_HINT = {
+    reading: 'Reading it now — it will be used once its words are read.',
+    no_words: "No words could be read from it, so your assistants can't use it. A scanned page or a picture of text can't be read — try a PDF with selectable text, or a .txt file. Word files aren't read yet.",
     processing: 'Still processing — it will be used once it is ready.',
     pending: "The upload didn't finish, so it isn't used. Remove it and try again.",
     failed: "The upload failed, so it isn't used. Remove it and try again.",
@@ -83,7 +92,9 @@
     const kind = a.isFile ? 'File' : 'Link';
     const open = !a.isFile && a.externalUrl
       ? `<a href="${esc(a.externalUrl)}" target="_blank" rel="noopener" class="text-xs font-bold text-emerald-800 hover:underline">Open</a>` : '';
-    const state = applied ? '' : `<span class="text-xs font-medium text-gray-600" title="${esc(NOT_APPLIED_HINT[a.status] || 'Not used yet.')}">${esc(NOT_APPLIED_HINT[a.status] ? a.status : 'not used yet')}</span>`;
+    const st = stateOf(a);
+    const label = { reading: 'reading', no_words: 'no words found' }[st] || (NOT_APPLIED_HINT[st] ? st : 'not used yet');
+    const state = applied ? '' : `<span class="text-xs font-medium text-gray-600" title="${esc(NOT_APPLIED_HINT[st] || 'Not used yet.')}">${esc(label)}</span>`;
     return `
       <li class="flex items-center justify-between gap-3 px-4 py-3 ${applied ? '' : 'bg-gray-50/50'}">
         <div class="min-w-0">
@@ -98,8 +109,8 @@
   }
 
   function listHtml(assets) {
-    const applied = assets.filter((a) => APPLIED.includes(a.status));
-    const pending = assets.filter((a) => !APPLIED.includes(a.status));
+    const applied = assets.filter(isUsed);
+    const pending = assets.filter((a) => !isUsed(a));
     if (!assets.length) return '<p class="text-sm text-gray-600 py-2">Nothing here yet. Add your logo, brand guidelines or a link below.</p>';
     return (applied.length ? `<ul class="divide-y divide-gray-100 border border-gray-200 rounded-xl overflow-hidden">${applied.map((a) => row(a, true)).join('')}</ul>` : '')
       + (pending.length ? `
@@ -166,7 +177,9 @@
       fileEl.value = '';
       if (!file) return;
       if (file.size > MAX_BYTES) { say(`${file.name} is bigger than 10 MB.`, 'error'); return; }
-      const category = catEl.value;
+      // The dropdown opens on "Brand Logo / Visuals", so a PDF sent without touching it was filed as a
+      // logo (prod 2026-11-08, Kudzu's business foundation document). Only a picture can be a logo.
+      const category = catEl.value === 'logo' && !(file.type || '').startsWith('image/') ? 'general' : catEl.value;
       run(`Uploading ${file.name}`, () => uploadFile(file, category));
     });
     el.querySelector('[data-bf-link-form]').addEventListener('submit', (e) => {
@@ -174,7 +187,7 @@
       const input = el.querySelector('#bf-url');
       const url = input.value.trim();
       if (!/^https?:\/\/\S+\.\S+/i.test(url)) { say('Paste a whole link, starting with https://', 'error'); return; }
-      const category = catEl.value;
+      const category = catEl.value === 'logo' ? 'general' : catEl.value; // a link is never a logo
       run('Adding the link', async () => { await addLink(url, category); input.value = ''; });
     });
     listEl.addEventListener('click', (e) => {

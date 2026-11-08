@@ -303,6 +303,21 @@ async function main() {
         assert.deepStrictEqual(r.report.notImported.map((l) => l.title), ['Services', 'About us']);
     });
 
+    await check('a 13-page menu (Restorative Futures, 2026-11-08) is read in full, nothing left out', async () => {
+        const slugs = ['about-us', 'testimonials', 'faqs', 'our-courses', 'building-relationships', 'conferencing-skills', 'online-reflection',
+            'community-panel', 'why-this-training-matters', 'booking-pricing', 'blogs', 'contact'];
+        const body = (h: string) => `<h1>${h}</h1><p>${`We deliver restorative practice training for schools, councils and youth services across the UK. `.repeat(3)}</p>`;
+        const html = (h: string) => `<html><body><header><nav><a href="/">Home</a>${slugs.map((s) => `<a href="/${s}">${s}</a>`).join('')}</nav></header><main>${body(h)}</main></body></html>`;
+        const site = 'https://rf.example';
+        const pages = Object.fromEntries([[`${site}/`, html('Home')], ...slugs.map((s) => [`${site}/${s}`, html(s)])]);
+        const r = await runImport({ url: `${site}/`, pictures: 'skip', current: current(), maxPages: 100 }, deps({ plan: null, pages }));
+        assert.ok(r.ok, r.ok ? '' : r.message);
+        if (!r.ok) return;
+        assert.strictEqual(r.report.pages.filter((p) => p.read).length, 13);
+        assert.deepStrictEqual(r.report.notImported, []);
+        assert.strictEqual(r.definition.pages.length, 13);
+    });
+
     await check('a JavaScript-only site: told plainly, no model call, no pictures, no draft', async () => {
         const d = deps({ pages: { 'https://spa.example/': read('tests/fixtures/site-pages/spa-shell.html') } });
         const r = await runImport({ url: 'https://spa.example/', pictures: 'copy', current: current(), maxPages: 5 }, d);

@@ -87,10 +87,10 @@ export function rulesPromptBlock(roleKey: string | null | undefined): string {
         ? `, "platform": null | ${RULE_PLATFORMS.map((p) => `"${p}"`).join(' | ')}   (null = every platform; only when the user limits it to one)`
         : '';
     return `CHANGING YOUR DO’S AND DON’TS — when the user asks you to remember something for the future ("from now on…", "never…", "always…", "stop doing…"), to reword a rule, to switch one off or back on, or to delete one, put this in "uiElement" instead of anything else (one change per reply):
-{ "type": "rule_proposal", "action": "add", "ruleText": "<the rule, short and general, in the user's terms, at most ${RULE_TEXT_MAX} characters>"${platformLine} }
+{ "type": "rule_proposal", "action": "add", "ruleText": "<the rule, short and general, in the user's terms — one or two sentences, well under ${RULE_TEXT_MAX} characters>"${platformLine} }
 { "type": "rule_proposal", "action": "edit", "ruleId": <# number>, "ruleText": "<the new wording>" }
 { "type": "rule_proposal", "action": "turn_off" | "turn_on" | "delete", "ruleId": <# number> }
-Name a rule only by a # number listed under YOUR DO’S AND DON’TS, and only one of your own (not a workspace-wide one). Prefer "turn_off" when they want to stop a rule for now; "delete" only when they say to remove it for good. A request that is only about the reply in front of you ("make this one shorter") is not a rule — just do it. You never change a rule yourself: the user confirms on the card, and only that click saves it. So never say a rule HAS been saved, changed or removed — say the card is there to confirm. If they ask what your rules are, list them from above.`;
+A rule is one point, not a brief: when they give you longer guidance (for a content pillar, say), propose its most important point as this rule and offer to add the others one at a time. Name a rule only by a # number listed under YOUR DO’S AND DON’TS, and only one of your own (not a workspace-wide one). Prefer "turn_off" when they want to stop a rule for now; "delete" only when they say to remove it for good. A request that is only about the reply in front of you ("make this one shorter") is not a rule — just do it. You never change a rule yourself: the user confirms on the card, and only that click saves it. So never say a rule HAS been saved, changed or removed — say the card is there to confirm. If they ask what your rules are, list them from above.`;
 }
 
 // ── Propose ──────────────────────────────────────────────────────────────────────────────────────
@@ -116,6 +116,36 @@ export function ruleProposalFromUiElement(uiElement: unknown): RuleRequest | nul
     if (!Number.isInteger(id) || id <= 0) return null;
     if (action === 'edit') return text ? { action, ruleId: id, ruleText: text, platform: null } : null;
     return { action, ruleId: id, ruleText: null, platform: null };
+}
+
+// ── Too long ─────────────────────────────────────────────────────────────────────────────────────
+// A model can't count characters: asked for "at most 300", a Social Media Assistant turning pillar
+// guidance into a rule kept writing 400+, and the card refused it every time ("Ask for a shorter
+// one"), so the user had to ask again and again. Now an over-long add/edit is condensed by a second,
+// small model call before the card is built — up to two tries — and refused only if that still fails.
+
+export const RULE_SHORTEN_PROMPT = `You condense one rule an AI assistant follows when it writes content. Keep its meaning, every concrete instruction, and the user's own terms; drop filler, examples and repetition. Write it as one short imperative rule of at most ${RULE_TEXT_MAX} characters — aim for about 220. Reply with the rule only: no quotes, no preamble.`;
+
+/** Condense an over-long rule with `ask` (system, user) → text. Text that fits comes back as it is.
+ *  Null when it still doesn't fit after two tries, or the call fails. Never throws. */
+export async function shortenRuleText(
+    text: string, ask: (system: string, user: string) => Promise<string>,
+): Promise<string | null> {
+    let current = oneLine(text);
+    if (current.length <= RULE_TEXT_MAX) return current;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const out = oneLine(await ask(RULE_SHORTEN_PROMPT, `The rule (${current.length} characters — too long):\n"""${current.slice(0, 4000)}"""`))
+                .replace(/^["“']+|["”']+$/g, '').trim();
+            if (!out) return null;
+            if (out.length <= RULE_TEXT_MAX) return out;
+            current = out;
+        } catch (err) {
+            console.error('[chat-rules] could not shorten a rule (non-fatal)', err);
+            return null;
+        }
+    }
+    return null;
 }
 
 export interface RuleCard {
@@ -164,7 +194,7 @@ function buildRuleCard(aiAssistantId: number, roleKey: string | null | undefined
     const p = oneLine(card.platform).toLowerCase();
     card.platformLabel = p && p !== 'global' ? (PLATFORM_LABEL[p] ?? p) : null;
     if (req.ruleText && req.ruleText.length > RULE_TEXT_MAX) {
-        card.blocked = `A rule can be at most ${RULE_TEXT_MAX} characters. Ask for a shorter one.`;
+        card.blocked = `A rule can be at most ${RULE_TEXT_MAX} characters, and I couldn’t shorten this one without losing something. Split it into a few shorter rules, one point each.`;
         return card;
     }
     if (req.action === 'add') return card;

@@ -979,23 +979,6 @@ function _parsePillars(raw) {
     return String(Array.isArray(raw) ? raw.join(',') : raw ?? '').split(/[,;\n·•|]/).map(p => p.trim()).filter(Boolean).slice(0, 5);
 }
 
-// Render a live chip preview of the discrete pillars below the entry field.
-function _renderPillarChips() {
-    const host = document.getElementById('pillars-chips');
-    if (!host) return;
-    const raw = document.getElementById('edit_pillars')?.value;
-    const pillars = _parsePillars(raw);
-    if (!pillars.length) { host.innerHTML = ''; return; }
-    const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    // Warnings in words the owner can act on — one long "pillar" is the shape that made a pillar
-    // never appear (2026-10-06): the assistant had one theme to rotate, not four.
-    const warnings = window.ContentPillars ? window.ContentPillars.pillarWarnings(raw) : [];
-    host.innerHTML = pillars.map(p =>
-        `<span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">${esc(p)}</span>`
-    ).join('') + (warnings.length
-        ? `<p class="w-full text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-1">${warnings.map(esc).join(' ')}</p>`
-        : '');
-}
 
 // Brief fields that auto-grow with their content. These can hold a lot of text (especially the
 // AI-wand fields), so they're rendered as textareas that expand to keep everything visible —
@@ -1030,7 +1013,7 @@ function _fetchPrefetched(url) {
     return p.then((r) => r || fetch(url));
 }
 
-const _AUTOGROW_FIELDS = ['edit_problem', 'edit_core_message', 'edit_audience', 'edit_tone', 'edit_pillars', 'edit_objections'];
+const _AUTOGROW_FIELDS = ['edit_problem', 'edit_core_message', 'edit_audience', 'edit_tone', 'edit_objections'];
 
 // The Website Assistant's editor (src/components/assistant-site-editor.js, ~2,000 lines) is loaded the
 // first time a Website Assistant needs it, not on every workspace page. Calls made while it loads run
@@ -1067,12 +1050,13 @@ function _initBriefAutoGrow() {
         el.dataset.autogrow = '1';
         el.addEventListener('input', () => _autoGrowField(el));
     });
-    // Keep the discrete pillar chips in sync as the user types (and on wand-applied changes,
-    // which dispatch an 'input' event on edit_pillars).
+    // Pillars are records (src/components/pillar-list.js). Nobody types in the hidden #edit_pillars:
+    // only the AI wand and the strategy fix write text there. Mark it so the next autosave sends
+    // that text and the server reconciles the records to it; otherwise the save leaves them alone.
     const pillarsEl = document.getElementById('edit_pillars');
-    if (pillarsEl && !pillarsEl.dataset.chipsync) {
-        pillarsEl.dataset.chipsync = '1';
-        pillarsEl.addEventListener('input', _renderPillarChips);
+    if (pillarsEl && !pillarsEl.dataset.textsync) {
+        pillarsEl.dataset.textsync = '1';
+        pillarsEl.addEventListener('input', () => { window._pillarsTextDirty = true; });
     }
 }
 
@@ -7872,8 +7856,13 @@ function _detailHydrate(data) {
     _renderContentMix(data);
     _renderVoiceBuilder(data);
     _syncStrategyCard();
-    _detailSetVal('edit_pillars', Array.isArray(ctx.content_pillars) ? ctx.content_pillars.join(', ') : (ctx.content_pillars || ''));
-    _renderPillarChips();
+    const pillarText = Array.isArray(ctx.content_pillars) ? ctx.content_pillars.join(', ') : (ctx.content_pillars || '');
+    _detailSetVal('edit_pillars', pillarText);
+    window._pillarsTextDirty = false;
+    // One record per pillar, Social Media assistants only (the only role that balances pillars).
+    if (data.roleKey === 'social_media_manager') {
+        window.PillarList?.mount(document.getElementById('pillars-list'), { assistantId: data.id, initialText: pillarText });
+    }
     // Sales context — feeds the auto-responder objection playbook (P4) and DM drafting.
     // Products & Services are SHOWN from Business Information, not edited here (one place).
     _renderOfferingsBox(ctx);
@@ -8623,6 +8612,11 @@ function _detailCollect(currentData) {
         posting_timezone: document.getElementById('edit_timezone')?.value || _POSTING_DEFAULT_TZ,
         target_audience: document.getElementById('edit_audience')?.value || '',
         tone_of_voice: document.getElementById('edit_tone')?.value || '',
+        // ⚠️ The records are the truth (src/utils/content-pillars-store.ts). Pillar text is sent ONLY
+        // when the AI wand or strategy fix wrote some; otherwise the key is left out below and the
+        // server carries the stored list across. Sending the page's copy clobbered the records on
+        // staging (2026-11-08): a save built before a pillar change landed after it, and the server
+        // reconciled the records back to the old list.
         content_pillars: _parsePillars(document.getElementById('edit_pillars')?.value),
         sales_objections: document.getElementById('edit_objections')?.value || '',
         reference_style_url: document.getElementById('edit_reference_url')?.value || '',
@@ -8646,6 +8640,7 @@ function _detailCollect(currentData) {
             || currentData.context?.content_source || null,
         primary_platforms: platforms,
     };
+    if (!window._pillarsTextDirty) delete newContext.content_pillars;
 
     // Content mix — only when the card is on the page (Social Media / Blog assistants); otherwise the
     // stored value rides through untouched on the spread above. All ticked is saved as null = "every
@@ -8828,6 +8823,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // The Creative Brief's old free-text products box, cleared once its notes are moved into (or
     // deleted in favour of) Business Information ▸ Products & Services. Through the normal save.
+    // The pillar list (src/components/pillar-list.js) saves on its own; it hands the derived names
+    // back here so the next autosave sends the same list and leaves the records alone.
+    window._detailSetContextKey = function (key, value) {
+        currentData.context = { ...(currentData.context || {}), [key]: value };
+    };
+
     window._detailClearOfferingNotes = async function () {
         currentData.context = { ...(currentData.context || {}), service_offerings: '' };
         await persistChanges();
@@ -8837,6 +8838,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     async function persistChanges() {
         _detailSetSaveStatus('Saving…', 'text-gray-400');
         const { newContext, newConfiguration } = _detailCollect(currentData);
+        const sentPillarText = window._pillarsTextDirty === true;
         // Also save the name
         const nameInput = document.getElementById('detail-name-input');
         const newName = nameInput ? nameInput.value.trim() : null;
@@ -8864,9 +8866,13 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 // posts drafted after it, weeks out — offer to redraft the upcoming ones
                 // (src/components/redraft-upcoming.js). Compared before currentData is overwritten.
                 const before = currentData.context || {};
-                const topicChanged = (window.REDRAFT_TOPIC_KEYS || []).some((k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(newContext[k] ?? null));
-                currentData.context = newContext;
+                // Pillars not sent = not changed by this save (pillar-list.js offers its own redraft).
+                const topicChanged = (window.REDRAFT_TOPIC_KEYS || []).some((k) => (k !== 'content_pillars' || sentPillarText)
+                    && JSON.stringify(before[k] ?? null) !== JSON.stringify(newContext[k] ?? null));
+                currentData.context = sentPillarText ? newContext : { ...newContext, content_pillars: before.content_pillars };
                 currentData.configuration = newConfiguration;
+                // The server turned wand/strategy pillar text into records: show them.
+                if (sentPillarText) { window._pillarsTextDirty = false; window.PillarList?.reload(); }
                 if (topicChanged) window.offerRedraftUpcoming?.(parseInt(assistantId));
                 // The Outreach tab's send-readiness (mailbox, chasers, signature) is read from these
                 // answers and cached per assistant — drop it so the next paint re-reads what was saved.

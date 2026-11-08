@@ -25,13 +25,15 @@
 import { HandlerEvent } from '@netlify/functions';
 import { and, eq } from 'drizzle-orm';
 import * as cheerio from 'cheerio';
-import { PDFParse } from 'pdf-parse';
+// Loaded where a PDF is read, so a load fault fails the item instead of killing the worker (see process-asset-background.ts).
+const loadPdfParse = () => import('pdf-parse').then((m) => m.PDFParse);
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
 import { inspoItems, inspoChunks, workspaceAssets, vectorEmbeddings } from '../../db/schema';
 import { chunkArticle, embedTexts, embeddingsConfigured } from '../../src/utils/kb-embeddings';
 import { safeFetchText, SafeFetchError } from '../../src/utils/safe-fetch';
 import { stripPromptInjection } from '../../src/utils/prompt-injection';
+import { workerAuthError } from '../../src/utils/worker-auth';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const R2_ENDPOINT          = process.env.R2_ENDPOINT;
@@ -60,6 +62,9 @@ function extractHtmlText(html: string): string {
 }
 
 export default withLambda(async (event: HandlerEvent) => {
+    // Only our own functions may start this (src/utils/worker-auth.ts).
+    const denied = workerAuthError(event.headers as Record<string, string | undefined>, 'process-inspo-background');
+    if (denied) return denied;
     const db = getDb();
 
     let inspoItemId: number | undefined;
@@ -116,7 +121,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 const obj = await s3.send(new GetObjectCommand({ Bucket: R2_BUCKET, Key: asset.r2Key }));
                 const buffer = Buffer.from(await obj.Body!.transformToByteArray());
                 if (isPdf) {
-                    const parser = new PDFParse({ data: buffer });
+                    const PDFParse = await loadPdfParse(); const parser = new PDFParse({ data: buffer });
                     try { body = (await parser.getText()).text.replace(/\s+/g, ' ').trim(); }
                     finally { await parser.destroy(); }
                 } else {

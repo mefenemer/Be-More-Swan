@@ -30,7 +30,7 @@
 //   bookings  { assistantId }                 → bookings from the last 30 days on (bookings.ts)
 //   booking_decide { assistantId, id, decision: confirm|decline|cancel } → the owner's decision; the
 //                                               customer is emailed (a calendar invite on confirm)
-//   booking_setup { assistantId, settings, section?: { pageId, kind, serviceIds, askStaff } }
+//   booking_setup { assistantId, settings, section?: { pageId, kind, serviceIds, askStaff }, serviceLocations?: [{ serviceId, location }] }
 //                                             → the chat's "Set up bookings" card: hours & rules saved
 //                                               to Business Information, and a booking section added
 //   orders    { assistantId }                 → paid orders from the site's Buy buttons
@@ -79,6 +79,9 @@ import { audienceContacts, bookings, bookingSettings, orgProducts, orgReviews, s
 import { addEnquirerToAudience } from '../../src/utils/enquiry-audience';
 import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookingSetup } from '../../src/utils/bookings';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
+import { bookableKinds, bookingsSwitchedOff } from '../../src/utils/site-booking-page';
+import { sectionForKind } from '../../src/utils/site-booking';
+import { cleanMeetingLocation, meetingLocationOf, ownerMeetingLine, refreshMeetingLinks } from '../../src/utils/booking-meeting';
 import { purgeCache } from '@netlify/functions';
 import { siteCacheTag } from '../../src/utils/site-hosting';
 
@@ -100,7 +103,7 @@ import { depositNote, refundDeposit } from '../../src/utils/booking-deposits';
 import { reconcileSoon } from '../../src/utils/calendar-microsoft';
 import { addSessions, cancelSessions, cleanNewSessions, offerFreedPlaces, ownerTimetable } from '../../src/utils/class-sessions';
 import { utcToZoned } from '../../src/utils/booking-time';
-import { sessionLink } from '../../src/utils/site-render';
+import { BOOKING_PAGE_PATH, sessionLink } from '../../src/utils/site-render';
 import { buyablePence, priceDisplay } from '../../src/utils/product-price';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
@@ -217,11 +220,16 @@ export default withLambda(async (event) => {
             booking: await (async () => {
                 const b = await loadBookingSetup(db, orgId);
                 const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(bookings).where(and(eq(bookings.organisationId, orgId), eq(bookings.status, 'pending')));
+                // The booking link (site-booking-page.ts): this site's address + /book, once there's something to book.
+                const kinds = await bookableKinds(db, orgId, new Date(), b);
+                const origin = ownDomain?.status === 'live' ? `https://${ownDomain.domain}` : s.slug ? siteOrigin(s.slug) : null;
                 return {
                     ready: Object.keys(b.settings.weeklyHours).length > 0, hours: describeHours(b.settings.weeklyHours), mode: b.settings.mode,
                     visitAddress: b.settings.visitAddress, whatsapp: b.settings.whatsapp,
-                    services: b.services.map((x) => ({ id: x.id, name: x.name, durationMinutes: x.durationMinutes, price: x.price })),
-                    resources: b.resources.map((r) => ({ id: r.id, name: r.name, kind: r.kind })), waiting: Number(n),
+                    services: b.services.map((x) => ({ id: x.id, name: x.name, durationMinutes: x.durationMinutes, price: x.price, meetingLocation: meetingLocationOf(x.meetingLocation) })),
+                    resources: b.resources.map((r) => ({ id: r.id, name: r.name, kind: r.kind, hasMeetingUrl: !!r.meetingUrl })), waiting: Number(n),
+                    link: origin && kinds.length && s.status !== 'suspended' && !bookingsSwitchedOff(definition) ? `${origin}${BOOKING_PAGE_PATH}` : null,
+                    kinds, needsAddress: !s.slug, meetingUrl: b.settings.meetingUrl,
                 };
             })(),
             newOrders: Number((await db.select({ n: sql<number>`count(*)::int` }).from(siteOrders)
@@ -491,7 +499,7 @@ export default withLambda(async (event) => {
         const rows = await listBookings(db, orgId);
         return json(200, { bookings: rows.map((b) => ({ ...describeBooking(b, setup.settings.timezone), id: b.id, status: b.status, customerName: b.customerName,
             customerEmail: b.customerEmail, customerPhone: b.customerPhone, notes: b.notes, partySize: b.partySize, startsAt: b.startsAt, createdAt: b.createdAt,
-            cancelledBy: b.cancelledBy, moved: b.movedFromId !== null, reminded: b.reminderSentAt !== null, deposit: depositNote(b) }))
+            cancelledBy: b.cancelledBy, moved: b.movedFromId !== null, reminded: b.reminderSentAt !== null, deposit: depositNote(b), meeting: ownerMeetingLine(b) || null }))
             // An unpaid deposit hold that lapsed was never a booking: left out.
             .filter((b, i) => !(rows[i].paymentStatus === 'expired')) });
     }
@@ -539,8 +547,9 @@ export default withLambda(async (event) => {
         if (!r.ok) return json(409, { error: r.error });
         // A class place given back (declined or cancelled): offer it to the waitlist.
         if (r.booking.sessionId && r.booking.status !== 'confirmed' && site.slug) {
-            const cls = definition.pages.flatMap((pg) => pg.sections).find((x) => x.type === 'booking' && x.props.kind === 'class');
-            if (cls) await offerFreedPlaces(db, orgId, r.booking.sessionId, { business: definition.settings.siteName, siteOrigin: siteOrigin(site.slug), bookPath: (sid) => sessionLink(cls.id, sid) });
+            // The site's class section, or the booking link's own (site-booking.ts sectionForKind).
+            const cls = sectionForKind(definition, 'class');
+            if (cls) await offerFreedPlaces(db, orgId, r.booking.sessionId, { business: definition.settings.siteName, siteOrigin: siteOrigin(site.slug), bookPath: (sid) => sessionLink(cls, sid) });
         }
         return json(200, { ok: true, status: r.booking.status });
     }
@@ -551,9 +560,27 @@ export default withLambda(async (event) => {
         const raw = body.settings && typeof body.settings === 'object' ? body.settings as Record<string, unknown> : {};
         const cleaned = cleanBookingSettings(raw);
         if (!cleaned.ok) return json(400, { error: cleaned.error });
+        // Where each service happens (in person / phone / video) — the same check as Products & Services.
+        const locs: Array<{ id: number; value: string | null }> = [];
+        for (const x of Array.isArray(body.serviceLocations) ? (body.serviceLocations as unknown[]).slice(0, 100) : []) {
+            const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+            const id = Number(o.serviceId);
+            const m = cleanMeetingLocation(o.location);
+            if (!Number.isInteger(id) || id <= 0) return json(400, { error: 'A service in that card isn\'t valid.' });
+            if (!m.ok) return json(400, { error: m.error });
+            locs.push({ id, value: m.value });
+        }
         if (Object.keys(cleaned.value).length) {
             const values = { ...cleaned.value, updatedAt: new Date() };
             await db.insert(bookingSettings).values({ organisationId: orgId, ...values }).onConflictDoUpdate({ target: bookingSettings.organisationId, set: values });
+        }
+        for (const l of locs) {
+            await db.update(orgProducts).set({ meetingLocation: l.value, updatedAt: new Date() }).where(and(eq(orgProducts.id, l.id), eq(orgProducts.organisationId, orgId)));
+        }
+        // A new video link reaches upcoming video bookings (booking-meeting.ts).
+        if ('meetingUrl' in cleaned.value) {
+            try { if (await refreshMeetingLinks(db, orgId, new Date())) await (await import('../../src/utils/calendar-microsoft')).reconcileSoon(db, orgId); }
+            catch (err) { console.error('[sites] meeting links not refreshed', err); }
         }
         const sec = body.section && typeof body.section === 'object' ? body.section as Record<string, unknown> : null;
         if (sec && typeof sec.pageId === 'string') {

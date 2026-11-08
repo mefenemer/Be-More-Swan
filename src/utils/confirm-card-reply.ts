@@ -43,6 +43,8 @@ const POINTS_AT_CARD = new RegExp([
     /\b(?:the|a|this)\s+card\s+(?:that|which)\b/.source,
     /\bbelow is a card\b/.source,
     /\btap (?:the|an?) (?:button|answer) below\b/.source,
+    // "Here it is now, and nothing is saved until you confirm on it" over no card (prod 2026-11-07, org 40).
+    /\bhere it is now\b[^\n]{0,80}\bconfirm\b/.source,
     // Without the word "card" (prod 2026-10-26: "I've put that change below for you to approve" over no card).
     /\b(?:I(?:'|’)?ve|I have)\s+(?:put|placed|attached|left|queued)\b[^.\n]{0,40}\b(?:below|above)\b/.source,
     /\b(?:below|above) for you to (?:approve|confirm|save|accept|review)\b/.source,

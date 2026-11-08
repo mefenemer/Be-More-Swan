@@ -1793,7 +1793,7 @@
     function onBookingSetup(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      sitePost({ action: 'booking_setup', assistantId, settings: d.settings || {}, section: d.section || null })
+      sitePost({ action: 'booking_setup', assistantId, settings: d.settings || {}, section: d.section || null, serviceLocations: Array.isArray(d.serviceLocations) ? d.serviceLocations : [] })
         .then(() => { respond({ ok: true }); siteChanged(); })
         .catch((err) => respond({ ok: false, error: err.message }));
     }

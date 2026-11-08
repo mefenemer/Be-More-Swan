@@ -26,8 +26,12 @@ import {
 import { chunkBodies } from './site-words';
 import { inlineEmbeds, type EmbedFetchers } from './site-embeds';
 
-/** Pages read at most (home + menu pages), before the plan's own page cap. */
-export const IMPORT_MAX_PAGES = 8;
+/**
+ * Pages read at most (home + menu pages), before the site's own page cap. Was 8 until 2026-11-08:
+ * Restorative Futures has 13 menu pages and 5 were left out. No plan limits pages any more
+ * (site-published.ts), so this only bounds one background run and the size of the model's plan.
+ */
+export const IMPORT_MAX_PAGES = 20;
 /** Below this many words on the home page — and IMPORT_THIN_SITE_WORDS across the site — there is nothing honest to import. */
 export const IMPORT_THIN_WORDS = 40;
 export const IMPORT_THIN_SITE_WORDS = 80;
