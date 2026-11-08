@@ -1,0 +1,13 @@
+/* Synthetic stylesheet modelled on a Webflow site's shared CSS: Webflow's own base rules (.w-…) first, then the site's. */
+html{-webkit-text-size-adjust:100%}body{margin:0;min-height:100%;background-color:#fff;font-family:Arial,sans-serif;font-size:14px;line-height:20px;color:#333}
+.w-button{display:inline-block;padding:9px 15px;background-color:#3898ec;color:white;border:0;line-height:inherit;text-decoration:none;cursor:pointer;border-radius:0}
+.w-form-done{display:none;padding:20px;text-align:center;background-color:#dddddd}.w-form-fail{display:none;margin-top:10px;padding:10px;background-color:#ffdede}
+.w-input:focus{border-color:#3898ec;outline:0}.w-checkbox-input--inputType-custom.w--redirected-checked{background-color:#3898ec;border-color:#3898ec}
+.w-slider-dot.w-active{background-color:#fff}.w-webflow-badge{background-color:#fff!important;color:#aaadb0!important}
+.w-dropdown-list.w--open{display:block}.w-nav-link.w--current{color:#0082f3}.w-tab-link.w--current{background-color:#c8c8c8}
+:root{--swatch--brand:#8a4b2a;--swatch--cream:#f7f1e8;--swatch--ink:#2b211c;--swatch--sage:#6f8a5b}
+body{background-color:var(--swatch--cream);color:var(--swatch--ink);font-family:Manrope,sans-serif}
+h1,h2{font-family:Fraunces,Georgia,serif}
+.button{background-color:var(--swatch--brand);border-radius:999px;color:#fff;padding:12px 24px}
+.button-outline{border:1px solid var(--swatch--brand);border-radius:999px;color:var(--swatch--brand)}
+.section-hero{background-image:url("https://cdn.prod.website-files.com/64aa00000000000000000001/64aa0000000000000000c000_hero-loaves.jpg");background-size:cover}
