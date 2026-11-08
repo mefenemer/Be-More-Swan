@@ -1784,8 +1784,8 @@
     function onSiteWords(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      sitePost({ action: 'words', assistantId, pageId: d.pageId, attachmentId: d.attachmentId, quote: d.quote, chatSessionId, note: d.note || '' })
-        .then((data) => respond({ ok: true, proposal: data.proposal }))
+      sitePost({ action: 'words', assistantId, pageId: d.pageId, attachmentId: d.attachmentId, quote: d.quote, sourceUrl: d.sourceUrl || null, chatSessionId, note: d.note || '' })
+        .then((data) => respond({ ok: true, proposal: data.proposal, note: data.note || null }))
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 

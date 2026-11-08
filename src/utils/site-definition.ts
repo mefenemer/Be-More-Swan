@@ -293,7 +293,7 @@ export interface SiteDefinition {
 
 export const LIMITS = {
     siteName: 80, description: 170, locality: 80, email: 254, phone: 30,
-    pageTitle: 80, seoTitle: 65, seoDescription: 170, slug: 40,
+    pageTitle: 80, seoTitle: 65, seoDescription: 170, slug: 80,
     sectionsPerPage: 20, navItems: 7, navLabel: 30, footer: 300,
     headline: 120, subheadline: 300, eyebrow: 40, ctaLabel: 40, href: 500, alt: 150,
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,

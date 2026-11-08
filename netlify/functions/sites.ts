@@ -21,7 +21,8 @@
 //                                               account (created the first time). Owner/admin only.
 //   payments_refresh { assistantId }          → re-read the account from Stripe (back from onboarding)
 //   words     { assistantId, pageId, text? | file?: {name, type, data(base64)} | attachmentId? |
-//               quote? + chatSessionId?, note? }   (attachmentId / quote: the chat's site_words card)
+//               sourceUrl? | quote? + chatSessionId?, note? }   (attachmentId / sourceUrl / quote: the chat's
+//               site_words card; sourceUrl = a page of their own current website, read by the server)
 //                                             → "Add your own words": a PROPOSAL placing the owner's
 //                                               text on the page WORD FOR WORD (site-words.ts). Saves
 //                                               nothing — Apply sends its ops through `apply`. 1 task.
@@ -113,7 +114,7 @@ import {
 import { triggerSiteDraft } from '../../src/utils/trigger-site-draft';
 import { DRAFT_NOTE_ADDING_MEDIA, DRAFT_NOTE_MEDIA_STOPPED, draftNoteIsFailure, resolveDraftMedia } from '../../src/utils/site-draft-media';
 import { draftMediaOptions } from '../../src/utils/site-draft-media-options';
-import { acceptImport, discardImport, importView, loadImport, startSiteImport } from '../../src/utils/site-import-store';
+import { acceptImport, discardImport, importView, loadImport, readOwnSitePage, startSiteImport } from '../../src/utils/site-import-store';
 import { cleanImportUrl } from '../../src/utils/site-import';
 import { refreshDirectoryAfterAddressChange, refreshDirectoryAfterPublish } from '../../src/utils/site-directory-store';
 import { hasTaskCapacity, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
@@ -451,10 +452,18 @@ export default withLambda(async (event) => {
         // From the chat's site_words card: an attached document's words, or words the assistant quoted
         // from the owner's own message — accepted only if they really are in it (chat-attachments.ts).
         const attachmentId = Number(body.attachmentId);
+        let pricesLeftOut = 0;
         if (Number.isInteger(attachmentId) && attachmentId > 0) {
             const fromAttachment = await attachmentText(db, orgId, attachmentId);
             if (!fromAttachment) return json(404, { error: 'That attached document isn\'t available any more. Attach it again.' });
             text = text ? `${text}\n\n${fromAttachment}` : fromAttachment;
+        } else if (typeof body.sourceUrl === 'string' && body.sourceUrl.trim()) {
+            // A page of their CURRENT website ("take the wording from my existing site"): read by the
+            // server like an import page, so the words are theirs, never retyped (site-source-page.ts).
+            const fromSite = await readOwnSitePage(db, site, body.sourceUrl);
+            if (!fromSite.ok) return json(fromSite.status, { error: fromSite.error });
+            text = text ? `${text}\n\n${fromSite.text}` : fromSite.text;
+            if (fromSite.prices) pricesLeftOut = fromSite.prices;
         } else if (typeof body.quote === 'string' && body.quote.trim()) {
             const fromChat = await quoteFromChat(db, orgId, Number(body.chatSessionId), body.quote);
             if (!fromChat) return json(400, { error: 'Those words weren\'t found in your messages, so they weren\'t used. Paste them again, or use "Add your own words" on the Website tab.' });
@@ -464,7 +473,8 @@ export default withLambda(async (event) => {
         if (blocked) return blocked;
         const r = await proposeOwnWords(db, site, { pageId, text, note, maxPages });
         if (!r.ok) return json(r.status, { error: r.error });
-        return json(200, { proposal: r.proposal });
+        // Prices on their old page are left out, as the import leaves them out: say so on the card.
+        return json(200, { proposal: r.proposal, ...(pricesLeftOut ? { note: `${pricesLeftOut} line${pricesLeftOut === 1 ? '' : 's'} with a price ${pricesLeftOut === 1 ? 'was' : 'were'} left out — prices belong in Business Information ▸ Products & Services.` } : {}) });
     }
 
     if (action === 'products_import') {

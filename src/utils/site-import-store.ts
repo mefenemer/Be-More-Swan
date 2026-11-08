@@ -10,7 +10,7 @@
 
 import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, contentAssets, siteImports, sites } from '../../db/schema';
+import { aiAssistants, contentAssets, organisations, siteImports, sites } from '../../db/schema';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
 import { persistBufferToR2, r2IsConfigured } from '../lib/media-persist';
@@ -21,7 +21,9 @@ import { safeFetchBinary } from './safe-fetch';
 import { normaliseSiteDefinition, type SiteDefinition } from './site-definition';
 import { fetchSiteHtml, fetchSiteJson } from './site-fetch';
 import { createPageRenderer, type PageRenderer } from './site-js-render';
-import { runImport, type ImportDeps, type ImportReport, type PictureChoice } from './site-import';
+import { cleanImportUrl, runImport, type ImportDeps, type ImportReport, type PictureChoice } from './site-import';
+import { readImportPage } from './site-extract';
+import { isOwnSitePage, sourcePageText } from './site-source-page';
 import { claimDraft, definitionOf, endDraft, maxPagesFor, verifySiteAssets, type SiteRow, SITE_WRITE_DEADLINE_MS } from './site-store';
 import { triggerSiteDraft } from './trigger-site-draft';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
@@ -46,6 +48,28 @@ export interface ImportView {
     report: ImportReport | null;
     pages: Array<{ title: string; path: string; sections: number }>;
     updatedAt: Date;
+}
+
+/**
+ * The words of one page of the owner's CURRENT website, for the chat's site_words card
+ * (site-source-page.ts). Only their own site — the host of their website in the business details, or
+ * of the site they imported from — read like an import page (robots.txt + SSRF fence). Never throws.
+ */
+export async function readOwnSitePage(db: Db, site: SiteRow, rawUrl: unknown): Promise<{ ok: true; text: string; url: string; prices: number } | { ok: false; error: string; status: number }> {
+    const url = cleanImportUrl(rawUrl);
+    if (!url) return { ok: false, status: 400, error: 'That page address couldn\'t be read. Paste the page’s words into the chat instead.' };
+    const [org] = await db.select({ websiteUrl: organisations.websiteUrl }).from(organisations).where(eq(organisations.id, site.organisationId)).limit(1);
+    const imported = await loadImport(db, site.id);
+    if (!isOwnSitePage(url, [org?.websiteUrl, imported?.sourceUrl])) {
+        return { ok: false, status: 400, error: 'Words can only be taken from your own website (the one in Business Information). Paste the words into the chat instead.' };
+    }
+    const r = await fetchSiteHtml(url, CRAWLERS.siteImport, { timeoutMs: PAGE_TIMEOUT_MS, maxBytes: PAGE_MAX_BYTES });
+    if (!r.ok) return { ok: false, status: 400, error: `We couldn't read that page: ${r.message}` };
+    let page;
+    try { page = readImportPage(r.html, r.finalUrl); } catch { page = null; }
+    const words = page ? sourcePageText(page) : { text: '', prices: 0 };
+    if (!words.text) return { ok: false, status: 400, error: 'We couldn\'t find any words on that page (some sites draw them with JavaScript). Paste them into the chat instead.' };
+    return { ok: true, text: words.text, url: r.finalUrl, prices: words.prices };
 }
 
 /** The site's import, if any. Null on any read failure — the table may not exist yet (db/z-site-import.sql). */

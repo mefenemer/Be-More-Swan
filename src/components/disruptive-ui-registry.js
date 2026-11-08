@@ -2483,7 +2483,7 @@
   }
   register('site_import_decision', renderSiteImportDecisionCard);
 
-  // { type: 'site_words', pageId, attachmentId?, quote?, note? } — the owner's OWN words onto a page,
+  // { type: 'site_words', pageId, attachmentId?, quote?, sourceUrl?, note? } — the owner's OWN words onto a page,
   // word for word (sites.ts `words` → site-words.ts). The card never carries their words for the
   // model to retype: it names an attached document, or quotes their own message (checked server-side).
   // Two clicks: "Place my words" shows exactly where everything goes; "Apply" saves it (site:apply).
@@ -2491,16 +2491,20 @@
     const pageId = typeof ui.pageId === 'string' ? ui.pageId.slice(0, 40) : '';
     const attachmentId = Number.isInteger(Number(ui.attachmentId)) && Number(ui.attachmentId) > 0 ? Number(ui.attachmentId) : null;
     const quote = typeof ui.quote === 'string' && ui.quote.trim() ? ui.quote.slice(0, 20000) : null;
+    // A page of their current website: the server reads its words (sites.ts words → site-source-page.ts).
+    const sourceUrl = !attachmentId && !quote && typeof ui.sourceUrl === 'string' && /^https?:\/\/[^\s]+$/i.test(ui.sourceUrl.trim()) ? ui.sourceUrl.trim().slice(0, 500) : null;
+    const sourceLabel = (() => { if (!sourceUrl) return ''; try { const u = new URL(sourceUrl); return (u.host.replace(/^www\./, '') + u.pathname).replace(/\/$/, ''); } catch { return sourceUrl; } })();
     const note = typeof ui.note === 'string' ? ui.note.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Your own words on your website</p>
       ${note ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(note)}</p>` : ''}
-      <p class="text-xs text-gray-600 mt-2">Your words go on the page exactly as you wrote them — split into headings and paragraphs, never reworded. You'll see where everything goes before anything changes. Uses 1 task.</p>
+      ${sourceUrl ? `<p class="text-xs text-gray-700 mt-2">From your website: <span class="font-semibold break-all">${esc(sourceLabel)}</span></p>` : ''}
+      <p class="text-xs text-gray-600 mt-2">${sourceUrl ? 'The words on that page go on this one exactly as they are on your website' : 'Your words go on the page exactly as you wrote them'} — split into headings and paragraphs, never reworded. You'll see where everything goes before anything changes. Uses 1 task.</p>
       <div data-sw-preview></div>
       <div class="flex flex-wrap items-center gap-2 mt-3" data-sw-actions>
-        <button type="button" data-sw-go ${pageId && (attachmentId || quote) ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Place my words</button>
+        <button type="button" data-sw-go ${pageId && (attachmentId || quote || sourceUrl) ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Place my words</button>
         <button type="button" data-sw-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
       </div>
       <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sw-status></p>`;
@@ -2518,8 +2522,8 @@
         el.dispatchEvent(new CustomEvent('site:words', {
           bubbles: true,
           detail: {
-            pageId, attachmentId, quote, note,
-            respond({ ok, error, proposal: p }) {
+            pageId, attachmentId, quote, sourceUrl, note,
+            respond({ ok, error, proposal: p, note: serverNote }) {
               if (!ok || !p) { setBusy(false); say(error || 'Your words couldn\'t be placed.', 'error'); return; }
               proposal = p;
               preview.innerHTML = `
@@ -2528,7 +2532,7 @@
               actions.innerHTML = `
                 <button type="button" data-sw-apply class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Apply to my page</button>
                 <button type="button" data-sw-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`;
-              say('Nothing has changed yet.');
+              say(serverNote ? `Nothing has changed yet. ${serverNote}` : 'Nothing has changed yet.');
             },
           },
         }));
