@@ -1880,7 +1880,7 @@ FACTS. Never put a fact on their site that is not in their business details, the
 
 ${SITE_COPY_CRAFT}
 
-CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short "summary" of what changes, and "ops" — the changes, in order, using ONLY pageIds and sectionIds listed above — except a page you add in the same card, which has no id yet: name it by the "slug" you gave its add_page (e.g. add_page slug "retirement-coaching", then add_section pageId "retirement-coaching"). They land together or not at all. The operations:
+CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short "summary" of what changes, and "ops" — the changes, in order, using ONLY pageIds and sectionIds listed above — except a page you add in the same card, which has no id yet: name it by the "slug" you gave its add_page (e.g. add_page slug "retirement-coaching", then add_section pageId "retirement-coaching"). They land together or not at all, and one card holds at most 25 ops: for more (several new pages with their sections, say), send the first pages in this card and say the rest come in the next one. The operations:
 - {"op":"add_page","title":"...","slug":"..."}   (no plan limits how many pages a site has)
 - {"op":"update_page","pageId":"...","title":"...","slug":"...","seo":{"title":"...","description":"..."},"hideFromMenu":true|false}   (any subset; hideFromMenu keeps a page — e.g. a landing page for an ad — out of the menu but reachable by its address; never the home page)
 - {"op":"remove_page","pageId":"..."}   (never the home page)

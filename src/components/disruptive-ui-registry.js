@@ -2081,17 +2081,28 @@
 
   // { type: 'site_changes', summary, ops: SiteOperation[] }
   function renderSiteChangesCard(ui, esc) {
-    const ops = (Array.isArray(ui.ops) ? ui.ops : []).filter((o) => o && typeof o === 'object' && SITE_OP_WORDS[o.op]).slice(0, 25);
+    // Never apply part of a card: the changes land together or not at all. A card with more than the
+    // server takes (25), or a change this card can't read, is refused here in words instead of quietly
+    // dropping the rest — dropped add_page / add_section ops were pages that "never appeared" (issue #31).
+    const given = Array.isArray(ui.ops) ? ui.ops : [];
+    const ops = given.filter((o) => o && typeof o === 'object' && SITE_OP_WORDS[o.op]);
+    const MAX_SITE_OPS = 25;
+    const blocked = ops.length !== given.length
+      ? 'This card has a change it can’t make. Ask the assistant to send it again — nothing was changed.'
+      : ops.length > MAX_SITE_OPS
+        ? `This card has ${ops.length} changes — up to ${MAX_SITE_OPS} can be applied at once. Ask the assistant to split it into two cards — nothing was changed.`
+        : '';
     const summary = typeof ui.summary === 'string' ? ui.summary.slice(0, 300) : '';
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Changes to your website · Approval needed</p>
       ${summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(summary)}</p>` : ''}
-      ${ops.length ? `<ul class="mt-2 space-y-1 list-disc pl-5">${ops.map((o) => `<li class="text-xs text-gray-700">${esc(SITE_OP_WORDS[o.op](o))}</li>`).join('')}</ul>` : '<p class="text-xs text-amber-700 mt-2">No changes were given.</p>'}
+      ${ops.length ? `<ul class="mt-2 space-y-1 list-disc pl-5">${ops.slice(0, MAX_SITE_OPS).map((o) => `<li class="text-xs text-gray-700">${esc(SITE_OP_WORDS[o.op](o))}</li>`).join('')}</ul>` : '<p class="text-xs text-amber-700 mt-2">No changes were given.</p>'}
+      ${blocked ? `<p class="text-xs font-semibold text-amber-700 mt-2" data-sc-blocked>${esc(blocked)}</p>` : ''}
       <p class="text-xs text-gray-600 mt-2">Changes your draft only — nothing is live. The preview on the Website tab updates straight away.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        <button type="button" data-sc-apply ${ops.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Apply changes</button>
+        <button type="button" data-sc-apply ${ops.length && !blocked ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Apply changes</button>
         <button type="button" data-sc-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
       </div>
       <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sc-status></p>`;
@@ -2100,7 +2111,7 @@
     const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-sc-cancel]')) { setBusy(true); say('Not applied.'); return; }
-      if (!e.target.closest('[data-sc-apply]')) return;
+      if (!e.target.closest('[data-sc-apply]') || blocked) return;
       setBusy(true);
       say('Applying…');
       el.dispatchEvent(new CustomEvent('site:apply', {

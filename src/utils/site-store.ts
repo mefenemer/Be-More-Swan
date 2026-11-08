@@ -32,7 +32,7 @@ import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
 import {
-    applySiteOperation, assetIdsIn, DEFAULT_MAX_PAGES, FEATURE_LABELS, markVideos, normaliseSiteDefinition, SITE_FEATURES, withoutAssets, type SiteDefinition, type SiteOperation,
+    applySiteOperation, applySiteOperationBatch, assetIdsIn, DEFAULT_MAX_PAGES, FEATURE_LABELS, markVideos, normaliseSiteDefinition, SITE_FEATURES, withoutAssets, type SiteDefinition, type SiteOperation,
 } from './site-definition';
 import { buildDraftPrompt, placeholdersIn, siteFromDraftReply, starterSite, themeFromBrandKit, type BusinessFacts } from './site-draft';
 import { buildFillPrompt, siteFromFillReply } from './site-template-fill';
@@ -109,14 +109,10 @@ export function definitionOf(site: SiteRow, maxPages: number): { definition: Sit
 export async function applySiteOperations(
     db: Db, site: SiteRow, ops: SiteOperation[], maxPages: number,
 ): Promise<{ ok: true; site: SiteRow; warnings: string[] } | { ok: false; error: string; index: number }> {
-    let def = definitionOf(site, maxPages).definition;
-    const warnings: string[] = [];
-    for (let i = 0; i < ops.length; i++) {
-        const r = applySiteOperation(def, ops[i], { maxPages });
-        if (!r.ok) return { ok: false, error: r.error, index: i };
-        def = r.definition;
-        for (const w of r.warnings) if (!warnings.includes(w)) warnings.push(w);
-    }
+    const batch = applySiteOperationBatch(definitionOf(site, maxPages).definition, ops, { maxPages });
+    if (!batch.ok) return batch;
+    const def = batch.definition;
+    const warnings = [...batch.warnings];
     const checked = await verifySiteAssets(db, site.organisationId, def);
     for (const w of checked.warnings) if (!warnings.includes(w)) warnings.push(w);
     const [saved] = await db.update(sites).set({ draft: checked.definition, updatedAt: new Date() }).where(eq(sites.id, site.id)).returning();

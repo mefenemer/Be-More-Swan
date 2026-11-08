@@ -1004,6 +1004,37 @@ export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts:
     return r.ok && cuts.length ? { ...r, warnings: [...new Set([...cuts, ...r.warnings])] } : r;
 }
 
+/**
+ * A card's changes, in order: the first refusal stops the batch (nothing is kept). A page added in the
+ * card is named by the address its add_page asked for — and that name means the NEW page even when an
+ * older page already had the address (the new one is moved to "-2" by the gate). Without this the
+ * card's sections landed on the old page and the new page stayed empty (issue #31, 2026-11-08).
+ */
+export function applySiteOperationBatch(def: SiteDefinition, ops: SiteOperation[], opts: NormaliseOptions = {}):
+    { ok: true; definition: SiteDefinition; warnings: string[] } | { ok: false; error: string; index: number } {
+    const added = new Map<string, string>();   // the address add_page asked for → the new page's id
+    const warnings: string[] = [];
+    for (let i = 0; i < ops.length; i++) {
+        let op = ops[i];
+        const alias = (ref: unknown) => {
+            if (typeof ref !== 'string' || def.pages.some((p) => p.id === ref)) return ref;
+            return added.get(slugify(ref.replace(/^\//, ''))) ?? ref;
+        };
+        if ('pageId' in op) op = { ...op, pageId: alias(op.pageId) } as SiteOperation;
+        if (op.op === 'move_section' && op.toPageId) op = { ...op, toPageId: alias(op.toPageId) as string };
+        const r = applySiteOperation(def, op, opts);
+        if (!r.ok) return { ok: false, error: r.error, index: i };
+        if (op.op === 'add_page') {
+            const page = r.definition.pages.find((p) => !def.pages.some((old) => old.id === p.id));
+            const asked = slugify(op.slug || op.title || '');
+            if (page && asked) added.set(asked, page.id);
+        }
+        def = r.definition;
+        for (const w of r.warnings) if (!warnings.includes(w)) warnings.push(w);
+    }
+    return { ok: true, definition: def, warnings };
+}
+
 function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseOptions): OperationResult {
     const maxPages = Math.max(1, opts.maxPages ?? DEFAULT_MAX_PAGES);
     const next: SiteDefinition = JSON.parse(JSON.stringify(def));
@@ -1026,6 +1057,17 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
             const title = cleanText(op.title, LIMITS.pageTitle);
             if (!title) return { ok: false, error: 'A new page needs a title.' };
             next.pages.push({ id: '', slug: slugify(op.slug || title) || 'page', title, seo: { title: null, description: null }, sections: [], hideFromMenu: false });
+            // A menu that was set by hand (set_nav) lists only its own entries, so a new page would never
+            // show in it (prod 2026-11-08, issue #31: "pages proposed in a card never appeared"). It
+            // joins the end once the gate has given it an id — or, if the menu is full, they are told.
+            if (next.nav.length) {
+                const r = normaliseSiteDefinition(next, opts);
+                const added = r.definition.pages.find((p) => !def.pages.some((old) => old.id === p.id));
+                if (!added) return { ok: true, definition: r.definition, warnings: r.warnings };
+                if (r.definition.nav.length < LIMITS.navItems) r.definition.nav.push({ label: clampText(added.title, LIMITS.navLabel), pageId: added.id });
+                else r.warnings.push(`Your menu is full, so "${added.title}" isn't in it yet. Change the menu on the Website tab to add it.`);
+                return { ok: true, definition: r.definition, warnings: r.warnings };
+            }
             break;
         }
         case 'update_page': {
