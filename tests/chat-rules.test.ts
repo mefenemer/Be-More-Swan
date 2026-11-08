@@ -16,7 +16,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
-    RULE_TEXT_MAX, buildRulesListBlock, refreshRuleCards, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock,
+    RULE_TEXT_MAX, buildRulesListBlock, refreshRuleCards, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, shortenRuleText,
 } from '../src/utils/chat-rules';
 import { RULE_READING_ROLES, formatRulesBlock } from '../src/utils/assistant-rules-prompt';
 
@@ -77,6 +77,25 @@ async function main() {
         assert.match(off?.blocked ?? '', /already switched off/);
         const long = await resolveRuleProposal(fakeDb(), 1, 5, 'blog_writer', { action: 'add', ruleId: null, ruleText: 'x'.repeat(RULE_TEXT_MAX + 1), platform: null });
         assert.match(long?.blocked ?? '', /at most 300/);
+    });
+    await check('an over-long rule is condensed before the card, not refused (user had to ask again each time)', async () => {
+        const long = 'Always '.repeat(60);
+        let calls = 0;
+        const fits = await shortenRuleText(long, async () => { calls++; return '"Lead pillar posts with a real customer story."'; });
+        assert.strictEqual(fits, 'Lead pillar posts with a real customer story.');
+        assert.strictEqual(calls, 1);
+        // still too long once → a second try
+        calls = 0;
+        const second = await shortenRuleText(long, async () => (++calls === 1 ? 'y'.repeat(RULE_TEXT_MAX + 5) : 'Short now.'));
+        assert.strictEqual(second, 'Short now.');
+        // never fits, or the call fails → null, and the card's refusal stands
+        assert.strictEqual(await shortenRuleText(long, async () => 'z'.repeat(RULE_TEXT_MAX + 1)), null);
+        assert.strictEqual(await shortenRuleText(long, async () => { throw new Error('down'); }), null);
+        // text that fits is untouched and costs no call
+        assert.strictEqual(await shortenRuleText('No hashtags', async () => { throw new Error('should not be called'); }), 'No hashtags');
+        const orch = read('netlify/functions/chat-orchestrator.ts');
+        const at = orch.indexOf('shortenRuleText(ruleReq.ruleText');
+        assert.ok(at > 0 && at < orch.indexOf('ruleCard = await resolveRuleProposal('), 'the orchestrator shortens before resolving the card');
     });
     await check('a platform is kept only for the Social Media Assistant', async () => {
         const smm = await resolveRuleProposal(fakeDb(), 1, 5, 'social_media_manager', { action: 'add', ruleId: null, ruleText: 'No hashtags', platform: 'linkedin' });

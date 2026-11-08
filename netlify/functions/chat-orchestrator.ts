@@ -91,7 +91,7 @@ import { buildDiscussionsChatBlock } from '../../src/utils/discussions';
 import {
     assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
 } from '../../src/utils/chat-assistant-settings';
-import { buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, type RuleCard } from '../../src/utils/chat-rules';
+import { RULE_TEXT_MAX, buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, shortenRuleText, type RuleCard } from '../../src/utils/chat-rules';
 import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, resolveTeamGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
@@ -3842,6 +3842,20 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // from content_rules; the click calls content-rules.ts, the endpoint the Do's and don'ts card uses.
         let ruleCard: RuleCard | null = null;
         const ruleReq = route !== defaultRoute && !settingsReq ? ruleProposalFromUiElement(uiElement) : null;
+        if (ruleReq?.ruleText && ruleReq.ruleText.length > RULE_TEXT_MAX) {
+            // The model can't count characters — condense an over-long rule rather than hand the user
+            // a refused card to ask again (shortenRuleText). If that fails the card still refuses it.
+            const shorter = await shortenRuleText(ruleReq.ruleText, async (system, user) => {
+                const res = await anthropic.messages.create({ model: DEFAULT_MODEL, max_tokens: 300, system, messages: [{ role: 'user', content: user }] });
+                void logAiUsage({
+                    workspaceId: orgId, userId, assistantId: assistantRow.id, model: DEFAULT_MODEL,
+                    inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens,
+                    sessionId: `chat:${session.id}:rule-shorten`, dataCategories: ['business_context'],
+                });
+                return res.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
+            });
+            if (shorter) ruleReq.ruleText = shorter;
+        }
         if (ruleReq) {
             ruleCard = await resolveRuleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, ruleReq);
             uiElement = ruleCard;
