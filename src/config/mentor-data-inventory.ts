@@ -51,6 +51,9 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('always', 'Its track record: accepted suggestions and what happened since (§5.3)', ['mentor_outcomes'], 'What changed since you accepted its suggestions'),
     ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus', 'chat_task_tally']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),
+    // The active pillars' NAMES already reach the Mentor every turn, as the derived content_pillars
+    // set-up answer on ai_assistants. The records add descriptions and switched-off pillars.
+    ...group('on_request', 'A Social Media assistant\'s content pillars with their descriptions (the names are in its set-up answers)', ['content_pillars']),
     ...group('on_request', 'Results: goal measurements and post performance', ['goal_telemetry', 'post_insights', 'manual_follower_counts']),
     // Phase 3b (§5.2): read by src/utils/mentor-customers.ts — in chat when the user asks about their
     // customers, and always in the weekly review and on the Customers panel. Only while the assistant

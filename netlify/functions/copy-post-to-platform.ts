@@ -302,6 +302,7 @@ export default withLambda(async (event) => {
             utmParams: source.utmParams,
             campaign: source.campaign,
             pillar: source.pillar,
+            pillarId: source.pillarId,
             // The user's own disclosure choice travels with the post — re-deciding it per copy would
             // silently re-enable a footer they had turned off.
             disclosureFooterDisabled: source.disclosureFooterDisabled,

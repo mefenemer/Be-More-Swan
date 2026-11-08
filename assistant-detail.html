@@ -1718,14 +1718,18 @@
         </div>
         <div>
           <div class="flex items-center justify-between mb-1">
-            <label for="edit_pillars" class="block text-sm font-bold text-gray-700" data-explain="content-pillars">Content Pillars / Core Topics</label>
+            <h4 id="pillars-heading" class="block text-sm font-bold text-gray-700" data-explain="content-pillars">Content Pillars</h4>
             <button type="button" onclick="window._magicWand('content_pillars','edit_pillars', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-800 hover:text-emerald-700 cursor-pointer">
               <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
             </button>
           </div>
-          <textarea id="edit_pillars" rows="2" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden" placeholder="E.g., Growth hacking, Leadership, Behind the scenes…"></textarea>
-          <div id="pillars-chips" class="flex flex-wrap gap-1.5 mt-2"></div>
-          <p class="text-xs text-gray-500 mt-1">Up to 5 short themes, separated by commas or one per line. Your assistant rotates between them so each one gets its turn.</p>
+          <p class="text-xs text-gray-500 mb-2">Up to 5 short themes switched on. Your assistant rotates between them so each one gets its turn. Add a description to say what belongs under a pillar.</p>
+          <!-- One record per pillar (src/components/pillar-list.js → netlify/functions/content-pillars.ts).
+               #edit_pillars stays as a HIDDEN carrier of the names: the AI wand and Review Progress's
+               strategy fix write pillar text into it, and the autosave hands that to the server, which
+               reconciles the records. Nobody types in it. -->
+          <div id="pillars-list" aria-labelledby="pillars-heading"></div>
+          <textarea id="edit_pillars" class="hidden" aria-hidden="true" tabindex="-1"></textarea>
         </div>
       </div>
     </div>

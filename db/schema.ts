@@ -1952,6 +1952,8 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   isAutonomous: boolean("is_autonomous").default(false).notNull(),
   campaign: text("campaign"),
   pillar: text("pillar"),
+  // The pillar record this post was drafted under (db/z-content-pillars.sql). `pillar` keeps the name.
+  pillarId: integer("pillar_id").references(() => contentPillars.id, { onDelete: "set null" }),
 
   rejectedAt: timestamp("rejected_at"),
   rejectionReason: text("rejection_reason"),
@@ -6786,3 +6788,21 @@ export const signupSources = pgTable("signup_sources", {
   campaign: text("campaign").notNull().default(""),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// A Social Media assistant's content pillars, one row each (db/z-content-pillars.sql,
+// src/utils/content-pillars-store.ts). The TRUTH: onboarding_context.content_pillars is derived from
+// the active rows. Archived, never deleted, so posts keep their pillar_id.
+export const contentPillars = pgTable("content_pillars", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  archivedAt: timestamp("archived_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("content_pillars_assistant_idx").on(t.assistantId, t.sortOrder),
+]);

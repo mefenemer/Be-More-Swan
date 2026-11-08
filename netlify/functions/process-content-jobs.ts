@@ -24,7 +24,7 @@ import { gatewayGenerate, isUpstreamBlocked } from '../../src/lib/ai-gateway';
 import { explainGenerationFailure } from '../../src/utils/generation-failure';
 import { voiceDirective, findNeverSay, normaliseVoice } from '../../src/utils/voice-profile';
 import { socialShapeLine } from '../../src/utils/content-shapes';
-import { parsePillars } from '../../src/public/content-pillars.js';
+import { loadDraftPillars, pillarPromptText } from '../../src/utils/content-pillars-store';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { pickInspoTopic } from '../../src/utils/inspo-topics';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
@@ -465,9 +465,11 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // Read LIVE from the profile first (like brand hashtags): `answers` is the compiled snapshot,
         // and a job queued before a pillar was added carries the old list until it is drafted.
         const rawPillars = brandCtx.content_pillars ?? answers['content_pillars'];
-        // The SHARED splitter (src/public/content-pillars.js) — the profile's chips use the same one,
-        // so what the owner sees as five pillars is what drafting rotates through.
-        const pillarList = parsePillars(rawPillars);
+        // The pillar RECORDS (src/utils/content-pillars-store.ts): the active rows, with their ids and
+        // descriptions. Until the assistant has rows, the old text split by the SHARED splitter
+        // (src/public/content-pillars.js), so what the owner sees is what drafting rotates through.
+        const draftPillars = await loadDraftPillars(db, job.organisation_id, job.assistant_id, { content_pillars: rawPillars });
+        const pillarList = draftPillars.map((p) => p.name);
         // Variety: rotate the pillar by the slot's calendar day instead of letting every slot pick the
         // same (strongest) pillar. Day-of-epoch % pillarCount walks the pillars across the calendar, so
         // consecutive scheduled posts land on different themes with no cross-job coordination needed.
@@ -501,23 +503,29 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             const dayIndex = Math.floor(new Date(job.target_publish_date).getTime() / 86_400_000);
             let counts: number[] | null = null;
             try {
+                // By pillar_id where the post has one, so a renamed pillar keeps its count; by name
+                // for posts drafted before records (or before the backfill linked them).
                 const used = await db
-                    .select({ pillar: scheduledPosts.pillar, n: sql<number>`count(*)::int` })
+                    .select({ pillarId: scheduledPosts.pillarId, pillar: scheduledPosts.pillar, n: sql<number>`count(*)::int` })
                     .from(scheduledPosts)
                     .where(and(
                         eq(scheduledPosts.assistantId, job.assistant_id),
                         isNotNull(scheduledPosts.pillar),
                         sql`${scheduledPosts.createdAt} > now() - interval '60 days'`,
                     ))
-                    .groupBy(scheduledPosts.pillar);
-                counts = pillarList.map((p) => used.find((u) => u.pillar === p)?.n ?? 0);
+                    .groupBy(scheduledPosts.pillarId, scheduledPosts.pillar);
+                counts = draftPillars.map((p) => used
+                    .filter((u) => (p.id !== null && u.pillarId === p.id) || (u.pillarId === null && u.pillar === p.name))
+                    .reduce((n, u) => n + u.n, 0));
             } catch { /* fall back to plain rotation */ }
             rotatedPillar = pickPillarForSlot(pillarList, counts, dayIndex);
         }
+        // The owner's description says what belongs under a pillar; the model returns the NAME only.
+        const rotatedDescription = rotatedPillar ? draftPillars.find((p) => p.name === rotatedPillar)?.description : null;
         const pillarLine = rotatedPillar
-            ? `Content Pillar for THIS post — write it under this pillar and return it verbatim in the "pillar" field: "${rotatedPillar}". Do NOT drift to another pillar; rotating pillars across the calendar is what keeps the feed varied.`
+            ? `Content Pillar for THIS post — write it under this pillar and return its name verbatim in the "pillar" field: "${rotatedPillar}".${rotatedDescription ? ` What the owner puts under this pillar: ${rotatedDescription}` : ''} Do NOT drift to another pillar; rotating pillars across the calendar is what keeps the feed varied.`
             : (pillarList.length
-                ? `Content Pillars (categorise this post under EXACTLY ONE, returned verbatim in the "pillar" field): ${pillarList.map(p => `"${p}"`).join(', ')}.`
+                ? `Content Pillars (categorise this post under EXACTLY ONE, returning only its name, verbatim, in the "pillar" field): ${draftPillars.map(pillarPromptText).join(', ')}.`
                 : '');
 
         // Batch-internal variety: assign each slot a DIFFERENT opening-hook style so the parallel
@@ -941,6 +949,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const resolvedPillar = generated.pillar && pillarList.includes(generated.pillar)
             ? generated.pillar
             : (pillarList.length === 1 ? pillarList[0] : null);
+        const resolvedPillarId = resolvedPillar ? (draftPillars.find((p) => p.name === resolvedPillar)?.id ?? null) : null;
 
         // AC5: for reels/video, fold the shot script + on-screen text into the media brief the
         // user reviews, so the creative direction travels with the draft (no new column needed).
@@ -967,6 +976,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             postFormat: isYoutubeShort ? SHORT_POST_FORMAT : format,
             ...(isYoutubeShort ? { formatKey: SHORT_FORMAT_KEY } : {}),
             pillar: resolvedPillar,
+            pillarId: resolvedPillarId,
             // Scheduled jobs carry the exact slot to publish at (from the posting schedule); other
             // jobs (on-demand, conversion, admin-test) keep the legacy "tomorrow" default.
             publishDate: job.target_publish_date ? new Date(job.target_publish_date) : new Date(now.getTime() + 24 * 60 * 60 * 1000),
@@ -1274,7 +1284,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             try {
                 const [primary] = await db.select({
                     suggestedMediaDescription: scheduledPosts.suggestedMediaDescription,
-                    pillar: scheduledPosts.pillar, postFormat: scheduledPosts.postFormat,
+                    pillar: scheduledPosts.pillar, pillarId: scheduledPosts.pillarId, postFormat: scheduledPosts.postFormat,
                     publishDate: scheduledPosts.publishDate, contentAssetIds: scheduledPosts.contentAssetIds,
                     crosspostGroupId: scheduledPosts.crosspostGroupId,
                 }).from(scheduledPosts).where(eq(scheduledPosts.id, post.id)).limit(1);
@@ -1292,7 +1302,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                         const [sibling] = await db.insert(scheduledPosts).values({
                             userId: job.user_id, organisationId: job.organisation_id, assistantId: job.assistant_id,
                             blueprintId: job.blueprint_id, jobId: job.job_id,
-                            platform: siblingPlatform, postFormat: primary?.postFormat ?? format, pillar: primary?.pillar ?? null,
+                            platform: siblingPlatform, postFormat: primary?.postFormat ?? format, pillar: primary?.pillar ?? null, pillarId: primary?.pillarId ?? null,
                             publishDate: primary?.publishDate ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),
                             caption: siblingFit.caption || null, hashtags: siblingFit.hashtags || null,
                             suggestedMediaDescription: primary?.suggestedMediaDescription ?? null,

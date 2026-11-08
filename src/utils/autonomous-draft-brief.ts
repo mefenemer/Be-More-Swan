@@ -124,6 +124,8 @@ export function buildAutonomousDraftSystem(args: {
     platformLabel: string;
     onboardingContext: unknown;
     pillar: string | null;
+    /** What the owner puts under this pillar (its record's description), when they said. */
+    pillarDescription?: string | null;
     slot: Date;
 }): string {
     const c = (args.onboardingContext ?? {}) as Ctx;
@@ -139,7 +141,7 @@ export function buildAutonomousDraftSystem(args: {
         ].join('\n'),
     ];
     if (args.pillar) {
-        parts.push(`Content Pillar for THIS post — write it under this pillar: "${args.pillar}".`);
+        parts.push(`Content Pillar for THIS post — write it under this pillar: "${args.pillar}".${args.pillarDescription ? ` What the owner puts under this pillar: ${text(args.pillarDescription, 300)}` : ''}`);
     }
     parts.push(voiceDirective(c.tone_of_voice, { surface: 'social', fallback: 'professional', voice: c.voice }));
     parts.push(CONTENT_QUALITY_STANDARDS);
