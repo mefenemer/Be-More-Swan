@@ -53,7 +53,7 @@ import { campaignDraftFromUiElement, NEWSLETTER_CAMPAIGN_DRAFT_TYPE } from '../.
 import { campaignCadencePromptBlock } from '../../src/config/email-campaign-cadences';
 import { formDraftFromUiElement, AUDIENCE_FORM_DRAFT_TYPE } from '../../src/utils/form-chat-draft';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { parseModelJson, stripCodeFences } from '../../src/utils/model-json';
+import { parseModelJson, splitProseAndCard, stripCodeFences } from '../../src/utils/model-json';
 
 import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { voiceDirective } from '../../src/utils/voice-profile';
@@ -455,6 +455,10 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
         // One card per reply. Several used to be dropped together, with nothing said (below).
         return { content: extra ? `${content}\n\n${MORE_CARDS_NOTE}` : content, uiElement: card };
     }
+
+    // Prose, then the card as a bare object (no envelope): keep both, never show the JSON.
+    const split = splitProseAndCard(raw);
+    if (split) return { content: split.prose, uiElement: split.card };
 
     // Unparseable. Never show raw JSON scaffolding to the user: if this was clearly a
     // (broken) structured attempt, degrade to a friendly retry line; only genuine
@@ -1876,7 +1880,7 @@ FACTS. Never put a fact on their site that is not in their business details, the
 
 ${SITE_COPY_CRAFT}
 
-CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short "summary" of what changes, and "ops" — the changes, in order, using ONLY pageIds and sectionIds listed above. They land together or not at all. The operations:
+CHANGING THE SITE. When they ask for a change, emit a site_changes card: a short "summary" of what changes, and "ops" — the changes, in order, using ONLY pageIds and sectionIds listed above — except a page you add in the same card, which has no id yet: name it by the "slug" you gave its add_page (e.g. add_page slug "retirement-coaching", then add_section pageId "retirement-coaching"). They land together or not at all. The operations:
 - {"op":"add_page","title":"...","slug":"..."}   (no plan limits how many pages a site has)
 - {"op":"update_page","pageId":"...","title":"...","slug":"...","seo":{"title":"...","description":"..."},"hideFromMenu":true|false}   (any subset; hideFromMenu keeps a page — e.g. a landing page for an ad — out of the menu but reachable by its address; never the home page)
 - {"op":"remove_page","pageId":"..."}   (never the home page)
@@ -4270,8 +4274,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
         // The Website Assistant can't make, find or place a picture in a reply — only its site_picture
         // card can, on a click (staging 2026-11-05: "I'm generating it now… I'll add it", then nothing).
+        // Beside ANOTHER card (a site_changes that removes a picture, say) the canned "I can't make a
+        // picture from a message" answered nothing she asked (prod 2026-11-08, org 40): point at that card.
         if (assistantRow.roleKey === 'website_assistant') {
-            content = pictureReply(content, !!uiElement && (uiElement as { type?: unknown }).type === 'site_picture');
+            const cardType = (uiElement as { type?: unknown } | null)?.type;
+            if (uiElement && cardType !== 'site_picture') {
+                if (replyClaimsPicture(content)) content = 'Here it is — nothing changes until you confirm on the card below.';
+            } else {
+                content = pictureReply(content, cardType === 'site_picture');
+            }
         }
         if (postPartCard?.type === POST_PICTURE_TYPE) content = pictureReply(content, true);
         if (emailPartCard?.type === EMAIL_PICTURE_TYPE && replyClaimsPicture(content)) content = 'Here it is: press the button on the card below to choose a picture. Nothing changes until you do.';
@@ -4297,13 +4308,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // card that opens the Help & Support form. The chat never books a call itself. A reply that
         // already carries a card keeps it — the prompt line below has the model mention the option.
         if (!uiElement && asksForACall(typed)) uiElement = callbackOfferElement();
-        // The Mentor's reply never points at a card that isn't there (confirm-card-reply.ts, rubric W6).
-        if (route === ROUTES.business_mentor) {
+        // No reply points at a card that isn't there (confirm-card-reply.ts, rubric W6). Mentor-only until
+        // prod 2026-11-07 (org 40, Social Media): "confirm on the card below", no card, then "Sorry, it
+        // didn't come through last time. Here it is now" — still none. Every route now.
+        {
             const fixed = missingCardReply(content, !!uiElement);
             if (fixed !== content) {
                 // Which way the card was lost: the model sent none, sent a shape the server refused, or wrote prose, not JSON.
                 const sent = (parsed.uiElement as { type?: unknown } | null)?.type;
-                console.warn('[chat-orchestrator] mentor reply points at a card that was not drawn', { sentType: typeof sent === 'string' ? sent : null, replyWasJson: raw.trimStart().startsWith('{'), length: raw.length, end: raw.slice(-200) });
+                console.warn('[chat-orchestrator] reply points at a card that was not drawn', { role: assistantRow.roleKey, sentType: typeof sent === 'string' ? sent : null, replyWasJson: raw.trimStart().startsWith('{'), length: raw.length, end: raw.slice(-200) });
             }
             content = fixed;
         }

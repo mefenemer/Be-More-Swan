@@ -72,11 +72,11 @@ check('prod 2026-10-26: a reply that points at a change below without saying "ca
     }
 });
 
-check('W6: the Mentor route applies the guard after the last card decision', () => {
+check('W6: every route (the Mentor included) applies the guard after the last card decision', () => {
     const at = ORCH.indexOf('const fixed = missingCardReply(content, !!uiElement);');
     assert.ok(at > 0);
     assert.ok(at > ORCH.indexOf('if (!uiElement && asksForACall(typed)) uiElement = callbackOfferElement();'));
-    assert.match(ORCH, /if \(route === ROUTES\.business_mentor\) \{\s*const fixed = missingCardReply/);
+    assert.match(ORCH, /\{\s*const fixed = missingCardReply/); // every route since prod 2026-11-07 (org 40)
 });
 
 check('W9: the shared rule only names the call-back button when it is really shown', () => {

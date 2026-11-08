@@ -1007,6 +1007,14 @@ export function applySiteOperation(def: SiteDefinition, op: SiteOperation, opts:
 function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseOptions): OperationResult {
     const maxPages = Math.max(1, opts.maxPages ?? DEFAULT_MAX_PAGES);
     const next: SiteDefinition = JSON.parse(JSON.stringify(def));
+    // A page added earlier in the same card has no id the model could know, so it is named by its
+    // address: add_page "retirement-coaching", then add_section pageId "retirement-coaching" (prod
+    // 2026-11-08, org 40 — the whole landing page was refused with "That page no longer exists").
+    // An id always wins; the address is only tried when no page has that id. Never the home page ('').
+    const byIdOrSlug = (ref: unknown) => typeof ref !== 'string' ? undefined
+        : next.pages.find((p) => p.id === ref) ?? next.pages.find((p) => p.slug !== '' && p.slug === slugify(ref.replace(/^\//, '')));
+    if ('pageId' in op) { const found = byIdOrSlug(op.pageId); if (found) op = { ...op, pageId: found.id } as SiteOperation; }
+    if (op.op === 'move_section' && op.toPageId) { const found = byIdOrSlug(op.toPageId); if (found) op = { ...op, toPageId: found.id }; }
     const page = 'pageId' in op ? next.pages.find((p) => p.id === op.pageId) : undefined;
     if ('pageId' in op && !page) return { ok: false, error: 'That page no longer exists.' };
     const sectionIndex = page && 'sectionId' in op ? page.sections.findIndex((s) => s.id === op.sectionId) : -1;

@@ -75,6 +75,30 @@ export function parseModelJson<T = Record<string, unknown>>(raw: string): T | nu
 }
 
 /**
+ * Prose followed by a bare card object — `…Nothing changes until you approve it.\n\n{"type":"site_changes",…}`
+ * — instead of the {"reply","uiElement"} envelope. Prod 2026-11-08 (org 40, Website Assistant): three
+ * replies came back this way; the parser found no "reply", saw prose first, and showed the whole
+ * thing, raw JSON included, with no card. Returns the prose and the card when the object is a card
+ * (has a string "type") and is the last thing in the reply; null otherwise.
+ */
+export function splitProseAndCard(raw: string): { prose: string; card: Record<string, unknown> } | null {
+    const text = stripCodeFences(raw);
+    const at = text.search(/\{\s*"type"\s*:/);
+    if (at <= 0) return null;
+    const objText = balancedObject(text.slice(at));
+    if (!objText) return null;
+    const rest = text.slice(at + objText.length).replace(/```/g, '').trim();
+    if (rest) return null;
+    let card: unknown = null;
+    try { card = JSON.parse(objText); } catch {
+        try { card = JSON.parse(escapeControlCharsInStrings(objText)); } catch { return null; }
+    }
+    if (!card || typeof card !== 'object' || Array.isArray(card) || typeof (card as { type?: unknown }).type !== 'string') return null;
+    const prose = text.slice(0, at).replace(/```[a-z]*\s*$/i, '').trim();
+    return prose ? { prose, card: card as Record<string, unknown> } : null;
+}
+
+/**
  * Escape raw newlines, carriage returns and tabs that sit INSIDE JSON string literals, leaving the
  * whitespace between tokens alone. String/escape aware, so an already-escaped `\n` is untouched.
  */

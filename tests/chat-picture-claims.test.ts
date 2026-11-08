@@ -38,7 +38,7 @@ check('with the card the reply points at it; without, it says plainly nothing wa
 
 check('the orchestrator applies it to the Website Assistant, and the prompt asks for the card at once', () => {
     const chat = readFileSync(path.resolve(__dirname, '../netlify/functions/chat-orchestrator.ts'), 'utf8');
-    assert.ok(chat.includes("content = pictureReply(content, !!uiElement && (uiElement as { type?: unknown }).type === 'site_picture');"));
+    assert.ok(chat.includes("content = pictureReply(content, cardType === 'site_picture');"));
     assert.ok(chat.includes('emit a site_picture card straight away'));
     assert.ok(chat.includes('NEVER say you are creating, generating, finding or adding it'));
 });
