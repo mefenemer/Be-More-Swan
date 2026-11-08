@@ -277,6 +277,9 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
             return { statusCode: 200, headers: headers('text/html; charset=utf-8', cache), body: event.httpMethod === 'HEAD' ? '' : renderSiteBlogIndex(definition, blogCtx, data) };
         }
         const post = await loadSiteBlogPost(db, site.organisationId, blogRoute.slug, origin, origins);
+        // An imported post's old /blog/<old-slug> that now lives at another /blog/<slug> (site-import-blog.ts).
+        const movedPost = post ? null : redirectFor(definition, path);
+        if (movedPost && movedPost !== path) return { statusCode: 301, headers: { Location: movedPost, 'Cache-Control': 'public, max-age=3600' } as Record<string, string>, body: '' };
         if (!post) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
         return { statusCode: 200, headers: headers('text/html; charset=utf-8', cache), body: event.httpMethod === 'HEAD' ? '' : renderSiteBlogPost(definition, blogCtx, post) };
     }

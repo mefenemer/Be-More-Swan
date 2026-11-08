@@ -8,9 +8,9 @@
 // It never publishes. It shares the draft claim (sites.drafting_at) with the AI whole-site draft, so
 // only one of the two runs at a time, and spends tasks the same way: 1 task, only once a draft exists.
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, contentAssets, organisations, siteImports, sites } from '../../db/schema';
+import { aiAssistants, blogPosts, contentAssets, masterAssistants, organisations, siteImports, sites } from '../../db/schema';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
 import { persistBufferToR2, r2IsConfigured } from '../lib/media-persist';
@@ -18,7 +18,8 @@ import { CRAWLERS } from '../lib/robots';
 import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
 import { safeFetchBinary } from './safe-fetch';
-import { normaliseSiteDefinition, type SiteDefinition } from './site-definition';
+import { BLOG_PATH, normaliseSiteDefinition, type SiteDefinition, type SiteRedirect } from './site-definition';
+import { blogSummary, type ImportedBlog, type ImportedBlogPost, type ImportedBlogSummary } from './site-import-blog';
 import { fetchSiteCss, fetchSiteHtml, fetchSiteJson } from './site-fetch';
 import { themeWithLook } from './site-import-theme';
 import { createPageRenderer, type PageRenderer } from './site-js-render';
@@ -46,7 +47,8 @@ export interface ImportView {
     sourceUrl: string;
     pictures: PictureChoice;
     message: string | null;
-    report: ImportReport | null;
+    /** The report, with the blog's posts as a summary (titles, dates, sizes) — never their bodies. */
+    report: (Omit<ImportReport, 'blog'> & { blog?: ImportedBlogSummary | null }) | null;
     pages: Array<{ title: string; path: string; sections: number }>;
     updatedAt: Date;
 }
@@ -89,10 +91,16 @@ export function importView(row: SiteImportRow | null): ImportView | null {
     const def = row.definition as SiteDefinition | null;
     return {
         status: row.status as ImportView['status'], sourceUrl: row.sourceUrl, pictures: row.pictures as PictureChoice,
-        message: row.message, report: (row.report as ImportReport | null) ?? null,
+        message: row.message, report: reportView(row.report as ImportReport | null),
         pages: Array.isArray(def?.pages) ? def!.pages.map((p) => ({ title: p.title, path: p.slug ? `/${p.slug}` : '/', sections: p.sections.length })) : [],
         updatedAt: row.updatedAt,
     };
+}
+
+function reportView(r: ImportReport | null): ImportView['report'] {
+    if (!r) return null;
+    const { blog, ...rest } = r;
+    return { ...rest, blog: blogSummary(blog) };
 }
 
 /**
@@ -232,19 +240,98 @@ export async function runSiteImport(db: Db, siteId: number): Promise<void> {
  * takes their old site's look (colours, lettering, corners) when the import read one — else keeps
  * the design they have now — and the imported logo only where they have none. Nothing goes live.
  */
-export async function acceptImport(db: Db, site: SiteRow, maxPages: number): Promise<{ ok: true; site: SiteRow; warnings: string[] } | { ok: false; status: number; error: string }> {
+export async function acceptImport(db: Db, site: SiteRow, maxPages: number, userId: number | null = null): Promise<{ ok: true; site: SiteRow; warnings: string[]; blogPosts: number } | { ok: false; status: number; error: string }> {
     const row = await loadImport(db, site.id);
     if (!row || row.status !== 'ready' || !row.definition) return { ok: false, status: 404, error: 'There\'s no imported site waiting to be used.' };
     const current = definitionOf(site, maxPages).definition;
     const imported = normaliseSiteDefinition(row.definition, { maxPages });
     const logoAssetId = current.theme.logoUrl || current.theme.logoAssetId ? current.theme.logoAssetId ?? null : imported.definition.theme.logoAssetId ?? null;
-    const look = (row.report as ImportReport | null)?.look ?? null;
+    const report = row.report as ImportReport | null;
+    const look = report?.look ?? null;
     const theme = look ? themeWithLook(current.theme, look) : current.theme;
-    const merged = normaliseSiteDefinition({ ...imported.definition, theme: { ...theme, logoAssetId } }, { maxPages });
+    // Posts from their old blog become Blog Assistant drafts first, so their final addresses are known
+    // for the redirects. A second press (or a re-import) finds them by their old address: no doubles.
+    const owner = userId ?? row.requestedBy ?? null;
+    const posts = report?.blog?.posts?.length && owner ? await importBlogDrafts(db, site.organisationId, owner, report.blog) : null;
+    const blogOnNow = posts?.redirects.length ? { blog: { enabled: true, menuLabel: imported.definition.settings.blog?.enabled ? imported.definition.settings.blog.menuLabel : (report?.blog?.label || 'Blog') } } : {};
+    const merged = normaliseSiteDefinition({
+        ...imported.definition, theme: { ...theme, logoAssetId },
+        settings: { ...imported.definition.settings, ...blogOnNow },
+        redirects: [...(imported.definition.redirects ?? []), ...(posts?.redirects ?? [])],
+    }, { maxPages });
     const checked = await verifySiteAssets(db, site.organisationId, merged.definition);
     const [saved] = await db.update(sites).set({ draft: checked.definition, updatedAt: new Date() }).where(eq(sites.id, site.id)).returning();
     await db.delete(siteImports).where(eq(siteImports.siteId, site.id));
-    return { ok: true, site: saved, warnings: [...new Set([...merged.warnings, ...checked.warnings])] };
+    const blogNote = posts ? blogAcceptNote(posts) : [];
+    return { ok: true, site: saved, warnings: [...new Set([...blogNote, ...merged.warnings, ...checked.warnings])], blogPosts: posts?.added ?? 0 };
+}
+
+function blogAcceptNote(p: { added: number; already: number; failed: number; assistant: string | null }): string[] {
+    const out: string[] = [];
+    if (p.added) out.push(`${p.added} post${p.added === 1 ? '' : 's'} from your old blog ${p.added === 1 ? 'is' : 'are'} waiting as draft${p.added === 1 ? '' : 's'} in ${p.assistant ? `${p.assistant}'s Review tab` : 'your Review list'} — nothing is published until you publish ${p.added === 1 ? 'it' : 'them'}. Each old post address goes to its new one once it's published.`);
+    if (p.already) out.push(`${p.already} post${p.already === 1 ? ' was' : 's were'} already in your Blog Assistant, so ${p.already === 1 ? 'it wasn\'t' : 'they weren\'t'} added again.`);
+    if (p.failed) out.push(`${p.failed} post${p.failed === 1 ? '' : 's'} couldn't be saved — add ${p.failed === 1 ? 'it' : 'them'} in the Blog Assistant.`);
+    return out;
+}
+
+/** The address an imported post may have: its own, unless another post (any status) holds it. */
+export function freeBlogSlug(wanted: string, taken: Set<string>): string {
+    const base = (wanted || 'post').slice(0, 76).replace(/-+$/, '') || 'post';
+    let s = wanted && !taken.has(wanted) ? wanted : base;
+    let n = 2;
+    while (taken.has(s)) s = `${base}-${n++}`;
+    return s;
+}
+
+/**
+ * The old blog's posts as Blog Assistant DRAFTS, owned by the person who pressed "Use this as my
+ * draft", on the workspace's Blog Assistant when it has one (its Review tab lists them). Their own
+ * words, so no generation_reason (they are not AI-written — blog-ai-assisted.ts). canonical_url keeps
+ * the old address until publishing stamps the new one (blog-publish.ts). Never throws.
+ */
+export async function importBlogDrafts(db: Db, orgId: number, userId: number, blog: ImportedBlog): Promise<{ added: number; already: number; failed: number; assistant: string | null; redirects: SiteRedirect[] }> {
+    const out = { added: 0, already: 0, failed: 0, assistant: null as string | null, redirects: [] as SiteRedirect[] };
+    try {
+        const [assistant] = await db.select({ id: aiAssistants.id, name: aiAssistants.name }).from(aiAssistants)
+            .innerJoin(masterAssistants, eq(masterAssistants.id, aiAssistants.masterAssistantId))
+            .where(and(eq(aiAssistants.organisationId, orgId), eq(masterAssistants.roleKey, 'blog_writer'), ne(aiAssistants.lifecycleStatus, 'archived')))
+            .orderBy(aiAssistants.id).limit(1);
+        out.assistant = assistant?.name ?? null;
+        const existing = await db.select({ slug: blogPosts.slug, canonicalUrl: blogPosts.canonicalUrl, status: blogPosts.status }).from(blogPosts).where(eq(blogPosts.organisationId, orgId));
+        const taken = new Set(existing.map((r) => r.slug).filter((x): x is string => !!x));
+        const bySource = new Map(existing.filter((r) => r.canonicalUrl && r.slug && r.status !== 'archived').map((r) => [r.canonicalUrl!, r.slug!]));
+        // Feature pictures must still be this workspace's (they were copied into it by the import).
+        const pictureIds = [...new Set(blog.posts.map((p) => p.featureAssetId).filter((x): x is number => !!x))];
+        const ours = new Set(pictureIds.length ? (await db.select({ id: contentAssets.id }).from(contentAssets)
+            .where(and(eq(contentAssets.organisationId, orgId), inArray(contentAssets.id, pictureIds)))).map((r) => r.id) : []);
+        const redirect = (p: ImportedBlogPost, slug: string) => {
+            const to = `${BLOG_PATH}/${slug}`;
+            if (p.fromPath !== to) out.redirects.push({ from: p.fromPath, to });
+        };
+        for (const p of blog.posts) {
+            const had = bySource.get(p.sourceUrl);
+            if (had) { out.already++; redirect(p, had); continue; }
+            const slug = freeBlogSlug(p.slug, taken);
+            try {
+                await db.insert(blogPosts).values({
+                    organisationId: orgId, userId, ownerId: userId, assistantId: assistant?.id ?? null,
+                    title: p.title.slice(0, 200), bodyMarkdown: p.bodyMarkdown, slug,
+                    metaDescription: p.excerpt, tags: p.tags, canonicalUrl: p.sourceUrl,
+                    featureAssetId: p.featureAssetId && ours.has(p.featureAssetId) ? p.featureAssetId : null,
+                    status: 'draft',
+                });
+                taken.add(slug);
+                out.added++;
+                redirect(p, slug);
+            } catch (err) {
+                out.failed++;
+                console.error('[site-import] blog post not saved', { orgId, url: p.sourceUrl.slice(0, 200), message: err instanceof Error ? err.message : String(err) });
+            }
+        }
+    } catch (err) {
+        console.error('[site-import] blog posts not imported', { orgId, message: err instanceof Error ? err.message : String(err) });
+    }
+    return out;
 }
 
 /** "Discard": the imported draft goes; copied pictures stay in their library. */
@@ -265,7 +352,14 @@ export function describeImportForChat(imp: ImportView | null, drafting: boolean)
     if (imp.status === 'reading' && drafting) return `Import of their current site: reading ${imp.sourceUrl} right now — the imported draft appears on the Website tab in a minute or two.`;
     if (imp.status === 'ready') {
         const r = imp.report;
-        return `Import of their current site: an imported DRAFT from ${imp.sourceUrl} is READY for review and has NOT replaced their draft — ${imp.pages.map((p) => `"${p.title}" (${p.path}, ${p.sections} sections)`).join(', ')}; ${r?.wordsRead ?? 0} of their words read; pictures ${imp.pictures === 'copy' ? `copied: ${r?.pictures.copied ?? 0}` : 'left out (their choice)'}; prices found and NOT copied: ${r?.prices.length ?? 0}${r?.prices.length ? ` (${r.prices.slice(0, 5).map((x) => `"${x.slice(0, 80)}"`).join('; ')}) — they belong in Business Information ▸ Products & Services` : ''}; left out as clutter: ${r?.leftOut.length ?? 0}; their old site's look ${r?.look ? `read (main colour ${r.look.primaryColor ?? 'not found'}, lettering ${r.look.font ?? 'unchanged'}) — using the import sets it as the site's design` : 'not read — using the import keeps their current design'}. When they decide, a site_import_decision card ("use" or "discard").`;
+        return `Import of their current site: an imported DRAFT from ${imp.sourceUrl} is READY for review and has NOT replaced their draft — ${imp.pages.map((p) => `"${p.title}" (${p.path}, ${p.sections} sections)`).join(', ')}; ${r?.wordsRead ?? 0} of their words read; pictures ${imp.pictures === 'copy' ? `copied: ${r?.pictures.copied ?? 0}` : 'left out (their choice)'}; prices found and NOT copied: ${r?.prices.length ?? 0}${r?.prices.length ? ` (${r.prices.slice(0, 5).map((x) => `"${x.slice(0, 80)}"`).join('; ')}) — they belong in Business Information ▸ Products & Services` : ''}; left out as clutter: ${r?.leftOut.length ?? 0}; ${blogForChat(r?.blog ?? null)}their old site's look ${r?.look ? `read (main colour ${r.look.primaryColor ?? 'not found'}, lettering ${r.look.font ?? 'unchanged'}) — using the import sets it as the site's design` : 'not read — using the import keeps their current design'}. When they decide, a site_import_decision card ("use" or "discard").`;
     }
     return `Import of their current site: the last attempt (${imp.sourceUrl}) did not make a draft — ${imp.message ?? 'it failed'}`;
+}
+
+/** The old blog's posts, for the chat's line about a ready import. */
+function blogForChat(b: ImportedBlogSummary | null): string {
+    if (!b?.posts.length) return '';
+    const titles = b.posts.slice(0, 5).map((p) => `"${p.title.slice(0, 80)}"`).join('; ');
+    return `posts from their OLD BLOG (${b.indexUrl}): ${b.posts.length}${b.more ? ' (the newest; there were more)' : ''} (${titles}${b.posts.length > 5 ? '; …' : ''})${b.failed.length ? `, ${b.failed.length} couldn't be read` : ''} — using the import adds them to the Blog Assistant as DRAFTS (nothing is published; they review and publish each there), switches the site's blog on, and sends each old post address to /blog/<its address> once published; `;
 }

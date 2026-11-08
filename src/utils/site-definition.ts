@@ -791,14 +791,17 @@ export function redirectKey(path: string): string {
     return p || '/';
 }
 const REDIRECT_FROM = /^\/[a-z0-9\-._~%/!$&'()*+,;=:@]{1,200}$/;
-/** Redirects kept: an old address no page uses, to one of the site's pages; each old address once. */
+/** Redirects kept: an old address no page uses, to one of the site's pages (or a blog post, when the blog is on); each old address once. */
+/** One blog post's address on the site (site-blog.ts siteBlogRoute) — where an imported post's old address goes. */
+const BLOG_POST_TO = /^\/blog\/[a-z0-9][a-z0-9-]{0,99}$/;
 function cleanRedirects(v: unknown, pagePaths: Set<string>): SiteRedirect[] {
     const out: SiteRedirect[] = [];
     for (const x of Array.isArray(v) ? v : []) {
         const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
         const from = redirectKey(String(o.from ?? ''));
         const to = String(o.to ?? '');
-        if (!REDIRECT_FROM.test(from) || from.startsWith('/_') || pagePaths.has(from) || !pagePaths.has(to) || from === to) continue;
+        const toPost = pagePaths.has(BLOG_PATH) && BLOG_POST_TO.test(to);
+        if (!REDIRECT_FROM.test(from) || from.startsWith('/_') || pagePaths.has(from) || (!pagePaths.has(to) && !toPost) || from === to) continue;
         if (out.some((r) => r.from === from) || out.length >= LIMITS.redirects) continue;
         out.push({ from, to });
     }

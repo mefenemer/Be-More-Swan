@@ -29,6 +29,7 @@ import { inlineEmbeds, type EmbedFetchers } from './site-embeds';
 import { linkFirst, PLACEHOLDER, plainOf } from './site-rich-text';
 import { lookFound, readImportedLook, themeWithLook, type ImportedLook } from './site-import-theme';
 import { harvestBrandSignals } from './brand-extract';
+import { findBlogIndex, readImportedBlog, type BlogIndexSignal, type ImportedBlog } from './site-import-blog';
 
 /**
  * Pages read at most (home + menu pages), before the site's own page cap. Was 8 until 2026-11-08:
@@ -252,6 +253,12 @@ export interface ImportReport {
     placeholders: number;
     /** Their colours, lettering and corners as we read them (null = none read: their current design is kept). */
     look?: ImportedLook | null;
+    /**
+     * Posts from a blog on their old site (not the Blog Assistant's widget) — held here, bodies and
+     * all, until "Use this as my draft" makes them Blog Assistant drafts (site-import-store.ts
+     * acceptImport). The Website tab and the chat see only blogSummary() of it.
+     */
+    blog?: ImportedBlog | null;
 }
 
 export interface AssembleInput {
@@ -746,6 +753,11 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
     // copy: its posts are already ours, and the new site shows them at /blog. The blog is switched on
     // under their menu's word for it, and links to the old page go to /blog.
     let blog: { label: string; urls: string[] } | null = null;
+    // A blog on another platform (WordPress, Squarespace, Wix, Ghost): its index page isn't copied as
+    // a page either — its posts are read (site-import-blog.ts) and become Blog Assistant DRAFTS when
+    // the owner uses the import. The first index found is the one read.
+    const menuUrls = [homePage.url, ...menu.map((l) => l.href)];
+    let otherBlog: { l: SiteLink; signal: BlogIndexSignal; page: ImportPage | null; at: number; finalUrl: string } | null = null;
     for (const { l, r } of fetched) {
         if (!r.ok) { reports.push({ url: l.href, title: l.text, words: 0, read: false, note: r.message }); continue; }
         if (BLOG_WIDGET.test(r.html)) {
@@ -755,9 +767,38 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
             continue;
         }
         const page = r.page;
+        const signal: BlogIndexSignal | null = otherBlog ? null : findBlogIndexSafe(r.html, r.finalUrl, menuUrls);
+        if (signal) { otherBlog = { l, signal, page, at: read.length, finalUrl: r.finalUrl }; continue; }
         if (!page.words && !page.blocks.length) { reports.push({ url: l.href, title: l.text, words: 0, read: false, note: 'We couldn\'t read any words on this page.' }); continue; }
         reports.push({ url: page.url, title: l.text, words: page.words, read: true, note: null });
         read.push({ url: page.url, menuLabel: l.text, page });
+    }
+    // Their home page may be the blog itself (WordPress's "home blog"): its posts come, the page stays.
+    if (!otherBlog && !blog) {
+        const signal = findBlogIndexSafe(home.html, home.finalUrl, menuUrls);
+        if (signal) otherBlog = { l: { text: homeLabel ?? 'Blog', href: homePage.url } as SiteLink, signal, page: null, at: -1, finalUrl: home.finalUrl };
+    }
+    let importedBlog: ImportedBlog | null = null;
+    if (otherBlog) {
+        const label = otherBlog.at < 0 ? 'Blog' : otherBlog.l.text.slice(0, 30) || 'Blog';
+        importedBlog = await readImportedBlog(otherBlog.signal, label, {
+            fetchHtml: (u) => deps.fetchHtml(u),
+            fetchJson: deps.fetchJson ? (u) => deps.fetchJson!(u) : undefined,
+            savePicture: input.pictures === 'copy' ? (src, alt) => deps.savePicture(src, alt) : undefined,
+        }).catch(() => null);
+        const found = importedBlog?.posts.length ?? 0;
+        if (otherBlog.at >= 0 && found) {
+            blog = { label, urls: [otherBlog.l.href, otherBlog.finalUrl] };
+            reports.push({ url: otherBlog.finalUrl, title: otherBlog.l.text, words: 0, read: true, note: `Your blog — ${found} post${found === 1 ? '' : 's'} come${found === 1 ? 's' : ''} across as drafts for your Blog Assistant, not copied as a page.` });
+        } else if (otherBlog.at >= 0 && otherBlog.page) {
+            // No posts could be read: the page is imported like any other, where it was in the menu.
+            const page = otherBlog.page;
+            if (page.words || page.blocks.length) {
+                reports.push({ url: page.url, title: otherBlog.l.text, words: page.words, read: true, note: null });
+                read.splice(Math.min(otherBlog.at, read.length), 0, { url: page.url, menuLabel: otherBlog.l.text, page });
+            }
+        }
+        if (!found) importedBlog = null;
     }
     const wordsRead = read.reduce((n, p) => n + p.page.words, 0);
     const baseReport = (): ImportReport => ({
@@ -765,6 +806,7 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
         notImported: menu.filter((l) => !toRead.includes(l)).map((l) => ({ url: l.href, title: l.text })),
         pictures: { choice: input.pictures, found: read.reduce((n, p) => n + p.page.blocks.filter((b) => b.kind === 'image').length, 0) + (homePage.logo ? 1 : 0), copied: 0, failed: 0, undescribed: 0 },
         prices: [], leftOut: [], notCarried: [], contact: importedContact(read), hadForm: read.some((p) => p.page.hasForm), formFields: importedFormFields(read), placeholders: 0,
+        blog: importedBlog,
     });
     if (wordsRead < IMPORT_THIN_SITE_WORDS || (homePage.words < IMPORT_THIN_WORDS && read.length === 1)) {
         return { ok: false, message: thinMessage(wordsRead, homePage.builder, home.embedsUnread), report: baseReport() };
@@ -809,6 +851,10 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
     report.notCarried = built.notCarried;
     report.placeholders = countPlaceholders(definition);
     return { ok: true, definition, report, warnings: built.warnings };
+}
+
+function findBlogIndexSafe(html: string, url: string, menuUrls: string[]): BlogIndexSignal | null {
+    try { return findBlogIndex(html, url, menuUrls); } catch { return null; }
 }
 
 /** The Blog Assistant's widget on their page (blog-widget embed): its posts are already in Be More Swan. */
