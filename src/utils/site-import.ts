@@ -25,6 +25,8 @@ import {
 } from './site-definition';
 import { chunkBodies } from './site-words';
 import { inlineEmbeds, type EmbedFetchers } from './site-embeds';
+import { lookFound, readImportedLook, themeWithLook, type ImportedLook } from './site-import-theme';
+import { harvestBrandSignals } from './brand-extract';
 
 /**
  * Pages read at most (home + menu pages), before the site's own page cap. Was 8 until 2026-11-08:
@@ -242,6 +244,8 @@ export interface ImportReport {
     contact: { email: string | null; phone: string | null; address: string | null };
     hadForm: boolean;
     placeholders: number;
+    /** Their colours, lettering and corners as we read them (null = none read: their current design is kept). */
+    look?: ImportedLook | null;
 }
 
 export interface AssembleInput {
@@ -618,6 +622,11 @@ export interface ImportDeps {
     plan(prompt: { system: string; user: string }): Promise<unknown | null>;
     /** Copy one picture into the workspace's library: its asset id, or null when it couldn't be copied. */
     savePicture(src: string, alt: string): Promise<number | null>;
+    /**
+     * One of their stylesheets, through the SSRF fence — for their colours and fonts
+     * (site-import-theme.ts). Optional: without it the look is read from the page alone.
+     */
+    fetchCss?(url: string): Promise<string | null>;
 }
 
 export interface ImportInput { url: string; pictures: PictureChoice; current: SiteDefinition; maxPages: number; }
@@ -705,10 +714,27 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
             definition = normaliseSiteDefinition({ ...definition, theme: { ...definition.theme, logoAssetId: id } }, { maxPages: input.maxPages }).definition;
         }
     }
+    // Their look: colours, lettering and corners read from the home page and its stylesheets.
+    const look = await readLook(home.html, home.finalUrl, deps);
+    report.look = lookFound(look) ? look : null;
+    if (report.look) definition = normaliseSiteDefinition({ ...definition, theme: themeWithLook(definition.theme, report.look) }, { maxPages: input.maxPages }).definition;
     report.leftOut = built.leftOut.slice(0, 60);
     report.notCarried = built.notCarried;
     report.placeholders = countPlaceholders(definition);
     return { ok: true, definition, report, warnings: built.warnings };
+}
+
+/** Stylesheets read for the look: their own first; a site with thirty is a build artefact. */
+const LOOK_MAX_STYLESHEETS = 4;
+async function readLook(html: string, finalUrl: string, deps: ImportDeps): Promise<ImportedLook | null> {
+    try {
+        let css = '';
+        if (deps.fetchCss) {
+            const sheets = harvestBrandSignals(html, finalUrl).stylesheets.slice(0, LOOK_MAX_STYLESHEETS);
+            css = (await Promise.all(sheets.map((u) => deps.fetchCss!(u).catch(() => null)))).filter(Boolean).join('\n');
+        }
+        return readImportedLook(html, finalUrl, css);
+    } catch { return null; }
 }
 
 /**
@@ -716,24 +742,24 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
  * JavaScript run. The rendered read is kept only when it found more words; the menu still comes from
  * whichever read had it (a JavaScript menu is read from the rendered page).
  */
-async function readPage(url: string, deps: ImportDeps): Promise<{ ok: true; page: ImportPage; embedsUnread: number } | { ok: false; message: string }> {
+async function readPage(url: string, deps: ImportDeps): Promise<{ ok: true; page: ImportPage; embedsUnread: number; html: string; finalUrl: string } | { ok: false; message: string }> {
     const r = await deps.fetchHtml(url);
     if (!r.ok) return r;
     let page = readImportPageSafe(r.html, r.finalUrl);
-    if (page.words >= IMPORT_THIN_WORDS) return { ok: true, page, embedsUnread: 0 };
+    if (page.words >= IMPORT_THIN_WORDS) return { ok: true, page, embedsUnread: 0, html: r.html, finalUrl: r.finalUrl };
     // Words inside an embedded HTML box (Wix "Embed HTML", site-embeds.ts) — cheaper than a browser,
     // and a browser wouldn't see them anyway (page.content() is the top document only).
     const embeds = await inlineEmbeds(r.html, r.finalUrl, embedFetchers(deps));
     const withEmbeds = embeds.read ? readImportPageSafe(embeds.html, r.finalUrl) : page;
     if (withEmbeds.words > page.words) page = { ...withEmbeds, navLinks: withEmbeds.navLinks.length ? withEmbeds.navLinks : page.navLinks };
     const embedsUnread = embeds.found - embeds.read;
-    if (page.words >= IMPORT_THIN_WORDS || !deps.renderHtml) return { ok: true, page, embedsUnread };
+    if (page.words >= IMPORT_THIN_WORDS || !deps.renderHtml) return { ok: true, page, embedsUnread, html: r.html, finalUrl: r.finalUrl };
     const rendered = await deps.renderHtml(r.finalUrl).catch(() => null);
-    if (!rendered?.ok) return { ok: true, page, embedsUnread };
+    if (!rendered?.ok) return { ok: true, page, embedsUnread, html: r.html, finalUrl: r.finalUrl };
     const renderedEmbeds = await inlineEmbeds(rendered.html, r.finalUrl, embedFetchers(deps));
     const fuller = readImportPageSafe(renderedEmbeds.html, r.finalUrl);
-    if (fuller.words <= page.words) return { ok: true, page, embedsUnread };
-    return { ok: true, page: { ...fuller, navLinks: fuller.navLinks.length ? fuller.navLinks : page.navLinks }, embedsUnread: renderedEmbeds.found - renderedEmbeds.read };
+    if (fuller.words <= page.words) return { ok: true, page, embedsUnread, html: r.html, finalUrl: r.finalUrl };
+    return { ok: true, page: { ...fuller, navLinks: fuller.navLinks.length ? fuller.navLinks : page.navLinks }, embedsUnread: renderedEmbeds.found - renderedEmbeds.read, html: r.html, finalUrl: r.finalUrl };
 }
 
 function embedFetchers(deps: ImportDeps): EmbedFetchers {

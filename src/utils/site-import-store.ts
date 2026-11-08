@@ -19,7 +19,8 @@ import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
 import { safeFetchBinary } from './safe-fetch';
 import { normaliseSiteDefinition, type SiteDefinition } from './site-definition';
-import { fetchSiteHtml, fetchSiteJson } from './site-fetch';
+import { fetchSiteCss, fetchSiteHtml, fetchSiteJson } from './site-fetch';
+import { themeWithLook } from './site-import-theme';
 import { createPageRenderer, type PageRenderer } from './site-js-render';
 import { cleanImportUrl, runImport, type ImportDeps, type ImportReport, type PictureChoice } from './site-import';
 import { readImportPage } from './site-extract';
@@ -144,6 +145,10 @@ function liveDeps(db: Db, site: SiteRow, userId: number, renderer: PageRenderer)
             return parseModelJson(res.text);
         },
         savePicture: (src, alt) => saveImportedPicture(db, site.organisationId, userId, src, alt),
+        async fetchCss(url) {
+            const r = await fetchSiteCss(url, CRAWLERS.siteImport, { timeoutMs: PAGE_TIMEOUT_MS, maxBytes: PAGE_MAX_BYTES });
+            return r.ok ? r.html : null;
+        },
     };
 }
 
@@ -223,8 +228,9 @@ export async function runSiteImport(db: Db, siteId: number): Promise<void> {
 }
 
 /**
- * The owner's "Use this as my draft": the imported site replaces the draft, through the gate, keeping
- * the design they have now (and the imported logo only where they have none). Nothing goes live.
+ * The owner's "Use this as my draft": the imported site replaces the draft, through the gate. It
+ * takes their old site's look (colours, lettering, corners) when the import read one — else keeps
+ * the design they have now — and the imported logo only where they have none. Nothing goes live.
  */
 export async function acceptImport(db: Db, site: SiteRow, maxPages: number): Promise<{ ok: true; site: SiteRow; warnings: string[] } | { ok: false; status: number; error: string }> {
     const row = await loadImport(db, site.id);
@@ -232,7 +238,9 @@ export async function acceptImport(db: Db, site: SiteRow, maxPages: number): Pro
     const current = definitionOf(site, maxPages).definition;
     const imported = normaliseSiteDefinition(row.definition, { maxPages });
     const logoAssetId = current.theme.logoUrl || current.theme.logoAssetId ? current.theme.logoAssetId ?? null : imported.definition.theme.logoAssetId ?? null;
-    const merged = normaliseSiteDefinition({ ...imported.definition, theme: { ...current.theme, logoAssetId } }, { maxPages });
+    const look = (row.report as ImportReport | null)?.look ?? null;
+    const theme = look ? themeWithLook(current.theme, look) : current.theme;
+    const merged = normaliseSiteDefinition({ ...imported.definition, theme: { ...theme, logoAssetId } }, { maxPages });
     const checked = await verifySiteAssets(db, site.organisationId, merged.definition);
     const [saved] = await db.update(sites).set({ draft: checked.definition, updatedAt: new Date() }).where(eq(sites.id, site.id)).returning();
     await db.delete(siteImports).where(eq(siteImports.siteId, site.id));
@@ -257,7 +265,7 @@ export function describeImportForChat(imp: ImportView | null, drafting: boolean)
     if (imp.status === 'reading' && drafting) return `Import of their current site: reading ${imp.sourceUrl} right now — the imported draft appears on the Website tab in a minute or two.`;
     if (imp.status === 'ready') {
         const r = imp.report;
-        return `Import of their current site: an imported DRAFT from ${imp.sourceUrl} is READY for review and has NOT replaced their draft — ${imp.pages.map((p) => `"${p.title}" (${p.path}, ${p.sections} sections)`).join(', ')}; ${r?.wordsRead ?? 0} of their words read; pictures ${imp.pictures === 'copy' ? `copied: ${r?.pictures.copied ?? 0}` : 'left out (their choice)'}; prices found and NOT copied: ${r?.prices.length ?? 0}${r?.prices.length ? ` (${r.prices.slice(0, 5).map((x) => `"${x.slice(0, 80)}"`).join('; ')}) — they belong in Business Information ▸ Products & Services` : ''}; left out as clutter: ${r?.leftOut.length ?? 0}. When they decide, a site_import_decision card ("use" or "discard").`;
+        return `Import of their current site: an imported DRAFT from ${imp.sourceUrl} is READY for review and has NOT replaced their draft — ${imp.pages.map((p) => `"${p.title}" (${p.path}, ${p.sections} sections)`).join(', ')}; ${r?.wordsRead ?? 0} of their words read; pictures ${imp.pictures === 'copy' ? `copied: ${r?.pictures.copied ?? 0}` : 'left out (their choice)'}; prices found and NOT copied: ${r?.prices.length ?? 0}${r?.prices.length ? ` (${r.prices.slice(0, 5).map((x) => `"${x.slice(0, 80)}"`).join('; ')}) — they belong in Business Information ▸ Products & Services` : ''}; left out as clutter: ${r?.leftOut.length ?? 0}; their old site's look ${r?.look ? `read (main colour ${r.look.primaryColor ?? 'not found'}, lettering ${r.look.font ?? 'unchanged'}) — using the import sets it as the site's design` : 'not read — using the import keeps their current design'}. When they decide, a site_import_decision card ("use" or "discard").`;
     }
     return `Import of their current site: the last attempt (${imp.sourceUrl}) did not make a draft — ${imp.message ?? 'it failed'}`;
 }

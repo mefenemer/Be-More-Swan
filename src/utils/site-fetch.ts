@@ -21,6 +21,11 @@ export async function fetchSiteJson(url: string, crawler: Crawler, opts: { timeo
     return fetchSite(url, crawler, opts, /json/i);
 }
 
+/** One of their stylesheets, for their colours and fonts (site-import-theme.ts). Same fence as their pages. */
+export async function fetchSiteCss(url: string, crawler: Crawler, opts: { timeoutMs: number; maxBytes: number }): Promise<HtmlFetch> {
+    return fetchSite(url, crawler, opts, /css|text\/plain/i);
+}
+
 async function fetchSite(url: string, crawler: Crawler, opts: { timeoutMs: number; maxBytes: number }, accept: RegExp): Promise<HtmlFetch> {
     try {
         const u = new URL(url);
