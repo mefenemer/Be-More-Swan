@@ -1273,18 +1273,25 @@ node_bundler = "esbuild"
 [functions.sites]
   timeout = 26
   external_node_modules = ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"]
+  included_files = ["node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "node_modules/@napi-rs/canvas/**", "node_modules/@napi-rs/canvas-*/**"]
 
 # pdf-parse v2 (pdfjs-dist 5) must ship as it is, never bundled. Bundled to CJS, pdfjs loses
 # import.meta.url, can't load @napi-rs/canvas for its DOMMatrix polyfill, and throws
 # "DOMMatrix is not defined" AS THE MODULE LOADS, before the handler runs. Every brand document
 # uploaded to prod sat at 'confirmed' with no text from July to 2026-11-08 because of it, so no
-# assistant ever read one. Every function that imports pdf-parse is listed here
-# (tests/pdf-parse-external.test.ts checks).
+# assistant ever read one. External alone was not enough (staging, 2026-11-08: still 'failed'):
+# the file trace never picks up @napi-rs/canvas (pdfjs requires it by a runtime path) or
+# pdf.worker.mjs, so both are included by hand. Checked by packaging the function with
+# zip-it-and-ship-it and reading a PDF from only the packaged files: without these, "DOMMatrix is
+# not defined"; with them, the words come back. Every function that imports pdf-parse is listed
+# here (tests/pdf-parse-external.test.ts checks).
 [functions.process-asset-background]
   external_node_modules = ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"]
+  included_files = ["node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "node_modules/@napi-rs/canvas/**", "node_modules/@napi-rs/canvas-*/**"]
 
 [functions.process-inspo-background]
   external_node_modules = ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"]
+  included_files = ["node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "node_modules/@napi-rs/canvas/**", "node_modules/@napi-rs/canvas-*/**"]
 
 # Website bookings: the day-before reminder (send-booking-reminders.ts). Hourly at :20 — one indexed
 # query that usually finds nothing; a booking is reminded once (reminder_sent_at).

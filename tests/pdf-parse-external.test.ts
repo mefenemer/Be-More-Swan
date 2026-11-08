@@ -47,6 +47,12 @@ for (const file of readdirSync(fnDir).filter((f) => f.endsWith('.ts'))) {
         assert.ok(b, `no [functions.${name}] block in netlify.toml`);
         for (const m of ['pdf-parse', 'pdfjs-dist', '@napi-rs/canvas']) assert.ok(b.includes(`"${m}"`), `${m} missing from external_node_modules`);
     });
+    check(`${name} includes the files the trace misses (canvas binary, pdf.worker.mjs)`, () => {
+        const b = block(name);
+        for (const f of ['node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs', 'node_modules/@napi-rs/canvas/**', 'node_modules/@napi-rs/canvas-*/**']) {
+            assert.ok(b.includes(`"${f}"`), `${f} missing from included_files`);
+        }
+    });
     if (direct) check(`${name} loads pdf-parse inside the handler, not at the top`, () => {
         assert.ok(!/^import [^;]*from 'pdf-parse'/m.test(src), 'top-level import of pdf-parse');
     });
