@@ -478,6 +478,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         `Can they press Publish now: ${(() => { const b = publishBlocker(site, d); return b ? `NO — ${b}` : 'yes'; })()}`,
         await draftMediaLine(db, orgId, assistantId),
         `Pages: ${d.pages.length} (no plan limits pages). Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
+        `Old addresses forwarding to a page (set_redirects): ${d.redirects?.length ? d.redirects.slice(0, 30).map((r) => `${r.from} → ${r.to}`).join('; ') : 'none'}`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
         await currentWebsiteLine(db, orgId, assistantId, site.slug),
         d.settings.features

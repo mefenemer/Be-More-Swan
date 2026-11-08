@@ -47,7 +47,7 @@
       { k: 'items', kind: 'items', label: 'Features', fields: [['title', 'text', 'Title'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional) — e.g. Read more']] }],
     steps: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'items', kind: 'items', label: 'Steps', fields: [['title', 'text', 'Step'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional)']] }],
-    text: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'body', kind: 'textarea', label: 'Text (a blank line starts a new paragraph)', rows: 8, required: true },
+    text: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'body', kind: 'textarea', label: 'Text (a blank line starts a new paragraph; a line starting ### is a subheading; [words](/page) makes a link)', rows: 8, required: true },
       { k: 'image', kind: 'image', label: 'Picture or video beside the text (optional)', video: true },
       { k: 'imageSide', kind: 'select', label: 'Picture on the', options: [['right', 'Right'], ['left', 'Left']] }],
     faq: [{ k: 'heading', kind: 'text', label: 'Heading' },
@@ -1120,6 +1120,8 @@
         <div><label class="block text-xs font-bold text-gray-700">Header</label><select data-theme="header" class="${inputCls}">${[['standard', 'Name on the left, menu on the right'], ['centered', 'Name centred above the menu']].map(([v, l]) => `<option value="${v}" ${(t.header || 'standard') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div><label class="block text-xs font-bold text-gray-700">Tint for alternate sections</label><div class="flex items-center gap-2"><input type="color" data-theme="accentColor" value="${esc(t.accentColor || '#e5e7eb')}" class="h-10 border border-gray-300 rounded-lg" style="width:64px">
           <label class="flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" data-theme-accent-off ${t.accentColor ? '' : 'checked'}> Plain grey</label></div></div>
+        <div><label class="block text-xs font-bold text-gray-700">Second colour (call-to-action buttons)</label><div class="flex items-center gap-2"><input type="color" data-theme="secondaryColor" value="${esc(t.secondaryColor || '#e5e7eb')}" class="h-10 border border-gray-300 rounded-lg" style="width:64px">
+          <label class="flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" data-theme-second-off ${t.secondaryColor ? '' : 'checked'}> None</label></div></div>
         <div><label class="block text-xs font-bold text-gray-700">Corners</label><select data-theme="radius" class="${inputCls}">${[['none', 'Square'], ['small', 'Slightly rounded'], ['medium', 'Rounded'], ['large', 'Very rounded']].map(([v, l]) => `<option value="${v}" ${t.radius === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="md:col-span-2"><p class="block text-xs font-bold text-gray-700">Logo</p>
           ${pictureHtml(t.logoAssetId ? { assetId: t.logoAssetId, url: '' } : (t.logoUrl ? { url: t.logoUrl } : null), { pick: 'data-site-logo-pick', clear: 'data-site-logo-clear' })}
@@ -1161,6 +1163,8 @@
         <div><label class="block text-xs font-bold text-gray-700">Kind of business</label><select data-setting="businessType" class="${inputCls}">${[['Organization', 'Business'], ['LocalBusiness', 'Local business'], ['ProfessionalService', 'Professional service'], ['Store', 'Shop']].map(([v, l]) => `<option value="${v}" ${s.businessType === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       </div>
       <label class="block text-xs font-bold text-gray-700 mt-3">Site description (search results)</label><textarea data-setting="description" rows="2" class="${inputCls}">${esc(s.description || '')}</textarea>
+      <label class="block text-xs font-bold text-gray-700 mt-3">Your social profiles (one address per line — Instagram, Facebook, LinkedIn, X, TikTok, YouTube…)</label><textarea data-site-social rows="2" class="${inputCls}" placeholder="https://www.instagram.com/yourname">${esc((s.socialLinks || []).join('\n'))}</textarea>
+      ${(def().redirects || []).length ? `<p class="block text-xs font-bold text-gray-700 mt-3">Old addresses that forward here</p><p class="text-xs text-gray-500">From your old site, so links and search results that point at them still arrive.</p><ul class="mt-1 space-y-1">${def().redirects.map((r, i) => `<li class="text-xs text-gray-700 flex items-center gap-2"><span>${esc(r.from)} → ${esc(r.to)}</span>${btn(`data-site-redirect-remove="${i}"`, 'Remove')}</li>`).join('')}</ul>` : ''}
       <label class="block text-xs font-bold text-gray-700 mt-3">Footer text</label><textarea data-site-footer rows="2" class="${inputCls}">${esc(def().footer.text || '')}</textarea>
       <div class="mt-4">${btn('data-site-details-save', 'Save details', true)}</div>`);
   }
@@ -1981,7 +1985,7 @@
     if (!look) return '<p class="text-xs text-gray-700 mt-1">Look: we couldn\'t read your old site\'s colours, so your current design is kept — change it in Design.</p>';
     const sw = (hex, name) => (hex ? `<span class="inline-flex items-center gap-1 mr-2"><span class="inline-block w-3.5 h-3.5 rounded-full border border-gray-300 align-middle" style="background:${esc(hex)}"></span>${esc(name)}</span>` : '');
     const pairs = { editorial: 'Fraunces & Inter', classic: 'Playfair Display & Lora', elegant: 'Cormorant Garamond & Work Sans', modern: 'Manrope', bold: 'Oswald & Inter', friendly: 'Nunito', tech: 'Space Grotesk & Inter', warm: 'DM Serif Display & Work Sans', serif: 'a classic serif', sans: 'a clean sans-serif' };
-    return `<p class="text-xs text-gray-700 mt-1">Look: your old site's colours and lettering come across — ${sw(look.primaryColor, 'main colour')}${sw(look.backgroundColor, 'background')}${sw(look.textColor, 'words')}${look.font ? `lettering ${esc(pairs[look.font] || look.font)}${look.headingFont && !String(pairs[look.font] || '').includes(look.headingFont) ? ` (closest to your ${esc(look.headingFont)})` : ''}` : ''}. Using this draft sets them in Design, where you can change them.</p>`;
+    return `<p class="text-xs text-gray-700 mt-1">Look: your old site's colours and lettering come across — ${sw(look.primaryColor, 'main colour')}${sw(look.backgroundColor, 'background')}${sw(look.textColor, 'words')}${sw(look.secondaryColor, 'second colour')}${look.font ? `lettering ${esc(pairs[look.font] || look.font)}${look.headingFont && !String(pairs[look.font] || '').includes(look.headingFont) ? ` (closest to your ${esc(look.headingFont)})` : ''}` : ''}. Using this draft sets them in Design, where you can change them.</p>`;
   }
 
   function importReviewCard(imp) {
@@ -2002,7 +2006,7 @@
       ${list(`Left out as menus or notices (${(r.leftOut || []).length}) — check nothing important is here`, r.leftOut)}
       ${list(`Didn't fit on its page (${(r.notCarried || []).length})`, r.notCarried, 'text-amber-800')}
       ${list(`Pages in your menu not imported (${(r.notImported || []).length}) — add them yourself with + Page`, r.notImported)}
-      ${r.hadForm ? '<p class="text-xs text-gray-500 mt-2">Your old site had a form. Enquiries from the new contact form come to you on the Enquiries tab; for an email sign-up, add a sign-up section with one of your forms.</p>' : ''}
+      ${r.hadForm ? `<p class="text-xs text-gray-500 mt-2">Your old site had a form${(r.formFields || []).length ? ` asking: ${esc(r.formFields.join(', '))}` : ''}. The new contact form asks for a name, email${(r.formFields || []).some((f) => /phone|tel\b|mobile|number/i.test(f)) || !(r.formFields || []).length ? ', phone' : ''} and message, and enquiries come to you on the Enquiries tab. For an email sign-up, add a sign-up section with one of your forms.</p>` : ''}
       <div class="flex flex-wrap gap-2 mt-3">
         ${btn('data-site-import-preview', state.previewImport ? 'Show my current draft' : 'Preview the imported site', !state.previewImport)}
         ${btn('data-site-import-use', 'Use this as my draft', state.previewImport)}
@@ -2891,6 +2895,7 @@
       // A web address typed for the logo replaces a library logo; left empty, the library logo stays.
       if (theme.logoUrl) theme.logoAssetId = null; else delete theme.logoUrl;
       if (hostOf(e).querySelector('[data-theme-accent-off]')?.checked) theme.accentColor = null;
+      if (hostOf(e).querySelector('[data-theme-second-off]')?.checked) theme.secondaryColor = null;
       await apply([{ op: 'set_theme', theme }]);
       return;
     }
@@ -2899,9 +2904,17 @@
       await apply([{ op: 'set_settings', settings: { blog: { enabled: host.querySelector('[data-site-blog-on]').checked, menuLabel: host.querySelector('[data-site-blog-label]').value.trim() || 'Blog' } } }]);
       return;
     }
+    const rmRedirect = t('[data-site-redirect-remove]');
+    if (rmRedirect) {
+      const keep = (def().redirects || []).filter((_, i) => i !== Number(rmRedirect.dataset.siteRedirectRemove));
+      await apply([{ op: 'set_redirects', redirects: keep }]);
+      return;
+    }
     if (t('[data-site-details-save]')) {
       const settings = {};
       hostOf(e).querySelectorAll('[data-setting]').forEach((el) => { settings[el.dataset.setting] = el.value; });
+      const social = hostOf(e).querySelector('[data-site-social]');
+      if (social) settings.socialLinks = social.value.split(/\s+/).filter(Boolean);
       await apply([{ op: 'set_settings', settings }, { op: 'set_footer', text: hostOf(e).querySelector('[data-site-footer]').value || null }]);
       return;
     }

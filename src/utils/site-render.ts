@@ -23,7 +23,9 @@ import type { SessionView } from './class-sessions';
 import { LISTING_PATH, listingLd, listingsFor, type SiteRenderListing, type SiteRenderListings } from './site-listings';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
 import type { WeeklyHours } from './booking-availability';
-import { BLOG_MENU_ID, BLOG_PATH, blogOn, buttonInk, menuOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
+import { INLINE_LINK, SUBHEADING } from './site-rich-text';
+import { contrastRatio, readableInkOn } from './brand-kit';
+import { BLOG_MENU_ID, BLOG_PATH, blogOn, buttonInk, cleanHref, menuOf, socialSiteOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
 
 /** What a sign-up section needs to draw one Form Builder form (form-definition.ts publicDefinition). */
 export interface SiteSignupForm {
@@ -204,6 +206,9 @@ export function themeCss(theme: SiteTheme): string {
     const pair = FONT_PAIRS[theme.font] || FONT_PAIRS.sans;
     const faces = pair.faces.map((f) => `@font-face{font-family:"${FACE_NAMES[f].family}";src:url(${SITE_FONTS_PATH}/${f}.woff2) format("woff2");font-weight:${FACE_NAMES[f].weights};font-style:normal;font-display:swap}`).join('');
     const tint = theme.accentColor ? mixHex(theme.backgroundColor, theme.accentColor, 0.14) : null;
+    // The second colour paints the call-to-action button only where it can be told apart from the band.
+    const second = theme.secondaryColor && contrastRatio(theme.secondaryColor, theme.primaryColor) >= 1.6 ? theme.secondaryColor : null;
+    const secondCss = second ? `.cta .btn{background:${second};color:${readableInkOn(second)}}` : '';
     return `${faces}:root{--p:${theme.primaryColor};--t:${theme.textColor};--b:${theme.backgroundColor};--ink:${ink};--r:${RADIUS[theme.radius]};--f:${pair.body};--hf:${pair.heading};--hw:${pair.weight};--sp:${SPACING[theme.spacing ?? 'regular']}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}body{margin:0;font-family:var(--f);color:var(--t);background:var(--b);line-height:1.6;font-size:17px}
 img{max-width:100%;height:auto;display:block}a{color:var(--p)}h1,h2,h3{line-height:1.2;margin:0 0 .5em;font-family:var(--hf);font-weight:var(--hw)${pair.upper ? ';text-transform:uppercase' : ''}${pair.tracking ? `;letter-spacing:${pair.tracking}` : ''}}.brand{font-family:var(--hf)}h1{font-size:clamp(2rem,5vw,3.2rem)}h2{font-size:clamp(1.5rem,3.5vw,2.2rem)}h3{font-size:1.15rem}
@@ -228,7 +233,7 @@ section{padding:var(--sp) 0}.alt{background:${tint ?? 'rgba(0,0,0,.035)'}}
 .grid{display:grid;gap:24px;margin-top:28px}@media(min-width:700px){.grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}}
 .card{border:1px solid rgba(0,0,0,.08);border-radius:var(--r);padding:22px;background:var(--b)}.card>.more{display:inline-block;margin-top:6px;font-weight:700}.num{display:inline-flex;width:34px;height:34px;border-radius:50%;background:var(--p);color:var(--ink);align-items:center;justify-content:center;font-weight:800;margin-bottom:10px}
 .intro{max-width:680px;opacity:.85}details{border:1px solid rgba(0,0,0,.1);border-radius:var(--r);padding:14px 18px;margin:10px 0;background:var(--b)}summary{cursor:pointer;font-weight:700}details p{margin:.6em 0 0}
-.cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}
+.cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}${secondCss}
 .ft{border-top:1px solid rgba(0,0,0,.08);padding:28px 0;font-size:.85rem;opacity:.85}.ft .w{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}.ft a{color:inherit}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
 .stars{color:#f59e0b;letter-spacing:1px}.stars .off{color:rgba(0,0,0,.15)}.rv{margin:0}.rv blockquote{margin:8px 0}.rv figcaption{font-size:.95rem}.rsum{margin:8px 0 0}
@@ -255,7 +260,33 @@ video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r)
 .fm button{border:0;cursor:pointer;font:inherit;justify-self:start}.fm button[disabled]{opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}`;
 }
 
-const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+/**
+ * Words in, paragraphs out — escaped, with the two marks site-rich-text.ts allows: [words](address)
+ * links, through the same gate as buttons (an address that isn't safe, or a page that doesn't exist,
+ * draws the words alone), and "### " subheading lines.
+ */
+const inline = (text: string) => {
+    let out = '';
+    let last = 0;
+    for (const m of text.matchAll(INLINE_LINK)) {
+        out += esc(text.slice(last, m.index)).replace(/\n/g, '<br>');
+        const to = cleanHref(m[2]);
+        const ok = to && (!to.startsWith('/') || pagePaths.has(to.split(/[?#]/)[0]));
+        out += ok ? `<a href="${esc(href(to!))}">${esc(m[1])}</a>` : esc(m[1]);
+        last = (m.index ?? 0) + m[0].length;
+    }
+    return out + esc(text.slice(last)).replace(/\n/g, '<br>');
+};
+const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => {
+    const sub = p.match(SUBHEADING);
+    return sub ? `<h3>${esc(sub[1])}</h3>` : `<p>${inline(p)}</p>`;
+}).join('');
+/** Set per render call — the site's own page addresses, so an inline link to a missing page draws as words. */
+let pagePaths = new Set<string>(['/']);
+const setPagePaths = (def: SiteDefinition) => {
+    pagePaths = new Set(def.pages.map((p) => (p.slug ? `/${p.slug}` : '/')));
+    if (blogOn(def)) pagePaths.add(BLOG_PATH);
+};
 
 /** Set per render call (renderSitePage) — internal links go through the context's pagePath. */
 let mapPath: (path: string) => string = (p) => p;
@@ -635,6 +666,7 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
             ...(logoSrc(def.theme) ? { logo: logoSrc(def.theme) } : {}),
             ...(s.email ? { email: s.email } : {}),
             ...(s.phone ? { telephone: s.phone } : {}),
+            ...(s.socialLinks?.length ? { sameAs: s.socialLinks } : {}),
             ...(s.locality || business.info?.visitAddress ? { address: { '@type': 'PostalAddress',
                 ...(business.info?.visitAddress ? { streetAddress: business.info.visitAddress.split('\n').join(', ') } : {}),
                 ...(s.locality ? { addressLocality: s.locality } : {}) } } : {}),
@@ -713,7 +745,7 @@ ${menu.length > (def.structure === 'one_page' ? 0 : 1) ? `<nav aria-label="Main"
 ${body}
 </main>
 <footer class="ft"><div class="w">
-<div>${def.footer.text ? `${paragraphs(def.footer.text)}` : ''}<p>© ${year} ${esc(s.siteName)}${s.email ? ` · <a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : ''}${s.phone ? ` · <a href="tel:${esc(s.phone.replace(/[^0-9+]/g, ''))}">${esc(s.phone)}</a>` : ''}</p></div>
+<div>${def.footer.text ? `${paragraphs(def.footer.text)}` : ''}${s.socialLinks?.length ? `<p class="soc">${s.socialLinks.map((u) => `<a href="${esc(u)}" rel="noopener me">${esc(socialSiteOf(u) ?? 'Profile')}</a>`).join(' · ')}</p>` : ''}<p>© ${year} ${esc(s.siteName)}${s.email ? ` · <a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : ''}${s.phone ? ` · <a href="tel:${esc(s.phone.replace(/[^0-9+]/g, ''))}">${esc(s.phone)}</a>` : ''}</p></div>
 <div><p>${ctx.creditUrl ? `<a href="${esc(ctx.creditUrl)}">Made with Be More Swan</a> · ` : ''}<a href="${esc(ctx.reportUrl)}" rel="nofollow">Report this site</a></p></div>
 </div></footer>
 </body>
@@ -723,6 +755,7 @@ ${body}
 /** One page by path ('/', '/services'). An unknown path is a real 404 page in the site's own look. */
 export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderContext): RenderedPage {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     const page = findPage(def, path);
     reviewsData = ctx.reviews ?? null;
@@ -757,6 +790,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
 /** A plain page in the site's own look — what a visitor sees after sending a form, or when it fails. */
 export function renderSiteNotice(def: SiteDefinition, ctx: RenderContext, title: string, message: string, back: { label: string; path: string }): string {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     const body = `<section><div class="w n"><h1>${esc(title)}</h1>${paragraphs(message)}<p><a class="btn" href="${esc(href(back.path))}">${esc(back.label)}</a></p></div></section>`;
     return documentHtml(def, null, { ...ctx }, body).replace('<title>Page not found |', `<title>${esc(title)} |`);
@@ -765,12 +799,14 @@ export function renderSiteNotice(def: SiteDefinition, ctx: RenderContext, title:
 /** A page of the site's own, with any body — the booking steps (booking-render.ts). Never indexed. */
 export function renderSiteShell(def: SiteDefinition, ctx: RenderContext, title: string, bodyHtml: string): string {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     return documentHtml(def, null, { ...ctx }, bodyHtml).replace('<title>Page not found |', `<title>${esc(title)} |`);
 }
 
 function startRender(def: SiteDefinition, ctx: RenderContext): void {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
 }

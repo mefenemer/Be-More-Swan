@@ -27,7 +27,7 @@ import { bookStep, bookSubmit } from '../../src/utils/site-booking';
 import { loadSiteReviews } from '../../src/utils/reviews';
 import { loadSiteSocialFeed } from '../../src/utils/site-social-feed';
 import { loadSiteBlogIndex, loadSiteBlogLatest, loadSiteBlogPost, siteBlogRoute, siteBlogSlugs } from '../../src/utils/site-blog';
-import { BLOG_PATH, blogOn } from '../../src/utils/site-definition';
+import { BLOG_PATH, blogOn, redirectFor } from '../../src/utils/site-definition';
 import { listingIcs, listingRoute, listingSlugs, loadListingBySlug, loadSiteListings } from '../../src/utils/site-listings';
 import { listingPostPage, listingPostSubmit } from '../../src/utils/site-listing-post';
 import { bookableSessions } from '../../src/utils/class-sessions';
@@ -294,6 +294,10 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         }
         return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : renderSiteListing(definition, ctx, l) };
     }
+
+    // An old address that moved (an imported page's former path — site-definition.ts redirects).
+    const moved = redirectFor(definition, path);
+    if (moved) return { statusCode: 301, headers: { Location: moved, 'Cache-Control': 'public, max-age=3600' } as Record<string, string>, body: '' };
 
     const hasShop = definition.pages.some((p) => p.sections.some((s) => s.type === 'products'));
     const hasBooking = definition.pages.some((p) => p.sections.some((s) => s.type === 'booking'));

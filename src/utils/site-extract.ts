@@ -19,6 +19,7 @@
 import { createHash } from 'node:crypto';
 import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
+import { socialSiteOf } from './site-definition';
 
 export interface SiteCta {
     text: string;
@@ -565,11 +566,14 @@ export function describeChanges(changes: SiteChange[]): string[] {
 
 export type ImportBlock =
     | { kind: 'heading'; level: number; text: string }
-    | { kind: 'text'; text: string }
-    | { kind: 'item'; text: string }
-    | { kind: 'quote'; text: string }
+    | { kind: 'text'; text: string; links?: InlineLink[] }
+    | { kind: 'item'; text: string; links?: InlineLink[] }
+    | { kind: 'quote'; text: string; links?: InlineLink[] }
     | { kind: 'button'; text: string; href: string | null }
     | { kind: 'image'; src: string; alt: string; altFromSite: boolean };
+
+/** A link inside a sentence: its words (as they appear in the block's text) and where it went. */
+export interface InlineLink { text: string; href: string; }
 
 export interface ImportPage {
     url: string;
@@ -585,6 +589,10 @@ export interface ImportPage {
     siteName: string | null;
     logo: { src: string; alt: string } | null;
     hasForm: boolean;
+    /** The questions their form asked (its field labels), for the import report — our contact form has its own. */
+    formFields?: string[];
+    /** Their profiles on social sites, linked anywhere on the page (footer included). */
+    socialLinks?: string[];
     /** Which builder made the page, from its generator tag or tell-tale markup. */
     builder: 'wix' | 'squarespace' | 'wordpress' | 'webflow' | 'square' | 'other';
 }
@@ -700,7 +708,8 @@ export function readImportPage(html: string, url: string): ImportPage {
     });
     siteName = siteName || orNull(clean($('meta[property="og:site_name"]').attr('content')));
 
-    $('script, style, noscript, template, svg, iframe, link').remove();
+    // Iframes stay: the walk turns a video or map into a button (addEmbed) and never reads inside one.
+    $('script, style, noscript, template, svg, link').remove();
     // Cookie and consent banners are the builder's, not the owner's.
     $('[id*="cookie" i], [class*="cookie" i], [id*="consent" i], [class*="consent" i]').remove();
 
@@ -748,6 +757,22 @@ export function readImportPage(html: string, url: string): ImportPage {
     }
 
     const hasForm = $('form').length > 0;
+    // Their form's questions: each field's label, placeholder or name (buttons and hidden fields aside).
+    const formFields: string[] = [];
+    $('form input, form textarea, form select').each((_, el) => {
+        const $f = $(el);
+        const type = ($f.attr('type') ?? '').toLowerCase();
+        if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type) || /bot|honeypot|captcha/i.test($f.attr('name') ?? '')) return;
+        const id = $f.attr('id');
+        const label = clean((id ? $(`label[for="${id.replace(/"/g, '')}"]`).first().text() : '') || $f.closest('label').text() || $f.attr('aria-label') || $f.attr('placeholder') || $f.attr('name') || '').replace(/\s*\*$/, '');
+        if (label && label.length <= 60 && !formFields.includes(label) && formFields.length < 15) formFields.push(label);
+    });
+    // Their social profiles, wherever on the page they are linked (usually the footer, removed below).
+    const socialLinks: string[] = [];
+    $('a[href^="http"]').each((_, a) => {
+        const h = ($(a).attr('href') ?? '').trim();
+        if (socialSiteOf(h) && !/\/(sharer|share|intent|shareArticle)\b|[?&](u|url)=/i.test(h) && !socialLinks.includes(h) && socialLinks.length < 8) socialLinks.push(h);
+    });
     // The page's own content: no menus, header, footer or forms (a form's labels are not content).
     // A <header> inside the main content or an article is that page's own title area (WordPress puts
     // the H1 there), so only the SITE's header and footer go.
@@ -759,13 +784,20 @@ export function readImportPage(html: string, url: string): ImportPage {
     const seenText = new Set<string>();
     const seenImg = new Set<string>();
     let lastHeading: string | null = null;
-    const addText = (kind: 'text' | 'item' | 'quote', raw: string) => {
+    const addText = (kind: 'text' | 'item' | 'quote', raw: string, node?: AnyNode) => {
         const text = clean(raw);
         if (!text || text.length < 2 || IMPORT_NOISE.test(text) || !/[a-z0-9]/i.test(text)) return;
         const k = normaliseText(text);
         if (seenText.has(k)) return;   // builders draw a block twice (desktop and phone layouts)
         seenText.add(k);
-        blocks.push({ kind, text });
+        // Links inside the words ("read our course notes"): kept beside the text, put back when placed.
+        const links: InlineLink[] = [];
+        if (node) $(node).find('a[href]').each((_, a) => {
+            const t = clean($(a).text());
+            const h = absolutise($(a).attr('href') ?? '', base);
+            if (t && t.length <= 80 && h && text.includes(t) && !links.some((l) => l.text === t) && links.length < 10) links.push({ text: t, href: h });
+        });
+        blocks.push(links.length ? { kind, text, links } : { kind, text });
     };
     const addImage = (el: AnyNode) => {
         const $el = $(el);
@@ -781,6 +813,39 @@ export function readImportPage(html: string, url: string): ImportPage {
         blocks.push({ kind: 'image', src, alt: alt || lastHeading || siteName || 'A picture from our website', altFromSite: !!alt });
     };
     const hasBlockChild = (node: AnyNode) => node.type === 'tag' && node.children.some((c) => c.type === 'tag' && (BLOCK_TAGS.has(c.name) || c.name === 'img'));
+    // A picture drawn as a CSS background (style="background-image:url(…)", or Tailwind's bg-[url(…)]):
+    // read like an <img>, described by the nearest heading.
+    const bgImage = (node: AnyNode) => {
+        if (node.type !== 'tag') return;
+        const raw = `${$(node).attr('style') ?? ''} ${$(node).attr('class') ?? ''} ${$(node).attr('data-bg') ?? ''}`;
+        const m = raw.match(/url\(\s*['"]?([^'")\s]+)['"]?\s*\)/) ?? ($(node).attr('data-bg') ? [null, $(node).attr('data-bg')!] : null);
+        if (!m || !m[1]) return;
+        const abs = absolutise(m[1], base);
+        if (!abs || !/^https?:/.test(abs) || /\.svg(\?|$)/i.test(abs) || /gradient/i.test(m[1])) return;
+        const src = fullSizeImageUrl(abs);
+        if (seenImg.has(src) || seenImg.size >= IMPORT_LIMITS.images) return;
+        seenImg.add(src);
+        blocks.push({ kind: 'image', src, alt: lastHeading || siteName || 'A picture from our website', altFromSite: false });
+    };
+    // An embedded video or map. Hosted pages load no one else's player (site-serve.ts CSP), so it
+    // becomes what a visitor can still use: the video's thumbnail and a button to watch it, or a
+    // button to the map. Unknown embeds are left out (the import report lists what wasn't read).
+    const addEmbed = (node: AnyNode) => {
+        const src = ($(node).attr('src') || $(node).attr('data-src') || '').trim();
+        const title = clean($(node).attr('title'));
+        const yt = src.match(/(?:youtube(?:-nocookie)?\.com\/embed\/|youtu\.be\/)([\w-]{6,20})/i)?.[1];
+        const vimeo = src.match(/player\.vimeo\.com\/video\/(\d{4,12})/i)?.[1];
+        if (yt) {
+            const thumb = `https://i.ytimg.com/vi/${yt}/hqdefault.jpg`;
+            if (!seenImg.has(thumb) && seenImg.size < IMPORT_LIMITS.images) { seenImg.add(thumb); blocks.push({ kind: 'image', src: thumb, alt: title || lastHeading || 'A video', altFromSite: !!title }); }
+            blocks.push({ kind: 'button', text: 'Watch the video', href: `https://www.youtube.com/watch?v=${yt}` });
+        } else if (vimeo) {
+            blocks.push({ kind: 'button', text: 'Watch the video', href: `https://vimeo.com/${vimeo}` });
+        } else if (/google\.[a-z.]+\/maps\/embed/i.test(src)) {
+            const u = absolutise(src.replace('/maps/embed', '/maps'), base);
+            if (u && u.startsWith('https://')) blocks.push({ kind: 'button', text: 'See us on the map', href: u });
+        }
+    };
     const walk = (node: AnyNode) => {
         if (blocks.length >= IMPORT_LIMITS.blocks || node.type !== 'tag') return;
         const name = node.name;
@@ -795,8 +860,10 @@ export function readImportPage(html: string, url: string): ImportPage {
             return;
         }
         if (name === 'img') { addImage(node); return; }
-        if (name === 'blockquote') { addText('quote', blockText(node)); return; }
-        if (name === 'li') { addText('item', blockText(node)); $(node).find('img').each((_, im) => addImage(im)); return; }
+        if (name === 'iframe') { addEmbed(node); return; }
+        bgImage(node);
+        if (name === 'blockquote') { addText('quote', blockText(node), node); return; }
+        if (name === 'li') { addText('item', blockText(node), node); $(node).find('img').each((_, im) => addImage(im)); return; }
         if (name === 'a' || name === 'button') {
             const $el = $(node);
             const text = clean($el.text()) || clean($el.attr('aria-label'));
@@ -821,7 +888,7 @@ export function readImportPage(html: string, url: string): ImportPage {
             if (only && only.type === 'tag' && $(only).attr('href') && clean($(only).text()).length <= 40) { walk(only); return; }
         }
         if (['p', 'figcaption', 'dd', 'dt', 'td', 'th', 'summary'].includes(name) || (ownText && !hasBlock)) {
-            addText('text', blockText(node));
+            addText('text', blockText(node), node);
             $(node).find('img').each((_, im) => addImage(im));
             return;
         }
@@ -834,7 +901,7 @@ export function readImportPage(html: string, url: string): ImportPage {
         url,
         title: orNull(clean($('title').first().text())) ?? orNull(clean($('meta[property="og:title"]').attr('content'))),
         description: orNull(clean($('meta[name="description"]').attr('content'))),
-        navLinks, blocks, words,
+        navLinks, blocks, words, formFields, socialLinks,
         contact: { emails: [...emails].slice(0, 3), phones: [...phones].slice(0, 3), address, locality },
         siteName, logo, hasForm, builder,
     };

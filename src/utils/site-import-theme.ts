@@ -14,7 +14,7 @@
 // Pure: HTML and CSS strings in, a partial theme out. The fetching is site-import.ts's deps.
 
 import { harvestBrandSignals } from './brand-extract';
-import { normalizeHex } from './brand-kit';
+import { normalizeHex, saturation } from './brand-kit';
 import type { FontKey, RadiusKey, SiteTheme } from './site-definition';
 
 /** What we brought across, for the import report ("Their colours and lettering"). */
@@ -22,6 +22,8 @@ export interface ImportedLook {
     primaryColor: string | null;
     textColor: string | null;
     backgroundColor: string | null;
+    /** A second brand colour their buttons use (themeWithLook → secondaryColor); null = none told apart. */
+    secondaryColor?: string | null;
     /** Their heading font as their site names it, and the pairing it became. */
     headingFont: string | null;
     font: FontKey | null;
@@ -129,6 +131,33 @@ function buttonRadius(html: string, css: string): RadiusKey | null {
     return best[1] ? best[0] : null;
 }
 
+/** The palette a Tailwind colour name belongs to: brand-700 → brand. */
+const paletteOf = (name: string) => name.replace(/-\d{2,3}$/, '');
+
+/**
+ * A second colour: on a Tailwind site, the button background used most that is not from the main
+ * colour's palette and not a near-grey; otherwise a --secondary / --accent variable in their CSS.
+ */
+function secondColour(html: string, css: string, tw: TailwindLook | null, primary: string | null): string | null {
+    if (tw) {
+        const primaryPalette = primary ? [...tw.colours].find(([, hex]) => hex === primary)?.[0] : undefined;
+        const counts = new Map<string, number>();
+        for (const m of html.matchAll(/<a\b[^>]*class=['"]([^'"]*\bpx-\d[^'"]*)['"]/gi)) {
+            for (const c of m[1].split(/\s+/)) {
+                const k = c.match(/^bg-([a-z]+-\d{2,3})$/)?.[1];
+                const hex = k ? tw.colours.get(k) : null;
+                if (!k || !hex || (primaryPalette && paletteOf(k) === paletteOf(primaryPalette)) || saturation(hex) < 0.35) continue;
+                counts.set(k, (counts.get(k) ?? 0) + 1);
+            }
+        }
+        const top = [...counts].sort((a, b) => b[1] - a[1])[0];
+        if (top) return tw.colours.get(top[0]) ?? null;
+    }
+    const v = css.match(/--(?:color-|brand-)?(?:secondary|accent)(?:-colou?r)?\s*:\s*(#[0-9a-f]{3,8})\b/i)?.[1];
+    const hex = v ? normalizeHex(v) : null;
+    return hex && hex !== primary && saturation(hex) >= 0.35 ? hex : null;
+}
+
 /**
  * Their site's look, as much of it as we could read. Every value is null when not found — the
  * caller keeps the current theme's value for that one. Colours only from what is on their site.
@@ -149,6 +178,7 @@ export function readImportedLook(html: string, baseUrl: string, css = ''): Impor
     const bodyFont = firstFamily(tw?.fonts.sans ?? tw?.fonts.body) ?? ruleFont(/\bbody\b/) ?? null;
     return {
         primaryColor: primary, textColor: text, backgroundColor: background,
+        secondaryColor: secondColour(html, allCss, tw, primary),
         headingFont, font: fontKeyFor(headingFont, bodyFont),
         radius: buttonRadius(html, css),
     };
@@ -164,6 +194,7 @@ export function themeWithLook(base: SiteTheme, look: ImportedLook): SiteTheme {
         ...base,
         ...(look.primaryColor ? { primaryColor: look.primaryColor, accentColor: look.primaryColor } : {}),
         ...(look.textColor ? { textColor: look.textColor } : {}),
+        ...(look.secondaryColor ? { secondaryColor: look.secondaryColor } : {}),
         ...(look.backgroundColor ? { backgroundColor: look.backgroundColor } : {}),
         ...(look.font ? { font: look.font } : {}),
         ...(look.radius ? { radius: look.radius } : {}),

@@ -14,6 +14,7 @@
 
 import { fillTemplateWords, templateById } from '../config/site-templates';
 import { contrastRatio, normalizeHex, readableInkOn } from './brand-kit';
+import { mapInlineLinks, mapPropStrings } from './site-rich-text';
 import { clampText, stripLoneSurrogates } from './text-safe';
 import { SOCIAL_PLATFORMS, type SocialPlatform } from '../config/platform-formats';
 
@@ -40,6 +41,11 @@ export interface SiteTheme {
     spacing?: SpacingKey;
     /** A soft tint for alternating sections; null = the grey of today. */
     accentColor?: string | null;
+    /**
+     * A second brand colour (2026-11-08): the button in a call-to-action band, so it stands out on
+     * the main colour — Restorative Futures' terracotta "Book" on teal. null/absent = today's look.
+     */
+    secondaryColor?: string | null;
     /** The logo and menu side by side ('standard'), or the logo centred above the menu. */
     header?: HeaderKey;
     /** https URL of the logo; null = the site name in text. */
@@ -53,6 +59,11 @@ export interface SiteTheme {
 
 export interface SiteSettings {
     siteName: string;
+    /**
+     * Their profiles elsewhere (2026-11-08): https addresses on the social sites in SOCIAL_LINK_SITES,
+     * linked in the footer and given to search engines (schema.org sameAs). An import brings them.
+     */
+    socialLinks?: string[];
     /** The search description of the home page when it has none of its own. */
     description: string | null;
     businessType: BusinessType;
@@ -298,14 +309,21 @@ export interface SiteDefinition {
      * e.g. landing pages, and are listed after those unless hidden).
      */
     structure: 'pages' | 'one_page';
+    /**
+     * Old addresses that now live elsewhere on this site (2026-11-08): an imported page whose address
+     * changed (/services/coaching → /coaching), so links and search results that point at the old one
+     * still arrive. Answered with a 301 by site-serve.ts. Absent = none.
+     */
+    redirects?: SiteRedirect[];
 }
+export interface SiteRedirect { from: string; to: string; }
 
 // ── Limits ──────────────────────────────────────────────────────────────────────────────────
 
 export const LIMITS = {
     siteName: 80, description: 170, locality: 80, email: 254, phone: 30,
     pageTitle: 80, seoTitle: 65, seoDescription: 170, slug: 80,
-    sectionsPerPage: 20, navItems: 7, navChildren: 12, navLabel: 30, navChildLabel: 48, footer: 300,
+    redirects: 100, sectionsPerPage: 20, navItems: 7, navChildren: 12, navLabel: 30, navChildLabel: 48, footer: 300,
     headline: 120, subheadline: 300, eyebrow: 40, ctaLabel: 40, href: 500, alt: 150,
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
     features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
@@ -689,6 +707,7 @@ export function cleanTheme(raw: unknown, warn: (m: string) => void, base: SiteTh
             : Number.isInteger(Number(t.logoAssetId)) && Number(t.logoAssetId) > 0 ? Number(t.logoAssetId) : (base.logoAssetId ?? null),
         spacing: SPACINGS.includes(t.spacing as SpacingKey) ? (t.spacing as SpacingKey) : (base.spacing ?? 'regular'),
         accentColor: t.accentColor === null ? null : (normalizeHex(typeof t.accentColor === 'string' ? t.accentColor : '') ?? base.accentColor ?? null),
+        secondaryColor: t.secondaryColor === null ? null : (normalizeHex(typeof t.secondaryColor === 'string' ? t.secondaryColor : '') ?? base.secondaryColor ?? null),
         header: HEADERS.includes(t.header as HeaderKey) ? (t.header as HeaderKey) : (base.header ?? 'standard'),
     };
 }
@@ -764,6 +783,57 @@ export function buttonInk(theme: SiteTheme): string {
     return readableInkOn(theme.primaryColor);
 }
 
+/** An address as a redirect compares it: path only, lower case, no trailing slash or ".html". */
+export function redirectKey(path: string): string {
+    let p = (path || '/').split(/[?#]/)[0];
+    try { p = decodeURIComponent(p); } catch { /* keep as sent */ }
+    p = p.toLowerCase().replace(/\/index\.html?$/, '/').replace(/\.html?$/, '').replace(/\/+$/, '');
+    return p || '/';
+}
+const REDIRECT_FROM = /^\/[a-z0-9\-._~%/!$&'()*+,;=:@]{1,200}$/;
+/** Redirects kept: an old address no page uses, to one of the site's pages; each old address once. */
+function cleanRedirects(v: unknown, pagePaths: Set<string>): SiteRedirect[] {
+    const out: SiteRedirect[] = [];
+    for (const x of Array.isArray(v) ? v : []) {
+        const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+        const from = redirectKey(String(o.from ?? ''));
+        const to = String(o.to ?? '');
+        if (!REDIRECT_FROM.test(from) || from.startsWith('/_') || pagePaths.has(from) || !pagePaths.has(to) || from === to) continue;
+        if (out.some((r) => r.from === from) || out.length >= LIMITS.redirects) continue;
+        out.push({ from, to });
+    }
+    return out;
+}
+/** Where an old address now lives, or null. Only for an address no page answers at. */
+export function redirectFor(def: SiteDefinition, path: string): string | null {
+    if (!def.redirects?.length) return null;
+    const key = redirectKey(path);
+    return def.redirects.find((r) => r.from === key)?.to ?? null;
+}
+
+/** The social sites a footer link may go to, by host, with the name it is shown as. */
+export const SOCIAL_LINK_SITES: Record<string, string> = {
+    'instagram.com': 'Instagram', 'facebook.com': 'Facebook', 'linkedin.com': 'LinkedIn', 'x.com': 'X', 'twitter.com': 'X',
+    'tiktok.com': 'TikTok', 'youtube.com': 'YouTube', 'threads.net': 'Threads', 'threads.com': 'Threads', 'pinterest.com': 'Pinterest',
+    'pinterest.co.uk': 'Pinterest', 'bsky.app': 'Bluesky',
+};
+/** The name a social link is shown as ("Instagram"), or null when it is not one of SOCIAL_LINK_SITES. */
+export function socialSiteOf(url: string): string | null {
+    try {
+        const h = new URL(url).hostname.toLowerCase().replace(/^(www|m|uk)\./, '');
+        return SOCIAL_LINK_SITES[h] ?? null;
+    } catch { return null; }
+}
+function cleanSocialLinks(v: unknown): string[] {
+    const list = Array.isArray(v) ? v : typeof v === 'string' ? v.split(/\s+/) : [];
+    const out: string[] = [];
+    for (const x of list) {
+        const h = cleanHref(x);
+        if (h && h.startsWith('https://') && socialSiteOf(h) && !out.includes(h) && out.length < 8) out.push(h);
+    }
+    return out;
+}
+
 function cleanSettings(raw: unknown, base?: SiteSettings): SiteSettings {
     const s = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const has = (k: string) => Object.prototype.hasOwnProperty.call(s, k);
@@ -778,6 +848,7 @@ function cleanSettings(raw: unknown, base?: SiteSettings): SiteSettings {
         phone: has('phone') ? (/^\+?[0-9 ()-]{5,30}$/.test(phone) ? phone : null) : base?.phone ?? null,
         features: has('features') ? cleanFeatures(s.features) : base?.features ?? null,
         template: has('template') ? (templateById(s.template) ? String(s.template) : null) : base?.template ?? null,
+        socialLinks: has('socialLinks') ? cleanSocialLinks(s.socialLinks) : base?.socialLinks ?? [],
         ...blogSetting(has('blog') ? s.blog : undefined, base?.blog),
     };
 }
@@ -925,7 +996,8 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
     const footer = { text: textOrNull((r.footer as Record<string, unknown> | undefined)?.text, LIMITS.footer, true) };
 
     const structure = r.structure === 'one_page' ? 'one_page' : 'pages';
-    return { definition: { version: 1, theme, settings, nav, pages, footer, structure }, warnings };
+    const redirects = cleanRedirects(r.redirects, pagePaths);
+    return { definition: { version: 1, theme, settings, nav, pages, footer, structure, ...(redirects.length ? { redirects } : {}) }, warnings };
 }
 
 /**
@@ -987,7 +1059,8 @@ export type SiteOperation =
     | { op: 'set_nav'; items: Array<{ label?: string; pageId: string }> }
     | { op: 'set_theme'; theme: Partial<Record<keyof SiteTheme, unknown>> }
     | { op: 'set_settings'; settings: Partial<Record<keyof SiteSettings, unknown>> }
-    | { op: 'set_footer'; text: string | null };
+    | { op: 'set_footer'; text: string | null }
+    | { op: 'set_redirects'; redirects: SiteRedirect[] };
 
 export type OperationResult = { ok: true; definition: SiteDefinition; warnings: string[] } | { ok: false; error: string };
 
@@ -1207,6 +1280,10 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
             next.footer = { text: op.text };
             break;
         }
+        case 'set_redirects': {
+            next.redirects = Array.isArray(op.redirects) ? op.redirects : [];
+            break;
+        }
         case 'set_structure': {
             next.structure = op.structure === 'one_page' ? 'one_page' : 'pages';
             break;
@@ -1230,6 +1307,8 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
                 if (sec.type === 'hero') { sec.props.primaryCta = fix(sec.props.primaryCta); sec.props.secondaryCta = fix(sec.props.secondaryCta); }
                 if (sec.type === 'cta') sec.props.button = fix(sec.props.button) ?? sec.props.button;
                 if (sec.type === 'features' || sec.type === 'steps') sec.props.items = sec.props.items.map((it) => (it.link ? withItemLink(it, fix(it.link)) : it));
+                // Links inside sentences ([words](/page)) move with their page too.
+                sec.props = mapPropStrings(sec.props, (t) => (t.includes('](') ? mapInlineLinks(t, (h) => fix({ label: 'x', href: h })!.href) : t)) as typeof sec.props;
             }
             next.pages = [home];
             next.nav = [];
@@ -1294,6 +1373,8 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
                 if (sec.type === 'hero') { sec.props.primaryCta = fix(sec.props.primaryCta); sec.props.secondaryCta = fix(sec.props.secondaryCta); }
                 if (sec.type === 'cta') sec.props.button = fix(sec.props.button) ?? sec.props.button;
                 if (sec.type === 'features' || sec.type === 'steps') sec.props.items = sec.props.items.map((it) => (it.link ? withItemLink(it, fix(it.link)) : it));
+                // Links inside sentences ([words](/page)) move with their page too.
+                sec.props = mapPropStrings(sec.props, (t) => (t.includes('](') ? mapInlineLinks(t, (h) => fix({ label: 'x', href: h })!.href) : t)) as typeof sec.props;
             }
             next.nav = [];
             next.structure = 'pages';

@@ -22,9 +22,11 @@ import type { ImportBlock, ImportPage, SiteLink } from './site-extract';
 import { normaliseText, readImportPage, statesPrice } from './site-extract';
 import {
     cleanHref, LIMITS, normaliseSiteDefinition, RESERVED_SLUGS, sectionAllowed, type SectionType, type SiteDefinition,
+    BLOG_PATH, redirectKey,
 } from './site-definition';
 import { chunkBodies } from './site-words';
 import { inlineEmbeds, type EmbedFetchers } from './site-embeds';
+import { linkFirst, PLACEHOLDER, plainOf } from './site-rich-text';
 import { lookFound, readImportedLook, themeWithLook, type ImportedLook } from './site-import-theme';
 import { harvestBrandSignals } from './brand-extract';
 
@@ -243,6 +245,8 @@ export interface ImportReport {
     notCarried: string[];
     contact: { email: string | null; phone: string | null; address: string | null };
     hadForm: boolean;
+    /** Their old form's questions (field labels) — our contact form asks name, email, (phone) and message. */
+    formFields?: string[];
     placeholders: number;
     /** Their colours, lettering and corners as we read them (null = none read: their current design is kept). */
     look?: ImportedLook | null;
@@ -256,6 +260,8 @@ export interface AssembleInput {
     /** Picture block number → the library picture it was copied into. */
     assets: Map<number, number>;
     maxPages: number;
+    /** Their old blog page(s) holding the Blog Assistant widget: links to them go to the new site's /blog. */
+    blogUrls?: string[];
 }
 
 const slugify = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, LIMITS.slug).replace(/-+$/, '');
@@ -296,10 +302,21 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         if (/^(mailto|tel):/i.test(href)) return cleanHref(href.replace(/\s+/g, ''));
         const i = pages.slice(0, cap).findIndex((p) => samePath(p.url, href));
         if (i >= 0) return i === 0 ? '/' : `/${slugs[i]}`;
+        if (input.blogUrls?.some((u) => samePath(u, href))) return BLOG_PATH;
         try { if (new URL(href).host.replace(/^www\./, '') === new URL(pages[0].url).host.replace(/^www\./, '')) return null; } catch { return null; }
         return cleanHref(href);
     };
 
+    /** A block's words with its inline links put back, each pointing at the new site (or dropped). */
+    const withLinks = (block: ImportBlock): string => {
+        if (block.kind === 'image') return '';
+        let t = block.text;
+        for (const l of ('links' in block && block.links) || []) {
+            const to = mapHref(l.href);
+            if (to) t = linkFirst(t, l.text, to);
+        }
+        return t;
+    };
     const onPage = (n: number | null | undefined, page: number): NumberedBlock | null => {
         if (!n || n < 1 || n > blocks.length || used.has(n)) return null;
         const b = blocks[n - 1];
@@ -336,7 +353,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         for (const n of ns) {
             const b = blocks[n - 1];
             if (!b || b.block.kind === 'image') continue;
-            const t = b.block.text;
+            const t = withLinks(b.block);
             if (b.block.kind === 'item' && prevItem && out.length) out[out.length - 1] += `\n${t}`;
             else out.push(t);
             prevItem = b.block.kind === 'item';
@@ -375,6 +392,9 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         return j >= 0 ? `p${j + 1}` : null;
     });
 
+    // The new contact form asks for a phone number when their old form did (or when we saw no form).
+    const oldForm = importedFormFields(pages);
+    const askPhone = !oldForm.length || oldForm.some((f) => /phone|tel\b|mobile|number/i.test(f));
     const outPages = pages.slice(0, cap).map((p, i) => {
         // Each group of sections remembers the first of their blocks it holds, so blocks the plan
         // forgot go back where they were read — not all at the end of the page.
@@ -487,7 +507,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
                 const heading = text(s.heading, i);
                 const introB = blocks[(s.intro ?? 0) - 1];
                 const intro = introB && introB.page === i && introB.block.kind !== 'image' && introB.block.kind !== 'button' && introB.block.text.length <= LIMITS.intro ? text(s.intro, i) : null;
-                sections.push({ type: 'contact', props: { heading: fitsHeading(heading) ? heading : null, intro, askPhone: true, offerUpdates: false } });
+                sections.push({ type: 'contact', props: { heading: fitsHeading(heading) ? heading : null, intro, askPhone, offerUpdates: false } });
                 if (heading && !fitsHeading(heading)) sections.push(...textSections(null, [heading], null));
             }
         }
@@ -542,7 +562,24 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         }
         if (!sections.length) sections.push({ type: 'text', props: { heading: pageTitle(p, i), body: '[What this page should say]' } });
 
-        // A page holds up to LIMITS.sectionsPerPage sections: what doesn't fit is listed, not dropped quietly.
+        // A page holds up to LIMITS.sectionsPerPage sections. A long page (Restorative Futures' "Why
+        // this training matters": 29) folds neighbouring text sections together — the second heading
+        // becomes a "### " subheading inside the first — shortest pairs first, while the words fit.
+        while (sections.length > LIMITS.sectionsPerPage) {
+            let best = -1;
+            let bestLen = Infinity;
+            for (let k = 0; k + 1 < sections.length; k++) {
+                const [a, b] = [sections[k], sections[k + 1]];
+                if (a.type !== 'text' || b.type !== 'text' || b.props.image) continue;
+                const len = String(a.props.body ?? '').length + String(b.props.body ?? '').length + String(b.props.heading ?? '').length + 8;
+                if (len <= LIMITS.textBody && len < bestLen) { best = k; bestLen = len; }
+            }
+            if (best < 0) break;
+            const [a, b] = [sections[best], sections[best + 1]];
+            const body = [a.props.body, b.props.heading ? `### ${b.props.heading}` : null, b.props.body].filter((x) => typeof x === 'string' && x).join('\n\n');
+            sections.splice(best, 2, { type: 'text', props: { ...a.props, body } });
+        }
+        // What still doesn't fit is listed, not dropped quietly.
         if (sections.length > LIMITS.sectionsPerPage) {
             for (const extra of sections.splice(LIMITS.sectionsPerPage)) {
                 const words = [extra.props.heading, extra.props.body].filter((x) => typeof x === 'string' && x).join(' — ');
@@ -561,7 +598,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
     // An enquiry form, where their old site had a contact page — or a page of its own, when there is room.
     if (!outPages.some((p) => p.sections.some((s) => s.type === 'contact'))) {
         const contactPage = outPages.find((p) => CONTACT_PAGE.test(p.slug));
-        const form = { type: 'contact', props: { heading: null, intro: null, askPhone: true, offerUpdates: false } };
+        const form = { type: 'contact', props: { heading: null, intro: null, askPhone, offerUpdates: false } };
         if (contactPage && contactPage.sections.length < LIMITS.sectionsPerPage) contactPage.sections.push(form);
         else if (outPages.length < input.maxPages) outPages.push({ id: '', menuParent: null, title: 'Contact', slug: slugs.includes('contact') ? 'contact-us' : 'contact', seo: { title: null, description: null }, sections: [form] });
         else if (outPages[0].sections.length < LIMITS.sectionsPerPage) outPages[0].sections.push(form);
@@ -578,12 +615,31 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
             // The public email and phone on their own site — the server read them, no model typed them.
             email: contact.email ?? current.settings.email,
             phone: contact.phone ?? current.settings.phone,
+            // Their profiles on social sites (footer links), when the new site has none yet.
+            socialLinks: current.settings.socialLinks?.length ? current.settings.socialLinks : importedSocialLinks(pages),
         },
         nav: [], footer: current.footer, structure: 'pages', pages: outPages,
+        // Their old addresses that changed (/services/coaching → /coaching) keep working on the new site.
+        redirects: pages.slice(0, cap).flatMap((p, i) => {
+            const from = redirectKey(new URL(p.url).pathname);
+            const to = i === 0 ? '/' : `/${slugs[i]}`;
+            return from !== to ? [{ from, to }] : [];
+        }),
     }, { maxPages: input.maxPages });
 
     const leftOut = [...skip].map((n) => blocks[n - 1]).filter((b) => b && b.block.kind !== 'image' && b.block.kind !== 'button').map((b) => (b.block as { text: string }).text.slice(0, 200));
     return { definition, leftOut, notCarried, warnings };
+}
+
+/** Their social profile links across the pages read, home first, each once. */
+export function importedSocialLinks(pages: ReadPage[]): string[] {
+    return [...new Set(pages.flatMap((p) => p.page.socialLinks ?? []))].slice(0, 8);
+}
+/** The questions their form asked — the contact page's form first, else the first form found. */
+export function importedFormFields(pages: ReadPage[]): string[] {
+    const withForm = pages.filter((p) => p.page.formFields?.length);
+    const best = withForm.find((p) => CONTACT_PAGE.test(new URL(p.url).pathname)) ?? withForm[0];
+    return best?.page.formFields ?? [];
 }
 
 /** The first email, phone and address found across the pages read (home first). */
@@ -603,7 +659,7 @@ export function draftWordsAllFromSource(definition: SiteDefinition, pages: ReadP
     const strays: string[] = [];
     const check = (s: unknown) => {
         if (typeof s !== 'string' || !s.trim()) return;
-        for (const line of s.split(/\n+/)) {
+        for (const line of plainOf(s).split(/\n+/)) {
             const t = normaliseText(line);
             if (t && !source.includes(t) && !extraAllowed.some((a) => normaliseText(a) === t) && !/^\[[^\]]+\]$/.test(t)) strays.push(line);
         }
@@ -684,8 +740,18 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
     const reports: ImportReport['pages'] = [{ url: homePage.url, title: homeLabel ?? 'Home', words: homePage.words, read: true, note: null }];
     const read: ReadPage[] = [{ url: homePage.url, menuLabel: homeLabel, page: homePage }];
     const fetched = await inTurns(toRead, 3, async (l) => ({ l, r: await readPage(l.href, deps) }));
+    // A page that is only the Blog Assistant's widget (Restorative Futures' "Blogs") is not a page to
+    // copy: its posts are already ours, and the new site shows them at /blog. The blog is switched on
+    // under their menu's word for it, and links to the old page go to /blog.
+    let blog: { label: string; urls: string[] } | null = null;
     for (const { l, r } of fetched) {
         if (!r.ok) { reports.push({ url: l.href, title: l.text, words: 0, read: false, note: r.message }); continue; }
+        if (BLOG_WIDGET.test(r.html)) {
+            const prev = blog as { label: string; urls: string[] } | null;
+            blog = { label: prev?.label ?? l.text, urls: [...(prev?.urls ?? []), l.href, r.finalUrl] };
+            reports.push({ url: r.finalUrl, title: l.text, words: 0, read: true, note: 'Your Blog Assistant posts — shown on the new site\'s blog page, not copied as a page.' });
+            continue;
+        }
         const page = r.page;
         if (!page.words && !page.blocks.length) { reports.push({ url: l.href, title: l.text, words: 0, read: false, note: 'We couldn\'t read any words on this page.' }); continue; }
         reports.push({ url: page.url, title: l.text, words: page.words, read: true, note: null });
@@ -696,7 +762,7 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
         sourceUrl: input.url, builder: homePage.builder, pages: reports, wordsRead,
         notImported: menu.filter((l) => !toRead.includes(l)).map((l) => ({ url: l.href, title: l.text })),
         pictures: { choice: input.pictures, found: read.reduce((n, p) => n + p.page.blocks.filter((b) => b.kind === 'image').length, 0) + (homePage.logo ? 1 : 0), copied: 0, failed: 0, undescribed: 0 },
-        prices: [], leftOut: [], notCarried: [], contact: importedContact(read), hadForm: read.some((p) => p.page.hasForm), placeholders: 0,
+        prices: [], leftOut: [], notCarried: [], contact: importedContact(read), hadForm: read.some((p) => p.page.hasForm), formFields: importedFormFields(read), placeholders: 0,
     });
     if (wordsRead < IMPORT_THIN_SITE_WORDS || (homePage.words < IMPORT_THIN_WORDS && read.length === 1)) {
         return { ok: false, message: thinMessage(wordsRead, homePage.builder, home.embedsUnread), report: baseReport() };
@@ -719,8 +785,12 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
             if (id) { assets.set(n, id); report.pictures.copied++; if (!b.altFromSite) report.pictures.undescribed++; } else report.pictures.failed++;
         }
     }
-    const built = assembleImport({ current: input.current, pages: read, blocks, plan, assets, maxPages: input.maxPages });
+    const built = assembleImport({ current: input.current, pages: read, blocks, plan, assets, maxPages: input.maxPages, blogUrls: blog?.urls });
     let definition = built.definition;
+    if (blog) {
+        const fromBlog = [...new Set(blog.urls.map((u) => redirectKey(new URL(u).pathname)))].map((from) => ({ from, to: BLOG_PATH }));
+        definition = normaliseSiteDefinition({ ...definition, settings: { ...definition.settings, blog: { enabled: true, menuLabel: blog.label } }, redirects: [...(definition.redirects ?? []), ...fromBlog] }, { maxPages: input.maxPages }).definition;
+    }
     // Their logo, when the new site has none yet (a picture they chose to copy, like the rest).
     if (input.pictures === 'copy' && !definition.theme.logoUrl && !definition.theme.logoAssetId && homePage.logo) {
         const id = await deps.savePicture(homePage.logo.src, homePage.logo.alt).catch(() => null);
@@ -738,6 +808,9 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
     report.placeholders = countPlaceholders(definition);
     return { ok: true, definition, report, warnings: built.warnings };
 }
+
+/** The Blog Assistant's widget on their page (blog-widget embed): its posts are already in Be More Swan. */
+const BLOG_WIDGET = /bemoreswan\.com\/widget\.js|data-bms-blog\b/i;
 
 /** Stylesheets read for the look: their own first; a site with thirty is a build artefact. */
 const LOOK_MAX_STYLESHEETS = 4;
@@ -788,6 +861,6 @@ function readImportPageSafe(html: string, url: string): ImportPage {
 }
 
 function countPlaceholders(def: SiteDefinition): number {
-    return (JSON.stringify(def.pages).match(/\[[^\][]{1,60}\]/g) ?? []).length;
+    return (JSON.stringify(def.pages).match(PLACEHOLDER) ?? []).length;
 }
 
