@@ -20,6 +20,7 @@ const DEFAULTS: Record<string, Answer> = {
     'get-social-drafts': { drafts: [], total: 0, hasMore: false },
     'get-assistants': { assistants: [] },
     'notifications': { notifications: [], unread: 0 },
+    'content-pillars': { pillars: [], maxActive: 5, maxName: 60, maxDescription: 300 },
 };
 
 export interface ApiCall { name: string; method: string; url: string; body: unknown }

@@ -51,6 +51,7 @@
     render();
     try {
       const data = await call('POST', body);
+      if (!Array.isArray(data.pillars)) throw new Error('That didn\'t save. Try again.');
       state.pillars = data.pillars;
       publish(state.pillars, opts || { offerRedraft: true });
     } catch (err) {
@@ -185,13 +186,19 @@
     if (!state.host || !state.assistantId) return;
     try {
       const data = await call('GET');
-      state.limits = { maxActive: data.maxActive, maxName: data.maxName, maxDescription: data.maxDescription };
-      state.pillars = data.pillars;
+      // Keep the defaults for any limit the answer leaves out, and treat an answer without a list as
+      // "not available yet" (the fallback chips): `undefined` here crashed render() on list.filter.
+      state.limits = {
+        maxActive: Number(data.maxActive) || state.limits.maxActive,
+        maxName: Number(data.maxName) || state.limits.maxName,
+        maxDescription: Number(data.maxDescription) || state.limits.maxDescription,
+      };
+      state.pillars = Array.isArray(data.pillars) ? data.pillars : null;
       state.error = '';
-      if (Array.isArray(state.pillars)) publish(state.pillars, { offerRedraft: false });
+      if (state.pillars) publish(state.pillars, { offerRedraft: false });
     } catch (err) {
       state.error = err.message;
-      if (state.pillars === undefined) state.pillars = null;
+      if (!Array.isArray(state.pillars)) state.pillars = null;
     }
     render();
   }
