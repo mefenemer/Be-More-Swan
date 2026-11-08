@@ -41,7 +41,7 @@ export default withLambda(async (event): Promise<Res> => {
             bookings: rows.filter((b) => b.status !== 'cancelled' || (b.decidedAt && new Date(b.decidedAt) > recent)).filter((b) => b.paymentStatus !== 'expired').map((b) => ({
                 id: b.id, kind: b.kind, status: b.status, startsAt: new Date(b.startsAt), endsAt: new Date(b.endsAt), what: describeBooking(b, st.timezone).what,
                 customerName: b.customerName, customerEmail: b.customerEmail, customerPhone: b.customerPhone, notes: b.notes, partySize: b.partySize,
-                depositPence: b.depositPence, paymentStatus: b.paymentStatus,
+                depositPence: b.depositPence, paymentStatus: b.paymentStatus, meetingLocation: b.meetingLocation, meetingUrl: b.meetingUrl,
             })),
             sessions: sessions.map((s) => {
                 const people = rows.filter((b) => b.sessionId === s.id && (b.status === 'pending' || b.status === 'confirmed'));

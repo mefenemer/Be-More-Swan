@@ -167,14 +167,18 @@ export async function loadProductsBlock(db: Db, organisationId: number, business
     // assistant), so none of them asks a software company about its menu (offer-profile.ts).
     // And the free trial / introductory offer — ALWAYS a line, because "not answered" and "no" both
     // tell the model something: don't promise one (intro-offer.ts, owner 2026-10-24).
-    const [products, offer, intro] = await Promise.all([
+    // And the online booking link, when there is one, so a post or follow-up that says "book here"
+    // uses the real address (site-booking-page.ts; docs/booking-calendly-gaps-plan.md A). Loaded
+    // lazily and never fatal: drafting must not fail over a booking lookup.
+    const [products, offer, intro, bookingLine] = await Promise.all([
         loadOrgProducts(db, organisationId), loadAnsweredOffer(db, organisationId), loadIntroOffer(db, organisationId),
+        import('./site-booking-page').then(async (m) => m.describeBookingLink(await m.bookingLinkFor(db, organisationId))).catch(() => ''),
     ]);
     // An empty catalogue still gets a block: every assistant must know where products live, or it
     // sends the owner to the old free-text boxes that no longer hold them (owner, 2026-10-21).
     const block = renderProductsBlock(products, businessName) ?? NO_PRODUCTS_BLOCK;
     const line = offer ? describeOfferProfile(offer) : '';
-    return [block, line, describeIntroOffer(intro)].filter(Boolean).join('\n') || null;
+    return [block, line, describeIntroOffer(intro), bookingLine].filter(Boolean).join('\n') || null;
 }
 
 // ── Short form, for prompts that only need to NAME what is on offer ─────────────────────────────

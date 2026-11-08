@@ -538,6 +538,7 @@
     function card(p, i, active) {
       const meta = [p.price ? `<span class="font-semibold text-gray-800">${esc(p.price)}</span>` : '',
         p.durationMinutes ? `${esc(p.durationMinutes)} min` : '',
+        p.durationMinutes && p.meetingLocation === 'video' ? 'Video call' : p.durationMinutes && p.meetingLocation === 'phone' ? 'Phone call' : '',
         Array.isArray(p.dietary) && p.dietary.length ? esc(p.dietary.map(d => ({ vegetarian: 'V', vegan: 'VG', gluten_free: 'GF', dairy_free: 'DF', contains_nuts: 'N', spicy: '🌶' }[d] || '')).filter(Boolean).join(' · ')) : '',
         p.depositType === 'fixed' && p.depositAmount ? `£${esc((p.depositAmount / 100).toFixed(2).replace(/\.00$/, ''))} deposit` : p.depositType === 'percent' && p.depositAmount ? `${esc(p.depositAmount)}% deposit` : '',
         p.audience ? `For ${esc(p.audience)}` : ''].filter(Boolean).join(' · ');
@@ -683,6 +684,13 @@
           <label for="op-duration" class="block text-sm font-semibold text-gray-700 mb-1">How long it takes (minutes)</label>
           <input id="op-duration" type="number" min="5" max="1440" step="5" value="${esc(v.durationMinutes || '')}" placeholder="e.g. 45" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
           <p class="text-xs text-gray-500 mt-1">Used when people book it.</p>
+          <label for="op-meeting" class="block text-sm font-semibold text-gray-700 mb-1 mt-3">Where it happens</label>
+          <select id="op-meeting" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
+            <option value="in_person" ${!v.meetingLocation || v.meetingLocation === 'in_person' ? 'selected' : ''}>In person</option>
+            <option value="video" ${v.meetingLocation === 'video' ? 'selected' : ''}>Video call</option>
+            <option value="phone" ${v.meetingLocation === 'phone' ? 'selected' : ''}>Phone call (you call them)</option>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">Video calls use your meeting link from the Bookings tab, sent once a booking is confirmed. Phone calls ask for their number.</p>
         </div>
         <div class="sm:col-span-2" data-op-group="menu">
           <p class="block text-sm font-semibold text-gray-700 mb-1">Dietary (for food — optional)</p>
@@ -738,6 +746,7 @@
         priceType: get('op-price-type') || null, priceAmount: get('op-price-amount'), priceUnit: get('op-price-unit'), priceCurrency: get('op-price-currency'),
         price: get('op-price-text'),
         durationMinutes: get('op-duration') ? Number(get('op-duration')) : null,
+        meetingLocation: get('op-meeting') || 'in_person',
         depositType: get('op-deposit-type') || null, depositAmount: get('op-deposit-amount'),
         dietary: [...f.querySelectorAll('[data-op-diet]:checked')].map(x => x.value), allergens: get('op-allergens'),
         imageAssetId: get('op-image') ? Number(get('op-image')) : null,
@@ -935,6 +944,9 @@
         <div><label for="bh-buffer" class="block text-sm font-semibold text-gray-700 mb-1">Gap between bookings (minutes)</label><input id="bh-buffer" type="number" min="0" max="240" step="5" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
         <div><label for="bh-table" class="block text-sm font-semibold text-gray-700 mb-1">A table is held for (minutes)</label><input id="bh-table" type="number" min="15" max="480" step="15" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
         <div><label for="bh-party" class="block text-sm font-semibold text-gray-700 mb-1">Largest party that can book online</label><input id="bh-party" type="number" min="1" max="100" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div class="sm:col-span-2"><label for="bh-meeting" class="block text-sm font-semibold text-gray-700 mb-1">Your video call link (for video services)</label>
+          <input id="bh-meeting" type="url" maxlength="500" placeholder="https://zoom.us/j/… or https://meet.google.com/…" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
+          <p class="text-xs text-gray-500 mt-1">A link you use for every call — your Zoom personal room, a Google Meet or Teams link. Customers get it once a booking is confirmed. A person below can have their own. Set a service to "Video call" in Products &amp; Services.</p></div>
         <div class="sm:col-span-2"><label for="bh-policy" class="block text-sm font-semibold text-gray-700 mb-1">Cancellation policy (optional)</label>
           <textarea id="bh-policy" rows="2" maxlength="500" placeholder="e.g. Please give us 24 hours' notice if you can't make it." class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></textarea></div>
       </div>
@@ -1051,6 +1063,7 @@
       $('bh-table').value = st.tableMinutes ?? 90;
       $('bh-party').value = st.maxPartySize ?? 8;
       $('bh-policy').value = st.cancellationPolicy || '';
+      $('bh-meeting').value = st.meetingUrl || '';
       $('bh-address').value = st.visitAddress || '';
       $('bh-whatsapp').value = st.whatsapp || '';
     }
@@ -1106,6 +1119,8 @@
           </div>
           ${svc.length && r.kind !== 'table' ? `<details class="mt-2"><summary class="text-xs text-gray-600 cursor-pointer">Services they do: ${ids ? esc(ids.length) + ' chosen' : 'all'}</summary>
             <div class="flex flex-wrap gap-2 mt-1">${svc.map(x => `<label class="inline-flex items-center gap-1 text-xs"><input type="checkbox" data-rsvc value="${x.id}" ${!ids || ids.includes(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div></details>` : ''}
+          ${r.kind !== 'table' ? `<label class="block text-xs text-gray-600 mt-2">Their video call link (optional — instead of yours)
+            <input data-rmeet type="url" maxlength="500" value="${esc(r.meetingUrl || '')}" placeholder="https://zoom.us/j/…" class="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-xs"></label>` : ''}
           ${r.kind !== 'table' && r.status === 'active' ? `<details class="mt-2" ${r.busyCalendarHost ? '' : ''}><summary class="text-xs text-gray-600 cursor-pointer">Their calendar: ${r.busyCalendarHost ? esc(busyLine(r)) : 'not linked'}</summary>
             <input data-rcal type="url" placeholder="${r.busyCalendarHost ? 'Paste a new private iCal address to replace it' : 'Their private iCal address'}" class="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-xs">
             <div class="flex flex-wrap items-center gap-2 mt-1">
@@ -1153,7 +1168,7 @@
           minNoticeMinutes: Math.round(Number($('bh-notice').value || 0) * 60), maxAdvanceDays: Number($('bh-advance').value || 60),
           slotIntervalMinutes: Number($('bh-interval').value), bufferMinutes: Number($('bh-buffer').value || 0),
           tableMinutes: Number($('bh-table').value || 90), maxPartySize: Number($('bh-party').value || 8),
-          cancellationPolicy: $('bh-policy').value,
+          cancellationPolicy: $('bh-policy').value, meetingUrl: $('bh-meeting').value.trim(),
           visitAddress: $('bh-address').value, whatsapp: $('bh-whatsapp').value,
         };
         const { settings } = await call('PUT', body);
@@ -1171,6 +1186,8 @@
       const chosen = ticks.filter(t => t.checked).map(t => Number(t.value));
       const body = { id, name: row.querySelector('[data-rname]').value, kind: row.querySelector('[data-rkind]').value, capacity: Number(row.querySelector('[data-rcap]').value || 1),
         serviceIds: ticks.length && chosen.length < ticks.length ? chosen : null };
+      const meet = row.querySelector('[data-rmeet]');
+      if (meet) body.meetingUrl = meet.value.trim();
       try { const { resource } = await call('PATCH', body); data.resources = data.resources.map(r => r.id === id ? resource : r); renderResources(); $('bh-res-error').classList.add('hidden'); }
       catch (e) { $('bh-res-error').textContent = e.message; $('bh-res-error').classList.remove('hidden'); }
     }

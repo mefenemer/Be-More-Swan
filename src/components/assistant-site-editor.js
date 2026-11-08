@@ -1334,11 +1334,43 @@
 
   // ── Bookings (bookings.ts) ─────────────────────────────────────────────────
   const BOOKING_TONE = { awaiting_payment: ['Paying the deposit…', 'text-gray-500'], pending: ['Waiting for you', 'text-emerald-800'], confirmed: ['Confirmed', 'text-green-700'], declined: ['Declined', 'text-gray-500'], cancelled: ['Cancelled', 'text-gray-500'] };
+  // The booking link of its own (site-booking-page.ts; docs/booking-calendly-gaps-plan.md A): this
+  // site's address + /book, live even before the site is published. Links per service and per
+  // person, and a button for any other website (a plain link — no embed, no script).
+  function bookingLinkCard() {
+    const b = state.data.booking || {};
+    const site = state.data.site || {};
+    if (!b.link) {
+      const why = b.needsAddress ? 'Choose your website\'s address on the Website tab (under Publish) — your booking link uses it. You don\'t need to publish.'
+        : !b.ready ? 'Set your opening hours first.'
+        : 'Add a service with a length in Products &amp; Services, a table under Bookings, or a class date below.';
+      return card(`<p class="text-sm font-black text-gray-900">Your booking link</p><p class="text-xs text-gray-500 mt-1">A link to share anywhere — your email signature, Instagram bio, messages. ${why}</p>`);
+    }
+    const link = b.link;
+    const services = (b.services || []);
+    const people = (b.resources || []).filter((r) => r.kind !== 'table');
+    const row = (label, url) => `<li class="flex flex-wrap items-center justify-between gap-2"><span class="text-xs text-gray-800">${esc(label)}</span><span class="flex items-center gap-1">${btn(`data-site-copy="${esc(url)}"`, 'Copy link')}</span></li>`;
+    const perService = services.length > 1 || people.length > 1 ? `<details class="mt-3"><summary class="text-xs font-bold text-gray-700 cursor-pointer">A link for one service or one person</summary>
+      <ul class="space-y-1.5 mt-2">${services.map((x) => row(x.name, `${link}?svc=${x.id}`)).join('')}${people.map((r) => row(`With ${r.name}`, `${link}?res=${r.id}`)).join('')}</ul></details>` : '';
+    const snippet = `<a href="${link}" style="display:inline-block;padding:12px 20px;border-radius:8px;background:#111827;color:#ffffff;font-weight:700;text-decoration:none">Book now</a>`;
+    const videoNoLink = services.some((x) => x.meetingLocation === 'video') && !b.meetingUrl && !people.some((r) => r.hasMeetingUrl);
+    return card(`<p class="text-sm font-black text-gray-900">Your booking link</p>
+      <p class="text-xs text-gray-500 mt-1">Share it anywhere — your email signature, Instagram bio, messages.${site.status === 'published' ? '' : ' Your website isn\'t published yet, so this address shows only your booking pages.'}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-2"><input readonly value="${esc(link)}" aria-label="Your booking link" class="flex-1 min-w-0 px-3 py-2 rounded-lg border border-gray-300 text-xs bg-gray-50">
+        ${btn(`data-site-copy="${esc(link)}"`, 'Copy link', true)}<a class="btn-secondary border sb-tap px-3 py-1.5 text-xs font-bold rounded-lg" href="${esc(link)}" target="_blank" rel="noopener">Open</a></div>
+      ${videoNoLink ? `<p class="text-xs text-amber-800 font-semibold mt-2">Some services are video calls but there's no video call link yet. Add yours in Business Information ▸ Bookings, or customers are told you'll send one. ${btn('data-site-open-bookings', 'Add it')}</p>` : ''}
+      ${perService}
+      <details class="mt-2"><summary class="text-xs font-bold text-gray-700 cursor-pointer">A "Book now" button for another website</summary>
+        <p class="text-xs text-gray-500 mt-1">Paste this where your other website lets you add HTML. It's a plain link, so it works anywhere.</p>
+        <textarea readonly rows="3" class="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-xs font-mono bg-gray-50">${esc(snippet)}</textarea>
+        <div class="mt-1">${btn(`data-site-copy="${esc(snippet)}"`, 'Copy button')}</div></details>`);
+  }
+
   function bookingsPanel() {
     const b = state.data.booking || {};
     const head = card(`<p class="text-sm font-black text-gray-900">Bookings</p>
       <p class="text-xs text-gray-500 mt-1">${b.ready ? `Opening hours: ${esc(b.hours)}. ${b.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}` : 'Set your opening hours to take bookings on your site.'} ${btn('data-site-open-hours', 'Hours & location')}</p>
-      <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`);
+      <p class="text-xs text-gray-500 mt-1">Add a "Bookings" section to a page to show it on your website.</p>`) + bookingLinkCard();
     const list = state.bookings;
     const tt = timetableCard();
     if (!list) return head + tt + card('<p class="text-sm text-gray-500 text-center">Loading bookings…</p>');
@@ -1355,6 +1387,7 @@
         <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-xs font-bold text-gray-900">${esc(x.when)}</p><span class="text-xs font-bold ${tone}">${esc(label)}</span></div>
         <p class="text-xs text-gray-800 mt-1">${esc(x.what)} · ${esc(x.customerName)}${x.reminded ? ' <span class="text-gray-500">· reminder sent</span>' : ''}</p>
         <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(x.customerEmail)}">${esc(x.customerEmail)}</a>${x.customerPhone ? ` · <a class="underline" href="tel:${esc(x.customerPhone)}">${esc(x.customerPhone)}</a>` : ''}</p>
+        ${x.meeting ? `<p class="text-xs text-gray-700 mt-1">${esc(x.meeting)}</p>` : ''}
         ${x.notes ? `<p class="text-xs text-gray-700 mt-1" style="white-space:pre-wrap">${esc(x.notes)}</p>` : ''}
         ${x.deposit ? `<p class="text-xs font-semibold ${/failed/.test(x.deposit) ? 'text-red-600' : 'text-gray-700'} mt-1">${esc(x.deposit)}</p>` : ''}
         ${!past && (x.status === 'pending' || x.status === 'confirmed') ? `<div class="flex flex-wrap gap-2 mt-2">
@@ -2592,6 +2625,7 @@
     if (t('[data-site-open-products]')) { window._bizinfoInitialTab = 'products'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
     if (t('[data-site-open-reviews]')) { window._audienceInitialTab = 'reviews'; if (typeof window.loadView === 'function') window.loadView('audience'); return; }
     if (t('[data-site-open-hours]')) { window._bizinfoInitialTab = 'hours'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    if (t('[data-site-open-bookings]')) { window._bizinfoInitialTab = 'bookings'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
     const sAdd = t('[data-session-add]');
     if (sAdd) {
       const draft = readSessionForm(sAdd.closest('[data-session-form]'));

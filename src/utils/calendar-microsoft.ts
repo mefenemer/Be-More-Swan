@@ -22,6 +22,7 @@ import { getFreshAccessToken, IntegrationError } from './workspace-integrations'
 import { settingsFromRow } from './booking-settings';
 import { setBusyCalendar } from './calendar-sync';
 import { formatPounds } from './product-price';
+import { ownerMeetingLine } from './booking-meeting';
 
 type Db = ReturnType<typeof getDb>;
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -68,13 +69,14 @@ export interface WantedEvent { key: string; subject: string; body: string; start
 export const wantedHash = (w: WantedEvent) => createHash('sha256').update(JSON.stringify([w.subject, w.body, w.start.toISOString(), w.end.toISOString(), w.tentative])).digest('hex').slice(0, 32);
 
 /** The event for a booking (not a class place — the class date carries those). Pure. */
-export function eventForBooking(b: { id: number; status: string; startsAt: Date; endsAt: Date; customerName: string; customerEmail: string; customerPhone: string | null; notes: string | null; partySize: number; kind: string; depositPence: number | null; paymentStatus: string | null }, what: string): WantedEvent {
+export function eventForBooking(b: { id: number; status: string; startsAt: Date; endsAt: Date; customerName: string; customerEmail: string; customerPhone: string | null; notes: string | null; partySize: number; kind: string; depositPence: number | null; paymentStatus: string | null; meetingLocation?: string | null; meetingUrl?: string | null }, what: string): WantedEvent {
     const pending = b.status === 'pending';
     const money = b.depositPence && b.paymentStatus === 'paid' ? `${formatPounds(b.depositPence)} deposit paid` : '';
     return {
         key: `b:${b.id}`, start: new Date(b.startsAt), end: new Date(b.endsAt), tentative: pending,
         subject: `${what} — ${b.customerName}${pending ? ' (to confirm)' : ''}`,
-        body: [b.customerName, b.customerEmail, b.customerPhone, b.kind === 'table' ? `Party of ${b.partySize}` : '', money, b.notes ? `Notes: ${b.notes}` : '',
+        body: [b.customerName, b.customerEmail, b.customerPhone, b.kind === 'table' ? `Party of ${b.partySize}` : '',
+            ownerMeetingLine({ status: b.status, meetingLocation: b.meetingLocation ?? null, meetingUrl: b.meetingUrl ?? null, customerPhone: b.customerPhone }), money, b.notes ? `Notes: ${b.notes}` : '',
             pending ? 'Confirm or decline it on the Bookings tab.' : '', 'Booked on your website (Be More Swan).'].filter(Boolean).join('\n'),
     };
 }

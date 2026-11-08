@@ -5,11 +5,12 @@
 import { DATE_RE, DAY_KEYS, TIME_RE, toMinutes, type DayKey } from './booking-time';
 import type { AvailabilitySettings, Interval, WeeklyHours } from './booking-availability';
 import { isValidTimezone } from './newsletter-schedule';
+import { cleanMeetingUrl } from './booking-meeting';
 
-export const BOOKING_DEFAULTS: AvailabilitySettings & { mode: 'instant' | 'request'; cancellationPolicy: string | null; visitAddress: string | null; whatsapp: string | null } = {
+export const BOOKING_DEFAULTS: AvailabilitySettings & { mode: 'instant' | 'request'; cancellationPolicy: string | null; visitAddress: string | null; whatsapp: string | null; meetingUrl: string | null } = {
     timezone: 'Europe/London', weeklyHours: {}, closures: [], mode: 'request',
     minNoticeMinutes: 120, maxAdvanceDays: 60, slotIntervalMinutes: 30, bufferMinutes: 0, tableMinutes: 90, maxPartySize: 8,
-    cancellationPolicy: null, visitAddress: null, whatsapp: null,
+    cancellationPolicy: null, visitAddress: null, whatsapp: null, meetingUrl: null,
 };
 export const SLOT_INTERVALS = [5, 10, 15, 20, 30, 45, 60, 90, 120] as const;
 export const MAX_INTERVALS_PER_DAY = 3;
@@ -112,6 +113,8 @@ export function cleanBookingSettings(raw: Record<string, unknown>): Result<Recor
     if (has('cancellationPolicy')) {
         out.cancellationPolicy = typeof raw.cancellationPolicy === 'string' && raw.cancellationPolicy.trim() ? raw.cancellationPolicy.trim().slice(0, 500) : null;
     }
+    // The business's video link for video services (booking-meeting.ts).
+    if (has('meetingUrl')) { const r = cleanMeetingUrl(raw.meetingUrl); if (!r.ok) return r; out.meetingUrl = r.value; }
     return { ok: true, value: out };
 }
 
@@ -144,6 +147,7 @@ export function cleanResource(raw: Record<string, unknown>, partial: boolean): R
             out.serviceIds = ids.length ? ids : null;
         }
     }
+    if (has('meetingUrl')) { const r = cleanMeetingUrl(raw.meetingUrl); if (!r.ok) return r; out.meetingUrl = r.value; }
     if (has('status')) {
         if (raw.status !== 'active' && raw.status !== 'archived') return { ok: false, error: 'Invalid status.' };
         out.status = raw.status;
@@ -167,6 +171,7 @@ export function settingsFromRow(row: Partial<Record<string, unknown>> | null | u
         cancellationPolicy: typeof row.cancellationPolicy === 'string' ? row.cancellationPolicy : null,
         visitAddress: typeof row.visitAddress === 'string' && row.visitAddress.trim() ? row.visitAddress : null,
         whatsapp: typeof row.whatsapp === 'string' && row.whatsapp.trim() ? row.whatsapp : null,
+        meetingUrl: typeof row.meetingUrl === 'string' && row.meetingUrl.trim() ? row.meetingUrl : null,
     };
 }
 

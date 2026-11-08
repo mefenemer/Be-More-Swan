@@ -12,8 +12,8 @@
 // is checked again before it is used.
 
 import type { getDb } from '../../db/client';
-import type { BookingProps, Section, SiteDefinition } from './site-definition';
-import { BOOK_PATH, esc, FORM_SENT_PATH, renderSiteShell, sessionLink, type RenderContext } from './site-render';
+import type { BookingProps, BookingSectionKind, Section, SiteDefinition } from './site-definition';
+import { BOOK_PATH, BOOKING_PAGE_PATH, esc, FORM_SENT_PATH, renderSiteShell, sessionLink, type RenderContext } from './site-render';
 import { bookableDates } from './booking-availability';
 import { formatDate, formatTime, DATE_RE, TIME_RE } from './booking-time';
 import {
@@ -22,7 +22,7 @@ import {
 } from './bookings';
 import { verifyBookingToken } from './booking-links';
 import { classStep, classSubmit } from './site-classes';
-import { offerFreedPlaces } from './class-sessions';
+import { classServiceIds, offerFreedPlaces } from './class-sessions';
 import { depositToTake, refundDeposit, releaseHold, startDepositCheckout } from './booking-deposits';
 import { connectAccountFor } from './site-shop';
 import { depositFor, depositLabel, formatPounds } from './product-price';
@@ -30,6 +30,7 @@ import { checkRateLimit } from './rate-limit';
 import { looksLikeEmail, normaliseEmail } from './audience-contacts';
 import { cleanText } from './site-definition';
 import type { SiteRow } from './site-store';
+import { customerMeetingHtml, MEETING_LOCATION_LABEL, meetingLocationOf } from './booking-meeting';
 
 type Db = ReturnType<typeof getDb>;
 export const BOOK_LIMITS = { perIp: { maxAttempts: 10, windowSecs: 3600 }, perEmail: { maxAttempts: 5, windowSecs: 86_400 } };
@@ -68,16 +69,33 @@ export function bookLink(c: BookChoice, over: Partial<BookChoice> = {}): string 
     return `${BOOK_PATH}?${q.toString()}`;
 }
 
-function findBookingSection(def: SiteDefinition, id: string): { section: Extract<Section, { type: 'booking' }>; pagePath: string } | null {
+export type FoundSection = { section: Extract<Section, { type: 'booking' }>; pagePath: string; virtual?: boolean };
+
+/**
+ * The booking link's own sections (docs/booking-calendly-gaps-plan.md A): `/book` works with no
+ * booking section on the site — or no published site at all — through a section made up from
+ * Business Information, one per kind. Their ids start with '_', which a real section id never does.
+ */
+export const VIRTUAL_SECTIONS: Record<string, BookingSectionKind> = { _appointment: 'appointment', _consultation: 'consultation', _table: 'table', _class: 'class' };
+export const virtualSectionId = (kind: BookingSectionKind) => `_${kind}`;
+
+export function virtualSection(id: string): FoundSection | null {
+    const kind = Object.prototype.hasOwnProperty.call(VIRTUAL_SECTIONS, id) ? VIRTUAL_SECTIONS[id] : null;
+    if (!kind) return null;
+    const heading = { appointment: 'Book an appointment', consultation: 'Book a consultation', table: 'Book a table', class: 'Book a class or event' }[kind];
+    return { section: { id, type: 'booking', props: { heading, intro: null, kind, serviceIds: [], askStaff: true, buttonLabel: 'Book' } }, pagePath: BOOKING_PAGE_PATH, virtual: true };
+}
+
+export function findBookingSection(def: SiteDefinition, id: string): FoundSection | null {
     for (const p of def.pages) for (const s of p.sections) if (s.id === id && s.type === 'booking') return { section: s, pagePath: p.slug ? `/${p.slug}` : '/' };
-    return null;
+    return virtualSection(id);
 }
 
 export type BookPage = { status: number; html: string } | { status: 303; location: string };
 
-interface BookCtx { db: Db; site: SiteRow; def: SiteDefinition; ctx: RenderContext; now: Date; }
+export interface BookCtx { db: Db; site: SiteRow; def: SiteDefinition; ctx: RenderContext; now: Date; }
 
-const page = (b: BookCtx, title: string, inner: string, status = 200): BookPage =>
+export const page = (b: BookCtx, title: string, inner: string, status = 200): BookPage =>
     ({ status, html: renderSiteShell(b.def, b.ctx, title, `<section><div class="w n">${inner}</div></section>`) });
 
 const NOTES_LABEL: Record<BookingProps['kind'], string> = {
@@ -92,7 +110,7 @@ function summary(c: BookChoice, props: BookingProps, setup: BookingSetup): strin
     const svc = c.svc ? setup.services.find((x) => x.id === c.svc) : null;
     const res = typeof c.res === 'number' ? setup.resources.find((r) => r.id === c.res) : null;
     const bits = [
-        props.kind === 'table' ? (c.party ? `Table for ${c.party}` : '') : (svc ? `${svc.name} · ${svc.durationMinutes} min${svc.price ? ` · ${svc.price}` : ''}` : ''),
+        props.kind === 'table' ? (c.party ? `Table for ${c.party}` : '') : (svc ? `${svc.name} · ${svc.durationMinutes} min${svc.price ? ` · ${svc.price}` : ''}${whereLabel(svc)}` : ''),
         res ? `with ${res.name}` : c.res === 'any' && props.askStaff ? 'with anyone available' : '',
         c.date ? formatDate(c.date) : '',
         c.time ? formatTime(c.time) : '',
@@ -108,10 +126,19 @@ async function bookingFromLink(b: BookCtx, idRaw: unknown, token: unknown): Prom
     return row && row.organisationId === b.site.organisationId ? row : null;
 }
 
-/** The first booking section on the site that takes this kind of booking — where a move starts. */
-function sectionForKind(def: SiteDefinition, kind: string): string | null {
+/** " · Video call" / " · Phone call" after a service's name; nothing for in person. */
+const whereLabel = (svc: { meetingLocation?: string | null }) => {
+    const loc = meetingLocationOf(svc.meetingLocation);
+    return loc === 'in_person' ? '' : ` · ${MEETING_LOCATION_LABEL[loc]}`;
+};
+
+/**
+ * The first booking section on the site that takes this kind of booking — where a move starts — or
+ * the booking link's own section for that kind, so a booking made from /book can be moved too.
+ */
+export function sectionForKind(def: SiteDefinition, kind: string): string | null {
     for (const p of def.pages) for (const s of p.sections) if (s.type === 'booking' && s.props.kind === kind) return s.id;
-    return null;
+    return Object.prototype.hasOwnProperty.call(VIRTUAL_SECTIONS, `_${kind}`) ? `_${kind}` : null;
 }
 
 /** GET /_book?manage=<id>&t=<sig> — the customer's own booking: see it, cancel it, or choose a new time. */
@@ -121,7 +148,7 @@ async function managePage(b: BookCtx, q: URLSearchParams): Promise<BookPage> {
     const setup = await loadBookingSetup(b.db, b.site.organisationId);
     const { when, what } = describeBooking(row, setup.settings.timezone);
     const status = { pending: 'Waiting to be confirmed', confirmed: 'Confirmed', declined: 'Not accepted', cancelled: 'Cancelled' }[row.status] ?? row.status;
-    const head = `<h1>Your booking</h1><p><strong>${esc(what)}</strong><br>${esc(when)}<br>${esc(status)}</p>`;
+    const head = `<h1>Your booking</h1><p><strong>${esc(what)}</strong><br>${esc(when)}<br>${esc(status)}</p>${row.status === 'pending' || row.status === 'confirmed' ? customerMeetingHtml(row, b.def.settings.siteName) : ''}`;
     if (!customerCanChange(row, setup.settings.minNoticeMinutes, b.now)) {
         const why = row.status === 'cancelled' || row.status === 'declined' ? '' : '<p>It\'s too close to the time to change it here — please get in touch with us directly.</p>';
         return page(b, 'Your booking', `${head}${why}<p><a class="btn s" href="/">Go to the website</a></p>`);
@@ -158,8 +185,10 @@ export async function bookStep(b: BookCtx, q: URLSearchParams, message: string |
     // Classes and events: a timetable of dated sessions, not times computed from opening hours.
     if (props.kind === 'class') return classStep(b, found, q, message);
     const setup = await loadBookingSetup(b.db, b.site.organisationId);
-    const services = setup.services.filter((x) => !props.serviceIds.length || props.serviceIds.includes(x.id));
-    const back = `<p><a href="${esc(found.pagePath)}">← Back to the website</a></p>`;
+    // The booking link's own section offers every service with a length except those run as classes.
+    const asClasses = found.virtual ? await classServiceIds(b.db, b.site.organisationId) : new Set<number>();
+    const services = setup.services.filter((x) => (!props.serviceIds.length || props.serviceIds.includes(x.id)) && !asClasses.has(x.id));
+    const back = found.virtual ? '' : `<p><a href="${esc(found.pagePath)}">← Back to the website</a></p>`;
     const note = message ? `<p class="fine" role="alert" style="color:#b91c1c"><strong>${esc(message)}</strong></p>` : '';
     if (!Object.keys(setup.settings.weeklyHours).length || (props.kind !== 'table' && !services.length)) {
         return page(b, 'Booking isn\'t open', `<h1>Booking isn't open right now</h1><p>Please get in touch with us to book.</p>${back}`);
@@ -171,7 +200,7 @@ export async function bookStep(b: BookCtx, q: URLSearchParams, message: string |
     if (props.kind === 'table' ? !(c.party >= 1 && c.party <= setup.settings.maxPartySize) : !svc) {
         const choose = props.kind === 'table'
             ? `<label>How many people?<select name="party">${Array.from({ length: setup.settings.maxPartySize }, (_, i) => `<option value="${i + 1}"${i === 1 ? ' selected' : ''}>${i + 1}</option>`).join('')}</select></label>`
-            : `<fieldset><legend>What would you like to book?</legend>${services.map((x, i) => `<label class="opt"><input type="radio" name="svc" value="${x.id}"${i === 0 ? ' checked' : ''}> <span><strong>${esc(x.name)}</strong> · ${x.durationMinutes} min${x.price ? ` · ${esc(x.price)}` : ''}${takesDeposits && depositLabel(x) ? ` · ${esc(depositLabel(x)!)}` : ''}</span></label>`).join('')}</fieldset>`;
+            : `<fieldset><legend>What would you like to book?</legend>${services.map((x, i) => `<label class="opt"><input type="radio" name="svc" value="${x.id}"${i === 0 ? ' checked' : ''}> <span><strong>${esc(x.name)}</strong> · ${x.durationMinutes} min${x.price ? ` · ${esc(x.price)}` : ''}${esc(whereLabel(x))}${takesDeposits && depositLabel(x) ? ` · ${esc(depositLabel(x)!)}` : ''}</span></label>`).join('')}</fieldset>`;
         return page(b, 'Book', `<h1>Book</h1>${note}<form class="fm" method="get" action="${BOOK_PATH}"><input type="hidden" name="s" value="${esc(c.s)}">${choose}<button class="btn" type="submit">Next</button></form>${back}`);
     }
 
@@ -213,7 +242,8 @@ ${['s', 'svc', 'party', 'res', 'date', 'time', 'mv', 'mt'].map((k) => { const v 
 <p class="fine">Your old time is released when the new one is booked.${setup.settings.mode === 'instant' ? '' : ' We\'ll confirm the new time by email.'}</p></form>${back}`);
     }
 
-    // 5. Your details — the only step that changes anything.
+    // 5. Your details — the only step that changes anything. A phone call needs their number.
+    const phoneCall = !!svc && meetingLocationOf(svc.meetingLocation) === 'phone';
     const policy = setup.settings.cancellationPolicy ? `<p class="fine"><strong>Cancellation:</strong> ${esc(setup.settings.cancellationPolicy)}</p>` : '';
     const how = setup.settings.mode === 'instant' ? 'Your booking is confirmed straight away, by email.' : 'We\'ll confirm your booking by email.';
     return page(b, 'Your details', `<h1>Your details</h1>${summary(c, props, setup)}${note}
@@ -223,7 +253,7 @@ ${['s', 'svc', 'party', 'res', 'date', 'time'].map((k) => { const v = (c as unkn
 <div class="hp" aria-hidden="true"><label>Leave this empty <input name="website" tabindex="-1" autocomplete="off"></label></div>
 <label>Your name<input name="name" required maxlength="120" autocomplete="name"></label>
 <label>Email<input type="email" name="email" required maxlength="254" autocomplete="email"></label>
-<label>Phone <span class="help">(optional)</span><input type="tel" name="phone" maxlength="30" autocomplete="tel"></label>
+${phoneCall ? '<label>Phone <span class="help">(we\'ll call you on this number)</span><input type="tel" name="phone" required maxlength="30" autocomplete="tel"></label>' : '<label>Phone <span class="help">(optional)</span><input type="tel" name="phone" maxlength="30" autocomplete="tel"></label>'}
 <label>${esc(NOTES_LABEL[props.kind])}<textarea name="notes" rows="3" maxlength="1000"></textarea></label>
 ${svc && takesDeposits && depositFor(svc) ? `<p class="fine"><strong>A ${esc(formatPounds(depositFor(svc)!))} deposit is paid now, by card</strong> — refunded if you cancel online in time.</p>` : ''}
 <button class="btn" type="submit">${svc && takesDeposits && depositFor(svc) ? `Continue to pay ${esc(formatPounds(depositFor(svc)!))} deposit` : setup.settings.mode === 'instant' ? 'Confirm booking' : 'Request booking'}</button>
@@ -257,6 +287,9 @@ export async function bookSubmit(b: BookCtx, body: URLSearchParams, ip: string):
     if (!name) return bookStep(b, body, 'Please add your name.');
     if (!looksLikeEmail(email)) return bookStep(b, body, 'Please check your email address — it doesn\'t look right.');
     if (phone && !/^[+()\d\s.-]{5,30}$/.test(phone)) return bookStep(b, body, 'Please check your phone number, or leave it empty.');
+    const setup = await loadBookingSetup(b.db, b.site.organisationId);
+    const chosen = props.kind === 'table' ? null : setup.services.find((x) => x.id === c.svc);
+    if (!phone && chosen && meetingLocationOf(chosen.meetingLocation) === 'phone') return bookStep(b, body, 'Please add your phone number — it\'s a phone call, so they\'ll call you on it.');
     try {
         const [byIp, byEmail] = await Promise.all([
             checkRateLimit(b.db, 'site_booking_ip', ip, BOOK_LIMITS.perIp),
@@ -266,7 +299,6 @@ export async function bookSubmit(b: BookCtx, body: URLSearchParams, ip: string):
     } catch (err) {
         console.error('[site-booking] rate limiter unavailable — allowing the booking', err);
     }
-    const setup = await loadBookingSetup(b.db, b.site.organisationId);
     const deposit = props.kind === 'table' ? null : await depositToTake(b.db, b.site.organisationId, c.svc, 1);
     const made = await createBooking(b.db, b.site.organisationId, {
         siteId: b.site.id, kind: props.kind, date: c.date, time: c.time,
@@ -303,7 +335,7 @@ export async function payDeposit(b: BookCtx, booking: BookingRow, pence: number,
 /** A local path from the query, or the home page. */
 function safeBack(def: SiteDefinition, raw: string | null): string {
     const p = String(raw || '/');
-    return /^\/[a-z0-9-]*$/.test(p) && (p === '/' || def.pages.some((pg) => `/${pg.slug}` === p)) ? p : '/';
+    return /^\/[a-z0-9-]*$/.test(p) && (p === '/' || p === BOOKING_PAGE_PATH || def.pages.some((pg) => `/${pg.slug}` === p)) ? p : '/';
 }
 
 function noticeCtx(b: BookCtx, setup: BookingSetup) {

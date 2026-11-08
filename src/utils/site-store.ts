@@ -22,6 +22,8 @@ import { listSignupForms } from './site-forms';
 import { connectAccountFor } from './site-shop';
 import { loadBookingSetup } from './bookings';
 import { describeHours } from './booking-settings';
+import { MEETING_LOCATION_LABEL, meetingLocationOf } from './booking-meeting';
+import { bookingLinkFor } from './site-booking-page';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
@@ -516,8 +518,13 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     const bk = await loadBookingSetup(db, orgId).catch(() => null);
     if (bk) {
         lines.push(Object.keys(bk.settings.weeklyHours).length
-            ? `Bookings: opening hours ${describeHours(bk.settings.weeklyHours)} (${bk.settings.timezone}); ${bk.settings.mode === 'instant' ? 'confirmed straight away' : 'they confirm each booking'}; bookable services (with a length): ${bk.services.length ? bk.services.map((x) => `${x.name} (serviceId ${x.id}, ${x.durationMinutes} min${depositLabel(x) ? `, ${depositLabel(x)}` : ''})`).join(', ') : 'none yet'}; who/what can be booked: ${bk.resources.length ? bk.resources.map((r) => `${r.name} (${r.kind})`).join(', ') : 'just them'}.`
+            ? `Bookings: opening hours ${describeHours(bk.settings.weeklyHours)} (${bk.settings.timezone}); ${bk.settings.mode === 'instant' ? 'confirmed straight away' : 'they confirm each booking'}; bookable services (with a length): ${bk.services.length ? bk.services.map((x) => `${x.name} (serviceId ${x.id}, ${x.durationMinutes} min, ${MEETING_LOCATION_LABEL[meetingLocationOf(x.meetingLocation)].toLowerCase()}${depositLabel(x) ? `, ${depositLabel(x)}` : ''})`).join(', ') : 'none yet'}; who/what can be booked: ${bk.resources.length ? bk.resources.map((r) => `${r.name} (resourceId ${r.id}, ${r.kind}${r.meetingUrl ? ', has their own video link' : ''})`).join(', ') : 'just them'}; video call link: ${bk.settings.meetingUrl ?? 'none set'}.`
             : 'Bookings: not set up (no opening hours yet).');
+        // The booking link (site-booking-page.ts) — theirs to share; it works before the site is published.
+        const link = await bookingLinkFor(db, orgId).catch(() => null);
+        lines.push(link
+            ? `Booking link (works now${site.status === 'published' ? '' : ', even though the site isn\'t published — it shows only the booking pages'}): ${link}. One service: ${link}?svc=<serviceId>; one person: ${link}?res=<resourceId>. It is on the Bookings tab ▸ "Your booking link", with a "Book now" button for another website.`
+            : `Booking link: none yet — it needs ${site.slug ? '' : 'the site\'s address chosen (Publish card on the Website tab; no need to publish), '}opening hours and something to book.`);
         lines.push(`Where to find them (Business Information, for an hours section): ${bk.settings.visitAddress ? `visit address "${bk.settings.visitAddress.split('\n').join(', ')}"` : 'no visit address'}; ${bk.settings.whatsapp ? `WhatsApp ${bk.settings.whatsapp}` : 'no WhatsApp number'}.`);
     }
     const tt = await bookableSessions(db, orgId, new Date(), [], 20).catch(() => null);
