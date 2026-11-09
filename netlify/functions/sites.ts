@@ -21,7 +21,8 @@
 //                                               account (created the first time). Owner/admin only.
 //   payments_refresh { assistantId }          → re-read the account from Stripe (back from onboarding)
 //   words     { assistantId, pageId, text? | file?: {name, type, data(base64)} | attachmentId? |
-//               quote? + chatSessionId?, note? }   (attachmentId / quote: the chat's site_words card)
+//               sourceUrl? | quote? + chatSessionId?, note? }   (attachmentId / sourceUrl / quote: the chat's
+//               site_words card; sourceUrl = a page of their own current website, read by the server)
 //                                             → "Add your own words": a PROPOSAL placing the owner's
 //                                               text on the page WORD FOR WORD (site-words.ts). Saves
 //                                               nothing — Apply sends its ops through `apply`. 1 task.
@@ -47,6 +48,11 @@
 //   import_accept  { assistantId }            → "Use this as my draft": the imported site replaces the
 //                                               draft (never the live site)
 //   import_discard { assistantId }            → throw the imported draft away (pictures stay in the library)
+//   import_products { assistantId, names? }   → the products the import found on their old shop become
+//                                               Business Information products (prices there, never on
+//                                               the site); names = the ones ticked, all when omitted.
+//                                               The import card's button and the chat's
+//                                               site_import_products card both send this.
 //
 // domain_add { assistantId, domain } · domain_check · domain_remove → their own domain (site-domains.ts),
 // owner or admin only.
@@ -113,7 +119,7 @@ import {
 import { triggerSiteDraft } from '../../src/utils/trigger-site-draft';
 import { DRAFT_NOTE_ADDING_MEDIA, DRAFT_NOTE_MEDIA_STOPPED, draftNoteIsFailure, resolveDraftMedia } from '../../src/utils/site-draft-media';
 import { draftMediaOptions } from '../../src/utils/site-draft-media-options';
-import { acceptImport, discardImport, importView, loadImport, startSiteImport } from '../../src/utils/site-import-store';
+import { acceptImport, addImportedProducts, discardImport, importView, loadImport, readOwnSitePage, startSiteImport } from '../../src/utils/site-import-store';
 import { cleanImportUrl } from '../../src/utils/site-import';
 import { refreshDirectoryAfterAddressChange, refreshDirectoryAfterPublish } from '../../src/utils/site-directory-store';
 import { hasTaskCapacity, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
@@ -123,7 +129,7 @@ function json(statusCode: number, body: unknown) {
 }
 
 const MAX_OPS = 25;
-const OP_NAMES = ['add_page', 'update_page', 'remove_page', 'add_section', 'update_section', 'remove_section', 'move_section', 'set_nav', 'set_theme', 'set_settings', 'set_footer', 'set_structure', 'combine_pages', 'split_pages', 'apply_template'];
+const OP_NAMES = ['add_page', 'update_page', 'remove_page', 'add_section', 'update_section', 'remove_section', 'move_section', 'set_nav', 'set_theme', 'set_settings', 'set_footer', 'set_redirects', 'set_structure', 'combine_pages', 'split_pages', 'apply_template'];
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -296,9 +302,17 @@ export default withLambda(async (event) => {
     }
 
     if (action === 'import_accept') {
-        const r = await acceptImport(db, site, maxPages);
+        const r = await acceptImport(db, site, maxPages, userId);
         if (!r.ok) return json(r.status, { error: r.error });
         return json(200, await view(r.site, ['Your imported site is now your draft. Nothing is live until you publish.', ...r.warnings]));
+    }
+
+    if (action === 'import_products') {
+        const r = await addImportedProducts(db, site, { names: body.names, userId: userId ?? null });
+        if (!r.ok) return json(r.status, { error: r.error });
+        const said = [`${r.added} product${r.added === 1 ? '' : 's'} added to Business Information ▸ Products & Services, with ${r.added === 1 ? 'its price' : 'their prices'} — change them there from now on.`];
+        if (r.skipped) said.push(`${r.skipped} ${r.skipped === 1 ? 'was' : 'were'} already there by name, so left as ${r.skipped === 1 ? 'it was' : 'they were'}.`);
+        return json(200, await view(site, said));
     }
 
     if (action === 'import_discard') {
@@ -451,10 +465,18 @@ export default withLambda(async (event) => {
         // From the chat's site_words card: an attached document's words, or words the assistant quoted
         // from the owner's own message — accepted only if they really are in it (chat-attachments.ts).
         const attachmentId = Number(body.attachmentId);
+        let pricesLeftOut = 0;
         if (Number.isInteger(attachmentId) && attachmentId > 0) {
             const fromAttachment = await attachmentText(db, orgId, attachmentId);
             if (!fromAttachment) return json(404, { error: 'That attached document isn\'t available any more. Attach it again.' });
             text = text ? `${text}\n\n${fromAttachment}` : fromAttachment;
+        } else if (typeof body.sourceUrl === 'string' && body.sourceUrl.trim()) {
+            // A page of their CURRENT website ("take the wording from my existing site"): read by the
+            // server like an import page, so the words are theirs, never retyped (site-source-page.ts).
+            const fromSite = await readOwnSitePage(db, site, body.sourceUrl);
+            if (!fromSite.ok) return json(fromSite.status, { error: fromSite.error });
+            text = text ? `${text}\n\n${fromSite.text}` : fromSite.text;
+            if (fromSite.prices) pricesLeftOut = fromSite.prices;
         } else if (typeof body.quote === 'string' && body.quote.trim()) {
             const fromChat = await quoteFromChat(db, orgId, Number(body.chatSessionId), body.quote);
             if (!fromChat) return json(400, { error: 'Those words weren\'t found in your messages, so they weren\'t used. Paste them again, or use "Add your own words" on the Website tab.' });
@@ -464,7 +486,8 @@ export default withLambda(async (event) => {
         if (blocked) return blocked;
         const r = await proposeOwnWords(db, site, { pageId, text, note, maxPages });
         if (!r.ok) return json(r.status, { error: r.error });
-        return json(200, { proposal: r.proposal });
+        // Prices on their old page are left out, as the import leaves them out: say so on the card.
+        return json(200, { proposal: r.proposal, ...(pricesLeftOut ? { note: `${pricesLeftOut} line${pricesLeftOut === 1 ? '' : 's'} with a price ${pricesLeftOut === 1 ? 'was' : 'were'} left out — prices belong in Business Information ▸ Products & Services.` } : {}) });
     }
 
     if (action === 'products_import') {

@@ -94,6 +94,32 @@ export function pictureReply(content: string, hasPictureCard: boolean): string {
 }
 
 /**
+ * The Website Assistant's reply with NO card (prod 2026-11-07, Restorative Futures, org 41): asked to
+ * "fill in the content on the blank pages", it answered "I've filled in all five blank pages…" and
+ * described each — with no card at all. Nothing changed; the pages stayed blank, and the next morning
+ * it had to admit it. Only a card's click changes the site, so a reply that says it already changed
+ * the site, beside no card, is replaced. Narrow on purpose: "Your home page has a hero" (describing
+ * the draft) and "I can add that" (an offer) are kept.
+ */
+const SITE_CHANGE_CLAIM = new RegExp([
+    /\b(?:I(?:'|’)?ve|I have)\s+(?:now\s+|just\s+|also\s+)?(?:filled(?: in)?|added|updated|changed|written|rewritten|wrote|removed|deleted|moved|replaced|created|built|made|put|placed|switched|turned|renamed|reworded|fixed|copied|imported|applied|set up)\b(?![^.\n]{0,40}\bcard\b)/.source,
+    /\b(?:is|are) now (?:on|in) your (?:site|website|draft|page|home page)\b/.source,
+    /\b(?:all|it(?:'|’)?s|that(?:'|’)?s) done\b/.source,
+].join('|'), 'i');
+
+export const SITE_NO_CARD_REPLY = 'I haven’t changed your website — no change card came with this reply, so nothing was applied. Ask me again and I’ll put the change on a card for you to approve.';
+
+export function replyClaimsSiteChange(content: string): boolean {
+    return SITE_CHANGE_CLAIM.test(content);
+}
+
+/** The Website Assistant's reply when no card came with it: never "I've filled in the pages". */
+export function siteNoCardReply(content: string, hasCard: boolean): string {
+    if (hasCard || !replyClaimsSiteChange(content)) return content;
+    return SITE_NO_CARD_REPLY;
+}
+
+/**
  * The one card in a reply, however the model shaped it. Every route draws ONE card, and every card
  * check downstream reads a single object — so a LIST of cards, or cards under "uiElements" / "cards",
  * matched no card type and was dropped without a word. Prod 2026-11-07 (org 40, Business Mentor):

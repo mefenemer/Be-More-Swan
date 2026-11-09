@@ -19,6 +19,10 @@
 import { createHash } from 'node:crypto';
 import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
+import { socialSiteOf } from './site-definition';
+import { adapterFor } from './site-builders';
+import type { ImportedProduct } from './site-builders/types';
+export type { ImportedProduct };
 
 export interface SiteCta {
     text: string;
@@ -28,6 +32,17 @@ export interface SiteCta {
 export interface SiteLink {
     text: string;
     href: string;
+    /**
+     * Menu links only (readImportPage): the label of the drop-down this link sits in on their site
+     * ("About Us" for Testimonials), when it is in one. The import puts that page under the page of
+     * that name in the new site's menu (SitePageDef.menuParent).
+     */
+    group?: string;
+    /**
+     * Menu links only: the platform adapter says this goes to a catalogue page (a shop category
+     * listing). The import reads their own pages first (site-import.ts choosePages).
+     */
+    catalogue?: true;
 }
 
 export interface SitePage {
@@ -559,11 +574,14 @@ export function describeChanges(changes: SiteChange[]): string[] {
 
 export type ImportBlock =
     | { kind: 'heading'; level: number; text: string }
-    | { kind: 'text'; text: string }
-    | { kind: 'item'; text: string }
-    | { kind: 'quote'; text: string }
+    | { kind: 'text'; text: string; links?: InlineLink[] }
+    | { kind: 'item'; text: string; links?: InlineLink[] }
+    | { kind: 'quote'; text: string; links?: InlineLink[] }
     | { kind: 'button'; text: string; href: string | null }
     | { kind: 'image'; src: string; alt: string; altFromSite: boolean };
+
+/** A link inside a sentence: its words (as they appear in the block's text) and where it went. */
+export interface InlineLink { text: string; href: string; }
 
 export interface ImportPage {
     url: string;
@@ -579,11 +597,22 @@ export interface ImportPage {
     siteName: string | null;
     logo: { src: string; alt: string } | null;
     hasForm: boolean;
+    /** The questions their form asked (its field labels), for the import report — our contact form has its own. */
+    formFields?: string[];
+    /** Their profiles on social sites, linked anywhere on the page (footer included). */
+    socialLinks?: string[];
+    /** The platform adapter that read it (site-builders/ key), or null when none matched. */
+    platform?: string | null;
+    /**
+     * Products the page shows (the adapter's cards, schema.org Product data): for Business Information
+     * only — the import never puts a price on the site.
+     */
+    products?: ImportedProduct[];
     /** Which builder made the page, from its generator tag or tell-tale markup. */
-    builder: 'wix' | 'squarespace' | 'wordpress' | 'webflow' | 'square' | 'other';
+    builder: 'wix' | 'wix-studio' | 'squarespace' | 'wordpress' | 'webflow' | 'square' | 'other';
 }
 
-export const IMPORT_LIMITS = { blocks: 160, images: 40, navLinks: 20 } as const;
+export const IMPORT_LIMITS = { blocks: 160, images: 40, navLinks: 20, products: 60 } as const;
 
 /** Lines every builder adds that are not the owner's content (Wix's "top of page", cookie buttons…). */
 const IMPORT_NOISE = /^(top of page|bottom of page|skip to (main )?content|use tab to navigate.*|powered by .*|created with .*|proudly created with .*|©.*|copyright\b.*|all rights reserved\.?|back to top|scroll( down)?|menu|close|open menu|search|log ?in|sign ?in|cart|basket|(view )?cart \(\d+\)|\d+ items?|accept( all)?( cookies)?|decline|reject( all)?|cookie (settings|policy|preferences)|manage (cookies|preferences)|share|tweet|pin it|previous|next|play video|0)$/i;
@@ -636,11 +665,74 @@ function detectBuilder(html: string, $: cheerio.CheerioAPI): ImportPage['builder
     return 'other';
 }
 
+/**
+ * A link to their PROFILE on a social site, as an https address with no tracking (?ref=, utm_…), or null:
+ * share buttons, single videos and posts, playlists and groups are not profiles (live check, 2026-11-09:
+ * YouTube watch/playlist links and Facebook groups came through as "social links").
+ */
+export function socialProfile(href: string): string | null {
+    if (!socialSiteOf(href)) return null;
+    let u: URL;
+    try { u = new URL(href); } catch { return null; }
+    if (/\/(sharer|share|intent|shareArticle)\b/i.test(u.pathname) || u.searchParams.has('u') || u.searchParams.has('url')) return null;
+    if (/^(www\.)?youtube\.com$/i.test(u.hostname) && /^\/(watch|playlist|shorts|embed|live|results)\b/i.test(u.pathname)) return null;
+    if (/facebook\.com$/i.test(u.hostname) && /^\/(groups|events|photo|watch|story\.php|permalink\.php|share)\b/i.test(u.pathname)) return null;
+    if (/(x|twitter)\.com$/i.test(u.hostname) && /\/status\//i.test(u.pathname)) return null;
+    if (/instagram\.com$/i.test(u.hostname) && /^\/(p|reel|reels|stories|explore)\//i.test(u.pathname)) return null;
+    if (/linkedin\.com$/i.test(u.hostname) && /^\/(posts|feed|pulse|shareArticle)\b/i.test(u.pathname)) return null;
+    if (u.pathname === '/' || u.pathname === '') return null;
+    // Facebook's own profile.php?id=… needs its id; everything else is its path alone.
+    const keep = /facebook\.com$/i.test(u.hostname) && u.pathname === '/profile.php' && u.searchParams.get('id') ? `?id=${u.searchParams.get('id')}` : '';
+    u.protocol = 'https:';
+    return `${u.origin}${u.pathname}${keep}`;
+}
+
 /** The owner's page as ordered blocks of their own words and pictures. `url` is the FINAL url. */
+/** A drop-down's own box (the sub-menu), by the names builders give it — never its heading. */
+const SUBMENU_CLASS = /(?:^|[\s_-])(?:sub-?menu|dropdown[-_]*(?:panel|menu|content|list|items)|folder-content|nav-group__(?:items|list|content|panel)|menu-children|children-menu|flyout|mega-?menu)(?:$|[\s_-])/i;
+const NAV_ROOT = new Set(['nav', 'header', 'body']);
+
+/**
+ * The label of the drop-down a menu link sits in, or null when it is a top-level entry. Three shapes:
+ * <details><summary>About Us</summary>…links…</details>; a list inside a list item (WordPress
+ * li > a + ul.sub-menu); a box named like a sub-menu, labelled by what comes just before it
+ * (Restorative Futures 2026-11-08: div.nav-dropdown__head "About Us" + div.nav-dropdown__panel).
+ */
+function menuGroupOf($: cheerio.CheerioAPI, el: AnyNode): string | null {
+    const label = (t: string) => { const c = clean(t); return c && c.length <= 40 ? c : null; };
+    let node = el.parent;
+    for (let depth = 0; node && depth < 8; depth++, node = node.parent) {
+        if (node.type !== 'tag') break;
+        const $n = $(node);
+        if (NAV_ROOT.has(node.name) || $n.attr('role') === 'navigation') break;
+        if (node.name === 'details') return label($n.children('summary').first().text());
+        if ((node.name === 'ul' || node.name === 'ol') && node.parent?.type === 'tag' && node.parent.name === 'li') {
+            const head = $(node.parent).children('a, button, span, summary, div').filter((_, c) => !$(c).is('ul, ol') && !!clean($(c).text())).first();
+            return label(head.text());
+        }
+        if (SUBMENU_CLASS.test(`${$n.attr('class') ?? ''} ${$n.attr('id') ?? ''}`)) {
+            for (let prev = $n.prev(); prev.length; prev = prev.prev()) {
+                const t = label(prev.text());
+                if (t) return t;
+            }
+            return null;
+        }
+    }
+    return null;
+}
+
 export function readImportPage(html: string, url: string): ImportPage {
     const $ = cheerio.load(html);
     const base = safeUrl(url);
-    const builder = detectBuilder(html, $);
+    // The platform's own adapter (site-builders/): tidies its markup before anything is read.
+    const adapter = adapterFor(html, $);
+    // Wix Studio pages carry classic Wix's tells too; the adapter tells them apart.
+    const builder = adapter?.key === 'wix-studio' ? 'wix-studio' : detectBuilder(html, $);
+    // Products, from the page as it arrived (prepare may rebuild the cards it reads them from).
+    let products: ImportedProduct[] = [];
+    try { products = adapter?.products?.($, base) ?? []; } catch { products = []; }
+    try { adapter?.prepare?.($, base); } catch { /* a broken adapter never stops an import */ }
+    const fullSize = (src: string) => { try { return adapter?.fullSizeImage?.(src) ?? fullSizeImageUrl(src); } catch { return fullSizeImageUrl(src); } };
 
     // Facts from structured data, before scripts go.
     let siteName: string | null = null;
@@ -650,6 +742,7 @@ export function readImportPage(html: string, url: string): ImportPage {
     let locality: string | null = null;
     walkLd(readJsonLd($), (o) => {
         const t = String(Array.isArray(o['@type']) ? o['@type'][0] : o['@type'] ?? '');
+        if (t === 'Product') { const p = ldProduct(o, base); if (p) products.push(p); }
         if (!siteName && typeof o.name === 'string' && t && !/^(WebPage|WebSite|BreadcrumbList|ListItem|Question|Answer|ImageObject|PostalAddress|Offer|Product|Review|Rating|AggregateRating|Person)$/.test(t)) siteName = clean(o.name);
         if (!ldPhone && typeof o.telephone === 'string') ldPhone = clean(o.telephone);
         if (!ldEmail && typeof o.email === 'string') ldEmail = clean(o.email).replace(/^mailto:/i, '');
@@ -661,7 +754,8 @@ export function readImportPage(html: string, url: string): ImportPage {
     });
     siteName = siteName || orNull(clean($('meta[property="og:site_name"]').attr('content')));
 
-    $('script, style, noscript, template, svg, iframe, link').remove();
+    // Iframes stay: the walk turns a video or map into a button (addEmbed) and never reads inside one.
+    $('script, style, noscript, template, svg, link').remove();
     // Cookie and consent banners are the builder's, not the owner's.
     $('[id*="cookie" i], [class*="cookie" i], [id*="consent" i], [class*="consent" i]').remove();
 
@@ -695,7 +789,10 @@ export function readImportPage(html: string, url: string): ImportPage {
         const text = clean($(el).text()) || clean($(el).attr('aria-label'));
         if (seenNav.has(key) || !text || text.length > 40) return;
         seenNav.add(key);
-        navLinks.push({ text, href: key });
+        const group = menuGroupOf($, el);
+        const link: SiteLink = group && group.toLowerCase() !== text.toLowerCase() ? { text, href: key, group } : { text, href: key };
+        try { if (adapter?.catalogueLink?.(key, $(el))) link.catalogue = true; } catch { /* never stops an import */ }
+        navLinks.push(link);
     });
 
     // The logo: the header's picture that says it is one, else the header's first picture.
@@ -704,28 +801,57 @@ export function readImportPage(html: string, url: string): ImportPage {
     const logoEl = headerImgs.find((el) => /logo/i.test(`${$(el).attr('class') ?? ''} ${$(el).attr('id') ?? ''} ${$(el).attr('alt') ?? ''} ${$(el).attr('src') ?? ''}`)) ?? headerImgs[0];
     if (logoEl) {
         const src = absolutise(largestFromSrcset($(logoEl).attr('srcset')) ?? $(logoEl).attr('src') ?? $(logoEl).attr('data-src') ?? '', base);
-        if (src && /^https?:/.test(src)) logo = { src: fullSizeImageUrl(src), alt: realAlt($(logoEl).attr('alt')) || `${siteName ?? 'Business'} logo` };
+        if (src && /^https?:/.test(src)) logo = { src: fullSize(src), alt: realAlt($(logoEl).attr('alt')) || `${siteName ?? 'Business'} logo` };
     }
 
     const hasForm = $('form').length > 0;
+    // Their form's questions: each field's label, placeholder or name (buttons and hidden fields aside).
+    const formFields: string[] = [];
+    $('form input, form textarea, form select').each((_, el) => {
+        const $f = $(el);
+        const type = ($f.attr('type') ?? '').toLowerCase();
+        if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type) || /bot|honeypot|captcha/i.test($f.attr('name') ?? '')) return;
+        const id = $f.attr('id');
+        const label = clean((id ? $(`label[for="${id.replace(/"/g, '')}"]`).first().text() : '') || $f.closest('label').text() || $f.attr('aria-label') || $f.attr('placeholder') || $f.attr('name') || '').replace(/\s*\*$/, '');
+        // A machine name ("srfm-dropdown-1-18390f9c-lbl-…", live check 2026-11-09) is not a question anyone was asked.
+        const machine = !/\s/.test(label) && (label.length > 24 || /\d.*[-_]|[-_].*\d/.test(label) && label.split(/[-_]/).length >= 3);
+        if (label && label.length <= 60 && !machine && !formFields.includes(label) && formFields.length < 15) formFields.push(label);
+    });
+    // Their social profiles, wherever on the page they are linked (usually the footer, removed below).
+    const socialLinks: string[] = [];
+    const seenProfile = new Set<string>();
+    $('a[href^="http"]').each((_, a) => {
+        const h = socialProfile(($(a).attr('href') ?? '').trim());
+        if (!h) return;
+        const key = h.toLowerCase().replace(/^https:\/\/(www\.|m\.)?/, '').replace(/^twitter\.com\//, 'x.com/').replace(/\/$/, '');
+        if (!seenProfile.has(key) && socialLinks.length < 8) { seenProfile.add(key); socialLinks.push(h); }
+    });
     // The page's own content: no menus, header, footer or forms (a form's labels are not content).
     // A <header> inside the main content or an article is that page's own title area (WordPress puts
     // the H1 there), so only the SITE's header and footer go.
     $('header, footer').filter((_, el) => $(el).closest('main, article').length === 0).remove();
     $('nav, form, [role="navigation"], [role="banner"], [role="contentinfo"], #SITE_HEADER, #SITE_FOOTER').remove();
-    const root = $('main').length ? $('main').first() : $('body');
+    const own = adapter?.contentRoot ? $(adapter.contentRoot).first() : null;
+    const root = own && own.length ? own : $('main').length ? $('main').first() : $('body');
 
     const blocks: ImportBlock[] = [];
     const seenText = new Set<string>();
     const seenImg = new Set<string>();
     let lastHeading: string | null = null;
-    const addText = (kind: 'text' | 'item' | 'quote', raw: string) => {
+    const addText = (kind: 'text' | 'item' | 'quote', raw: string, node?: AnyNode) => {
         const text = clean(raw);
-        if (!text || text.length < 2 || IMPORT_NOISE.test(text) || !/[a-z0-9]/i.test(text)) return;
+        if (!text || text.length < 2 || IMPORT_NOISE.test(text) || adapter?.noise?.test(text) || !/[a-z0-9]/i.test(text)) return;
         const k = normaliseText(text);
         if (seenText.has(k)) return;   // builders draw a block twice (desktop and phone layouts)
         seenText.add(k);
-        blocks.push({ kind, text });
+        // Links inside the words ("read our course notes"): kept beside the text, put back when placed.
+        const links: InlineLink[] = [];
+        if (node) $(node).find('a[href]').each((_, a) => {
+            const t = clean($(a).text());
+            const h = absolutise($(a).attr('href') ?? '', base);
+            if (t && t.length <= 80 && h && text.includes(t) && !links.some((l) => l.text === t) && links.length < 10) links.push({ text: t, href: h });
+        });
+        blocks.push(links.length ? { kind, text, links } : { kind, text });
     };
     const addImage = (el: AnyNode) => {
         const $el = $(el);
@@ -734,11 +860,45 @@ export function readImportPage(html: string, url: string): ImportPage {
         const raw = largestFromSrcset($el.attr('srcset') ?? $el.attr('data-srcset')) ?? $el.attr('data-src') ?? $el.attr('data-image') ?? $el.attr('src') ?? '';
         const abs = absolutise(raw, base);
         if (!abs || !/^https?:/.test(abs) || /\.svg(\?|$)/i.test(abs)) return;
-        const src = fullSizeImageUrl(abs);
+        const src = fullSize(abs);
         if (seenImg.has(src) || seenImg.size >= IMPORT_LIMITS.images) return;
         seenImg.add(src);
         const alt = realAlt($el.attr('alt'));
         blocks.push({ kind: 'image', src, alt: alt || lastHeading || siteName || 'A picture from our website', altFromSite: !!alt });
+    };
+    const hasBlockChild = (node: AnyNode) => node.type === 'tag' && node.children.some((c) => c.type === 'tag' && (BLOCK_TAGS.has(c.name) || c.name === 'img'));
+    // A picture drawn as a CSS background (style="background-image:url(…)", or Tailwind's bg-[url(…)]):
+    // read like an <img>, described by the nearest heading.
+    const bgImage = (node: AnyNode) => {
+        if (node.type !== 'tag') return;
+        const raw = `${$(node).attr('style') ?? ''} ${$(node).attr('class') ?? ''} ${$(node).attr('data-bg') ?? ''}`;
+        const m = raw.match(/url\(\s*['"]?([^'")\s]+)['"]?\s*\)/) ?? ($(node).attr('data-bg') ? [null, $(node).attr('data-bg')!] : null);
+        if (!m || !m[1]) return;
+        const abs = absolutise(m[1], base);
+        if (!abs || !/^https?:/.test(abs) || /\.svg(\?|$)/i.test(abs) || /gradient/i.test(m[1])) return;
+        const src = fullSize(abs);
+        if (seenImg.has(src) || seenImg.size >= IMPORT_LIMITS.images) return;
+        seenImg.add(src);
+        blocks.push({ kind: 'image', src, alt: lastHeading || siteName || 'A picture from our website', altFromSite: false });
+    };
+    // An embedded video or map. Hosted pages load no one else's player (site-serve.ts CSP), so it
+    // becomes what a visitor can still use: the video's thumbnail and a button to watch it, or a
+    // button to the map. Unknown embeds are left out (the import report lists what wasn't read).
+    const addEmbed = (node: AnyNode) => {
+        const src = ($(node).attr('src') || $(node).attr('data-src') || '').trim();
+        const title = clean($(node).attr('title'));
+        const yt = src.match(/(?:youtube(?:-nocookie)?\.com\/embed\/|youtu\.be\/)([\w-]{6,20})/i)?.[1];
+        const vimeo = src.match(/player\.vimeo\.com\/video\/(\d{4,12})/i)?.[1];
+        if (yt) {
+            const thumb = `https://i.ytimg.com/vi/${yt}/hqdefault.jpg`;
+            if (!seenImg.has(thumb) && seenImg.size < IMPORT_LIMITS.images) { seenImg.add(thumb); blocks.push({ kind: 'image', src: thumb, alt: title || lastHeading || 'A video', altFromSite: !!title }); }
+            blocks.push({ kind: 'button', text: 'Watch the video', href: `https://www.youtube.com/watch?v=${yt}` });
+        } else if (vimeo) {
+            blocks.push({ kind: 'button', text: 'Watch the video', href: `https://vimeo.com/${vimeo}` });
+        } else if (/google\.[a-z.]+\/maps\/embed/i.test(src)) {
+            const u = absolutise(src.replace('/maps/embed', '/maps'), base);
+            if (u && u.startsWith('https://')) blocks.push({ kind: 'button', text: 'See us on the map', href: u });
+        }
     };
     const walk = (node: AnyNode) => {
         if (blocks.length >= IMPORT_LIMITS.blocks || node.type !== 'tag') return;
@@ -754,38 +914,97 @@ export function readImportPage(html: string, url: string): ImportPage {
             return;
         }
         if (name === 'img') { addImage(node); return; }
-        if (name === 'blockquote') { addText('quote', blockText(node)); return; }
-        if (name === 'li') { addText('item', blockText(node)); $(node).find('img').each((_, im) => addImage(im)); return; }
+        if (name === 'iframe') { addEmbed(node); return; }
+        bgImage(node);
+        if (name === 'blockquote') { addText('quote', blockText(node), node); return; }
+        if (name === 'li') { addText('item', blockText(node), node); $(node).find('img').each((_, im) => addImage(im)); return; }
         if (name === 'a' || name === 'button') {
             const $el = $(node);
             const text = clean($el.text()) || clean($el.attr('aria-label'));
             const cls = `${$el.attr('class') ?? ''} ${$el.attr('id') ?? ''}`;
-            if (text && text.length <= 40 && (name === 'button' || $el.attr('role') === 'button' || BUTTONISH.test(cls))) {
-                const href = absolutise($el.attr('href') ?? '', base);
-                if (!IMPORT_NOISE.test(text)) blocks.push({ kind: 'button', text, href });
+            const href = absolutise($el.attr('href') ?? '', base);
+            // A link standing on its own (not inside a sentence — those arrive inside their paragraph)
+            // is a button whatever its class: Tailwind and hand-made sites draw "Read more" and
+            // "Book now" as plain <a> tags with utility classes (Restorative Futures, 2026-11-08).
+            const standalone = name === 'a' && !!href && !hasBlockChild(node);
+            if (text && text.length <= 40 && (name === 'button' || $el.attr('role') === 'button' || BUTTONISH.test(cls) || standalone)) {
+                // The platform's own control labels ("Previous slide") are noise as buttons too.
+                if (!IMPORT_NOISE.test(text) && !adapter?.noise?.test(text)) blocks.push({ kind: 'button', text, href });
                 $el.find('img').each((_, im) => addImage(im));
                 return;
             }
         }
         const ownText = node.children.some((c) => c.type === 'text' && /\S{2,}/.test((c as unknown as { data: string }).data));
-        const hasBlockChild = node.children.some((c) => c.type === 'tag' && (BLOCK_TAGS.has(c.name) || c.name === 'img'));
-        if (['p', 'figcaption', 'dd', 'dt', 'td', 'th', 'summary'].includes(name) || (ownText && !hasBlockChild)) {
-            addText('text', blockText(node));
+        const hasBlock = hasBlockChild(node);
+        // A paragraph that is nothing but one link ("See all courses →") is that link, standing alone.
+        if (name === 'p' && !ownText) {
+            const tags = node.children.filter((c) => c.type === 'tag' && c.name !== 'br') as AnyNode[];
+            const only = tags.length === 1 && tags[0].type === 'tag' && tags[0].name === 'a' ? tags[0] : null;
+            if (only && only.type === 'tag' && $(only).attr('href') && clean($(only).text()).length <= 40) { walk(only); return; }
+        }
+        if (['p', 'figcaption', 'dd', 'dt', 'td', 'th', 'summary'].includes(name) || (ownText && !hasBlock)) {
+            addText('text', blockText(node), node);
             $(node).find('img').each((_, im) => addImage(im));
             return;
         }
         for (const c of node.children) walk(c);
     };
-    for (const c of root.get(0)?.children ?? []) walk(c);
+    const rootEl = root.get(0);
+    for (const c of (rootEl && 'children' in rootEl ? rootEl.children : [])) walk(c);
 
     const words = blocks.reduce((n, b) => n + (b.kind === 'image' ? 0 : b.text.split(' ').filter((w) => /[a-z0-9]/i.test(w)).length), 0);
     return {
         url,
         title: orNull(clean($('title').first().text())) ?? orNull(clean($('meta[property="og:title"]').attr('content'))),
         description: orNull(clean($('meta[name="description"]').attr('content'))),
-        navLinks, blocks, words,
+        navLinks, blocks, words, formFields, socialLinks,
         contact: { emails: [...emails].slice(0, 3), phones: [...phones].slice(0, 3), address, locality },
-        siteName, logo, hasForm, builder,
+        siteName, logo, hasForm, builder, platform: adapter?.key ?? null,
+        ...(products.length ? { products: cleanProducts(products, base, fullSize) } : {}),
     };
 }
 const LIMITS_ALT = 150;
+
+const LD_SYMBOL: Record<string, string> = { GBP: '£', EUR: '€', USD: 'US$', AUD: 'AU$', CAD: 'CA$' };
+
+/** A schema.org Product as one product: its name, first offer's price as a shop states it, picture, page. */
+function ldProduct(o: Record<string, unknown>, base: URL | null): ImportedProduct | null {
+    const name = typeof o.name === 'string' ? clean(o.name) : '';
+    if (!name) return null;
+    const offers = Array.isArray(o.offers) ? o.offers[0] : o.offers;
+    let price: string | null = null;
+    if (offers && typeof offers === 'object') {
+        const of = offers as Record<string, unknown>;
+        const amount = of.price ?? of.lowPrice;
+        const n = typeof amount === 'number' ? amount : typeof amount === 'string' ? Number(amount.replace(/,/g, '')) : NaN;
+        const cur = typeof of.priceCurrency === 'string' ? of.priceCurrency.toUpperCase() : '';
+        if (Number.isFinite(n) && n > 0) {
+            const num = n.toFixed(2);
+            const sym = LD_SYMBOL[cur];
+            price = sym ? `${of.lowPrice !== undefined && of.price === undefined ? 'From ' : ''}${sym}${num}` : `${num}${cur ? ` ${cur}` : ''}`;
+        }
+    }
+    const img = Array.isArray(o.image) ? o.image[0] : o.image;
+    const imgSrc = typeof img === 'string' ? img : img && typeof img === 'object' && typeof (img as { url?: unknown }).url === 'string' ? (img as { url: string }).url : '';
+    return { name, price, href: typeof o.url === 'string' ? absolutise(o.url, base) : null, image: imgSrc ? absolutise(imgSrc, base) : null };
+}
+
+/** One entry per product name (cards and structured data often list the same one), full-size pictures, capped. */
+function cleanProducts(list: ImportedProduct[], base: URL | null, fullSize: (src: string) => string): ImportedProduct[] {
+    const out: ImportedProduct[] = [];
+    const seen = new Map<string, ImportedProduct>();
+    for (const p of list) {
+        const name = clean(p.name).slice(0, 120);
+        if (!name || name.length < 2) continue;
+        const href = p.href ? absolutise(p.href, base) : null;
+        const image = p.image ? absolutise(p.image, base) : null;
+        const item: ImportedProduct = { name, price: p.price ? clean(p.price).slice(0, 60) || null : null, href: href && /^https?:/.test(href) ? href : null, image: image && /^https?:/.test(image) ? fullSize(image) : null };
+        const k = name.toLowerCase();
+        const had = seen.get(k);
+        if (had) { had.price ??= item.price; had.href ??= item.href; had.image ??= item.image; continue; }
+        if (out.length >= IMPORT_LIMITS.products) break;
+        seen.set(k, item);
+        out.push(item);
+    }
+    return out;
+}

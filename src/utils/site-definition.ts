@@ -14,6 +14,7 @@
 
 import { fillTemplateWords, templateById } from '../config/site-templates';
 import { contrastRatio, normalizeHex, readableInkOn } from './brand-kit';
+import { mapInlineLinks, mapPropStrings } from './site-rich-text';
 import { clampText, stripLoneSurrogates } from './text-safe';
 import { SOCIAL_PLATFORMS, type SocialPlatform } from '../config/platform-formats';
 
@@ -28,6 +29,10 @@ export type FontKey = 'sans' | 'serif' | 'rounded' | 'system'
 export type SpacingKey = 'compact' | 'regular' | 'airy';
 export type HeaderKey = 'standard' | 'centered';
 export type RadiusKey = 'none' | 'small' | 'medium' | 'large';
+export type ButtonStyleKey = 'solid' | 'outline' | 'pill';
+export type CardStyleKey = 'bordered' | 'shadow' | 'flat';
+export const BUTTON_STYLES: readonly ButtonStyleKey[] = ['solid', 'outline', 'pill'];
+export const CARD_STYLES: readonly CardStyleKey[] = ['bordered', 'shadow', 'flat'];
 export type BusinessType = 'Organization' | 'LocalBusiness' | 'ProfessionalService' | 'Store';
 
 export interface SiteTheme {
@@ -40,6 +45,21 @@ export interface SiteTheme {
     spacing?: SpacingKey;
     /** A soft tint for alternating sections; null = the grey of today. */
     accentColor?: string | null;
+    /**
+     * A second brand colour (2026-11-08): the button in a call-to-action band, so it stands out on
+     * the main colour — Restorative Futures' terracotta "Book" on teal. null/absent = today's look.
+     */
+    secondaryColor?: string | null;
+    /** Buttons: filled (today), outlined, or filled and fully rounded. Absent = 'solid'. (2026-11-08) */
+    buttonStyle?: ButtonStyleKey;
+    /** Cards (features, steps, testimonials…): a thin border (today), a soft shadow, or flat. Absent = 'bordered'. */
+    cardStyle?: CardStyleKey;
+    /** Headings in their own colour; must read on the background. null/absent = the text colour. */
+    headingColor?: string | null;
+    /** The header band's colour (its words take a readable ink); null/absent = the page background. */
+    headerColor?: string | null;
+    /** The footer band's colour; null/absent = the page background. */
+    footerColor?: string | null;
     /** The logo and menu side by side ('standard'), or the logo centred above the menu. */
     header?: HeaderKey;
     /** https URL of the logo; null = the site name in text. */
@@ -53,6 +73,11 @@ export interface SiteTheme {
 
 export interface SiteSettings {
     siteName: string;
+    /**
+     * Their profiles elsewhere (2026-11-08): https addresses on the social sites in SOCIAL_LINK_SITES,
+     * linked in the footer and given to search engines (schema.org sameAs). An import brings them.
+     */
+    socialLinks?: string[];
     /** The search description of the home page when it has none of its own. */
     description: string | null;
     businessType: BusinessType;
@@ -139,7 +164,11 @@ export interface HeroProps {
     secondaryCta: Link | null;
     image: Image | null;
 }
-export interface ItemsProps { heading: string | null; intro: string | null; items: Array<{ title: string; body: string }>; }
+/**
+ * `link` (optional, 2026-11-08): where the card leads — "Read more" to the page about that course or
+ * service. An imported site keeps its card links this way; drawn as a link under the card's words.
+ */
+export interface ItemsProps { heading: string | null; intro: string | null; items: Array<{ title: string; body: string; link?: Link | null; image?: Image | null }>; }
 /** Text, optionally with a picture beside it (left or right — on a phone it sits above the words). */
 export interface TextProps { heading: string | null; body: string; image: Image | null; imageSide: 'left' | 'right'; }
 export interface FaqProps { heading: string | null; items: Array<{ q: string; a: string }>; }
@@ -236,7 +265,7 @@ export interface ProductsProps { heading: string | null; intro: string | null; p
  * applies to grid sections (features, steps, testimonials, products); `menuLabel` makes the section
  * a menu entry on a one-page site (the menu links down the page to it).
  */
-export interface SectionLook { background: 'auto' | 'plain' | 'soft' | 'brand'; columns: 'auto' | 2 | 3; menuLabel: string | null; }
+export interface SectionLook { background: 'auto' | 'plain' | 'soft' | 'brand' | 'gradient'; columns: 'auto' | 2 | 3; menuLabel: string | null; }
 export const DEFAULT_LOOK: SectionLook = { background: 'auto', columns: 'auto', menuLabel: null };
 
 export type Section = SectionBody & { look?: SectionLook };
@@ -271,6 +300,13 @@ export interface SitePageDef {
     sections: Section[];
     /** Left out of the menu, still reachable by its address — a landing page for an ad or a post. */
     hideFromMenu: boolean;
+    /**
+     * Shown in the menu UNDER this page (its pageId), in a drop-down — "Testimonials" under "About
+     * Us", the courses under "Our Courses" (2026-11-08: the menu holds LIMITS.navItems entries, and
+     * Restorative Futures' 13 pages lost Contact and Booking from it). One level only: the parent is
+     * never the home page and never under another page itself. Absent/null = an entry of its own.
+     */
+    menuParent?: string | null;
 }
 
 export interface SiteDefinition {
@@ -287,14 +323,21 @@ export interface SiteDefinition {
      * e.g. landing pages, and are listed after those unless hidden).
      */
     structure: 'pages' | 'one_page';
+    /**
+     * Old addresses that now live elsewhere on this site (2026-11-08): an imported page whose address
+     * changed (/services/coaching → /coaching), so links and search results that point at the old one
+     * still arrive. Answered with a 301 by site-serve.ts. Absent = none.
+     */
+    redirects?: SiteRedirect[];
 }
+export interface SiteRedirect { from: string; to: string; }
 
 // ── Limits ──────────────────────────────────────────────────────────────────────────────────
 
 export const LIMITS = {
     siteName: 80, description: 170, locality: 80, email: 254, phone: 30,
-    pageTitle: 80, seoTitle: 65, seoDescription: 170, slug: 40,
-    sectionsPerPage: 20, navItems: 7, navLabel: 30, footer: 300,
+    pageTitle: 80, seoTitle: 65, seoDescription: 170, slug: 80,
+    redirects: 100, sectionsPerPage: 20, navItems: 7, navChildren: 12, navLabel: 30, navChildLabel: 48, footer: 300,
     headline: 120, subheadline: 300, eyebrow: 40, ctaLabel: 40, href: 500, alt: 150,
     itemTitle: 80, itemBody: 400, intro: 300, textBody: 3000, faqItems: 15, q: 200, a: 1000,
     features: 9, stepsMin: 2, steps: 6, testimonials: 9, quote: 500, personName: 80, personDetail: 80,
@@ -391,6 +434,18 @@ export function cleanHref(v: unknown): string | null {
     } catch { return null; }
 }
 
+/** A card with its picture replaced — or taken off (null), leaving no empty `image` key behind. */
+function withCardImage(it: ItemsProps['items'][number], image: Image | null): ItemsProps['items'][number] {
+    const { image: _old, ...rest } = it;
+    return image ? { ...rest, image } : rest;
+}
+
+/** A card with its link replaced — or taken off (null), leaving no empty `link` key behind. */
+function withItemLink(it: ItemsProps['items'][number], link: Link | null): ItemsProps['items'][number] {
+    const { link: _old, ...rest } = it;
+    return link ? { ...rest, link } : rest;
+}
+
 function cleanLink(v: unknown): Link | null {
     if (!v || typeof v !== 'object') return null;
     const o = v as Record<string, unknown>;
@@ -417,11 +472,17 @@ function cleanImage(v: unknown, warn: (m: string) => void): Image | null {
 
 // ── Sections ────────────────────────────────────────────────────────────────────────────────
 
-function items(v: unknown, max: number, warn: (m: string) => void): Array<{ title: string; body: string }> {
+function items(v: unknown, max: number, warn: (m: string) => void): ItemsProps['items'] {
     const list = Array.isArray(v) ? v : [];
     const out = list.map((x) => {
         const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
-        return { title: cleanText(o.title, LIMITS.itemTitle), body: cleanText(o.body, LIMITS.itemBody, true) };
+        const link = cleanLink(o.link);
+        // A card's own picture (2026-11-08): shown across its top. Pictures only — never a video.
+        const image = o.image ? cleanImage(o.image, warn) : null;
+        const item: ItemsProps['items'][number] = { title: cleanText(o.title, LIMITS.itemTitle), body: cleanText(o.body, LIMITS.itemBody, true) };
+        if (link) item.link = link;
+        if (image) item.image = image;
+        return item;
     }).filter((x) => x.title);
     if (out.length > max) warn(`Only the first ${max} items were kept.`);
     return out.slice(0, max);
@@ -629,7 +690,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
 export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts', 'listings'];
 export function cleanLook(raw: unknown, type: SectionType): SectionLook {
     const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-    const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' ? o.background : 'auto';
+    const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' || o.background === 'gradient' ? o.background : 'auto';
     const cols = Number(o.columns);
     return {
         // The opening section already has its own layouts (centred / beside a picture / banner).
@@ -669,9 +730,40 @@ export function cleanTheme(raw: unknown, warn: (m: string) => void, base: SiteTh
             : Number.isInteger(Number(t.logoAssetId)) && Number(t.logoAssetId) > 0 ? Number(t.logoAssetId) : (base.logoAssetId ?? null),
         spacing: SPACINGS.includes(t.spacing as SpacingKey) ? (t.spacing as SpacingKey) : (base.spacing ?? 'regular'),
         accentColor: t.accentColor === null ? null : (normalizeHex(typeof t.accentColor === 'string' ? t.accentColor : '') ?? base.accentColor ?? null),
+        secondaryColor: t.secondaryColor === null ? null : (normalizeHex(typeof t.secondaryColor === 'string' ? t.secondaryColor : '') ?? base.secondaryColor ?? null),
         header: HEADERS.includes(t.header as HeaderKey) ? (t.header as HeaderKey) : (base.header ?? 'standard'),
+        ...optionalLook(t, base, backgroundColor, warn),
     };
 }
+
+/**
+ * The 2026-11-08 design settings, each present only when set (so older sites read exactly as before).
+ * A heading colour that can't be read on the background is refused; header and footer bands take
+ * whatever ink reads on them (site-render.ts), so any colour is safe there.
+ */
+function optionalLook(t: Record<string, unknown>, base: SiteTheme, background: string, warn: (m: string) => void): Partial<SiteTheme> {
+    const out: Partial<SiteTheme> = {};
+    const pick = <K extends 'buttonStyle' | 'cardStyle'>(k: K, list: readonly string[]) => {
+        const v = list.includes(t[k] as string) ? (t[k] as SiteTheme[K]) : t[k] === null ? undefined : base[k];
+        if (v) out[k] = v;
+    };
+    pick('buttonStyle', BUTTON_STYLES);
+    pick('cardStyle', CARD_STYLES);
+    const col = (k: 'headingColor' | 'headerColor' | 'footerColor') => {
+        if (t[k] === null) return null;
+        return normalizeHex(typeof t[k] === 'string' ? (t[k] as string) : '') ?? base[k] ?? null;
+    };
+    const heading = col('headingColor');
+    if (heading && contrastRatio(heading, background) < MIN_HEADING_CONTRAST) warn('That heading colour is too hard to read on the background, so headings stay in the text colour.');
+    else if (heading) out.headingColor = heading;
+    const header = col('headerColor');
+    if (header) out.headerColor = header;
+    const footer = col('footerColor');
+    if (footer) out.footerColor = footer;
+    return out;
+}
+/** Large text (headings) needs 3:1 (WCAG AA for large text). */
+const MIN_HEADING_CONTRAST = 3;
 
 /** Every library picture the site uses (logo, hero pictures, product pictures). */
 export function assetIdsIn(def: SiteDefinition): number[] {
@@ -682,6 +774,7 @@ export function assetIdsIn(def: SiteDefinition): number[] {
             if ((s.type === 'hero' || s.type === 'text' || s.type === 'signup') && s.props.image?.assetId) ids.add(s.props.image.assetId);
             if (s.type === 'products') for (const it of s.props.items) if (it.image?.assetId) ids.add(it.image.assetId);
             if (s.type === 'gallery') for (const im of s.props.images) if (im.assetId) ids.add(im.assetId);
+            if (s.type === 'features' || s.type === 'steps') for (const it of s.props.items) if (it.image?.assetId) ids.add(it.image.assetId);
         }
     }
     return [...ids];
@@ -700,6 +793,7 @@ export function withoutAssets(def: SiteDefinition, drop: Set<number>): SiteDefin
             if (s.type === 'signup') return { ...s, props: { ...s.props, image: keep(s.props.image) } };
             if (s.type === 'products') return { ...s, props: { ...s.props, items: s.props.items.map((it) => ({ ...it, image: keep(it.image) })) } };
             if (s.type === 'gallery') return { ...s, props: { ...s.props, images: s.props.images.filter((im) => keep(im)) } };
+            if (s.type === 'features' || s.type === 'steps') return { ...s, props: { ...s.props, items: s.props.items.map((it) => withCardImage(it, keep(it.image ?? null))) } };
             return s;
         }) }))
             // A gallery left with no pictures is no gallery.
@@ -733,6 +827,7 @@ export function markVideos(def: SiteDefinition, videos: Set<number>): { definiti
             if (sec.type === 'gallery') return { ...sec, props: { ...sec.props, images: sec.props.images.map((im) => flag(im)) } };
             if (sec.type === 'signup') return { ...sec, props: { ...sec.props, image: pictureOnly(sec.props.image) } };
             if (sec.type === 'products') return { ...sec, props: { ...sec.props, items: sec.props.items.map((it) => ({ ...it, image: pictureOnly(it.image) })) } };
+            if (sec.type === 'features' || sec.type === 'steps') return { ...sec, props: { ...sec.props, items: sec.props.items.map((it) => (it.image ? withCardImage(it, pictureOnly(it.image)) : it)) } };
             return sec;
         }) })),
     } as SiteDefinition;
@@ -742,6 +837,60 @@ export function markVideos(def: SiteDefinition, videos: Set<number>): { definiti
 /** The colour a button's label must be on the primary colour — dark or light, whichever reads. */
 export function buttonInk(theme: SiteTheme): string {
     return readableInkOn(theme.primaryColor);
+}
+
+/** An address as a redirect compares it: path only, lower case, no trailing slash or ".html". */
+export function redirectKey(path: string): string {
+    let p = (path || '/').split(/[?#]/)[0];
+    try { p = decodeURIComponent(p); } catch { /* keep as sent */ }
+    p = p.toLowerCase().replace(/\/index\.html?$/, '/').replace(/\.html?$/, '').replace(/\/+$/, '');
+    return p || '/';
+}
+const REDIRECT_FROM = /^\/[a-z0-9\-._~%/!$&'()*+,;=:@]{1,200}$/;
+/** Redirects kept: an old address no page uses, to one of the site's pages (or a blog post, when the blog is on); each old address once. */
+/** One blog post's address on the site (site-blog.ts siteBlogRoute) — where an imported post's old address goes. */
+const BLOG_POST_TO = /^\/blog\/[a-z0-9][a-z0-9-]{0,99}$/;
+function cleanRedirects(v: unknown, pagePaths: Set<string>): SiteRedirect[] {
+    const out: SiteRedirect[] = [];
+    for (const x of Array.isArray(v) ? v : []) {
+        const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+        const from = redirectKey(String(o.from ?? ''));
+        const to = String(o.to ?? '');
+        const toPost = pagePaths.has(BLOG_PATH) && BLOG_POST_TO.test(to);
+        if (!REDIRECT_FROM.test(from) || from.startsWith('/_') || pagePaths.has(from) || (!pagePaths.has(to) && !toPost) || from === to) continue;
+        if (out.some((r) => r.from === from) || out.length >= LIMITS.redirects) continue;
+        out.push({ from, to });
+    }
+    return out;
+}
+/** Where an old address now lives, or null. Only for an address no page answers at. */
+export function redirectFor(def: SiteDefinition, path: string): string | null {
+    if (!def.redirects?.length) return null;
+    const key = redirectKey(path);
+    return def.redirects.find((r) => r.from === key)?.to ?? null;
+}
+
+/** The social sites a footer link may go to, by host, with the name it is shown as. */
+export const SOCIAL_LINK_SITES: Record<string, string> = {
+    'instagram.com': 'Instagram', 'facebook.com': 'Facebook', 'linkedin.com': 'LinkedIn', 'x.com': 'X', 'twitter.com': 'X',
+    'tiktok.com': 'TikTok', 'youtube.com': 'YouTube', 'threads.net': 'Threads', 'threads.com': 'Threads', 'pinterest.com': 'Pinterest',
+    'pinterest.co.uk': 'Pinterest', 'bsky.app': 'Bluesky',
+};
+/** The name a social link is shown as ("Instagram"), or null when it is not one of SOCIAL_LINK_SITES. */
+export function socialSiteOf(url: string): string | null {
+    try {
+        const h = new URL(url).hostname.toLowerCase().replace(/^(www|m|uk)\./, '');
+        return SOCIAL_LINK_SITES[h] ?? null;
+    } catch { return null; }
+}
+function cleanSocialLinks(v: unknown): string[] {
+    const list = Array.isArray(v) ? v : typeof v === 'string' ? v.split(/\s+/) : [];
+    const out: string[] = [];
+    for (const x of list) {
+        const h = cleanHref(x);
+        if (h && h.startsWith('https://') && socialSiteOf(h) && !out.includes(h) && out.length < 8) out.push(h);
+    }
+    return out;
 }
 
 function cleanSettings(raw: unknown, base?: SiteSettings): SiteSettings {
@@ -758,6 +907,7 @@ function cleanSettings(raw: unknown, base?: SiteSettings): SiteSettings {
         phone: has('phone') ? (/^\+?[0-9 ()-]{5,30}$/.test(phone) ? phone : null) : base?.phone ?? null,
         features: has('features') ? cleanFeatures(s.features) : base?.features ?? null,
         template: has('template') ? (templateById(s.template) ? String(s.template) : null) : base?.template ?? null,
+        socialLinks: has('socialLinks') ? cleanSocialLinks(s.socialLinks) : base?.socialLinks ?? [],
         ...blogSetting(has('blog') ? s.blog : undefined, base?.blog),
     };
 }
@@ -842,6 +992,7 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
             seo: { title: textOrNull(seo.title, LIMITS.seoTitle), description: textOrNull(seo.description, LIMITS.seoDescription) },
             sections,
             hideFromMenu: p.hideFromMenu === true,
+            menuParent: typeof p.menuParent === 'string' && ID_RE.test(p.menuParent) ? p.menuParent : null,
         });
     }
 
@@ -857,6 +1008,14 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
     // Home first, so the menu and the sitemap start where a visitor does. The home page is always in the menu.
     pages.sort((a, b) => (a.slug === '' ? -1 : b.slug === '' ? 1 : 0));
     pages[0].hideFromMenu = false;
+    pages[0].menuParent = null;
+    // A drop-down parent must be a page here, not the home page, not itself, and not under another page.
+    const pageById = new Map(pages.map((p) => [p.id, p]));
+    for (const p of pages) {
+        const parent = p.menuParent ? pageById.get(p.menuParent) : undefined;
+        if (p.menuParent && (!parent || parent === p || parent.slug === '' || (parent.menuParent && pageById.get(parent.menuParent)))) p.menuParent = null;
+    }
+    for (const p of pages) if (p.menuParent && pages.some((c) => c.menuParent === p.id)) p.menuParent = null;
 
     // Internal links must point at a page that exists.
     const pagePaths = new Set(pages.map((p) => (p.slug ? `/${p.slug}` : '/')));
@@ -874,6 +1033,9 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
                 const button = checkLink(s.props.button);
                 if (!button) { warn('A call-to-action section was left out: its button pointed nowhere.'); return []; }
                 return [{ ...s, props: { ...s.props, button } }];
+            }
+            if ((s.type === 'features' || s.type === 'steps') && s.props.items.some((it) => it.link)) {
+                return [{ ...s, props: { ...s.props, items: s.props.items.map((it) => (it.link ? withItemLink(it, checkLink(it.link)) : it)) } }] as Section[];
             }
             return [s];
         });
@@ -893,7 +1055,8 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
     const footer = { text: textOrNull((r.footer as Record<string, unknown> | undefined)?.text, LIMITS.footer, true) };
 
     const structure = r.structure === 'one_page' ? 'one_page' : 'pages';
-    return { definition: { version: 1, theme, settings, nav, pages, footer, structure }, warnings };
+    const redirects = cleanRedirects(r.redirects, pagePaths);
+    return { definition: { version: 1, theme, settings, nav, pages, footer, structure, ...(redirects.length ? { redirects } : {}) }, warnings };
 }
 
 /**
@@ -904,7 +1067,9 @@ function normalise(raw: unknown, opts: NormaliseOptions, warn: (m: string) => vo
 /** The menu entry the blog adds (pageId is not a page's — no page has it). */
 export const BLOG_MENU_ID = '_blog';
 
-export function menuOf(def: SiteDefinition): Array<{ label: string; path: string; pageId: string; sectionId?: string }> {
+export interface MenuEntry { label: string; path: string; pageId: string; sectionId?: string; children?: Array<{ label: string; path: string; pageId: string }> }
+
+export function menuOf(def: SiteDefinition): MenuEntry[] {
     const toPage = (p: SitePageDef, label?: string) => ({ label: clampText(label || p.title, LIMITS.navLabel), path: p.slug ? `/${p.slug}` : '/', pageId: p.id });
     // The blog is always last in the menu, and always fits: it takes the last place if the menu is full.
     const blog = blogOn(def) ? [{ label: def.settings.blog!.menuLabel || DEFAULT_BLOG_LABEL, path: BLOG_PATH, pageId: BLOG_MENU_ID }] : [];
@@ -915,10 +1080,21 @@ export function menuOf(def: SiteDefinition): Array<{ label: string; path: string
         const others = def.pages.slice(1).filter((p) => !p.hideFromMenu).map((p) => toPage(p));
         return [...[...jumps, ...others].slice(0, room), ...blog];
     }
-    const entries = def.nav.length ? def.nav : def.pages.filter((p) => !p.hideFromMenu).slice(0, LIMITS.navItems).map((p) => ({ label: clampText(p.title, LIMITS.navLabel), pageId: p.id }));
+    // Pages with a menuParent go in that page's drop-down — unless the parent isn't in the menu, when
+    // they stand on their own rather than vanish from it.
+    const visible = def.pages.filter((p) => !p.hideFromMenu);
+    const topIds = new Set(def.nav.length ? def.nav.map((n) => n.pageId) : visible.filter((p) => !p.menuParent).map((p) => p.id));
+    const isChild = (p: SitePageDef) => !!p.menuParent && topIds.has(p.menuParent) && p.menuParent !== p.id;
+    const entries = def.nav.length
+        ? def.nav.filter((n) => { const pg = def.pages.find((p) => p.id === n.pageId); return !pg || !isChild(pg); })
+        : visible.filter((p) => !isChild(p)).slice(0, LIMITS.navItems).map((p) => ({ label: clampText(p.title, LIMITS.navLabel), pageId: p.id }));
     return [...entries.flatMap((n) => {
         const page = def.pages.find((p) => p.id === n.pageId);
-        return page ? [toPage(page, n.label)] : [];
+        if (!page) return [];
+        const entry: MenuEntry = toPage(page, n.label);
+        const kids = visible.filter((c) => isChild(c) && c.menuParent === page.id).slice(0, LIMITS.navChildren).map((c) => ({ ...toPage(c), label: clampText(c.title, LIMITS.navChildLabel) }));
+        if (kids.length) entry.children = kids;
+        return [entry];
     }).slice(0, room), ...blog];
 }
 
@@ -926,7 +1102,7 @@ export function menuOf(def: SiteDefinition): Array<{ label: string; path: string
 
 export type SiteOperation =
     | { op: 'add_page'; title: string; slug?: string }
-    | { op: 'update_page'; pageId: string; title?: string; slug?: string; seo?: { title?: string | null; description?: string | null }; hideFromMenu?: boolean }
+    | { op: 'update_page'; pageId: string; title?: string; slug?: string; seo?: { title?: string | null; description?: string | null }; hideFromMenu?: boolean; menuParent?: string | null }
     | { op: 'remove_page'; pageId: string }
     | { op: 'add_section'; pageId: string; section: { type: SectionType; props: unknown; look?: Partial<SectionLook> }; index?: number }
     | { op: 'update_section'; pageId: string; sectionId: string; props?: Record<string, unknown>; look?: Partial<SectionLook> }
@@ -942,7 +1118,8 @@ export type SiteOperation =
     | { op: 'set_nav'; items: Array<{ label?: string; pageId: string }> }
     | { op: 'set_theme'; theme: Partial<Record<keyof SiteTheme, unknown>> }
     | { op: 'set_settings'; settings: Partial<Record<keyof SiteSettings, unknown>> }
-    | { op: 'set_footer'; text: string | null };
+    | { op: 'set_footer'; text: string | null }
+    | { op: 'set_redirects'; redirects: SiteRedirect[] };
 
 export type OperationResult = { ok: true; definition: SiteDefinition; warnings: string[] } | { ok: false; error: string };
 
@@ -1083,12 +1260,27 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
                 if (page!.slug === '' && op.hideFromMenu) return { ok: false, error: 'The home page is always in the menu.' };
                 page!.hideFromMenu = op.hideFromMenu === true;
             }
+            if (op.menuParent !== undefined) {
+                if (op.menuParent === null || op.menuParent === '') page!.menuParent = null;
+                else {
+                    const parent = byIdOrSlug(op.menuParent);
+                    if (!parent) return { ok: false, error: 'The page to put it under no longer exists.' };
+                    if (page!.slug === '') return { ok: false, error: 'The home page always has its own place in the menu.' };
+                    if (parent === page) return { ok: false, error: 'A page can\'t go under itself in the menu.' };
+                    if (parent.slug === '') return { ok: false, error: 'Pages can\'t go under the home page in the menu — choose another page.' };
+                    if (parent.menuParent) return { ok: false, error: `"${parent.title}" is itself under another page in the menu. Choose a page that has its own place in the menu.` };
+                    if (next.pages.some((c) => c.menuParent === page!.id)) return { ok: false, error: `Other pages are under "${page!.title}" in the menu, so it can't go under another page. Move those first.` };
+                    page!.menuParent = parent.id;
+                }
+            }
             break;
         }
         case 'remove_page': {
             if (page!.slug === '') return { ok: false, error: 'The home page can\'t be removed — every site needs one.' };
             next.pages = next.pages.filter((p) => p !== page);
             next.nav = next.nav.filter((n) => n.pageId !== op.pageId);
+            // Pages that were under it in the menu get their own place again.
+            for (const c of next.pages) if (c.menuParent === op.pageId) c.menuParent = null;
             break;
         }
         case 'add_section': {
@@ -1147,6 +1339,10 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
             next.footer = { text: op.text };
             break;
         }
+        case 'set_redirects': {
+            next.redirects = Array.isArray(op.redirects) ? op.redirects : [];
+            break;
+        }
         case 'set_structure': {
             next.structure = op.structure === 'one_page' ? 'one_page' : 'pages';
             break;
@@ -1169,6 +1365,9 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
             for (const sec of home.sections) {
                 if (sec.type === 'hero') { sec.props.primaryCta = fix(sec.props.primaryCta); sec.props.secondaryCta = fix(sec.props.secondaryCta); }
                 if (sec.type === 'cta') sec.props.button = fix(sec.props.button) ?? sec.props.button;
+                if (sec.type === 'features' || sec.type === 'steps') sec.props.items = sec.props.items.map((it) => (it.link ? withItemLink(it, fix(it.link)) : it));
+                // Links inside sentences ([words](/page)) move with their page too.
+                sec.props = mapPropStrings(sec.props, (t) => (t.includes('](') ? mapInlineLinks(t, (h) => fix({ label: 'x', href: h })!.href) : t)) as typeof sec.props;
             }
             next.pages = [home];
             next.nav = [];
@@ -1232,6 +1431,9 @@ function applyOperation(def: SiteDefinition, op: SiteOperation, opts: NormaliseO
             for (const pg of next.pages) for (const sec of pg.sections) {
                 if (sec.type === 'hero') { sec.props.primaryCta = fix(sec.props.primaryCta); sec.props.secondaryCta = fix(sec.props.secondaryCta); }
                 if (sec.type === 'cta') sec.props.button = fix(sec.props.button) ?? sec.props.button;
+                if (sec.type === 'features' || sec.type === 'steps') sec.props.items = sec.props.items.map((it) => (it.link ? withItemLink(it, fix(it.link)) : it));
+                // Links inside sentences ([words](/page)) move with their page too.
+                sec.props = mapPropStrings(sec.props, (t) => (t.includes('](') ? mapInlineLinks(t, (h) => fix({ label: 'x', href: h })!.href) : t)) as typeof sec.props;
             }
             next.nav = [];
             next.structure = 'pages';

@@ -11,6 +11,7 @@
 //     policies either (reply times, free quotes, delivery…: src/constants/site-copy-craft.ts);
 //   · step 3's publish refuses a page that still has a [placeholder] on it.
 
+import { PLACEHOLDER } from './site-rich-text';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../constants/safety-benchmark';
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { SITE_COPY_CRAFT } from '../constants/site-copy-craft';
@@ -83,7 +84,7 @@ export function placeholdersIn(def: SiteDefinition): Array<{ pageId: string; pag
     const out: Array<{ pageId: string; pageTitle: string; sectionId: string | null; text: string }> = [];
     const scan = (value: unknown, pageId: string, pageTitle: string, sectionId: string | null) => {
         if (typeof value === 'string') {
-            for (const m of value.matchAll(/\[[^\][]{1,60}\]/g)) out.push({ pageId, pageTitle, sectionId, text: m[0] });
+            for (const m of value.matchAll(PLACEHOLDER)) out.push({ pageId, pageTitle, sectionId, text: m[0] });
         } else if (Array.isArray(value)) value.forEach((v) => scan(v, pageId, pageTitle, sectionId));
         else if (value && typeof value === 'object') Object.values(value).forEach((v) => scan(v, pageId, pageTitle, sectionId));
     };
@@ -97,7 +98,7 @@ export function placeholdersIn(def: SiteDefinition): Array<{ pageId: string; pag
 
 const SECTION_SCHEMA = `Section types and their props (use ONLY these; any other type or prop is discarded):
 - "hero": { "layout": "centered" | "split" | "banner", "eyebrow": short label or null, "headline": max ${LIMITS.headline} chars, "subheadline": max ${LIMITS.subheadline} chars, "primaryCta": { "label", "href" } or null, "secondaryCta": { "label", "href" } or null }
-- "features": { "heading", "intro", "items": [ { "title", "body" } ] }  (1–${LIMITS.features} items)
+- "features": { "heading", "intro", "items": [ { "title", "body", "link": { "label", "href" } or null } ] }  (1–${LIMITS.features} items)
 - "steps": { "heading", "intro", "items": [ { "title", "body" } ] }  (${LIMITS.stepsMin}–${LIMITS.steps} steps)
 - "text": { "heading", "body" }  (body: paragraphs separated by a blank line)
 - "faq": { "heading", "items": [ { "q", "a" } ] }  (1–${LIMITS.faqItems})

@@ -92,7 +92,8 @@ check('no file both calls the gateway and logs for itself (that double-counts)',
 
 check('every model the code calls has a list price', () => {
     const models = new Set<string>();
-    for (const f of sources) for (const m of read(f).matchAll(/'(claude-[a-z0-9.-]+)'/g)) models.add(m[1]);
+    // site-builders/ names website platforms ('claude-code' = sites built with Claude Code), not models.
+    for (const f of sources.filter((x) => !x.includes('site-builders/'))) for (const m of read(f).matchAll(/'(claude-[a-z0-9.-]+)'/g)) models.add(m[1]);
     const unpriced = [...models].filter((m) => !LIST_PRICE_PER_1K[m]);
     assert.deepStrictEqual(unpriced, [], `add these to LIST_PRICE_PER_1K in src/utils/ai-usage.ts, or every call to them records $0: ${unpriced.join(', ')}`);
 });

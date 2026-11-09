@@ -1,0 +1,99 @@
+<!doctype html>
+<!-- SYNTHETIC fixture modelled on a Magento 2.4 store on the Hyvä theme (Tailwind + Alpine.js). Invented business, .example domain. -->
+<html lang="en-GB"><head><meta charset="utf-8"/>
+<title>Moorland Tack Room | Saddlery in Helmsley</title>
+<meta name="description" content="Saddles fitted, tack repaired and riding wear from our shop in Helmsley."/>
+<link rel="stylesheet" type="text/css" media="all" href="https://shop.moorlandtack.example/static/version1731111111/frontend/Moorland/hyva-child/en_GB/css/styles.css"/>
+<script>var BASE_URL = 'https://shop.moorlandtack.example/'; var THEME_PATH = 'https://shop.moorlandtack.example/static/version1731111111/frontend/Moorland/hyva-child/en_GB'; window.hyva = window.hyva || {};</script>
+</head>
+<body id="html-body" class="cms-home cms-index-index page-layout-1column">
+<input name="form_key" type="hidden" value="Zx9Yw8Vu7Ts6Rq5P"/>
+<noscript><section class="message global noscript border-b-2 border-blue-500 bg-blue-50 shadow-none m-0 px-0 rounded-none font-normal"><div class="container text-center"><p><strong>JavaScript seems to be disabled in your browser.</strong></p></div></section></noscript>
+<div class="page-wrapper">
+<header class="page-header">
+<a class="action skip sr-only focus:not-sr-only focus:absolute focus:z-40 focus:bg-white" href="#contentarea"><span>Skip to Content</span></a>
+<div id="header" class="relative z-30 w-full border-b shadow bg-container-lighter border-container-lighter" x-data="initHeader()" @private-content-loaded.window="getData(event.detail.data)">
+<div class="container flex flex-wrap lg:flex-nowrap items-center justify-between w-full px-6 py-3 mx-auto mt-0">
+<div class="order-1 sm:order-2 lg:order-1 w-full pb-2 sm:w-auto sm:pb-0">
+<a class="flex items-center justify-center text-xl font-medium tracking-wide text-gray-800 no-underline hover:no-underline font-title" href="https://shop.moorlandtack.example/" aria-label="Go to Home page"><img src="https://shop.moorlandtack.example/media/logo/default/moorland-tack.png" alt="Moorland Tack Room" width="189" height="53" loading="eager"/></a>
+</div>
+<div x-data="initMobileMenu" class="z-20 order-2 sm:order-1 lg:order-2 navigation lg:hidden">
+<nav aria-label="Mobile Main Menu"><ul>
+<li data-level="0" x-data="initMobileSubMenu"><button type="button" aria-expanded="false" @click="open"><span>Saddles</span></button>
+<ul x-show="isOpen"><li data-level="1"><button type="button" @click="close">Saddles</button><a href="https://shop.moorlandtack.example/saddles.html"><span class="ms-7">See all Saddles</span></a></li>
+<li data-level="1"><a href="https://shop.moorlandtack.example/saddles/general-purpose.html">General purpose</a></li></ul></li>
+<li data-level="0"><a href="https://shop.moorlandtack.example/repairs">Repairs</a></li>
+</ul></nav>
+</div>
+<div class="z-20 order-2 sm:order-1 lg:order-2 navigation hidden lg:flex">
+<nav class="relative" aria-label="Main menu"><ul class="flex justify-start flex-wrap gap-x-7 py-4">
+<li class="relative level-0" x-data="initMenuDesktopItem" @mouseenter="canHoverOpen"><span class="flex items-center text-md"><a href="https://shop.moorlandtack.example/saddles.html" class="level-0 block py-2 px-1 rounded">Saddles</a><button type="button" class="group rounded p-1" @click="toggle" aria-expanded="false"><span class="sr-only">Show submenu for Saddles category</span></button></span>
+<ul id="category-node-3" class="z-10 absolute top-full" x-show="open" x-cloak=""><li><a href="https://shop.moorlandtack.example/saddles/general-purpose.html" title="General purpose" class="block py-3 px-5">General purpose</a></li><li><a href="https://shop.moorlandtack.example/saddles/dressage.html" title="Dressage" class="block py-3 px-5">Dressage</a></li></ul></li>
+<li class="relative level-0"><span class="flex items-center text-md"><a href="https://shop.moorlandtack.example/riding-wear.html" class="level-0 block py-2 px-1 rounded">Riding wear</a></span></li>
+<li class="relative level-0"><span class="flex items-center text-md"><a href="https://shop.moorlandtack.example/repairs" class="level-0 block py-2 px-1 rounded">Repairs</a></span></li>
+</ul></nav>
+</div>
+<div class="flex items-center gap-1 md:gap-2 order-3 md:-me-1">
+<button id="menu-search-icon" class="inline-block p-1" @click.prevent="searchOpen = !searchOpen" aria-label="Toggle search form"></button>
+<div x-data="{ open: false }" class="relative inline-block">
+<button type="button" id="customer-menu" class="block rounded p-1" @click="open = !open" aria-label="My Account" aria-haspopup="true"></button>
+<nav class="z-10 absolute right-0 w-40" aria-label="My Account" x-show="open" x-cloak=""><a id="customer.header.sign.in.link" class="block px-4 py-2" href="https://shop.moorlandtack.example/customer/account/index/" title="Sign In">Sign In</a><a id="customer.header.register.link" class="block px-4 py-2" href="https://shop.moorlandtack.example/customer/account/create/" title="Create an Account">Create an Account</a></nav>
+</div>
+<a id="menu-cart-icon" @click.prevent.stop="toggleCartDrawer" href="https://shop.moorlandtack.example/checkout/cart/index/" class="relative inline-block rounded p-1"><span class="sr-only label">Cart</span><span x-text="cart.summary_count" class="absolute top-0 right-0 h-5 px-2 py-1 -mt-5 -me-4 text-xs font-semibold leading-none text-center">0</span></a>
+</div>
+</div>
+<div class="absolute z-10 w-full border-t shadow-sm bg-container-lighter border-container-lighter" id="search-content" x-cloak x-show="searchOpen"><form class="form minisearch" id="search_mini_form" action="https://shop.moorlandtack.example/catalogsearch/result/" method="get"><label class="sr-only" for="search">Search entire store here...</label><input id="search" x-ref="searchInput" type="search" name="q" placeholder="Search entire store here..." class="w-full p-2 text-lg leading-normal"/></form></div>
+<section id="cart-drawer" x-data="initCartDrawer()" @toggle-cart.window="toggleCartDrawer()"><div role="dialog" aria-modal="true" aria-labelledby="cart-drawer-title" x-show="open" x-cloak><header class="relative px-4 py-6 sm:px-6"><p id="cart-drawer-title" class="text-lg font-medium leading-7 text-gray-900"><strong>My Cart</strong></p></header><div class="relative grid gap-6 sm:gap-8 px-1 py-3 sm:px-3"><p class="text-center">Cart is empty</p></div></div></section>
+</div>
+</header>
+<div x-data="initAuthenticationPopup()" x-cloak><div x-show="open" role="dialog" aria-modal="true"><form class="form form-login" method="post" action="https://shop.moorlandtack.example/customer/account/loginPost/" id="customer-login-form"><h2>Sign in</h2><label for="form-login-username">Email Address</label><input type="email" name="username" id="form-login-username"/><label for="form-login-password">Password</label><input type="password" name="password" id="form-login-password"/><button type="submit">Sign in</button></form></div></div>
+<main id="maincontent" class="page-main"><a id="contentarea" tabindex="-1"></a>
+<div class="columns"><div class="column main">
+<div data-content-type="row" data-appearance="contained" data-element="main"><div data-element="inner">
+<div data-content-type="slider" data-appearance="default" data-autoplay="false" data-element="main">
+<div data-content-type="slide" data-slide-name="" data-appearance="collage-left" data-show-button="always" data-show-overlay="never_show" data-element="main">
+<a href="https://shop.moorlandtack.example/saddle-fitting" target="" data-link-type="page" data-element="link"><div class="pagebuilder-slide-wrapper" data-background-images='{\"desktop_image\":\"https://shop.moorlandtack.example/media/wysiwyg/slides/fitting-yard.jpg\",\"mobile_image\":\"\"}' data-background-type="image" data-element="wrapper"><div class="pagebuilder-overlay" data-element="overlay"><div class="pagebuilder-collage-content"><div data-element="content"><h2>Saddles fitted on your own horse</h2><p>Our qualified fitters travel across North Yorkshire with a van of demo saddles.</p></div><button type="button" class="pagebuilder-slide-button pagebuilder-button-primary" data-element="button">Book a fitting</button></div></div></div></a>
+</div>
+</div>
+<div data-content-type="text" data-appearance="default" data-element="main"><h2>Mended, not binned</h2><p>Bring us broken bridles, worn girths and tired rugs. We stitch leather by hand in the workshop behind the shop on Bondgate.</p></div>
+</div></div>
+<section class="my-12 text-gray-700 body-font">
+<div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6"><h3 class="text-gray-900 text-2xl font-medium">Popular in the shop</h3></div>
+<a class="sr-only focus:not-sr-only" href="#after-slider-1">Press to skip carousel</a>
+<div x-data="initSliderComponent()" class="relative" role="group" aria-roledescription="carousel" aria-label="Popular in the shop">
+<div class="relative w-full overflow-x-auto" x-ref="slider"><div class="flex flex-nowrap">
+<div id="slider-1-31" class="flex flex-col" role="tabpanel">
+<form method="post" action="https://shop.moorlandtack.example/checkout/cart/add/uenc/%25uenc%25/product/31/" class="item product product-item product_addtocart_form card card-interactive grow flex flex-col w-full" data-sku="BRIDLE-CB">
+<input name="form_key" type="hidden" value="Zx9Yw8Vu7Ts6Rq5P"/><input type="hidden" name="product" value="31"/>
+<a href="https://shop.moorlandtack.example/cavesson-bridle-havana.html" class="product photo product-item-photo block mx-auto mb-3" tabindex="-1"><img src="https://shop.moorlandtack.example/media/catalog/product/cache/67ee89799642c567a71fc92f3699d937/c/a/cavesson-bridle-havana.jpg?width=360&amp;height=360&amp;quality=80&amp;fit=bounds" width="360" height="360" alt="Cavesson bridle in havana" class="product-image-photo" loading="lazy" x-data="initProductItemImage"/></a>
+<div class="product-info flex flex-col grow"><div class="mt-2 mb-1 items-center justify-center font-semibold text-lg text-center"><a class="product-item-link" href="https://shop.moorlandtack.example/cavesson-bridle-havana.html">Cavesson bridle – havana</a></div>
+<div class="py-1 mx-auto"><div role="img" class="rating-summary" aria-label="Cavesson bridle – havana rating. 4.5 out of 5 stars"></div></div>
+<div class="py-1 mx-auto"><div class="price-container"><div class="final-price inline-block" itemprop="offers" itemscope=""><span class="price-label block">Regular Price</span><span id="product-price-31" class="price-wrapper title-font font-medium text-2xl"><span class="price">£95.00</span></span></div></div></div>
+<p class="text-center"><span class="sr-only">View more about Cavesson bridle – havana</span></p>
+<div class="mt-auto pt-3 flex flex-wrap justify-center items-center gap-2"><button class="btn btn-primary" aria-label="Add to Cart Cavesson bridle – havana"><span class="hidden sm:block md:hidden lg:block">Add to Cart</span></button><button x-data="initWishlist()" @click.prevent="addToWishlist(31)" aria-label="Add to Wish List Cavesson bridle – havana" type="button" class="btn p-2 rounded-full"></button><button x-data="initCompareOnProductList()" @click.prevent="addToCompare(31)" aria-label="Add to Compare Cavesson bridle – havana" type="button" class="btn p-2 rounded-full"></button></div>
+</div></form></div>
+<div id="slider-1-32" class="flex flex-col" role="tabpanel">
+<form method="post" action="https://shop.moorlandtack.example/checkout/cart/add/uenc/%25uenc%25/product/32/" class="item product product-item product_addtocart_form card card-interactive grow flex flex-col w-full" data-sku="GIRTH-W">
+<a href="https://shop.moorlandtack.example/wool-girth.html" class="product photo product-item-photo block mx-auto mb-3" tabindex="-1"><img src="https://shop.moorlandtack.example/media/catalog/product/cache/67ee89799642c567a71fc92f3699d937/w/o/wool-girth.jpg" width="360" height="360" alt="" class="product-image-photo" loading="lazy"/></a>
+<div class="product-info flex flex-col grow"><div class="mt-2 mb-1"><a class="product-item-link" href="https://shop.moorlandtack.example/wool-girth.html">Wool-lined girth</a></div>
+<div class="py-1 mx-auto"><div class="price-container"><span class="price">£48.00</span></div></div>
+<div class="mt-auto pt-3"><span class="text-red-600">Out of stock</span></div></div></form></div>
+</div></div>
+<div class="flex items-center justify-center gap-2"><button type="button" class="glider-prev" aria-label="Previous slide" @click="scrollPrevious"></button><button type="button" class="glider-next" aria-label="Next slide" @click="scrollNext"></button></div>
+</div><span id="after-slider-1" tabindex="-1"></span>
+</section>
+</div></div></main>
+<footer class="page-footer"><div class="footer content"><div class="bg-gray-100 border-t border-gray-300 pb-16"><div class="container py-8">
+<nav aria-label="Company Menu"><h2 class="text-md leading-5 font-semibold tracking-wider uppercase">Company</h2><ul class="mt-4">
+<li><a href="https://shop.moorlandtack.example/about-us" class="text-base leading-6">About</a></li>
+<li class="mt-4"><a href="https://shop.moorlandtack.example/customer/account/" class="text-base leading-6">My Account</a></li>
+<li class="mt-4"><a href="https://shop.moorlandtack.example/sales/guest/form/" class="text-base leading-6">Orders and Returns</a></li>
+<li class="mt-4"><a href="https://shop.moorlandtack.example/contact/" class="text-base leading-6">Contact</a></li></ul></nav>
+<nav aria-label="Legal Menu"><h2 class="text-md leading-5 font-semibold tracking-wider uppercase">Legal</h2><ul class="mt-4"><li class="mt-4"><a href="https://shop.moorlandtack.example/privacy-policy-cookie-restriction-mode" class="text-base leading-6">Privacy</a></li></ul></nav>
+<div x-data="initStoreSwitcher" class="w-full"><div id="store-switcher-title" class="text-md leading-5 font-semibold tracking-wider uppercase mb-4">Select Store</div></div>
+<form class="form subscribe" action="https://shop.moorlandtack.example/newsletter/subscriber/new/" method="post"><h2 class="text-md">Newsletter</h2><label for="newsletter-subscribe" class="sr-only">Email Address</label><input name="email" type="email" id="newsletter-subscribe" placeholder="Enter your email address"/><button class="btn btn-primary">Subscribe</button></form>
+<div class="pt-6 pb-1 mt-8 border-t border-gray-300"><div class="copyright">© 2026 Moorland Tack Room</div></div>
+</div></div></div></footer>
+</div>
+<script>function initHeader () { return { searchOpen: false, cart: {} } }</script>
+</body></html>

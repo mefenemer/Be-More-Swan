@@ -1,0 +1,7 @@
+/* SYNTHETIC: a few rules in the shape of a Luma child theme's compiled styles-m.css */
+body{color:#333333;font-family:'Open Sans','Helvetica Neue',Helvetica,Arial,sans-serif;font-size:1.4rem}
+h1,h2,h3{font-family:'Lora',Georgia,serif;font-weight:400;color:#2b3a2f}
+a,.alink{color:#7a4b2a;text-decoration:none}
+.action.primary,.pagebuilder-button-primary{background:#7a4b2a;border:1px solid #7a4b2a;color:#ffffff;border-radius:3px}
+.page-header{background-color:#f4efe6}
+.page-footer{background:#2b3a2f;color:#f4efe6}

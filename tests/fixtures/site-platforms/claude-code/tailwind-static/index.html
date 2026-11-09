@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          tide: { 50: "#f2f7f6", 600: "#1f6f68", 700: "#185a54" },
+          sand: { 50: "#fbf8f2", 200: "#efe4cf" }
+        },
+        fontFamily: { display: ["Fraunces", "serif"], sans: ["Inter", "sans-serif"] }
+      }
+    }
+  }
+</script>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+<title>Harbour Lane Mediation | Family and workplace mediation</title>
+<meta name="description" content="Calm, independent mediation for families and workplaces across the fictional county of Westshire.">
+</head>
+<body class="bg-sand-50 text-slate-800 font-sans">
+<header class="bg-sand-50 border-b border-sand-200">
+  <div class="max-w-6xl mx-auto flex items-center justify-between px-4 py-3">
+    <a href="/" class="flex items-center gap-2"><img src="/images/logo.png" alt="Harbour Lane Mediation logo" class="h-10 w-auto" width="160" height="40"></a>
+    <nav class="hidden md:flex items-center gap-6 text-sm">
+      <a href="/" class="hover:text-tide-700">Home</a>
+      <div class="nav-dropdown relative group">
+        <button class="nav-dropdown__head flex items-center gap-1" aria-expanded="false">About Us</button>
+        <div class="nav-dropdown__panel absolute hidden group-hover:block bg-white shadow-lg rounded-lg p-2">
+          <a href="/about.html" class="block px-3 py-2">Our Story</a>
+          <a href="/about.html#team" class="block px-3 py-2">The Team</a>
+        </div>
+      </div>
+      <div class="relative" x-data="{open:false}">
+        <button class="flex items-center gap-1" @click="open=!open">Services</button>
+        <div class="absolute bg-white shadow-lg rounded-lg p-2" x-show="open">
+          <a href="/services/mediation.html" class="block px-3 py-2">Family Mediation</a>
+          <a href="/services/workplace.html" class="block px-3 py-2">Workplace Mediation</a>
+        </div>
+      </div>
+      <a href="/blog.html" class="hover:text-tide-700">Blogs</a>
+      <a href="/contact.html" class="rounded-full bg-tide-600 text-white px-4 py-2">Get in touch</a>
+    </nav>
+    <button id="menu-toggle" class="md:hidden" aria-label="Open menu">☰</button>
+  </div>
+  <div id="mobile-menu" class="hidden md:hidden px-4 pb-4">
+    <a href="/" class="block py-2">Home</a>
+    <a href="/about.html" class="block py-2">Our Story</a>
+    <a href="/services/mediation.html" class="block py-2">Family Mediation</a>
+    <a href="/contact.html" class="block py-2">Get in touch</a>
+  </div>
+</header>
+<main>
+  <section class="relative bg-[url('/images/hero-harbour.jpg')] bg-cover bg-center" data-cms-section="hero">
+    <div class="max-w-6xl mx-auto px-4 py-24">
+      <h1 class="font-display text-4xl md:text-5xl text-tide-700" data-cms-field="hero.title">Talk it through, with someone in the middle</h1>
+      <p class="mt-4 text-lg max-w-xl" data-cms-field="hero.subtitle">We help separating parents, neighbours and colleagues find an agreement they can both live with, without going to court.</p>
+      <div class="mt-8 flex gap-3">
+        <a href="/contact.html" class="inline-block rounded-full bg-tide-600 hover:bg-tide-700 text-white px-6 py-3" data-cms-field="hero.cta">Book a free first call</a>
+        <a href="/services/mediation.html" class="inline-block rounded-full border border-tide-600 text-tide-700 px-6 py-3">How mediation works</a>
+      </div>
+    </div>
+  </section>
+  <section class="max-w-6xl mx-auto px-4 py-16" data-cms-section="services">
+    <h2 class="font-display text-3xl text-tide-700" data-cms-field="services.title">What we help with</h2>
+    <div class="mt-8 grid md:grid-cols-3 gap-6">
+      <div class="rounded-2xl bg-white shadow p-6">
+        <img src="/images/family.jpg" alt="Two parents talking at a kitchen table" class="rounded-xl" width="600" height="400">
+        <h3 class="mt-4 font-semibold text-xl" data-cms-field="services.items.0.title">Family mediation</h3>
+        <p class="mt-2" data-cms-field="services.items.0.body">Arrangements for children, money and the family home, agreed together.</p>
+        <a href="/services/mediation.html" class="mt-4 inline-block text-tide-700 font-semibold">Read more →</a>
+      </div>
+      <div class="rounded-2xl bg-white shadow p-6">
+        <img src="/images/workplace.jpg" alt="Colleagues at a round table" class="rounded-xl" width="600" height="400">
+        <h3 class="mt-4 font-semibold text-xl" data-cms-field="services.items.1.title">Workplace mediation</h3>
+        <p class="mt-2" data-cms-field="services.items.1.body">When a team has stopped talking, we help it start again before it reaches a grievance.</p>
+        <a href="/services/workplace.html" class="mt-4 inline-block text-tide-700 font-semibold">Read more →</a>
+      </div>
+      <div class="rounded-2xl bg-white shadow p-6">
+        <div class="h-40 rounded-xl bg-cover" style="background-image:url('/images/neighbours.jpg')"></div>
+        <h3 class="mt-4 font-semibold text-xl" data-cms-field="services.items.2.title">Neighbour disputes</h3>
+        <p class="mt-2" data-cms-field="services.items.2.body">Boundaries, noise and parking, settled over a cup of tea rather than a solicitor's letter.</p>
+      </div>
+    </div>
+  </section>
+  <section class="bg-white" data-cms-section="testimonial">
+    <blockquote class="max-w-3xl mx-auto px-4 py-16 text-2xl font-display text-center" data-cms-field="testimonial.quote">
+      “For the first time in a year we left a room still speaking to each other.”
+    </blockquote>
+  </section>
+</main>
+<footer class="bg-tide-700 text-white mt-16">
+  <div class="max-w-6xl mx-auto px-4 py-10 grid md:grid-cols-3 gap-6 text-sm">
+    <p data-cms-field="footer.blurb">Calm, practical help when conversations get hard.</p>
+    <p><a href="mailto:hello@harbourlane.example">hello@harbourlane.example</a><br><a href="tel:01632960123">01632 960123</a></p>
+    <p><a href="https://www.facebook.com/harbourlanemediation.example">Facebook</a> · <a href="https://www.linkedin.com/company/harbourlane-example">LinkedIn</a></p>
+  </div>
+  <p class="text-center text-xs pb-6">© 2026 Harbour Lane Mediation. All rights reserved.</p>
+</footer>
+<script>
+  document.getElementById("menu-toggle").addEventListener("click", function () {
+    document.getElementById("mobile-menu").classList.toggle("hidden");
+  });
+</script>
+</body>
+</html>

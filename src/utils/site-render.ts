@@ -23,7 +23,9 @@ import type { SessionView } from './class-sessions';
 import { LISTING_PATH, listingLd, listingsFor, type SiteRenderListing, type SiteRenderListings } from './site-listings';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
 import type { WeeklyHours } from './booking-availability';
-import { BLOG_MENU_ID, BLOG_PATH, blogOn, buttonInk, menuOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
+import { INLINE_LINK, SUBHEADING } from './site-rich-text';
+import { contrastRatio, readableInkOn } from './brand-kit';
+import { BLOG_MENU_ID, BLOG_PATH, blogOn, buttonInk, cleanHref, menuOf, socialSiteOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
 
 /** What a sign-up section needs to draw one Form Builder form (form-definition.ts publicDefinition). */
 export interface SiteSignupForm {
@@ -204,6 +206,24 @@ export function themeCss(theme: SiteTheme): string {
     const pair = FONT_PAIRS[theme.font] || FONT_PAIRS.sans;
     const faces = pair.faces.map((f) => `@font-face{font-family:"${FACE_NAMES[f].family}";src:url(${SITE_FONTS_PATH}/${f}.woff2) format("woff2");font-weight:${FACE_NAMES[f].weights};font-style:normal;font-display:swap}`).join('');
     const tint = theme.accentColor ? mixHex(theme.backgroundColor, theme.accentColor, 0.14) : null;
+    // The second colour paints the call-to-action button only where it can be told apart from the band.
+    const second = theme.secondaryColor && contrastRatio(theme.secondaryColor, theme.primaryColor) >= 1.6 ? theme.secondaryColor : null;
+    const secondCss = second ? `.cta .btn{background:${second};color:${readableInkOn(second)}}` : '';
+    // The 2026-11-08 design settings — each only when set, so older sites draw exactly as before.
+    const extra = [
+        // A soft wash from the main colour into the second (or the tint), always light enough for the text.
+        `.grad{background:linear-gradient(135deg,${mixHex(theme.backgroundColor, theme.primaryColor, 0.16)},${mixHex(theme.backgroundColor, theme.secondaryColor || theme.accentColor || theme.primaryColor, 0.22)})}`,
+        `.card>.ci{display:block;width:calc(100% + 2*var(--cp));max-width:none;margin:calc(-1*var(--cp)) calc(-1*var(--cp)) 16px;aspect-ratio:3/2;object-fit:cover;border-radius:var(--r) var(--r) 0 0}`,
+        // Outlined on the page's own background only: on a coloured band (CTA, brand band, banner or
+        // cover hero) the outline would be the band's colour, so the solid button stays there.
+        theme.buttonStyle === 'outline' ? ':where(section:not(.band):not(.cta):not(.banner):not(.cover)) .btn:not(.s){background:transparent;color:var(--p);border:2px solid var(--p)}' : '',
+        theme.buttonStyle === 'pill' ? '.btn{border-radius:999px}' : '',
+        theme.cardStyle === 'shadow' ? '.card{border-color:transparent;box-shadow:0 1px 2px rgba(0,0,0,.06),0 10px 28px rgba(0,0,0,.09)}' : '',
+        theme.cardStyle === 'flat' ? '.card{border:0;background:transparent;--cp:0px}.card>.ci{border-radius:var(--r)}' : '',
+        theme.headingColor ? `h1,h2,h3{color:${theme.headingColor}}.band h1,.band h2,.band h3,.hero.banner h1,.hero.cover h1,.cta h2{color:inherit}` : '',
+        theme.headerColor ? `.hd{background:${theme.headerColor};color:${readableInkOn(theme.headerColor)};border-bottom-color:transparent}.hd .brand,.hd .nav>li>a,.hd .nav a[aria-current=page]{color:${readableInkOn(theme.headerColor)}}.hd .nav .sub a{color:var(--t)}@media(max-width:720px){.hd .nav .sub a{color:${readableInkOn(theme.headerColor)}}}` : '',
+        theme.footerColor ? `.ft{background:${theme.footerColor};color:${readableInkOn(theme.footerColor)};opacity:1;border-top-color:transparent}` : '',
+    ].join('');
     return `${faces}:root{--p:${theme.primaryColor};--t:${theme.textColor};--b:${theme.backgroundColor};--ink:${ink};--r:${RADIUS[theme.radius]};--f:${pair.body};--hf:${pair.heading};--hw:${pair.weight};--sp:${SPACING[theme.spacing ?? 'regular']}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}body{margin:0;font-family:var(--f);color:var(--t);background:var(--b);line-height:1.6;font-size:17px}
 img{max-width:100%;height:auto;display:block}a{color:var(--p)}h1,h2,h3{line-height:1.2;margin:0 0 .5em;font-family:var(--hf);font-weight:var(--hw)${pair.upper ? ';text-transform:uppercase' : ''}${pair.tracking ? `;letter-spacing:${pair.tracking}` : ''}}.brand{font-family:var(--hf)}h1{font-size:clamp(2rem,5vw,3.2rem)}h2{font-size:clamp(1.5rem,3.5vw,2.2rem)}h3{font-size:1.15rem}
@@ -211,6 +231,8 @@ p{margin:0 0 1em}.w{max-width:1080px;margin:0 auto;padding:0 20px}.n{max-width:7
 .hd{border-bottom:1px solid rgba(0,0,0,.08)}.hd .w{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-top:14px;padding-bottom:14px}
 .brand{font-weight:800;font-size:1.15rem;text-decoration:none;color:var(--t)}.brand img{max-height:40px;width:auto}
 .nav{display:flex;flex-wrap:wrap;gap:4px 18px;margin:0;padding:0;list-style:none}.nav a{text-decoration:none;color:var(--t);font-weight:600;font-size:.95rem}.nav a[aria-current=page]{color:var(--p)}
+.hd{position:relative;z-index:30}.nav li{position:relative}.nav .sub{list-style:none;margin:0;padding:6px 0;display:none;position:absolute;left:-14px;top:100%;width:max-content;min-width:200px;max-width:320px;background:var(--b);border:1px solid rgba(0,0,0,.1);border-radius:var(--r);box-shadow:0 10px 28px rgba(0,0,0,.1)}.nav .sub a{display:block;padding:7px 14px;font-weight:500}.nav .has-sub>a::after{content:"▾";font-size:.7em;margin-left:5px}.nav .has-sub:hover>.sub,.nav .has-sub:focus-within>.sub{display:block}
+@media(max-width:720px){.nav .has-sub{flex-basis:100%}.nav .sub{display:block;position:static;min-width:0;border:0;box-shadow:none;background:none;padding:2px 0 4px 12px}.nav .sub a{padding:2px 0;font-size:.9rem}.nav .has-sub>a::after{content:none}}
 section{padding:var(--sp) 0}.alt{background:${tint ?? 'rgba(0,0,0,.035)'}}
 .hd.ctr .w{flex-direction:column;justify-content:center;gap:10px;padding-top:22px}.hd.ctr .brand{font-size:1.5rem}.hd.ctr .nav{justify-content:center}
 .btn{display:inline-block;padding:12px 22px;border-radius:var(--r);background:var(--p);color:var(--ink);font-weight:700;text-decoration:none;margin:4px 8px 4px 0}.btn.s{background:transparent;color:var(--p);border:2px solid var(--p)}
@@ -224,9 +246,9 @@ section{padding:var(--sp) 0}.alt{background:${tint ?? 'rgba(0,0,0,.035)'}}
 .hero.cover .w{position:relative;z-index:1;width:100%}.hero.cover h1{font-size:clamp(2.4rem,6.2vw,4.6rem);color:#fff}.hero.cover .eb{color:#fff;opacity:.9}.hero.cover .sub{opacity:.95}
 .hero.cover a.btn.s{color:#fff;border-color:#fff}.hero.cover video.bg{background:transparent}
 .grid{display:grid;gap:24px;margin-top:28px}@media(min-width:700px){.grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}}
-.card{border:1px solid rgba(0,0,0,.08);border-radius:var(--r);padding:22px;background:var(--b)}.num{display:inline-flex;width:34px;height:34px;border-radius:50%;background:var(--p);color:var(--ink);align-items:center;justify-content:center;font-weight:800;margin-bottom:10px}
+.card{--cp:22px;border:1px solid rgba(0,0,0,.08);border-radius:var(--r);padding:var(--cp);background:var(--b);overflow:hidden}.card>.more{display:inline-block;margin-top:6px;font-weight:700}.num{display:inline-flex;width:34px;height:34px;border-radius:50%;background:var(--p);color:var(--ink);align-items:center;justify-content:center;font-weight:800;margin-bottom:10px}
 .intro{max-width:680px;opacity:.85}details{border:1px solid rgba(0,0,0,.1);border-radius:var(--r);padding:14px 18px;margin:10px 0;background:var(--b)}summary{cursor:pointer;font-weight:700}details p{margin:.6em 0 0}
-.cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}
+.cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}${secondCss}${extra}
 .ft{border-top:1px solid rgba(0,0,0,.08);padding:28px 0;font-size:.85rem;opacity:.85}.ft .w{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}.ft a{color:inherit}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
 .stars{color:#f59e0b;letter-spacing:1px}.stars .off{color:rgba(0,0,0,.15)}.rv{margin:0}.rv blockquote{margin:8px 0}.rv figcaption{font-size:.95rem}.rsum{margin:8px 0 0}
@@ -253,7 +275,33 @@ video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r)
 .fm button{border:0;cursor:pointer;font:inherit;justify-self:start}.fm button[disabled]{opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}`;
 }
 
-const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+/**
+ * Words in, paragraphs out — escaped, with the two marks site-rich-text.ts allows: [words](address)
+ * links, through the same gate as buttons (an address that isn't safe, or a page that doesn't exist,
+ * draws the words alone), and "### " subheading lines.
+ */
+const inline = (text: string) => {
+    let out = '';
+    let last = 0;
+    for (const m of text.matchAll(INLINE_LINK)) {
+        out += esc(text.slice(last, m.index)).replace(/\n/g, '<br>');
+        const to = cleanHref(m[2]);
+        const ok = to && (!to.startsWith('/') || pagePaths.has(to.split(/[?#]/)[0]));
+        out += ok ? `<a href="${esc(href(to!))}">${esc(m[1])}</a>` : esc(m[1]);
+        last = (m.index ?? 0) + m[0].length;
+    }
+    return out + esc(text.slice(last)).replace(/\n/g, '<br>');
+};
+const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => {
+    const sub = p.match(SUBHEADING);
+    return sub ? `<h3>${esc(sub[1])}</h3>` : `<p>${inline(p)}</p>`;
+}).join('');
+/** Set per render call — the site's own page addresses, so an inline link to a missing page draws as words. */
+let pagePaths = new Set<string>(['/']);
+const setPagePaths = (def: SiteDefinition) => {
+    pagePaths = new Set(def.pages.map((p) => (p.slug ? `/${p.slug}` : '/')));
+    if (blogOn(def)) pagePaths.add(BLOG_PATH);
+};
 
 /** Set per render call (renderSitePage) — internal links go through the context's pagePath. */
 let mapPath: (path: string) => string = (p) => p;
@@ -355,7 +403,7 @@ function listingCardHtml(l: SiteRenderListing, tag: 'h2' | 'h3', layout: 'cards'
 
 /** One section. `h1` is true for the single section that carries the page's main heading. */
 /** The background a section is drawn on: none, the soft tint, or the brand colour (look.background). */
-type SectionBg = '' | 'alt' | 'band';
+type SectionBg = '' | 'alt' | 'band' | 'grad';
 
 function sectionHtml(s: Section, h1: boolean, bg: SectionBg): string {
     const H = h1 ? 'h1' : 'h2';
@@ -377,8 +425,12 @@ function sectionHtml(s: Section, h1: boolean, bg: SectionBg): string {
         case 'features':
         case 'steps': {
             const p = s.props;
-            const cards = p.items.map((it, i) => `<div class="card">${s.type === 'steps' ? `<span class="num">${i + 1}</span>` : ''}<h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}</div>`).join('');
-            const list = s.type === 'steps' ? `<ol class="grid" style="list-style:none;padding:0">${p.items.map((it, i) => `<li class="card"><span class="num">${i + 1}</span><h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}</li>`).join('')}</ol>` : `<div class="grid">${cards}</div>`;
+            // A card's own link ("Read more", "Course details") sits under its words.
+            const more = (it: typeof p.items[number]) => (it.link ? `<a class="more" href="${esc(href(it.link.href))}">${esc(it.link.label)}</a>` : '');
+            // A card's own picture, across its top (2026-11-08).
+            const pic = (it: typeof p.items[number]) => { const src = imageSrc(it.image); return it.image && src ? mediaHtml({ alt: it.image.alt }, src, 'lazy', 'ci') : ''; };
+            const cards = p.items.map((it, i) => `<div class="card">${pic(it)}${s.type === 'steps' ? `<span class="num">${i + 1}</span>` : ''}<h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}${more(it)}</div>`).join('');
+            const list = s.type === 'steps' ? `<ol class="grid" style="list-style:none;padding:0">${p.items.map((it, i) => `<li class="card">${pic(it)}<span class="num">${i + 1}</span><h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}${more(it)}</li>`).join('')}</ol>` : `<div class="grid">${cards}</div>`;
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${list}</div></section>`;
         }
         case 'text': {
@@ -631,6 +683,7 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
             ...(logoSrc(def.theme) ? { logo: logoSrc(def.theme) } : {}),
             ...(s.email ? { email: s.email } : {}),
             ...(s.phone ? { telephone: s.phone } : {}),
+            ...(s.socialLinks?.length ? { sameAs: s.socialLinks } : {}),
             ...(s.locality || business.info?.visitAddress ? { address: { '@type': 'PostalAddress',
                 ...(business.info?.visitAddress ? { streetAddress: business.info.visitAddress.split('\n').join(', ') } : {}),
                 ...(s.locality ? { addressLocality: s.locality } : {}) } } : {}),
@@ -703,13 +756,13 @@ ${ld.map((x) => `<script type="application/ld+json">${jsonLd(x)}</script>`).join
 ${ctx.preview ? '<div class="pv">Preview — this version is not live yet.</div>' : ''}
 <header class="hd${def.theme.header === 'centered' ? ' ctr' : ''}"><div class="w">
 <a class="brand" href="${esc(href('/'))}">${logoSrc(def.theme) ? `<img src="${esc(logoSrc(def.theme))}" alt="${esc(s.siteName)}">` : esc(s.siteName)}</a>
-${menu.length > (def.structure === 'one_page' ? 0 : 1) ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li><a href="${esc(m.sectionId && page && page.slug !== '' ? `${href('/')}${m.path}` : href(m.path))}"${current && m.pageId === current && !m.sectionId ? ' aria-current="page"' : ''}>${esc(m.label)}</a></li>`).join('')}</ul></nav>` : ''}
+${menu.length > (def.structure === 'one_page' ? 0 : 1) ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li${m.children ? ' class="has-sub"' : ''}><a href="${esc(m.sectionId && page && page.slug !== '' ? `${href('/')}${m.path}` : href(m.path))}"${current && m.pageId === current && !m.sectionId ? ' aria-current="page"' : ''}>${esc(m.label)}</a>${m.children ? `<ul class="sub">${m.children.map((c) => `<li><a href="${esc(href(c.path))}"${current && c.pageId === current ? ' aria-current="page"' : ''}>${esc(c.label)}</a></li>`).join('')}</ul>` : ''}</li>`).join('')}</ul></nav>` : ''}
 </div></header>
 <main>
 ${body}
 </main>
 <footer class="ft"><div class="w">
-<div>${def.footer.text ? `${paragraphs(def.footer.text)}` : ''}<p>© ${year} ${esc(s.siteName)}${s.email ? ` · <a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : ''}${s.phone ? ` · <a href="tel:${esc(s.phone.replace(/[^0-9+]/g, ''))}">${esc(s.phone)}</a>` : ''}</p></div>
+<div>${def.footer.text ? `${paragraphs(def.footer.text)}` : ''}${s.socialLinks?.length ? `<p class="soc">${s.socialLinks.map((u) => `<a href="${esc(u)}" rel="noopener me">${esc(socialSiteOf(u) ?? 'Profile')}</a>`).join(' · ')}</p>` : ''}<p>© ${year} ${esc(s.siteName)}${s.email ? ` · <a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : ''}${s.phone ? ` · <a href="tel:${esc(s.phone.replace(/[^0-9+]/g, ''))}">${esc(s.phone)}</a>` : ''}</p></div>
 <div><p>${ctx.creditUrl ? `<a href="${esc(ctx.creditUrl)}">Made with Be More Swan</a> · ` : ''}<a href="${esc(ctx.reportUrl)}" rel="nofollow">Report this site</a></p></div>
 </div></footer>
 </body>
@@ -719,6 +772,7 @@ ${body}
 /** One page by path ('/', '/services'). An unknown path is a real 404 page in the site's own look. */
 export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderContext): RenderedPage {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     const page = findPage(def, path);
     reviewsData = ctx.reviews ?? null;
@@ -740,7 +794,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
         // plain, the soft tint, or a band of their brand colour (look.background).
         const look = s.look;
         const auto: SectionBg = shade && s.type !== 'hero' && s.type !== 'cta' ? 'alt' : '';
-        const bg: SectionBg = !look || look.background === 'auto' ? auto : look.background === 'soft' ? 'alt' : look.background === 'brand' ? 'band' : '';
+        const bg: SectionBg = !look || look.background === 'auto' ? auto : look.background === 'soft' ? 'alt' : look.background === 'brand' ? 'band' : look.background === 'gradient' ? 'grad' : '';
         if (s.type !== 'hero' && s.type !== 'cta') shade = !shade;
         let html = sectionHtml(s, i === h1At, bg);
         // Columns for grid sections (look.columns) — a class on the section's one grid.
@@ -753,6 +807,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
 /** A plain page in the site's own look — what a visitor sees after sending a form, or when it fails. */
 export function renderSiteNotice(def: SiteDefinition, ctx: RenderContext, title: string, message: string, back: { label: string; path: string }): string {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     const body = `<section><div class="w n"><h1>${esc(title)}</h1>${paragraphs(message)}<p><a class="btn" href="${esc(href(back.path))}">${esc(back.label)}</a></p></div></section>`;
     return documentHtml(def, null, { ...ctx }, body).replace('<title>Page not found |', `<title>${esc(title)} |`);
@@ -761,12 +816,14 @@ export function renderSiteNotice(def: SiteDefinition, ctx: RenderContext, title:
 /** A page of the site's own, with any body — the booking steps (booking-render.ts). Never indexed. */
 export function renderSiteShell(def: SiteDefinition, ctx: RenderContext, title: string, bodyHtml: string): string {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     return documentHtml(def, null, { ...ctx }, bodyHtml).replace('<title>Page not found |', `<title>${esc(title)} |`);
 }
 
 function startRender(def: SiteDefinition, ctx: RenderContext): void {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
 }

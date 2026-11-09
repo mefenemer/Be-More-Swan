@@ -1,0 +1,21 @@
+{
+  "site": { "name": "Oak & Ember Pottery" },
+  "nav": [
+    { "label": "Home", "href": "/" },
+    { "label": "Classes", "href": "/classes.html" },
+    { "label": "Shop", "href": "/shop.html" },
+    { "label": "Visit us", "href": "/visit.html" }
+  ],
+  "hero": {
+    "title": "Pots made slowly, by hand, in a converted barn",
+    "subtitle": "Every mug, bowl and jug is thrown on the wheel in our studio and fired in a wood kiln that takes three days to cool.",
+    "cta": "Book a taster class",
+    "ctaLink": "/classes.html"
+  },
+  "features": [
+    { "title": "Weekend taster classes", "body": "Two hours at the wheel with a potter beside you. You leave with two pieces to glaze and collect a fortnight later.", "image": "/images/class.jpg", "alt": "A beginner centring clay on a wheel" },
+    { "title": "Commissions", "body": "Dinner sets, wedding gifts and one-off pieces, made to your colours and glazed to match.", "image": "/images/commission.jpg", "alt": "A stack of glazed blue plates" },
+    { "title": "Open studio days", "body": "On the first Saturday of every month the barn doors are open: come and watch, ask questions and pick up seconds.", "image": "/images/studio.jpg", "alt": "Shelves of drying pots in the barn" }
+  ],
+  "footer": { "text": "Oak & Ember Pottery, Barn 2, Fictional Farm, Westshire." }
+}

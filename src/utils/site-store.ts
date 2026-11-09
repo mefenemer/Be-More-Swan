@@ -478,6 +478,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         `Can they press Publish now: ${(() => { const b = publishBlocker(site, d); return b ? `NO — ${b}` : 'yes'; })()}`,
         await draftMediaLine(db, orgId, assistantId),
         `Pages: ${d.pages.length} (no plan limits pages). Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
+        `Old addresses forwarding to a page (set_redirects): ${d.redirects?.length ? d.redirects.slice(0, 30).map((r) => `${r.from} → ${r.to}`).join('; ') : 'none'}`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
         await currentWebsiteLine(db, orgId, assistantId, site.slug),
         d.settings.features
@@ -486,7 +487,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         `Theme: main colour ${d.theme.primaryColor}, text ${d.theme.textColor}, background ${d.theme.backgroundColor}, lettering ${d.theme.font}, corners ${d.theme.radius}${d.theme.logoUrl ? ', has a logo' : ', no logo'}.`,
     ];
     for (const p of d.pages) {
-        lines.push(`- Page "${p.title}" (pageId ${p.id}, address ${p.slug ? `/${p.slug}` : '/'}${p.hideFromMenu ? ', HIDDEN from the menu' : ''}${p.seo.title ? `, search title "${clip(p.seo.title, 70)}"` : ', no search title'}):`);
+        lines.push(`- Page "${p.title}" (pageId ${p.id}, address ${p.slug ? `/${p.slug}` : '/'}${p.hideFromMenu ? ', HIDDEN from the menu' : ''}${p.menuParent ? `, in the menu UNDER "${clip(d.pages.find((x) => x.id === p.menuParent)?.title ?? p.menuParent, 40)}"` : ''}${p.seo.title ? `, search title "${clip(p.seo.title, 70)}"` : ', no search title'}):`);
         if (!p.sections.length) lines.push('    (no sections)');
         for (const s of p.sections) {
             const pr = s.props as unknown as Record<string, unknown>;

@@ -44,10 +44,10 @@
       { k: 'image', kind: 'image', label: 'Picture or video', video: true },
     ],
     features: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
-      { k: 'items', kind: 'items', label: 'Features', fields: [['title', 'text', 'Title'], ['body', 'textarea', 'Text']] }],
+      { k: 'items', kind: 'items', label: 'Features', fields: [['title', 'text', 'Title'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional) — e.g. Read more'], ['image', 'image', 'Picture (optional)']] }],
     steps: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
-      { k: 'items', kind: 'items', label: 'Steps', fields: [['title', 'text', 'Step'], ['body', 'textarea', 'Text']] }],
-    text: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'body', kind: 'textarea', label: 'Text (a blank line starts a new paragraph)', rows: 8, required: true },
+      { k: 'items', kind: 'items', label: 'Steps', fields: [['title', 'text', 'Step'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional)'], ['image', 'image', 'Picture (optional)']] }],
+    text: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'body', kind: 'textarea', label: 'Text (a blank line starts a new paragraph; a line starting ### is a subheading; [words](/page) makes a link)', rows: 8, required: true },
       { k: 'image', kind: 'image', label: 'Picture or video beside the text (optional)', video: true },
       { k: 'imageSide', kind: 'select', label: 'Picture on the', options: [['right', 'Right'], ['left', 'Left']] }],
     faq: [{ k: 'heading', kind: 'text', label: 'Heading' },
@@ -615,11 +615,19 @@
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         <div data-items="${esc(f.k)}" class="space-y-2">${list.map((it, i) => `
           <div class="border border-gray-200 rounded-lg p-3" data-item>
-            ${f.fields.map(([k, kind, label]) => kind === 'textarea'
+            ${f.fields.map(([k, kind, label]) => kind === 'image'
+              ? `<div data-item-image>${pictureHtml(it[k], { pick: `data-site-item-pick="${esc(f.k)}:${i}"`, clear: `data-site-item-pick-clear="${esc(f.k)}:${i}"` }, false)}
+                  <input type="hidden" data-item-img="asset" value="${esc((it[k] && it[k].assetId) || '')}"><input type="hidden" data-item-img="url" value="${esc((it[k] && !it[k].assetId && it[k].url) || '')}">
+                  ${it[k] && (it[k].assetId || it[k].url) ? `<input data-item-img="alt" aria-label="${esc(f.label)} ${i + 1}: what the picture shows" class="${inputCls} mt-1" placeholder="What the picture shows (needed)" value="${esc(it[k].alt || '')}">` : ''}</div>`
+              : kind === 'link'
+              ? `<div class="grid gap-2 md:grid-cols-2 mt-1"><input data-item-link="label" aria-label="${esc(f.label)} ${i + 1}: link text" class="${inputCls}" placeholder="${esc(label)}" value="${esc((it[k] && it[k].label) || '')}">
+                  <input data-item-link="href" aria-label="${esc(f.label)} ${i + 1}: where the link goes" class="${inputCls}" list="site-pages-list" placeholder="/page or https://…" value="${esc((it[k] && it[k].href) || '')}"></div>`
+              : kind === 'textarea'
               ? `<textarea data-item-field="${esc(k)}" aria-label="${esc(f.label)} ${i + 1}: ${esc(label)}" rows="2" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))}>${esc(it[k] || '')}</textarea>${limitNote(itemMax(k))}`
               : `<input data-item-field="${esc(k)}" aria-label="${esc(f.label)} ${i + 1}: ${esc(label)}" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))} value="${esc(it[k] || '')}">${limitNote(itemMax(k))}`).join('')}
             <div class="mt-1">${btn(`data-item-remove="${i}"`, 'Remove')}</div>
           </div>`).join('')}</div>
+        ${f.fields.some((x) => x[1] === 'link') ? `<datalist id="site-pages-list">${def().pages.map((pg) => `<option value="${esc(pathOf(pg))}">${esc(pg.title)}</option>`).join('')}</datalist>` : ''}
         <div class="mt-2">${btn(`data-item-add="${esc(f.k)}"`, '+ Add another')}</div>`;
     }
     return '';
@@ -667,6 +675,13 @@
         props[f.k] = [...form.querySelectorAll(`[data-items="${f.k}"] [data-item]`)].map((row) => {
           const o = {};
           row.querySelectorAll('[data-item-field]').forEach((el) => { o[el.dataset.itemField] = el.value; });
+          const ia = row.querySelector('[data-item-img="asset"]');
+          if (ia) {
+            const assetId = Number(ia.value) || null, url = row.querySelector('[data-item-img="url"]').value, alt = (row.querySelector('[data-item-img="alt"]') || {}).value || '';
+            o.image = assetId ? { assetId, url: '', alt } : url ? { url, alt } : null;
+          }
+          const ll = row.querySelector('[data-item-link="label"]'), lh = row.querySelector('[data-item-link="href"]');
+          if (ll && lh) { const label = ll.value.trim(), href = lh.value.trim(); o.link = label || href ? { label, href } : null; }
           return o;
         });
       }
@@ -681,7 +696,7 @@
     const l = e.look || LOOK_DEFAULT;
     const onePage = def().structure === 'one_page';
     const sel = (name, options, value) => `<select name="${name}" class="${inputCls}">${options.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
-    const bg = e.type === 'hero' ? '' : `<div><label class="block text-xs font-bold text-gray-700">Background</label>${sel('look-background', [['auto', 'Automatic'], ['plain', 'Plain'], ['soft', 'Soft tint'], ['brand', 'Your main colour']], l.background)}</div>`;
+    const bg = e.type === 'hero' ? '' : `<div><label class="block text-xs font-bold text-gray-700">Background</label>${sel('look-background', [['auto', 'Automatic'], ['plain', 'Plain'], ['soft', 'Soft tint'], ['brand', 'Your main colour'], ['gradient', 'Soft gradient of your colours']], l.background)}</div>`;
     const cols = GRID_TYPES.includes(e.type) ? `<div><label class="block text-xs font-bold text-gray-700">Columns on a wide screen</label>${sel('look-columns', [['auto', 'Automatic'], ['2', 'Two'], ['3', 'Three']], l.columns)}</div>` : '';
     const menu = onePage || l.menuLabel ? `<div><label class="block text-xs font-bold text-gray-700">Menu label${onePage ? '' : ' (one-page sites)'}</label><input name="look-menu" class="${inputCls}" maxlength="30" value="${esc(l.menuLabel || '')}" placeholder="e.g. Prices — leave empty to keep it out of the menu"></div>` : '';
     if (!bg && !cols && !menu) return '';
@@ -838,7 +853,21 @@
           <div><label class="block text-xs font-bold text-gray-700">Search description</label><input data-site-seo-desc class="${inputCls}" value="${esc(p.seo.description || '')}" placeholder="One or two sentences"></div>
         </div>
         ${p.slug ? `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" data-site-page-hidden ${p.hideFromMenu ? 'checked' : ''}> Hide from the menu <span class="font-normal text-gray-500">— still there for anyone with its address, e.g. a page for an ad or an offer</span></label>` : ''}
+        ${menuPlaceHtml(p)}
         <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-page-save', 'Save page details', true)}${p.slug ? btn('data-site-remove-page', 'Remove this page') : ''}</div>`)}`;
+  }
+
+  // Where the page sits in the menu: its own entry, or in another page's drop-down (menuParent,
+  // site-definition.ts). One level only, so a page with pages under it keeps its own entry.
+  function menuPlaceHtml(p) {
+    if (!p.slug || def().structure === 'one_page') return '';
+    const kids = def().pages.filter((x) => x.menuParent === p.id);
+    if (kids.length) return `<p class="text-xs text-gray-600 mt-2">In the menu, these pages drop down from this one: ${kids.map((x) => esc(x.title)).join(', ')}.</p>`;
+    const parents = def().pages.filter((x) => x.slug && x.id !== p.id && !x.menuParent);
+    if (!parents.length) return '';
+    return `<label class="block text-xs font-bold text-gray-700 mt-3">In the menu
+      <select data-site-page-under class="${inputCls} mt-1"><option value="">On its own</option>${parents.map((x) => `<option value="${esc(x.id)}" ${p.menuParent === x.id ? 'selected' : ''}>Under “${esc(x.title)}” (a drop-down)</option>`).join('')}</select></label>
+      <p class="text-xs text-gray-500 mt-1">Put related pages under one entry, e.g. each course under “Our Courses”, so the menu stays short.</p>`;
   }
 
   // ── "Add your own words" (site-words.ts — the owner's wording is used unchanged) ──────────
@@ -1100,6 +1129,12 @@
         <div><label class="block text-xs font-bold text-gray-700">Header</label><select data-theme="header" class="${inputCls}">${[['standard', 'Name on the left, menu on the right'], ['centered', 'Name centred above the menu']].map(([v, l]) => `<option value="${v}" ${(t.header || 'standard') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div><label class="block text-xs font-bold text-gray-700">Tint for alternate sections</label><div class="flex items-center gap-2"><input type="color" data-theme="accentColor" value="${esc(t.accentColor || '#e5e7eb')}" class="h-10 border border-gray-300 rounded-lg" style="width:64px">
           <label class="flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" data-theme-accent-off ${t.accentColor ? '' : 'checked'}> Plain grey</label></div></div>
+        <div><label class="block text-xs font-bold text-gray-700">Second colour (call-to-action buttons)</label><div class="flex items-center gap-2"><input type="color" data-theme="secondaryColor" value="${esc(t.secondaryColor || '#e5e7eb')}" class="h-10 border border-gray-300 rounded-lg" style="width:64px">
+          <label class="flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" data-theme-second-off ${t.secondaryColor ? '' : 'checked'}> None</label></div></div>
+        <div><label class="block text-xs font-bold text-gray-700">Buttons</label><select data-theme="buttonStyle" class="${inputCls}">${[['solid', 'Filled'], ['outline', 'Outlined'], ['pill', 'Filled, fully rounded']].map(([v, l]) => `<option value="${v}" ${(t.buttonStyle || 'solid') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div><label class="block text-xs font-bold text-gray-700">Cards</label><select data-theme="cardStyle" class="${inputCls}">${[['bordered', 'Thin border'], ['shadow', 'Soft shadow'], ['flat', 'Flat, no border']].map(([v, l]) => `<option value="${v}" ${(t.cardStyle || 'bordered') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        ${[['headingColor', 'Heading colour', 'Same as text'], ['headerColor', 'Header colour', 'Same as background'], ['footerColor', 'Footer colour', 'Same as background']].map(([k, label, off]) => `<div><label class="block text-xs font-bold text-gray-700">${label}</label><div class="flex items-center gap-2"><input type="color" data-theme="${k}" value="${esc(t[k] || t.textColor || '#111827')}" class="h-10 border border-gray-300 rounded-lg" style="width:64px">
+          <label class="flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" data-theme-off="${k}" ${t[k] ? '' : 'checked'}> ${off}</label></div></div>`).join('')}
         <div><label class="block text-xs font-bold text-gray-700">Corners</label><select data-theme="radius" class="${inputCls}">${[['none', 'Square'], ['small', 'Slightly rounded'], ['medium', 'Rounded'], ['large', 'Very rounded']].map(([v, l]) => `<option value="${v}" ${t.radius === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="md:col-span-2"><p class="block text-xs font-bold text-gray-700">Logo</p>
           ${pictureHtml(t.logoAssetId ? { assetId: t.logoAssetId, url: '' } : (t.logoUrl ? { url: t.logoUrl } : null), { pick: 'data-site-logo-pick', clear: 'data-site-logo-clear' })}
@@ -1141,6 +1176,8 @@
         <div><label class="block text-xs font-bold text-gray-700">Kind of business</label><select data-setting="businessType" class="${inputCls}">${[['Organization', 'Business'], ['LocalBusiness', 'Local business'], ['ProfessionalService', 'Professional service'], ['Store', 'Shop']].map(([v, l]) => `<option value="${v}" ${s.businessType === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       </div>
       <label class="block text-xs font-bold text-gray-700 mt-3">Site description (search results)</label><textarea data-setting="description" rows="2" class="${inputCls}">${esc(s.description || '')}</textarea>
+      <label class="block text-xs font-bold text-gray-700 mt-3">Your social profiles (one address per line — Instagram, Facebook, LinkedIn, X, TikTok, YouTube…)</label><textarea data-site-social rows="2" class="${inputCls}" placeholder="https://www.instagram.com/yourname">${esc((s.socialLinks || []).join('\n'))}</textarea>
+      ${(def().redirects || []).length ? `<p class="block text-xs font-bold text-gray-700 mt-3">Old addresses that forward here</p><p class="text-xs text-gray-500">From your old site, so links and search results that point at them still arrive.</p><ul class="mt-1 space-y-1">${def().redirects.map((r, i) => `<li class="text-xs text-gray-700 flex items-center gap-2"><span>${esc(r.from)} → ${esc(r.to)}</span>${btn(`data-site-redirect-remove="${i}"`, 'Remove')}</li>`).join('')}</ul>` : ''}
       <label class="block text-xs font-bold text-gray-700 mt-3">Footer text</label><textarea data-site-footer rows="2" class="${inputCls}">${esc(def().footer.text || '')}</textarea>
       <div class="mt-4">${btn('data-site-details-save', 'Save details', true)}</div>`);
   }
@@ -1956,6 +1993,43 @@
     return `<ul class="mt-2 space-y-1">${report.pages.map((p) => `<li class="text-xs text-gray-700">${esc(p.title)} — ${p.read ? `${esc(p.words)} words read` : `<span class="text-amber-800">${esc(p.note || 'not read')}</span>`}</li>`).join('')}</ul>`;
   }
 
+  /** Their old site's colours and lettering, as the import read them (site-import-theme.ts). */
+  function importLookLine(look) {
+    if (!look) return '<p class="text-xs text-gray-700 mt-1">Look: we couldn\'t read your old site\'s colours, so your current design is kept — change it in Design.</p>';
+    const sw = (hex, name) => (hex ? `<span class="inline-flex items-center gap-1 mr-2"><span class="inline-block w-3.5 h-3.5 rounded-full border border-gray-300 align-middle" style="background:${esc(hex)}"></span>${esc(name)}</span>` : '');
+    const pairs = { editorial: 'Fraunces & Inter', classic: 'Playfair Display & Lora', elegant: 'Cormorant Garamond & Work Sans', modern: 'Manrope', bold: 'Oswald & Inter', friendly: 'Nunito', tech: 'Space Grotesk & Inter', warm: 'DM Serif Display & Work Sans', serif: 'a classic serif', sans: 'a clean sans-serif' };
+    return `<p class="text-xs text-gray-700 mt-1">Look: your old site's colours and lettering come across — ${sw(look.primaryColor, 'main colour')}${sw(look.backgroundColor, 'background')}${sw(look.textColor, 'words')}${sw(look.secondaryColor, 'second colour')}${sw(look.headerColor, 'header')}${sw(look.footerColor, 'footer')}${look.font ? `lettering ${esc(pairs[look.font] || look.font)}${look.headingFont && !String(pairs[look.font] || '').includes(look.headingFont) ? ` (closest to your ${esc(look.headingFont)})` : ''}` : ''}. Using this draft sets them in Design, where you can change them.</p>`;
+  }
+
+  // Products their old shop showed (report.products): ticked ones become Business Information products
+  // (sites.ts import_products — the chat's site_import_products card sends the same). Prices go there,
+  // never onto the site. Only while the import waits: using or discarding it ends the offer.
+  function importProductsBlock(products) {
+    if (!products || !products.length) return '';
+    return `<details class="mt-2" open data-site-import-products-box><summary class="text-xs font-bold text-gray-800 cursor-pointer">Products we found on your shop (${esc(products.length)}) — add them to Business Information</summary>
+      <p class="text-xs text-gray-500 mt-1">Each ticked one becomes a product in Business Information ▸ Products & Services, with its price and a link to its page on your old shop${state.data.import && state.data.import.pictures === 'copy' ? ', and its picture' : ''}. Prices never go on your website. Add them before you use or discard this import.</p>
+      <ul class="mt-1 space-y-1">${products.slice(0, 60).map((p, i) => `<li class="text-xs text-gray-700"><label class="inline-flex items-start gap-2"><input type="checkbox" checked data-site-import-product="${esc(i)}" class="mt-0.5"> <span>${esc(p.name)}${p.price ? ` <span class="text-gray-500">— ${esc(p.price)}</span>` : ''}</span></label></li>`).join('')}</ul>
+      <div class="mt-2">${btn('data-site-import-products', 'Add ticked products to Business Information')}</div>
+    </details>`;
+  }
+
+  function importBlogCount() {
+    const b = state.data && state.data.import && state.data.import.report && state.data.import.report.blog;
+    return b && b.posts ? b.posts.length : 0;
+  }
+
+  // Posts from a blog on their old site (site-import-blog.ts): drafts for the Blog Assistant on "Use this as my draft".
+  function importBlogList(b) {
+    if (!b || !b.posts || !b.posts.length) return '';
+    const n = b.posts.length;
+    const when = (d) => { if (!d) return ''; const t = new Date(d); return isNaN(t) ? '' : ` · ${t.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`; };
+    const items = b.posts.map((p) => `<li class="text-xs text-gray-700">${esc(p.title)}<span class="text-gray-500">${esc(when(p.date))} · ${esc(p.words)} words${p.picture ? ' · picture' : ''}</span>${p.mentionsPrice ? ' <span class="font-semibold text-amber-800">· mentions a price — check it\'s still right</span>' : ''}</li>`).join('');
+    const failed = (b.failed || []).length ? `<p class="text-xs text-amber-800 mt-1">${esc(b.failed.length)} post${b.failed.length === 1 ? '' : 's'} couldn't be read: ${esc(b.failed.slice(0, 5).map((f) => f.title).join(', '))}${b.failed.length > 5 ? '…' : ''}.</p>` : '';
+    return `<details class="mt-2" open><summary class="text-xs font-bold text-gray-800 cursor-pointer">Posts from your blog (${esc(n)}${b.more ? ', the newest' : ''}) — become drafts in your Blog Assistant</summary>
+      <ul class="mt-1 space-y-1 list-disc pl-5">${items}</ul>${failed}
+      <p class="text-xs text-gray-500 mt-1">"Use this as my draft" adds ${n === 1 ? 'it' : 'them'} to your Blog Assistant as draft${n === 1 ? '' : 's'}, in your words as they were${b.pictures && b.pictures.copied ? `, with ${esc(b.pictures.copied)} picture${b.pictures.copied === 1 ? '' : 's'} copied into your library` : ''}. Nothing is published until you publish each one there; then its old address leads to the new one on your blog.</p></details>`;
+  }
+
   function importReviewCard(imp) {
     const r = imp.report || {};
     const pics = r.pictures || {};
@@ -1967,13 +2041,16 @@
       ${importPagesList(r)}
       <p class="text-xs text-gray-700 mt-2">${pics.choice === 'copy' ? `Pictures: ${esc(pics.copied || 0)} copied into your library${pics.failed ? `, ${esc(pics.failed)} couldn't be copied` : ''}.` : 'Pictures: left out, as you chose — add your own with "Choose picture".'}</p>
       ${pics.undescribed ? `<p class="text-xs font-semibold text-amber-800 mt-1">${esc(pics.undescribed)} picture${pics.undescribed === 1 ? '' : 's'} had no description on your old site, so each is described by the heading near it — check them, for people using screen readers.</p>` : ''}
+      ${importLookLine(r.look)}
       ${contact.email || contact.phone ? `<p class="text-xs text-gray-700 mt-1">Contact details found: ${esc([contact.email, contact.phone].filter(Boolean).join(' · '))}.</p>` : ''}
       ${r.placeholders ? `<p class="text-xs font-semibold text-amber-800 mt-1">${esc(r.placeholders)} part${r.placeholders === 1 ? '' : 's'} in [square brackets] to fill in before you publish.</p>` : ''}
+      ${importProductsBlock(r.products)}
       ${list(`Prices we found (${(r.prices || []).length}) — not copied: add them in Business Information ▸ Products & Services`, r.prices, 'text-amber-800')}
       ${list(`Left out as menus or notices (${(r.leftOut || []).length}) — check nothing important is here`, r.leftOut)}
       ${list(`Didn't fit on its page (${(r.notCarried || []).length})`, r.notCarried, 'text-amber-800')}
       ${list(`Pages in your menu not imported (${(r.notImported || []).length}) — add them yourself with + Page`, r.notImported)}
-      ${r.hadForm ? '<p class="text-xs text-gray-500 mt-2">Your old site had a form. Enquiries from the new contact form come to you on the Enquiries tab; for an email sign-up, add a sign-up section with one of your forms.</p>' : ''}
+      ${importBlogList(r.blog)}
+      ${r.hadForm ? `<p class="text-xs text-gray-500 mt-2">Your old site had a form${(r.formFields || []).length ? ` asking: ${esc(r.formFields.join(', '))}` : ''}. The new contact form asks for a name, email${(r.formFields || []).some((f) => /phone|tel\b|mobile|number/i.test(f)) || !(r.formFields || []).length ? ', phone' : ''} and message, and enquiries come to you on the Enquiries tab. For an email sign-up, add a sign-up section with one of your forms.</p>` : ''}
       <div class="flex flex-wrap gap-2 mt-3">
         ${btn('data-site-import-preview', state.previewImport ? 'Show my current draft' : 'Preview the imported site', !state.previewImport)}
         ${btn('data-site-import-use', 'Use this as my draft', state.previewImport)}
@@ -2612,6 +2689,34 @@
       });
       return;
     }
+    // A card's own picture (features / steps): the same picker, written into that card.
+    const itemPick = t('[data-site-item-pick]');
+    if (itemPick && window.MediaPicker) {
+      const form = itemPick.closest('form');
+      const [k, idx] = itemPick.dataset.siteItemPick.split(':');
+      syncEditing(form);
+      window.MediaPicker.open({
+        title: 'Choose a picture', video: false, topic: topicOf(state.editing.props), assistantName: state.assistantName,
+        onPick: (asset) => {
+          state.thumbs[asset.id] = asset.url;
+          syncEditing(form);
+          const item = (state.editing.props[k] || [])[Number(idx)];
+          if (item) item.image = { assetId: asset.id, url: '', alt: (item.image && item.image.alt) || item.title || altFromName(asset.name) };
+          render();
+        },
+      });
+      return;
+    }
+    const itemClear = t('[data-site-item-pick-clear]');
+    if (itemClear) {
+      const form = itemClear.closest('form');
+      const [k, idx] = itemClear.dataset.siteItemPickClear.split(':');
+      syncEditing(form);
+      const item = (state.editing.props[k] || [])[Number(idx)];
+      if (item) item.image = null;
+      render();
+      return;
+    }
     const clearField = t('[data-site-pick-clear]');
     if (clearField) { const form = clearField.closest('form'); syncEditing(form); state.editing.props[clearField.dataset.sitePickClear] = null; render(); return; }
     if (t('[data-site-products-import]')) {
@@ -2760,7 +2865,7 @@
       const np = def().pages.find((x) => !before.has(x.id));
       if (!np) return;   // refused (e.g. the plan's pages are full) — the note says why
       await apply([
-        { op: 'update_page', pageId: np.id, seo: u.page.seo, hideFromMenu: !!u.page.hideFromMenu },
+        { op: 'update_page', pageId: np.id, seo: u.page.seo, hideFromMenu: !!u.page.hideFromMenu, ...(u.page.menuParent && def().pages.some((x) => x.id === u.page.menuParent) ? { menuParent: u.page.menuParent } : {}) },
         ...u.page.sections.map((x) => ({ op: 'add_section', pageId: np.id, section: { type: x.type, props: x.props, look: x.look || {} } })),
       ], () => {
         state.pageId = np.id; state.previewPath = pathOf(np); state.editing = null;
@@ -2816,6 +2921,8 @@
       if (p.slug) op.slug = host.querySelector('[data-site-page-slug]').value.replace(/^\//, '');
       const hidden = host.querySelector('[data-site-page-hidden]');
       if (hidden) op.hideFromMenu = hidden.checked;
+      const under = host.querySelector('[data-site-page-under]');
+      if (under && (under.value || null) !== (p.menuParent || null)) op.menuParent = under.value || null;
       await apply([op], () => { state.previewPath = pathOf(page()); });
       return;
     }
@@ -2860,6 +2967,8 @@
       // A web address typed for the logo replaces a library logo; left empty, the library logo stays.
       if (theme.logoUrl) theme.logoAssetId = null; else delete theme.logoUrl;
       if (hostOf(e).querySelector('[data-theme-accent-off]')?.checked) theme.accentColor = null;
+      if (hostOf(e).querySelector('[data-theme-second-off]')?.checked) theme.secondaryColor = null;
+      hostOf(e).querySelectorAll('[data-theme-off]').forEach((el) => { if (el.checked) theme[el.dataset.themeOff] = null; });
       await apply([{ op: 'set_theme', theme }]);
       return;
     }
@@ -2868,9 +2977,17 @@
       await apply([{ op: 'set_settings', settings: { blog: { enabled: host.querySelector('[data-site-blog-on]').checked, menuLabel: host.querySelector('[data-site-blog-label]').value.trim() || 'Blog' } } }]);
       return;
     }
+    const rmRedirect = t('[data-site-redirect-remove]');
+    if (rmRedirect) {
+      const keep = (def().redirects || []).filter((_, i) => i !== Number(rmRedirect.dataset.siteRedirectRemove));
+      await apply([{ op: 'set_redirects', redirects: keep }]);
+      return;
+    }
     if (t('[data-site-details-save]')) {
       const settings = {};
       hostOf(e).querySelectorAll('[data-setting]').forEach((el) => { settings[el.dataset.setting] = el.value; });
+      const social = hostOf(e).querySelector('[data-site-social]');
+      if (social) settings.socialLinks = social.value.split(/\s+/).filter(Boolean);
       await apply([{ op: 'set_settings', settings }, { op: 'set_footer', text: hostOf(e).querySelector('[data-site-footer]').value || null }]);
       return;
     }
@@ -2965,7 +3082,7 @@
     }
     if (t('[data-site-import-use]')) {
       const ok = typeof window.confirmModal === 'function'
-        ? await window.confirmModal(`Your current draft is replaced with the ${state.data.import.pages.length} imported page${state.data.import.pages.length === 1 ? '' : 's'}. Your design stays. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing goes live until you publish.'}`, { title: 'Use the imported site as your draft?', confirmLabel: 'Use this as my draft', cancelLabel: 'Not now' })
+        ? await window.confirmModal(`Your current draft is replaced with the ${state.data.import.pages.length} imported page${state.data.import.pages.length === 1 ? '' : 's'}.${importBlogCount() ? ` ${importBlogCount()} post${importBlogCount() === 1 ? '' : 's'} from your old blog go${importBlogCount() === 1 ? 'es' : ''} to your Blog Assistant as draft${importBlogCount() === 1 ? '' : 's'}.` : ''} Your design stays. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing goes live until you publish.'}`, { title: 'Use the imported site as your draft?', confirmLabel: 'Use this as my draft', cancelLabel: 'Not now' })
         : true;
       if (!ok) return;
       try {
@@ -2973,6 +3090,18 @@
         state.previewImport = false; state.previewPath = '/'; state.version++;
         state.pageId = def().pages[0].id;
         state.note = { text: (state.data.warnings || []).join(' ') || 'Your imported site is now your draft.', tone: 'ok' };
+      } catch (err) { say(err.message, 'error'); }
+      rerender();
+      return;
+    }
+    if (t('[data-site-import-products]')) {
+      const all = (state.data.import && state.data.import.report && state.data.import.report.products) || [];
+      const box = t('[data-site-import-products]').closest('[data-site-import-products-box]');
+      const names = [...(box ? box.querySelectorAll('[data-site-import-product]:checked') : [])].map((c) => all[Number(c.dataset.siteImportProduct)]).filter(Boolean).map((p) => p.name);
+      if (!names.length) { say('Tick at least one product to add.', 'error'); rerender(); return; }
+      try {
+        state.data = await post({ action: 'import_products', assistantId: state.assistantId, names });
+        state.note = { text: (state.data.warnings || []).join(' ') || 'Added to Business Information.', tone: 'ok' };
       } catch (err) { say(err.message, 'error'); }
       rerender();
       return;
