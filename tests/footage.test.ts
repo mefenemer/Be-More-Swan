@@ -13,7 +13,8 @@ import {
     footagePlannerBlock, MAX_FRAMES, MAX_SUGGESTIONS, FOOTAGE_REVIEW_TASKS, type FootageVideo,
 } from '../src/lib/footage';
 import { ownWindow, sceneClips, playedDurations, readFootageIds, readBrief, livePieces, sceneOverlays } from '../src/utils/video-producer';
-import { tightenSegment, tightenStoryboard, retakeIndexes, isFiller, capPieces, describeTightening, MAX_PAUSE_S, loudSeconds, restoreLoudGaps } from '../src/lib/footage';
+import { tightenSegment, tightenStoryboard, retakeIndexes, isFiller, capPieces, describeTightening, MAX_PAUSE_S, loudSeconds, restoreLoudGaps, snapSegment } from '../src/lib/footage';
+import { transcriptionPrompt } from '../src/utils/footage-review';
 import { MAX_CLIPS } from '../src/lib/video-edit';
 import { TASK_WEIGHTS } from '../src/config/task-weights';
 
@@ -512,6 +513,44 @@ check('on-screen text over your own take shows for the opening 3 s; elsewhere fo
 
 check('old branded cards are not offered as library pictures (their words are drawn in)', () => {
     assert.ok(read('src/utils/video-producer.ts').includes("notInArray(contentAssets.provider, ['pexels', 'fal', 'brand_card'])"));
+});
+
+check('a cut that falls mid-sentence runs on to the next pause; one in a pause stays', () => {
+    const words = [...W('hello and welcome to the studio', 20, 0.4), ...W('book a tour today', 23, 0.4)];
+    // 0:25 is in the middle of "book a tour today" (23.0–24.6)? no — it is in it at 23.8.
+    const r = snapSegment(0, 23.8, words, 29);
+    assert.ok(r.outS >= 24.55 && r.outS <= 24.9, `ran on to the end of the sentence (${r.outS})`);
+    const pause = snapSegment(0, 22.6, words, 29);
+    assert.strictEqual(pause.outS, 22.6, 'a cut in a pause is left alone');
+    const start = snapSegment(21, 29, words, 29);
+    assert.ok(start.inS <= 19.9, 'a start inside a sentence goes back to its beginning');
+});
+
+check('a still-loud end runs on while the speech lasts (words the transcript missed)', () => {
+    const words = W('one two three', 0, 0.4);
+    const loud = Array.from({ length: 60 }, (_, i) => (i < 40 ? 30 : 1));
+    const r = snapSegment(0, 2, words, 6, loud);
+    assert.ok(r.outS >= 3.8 && r.outS <= 4.2, `ran on to the end of the sound (${r.outS})`);
+});
+
+check('tightenStoryboard snaps own-sound scenes even when kept as filmed', () => {
+    const v: FootageVideo[] = [{ id: 11, name: 'a', durationS: 29, analysis: null, words: [...W('hello and welcome to the studio', 20, 0.4), ...W('book a tour today', 23, 0.4)] }];
+    const sb = { title: 'T', caption: '', scenes: [{ id: 's1', beat: 'hook' as const, voiceover: '', source: 'own_video' as const, assetId: 11, inS: 20, outS: 23.8, targetS: 3.8, tighten: false }] };
+    const out = tightenStoryboard(sb, brief({ voiceover: false, footageAssetIds: [11] }), v).storyboard.scenes[0];
+    assert.ok(out.outS! >= 24.55 && out.cuts === undefined);
+    assert.ok(Math.abs(out.targetS - (out.outS! - out.inS!)) < 0.11);
+});
+
+check('ums are transcribed so they can be cut (English prompt written with hesitations)', () => {
+    assert.ok(/Umm, so, uh/.test(transcriptionPrompt('en', 'Cafe')!));
+    assert.ok(!/Umm/.test(transcriptionPrompt('fr', 'Cafe') ?? ''), 'not in another language');
+    assert.ok(read('src/utils/footage-review.ts').includes('prompt: transcriptionPrompt(ctx.language, ctx.businessName)'));
+});
+
+check('the review screen stops painting its own text over a finished render', () => {
+    const html = read('workspace.html');
+    assert.ok(html.includes("const burnedIn = isVideo && post && post.renderStatus === 'done'"));
+    assert.ok(html.includes('const shown = burnedIn ? [] :'));
 });
 
 check('the clip limit is 40 in the render and in the post editor', () => {

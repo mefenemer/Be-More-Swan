@@ -7818,7 +7818,11 @@ function _rqRenderCanvasOverlays(post, canvasOnly) {
         // against a single frame, and coming back.
         // A hidden box is not painted. It is still in `overlays` and still saved — this is a filter
         // on what is on screen, nothing more.
-        const shown = overlays.filter((ov) => !_pceTextHidden(ov && ov.id));
+        // A finished render of a timeline already has the text burned in. Painting the editable copy
+        // over it doubled every box ("Book online" over "Marmalade Productions", staging 2026-11-09).
+        // Editing the text is still possible from the Text panel; approval renders it again.
+        const burnedIn = isVideo && post && post.renderStatus === 'done' && post.videoEdit && Array.isArray(post.videoEdit.clips) && post.videoEdit.clips.length > 0;
+        const shown = burnedIn ? [] : overlays.filter((ov) => !_pceTextHidden(ov && ov.id));
         const nodes = window.ImageOverlayEditor.render(layer, shown, {
             refEl: media || undefined,
             onGrab: (ov) => {
