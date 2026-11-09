@@ -12,7 +12,7 @@ import {
     enforceShotList, enforceReview, reviewSystemPrompt, frameTimes, ownSpeechOnTimeline, silentWav, quoteIsInTranscript, suggestionLine,
     footagePlannerBlock, MAX_FRAMES, MAX_SUGGESTIONS, FOOTAGE_REVIEW_TASKS, type FootageVideo,
 } from '../src/lib/footage';
-import { ownWindow, sceneClips, playedDurations, readFootageIds, readBrief, livePieces } from '../src/utils/video-producer';
+import { ownWindow, sceneClips, playedDurations, readFootageIds, readBrief, livePieces, sceneOverlays } from '../src/utils/video-producer';
 import { tightenSegment, tightenStoryboard, retakeIndexes, isFiller, capPieces, describeTightening, MAX_PAUSE_S, loudSeconds, restoreLoudGaps } from '../src/lib/footage';
 import { MAX_CLIPS } from '../src/lib/video-edit';
 import { TASK_WEIGHTS } from '../src/config/task-weights';
@@ -498,6 +498,20 @@ check('the finished video is rendered right after it is made, so the review show
     assert.ok(b.indexOf('renderFinishedVideo(db') > b.indexOf("status: 'built'"));
     assert.ok(src.includes('queuePostRender(db, {'));
     assert.ok(read('src/components/assistant-videos.js').includes("(v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'rendering'"), 'both render states say so');
+});
+
+check('on-screen text over your own take shows for the opening 3 s; elsewhere for the whole scene', () => {
+    const scenes: Scene[] = [
+        { id: 's1', beat: 'hook', voiceover: '', source: 'own_video', assetId: 11, inS: 0, outS: 20, targetS: 20, onScreenText: 'Marmalade Productions' },
+        { id: 's2', beat: 'cta', voiceover: '', source: 'stock_video', targetS: 5, onScreenText: 'Book a tour' },
+    ];
+    const o = sceneOverlays(scenes, [20, 5]);
+    assert.deepStrictEqual([o[0].startS, o[0].endS], [0, 3]);
+    assert.deepStrictEqual([o[1].startS, o[1].endS], [20, 25]);
+});
+
+check('old branded cards are not offered as library pictures (their words are drawn in)', () => {
+    assert.ok(read('src/utils/video-producer.ts').includes("notInArray(contentAssets.provider, ['pexels', 'fal', 'brand_card'])"));
 });
 
 check('the clip limit is 40 in the render and in the post editor', () => {

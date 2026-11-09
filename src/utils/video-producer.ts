@@ -193,10 +193,12 @@ export async function startProject(db: Db, args: {
 export async function libraryPictures(db: Db, orgId: number, limit = 30): Promise<LibraryPicture[]> {
     const rows = await db.select({ id: contentAssets.id, name: contentAssets.name })
         .from(contentAssets)
-        // Stock and AI pictures are not "the business's own"; uploads and brand cards are.
+        // Stock and AI pictures are not "the business's own"; uploads are. Old branded cards are left
+        // out too: their words are drawn in, so reused as a "picture" they showed an old headline with
+        // the new on-screen text doubled over it (staging, 2026-11-09). A card scene makes a fresh one.
         .where(and(
             eq(contentAssets.organisationId, orgId), eq(contentAssets.assetType, 'image'), isNull(contentAssets.purgedAt),
-            or(isNull(contentAssets.provider), notInArray(contentAssets.provider, ['pexels', 'fal'])),
+            or(isNull(contentAssets.provider), notInArray(contentAssets.provider, ['pexels', 'fal', 'brand_card'])),
         ))
         .orderBy(desc(contentAssets.createdAt))
         .limit(limit);
@@ -345,6 +347,9 @@ export const VIDEO_CARD = {
     },
 };
 
+/** How long on-screen text stays over the owner's own footage. */
+export const OWN_TITLE_S = 3;
+
 export function sceneOverlays(scenes: Scene[], durations: number[], captionPosition: 'bottom' | 'middle' | 'top' = 'bottom'): Overlay[] {
     const out: Overlay[] = [];
     let t = 0;
@@ -355,13 +360,16 @@ export function sceneOverlays(scenes: Scene[], durations: number[], captionPosit
         // (card, overlay, captions). The card says it; the overlay stays off.
         if (s.onScreenText && s.source !== 'brand_card') {
             const text = onScreenLines(s.onScreenText);
+            // Over the owner's own take, a title is a title: the opening seconds, not the whole scene
+            // ("Marmalade Productions" sat over 23 s of someone talking, staging 2026-11-09).
+            const shown = s.source === 'own_video' && d > OWN_TITLE_S + 1 ? OWN_TITLE_S : d;
             out.push({
                 id: `vp_${s.id}`, text,
                 // Upper third: the captions own the lower part of the frame — unless they were moved
                 // to the top, when the on-screen text takes the lower part instead.
                 x: 0.5, y: captionPosition === 'top' ? 0.7 : 0.2, fontFamily: 'Impact', fontSizePct: onScreenFontPct(text),
                 color: '#FFFFFF', boxStroke: null, boxFill: '#000000', boxOpacity: 0.55,
-                startS: Math.round(t * 10) / 10, endS: Math.round((t + d) * 10) / 10, anim: 'rise',
+                startS: Math.round(t * 10) / 10, endS: Math.round((t + shown) * 10) / 10, anim: 'rise',
             });
         }
         t += d;
