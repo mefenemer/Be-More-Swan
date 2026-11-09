@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<!-- SYNTHETIC fixture modelled on Joomla 5 + YOOtheme Pro (UIkit): tm-* layout, desktop and mobile headers,
+     builder sections with lazy background pictures (data-src + uk-img), cached resized pictures with a
+     srcset, a toolbar, an off-canvas menu and a to-top link. No generator tag (YOOtheme sites often drop it). Invented business. -->
+<html lang="en-gb" dir="ltr">
+<head>
+    <meta charset="utf-8">
+    <title>Hartley Physio | Sports and back pain clinic</title>
+    <link href="/media/system/css/joomla-fontawesome.min.css?4.5.33" rel="stylesheet">
+    <link href="/templates/yootheme_hartley/css/theme.12.css?1762530000" rel="stylesheet">
+    <script src="/templates/yootheme/vendor/assets/uikit/dist/js/uikit.min.js?4.5.33"></script>
+    <script src="/media/system/js/core.min.js?2cb912"></script>
+    <script type="application/json" class="joomla-script-options new">{"system.paths":{"root":"","rootFull":"https:\/\/hartley-physio.example\/","base":""}}</script>
+</head>
+<body class="">
+    <div class="tm-page">
+        <div class="tm-toolbar tm-toolbar-default uk-visible@m">
+            <div class="uk-container uk-flex uk-flex-middle"><div class="uk-first-column"><div class="uk-panel">Free parking at the clinic</div></div></div>
+        </div>
+        <header class="tm-header-mobile uk-hidden@m">
+            <div uk-sticky cls-active="uk-navbar-sticky" sel-target=".uk-navbar-container">
+                <div class="uk-navbar-container"><nav class="uk-navbar" uk-navbar><div class="uk-navbar-left"><a href="https://hartley-physio.example/" aria-label="Back to home" class="uk-logo uk-navbar-item"><img alt="Hartley Physio" loading="eager" width="160" height="50" src="/images/brand/hartley-logo.png"></a></div><div class="uk-navbar-right"><a uk-toggle href="#tm-dialog-mobile" class="uk-navbar-toggle"><div uk-navbar-toggle-icon></div></a></div></nav></div>
+            </div>
+            <div id="tm-dialog-mobile" uk-offcanvas="container: true; overlay: true" mode="slide" flip>
+                <div class="uk-offcanvas-bar uk-flex uk-flex-column">
+                    <ul class="uk-nav uk-nav-default uk-nav-accordion" uk-nav="targets: &gt; .js-accordion">
+                        <li class="item-101 uk-active"><a href="/">Home</a></li>
+                        <li class="item-102"><a href="/treatments">Treatments</a></li>
+                        <li class="item-103"><a href="/contact">Contact</a></li>
+                    </ul>
+                </div>
+            </div>
+        </header>
+        <header class="tm-header uk-visible@m" uk-header>
+            <div uk-sticky media="@m" cls-active="uk-navbar-sticky" sel-target=".uk-navbar-container">
+                <div class="uk-navbar-container">
+                    <div class="uk-container uk-container-expand">
+                        <nav class="uk-navbar" uk-navbar="{&quot;align&quot;:&quot;left&quot;}">
+                            <div class="uk-navbar-left"><a href="https://hartley-physio.example/" aria-label="Back to home" class="uk-logo uk-navbar-item"><img alt="Hartley Physio" loading="eager" width="200" height="60" src="/images/brand/hartley-logo.png"></a></div>
+                            <div class="uk-navbar-right">
+                                <ul class="uk-navbar-nav">
+                                    <li class="item-101 uk-active"><a href="/">Home</a></li>
+                                    <li class="item-102 uk-parent"><a href="/treatments">Treatments</a>
+                                        <div class="uk-drop uk-navbar-dropdown"><div><ul class="uk-nav uk-navbar-dropdown-nav"><li class="item-104"><a href="/treatments/sports-massage">Sports massage</a></li></ul></div></div>
+                                    </li>
+                                    <li class="item-103"><a href="/contact">Contact</a></li>
+                                </ul>
+                            </div>
+                        </nav>
+                    </div>
+                </div>
+            </div>
+        </header>
+        <main id="tm-main">
+            <!-- Builder #page -->
+            <div class="uk-section-default uk-preserve-color uk-light">
+                <div data-src="/images/clinic/treatment-room.jpg" data-sources="[{&quot;type&quot;:&quot;image\/webp&quot;,&quot;srcset&quot;:&quot;\/templates\/yootheme\/cache\/0b\/treatment-room-0b1c2d3e.webp 1920w&quot;}]" uk-img class="uk-background-norepeat uk-background-cover uk-background-center-center uk-section uk-section-xlarge">
+                    <div class="uk-container">
+                        <div class="uk-grid tm-grid-expand uk-child-width-1-1 uk-grid-margin">
+                            <div class="uk-width-1-1">
+                                <h1 class="uk-heading-medium">Back to doing what you love</h1>
+                                <div class="uk-panel uk-text-lead uk-margin">Hands-on physiotherapy for runners, desk workers and everyone in between.</div>
+                                <div class="uk-margin"><a class="el-content uk-button uk-button-primary" href="/contact">Book an assessment</a></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="uk-section-default uk-section">
+                <div class="uk-container">
+                    <div class="uk-grid tm-grid-expand uk-grid-margin" uk-grid>
+                        <div class="uk-width-1-2@m">
+                            <h2 class="uk-h2">What we treat</h2>
+                            <ul class="uk-list uk-list-bullet">
+                                <li class="el-item"><div class="el-content uk-panel">Back and neck pain</div></li>
+                                <li class="el-item"><div class="el-content uk-panel">Running injuries</div></li>
+                            </ul>
+                        </div>
+                        <div class="uk-width-1-2@m">
+                            <div class="uk-margin"><picture><source type="image/webp" srcset="/templates/yootheme/cache/7a/clinician-7a8b9c0d.webp 768w, /templates/yootheme/cache/2f/clinician-2f3e4d5c.webp 1200w" sizes="(min-width: 1200px) 1200px"><img src="/templates/yootheme/cache/9e/clinician-9e8d7c6b.jpeg" width="1200" height="800" class="el-image" alt="A physiotherapist working on a runner's calf" loading="lazy"></picture></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+        <footer>
+            <div class="uk-section-secondary uk-section uk-section-small">
+                <div class="uk-container"><div class="uk-panel">© Hartley Physio 2026</div><div class="uk-margin"><a href="#" uk-totop uk-scroll aria-label="Back to top"></a></div></div>
+            </div>
+        </footer>
+    </div>
+</body>
+</html>
