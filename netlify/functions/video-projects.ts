@@ -198,6 +198,11 @@ export default withLambda(async (event) => {
         const scene = sb.scenes.find((s) => s.id === body.sceneId);
         if (!scene) return json(404, { error: 'Scene not found.' });
         const patch = (body.patch && typeof body.patch === 'object' ? body.patch : {}) as Record<string, unknown>;
+        // What the scene SHOWS before the edit: only a change to it re-sources the scene. New words on
+        // screen over the same clip keep the clip (they're an overlay) — except on a branded card,
+        // whose words are drawn into the picture (staging, 2026-11-09: a words-only edit swapped the stock clip).
+        const looks = (s: typeof scene) => JSON.stringify([s.source, s.keywords ?? '', s.prompt ?? '', s.assetId ?? null, s.inS ?? null, s.outS ?? null, s.source === 'brand_card' ? (s.onScreenText ?? '') : '']);
+        const before = looks(scene);
         let voiceChanged = false;
         if (typeof patch.voiceover === 'string' && patch.voiceover !== scene.voiceover) { scene.voiceover = patch.voiceover; voiceChanged = true; }
         if (typeof patch.onScreenText === 'string') scene.onScreenText = patch.onScreenText;
@@ -221,7 +226,8 @@ export default withLambda(async (event) => {
         const storyboard = tightened.storyboard;
         const changes = [...enforced.changes, ...tightened.changes];
         const assets = { ...(row.sceneAssets as Record<string, number>) };
-        delete assets[scene.id];   // this scene is re-sourced on the next build
+        const after = storyboard.scenes.find((s) => s.id === scene.id);
+        if (!after || looks(after) !== before) delete assets[scene.id];   // re-sourced on the next build
         await db.update(videoProjects).set({
             storyboard, changes, sceneAssets: assets, status: 'planned',
             // The voiceover is one track for the whole script — any line changing re-records it.

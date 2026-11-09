@@ -183,4 +183,14 @@ check('the chat has the same hand-off, as a card that opens the flow (never post
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"type": "video_handover_proposal"'));
 });
 
+check('words-only scene edits keep the clip; a branded card or a new picture is made again', () => {
+    const ep = read('netlify/functions/video-projects.ts');
+    assert.ok(ep.includes("s.source === 'brand_card' ? (s.onScreenText ?? '') : ''"));
+    assert.ok(ep.includes('if (!after || looks(after) !== before) delete assets[scene.id];'));
+});
+
+check('a ready or rendering video has no "Plan it again" / "Cancel" row — it has Change it', () => {
+    assert.ok(read('src/components/assistant-videos.js').includes("!['cancelled', 'built', 'planning', 'building', 'reviewing', 'rendering', 'ready'].includes(v.status)"));
+});
+
 console.log(`\nvideo studio: ${passed} passed`);
