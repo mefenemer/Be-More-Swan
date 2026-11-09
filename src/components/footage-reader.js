@@ -11,8 +11,11 @@
  * then hands them to netlify/functions/footage.ts (the WAV goes straight to storage by a signed PUT).
  *
  *   window.FootageReader.prepare(assetId, source, { onProgress }) → Promise<void>
- *     source: a File (just uploaded — no download needed) or the video's URL (a library video; R2
- *     answers GETs from the app's origins with CORS, scripts/set-r2-cors.ts, so the canvas stays readable)
+ *     source: a File (just uploaded — no download needed) or the video's URL (a library video). A URL
+ *     is downloaded ONCE, with the cache skipped, and read from memory. Not straight into a <video>:
+ *     the library's thumbnails load the SAME signed URL without CORS (the URL is kept stable so the
+ *     browser caches it), and a CORS request then gets that cached copy with no CORS header — the
+ *     video "couldn't be opened" on staging, 2026-11-09, although R2's CORS rules were right.
  *   window.FootageReader.upload(file) → Promise<{ id, name }>   a new video into the library (My Content)
  *
  * Nothing here spends. Reading a library video downloads it once into this tab.
@@ -121,8 +124,23 @@
     return j;
   }
 
+  /** A library video's bytes, fresh from storage (never the cached non-CORS copy). */
+  async function download(url, onProgress) {
+    onProgress?.('Fetching your video…');
+    let r;
+    try { r = await fetch(url, { mode: 'cors', cache: 'no-store', credentials: 'omit' }); } catch {
+      throw new Error('Your video couldn’t be fetched. Check your connection and try again.');
+    }
+    if (!r.ok) throw new Error(`Your video couldn’t be fetched (HTTP ${r.status}). Reload the page and try again.`);
+    const blob = await r.blob();
+    if (blob.size > MAX_BYTES) throw new Error('That video is larger than 500 MB. Trim it first, or pick the part you want.');
+    return blob;
+  }
+
   async function prepare(assetId, source, opts) {
     const onProgress = opts && opts.onProgress;
+    if (!source) throw new Error('That video couldn’t be found. Reload the page and try again.');
+    if (!(source instanceof Blob)) source = await download(String(source), onProgress);
     if (source instanceof Blob && source.size > MAX_BYTES) throw new Error('That video is larger than 500 MB. Trim it first, or pick the part you want.');
     const src = source instanceof Blob ? URL.createObjectURL(source) : source;
     try {

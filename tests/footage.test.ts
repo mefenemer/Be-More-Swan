@@ -413,6 +413,13 @@ check('the build plays a tightened scene as one clip per piece, inside the file,
     assert.deepStrictEqual(livePieces([{ inS: 18, outS: 25 }, { inS: 30, outS: 31 }], 20), [{ inS: 18, outS: 20 }]);
 });
 
+check('a library video is downloaded fresh, never read from the cached non-CORS copy (staging, 2026-11-09)', () => {
+    const js = read('src/components/footage-reader.js');
+    assert.ok(js.includes("cache: 'no-store'"));
+    const prep = js.slice(js.indexOf('async function prepare'));
+    assert.ok(prep.indexOf('await download(') > 0 && prep.indexOf('await download(') < prep.indexOf('openVideo('), 'downloaded before it is opened');
+});
+
 check('the clip limit is 40 in the render and in the post editor', () => {
     assert.strictEqual(MAX_CLIPS, 40);
     assert.ok(read('workspace.html').includes('const _PCE_MAX_CLIPS = 40;'));
