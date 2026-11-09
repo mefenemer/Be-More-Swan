@@ -9,7 +9,7 @@ import assert from 'node:assert';
 import { readFileSync, existsSync } from 'node:fs';
 import { enforceStoryboard, fitLength, clampSegment, keepsOwnSound, storyboardUserPrompt, type VideoBrief, type Scene } from '../src/lib/storyboard';
 import {
-    enforceShotList, enforceReview, frameTimes, ownSpeechOnTimeline, silentWav, quoteIsInTranscript, suggestionLine,
+    enforceShotList, enforceReview, reviewSystemPrompt, frameTimes, ownSpeechOnTimeline, silentWav, quoteIsInTranscript, suggestionLine,
     footagePlannerBlock, MAX_FRAMES, MAX_SUGGESTIONS, FOOTAGE_REVIEW_TASKS, type FootageVideo,
 } from '../src/lib/footage';
 import { ownWindow, sceneClips, playedDurations, readFootageIds, readBrief, livePieces } from '../src/utils/video-producer';
@@ -226,6 +226,18 @@ check('the review: every chosen video gets a line; suggestions arrive ticked, ca
     assert.strictEqual(r.suggestions[1].kind, 'other');
     assert.strictEqual(r.suggestions[1].assetId, undefined);
     assert.strictEqual(r.charged, 2);
+});
+
+check('a stretch is kept only on edits about one; the prompt rules out what it cannot do', () => {
+    const r = enforceReview({ suggestions: [
+        { kind: 'fill', text: 'Add a card', assetId: 11, inS: 0, outS: 20 },
+        { kind: 'trim', text: 'Trim the start', assetId: 11, inS: 0, outS: 2 },
+    ] }, videos, 0);
+    assert.strictEqual(r.suggestions[0].inS, undefined);
+    assert.strictEqual(r.suggestions[0].assetId, 11);
+    assert.deepStrictEqual([r.suggestions[1].inS, r.suggestions[1].outS], [0, 2]);
+    const p = reviewSystemPrompt();
+    assert.ok(/can NOT add background music/.test(p) && /never 8:00/.test(p));
 });
 
 check('suggestion lines and the planner block name the video and the stretch', () => {
