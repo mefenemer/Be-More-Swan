@@ -112,7 +112,11 @@ Making takes a few minutes and you can leave the page. If it stops part-way, the
 
 When it's made, the finished video is rendered and saved to **My Content**. This takes a few more minutes. On the **Videos** tab it moves to **Ready**, where you can play it, see the words it suggests posting with it, and press **Download**. If the finished video fails to render, press **Try the render again**. That's free.
 
-To post it, open your Social Media Assistant and add the video from **My Content** to a post. Your Blog Writer can put it in an article the same way.
+- **Use in a post** hands it to your Social Media Assistant. You choose where it goes, the draft starts with the video and the suggested words, and you approve it in the **Review Queue** as usual.
+- **Use in a blog post** starts a new article for your Blog Writer with the video in it.
+- **Change it** makes a new version. Everything already made is kept, so only the scenes you change are made, and paid for, again. The earlier version stays in **My Content**.
+
+Handing a video over is free. The buttons appear when you have that assistant hired and working. Any of your assistants can also pick the video from **My Content**.
 
 Your Video Producer's **Results** tab counts **Videos Published**.
 $$, FALSE),

@@ -29,6 +29,23 @@ export function isWorking(lifecycleStatus: string | null, provisioningStatus: st
     return lifecycleStatus === 'working' && !String(provisioningStatus ?? '').startsWith('paused');
 }
 
+/**
+ * The workspace's active assistant in a role (the earliest hired, if there are several), or null.
+ * Hand-offs only ever go to a teammate that is working (memory: never hand off to a paused one).
+ */
+export async function activeAssistantInRole(db: Db, orgId: number, roleKey: string): Promise<{ id: number; name: string } | null> {
+    const rows = await db.select({
+        id: aiAssistants.id, name: aiAssistants.name,
+        lifecycleStatus: aiAssistants.lifecycleStatus, provisioningStatus: aiAssistants.provisioningStatus,
+    })
+        .from(aiAssistants)
+        .innerJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
+        .where(and(eq(aiAssistants.organisationId, orgId), eq(aiAssistants.isActive, true), eq(masterAssistants.roleKey, roleKey)))
+        .orderBy(asc(aiAssistants.id));
+    const a = rows.find((r) => isWorking(r.lifecycleStatus, r.provisioningStatus));
+    return a ? { id: a.id, name: a.name } : null;
+}
+
 /** The workspace's active Video Producer (the earliest hired, if there are several), or null. */
 export async function activeVideoProducer(db: Db, orgId: number): Promise<{ id: number; name: string; onboardingContext: unknown } | null> {
     const rows = await db.select({

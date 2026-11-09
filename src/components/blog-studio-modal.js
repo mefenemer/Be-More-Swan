@@ -14,6 +14,9 @@
  *
  * Public API (attached to window):
  *   openBlogStudio({ assistantId?, postId?, intent? })  — open the modal; postId loads an existing draft.
+ *   openBlogStudio({ assistantId, withVideo: { assetId, title?, words? } })  — "Use in a blog post" from the
+ *     Video Producer (docs/video-producer-studio-plan.md Phase 4): a new draft titled after the video,
+ *     starting with its suggested words, with the video placed in the body. Free — no model call.
  *     intent:'review' puts the Approve / Pick a time / Reject bar on screen while the post is undecided.
  *   openBlogStudio({ mode:'setup', assistantId? })  — "Blog setup": Search Console and the blog widget
  *     only. Both are set once for the whole blog, so they are not shown in a post's editor.
@@ -1083,10 +1086,15 @@
     syncRejectButton(null);
     syncDecideBar(null);
     setStatus('bs-save-status', 'Creating…');
-    api('blog-posts', { method: 'POST', body: JSON.stringify({ title: 'Untitled draft', assistantId: state.assistantId }) }).then(function (res) {
+    var video = state.pendingVideo;
+    state.pendingVideo = null;
+    var title = video && video.title ? String(video.title).slice(0, 200) : 'Untitled draft';
+    api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title, assistantId: state.assistantId }) }).then(function (res) {
       if (!res.ok) { setBanner('bs-action-status', 'Could not create a draft: ' + ((res.body && res.body.error) || 'please try again.'), 'error'); return; }
       setStatus('bs-save-status', '');
-      var editor = openWorkspace(res.body.post.id, 'Untitled draft', '');
+      var editor = openWorkspace(res.body.post.id, title, video && video.words ? String(video.words) : '');
+      // A video handed over by the Video Producer goes into the body straight away.
+      if (video) attachInline({ assetId: Number(video.assetId) });
       if (editor && editor.focus) editor.focus();   // drop straight into typing
     });
   }
@@ -3164,6 +3172,7 @@
     returnSetupSections();   // the studio's own code expects them in the page whenever it is open
     state.assistantId = opts.assistantId != null ? opts.assistantId : null;
     state.reviewIntent = opts.intent === 'review';
+    state.pendingVideo = opts.withVideo && opts.withVideo.assetId ? opts.withVideo : null;
     state.nextPostId = null;
     el('bs-approved').classList.add('bs-hidden');
     var setup = opts.mode === 'setup';

@@ -121,7 +121,8 @@ check('a new post is seeded across every connected platform', () => {
     assert.ok(!/const first = /.test(body), 'the first-connected-only seed must be gone');
     // The row is still created with the whole set, just on confirm rather than on open.
     const confirm = workspace.slice(landmark(workspace, 'async function pceConfirmDestinations()'));
-    assert.match(confirm.slice(0, 1600), /destinations, blank: true/, 'the whole set goes to create-manual-post');
+    // A Video Producer hand-off (pceStartPostWithVideo) sends a caption and the video instead of blank.
+    assert.match(confirm.slice(0, 2400), /assistantId: _pceDestAssistantId, destinations,[\s\S]{0,200}\{ blank: true \}/, 'the whole set goes to create-manual-post');
 });
 
 check('step 3 is video-only and says so, and stills keep their text and sound', () => {

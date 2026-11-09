@@ -1801,6 +1801,55 @@
   }
 
   register('footage_review_proposal', renderFootageReviewProposalCard);
+
+  // { type: 'video_handover_proposal', projectId, to: 'post' | 'blog' }
+  //
+  // The chat twin of "Use in a post" / "Use in a blog post" on a Ready video (studio plan Phase 4). It
+  // opens the SAME flows — the Social Media Manager's "Where should this video go?" or a new Blog Writer
+  // draft with the video in it — so platforms, words and approval stay with that assistant. Free.
+  function renderVideoHandoverProposalCard(ui, esc) {
+    const projectId = Number(ui.projectId);
+    const to = ui.to === 'blog' ? 'blog' : 'post';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${to === 'blog' ? 'Use in a blog post' : 'Use in a post'}</p>
+      <p class="text-xs text-gray-700 mt-2">${to === 'blog'
+        ? 'Starts a new article for your Blog Writer with this video in it. You write and publish it there.'
+        : 'Your Social Media Assistant makes a draft post with this video. You choose where it goes, and approve it in the Review Queue.'} Free.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vhp-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Open it</button>
+        <button type="button" data-vhp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vhp-status></p>`;
+    const status = el.querySelector('[data-vhp-status]');
+    const say = (t, bad) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${bad ? 'text-red-600' : 'text-indigo-700'}`; };
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-vhp-cancel]')) { el.querySelectorAll('button').forEach((x) => { x.disabled = true; }); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-vhp-go]')) return;
+      try {
+        const [p, tm] = await Promise.all([
+          fetch(`/.netlify/functions/video-projects?id=${projectId}`, { credentials: 'same-origin' }).then((r) => r.json()),
+          fetch('/.netlify/functions/video-projects?teammates=1', { credentials: 'same-origin' }).then((r) => r.json()),
+        ]);
+        const v = p && p.project;
+        if (!v || v.status !== 'ready' || !v.outputAssetId) { say('That video isn’t ready yet — it needs to be finished first.', true); return; }
+        const words = (v.storyboard && v.storyboard.caption) || '';
+        if (to === 'post') {
+          if (!tm.social) { say('You don’t have an active Social Media Assistant. Download the video from the Videos tab instead.', true); return; }
+          if (typeof window.pceStartPostWithVideo !== 'function') { say('Open your Video Producer’s Videos tab and press “Use in a post” there.', true); return; }
+          window.pceStartPostWithVideo(tm.social.id, { assetId: v.outputAssetId, caption: words || v.title, title: v.title, shape: (v.brief && v.brief.shape) || '9:16' });
+        } else {
+          if (!tm.blog) { say('You don’t have an active Blog Writer. Download the video from the Videos tab instead.', true); return; }
+          if (typeof window.openBlogStudio !== 'function') { say('Open your Video Producer’s Videos tab and press “Use in a blog post” there.', true); return; }
+          window.openBlogStudio({ assistantId: tm.blog.id, withVideo: { assetId: v.outputAssetId, title: v.title, words } });
+        }
+        say('Opened.');
+      } catch { say('That didn’t open — try the button on the Videos tab.', true); }
+    });
+    return el;
+  }
+  register('video_handover_proposal', renderVideoHandoverProposalCard);
   register('video_brief_proposal', renderVideoBriefProposalCard);
   register('video_replan_proposal', renderVideoReplanProposalCard);
 
