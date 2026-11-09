@@ -44,9 +44,9 @@
       { k: 'image', kind: 'image', label: 'Picture or video', video: true },
     ],
     features: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
-      { k: 'items', kind: 'items', label: 'Features', fields: [['title', 'text', 'Title'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional) — e.g. Read more']] }],
+      { k: 'items', kind: 'items', label: 'Features', fields: [['title', 'text', 'Title'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional) — e.g. Read more'], ['image', 'image', 'Picture (optional)']] }],
     steps: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
-      { k: 'items', kind: 'items', label: 'Steps', fields: [['title', 'text', 'Step'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional)']] }],
+      { k: 'items', kind: 'items', label: 'Steps', fields: [['title', 'text', 'Step'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional)'], ['image', 'image', 'Picture (optional)']] }],
     text: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'body', kind: 'textarea', label: 'Text (a blank line starts a new paragraph; a line starting ### is a subheading; [words](/page) makes a link)', rows: 8, required: true },
       { k: 'image', kind: 'image', label: 'Picture or video beside the text (optional)', video: true },
       { k: 'imageSide', kind: 'select', label: 'Picture on the', options: [['right', 'Right'], ['left', 'Left']] }],
@@ -615,7 +615,11 @@
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         <div data-items="${esc(f.k)}" class="space-y-2">${list.map((it, i) => `
           <div class="border border-gray-200 rounded-lg p-3" data-item>
-            ${f.fields.map(([k, kind, label]) => kind === 'link'
+            ${f.fields.map(([k, kind, label]) => kind === 'image'
+              ? `<div data-item-image>${pictureHtml(it[k], { pick: `data-site-item-pick="${esc(f.k)}:${i}"`, clear: `data-site-item-pick-clear="${esc(f.k)}:${i}"` }, false)}
+                  <input type="hidden" data-item-img="asset" value="${esc((it[k] && it[k].assetId) || '')}"><input type="hidden" data-item-img="url" value="${esc((it[k] && !it[k].assetId && it[k].url) || '')}">
+                  ${it[k] && (it[k].assetId || it[k].url) ? `<input data-item-img="alt" aria-label="${esc(f.label)} ${i + 1}: what the picture shows" class="${inputCls} mt-1" placeholder="What the picture shows (needed)" value="${esc(it[k].alt || '')}">` : ''}</div>`
+              : kind === 'link'
               ? `<div class="grid gap-2 md:grid-cols-2 mt-1"><input data-item-link="label" aria-label="${esc(f.label)} ${i + 1}: link text" class="${inputCls}" placeholder="${esc(label)}" value="${esc((it[k] && it[k].label) || '')}">
                   <input data-item-link="href" aria-label="${esc(f.label)} ${i + 1}: where the link goes" class="${inputCls}" list="site-pages-list" placeholder="/page or https://…" value="${esc((it[k] && it[k].href) || '')}"></div>`
               : kind === 'textarea'
@@ -671,6 +675,11 @@
         props[f.k] = [...form.querySelectorAll(`[data-items="${f.k}"] [data-item]`)].map((row) => {
           const o = {};
           row.querySelectorAll('[data-item-field]').forEach((el) => { o[el.dataset.itemField] = el.value; });
+          const ia = row.querySelector('[data-item-img="asset"]');
+          if (ia) {
+            const assetId = Number(ia.value) || null, url = row.querySelector('[data-item-img="url"]').value, alt = (row.querySelector('[data-item-img="alt"]') || {}).value || '';
+            o.image = assetId ? { assetId, url: '', alt } : url ? { url, alt } : null;
+          }
           const ll = row.querySelector('[data-item-link="label"]'), lh = row.querySelector('[data-item-link="href"]');
           if (ll && lh) { const label = ll.value.trim(), href = lh.value.trim(); o.link = label || href ? { label, href } : null; }
           return o;
@@ -687,7 +696,7 @@
     const l = e.look || LOOK_DEFAULT;
     const onePage = def().structure === 'one_page';
     const sel = (name, options, value) => `<select name="${name}" class="${inputCls}">${options.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
-    const bg = e.type === 'hero' ? '' : `<div><label class="block text-xs font-bold text-gray-700">Background</label>${sel('look-background', [['auto', 'Automatic'], ['plain', 'Plain'], ['soft', 'Soft tint'], ['brand', 'Your main colour']], l.background)}</div>`;
+    const bg = e.type === 'hero' ? '' : `<div><label class="block text-xs font-bold text-gray-700">Background</label>${sel('look-background', [['auto', 'Automatic'], ['plain', 'Plain'], ['soft', 'Soft tint'], ['brand', 'Your main colour'], ['gradient', 'Soft gradient of your colours']], l.background)}</div>`;
     const cols = GRID_TYPES.includes(e.type) ? `<div><label class="block text-xs font-bold text-gray-700">Columns on a wide screen</label>${sel('look-columns', [['auto', 'Automatic'], ['2', 'Two'], ['3', 'Three']], l.columns)}</div>` : '';
     const menu = onePage || l.menuLabel ? `<div><label class="block text-xs font-bold text-gray-700">Menu label${onePage ? '' : ' (one-page sites)'}</label><input name="look-menu" class="${inputCls}" maxlength="30" value="${esc(l.menuLabel || '')}" placeholder="e.g. Prices — leave empty to keep it out of the menu"></div>` : '';
     if (!bg && !cols && !menu) return '';
@@ -1122,6 +1131,10 @@
           <label class="flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" data-theme-accent-off ${t.accentColor ? '' : 'checked'}> Plain grey</label></div></div>
         <div><label class="block text-xs font-bold text-gray-700">Second colour (call-to-action buttons)</label><div class="flex items-center gap-2"><input type="color" data-theme="secondaryColor" value="${esc(t.secondaryColor || '#e5e7eb')}" class="h-10 border border-gray-300 rounded-lg" style="width:64px">
           <label class="flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" data-theme-second-off ${t.secondaryColor ? '' : 'checked'}> None</label></div></div>
+        <div><label class="block text-xs font-bold text-gray-700">Buttons</label><select data-theme="buttonStyle" class="${inputCls}">${[['solid', 'Filled'], ['outline', 'Outlined'], ['pill', 'Filled, fully rounded']].map(([v, l]) => `<option value="${v}" ${(t.buttonStyle || 'solid') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        <div><label class="block text-xs font-bold text-gray-700">Cards</label><select data-theme="cardStyle" class="${inputCls}">${[['bordered', 'Thin border'], ['shadow', 'Soft shadow'], ['flat', 'Flat, no border']].map(([v, l]) => `<option value="${v}" ${(t.cardStyle || 'bordered') === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+        ${[['headingColor', 'Heading colour', 'Same as text'], ['headerColor', 'Header colour', 'Same as background'], ['footerColor', 'Footer colour', 'Same as background']].map(([k, label, off]) => `<div><label class="block text-xs font-bold text-gray-700">${label}</label><div class="flex items-center gap-2"><input type="color" data-theme="${k}" value="${esc(t[k] || t.textColor || '#111827')}" class="h-10 border border-gray-300 rounded-lg" style="width:64px">
+          <label class="flex items-center gap-1 text-xs text-gray-600"><input type="checkbox" data-theme-off="${k}" ${t[k] ? '' : 'checked'}> ${off}</label></div></div>`).join('')}
         <div><label class="block text-xs font-bold text-gray-700">Corners</label><select data-theme="radius" class="${inputCls}">${[['none', 'Square'], ['small', 'Slightly rounded'], ['medium', 'Rounded'], ['large', 'Very rounded']].map(([v, l]) => `<option value="${v}" ${t.radius === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
         <div class="md:col-span-2"><p class="block text-xs font-bold text-gray-700">Logo</p>
           ${pictureHtml(t.logoAssetId ? { assetId: t.logoAssetId, url: '' } : (t.logoUrl ? { url: t.logoUrl } : null), { pick: 'data-site-logo-pick', clear: 'data-site-logo-clear' })}
@@ -1985,7 +1998,7 @@
     if (!look) return '<p class="text-xs text-gray-700 mt-1">Look: we couldn\'t read your old site\'s colours, so your current design is kept — change it in Design.</p>';
     const sw = (hex, name) => (hex ? `<span class="inline-flex items-center gap-1 mr-2"><span class="inline-block w-3.5 h-3.5 rounded-full border border-gray-300 align-middle" style="background:${esc(hex)}"></span>${esc(name)}</span>` : '');
     const pairs = { editorial: 'Fraunces & Inter', classic: 'Playfair Display & Lora', elegant: 'Cormorant Garamond & Work Sans', modern: 'Manrope', bold: 'Oswald & Inter', friendly: 'Nunito', tech: 'Space Grotesk & Inter', warm: 'DM Serif Display & Work Sans', serif: 'a classic serif', sans: 'a clean sans-serif' };
-    return `<p class="text-xs text-gray-700 mt-1">Look: your old site's colours and lettering come across — ${sw(look.primaryColor, 'main colour')}${sw(look.backgroundColor, 'background')}${sw(look.textColor, 'words')}${sw(look.secondaryColor, 'second colour')}${look.font ? `lettering ${esc(pairs[look.font] || look.font)}${look.headingFont && !String(pairs[look.font] || '').includes(look.headingFont) ? ` (closest to your ${esc(look.headingFont)})` : ''}` : ''}. Using this draft sets them in Design, where you can change them.</p>`;
+    return `<p class="text-xs text-gray-700 mt-1">Look: your old site's colours and lettering come across — ${sw(look.primaryColor, 'main colour')}${sw(look.backgroundColor, 'background')}${sw(look.textColor, 'words')}${sw(look.secondaryColor, 'second colour')}${sw(look.headerColor, 'header')}${sw(look.footerColor, 'footer')}${look.font ? `lettering ${esc(pairs[look.font] || look.font)}${look.headingFont && !String(pairs[look.font] || '').includes(look.headingFont) ? ` (closest to your ${esc(look.headingFont)})` : ''}` : ''}. Using this draft sets them in Design, where you can change them.</p>`;
   }
 
   function importReviewCard(imp) {
@@ -2645,6 +2658,34 @@
       });
       return;
     }
+    // A card's own picture (features / steps): the same picker, written into that card.
+    const itemPick = t('[data-site-item-pick]');
+    if (itemPick && window.MediaPicker) {
+      const form = itemPick.closest('form');
+      const [k, idx] = itemPick.dataset.siteItemPick.split(':');
+      syncEditing(form);
+      window.MediaPicker.open({
+        title: 'Choose a picture', video: false, topic: topicOf(state.editing.props), assistantName: state.assistantName,
+        onPick: (asset) => {
+          state.thumbs[asset.id] = asset.url;
+          syncEditing(form);
+          const item = (state.editing.props[k] || [])[Number(idx)];
+          if (item) item.image = { assetId: asset.id, url: '', alt: (item.image && item.image.alt) || item.title || altFromName(asset.name) };
+          render();
+        },
+      });
+      return;
+    }
+    const itemClear = t('[data-site-item-pick-clear]');
+    if (itemClear) {
+      const form = itemClear.closest('form');
+      const [k, idx] = itemClear.dataset.siteItemPickClear.split(':');
+      syncEditing(form);
+      const item = (state.editing.props[k] || [])[Number(idx)];
+      if (item) item.image = null;
+      render();
+      return;
+    }
     const clearField = t('[data-site-pick-clear]');
     if (clearField) { const form = clearField.closest('form'); syncEditing(form); state.editing.props[clearField.dataset.sitePickClear] = null; render(); return; }
     if (t('[data-site-products-import]')) {
@@ -2896,6 +2937,7 @@
       if (theme.logoUrl) theme.logoAssetId = null; else delete theme.logoUrl;
       if (hostOf(e).querySelector('[data-theme-accent-off]')?.checked) theme.accentColor = null;
       if (hostOf(e).querySelector('[data-theme-second-off]')?.checked) theme.secondaryColor = null;
+      hostOf(e).querySelectorAll('[data-theme-off]').forEach((el) => { if (el.checked) theme[el.dataset.themeOff] = null; });
       await apply([{ op: 'set_theme', theme }]);
       return;
     }

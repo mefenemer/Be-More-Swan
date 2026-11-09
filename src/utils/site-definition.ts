@@ -29,6 +29,10 @@ export type FontKey = 'sans' | 'serif' | 'rounded' | 'system'
 export type SpacingKey = 'compact' | 'regular' | 'airy';
 export type HeaderKey = 'standard' | 'centered';
 export type RadiusKey = 'none' | 'small' | 'medium' | 'large';
+export type ButtonStyleKey = 'solid' | 'outline' | 'pill';
+export type CardStyleKey = 'bordered' | 'shadow' | 'flat';
+export const BUTTON_STYLES: readonly ButtonStyleKey[] = ['solid', 'outline', 'pill'];
+export const CARD_STYLES: readonly CardStyleKey[] = ['bordered', 'shadow', 'flat'];
 export type BusinessType = 'Organization' | 'LocalBusiness' | 'ProfessionalService' | 'Store';
 
 export interface SiteTheme {
@@ -46,6 +50,16 @@ export interface SiteTheme {
      * the main colour — Restorative Futures' terracotta "Book" on teal. null/absent = today's look.
      */
     secondaryColor?: string | null;
+    /** Buttons: filled (today), outlined, or filled and fully rounded. Absent = 'solid'. (2026-11-08) */
+    buttonStyle?: ButtonStyleKey;
+    /** Cards (features, steps, testimonials…): a thin border (today), a soft shadow, or flat. Absent = 'bordered'. */
+    cardStyle?: CardStyleKey;
+    /** Headings in their own colour; must read on the background. null/absent = the text colour. */
+    headingColor?: string | null;
+    /** The header band's colour (its words take a readable ink); null/absent = the page background. */
+    headerColor?: string | null;
+    /** The footer band's colour; null/absent = the page background. */
+    footerColor?: string | null;
     /** The logo and menu side by side ('standard'), or the logo centred above the menu. */
     header?: HeaderKey;
     /** https URL of the logo; null = the site name in text. */
@@ -154,7 +168,7 @@ export interface HeroProps {
  * `link` (optional, 2026-11-08): where the card leads — "Read more" to the page about that course or
  * service. An imported site keeps its card links this way; drawn as a link under the card's words.
  */
-export interface ItemsProps { heading: string | null; intro: string | null; items: Array<{ title: string; body: string; link?: Link | null }>; }
+export interface ItemsProps { heading: string | null; intro: string | null; items: Array<{ title: string; body: string; link?: Link | null; image?: Image | null }>; }
 /** Text, optionally with a picture beside it (left or right — on a phone it sits above the words). */
 export interface TextProps { heading: string | null; body: string; image: Image | null; imageSide: 'left' | 'right'; }
 export interface FaqProps { heading: string | null; items: Array<{ q: string; a: string }>; }
@@ -251,7 +265,7 @@ export interface ProductsProps { heading: string | null; intro: string | null; p
  * applies to grid sections (features, steps, testimonials, products); `menuLabel` makes the section
  * a menu entry on a one-page site (the menu links down the page to it).
  */
-export interface SectionLook { background: 'auto' | 'plain' | 'soft' | 'brand'; columns: 'auto' | 2 | 3; menuLabel: string | null; }
+export interface SectionLook { background: 'auto' | 'plain' | 'soft' | 'brand' | 'gradient'; columns: 'auto' | 2 | 3; menuLabel: string | null; }
 export const DEFAULT_LOOK: SectionLook = { background: 'auto', columns: 'auto', menuLabel: null };
 
 export type Section = SectionBody & { look?: SectionLook };
@@ -420,6 +434,12 @@ export function cleanHref(v: unknown): string | null {
     } catch { return null; }
 }
 
+/** A card with its picture replaced — or taken off (null), leaving no empty `image` key behind. */
+function withCardImage(it: ItemsProps['items'][number], image: Image | null): ItemsProps['items'][number] {
+    const { image: _old, ...rest } = it;
+    return image ? { ...rest, image } : rest;
+}
+
 /** A card with its link replaced — or taken off (null), leaving no empty `link` key behind. */
 function withItemLink(it: ItemsProps['items'][number], link: Link | null): ItemsProps['items'][number] {
     const { link: _old, ...rest } = it;
@@ -457,8 +477,11 @@ function items(v: unknown, max: number, warn: (m: string) => void): ItemsProps['
     const out = list.map((x) => {
         const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
         const link = cleanLink(o.link);
+        // A card's own picture (2026-11-08): shown across its top. Pictures only — never a video.
+        const image = o.image ? cleanImage(o.image, warn) : null;
         const item: ItemsProps['items'][number] = { title: cleanText(o.title, LIMITS.itemTitle), body: cleanText(o.body, LIMITS.itemBody, true) };
         if (link) item.link = link;
+        if (image) item.image = image;
         return item;
     }).filter((x) => x.title);
     if (out.length > max) warn(`Only the first ${max} items were kept.`);
@@ -667,7 +690,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
 export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts', 'listings'];
 export function cleanLook(raw: unknown, type: SectionType): SectionLook {
     const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
-    const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' ? o.background : 'auto';
+    const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' || o.background === 'gradient' ? o.background : 'auto';
     const cols = Number(o.columns);
     return {
         // The opening section already has its own layouts (centred / beside a picture / banner).
@@ -709,8 +732,38 @@ export function cleanTheme(raw: unknown, warn: (m: string) => void, base: SiteTh
         accentColor: t.accentColor === null ? null : (normalizeHex(typeof t.accentColor === 'string' ? t.accentColor : '') ?? base.accentColor ?? null),
         secondaryColor: t.secondaryColor === null ? null : (normalizeHex(typeof t.secondaryColor === 'string' ? t.secondaryColor : '') ?? base.secondaryColor ?? null),
         header: HEADERS.includes(t.header as HeaderKey) ? (t.header as HeaderKey) : (base.header ?? 'standard'),
+        ...optionalLook(t, base, backgroundColor, warn),
     };
 }
+
+/**
+ * The 2026-11-08 design settings, each present only when set (so older sites read exactly as before).
+ * A heading colour that can't be read on the background is refused; header and footer bands take
+ * whatever ink reads on them (site-render.ts), so any colour is safe there.
+ */
+function optionalLook(t: Record<string, unknown>, base: SiteTheme, background: string, warn: (m: string) => void): Partial<SiteTheme> {
+    const out: Partial<SiteTheme> = {};
+    const pick = <K extends 'buttonStyle' | 'cardStyle'>(k: K, list: readonly string[]) => {
+        const v = list.includes(t[k] as string) ? (t[k] as SiteTheme[K]) : t[k] === null ? undefined : base[k];
+        if (v) out[k] = v;
+    };
+    pick('buttonStyle', BUTTON_STYLES);
+    pick('cardStyle', CARD_STYLES);
+    const col = (k: 'headingColor' | 'headerColor' | 'footerColor') => {
+        if (t[k] === null) return null;
+        return normalizeHex(typeof t[k] === 'string' ? (t[k] as string) : '') ?? base[k] ?? null;
+    };
+    const heading = col('headingColor');
+    if (heading && contrastRatio(heading, background) < MIN_HEADING_CONTRAST) warn('That heading colour is too hard to read on the background, so headings stay in the text colour.');
+    else if (heading) out.headingColor = heading;
+    const header = col('headerColor');
+    if (header) out.headerColor = header;
+    const footer = col('footerColor');
+    if (footer) out.footerColor = footer;
+    return out;
+}
+/** Large text (headings) needs 3:1 (WCAG AA for large text). */
+const MIN_HEADING_CONTRAST = 3;
 
 /** Every library picture the site uses (logo, hero pictures, product pictures). */
 export function assetIdsIn(def: SiteDefinition): number[] {
@@ -721,6 +774,7 @@ export function assetIdsIn(def: SiteDefinition): number[] {
             if ((s.type === 'hero' || s.type === 'text' || s.type === 'signup') && s.props.image?.assetId) ids.add(s.props.image.assetId);
             if (s.type === 'products') for (const it of s.props.items) if (it.image?.assetId) ids.add(it.image.assetId);
             if (s.type === 'gallery') for (const im of s.props.images) if (im.assetId) ids.add(im.assetId);
+            if (s.type === 'features' || s.type === 'steps') for (const it of s.props.items) if (it.image?.assetId) ids.add(it.image.assetId);
         }
     }
     return [...ids];
@@ -739,6 +793,7 @@ export function withoutAssets(def: SiteDefinition, drop: Set<number>): SiteDefin
             if (s.type === 'signup') return { ...s, props: { ...s.props, image: keep(s.props.image) } };
             if (s.type === 'products') return { ...s, props: { ...s.props, items: s.props.items.map((it) => ({ ...it, image: keep(it.image) })) } };
             if (s.type === 'gallery') return { ...s, props: { ...s.props, images: s.props.images.filter((im) => keep(im)) } };
+            if (s.type === 'features' || s.type === 'steps') return { ...s, props: { ...s.props, items: s.props.items.map((it) => withCardImage(it, keep(it.image ?? null))) } };
             return s;
         }) }))
             // A gallery left with no pictures is no gallery.
@@ -772,6 +827,7 @@ export function markVideos(def: SiteDefinition, videos: Set<number>): { definiti
             if (sec.type === 'gallery') return { ...sec, props: { ...sec.props, images: sec.props.images.map((im) => flag(im)) } };
             if (sec.type === 'signup') return { ...sec, props: { ...sec.props, image: pictureOnly(sec.props.image) } };
             if (sec.type === 'products') return { ...sec, props: { ...sec.props, items: sec.props.items.map((it) => ({ ...it, image: pictureOnly(it.image) })) } };
+            if (sec.type === 'features' || sec.type === 'steps') return { ...sec, props: { ...sec.props, items: sec.props.items.map((it) => (it.image ? withCardImage(it, pictureOnly(it.image)) : it)) } };
             return sec;
         }) })),
     } as SiteDefinition;

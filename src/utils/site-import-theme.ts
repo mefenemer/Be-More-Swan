@@ -15,7 +15,7 @@
 
 import { harvestBrandSignals } from './brand-extract';
 import { normalizeHex, saturation } from './brand-kit';
-import type { FontKey, RadiusKey, SiteTheme } from './site-definition';
+import type { CardStyleKey, FontKey, RadiusKey, SiteTheme } from './site-definition';
 
 /** What we brought across, for the import report ("Their colours and lettering"). */
 export interface ImportedLook {
@@ -24,6 +24,13 @@ export interface ImportedLook {
     backgroundColor: string | null;
     /** A second brand colour their buttons use (themeWithLook → secondaryColor); null = none told apart. */
     secondaryColor?: string | null;
+    /** Filled, outlined or pill-shaped buttons; their cards' border, shadow or neither (2026-11-08). */
+    buttonStyle?: 'solid' | 'outline' | 'pill' | null;
+    cardStyle?: 'bordered' | 'shadow' | 'flat' | null;
+    /** Their headings' own colour, and their header and footer bands' colours, when they differ from the page. */
+    headingColor?: string | null;
+    headerColor?: string | null;
+    footerColor?: string | null;
     /** Their heading font as their site names it, and the pairing it became. */
     headingFont: string | null;
     font: FontKey | null;
@@ -107,6 +114,8 @@ function classColour(classes: string, prefix: 'bg' | 'text', tw: TailwindLook | 
     return null;
 }
 
+const differs = (a: string | null, b: string | null) => (a && a !== b ? a : null);
+
 /** The rounding their buttons use, by the classes on their links (Tailwind) or button rules in their CSS. */
 function buttonRadius(html: string, css: string): RadiusKey | null {
     const counts: Record<RadiusKey, number> = { none: 0, small: 0, medium: 0, large: 0 };
@@ -129,6 +138,49 @@ function buttonRadius(html: string, css: string): RadiusKey | null {
     }
     const best = (Object.entries(counts) as Array<[RadiusKey, number]>).sort((a, b) => b[1] - a[1])[0];
     return best[1] ? best[0] : null;
+}
+
+/** Classes on the links drawn as buttons (padded both sides), in the page's content (not its menu). */
+function buttonClasses(html: string): string[] {
+    const content = html.replace(/<(nav|header|footer)\b[\s\S]*?<\/\1>/gi, '');
+    return [...content.matchAll(/<a\b[^>]*class=['"]([^'"]*\bpx-\d[^'"]*)['"]/gi)].map((m) => ` ${m[1]} `);
+}
+/** Filled, outlined or pill: what most of their buttons are. */
+function buttonStyleOf(html: string): ImportedLook['buttonStyle'] {
+    const cls = buttonClasses(html);
+    if (!cls.length) return null;
+    const filled = cls.filter((c) => /\sbg-(?!transparent\s)[a-z]/.test(c));
+    const outlined = cls.filter((c) => !/\sbg-(?!transparent\s)[a-z]/.test(c) && /\sborder(-\d)?\s/.test(c));
+    if (outlined.length > filled.length) return 'outline';
+    if (!filled.length) return null;
+    return filled.filter((c) => /\srounded-full\s/.test(c)).length * 2 >= filled.length ? 'pill' : 'solid';
+}
+/** Their cards (a rounded, padded box holding a heading): shadowed, bordered or flat. */
+function cardStyleOf(html: string, css: string): CardStyleKey | null {
+    const counts: Record<CardStyleKey, number> = { bordered: 0, shadow: 0, flat: 0 };
+    for (const m of html.matchAll(/<(?:article|div|li)\b[^>]*class=['"]([^'"]*\brounded[^'"]*)['"][^>]*>/gi)) {
+        const c = ` ${m[1]} `;
+        if (!/\sp-\d|\sp[xy]-\d|\soverflow-hidden\s/.test(c)) continue;
+        if (/\sshadow(-(md|lg|xl|2xl))?\s/.test(c)) counts.shadow++;
+        else if (/\sborder(-\d)?\s/.test(c)) counts.bordered++;
+        else if (/\sbg-/.test(c)) counts.flat++;
+    }
+    if (!Object.values(counts).some(Boolean)) {
+        const rule = css.match(/\.(?:card|tile|box)[^{]*\{([^}]*)\}/i)?.[1] ?? '';
+        if (/box-shadow\s*:\s*(?!none)/i.test(rule)) return 'shadow';
+        if (/border\s*:\s*\d/i.test(rule)) return 'bordered';
+        return null;
+    }
+    return (Object.entries(counts) as Array<[CardStyleKey, number]>).sort((a, b) => b[1] - a[1])[0][0];
+}
+/** A colour set on an element: its Tailwind bg-/text- class from their palette, or a CSS rule for it. */
+function elementColour(html: string, css: string, tag: 'header' | 'footer' | 'h1', prop: 'bg' | 'text', tw: TailwindLook | null): string | null {
+    // Every element of that kind (a testimonial's <footer> comes before the site's), the last one that says.
+    const found = [...html.matchAll(new RegExp(`<${tag}\\b[^>]*class=['"]([^'"]*)['"]`, 'gi'))].map((m) => classColour(m[1], prop, tw)).filter(Boolean);
+    if (found.length) return found[found.length - 1];
+    const rule = css.match(new RegExp(`(?:^|[},\\s])${tag}\\s*\\{([^}]*)\\}`, 'i'))?.[1] ?? '';
+    const v = rule.match(prop === 'bg' ? /background(?:-color)?\s*:\s*(#[0-9a-f]{3,8})\b/i : /(?:^|;)\s*color\s*:\s*(#[0-9a-f]{3,8})\b/i)?.[1];
+    return v ? normalizeHex(v) : null;
 }
 
 /** The palette a Tailwind colour name belongs to: brand-700 → brand. */
@@ -179,6 +231,12 @@ export function readImportedLook(html: string, baseUrl: string, css = ''): Impor
     return {
         primaryColor: primary, textColor: text, backgroundColor: background,
         secondaryColor: secondColour(html, allCss, tw, primary),
+        buttonStyle: buttonStyleOf(html),
+        cardStyle: cardStyleOf(html, allCss),
+        // Only when they differ from what the page already uses (the same colour adds nothing).
+        headingColor: differs(elementColour(html, allCss, 'h1', 'text', tw), text),
+        headerColor: differs(elementColour(html, allCss, 'header', 'bg', tw), background),
+        footerColor: differs(elementColour(html, allCss, 'footer', 'bg', tw), background),
         headingFont, font: fontKeyFor(headingFont, bodyFont),
         radius: buttonRadius(html, css),
     };
@@ -195,6 +253,11 @@ export function themeWithLook(base: SiteTheme, look: ImportedLook): SiteTheme {
         ...(look.primaryColor ? { primaryColor: look.primaryColor, accentColor: look.primaryColor } : {}),
         ...(look.textColor ? { textColor: look.textColor } : {}),
         ...(look.secondaryColor ? { secondaryColor: look.secondaryColor } : {}),
+        ...(look.buttonStyle ? { buttonStyle: look.buttonStyle } : {}),
+        ...(look.cardStyle ? { cardStyle: look.cardStyle } : {}),
+        ...(look.headingColor ? { headingColor: look.headingColor } : {}),
+        ...(look.headerColor ? { headerColor: look.headerColor } : {}),
+        ...(look.footerColor ? { footerColor: look.footerColor } : {}),
         ...(look.backgroundColor ? { backgroundColor: look.backgroundColor } : {}),
         ...(look.font ? { font: look.font } : {}),
         ...(look.radius ? { radius: look.radius } : {}),

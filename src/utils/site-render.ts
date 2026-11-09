@@ -209,6 +209,21 @@ export function themeCss(theme: SiteTheme): string {
     // The second colour paints the call-to-action button only where it can be told apart from the band.
     const second = theme.secondaryColor && contrastRatio(theme.secondaryColor, theme.primaryColor) >= 1.6 ? theme.secondaryColor : null;
     const secondCss = second ? `.cta .btn{background:${second};color:${readableInkOn(second)}}` : '';
+    // The 2026-11-08 design settings — each only when set, so older sites draw exactly as before.
+    const extra = [
+        // A soft wash from the main colour into the second (or the tint), always light enough for the text.
+        `.grad{background:linear-gradient(135deg,${mixHex(theme.backgroundColor, theme.primaryColor, 0.16)},${mixHex(theme.backgroundColor, theme.secondaryColor || theme.accentColor || theme.primaryColor, 0.22)})}`,
+        `.card>.ci{display:block;width:calc(100% + 2*var(--cp));max-width:none;margin:calc(-1*var(--cp)) calc(-1*var(--cp)) 16px;aspect-ratio:3/2;object-fit:cover;border-radius:var(--r) var(--r) 0 0}`,
+        // Outlined on the page's own background only: on a coloured band (CTA, brand band, banner or
+        // cover hero) the outline would be the band's colour, so the solid button stays there.
+        theme.buttonStyle === 'outline' ? ':where(section:not(.band):not(.cta):not(.banner):not(.cover)) .btn:not(.s){background:transparent;color:var(--p);border:2px solid var(--p)}' : '',
+        theme.buttonStyle === 'pill' ? '.btn{border-radius:999px}' : '',
+        theme.cardStyle === 'shadow' ? '.card{border-color:transparent;box-shadow:0 1px 2px rgba(0,0,0,.06),0 10px 28px rgba(0,0,0,.09)}' : '',
+        theme.cardStyle === 'flat' ? '.card{border:0;background:transparent;--cp:0px}.card>.ci{border-radius:var(--r)}' : '',
+        theme.headingColor ? `h1,h2,h3{color:${theme.headingColor}}.band h1,.band h2,.band h3,.hero.banner h1,.hero.cover h1,.cta h2{color:inherit}` : '',
+        theme.headerColor ? `.hd{background:${theme.headerColor};color:${readableInkOn(theme.headerColor)};border-bottom-color:transparent}.hd .brand,.hd .nav>li>a,.hd .nav a[aria-current=page]{color:${readableInkOn(theme.headerColor)}}.hd .nav .sub a{color:var(--t)}@media(max-width:720px){.hd .nav .sub a{color:${readableInkOn(theme.headerColor)}}}` : '',
+        theme.footerColor ? `.ft{background:${theme.footerColor};color:${readableInkOn(theme.footerColor)};opacity:1;border-top-color:transparent}` : '',
+    ].join('');
     return `${faces}:root{--p:${theme.primaryColor};--t:${theme.textColor};--b:${theme.backgroundColor};--ink:${ink};--r:${RADIUS[theme.radius]};--f:${pair.body};--hf:${pair.heading};--hw:${pair.weight};--sp:${SPACING[theme.spacing ?? 'regular']}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}body{margin:0;font-family:var(--f);color:var(--t);background:var(--b);line-height:1.6;font-size:17px}
 img{max-width:100%;height:auto;display:block}a{color:var(--p)}h1,h2,h3{line-height:1.2;margin:0 0 .5em;font-family:var(--hf);font-weight:var(--hw)${pair.upper ? ';text-transform:uppercase' : ''}${pair.tracking ? `;letter-spacing:${pair.tracking}` : ''}}.brand{font-family:var(--hf)}h1{font-size:clamp(2rem,5vw,3.2rem)}h2{font-size:clamp(1.5rem,3.5vw,2.2rem)}h3{font-size:1.15rem}
@@ -231,9 +246,9 @@ section{padding:var(--sp) 0}.alt{background:${tint ?? 'rgba(0,0,0,.035)'}}
 .hero.cover .w{position:relative;z-index:1;width:100%}.hero.cover h1{font-size:clamp(2.4rem,6.2vw,4.6rem);color:#fff}.hero.cover .eb{color:#fff;opacity:.9}.hero.cover .sub{opacity:.95}
 .hero.cover a.btn.s{color:#fff;border-color:#fff}.hero.cover video.bg{background:transparent}
 .grid{display:grid;gap:24px;margin-top:28px}@media(min-width:700px){.grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}}
-.card{border:1px solid rgba(0,0,0,.08);border-radius:var(--r);padding:22px;background:var(--b)}.card>.more{display:inline-block;margin-top:6px;font-weight:700}.num{display:inline-flex;width:34px;height:34px;border-radius:50%;background:var(--p);color:var(--ink);align-items:center;justify-content:center;font-weight:800;margin-bottom:10px}
+.card{--cp:22px;border:1px solid rgba(0,0,0,.08);border-radius:var(--r);padding:var(--cp);background:var(--b);overflow:hidden}.card>.more{display:inline-block;margin-top:6px;font-weight:700}.num{display:inline-flex;width:34px;height:34px;border-radius:50%;background:var(--p);color:var(--ink);align-items:center;justify-content:center;font-weight:800;margin-bottom:10px}
 .intro{max-width:680px;opacity:.85}details{border:1px solid rgba(0,0,0,.1);border-radius:var(--r);padding:14px 18px;margin:10px 0;background:var(--b)}summary{cursor:pointer;font-weight:700}details p{margin:.6em 0 0}
-.cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}${secondCss}
+.cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}${secondCss}${extra}
 .ft{border-top:1px solid rgba(0,0,0,.08);padding:28px 0;font-size:.85rem;opacity:.85}.ft .w{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}.ft a{color:inherit}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
 .stars{color:#f59e0b;letter-spacing:1px}.stars .off{color:rgba(0,0,0,.15)}.rv{margin:0}.rv blockquote{margin:8px 0}.rv figcaption{font-size:.95rem}.rsum{margin:8px 0 0}
@@ -388,7 +403,7 @@ function listingCardHtml(l: SiteRenderListing, tag: 'h2' | 'h3', layout: 'cards'
 
 /** One section. `h1` is true for the single section that carries the page's main heading. */
 /** The background a section is drawn on: none, the soft tint, or the brand colour (look.background). */
-type SectionBg = '' | 'alt' | 'band';
+type SectionBg = '' | 'alt' | 'band' | 'grad';
 
 function sectionHtml(s: Section, h1: boolean, bg: SectionBg): string {
     const H = h1 ? 'h1' : 'h2';
@@ -412,8 +427,10 @@ function sectionHtml(s: Section, h1: boolean, bg: SectionBg): string {
             const p = s.props;
             // A card's own link ("Read more", "Course details") sits under its words.
             const more = (it: typeof p.items[number]) => (it.link ? `<a class="more" href="${esc(href(it.link.href))}">${esc(it.link.label)}</a>` : '');
-            const cards = p.items.map((it, i) => `<div class="card">${s.type === 'steps' ? `<span class="num">${i + 1}</span>` : ''}<h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}${more(it)}</div>`).join('');
-            const list = s.type === 'steps' ? `<ol class="grid" style="list-style:none;padding:0">${p.items.map((it, i) => `<li class="card"><span class="num">${i + 1}</span><h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}${more(it)}</li>`).join('')}</ol>` : `<div class="grid">${cards}</div>`;
+            // A card's own picture, across its top (2026-11-08).
+            const pic = (it: typeof p.items[number]) => { const src = imageSrc(it.image); return it.image && src ? mediaHtml({ alt: it.image.alt }, src, 'lazy', 'ci') : ''; };
+            const cards = p.items.map((it, i) => `<div class="card">${pic(it)}${s.type === 'steps' ? `<span class="num">${i + 1}</span>` : ''}<h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}${more(it)}</div>`).join('');
+            const list = s.type === 'steps' ? `<ol class="grid" style="list-style:none;padding:0">${p.items.map((it, i) => `<li class="card">${pic(it)}<span class="num">${i + 1}</span><h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}${more(it)}</li>`).join('')}</ol>` : `<div class="grid">${cards}</div>`;
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${list}</div></section>`;
         }
         case 'text': {
@@ -777,7 +794,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
         // plain, the soft tint, or a band of their brand colour (look.background).
         const look = s.look;
         const auto: SectionBg = shade && s.type !== 'hero' && s.type !== 'cta' ? 'alt' : '';
-        const bg: SectionBg = !look || look.background === 'auto' ? auto : look.background === 'soft' ? 'alt' : look.background === 'brand' ? 'band' : '';
+        const bg: SectionBg = !look || look.background === 'auto' ? auto : look.background === 'soft' ? 'alt' : look.background === 'brand' ? 'band' : look.background === 'gradient' ? 'grad' : '';
         if (s.type !== 'hero' && s.type !== 'cta') shade = !shade;
         let html = sectionHtml(s, i === h1At, bg);
         // Columns for grid sections (look.columns) — a class on the section's one grid.

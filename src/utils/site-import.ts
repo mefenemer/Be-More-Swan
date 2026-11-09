@@ -128,7 +128,7 @@ export function buildImportPrompt(pages: ReadPage[], blocks: NumberedBlock[], op
     const kinds = [
         '- {"type":"hero","headline":n,"subheadline":n|null,"button":n|null,"button2":n|null,"image":n|null}   (the opening of a page: its main heading, the line under it, and up to two buttons)',
         '- {"type":"text","heading":n|null,"body":[n,…],"image":n|null}   (paragraphs, or a short list, under one heading)',
-        '- {"type":"features","heading":n|null,"items":[{"title":n,"body":[n],"button":n|null}]}   (a set of short titled points or cards — services, courses, reasons to choose them; "button" is the card\'s own link, e.g. "Read more")',
+        '- {"type":"features","heading":n|null,"items":[{"title":n,"body":[n],"button":n|null,"image":n|null}]}   (a set of short titled points or cards — services, courses, reasons to choose them; "button" is the card\'s own link, e.g. "Read more"; "image" its own picture)',
         '- {"type":"steps","heading":n|null,"items":[{"title":n,"body":[n],"button":n|null}]}   (a numbered process: how it works)',
         opts.allowed('faq') ? '- {"type":"faq","heading":n|null,"items":[{"q":n,"a":[n]}]}   (questions and their answers)' : '',
         '- {"type":"testimonials","heading":n|null,"items":[{"quote":n,"name":n,"detail":n|null}]}   (ONLY quotes from customers that are on their site, with the customer\'s name block)',
@@ -170,7 +170,7 @@ ${kinds}
 export type PlanSection =
     | { type: 'hero'; headline: number | null; subheadline: number | null; button: number | null; button2?: number | null; image: number | null }
     | { type: 'text'; heading: number | null; body: number[]; image: number | null }
-    | { type: 'features' | 'steps'; heading: number | null; items: Array<{ title: number; body: number[]; button?: number | null }> }
+    | { type: 'features' | 'steps'; heading: number | null; items: Array<{ title: number; body: number[]; button?: number | null; image?: number | null }> }
     | { type: 'cta'; heading: number | null; body: number[]; button: number | null }
     | { type: 'faq'; heading: number | null; items: Array<{ q: number; a: number[] }> }
     | { type: 'testimonials'; heading: number | null; items: Array<{ quote: number; name: number | null; detail: number | null }> }
@@ -198,7 +198,7 @@ export function readImportPlan(raw: unknown): ImportPlan | null {
                 case 'hero': sections.push({ type: 'hero', headline: num(s.headline), subheadline: num(s.subheadline), button: num(s.button), button2: num(s.button2), image: num(s.image) }); break;
                 case 'text': sections.push({ type: 'text', heading, body: nums(s.body), image: num(s.image) }); break;
                 case 'features': case 'steps':
-                    sections.push({ type: s.type, heading, items: list(s.items).map((x) => ({ title: num(x.title) ?? 0, body: nums(x.body), button: num(x.button) })).filter((x) => x.title > 0) }); break;
+                    sections.push({ type: s.type, heading, items: list(s.items).map((x) => ({ title: num(x.title) ?? 0, body: nums(x.body), button: num(x.button), image: num(x.image) })).filter((x) => x.title > 0) }); break;
                 case 'cta': sections.push({ type: 'cta', heading, body: nums(s.body), button: num(s.button) }); break;
                 case 'faq': sections.push({ type: 'faq', heading, items: list(s.items).map((x) => ({ q: num(x.q) ?? 0, a: nums(x.a) })).filter((x) => x.q > 0 && x.a.length) }); break;
                 case 'testimonials': sections.push({ type: 'testimonials', heading, items: list(s.items).map((x) => ({ quote: num(x.quote) ?? 0, name: num(x.name), detail: num(x.detail) })).filter((x) => x.quote > 0) }); break;
@@ -220,6 +220,7 @@ export function picturesInPlan(plan: ImportPlan | null, blocks: NumberedBlock[])
     const add = (n: number | null) => { if (n !== null && isImage(n) && !out.includes(n) && out.length < IMPORT_MAX_PICTURES) out.push(n); };
     for (const pg of plan.pages) for (const s of pg.sections) {
         if (s.type === 'hero' || s.type === 'text') add(s.image);
+        if (s.type === 'features' || s.type === 'steps') s.items.forEach((it) => add(it.image ?? null));
         if (s.type === 'gallery') s.images.forEach(add);
     }
     return out;
@@ -444,10 +445,13 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
                     const title = text(it.title, i);
                     const body = takeParagraphs(it.body, i).join('\n\n');
                     const btn = title ? buttonAt(it.button, i) : null;
-                    if (!btn || taken.has(btn.n)) return { title, body };
+                    // Its own picture, when the plan gave one and it was copied.
+                    const img = title ? image(it.image, i) : null;
+                    const base = img ? { title, body, image: img } : { title, body };
+                    if (!btn || taken.has(btn.n)) return base;
                     taken.add(btn.n);
-                    return { title, body, link: btn.link, btnN: btn.n };
-                }).filter((x) => x.title) as Array<{ title: string; body: string; link?: { label: string; href: string }; btnN?: number }>;
+                    return { ...base, link: btn.link, btnN: btn.n };
+                }).filter((x) => x.title) as Array<{ title: string; body: string; image?: { assetId: number; alt: string }; link?: { label: string; href: string }; btnN?: number }>;
                 const max = s.type === 'steps' ? LIMITS.steps : LIMITS.features;
                 const fits = items.length >= (s.type === 'steps' ? LIMITS.stepsMin : 1) && items.length <= max && (!heading || fitsHeading(heading))
                     && items.every((x) => x.title.length <= LIMITS.itemTitle && x.body.length <= LIMITS.itemBody);

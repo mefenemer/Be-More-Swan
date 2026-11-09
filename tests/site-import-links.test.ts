@@ -228,7 +228,7 @@ async function main() {
     });
 
     await check('the chat and the first-draft writer know a card can carry a link', () => {
-        assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('items:[{title, body, link:{label,href}|null}]'));
+        assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('items:[{title, body, link:{label,href}|null'));
         assert.ok(read('src/utils/site-draft.ts').includes('"items": [ { "title", "body", "link": { "label", "href" } or null } ]'));
     });
 

@@ -62,6 +62,7 @@ async function main() {
     await check('Restorative-shaped site: teal main colour, sand page, dark-teal words, Fraunces & Inter, round buttons', () => {
         assert.deepStrictEqual(readImportedLook(TAILWIND, 'https://restorative.example/'), {
             primaryColor: '#1d5b5a', textColor: '#183d3c', backgroundColor: '#fbf9f5', secondaryColor: null,
+            buttonStyle: 'pill', cardStyle: null, headingColor: null, headerColor: null, footerColor: null,
             headingFont: 'Fraunces', font: 'editorial', radius: 'large',
         });
     });
