@@ -5,7 +5,13 @@ Added 2026-11-09, from the owner, after the first real footage tests on staging.
 [video-producer-footage-and-ai-plan.md](./video-producer-footage-and-ai-plan.md) (footage review and
 tightening, on staging).
 
-Status: **decisions taken 2026-11-09 — the owner accepted every recommendation in §8 (D-S1…D-S6).** Phase 1 in progress.
+Status: **decisions taken 2026-11-09 — the owner accepted every recommendation in §8 (D-S1…D-S6).**
+**Phases 1–2 built 2026-11-09 (commit def5d734)**, waiting on `db/z-video-producer-studio.sql` before deploy.
+
+As built, differently from §4.1: projects render through their OWN worker
+(`render-video-project-background.ts` → `src/utils/video-render.ts renderProject`), not by making
+`post_render_jobs.post_id` nullable. The post render path is untouched, and the render state lives on
+`video_projects` (`render_id`, `render_bucket`, `render_region`). Same composition, same resolvers.
 
 ---
 
