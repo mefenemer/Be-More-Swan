@@ -48,6 +48,9 @@ async function main() {
     await check('a plain page with an image/png icon is not Magento (the old `mage/` test matched inside "image/")', () => {
         const plain = '<html><head><link rel="icon" type="image/png" href="/favicon.png"><script src="/js/require.js"></script></head><body><main><h1>Hand-made page</h1><img src="/img/team.jpg" alt="Our team"></main></body></html>';
         assert.strictEqual(found(plain), null);
+        // Joomla's default favicon link, a webp icon and og:image:type (reported by the Joomla session).
+        const joomla = '<html><head><link href="/templates/cassiopeia/favicon.ico" rel="alternate icon" type="image/vnd.microsoft.icon"><link rel="icon" type="image/webp" href="/images/x.webp"><meta property="og:image:type" content="image/jpeg"></head><body><main><img src="/images/joomla.jpg"></main></body></html>';
+        assert.ok(!adapter.detect(joomla, '', cheerio.load(joomla)));
     });
 
     console.log('\nThe menu');
