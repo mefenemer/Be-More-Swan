@@ -2,8 +2,8 @@
 
 One session per platform improved that platform's adapter (`src/utils/site-builders/<key>.ts`) on its own
 branch, with a test, synthetic fixtures and a report (`docs/site-import-platforms/<key>.md`). This page pulls
-the 34 reports together. **All 34 are committed.** Merged into staging so far: Magento (adapter only), Wix,
-Wix Studio. The other 31 branches touch only their own files and are waiting to be merged.
+the 34 reports together. **All 34 adapters are merged into staging** (2026-11-09; Magento's adapter only —
+its shared changes were re-applied after review), and every platform test passes with all of them together.
 
 ## Where each platform stands
 
@@ -61,7 +61,7 @@ holds the words; nothing to detect, so generic framework handling does the work.
 ## Can be done — shared fixes, by how many platforms they help
 
 1. **A look hook for adapters** (WordPress, Elementor, Squarespace, Shopify, Webflow, Wix, Hostinger, GoDaddy, Tilda, Ghost, Drupal, Joomla, Framer, Weebly — 14). Builders ship their own UI colours, or keep the owner's theme in variables we don't read (`--wp--preset--*`, `--e-global-*`, Dawn's tokens, Ghost's `--gh-font-*`). Let each adapter give its own colours and fonts and say which CSS to ignore. **S–M, biggest single win.**
-2. **Merge the 31 waiting branches.** They touch only their own files.
+2. ~~Merge the 31 waiting branches~~ — done 2026-11-09.
 3. **Framework page data and pictures** (v0, Sanity, Sitecore, Contentful, Strapi, Payload, Cursor, Windsurf, Lovable — 9): unwrap `/_next/image`, `/_ipx/`, `/_vercel/image`; expand `__NEXT_DATA__`, the RSC payload, SvelteKit/Nuxt data and streamed Suspense content as one shared step. **M.**
 4. **AI-builder colours** (Lovable, v0, Bolt): read shadcn HSL tokens and Tailwind v4 `oklch()`. **S.**
 5. **Read the look from the rendered page** when headless Chrome drew it (Bolt, Lovable, Framer). **S.**
