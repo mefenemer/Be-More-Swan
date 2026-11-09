@@ -30,6 +30,8 @@ import { inlineEmbeds, type EmbedFetchers } from './site-embeds';
 import { linkFirst, PLACEHOLDER, plainOf } from './site-rich-text';
 import { fontKeyFor, lookFound, readImportedLook, readsOn, themeWithLook, type ImportedLook } from './site-import-theme';
 import { ADAPTERS } from './site-builders';
+import { isWooShop } from './site-builders/woocommerce';
+import { readShopifyFeed, readWooFeed, SHOP_FEED_MAX, shopFeedUrl, shopifyCurrency } from './site-shop-feeds';
 import * as cheerio from 'cheerio';
 import { harvestBrandSignals } from './brand-extract';
 import { findBlogIndex, readImportedBlog, type BlogIndexSignal, type ImportedBlog } from './site-import-blog';
@@ -329,7 +331,11 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
     const slugs: string[] = [];
     pages.slice(0, cap).forEach((p, i) => {
         if (i === 0) { slugs.push(''); return; }
-        const last = new URL(p.url).pathname.split('/').filter(Boolean).pop() ?? '';
+        // A file name is not an address: about.html → about, and …/index.html takes its folder's name.
+        const segs = new URL(p.url).pathname.split('/').filter(Boolean);
+        let last = segs.pop() ?? '';
+        if (/^(index|default|home)\.(html?|php|aspx?)$/i.test(last)) last = segs.pop() ?? '';
+        last = last.replace(/\.(html?|php|aspx?|jsp)$/i, '');
         let s = slugify(decodeURIComponent(last)) || slugify(pageTitle(p, i)) || `page-${i + 1}`;
         if (RESERVED_SLUGS.has(s)) s = `${s}-page`;
         let k = 2;
@@ -340,6 +346,8 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
     // Their links between their own pages follow onto the new ones; tel:, mailto: and other sites stay.
     const mapHref = (href: string | null): string | null => {
         if (!href) return null;
+        // A jump to a section of the same page: a placeholder until the sections have their ids (pointJumps).
+        if (/^#[\w-]{1,35}$/.test(href)) return `#${JUMP}${href.slice(1)}`;
         if (/^(mailto|tel):/i.test(href)) return cleanHref(href.replace(/\s+/g, ''));
         const i = pages.slice(0, cap).findIndex((p) => samePath(p.url, href));
         if (i >= 0) return i === 0 ? '/' : `/${slugs[i]}`;
@@ -639,6 +647,23 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         };
     });
 
+    // A one-page site (Carrd, a landing page): its menu jumps to sections. Each section a menu entry jumped
+    // to is labelled with that entry, and when the home page is all there is, the new site is one page too
+    // (structure 'one_page': its menu links down the page to the labelled sections).
+    const anchorNav = pages[0]?.page.anchorNav ?? [];
+    const navTextOf = new Map(anchorNav.map((a) => [a.id, a.text]));
+    const anchorByHeading = new Map<string, string>();
+    for (const b of blocks) if (b.page === 0 && b.block.kind === 'heading' && b.block.anchor && navTextOf.has(b.block.anchor)) anchorByHeading.set(b.block.text, navTextOf.get(b.block.anchor)!);
+    if (anchorByHeading.size && outPages[0]) {
+        const labelled = new Set<string>();
+        for (const sec of outPages[0].sections as Array<{ type: string; props: Record<string, unknown>; look?: Record<string, unknown> }>) {
+            const head = String(sec.props.headline ?? sec.props.heading ?? '');
+            const label = anchorByHeading.get(head);
+            if (label && !labelled.has(label)) { labelled.add(label); sec.look = { ...(sec.look ?? {}), menuLabel: label.slice(0, LIMITS.navLabel) }; }
+        }
+    }
+    const onePage = pages.length === 1 && anchorNav.length >= 2 && anchorByHeading.size >= 2;
+
     // An enquiry form, where their old site had a contact page — or a page of its own, when there is room.
     if (!outPages.some((p) => p.sections.some((s) => s.type === 'contact'))) {
         const contactPage = outPages.find((p) => CONTACT_PAGE.test(p.slug));
@@ -650,7 +675,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
 
     const home = pages[0].page;
     const contact = importedContact(pages);
-    const { definition, warnings } = normaliseSiteDefinition({
+    const { definition: drafted, warnings } = normaliseSiteDefinition({
         theme: current.theme,
         settings: {
             ...current.settings,
@@ -662,7 +687,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
             // Their profiles on social sites (footer links), when the new site has none yet.
             socialLinks: current.settings.socialLinks?.length ? current.settings.socialLinks : importedSocialLinks(pages),
         },
-        nav: [], footer: current.footer, structure: 'pages', pages: outPages,
+        nav: [], footer: current.footer, structure: onePage ? 'one_page' : 'pages', pages: outPages,
         // Their old addresses that changed (/services/coaching → /coaching) keep working on the new site.
         redirects: pages.slice(0, cap).flatMap((p, i) => {
             const from = redirectKey(new URL(p.url).pathname);
@@ -670,6 +695,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
             return from !== to ? [{ from, to }] : [];
         }),
     }, { maxPages: input.maxPages });
+    const definition = pointJumps(drafted, blocks, input.maxPages);
 
     const leftOut = [...skip].map((n) => blocks[n - 1]).filter((b) => b && b.block.kind !== 'image' && b.block.kind !== 'button').map((b) => (b.block as { text: string }).text.slice(0, 200));
     return { definition, leftOut, notCarried, warnings };
@@ -715,6 +741,37 @@ export function importedFormFields(pages: ReadPage[]): string[] {
     const withForm = pages.filter((p) => p.page.formFields?.length);
     const best = withForm.find((p) => CONTACT_PAGE.test(new URL(p.url).pathname)) ?? withForm[0];
     return best?.page.formFields ?? [];
+}
+
+/** The placeholder a jump to a section carries until the sections have their ids. */
+const JUMP = 'bmsj-';   // short: the gate keeps in-page anchors of up to 40 characters
+
+/**
+ * Jump buttons and links ("See our work ↓" → #work) pointed at the section they jump to: the section
+ * whose heading sat in the old page's #work. A jump nothing matches goes to the top of its own page, so a
+ * call-to-action keeps its button (2026-11-09).
+ */
+function pointJumps(def: SiteDefinition, blocks: NumberedBlock[], maxPages: number): SiteDefinition {
+    if (!JSON.stringify(def.pages).includes(`#${JUMP}`)) return def;
+    const pages = def.pages.map((pg, i) => {
+        const anchorOf = new Map<string, string>();
+        for (const b of blocks) if (b.page === i && b.block.kind === 'heading' && b.block.anchor) anchorOf.set(b.block.text, b.block.anchor);
+        const target = new Map<string, string>();
+        for (const sec of pg.sections) {
+            const p = sec.props as unknown as Record<string, unknown>;
+            const a = anchorOf.get(String(p.headline ?? p.heading ?? ''));
+            if (a && !target.has(a)) target.set(a, `#${sec.id}`);
+        }
+        const own = pg.slug ? `/${pg.slug}` : '/';
+        const fix = (v: unknown): unknown => {
+            if (typeof v === 'string') return v.startsWith(`#${JUMP}`) ? (target.get(v.slice(JUMP.length + 1)) ?? own) : v.includes(`(#${JUMP}`) ? v.replace(new RegExp(`\\(#${JUMP}([\\w-]+)\\)`, 'g'), (_m, id: string) => `(${target.get(id) ?? own})`) : v;
+            if (Array.isArray(v)) return v.map(fix);
+            if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)]));
+            return v;
+        };
+        return { ...pg, sections: pg.sections.map((sec) => ({ ...sec, props: fix(sec.props) })) };
+    });
+    return normaliseSiteDefinition({ ...def, pages }, { maxPages }).definition;
 }
 
 /** The first email, phone and address found across the pages read (home first). */
@@ -904,6 +961,8 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
         }
     }
     report.products = importedProducts(read, blocks, assets);
+    // Every product the shop sells, from its own public feed (site-shop-feeds.ts): a page shows only some.
+    report.products = await withShopFeed(report.products, homePage.platform ?? null, home.html, home.finalUrl, deps);
     if (!report.products.length) delete report.products;
     const built = assembleImport({ current: input.current, pages: read, blocks, plan, assets, maxPages: input.maxPages, blogUrls: blog?.urls });
     let definition = built.definition;
@@ -962,6 +1021,32 @@ export async function planInBatches(pages: ReadPage[], blocks: NumberedBlock[], 
     const ok = plans.filter((x): x is ImportPlan => !!x);
     if (!ok.length) return null;
     return { pages: ok.flatMap((x) => x.pages), skip: ok.flatMap((x) => x.skip) };
+}
+
+/** The pages' products, then the shop feed's others (each name once), up to Business Information's limit. */
+async function withShopFeed(fromPages: NonNullable<ImportReport['products']>, platform: string | null, html: string, finalUrl: string, deps: ImportDeps): Promise<NonNullable<ImportReport['products']>> {
+    try {
+        const origin = new URL(finalUrl).origin;
+        const url = shopFeedUrl(platform, origin);
+        if (!url || !deps.fetchJson || (platform === 'elementor' && !isWooShop(html))) return fromPages;
+        const r = await deps.fetchJson(url).catch(() => null);
+        let feed = r?.ok ? (platform === 'shopify' ? readShopifyFeed(r.html, origin, shopifyCurrency(html)) : readWooFeed(r.html)) : [];
+        // Shopify throttles its JSON feed for scripted clients (429 "retry after 60", live check
+        // 2026-11-09): its "all products" page is an ordinary page, read like the others.
+        if (!feed.length && platform === 'shopify') {
+            const page = await deps.fetchHtml(`${origin}/collections/all`).catch(() => null);
+            if (page?.ok) feed = readImportPage(page.html, page.finalUrl).products ?? [];
+        }
+        if (!feed.length) return fromPages;
+        const seen = new Set(fromPages.map((p) => p.name.trim().toLowerCase()));
+        const out = [...fromPages];
+        for (const p of feed) {
+            const k = p.name.trim().toLowerCase();
+            if (seen.has(k) || out.length >= SHOP_FEED_MAX) continue;
+            seen.add(k); out.push(p);
+        }
+        return out;
+    } catch { return fromPages; }
 }
 
 /** Stylesheets read for the look: their own first; a site with thirty is a build artefact. */

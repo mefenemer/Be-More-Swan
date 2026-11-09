@@ -93,7 +93,13 @@ export function judgeVideoProject(
         case 'planned':
             return { kind: 'in_review', summary: 'Storyboard ready — check it and press "Make the video" on the Video Producer\'s Videos tab' };
         case 'building':
+        case 'rendering':
             return { kind: 'in_review', summary: 'The Video Producer is making the video' };
+        // A studio video (docs/video-producer-studio-plan.md): ready = the finished MP4 is in My Content.
+        case 'ready':
+            return { kind: 'delivered', summary: 'Video ready in My Content' };
+        case 'render_failed':
+            return { kind: 'in_review', summary: 'The video was made but its file failed to render — press "Try the render again" on the Videos tab' };
         case 'failed':
             return project.storyboard
                 ? { kind: 'in_review', summary: `The video stopped part-way${project.note ? ` (${project.note.slice(0, 120)})` : ''} — press "Make the video" again on the Videos tab` }

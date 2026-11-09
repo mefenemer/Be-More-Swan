@@ -81,6 +81,9 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('on_request', 'Email results: sends and link clicks (totals)', ['newsletter_sends', 'newsletter_link_clicks', 'newsletter_sequences']),
     ...group('on_request', 'Brand Designer briefs and Inspo titles', ['visual_briefs', 'inspo_items']),
     ...group('on_request', 'Video Producer videos: titles, status and what they cost', ['video_projects']),
+    // The owner's own videos as the Video Producer understood them (shot lists, spoken words) — only
+    // the Video Producer reads them; nothing the Mentor needs.
+    ...group('never', 'Video Producer footage reviews: shot lists and transcripts of the owner\'s own videos', ['footage_analyses']),
     ...group('on_request', 'The user\'s own support tickets and issue reports, with status', ['support_tickets', 'issue_reports']),
     ...group('on_request', 'A half-finished assistant set-up, to offer picking it up', ['onboarding_drafts']),
     ...group('on_request', 'Bookings: counts and upcoming, when bookings are in use', ['bookings', 'booking_settings', 'class_sessions']),
@@ -100,6 +103,11 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'audience_form_submissions', 'lead_opt_outs', 'review_opt_outs', 'suppression_list', 'site_enquiries',
     ], 'Your contacts\' email addresses, phone numbers and consent records'),
     ...group('never', 'Website visitor counts — the Website Assistant reports them; the hashed visitor ids are only for counting each visitor once a day', ['site_visit_days', 'site_visit_pages', 'site_visit_refs', 'site_visit_seen'], 'How many people visit your website'),
+    // Holiday lets and B&B rooms (db/z-stays.sql). stay_types holds the door codes and Wi-Fi passwords
+    // emailed to guests — never for a model. The Mentor sees stays as bookings (kind 'stay').
+    ...group('never', 'Holiday lets and B&B rooms: rates, rooms, blocked dates, and the arrival details (door codes) sent to guests; the Website Assistant manages them', [
+        'stay_types', 'stay_rates', 'stay_fees', 'stay_units', 'stay_blocks', 'booking_units',
+    ], 'Your holiday let\'s door codes and arrival details'),
     ...group('never', 'Website listings (events and directory entries) — they hold the names and emails of visitors who sent entries in; the Website Assistant manages them', ['site_listings'], 'Your website\'s listings and who sent them in'),
     ...group('never', 'Message bodies and transcripts (size and privacy; the owning assistant reads them)', [
         'lead_messages', 'chat_attachments',

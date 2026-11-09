@@ -110,17 +110,18 @@ export const DEFAULT_BLOG_LABEL = 'Blog';
 /** Whether this site shows the Blog Assistant's posts at /blog. */
 export const blogOn = (def: Pick<SiteDefinition, 'settings'>): boolean => def.settings.blog?.enabled === true;
 
-export const SITE_FEATURES = ['shop', 'bookings', 'menu', 'hours', 'gallery', 'reviews', 'signup', 'faq', 'listings'] as const;
+export const SITE_FEATURES = ['shop', 'bookings', 'menu', 'hours', 'gallery', 'reviews', 'signup', 'faq', 'listings', 'stays'] as const;
 export type SiteFeature = typeof SITE_FEATURES[number];
 /** The kinds of section each feature brings. Everything not listed is always offered. */
 export const FEATURE_SECTIONS: Record<SiteFeature, SectionType[]> = {
     shop: ['products'], bookings: ['booking'], menu: ['menu'], hours: ['hours'],
-    gallery: ['gallery'], reviews: ['reviews'], signup: ['signup'], faq: ['faq'], listings: ['listings'],
+    gallery: ['gallery'], reviews: ['reviews'], signup: ['signup'], faq: ['faq'], listings: ['listings'], stays: ['stays'],
 };
 export const FEATURE_LABELS: Record<SiteFeature, string> = {
     shop: 'Sell things (shop and Buy buttons)', bookings: 'Take bookings (appointments, tables, classes)', menu: 'A food or drinks menu',
     hours: 'Opening hours', gallery: 'A picture gallery', reviews: 'Customer reviews', signup: 'Email sign-up and free downloads', faq: 'Questions and answers',
     listings: 'Listings — an events calendar, a directory or another list',
+    stays: 'Holiday lets or B&B rooms (stays by the night)',
 };
 /** The feature a kind of section belongs to, or null when it is always offered. */
 export function featureOf(type: SectionType): SiteFeature | null {
@@ -252,6 +253,12 @@ export interface BlogPostsProps { heading: string | null; intro: string | null; 
  * category filter (plain links, no script). Each entry has its own page at /listings/<slug>.
  */
 export interface ListingsProps { heading: string | null; intro: string | null; kind: 'event' | 'entry'; categories: string[]; show: 'upcoming' | 'all'; count: number; layout: 'cards' | 'list'; filter: boolean; allowPosts: boolean; postLabel: string; }
+/**
+ * Stays (stays.ts, Business Information ▸ Stays): holiday lets and B&B room types, read when the page
+ * is drawn — the section holds only WHICH ones ([] = every active one), never names or prices. Each
+ * has its own page at /stays/<slug> with its calendar; booking starts at /_book?stay=<id>.
+ */
+export interface StaysProps { heading: string | null; intro: string | null; stayIds: number[]; buttonLabel: string; }
 export interface HoursProps { heading: string | null; intro: string | null; showHours: boolean; showContact: boolean; showAddress: boolean; }
 /** 'class': classes and events — dated sessions with places (class-sessions.ts), not times from opening hours. */
 export type BookingSectionKind = 'appointment' | 'consultation' | 'table' | 'class';
@@ -287,9 +294,10 @@ export type SectionBody =
     | { id: string; type: 'reviews'; props: ReviewsProps }
     | { id: string; type: 'social_feed'; props: SocialFeedProps }
     | { id: string; type: 'blog_posts'; props: BlogPostsProps }
-    | { id: string; type: 'listings'; props: ListingsProps };
+    | { id: string; type: 'listings'; props: ListingsProps }
+    | { id: string; type: 'stays'; props: StaysProps };
 export type SectionType = SectionBody['type'];
-export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts', 'listings'];
+export const SECTION_TYPES: readonly SectionType[] = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts', 'listings', 'stays'];
 
 export interface SitePageDef {
     id: string;
@@ -371,7 +379,8 @@ export const DEFAULT_MAX_PAGES = 100;
 export const MIN_TEXT_CONTRAST = 4.5;
 /** Page addresses we serve ourselves, which a page may never take. */
 // 'listings': each listing's own page is /listings/<slug> (site-listings.ts LISTING_PATH).
-export const RESERVED_SLUGS = new Set(['sitemap.xml', 'robots.txt', 'api', 'preview', 'assets', 'favicon.ico', '_bms', 'report', 'listings']);
+// 'stays': each holiday let / room type has its own page at /stays/<slug> (site-stays.ts STAY_PATH).
+export const RESERVED_SLUGS = new Set(['sitemap.xml', 'robots.txt', 'api', 'preview', 'assets', 'favicon.ico', '_bms', 'report', 'listings', 'stays']);
 
 export const DEFAULT_THEME: SiteTheme = {
     primaryColor: '#1f2937', textColor: '#1f2937', backgroundColor: '#ffffff', font: 'sans', radius: 'medium', logoUrl: null,
@@ -618,6 +627,14 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
                 postLabel: cleanText(p.postLabel, LIMITS.buttonLabel) || (p.kind === 'entry' ? 'Add a listing' : 'Post your event'),
             } };
         }
+        case 'stays': {
+            const ids = [...new Set((Array.isArray(p.stayIds) ? p.stayIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+            return { type: 'stays', props: {
+                heading: textOrNull(p.heading, LIMITS.headline) ?? 'Stay with us', intro: textOrNull(p.intro, LIMITS.intro, true),
+                stayIds: ids.slice(0, 50),
+                buttonLabel: cleanText(p.buttonLabel, LIMITS.buttonLabel) || 'See dates and prices',
+            } };
+        }
         case 'gallery': {
             const raw = Array.isArray(p.images) ? p.images : [];
             const images = raw.map((x) => {
@@ -687,7 +704,7 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
 }
 
 /** A section's look: a closed set of choices, so nothing here can become CSS. */
-export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts', 'listings'];
+export const GRID_TYPES: readonly SectionType[] = ['features', 'steps', 'testimonials', 'products', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts', 'listings', 'stays'];
 export function cleanLook(raw: unknown, type: SectionType): SectionLook {
     const o = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const background = o.background === 'plain' || o.background === 'soft' || o.background === 'brand' || o.background === 'gradient' ? o.background : 'auto';
@@ -865,9 +882,16 @@ function cleanRedirects(v: unknown, pagePaths: Set<string>): SiteRedirect[] {
 }
 /** Where an old address now lives, or null. Only for an address no page answers at. */
 export function redirectFor(def: SiteDefinition, path: string): string | null {
-    if (!def.redirects?.length) return null;
     const key = redirectKey(path);
-    return def.redirects.find((r) => r.from === key)?.to ?? null;
+    const listed = def.redirects?.find((r) => r.from === key)?.to;
+    if (listed) return listed;
+    // An old file-style address of a page that now lives at its plain one (about.html, /About.HTML →
+    // /about): an imported site's links and search results still arrive (2026-11-09).
+    const raw = (path || '/').split(/[?#]/)[0];
+    if (/\.(html?|php|aspx?|jsp)$/i.test(raw) || /[A-Z]/.test(raw)) {
+        if (def.pages.some((p) => (p.slug ? `/${p.slug}` : '/') === key) && key !== raw) return key;
+    }
+    return null;
 }
 
 /** The social sites a footer link may go to, by host, with the name it is shown as. */

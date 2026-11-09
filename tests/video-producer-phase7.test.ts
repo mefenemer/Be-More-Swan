@@ -129,13 +129,12 @@ check('every way a video starts goes through startProject (setup defaults apply 
 
 console.log('\n──── "Make a video version" ────');
 
-check('a post becomes a brief in its own words, on its own platform when that takes video', () => {
+check('a post becomes a brief in its own words, vertical; the finished video goes back to the post', () => {
     const ig = briefFromPost({ caption: 'Our autumn menu is here — pumpkin spice is back!', platform: 'instagram' })!;
     assert.match(String(ig.message), /pumpkin spice is back/);
-    assert.deepStrictEqual(ig.platforms, ['instagram']);
-    assert.deepStrictEqual(briefFromPost({ caption: 'Hiring a new barista this month', platform: 'linkedin' })!.platforms, ['instagram'],
-        'LinkedIn takes no vertical video here — the Videos tab default');
-    assert.deepStrictEqual(briefFromPost({ caption: 'Hiring a new barista this month', platform: 'youtube' })!.platforms, ['youtube']);
+    // A shape, not platforms (studio plan D-S2); where it goes is the post's own (video-post-media.ts).
+    assert.strictEqual(ig.shape, '9:16');
+    assert.strictEqual(ig.platforms, undefined);
     assert.strictEqual(briefFromPost({ caption: 'Hi', platform: 'instagram' }), null);
     assert.strictEqual(briefFromPost({ caption: null, platform: 'instagram' }), null);
 });

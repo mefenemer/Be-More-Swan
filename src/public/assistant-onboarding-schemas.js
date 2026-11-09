@@ -518,6 +518,19 @@
             ],
           },
           {
+            // docs/video-producer-studio-plan.md D-S2: a shape, never platforms — the finished video is
+            // saved to My Content and posted by whoever uses it.
+            key: 'defaultShape',
+            label: 'What shape should your videos usually be?',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: '9:16', label: 'Vertical 9:16', description: 'Instagram Reels, YouTube Shorts, TikTok, Stories.' },
+              { value: '1:1', label: 'Square 1:1', description: 'Facebook and LinkedIn feeds.' },
+              { value: '16:9', label: 'Wide 16:9', description: 'YouTube and your website.' },
+            ],
+          },
+          {
             key: 'defaultCta',
             label: 'What should viewers do at the end?',
             type: 'text',

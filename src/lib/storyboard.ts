@@ -11,18 +11,41 @@
 //   · a "product photo" scene must name one of the workspace's OWN pictures — an AI picture of
 //     someone's product invents the product, so an unknown id becomes stock, never AI
 //   · no URLs read aloud or painted on screen (models invent them)
+//   · an "own video" scene must name one of the videos the owner chose, and its segment is clamped
+//     to that video's MEASURED length — never the model's numbers (a segment past the end of a file
+//     fails the whole render: "No frame found", 2026-11-01)
 //
 // PURE: no database, no network. Tested in tests/storyboard.test.ts.
 
 import type { CaptionStyle } from './captions';
 import { isStillMotion, type StillMotion } from './still-motion';
 
-export const SCENE_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_image', 'brand_card', 'product_photo'] as const;
+export const SCENE_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_image', 'brand_card', 'product_photo', 'own_video'] as const;
 export type SceneSource = typeof SCENE_SOURCES[number];
 export const BEATS = ['hook', 'problem', 'value', 'proof', 'cta'] as const;
 export type Beat = typeof BEATS[number];
 
 export const VIDEO_LENGTHS = [15, 30, 60] as const;
+
+/**
+ * The shape of the finished video (owner decision D-S2, 2026-11-09): the Video Producer makes a video
+ * for anywhere, so it asks for a shape, never platforms. Vertical for Reels, Shorts and Stories;
+ * square for feeds; wide for YouTube and websites.
+ */
+export const VIDEO_SHAPES = ['9:16', '1:1', '16:9'] as const;
+export type VideoShape = typeof VIDEO_SHAPES[number];
+export const SHAPE_LABELS: Record<VideoShape, string> = { '9:16': 'vertical (9:16)', '1:1': 'square (1:1)', '16:9': 'wide (16:9)' };
+export function isVideoShape(v: unknown): v is VideoShape {
+    return (VIDEO_SHAPES as readonly string[]).includes(String(v));
+}
+/** The frame a shape renders at — even pixels, 1080 on the short side. Pure. */
+export function shapeFrame(shape: VideoShape | null | undefined): { width: number; height: number } {
+    return shape === '1:1' ? { width: 1080, height: 1080 } : shape === '16:9' ? { width: 1920, height: 1080 } : { width: 1080, height: 1920 };
+}
+/** Stock search orientation for a shape. Pure. */
+export function shapeOrientation(shape: VideoShape | null | undefined): 'portrait' | 'landscape' | 'square' {
+    return shape === '1:1' ? 'square' : shape === '16:9' ? 'landscape' : 'portrait';
+}
 export type VideoLength = typeof VIDEO_LENGTHS[number];
 export type AiAllowance = 'stock_only' | 'stock_and_ai' | 'ai_first';
 
@@ -49,6 +72,16 @@ export interface VideoBrief {
     /** Burn the spoken words in as captions (default on), and how they look (captions.ts). */
     captions?: boolean;
     captionStyle?: CaptionStyle | null;
+    /**
+     * The owner's own videos this one is made from (docs/video-producer-footage-and-ai-plan.md §4).
+     * Absent or empty = an ordinary video from stock, pictures and AI. With footage and no voiceover,
+     * the footage keeps its own sound and each own-video scene is exactly its segment.
+     */
+    footageAssetIds?: number[];
+    /** Cut pauses, "um"s and repeated takes out of own footage in its own sound. Absent = on. */
+    tighten?: boolean;
+    /** The finished video's shape. Absent = vertical 9:16 (every video before 2026-11-09). */
+    shape?: VideoShape;
 }
 
 export interface Scene {
@@ -65,6 +98,19 @@ export interface Scene {
     assetId?: number;
     /** Movement on a still scene. */
     motion?: StillMotion;
+    /** For own_video: the segment of the owner's video (`assetId`), in seconds against the source. */
+    inS?: number;
+    outS?: number;
+    /**
+     * For own_video in its own sound: the pieces of the segment that play, once pauses, "um"s and
+     * repeated takes are taken out (src/lib/footage.ts tightenSegment). Absent = the whole segment.
+     * Worked out by the server from the review's word timings — never taken from the model.
+     */
+    cuts?: Array<{ inS: number; outS: number }>;
+    /** What tightening took out, for the Videos tab ("2 pauses, 1 “um” cut — 3.1 s shorter"). */
+    tightened?: { pauses: number; fillers: number; retakes: number; savedS: number };
+    /** false = the owner chose "Keep as filmed" for this scene. */
+    tighten?: boolean;
     targetS: number;
 }
 
@@ -76,6 +122,46 @@ export interface Storyboard {
 
 /** A picture the planner may use for a product_photo scene. */
 export interface LibraryPicture { id: number; name: string }
+
+/** One of the owner's videos the planner may cut own_video scenes from. `durationS` is MEASURED. */
+export interface OwnVideo { id: number; name: string; durationS: number }
+
+/**
+ * The fewest scenes a usable video has. Three for a made-up video (hook, body, call to action) — but
+ * a video from the owner's own footage is often ONE take plus a closing card, and the three-scene
+ * rule failed the first real talking-head plan on staging (2026-11-09). Pure.
+ */
+export function minScenesFor(brief: Pick<VideoBrief, 'footageAssetIds'>): number {
+    return brief.footageAssetIds?.length ? 1 : MIN_SCENES;
+}
+
+/** A cut shorter than this is a flash, not a scene. */
+export const MIN_OWN_SEGMENT_S = 0.8;
+
+/** Does this video keep its footage's own sound? Footage chosen, no voiceover. Pure. */
+export function keepsOwnSound(brief: Pick<VideoBrief, 'voiceover' | 'footageAssetIds'>): boolean {
+    return !brief.voiceover && !!brief.footageAssetIds?.length;
+}
+
+/**
+ * A segment of an own video, made safe: inside [0, durationS], in order, at least MIN_OWN_SEGMENT_S.
+ * Null when the video is too short to hold one. Pure.
+ */
+export function clampSegment(inS: unknown, outS: unknown, durationS: number): { inS: number; outS: number } | null {
+    if (!(durationS >= MIN_OWN_SEGMENT_S)) return null;
+    let a = Number(inS), b = Number(outS);
+    if (!Number.isFinite(a)) a = 0;
+    if (!Number.isFinite(b)) b = durationS;
+    if (b < a) [a, b] = [b, a];
+    a = Math.min(Math.max(0, a), durationS);
+    b = Math.min(Math.max(0, b), durationS);
+    if (b - a < MIN_OWN_SEGMENT_S) {
+        // Too short: grow it around where it was asked for, inside the file.
+        b = Math.min(durationS, a + MIN_OWN_SEGMENT_S);
+        a = Math.max(0, b - MIN_OWN_SEGMENT_S);
+    }
+    return { inS: round1(a), outS: Math.min(durationS, round1(b)) };
+}
 
 const URL_RE = /\b(?:https?:\/\/|www\.)\S+/gi;
 const clip = (s: unknown, n: number) => String(typeof s === 'string' ? s : '').replace(URL_RE, '').replace(/\s+/g, ' ').trim().slice(0, n);
@@ -101,10 +187,14 @@ function stockFor(source: SceneSource): SceneSource {
  * Make a model's storyboard safe to build. Pure; never throws. Returns the storyboard and the
  * changes made, so the review panel can say what was adjusted rather than silently differ.
  */
-export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: LibraryPicture[] = []): { storyboard: Storyboard; changes: string[] } {
+export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: LibraryPicture[] = [], footage: OwnVideo[] = []): { storyboard: Storyboard; changes: string[] } {
     const changes: string[] = [];
     const r = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
     const libraryIds = new Set(library.map((p) => p.id));
+    // Only the videos the owner chose for THIS video, and only once they are measured.
+    const chosen = new Set(brief.footageAssetIds ?? []);
+    const ownById = new Map(footage.filter((v) => chosen.has(v.id) && v.durationS > 0).map((v) => [v.id, v]));
+    const ownSound = keepsOwnSound(brief);
     const motions: StillMotion[] = ['push_in', 'pan_right', 'pull_out', 'pan_left'];
 
     let scenes: Scene[] = (Array.isArray(r.scenes) ? r.scenes : []).slice(0, MAX_SCENES).map((s, i) => {
@@ -115,6 +205,17 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
             source = 'stock_photo';
             changes.push(`Scene ${i + 1}: that picture isn't in your library, so a stock photo is used instead.`);
         }
+        let segment: { inS: number; outS: number } | null = null;
+        if (source === 'own_video') {
+            const own = ownById.get(assetId);
+            segment = own ? clampSegment(o.inS, o.outS, own.durationS) : null;
+            if (!segment) {
+                source = 'stock_video';
+                changes.push(`Scene ${i + 1}: that isn't one of the videos you chose, so stock footage is used instead.`);
+            } else if (Number(o.inS) !== segment.inS || Number(o.outS) !== segment.outS) {
+                changes.push(`Scene ${i + 1}: the cut was moved to fit inside your video.`);
+            }
+        }
         const beat: Beat = (BEATS as readonly string[]).includes(String(o.beat)) ? o.beat as Beat : 'value';
         const scene: Scene = {
             id: `s${i + 1}`,
@@ -123,6 +224,14 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
             source,
             targetS: Math.max(MIN_SCENE_S, Number(o.targetS) || brief.lengthS / 5),
         };
+        if (segment) {
+            scene.assetId = assetId;
+            scene.inS = segment.inS;
+            scene.outS = segment.outS;
+            if (o.tighten === false) scene.tighten = false;
+            // Its own sound: the scene IS the segment. Under a voiceover the voice sets the cut.
+            if (ownSound) scene.targetS = round1(segment.outS - segment.inS);
+        }
         const text = clip(o.onScreenText, 60);
         if (text) scene.onScreenText = text;
         const prompt = clip(o.prompt, 600);
@@ -135,8 +244,8 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
     });
 
     // Too few scenes is not repairable by rules — the caller re-plans or falls back.
-    if (scenes.length < MIN_SCENES) {
-        changes.push(`The plan had ${scenes.length} scene${scenes.length === 1 ? '' : 's'}; a video needs at least ${MIN_SCENES}.`);
+    if (scenes.length < minScenesFor(brief)) {
+        changes.push(`The plan had ${scenes.length} scene${scenes.length === 1 ? '' : 's'}; a video needs at least ${minScenesFor(brief)}.`);
     }
 
     // AI allowance, then the per-video clip cap. Earliest AI clips are kept (the hook matters most).
@@ -174,7 +283,8 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
         }
     }
 
-    scenes = fitLength(scenes, brief.lengthS, changes);
+    // A video in its own sound: a scene with no voiceover line is fine — the footage speaks.
+    scenes = fitLength(scenes, brief.lengthS, changes, ownSound ? (s) => s.source === 'own_video' : undefined);
 
     return {
         storyboard: {
@@ -186,23 +296,38 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
     };
 }
 
-/** Rescale scene lengths to the asked-for total (±10 %), keeping the hook ≤ 3 s. Pure. */
-export function fitLength(scenes: Scene[], lengthS: number, changes: string[] = []): Scene[] {
+/**
+ * Rescale scene lengths to the asked-for total (±10 %), keeping the hook ≤ 3 s. Pure.
+ *
+ * `fixed` scenes keep their length: an own-video scene in its own sound IS its segment, and stretching
+ * it would play past the cut (or past the file). Only the other scenes take up the difference, and a
+ * fixed hook is never shortened — cutting someone off mid-sentence is worse than a long hook.
+ */
+export function fitLength(scenes: Scene[], lengthS: number, changes: string[] = [], fixed?: (s: Scene) => boolean): Scene[] {
     if (!scenes.length) return scenes;
+    const isFixed = (s: Scene) => !!fixed && fixed(s);
     const total = scenes.reduce((a, s) => a + s.targetS, 0);
     const lo = lengthS * 0.9, hi = lengthS * 1.1;
     let out = scenes.map((s) => ({ ...s }));
     if (total < lo || total > hi) {
-        const k = lengthS / total;
-        out = out.map((s) => ({ ...s, targetS: Math.max(MIN_SCENE_S, s.targetS * k) }));
-        changes.push(`Scene lengths adjusted to make a ${lengthS}-second video.`);
+        const fixedTotal = out.filter(isFixed).reduce((a, s) => a + s.targetS, 0);
+        const free = total - fixedTotal;
+        const room = lengthS - fixedTotal;
+        if (free > 0 && room > 0) {
+            const k = room / free;
+            out = out.map((s) => (isFixed(s) ? s : { ...s, targetS: Math.max(MIN_SCENE_S, s.targetS * k) }));
+            changes.push(`Scene lengths adjusted to make a ${lengthS}-second video.`);
+        } else if (free > 0 && fixedTotal > hi) {
+            changes.push(`Your clips alone run ${Math.round(fixedTotal)} seconds, longer than the ${lengthS} asked for.`);
+        }
     }
-    if (out[0].targetS > MAX_HOOK_S) {
+    if (out[0].targetS > MAX_HOOK_S && !isFixed(out[0])) {
         const spare = out[0].targetS - MAX_HOOK_S;
         out[0].targetS = MAX_HOOK_S;
-        if (out.length > 1) {
-            const share = spare / (out.length - 1);
-            for (let i = 1; i < out.length; i++) out[i].targetS += share;
+        const takers = out.slice(1).filter((s) => !isFixed(s));
+        if (takers.length) {
+            const share = spare / takers.length;
+            for (const s of takers) s.targetS += share;
         }
     }
     return out.map((s) => ({ ...s, targetS: round1(s.targetS) }));
@@ -259,7 +384,7 @@ export function estimateCredits(storyboard: Storyboard, brief: VideoBrief, costs
 // ── The planner prompt ──────────────────────────────────────────────────────────────────────────
 
 export function storyboardSystemPrompt(): string {
-    return `You are a short-form video producer for a small business. You plan vertical (9:16) promo videos for Instagram Reels, YouTube Shorts and Facebook.
+    return `You are a short-form video producer for a small business. You plan short promo videos (vertical 9:16 unless told another shape) that the business can post anywhere or use on its website.
 
 Rules:
 - One idea per video. Open with a hook that lands in under 3 seconds. End with the call to action.
@@ -269,9 +394,10 @@ Rules:
 - AI prompts describe a scene with NO words, letters, logos or signs in it. Never use AI to picture the business's own product — use product_photo or stock.
 - Stock keywords are 2–4 plain words a stock library would match.
 - Use only facts from the business information given. Never invent prices, offers, awards or claims.
+- When the owner's own footage is listed, build the video mainly FROM it: own_video scenes, each a segment {assetId, inS, outS} in seconds inside that video's length, taken from its usable moments. Fill only real gaps with stock, a branded card or AI. Never use a moment the shot list marks as a problem.
 
 Return STRICT JSON only:
-{"title": "...", "caption": "a post caption, 1–3 sentences", "scenes": [{"beat": "hook|problem|value|proof|cta", "voiceover": "...", "onScreenText": "...", "source": "stock_video|stock_photo|product_photo|brand_card|ai_image|ai_video", "keywords": "...", "prompt": "...", "assetId": 123, "motion": "push_in|pull_out|pan_left|pan_right", "targetS": 4}]}`;
+{"title": "...", "caption": "a post caption, 1–3 sentences", "scenes": [{"beat": "hook|problem|value|proof|cta", "voiceover": "...", "onScreenText": "...", "source": "own_video|stock_video|stock_photo|product_photo|brand_card|ai_image|ai_video", "keywords": "...", "prompt": "...", "assetId": 123, "inS": 0, "outS": 4.5, "motion": "push_in|pull_out|pan_left|pan_right", "targetS": 4}]}`;
 }
 
 export function storyboardUserPrompt(args: {
@@ -283,6 +409,11 @@ export function storyboardUserPrompt(args: {
     feedback?: string | null;
     /** The script's language by name ("French"); absent or English = no instruction. */
     language?: string | null;
+    /** The owner's footage with its shot lists (src/lib/footage.ts footagePlannerBlock); absent = none. */
+    footageBlock?: string | null;
+    /** The suggested edits the owner ticked, and the ones they left unticked (footage videos only). */
+    acceptedEdits?: string[];
+    declinedEdits?: string[];
 }): string {
     const { brief } = args;
     const allow = brief.allowAi === 'stock_only' ? 'Do NOT use ai_image or ai_video.'
@@ -290,19 +421,29 @@ export function storyboardUserPrompt(args: {
         : `Prefer stock; AI is allowed where stock would not fit (at most ${MAX_AI_CLIPS} ai_video scenes).`;
     return [
         `Today is ${args.today}.`,
+        brief.shape && brief.shape !== '9:16' ? `SHAPE: the video is ${SHAPE_LABELS[brief.shape]}, not vertical — frame every scene for that.` : '',
         `BUSINESS: ${args.businessName}`,
         args.businessFacts ? `BUSINESS INFORMATION:\n${args.businessFacts}` : '',
-        `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, ${MIN_SCENES}–${MAX_SCENES} scenes, scene lengths adding up to ${brief.lengthS} seconds.`,
+        brief.footageAssetIds?.length
+            ? `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, 1–${MAX_SCENES} scenes, about ${brief.lengthS} seconds. One continuous take is ONE own_video scene — never split a sentence across scenes; a closing branded card is its own scene.`
+            : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, ${MIN_SCENES}–${MAX_SCENES} scenes, scene lengths adding up to ${brief.lengthS} seconds.`,
         `WHAT IT MUST SAY: ${clip(brief.message, 600)}`,
         brief.cta ? `CALL TO ACTION (use these words in the last scene): ${clip(brief.cta, 200)}` : '',
-        brief.voiceover ? 'It has a voiceover — every scene needs a voiceover line.' : 'No voiceover — leave voiceover empty and use onScreenText to carry the message.',
-        args.language && args.language !== 'English'
+        keepsOwnSound(brief)
+            ? 'No voiceover — the video keeps the footage\'s OWN sound. Leave voiceover empty. An own_video scene plays exactly its segment, so cut segments at natural pauses, never mid-sentence. Its targetS is ignored. Pauses, "um"s and repeated takes inside a segment are taken out automatically afterwards, so choose whole sentences and do not chop a segment up to remove them yourself. Use onScreenText where the footage needs words.'
+            : brief.voiceover ? 'It has a voiceover — every scene needs a voiceover line.' : 'No voiceover — leave voiceover empty and use onScreenText to carry the message.',
+        // A footage video always says it: the shot list quotes what was SAID, and a mis-heard language
+        // there wrote the whole post in Welsh for an English speaker (staging, 2026-11-09).
+        args.language && (args.language !== 'English' || args.footageBlock)
             ? `LANGUAGE: write every voiceover line, every onScreenText and the caption in ${args.language}. Keep search keywords and AI prompts in English.`
             : '',
         allow,
         args.library.length
             ? `LIBRARY PICTURES you may use as product_photo (id: name):\n${args.library.slice(0, 30).map((p) => `${p.id}: ${clip(p.name, 80)}`).join('\n')}`
             : 'There are no library pictures — do not use product_photo.',
+        args.footageBlock ? args.footageBlock : '',
+        args.acceptedEdits?.length ? `EDITS THE OWNER ACCEPTED (apply every one):\n${args.acceptedEdits.map((e) => `- ${clip(e, 300)}`).join('\n')}` : '',
+        args.declinedEdits?.length ? `EDITS THE OWNER TURNED DOWN (do NOT apply these):\n${args.declinedEdits.map((e) => `- ${clip(e, 300)}`).join('\n')}` : '',
         args.feedback ? `THE OWNER'S NOTES ON THE LAST VERSION (follow them): ${clip(args.feedback, 600)}` : '',
     ].filter(Boolean).join('\n\n');
 }

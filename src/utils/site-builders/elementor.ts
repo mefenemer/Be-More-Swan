@@ -9,6 +9,7 @@
 import type * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import type { BuilderAdapter } from './types';
+import { isWooShop, prepareWoo, readWooProducts } from './woocommerce';
 import { fontKeyFor } from '../site-import-theme';
 import type { FontKey } from '../site-definition';
 
@@ -29,7 +30,7 @@ function setBackground($el: cheerio.Cheerio<AnyNode>, url: string): void {
     $el.attr('data-bg', url);
 }
 
-function prepare($: cheerio.CheerioAPI): void {
+export function prepareElementor($: cheerio.CheerioAPI): void {
     // 1. Elementor's furniture: popups (printed hidden on every page), carousel clones and controls,
     //    the burger button. Sections hidden on desktop are the phone copies of a desktop section.
     $('[data-elementor-type="popup"], .elementor-location-popup, .elementor-popup-modal').remove();
@@ -155,7 +156,12 @@ export const adapter: BuilderAdapter = {
     look: ({ html, css }) => { const k = readElementorKit(html, css); return k.defaults ? null : { primaryColor: k.primaryColor, secondaryColor: k.secondaryColor ?? k.accentColor, textColor: k.textColor, headingFont: k.headingFont, font: k.font }; },
     label: 'Elementor',
     detect: (html, gen) => (gen.includes('elementor') || /elementor-(?:kit|section|element|widget)|\/plugins\/elementor\/|\/uploads\/elementor\//.test(html)) && !WOO_PAGE.test(html),
-    prepare: ($) => prepare($),
+    // A WooCommerce shop built with Elementor (main session, 2026-11-09): its home and content pages are
+    // Elementor's, but their product cards and furniture are WooCommerce's — both tidy, and the shop's
+    // products are read. (Its product and shop pages go to the WooCommerce adapter, which does the same.)
+    prepare: ($) => { if (isWooShop($.html())) { try { prepareWoo($); } catch { /* Elementor's tidy still runs */ } } prepareElementor($); },
+    products: ($, url) => (isWooShop($.html()) ? readWooProducts($, url) : []),
+    catalogueLink: (href, el) => /\/(product-category|product-tag|product)\//i.test(href) || el.closest('li.menu-item-object-product_cat, li.menu-item-object-product').length > 0,
     // Elementor's own lines: carousel and lightbox labels, screen-reader-only text.
     noise: /^((previous|next)( (slide|image|item))?|go to slide \d+|(toggle|close) (menu|navigation)|menu toggle|pause|play)$/i,
     fullSizeImage: elementorFullSize,

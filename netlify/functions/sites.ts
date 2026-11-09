@@ -84,6 +84,8 @@ import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnect
 import { audienceContacts, bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
 import { addEnquirerToAudience } from '../../src/utils/enquiry-audience';
 import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookingSetup } from '../../src/utils/bookings';
+import { cleanKeep, settleDamageDeposit, stayMoneyView } from '../../src/utils/stay-charges';
+import { damageEmail, whoFor } from '../../src/utils/stay-jobs';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
 import { bookableKinds, bookingsSwitchedOff } from '../../src/utils/site-booking-page';
 import { sectionForKind } from '../../src/utils/site-booking';
@@ -110,7 +112,7 @@ import { reconcileSoon } from '../../src/utils/calendar-microsoft';
 import { addSessions, cancelSessions, cleanNewSessions, offerFreedPlaces, ownerTimetable } from '../../src/utils/class-sessions';
 import { utcToZoned } from '../../src/utils/booking-time';
 import { BOOKING_PAGE_PATH, sessionLink } from '../../src/utils/site-render';
-import { buyablePence, priceDisplay } from '../../src/utils/product-price';
+import { buyablePence, poundsToPence, priceDisplay } from '../../src/utils/product-price';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
     applySiteOperations, claimDraft, definitionOf, endDraft, hasUnpublishedChanges, listSiteVersions, loadOrCreateSite, maxPagesFor,
@@ -522,7 +524,9 @@ export default withLambda(async (event) => {
         const rows = await listBookings(db, orgId);
         return json(200, { bookings: rows.map((b) => ({ ...describeBooking(b, setup.settings.timezone), id: b.id, status: b.status, customerName: b.customerName,
             customerEmail: b.customerEmail, customerPhone: b.customerPhone, notes: b.notes, partySize: b.partySize, startsAt: b.startsAt, createdAt: b.createdAt,
-            cancelledBy: b.cancelledBy, moved: b.movedFromId !== null, reminded: b.reminderSentAt !== null, deposit: depositNote(b), meeting: ownerMeetingLine(b) || null }))
+            cancelledBy: b.cancelledBy, moved: b.movedFromId !== null, reminded: b.reminderSentAt !== null, deposit: depositNote(b), meeting: ownerMeetingLine(b) || null,
+            // Holiday lets / B&B rooms: the balance and the damage deposit (stay-jobs.ts), in words, and what the owner may do.
+            ...(b.kind === 'stay' ? { stay: stayMoneyView(b, new Date()) } : {}) }))
             // An unpaid deposit hold that lapsed was never a booking: left out.
             .filter((b, i) => !(rows[i].paymentStatus === 'expired')) });
     }
@@ -556,6 +560,27 @@ export default withLambda(async (event) => {
         }
         await reconcileSoon(db, orgId);
         return json(200, { cancelled: r.sessions.length, told: r.bookings.length, sessions: await ownerTimetable(db, orgId, new Date()) });
+    }
+
+    // ── A stay's damage deposit (stay-charges.ts): give it all back now, or keep part with a reason ──
+    if (action === 'damage_return' || action === 'damage_keep') {
+        const [b] = await db.select().from(bookings).where(and(eq(bookings.id, Number(body.id)), eq(bookings.organisationId, orgId))).limit(1);
+        if (!b || b.kind !== 'stay' || b.damageDepositStatus !== 'held' || !b.damageDepositPence) return json(409, { error: 'There is no damage deposit held for that booking.' });
+        let keep = 0;
+        const reason = String(body.reason ?? '').trim().slice(0, 500);
+        if (action === 'damage_keep') {
+            const today = utcToZoned(new Date(), (await loadBookingSetup(db, orgId)).settings.timezone).date;
+            if (!b.checkIn || b.checkIn > today) return json(409, { error: 'Part of a damage deposit can only be kept once the stay has started.' });
+            keep = poundsToPence(body.keep) ?? -1;
+            const ok = cleanKeep(b.damageDepositPence, keep, reason);
+            if (!ok.ok) return json(400, { error: ok.error });
+        }
+        const r = await settleDamageDeposit(db, b, keep, keep ? reason : null);
+        if (r === 'none') return json(409, { error: 'That damage deposit has already been dealt with.' });
+        const who = await whoFor(db, b);
+        await damageEmail(b, who, r === 'refund_failed' ? null : keep, keep ? reason : null);
+        if (r === 'refund_failed') return json(502, { error: 'Stripe couldn\'t make the refund. Please refund it in your Stripe dashboard — the guest has been told you will.' });
+        return json(200, { ok: true, status: r });
     }
 
     if (action === 'booking_decide') {

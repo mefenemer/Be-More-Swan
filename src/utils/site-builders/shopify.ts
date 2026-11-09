@@ -9,7 +9,7 @@
 // slider arrows, review-app badges and the Inbox chat. This file takes that away and asks Shopify's
 // picture CDN for a sensible full-size copy of each picture.
 import type * as cheerio from 'cheerio';
-import type { BuilderAdapter } from './types';
+import type { BuilderAdapter, ImportedProduct } from './types';
 import { tokenColour } from '../site-import-theme';
 
 /**
@@ -107,8 +107,41 @@ export function shopifyFullSize(src: string): string | null {
     return u.toString();
 }
 
+/**
+ * The products a page's product grid shows (Dawn and most themes: a card linking to /products/<handle>),
+ * read before prepare tidies the cards: name, the price as shown, picture and page. For Business
+ * Information only — never put on the site (main session, 2026-11-09).
+ */
+export function readShopifyCards($: cheerio.CheerioAPI, url: URL | null): ImportedProduct[] {
+    const out: ImportedProduct[] = [];
+    const seen = new Set<string>();
+    const abs = (h: string | undefined) => { if (!h) return null; try { const u = new URL(h, url ?? undefined); u.search = ''; u.hash = ''; return u.toString(); } catch { return null; } };
+    $('a[href*="/products/"]').each((_, a) => {
+        const href = abs($(a).attr('href'));
+        if (!href || seen.has(href) || /\/products\/[^/]+\/(?!$)/.test(new URL(href).pathname)) return;
+        const card = $(a).closest('li, .card-wrapper, .product-card, .grid-product, .product-item, .grid__item, article');
+        if (!card.length) return;
+        const name = ($(a).text().replace(/\s+/g, ' ').trim() || card.find('.card__heading, .product-card__title, .grid-product__title, h3, h2').first().text().replace(/\s+/g, ' ').trim() || $(a).find('img').attr('alt') || '').trim();
+        if (!name || name.length > 120) return;
+        // The most specific price first (a sale price over the crossed-out one), then just its amount.
+        let priceText = '';
+        for (const sel of ['.price-item--sale', '.price-item--last', '.price-item--regular', '.product-price', '.grid-product__price', '.price', '[class*="price"]']) {
+            const t = card.find(sel).first().text().replace(/\s+/g, ' ').trim();
+            if (/\d/.test(t)) { priceText = t; break; }
+        }
+        const amount = priceText.match(/(?:£|€|US\$|A\$|C\$|\$)\s?\d[\d,]*(?:\.\d{1,2})?/)?.[0]?.replace(/\s/g, '') ?? null;
+        const price = amount ? `${/\bfrom\b/i.test(priceText) ? 'From ' : ''}${amount}` : null;
+        const img = card.find('img').first();
+        const src = img.attr('src') ?? img.attr('data-src') ?? null;
+        seen.add(href);
+        out.push({ name, price, href, image: src ? (abs(src.startsWith('//') ? `https:${src}` : src)) : null });
+    });
+    return out.slice(0, 200);
+}
+
 export const adapter: BuilderAdapter = {
     key: 'shopify',
+    products: readShopifyCards,
     // The theme's colour scheme and fonts (Dawn and other 2.0 themes: --color-base-*, --font-*-family) (main session, 2026-11-09).
     look: ({ html, css }) => {
         const all = `${[...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n')}\n${css}`;

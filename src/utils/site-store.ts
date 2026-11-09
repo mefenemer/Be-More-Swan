@@ -497,6 +497,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
                 ? ` · look: ${[s.look.background !== 'auto' ? `${s.look.background} background` : '', s.look.columns !== 'auto' ? `${s.look.columns} columns` : '', s.look.menuLabel ? `menu label "${s.look.menuLabel}"` : ''].filter(Boolean).join(', ')}` : '';
             const feed = s.type === 'social_feed' ? ` · ${s.props.enabled ? 'ON' : 'SWITCHED OFF'}, ${s.props.count} newest from ${s.props.platforms.length ? s.props.platforms.join(', ') : 'every platform'}`
                 : s.type === 'blog_posts' ? ` · ${s.props.enabled ? 'ON' : 'SWITCHED OFF'}, ${s.props.count} newest blog posts`
+                : s.type === 'stays' ? ` · ${s.props.stayIds.length ? `stays ${s.props.stayIds.join(', ')}` : 'every active stay'} (Business Information ▸ Stays), button "${s.props.buttonLabel}"`
                 : s.type === 'listings' ? ` · ${s.props.kind === 'event' ? 'events' : 'entries'}${s.props.categories.length ? ` in ${s.props.categories.join(', ')}` : ''}, ${s.props.show === 'all' ? 'all' : 'upcoming only'}, up to ${s.props.count}, ${s.props.layout}${s.props.allowPosts ? `, visitors may send one in ("${s.props.postLabel}")` : ''}` : '';
             lines.push(`    · ${s.type} (sectionId ${s.id})${main ? `: "${clip(main, 90)}"` : ''}${items}${typeof pr.body === 'string' ? ` · "${clip(pr.body, 80)}"` : ''}${feed}${lk}`);
         }
@@ -532,6 +533,8 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     lines.push(await socialFeedForPrompt(db, orgId).catch(() => 'Their published social posts could not be read this turn.'));
     lines.push(await siteBlogForPrompt(db, orgId, d).catch(() => 'Their blog posts could not be read this turn.'));
     lines.push(await listingsForPrompt(db, orgId).catch(() => 'Their listings could not be read this turn.'));
+    // Holiday lets and B&B rooms, and the stays booked (stays-prompt.ts) — for stay_setup / stay_block / stay_damage cards.
+    lines.push(await (await import('./stays-prompt')).staysForPrompt(db, orgId).catch(() => 'Their stays could not be read this turn.'));
     lines.push(await visitStats(db, site.id).then((v) => visitsLine(v, site.status === 'published')).catch(() => 'Visitor figures could not be read this turn.'));
     const forms = await listSignupForms(db, orgId).catch(() => []);
     lines.push(forms.length

@@ -1647,7 +1647,7 @@
   register('visual_brief_proposal', renderVisualBriefProposalCard);
 
   // ── Built-ins: Video Producer cards (docs/video-producer-plan.md §5.10) ─────────────────────
-  // { type: 'video_brief_proposal', message, purpose?, lengthS?, cta?, voiceover?, allowAi?, platforms? }
+  // { type: 'video_brief_proposal', message, purpose?, lengthS?, cta?, voiceover?, allowAi?, shape? }
   // { type: 'video_replan_proposal', projectId, feedback? }
   //
   // The chat twins of "New video" and "Plan it again" on the Videos tab — the same video-projects.ts
@@ -1655,7 +1655,8 @@
   // can do it: that is "Make the video" on the Videos tab, which states the cost first.
   function renderVideoBriefProposalCard(ui, esc) {
     const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
-    const PLATFORMS = { instagram: 'Instagram Reel', youtube: 'YouTube Short', facebook: 'Facebook Reel' };
+    // A shape, not platforms: the Video Producer saves the finished video to My Content (studio plan D-S2).
+    const SHAPES = { '9:16': 'Vertical 9:16', '1:1': 'Square 1:1', '16:9': 'Wide 16:9' };
     const ALLOW = { stock_and_ai: 'Stock first, AI where it fits', stock_only: 'Stock and your own pictures only', ai_first: 'Leans on AI' };
     const brief = {
       message: clean(ui.message, 1200),
@@ -1669,9 +1670,8 @@
       captions: ui.captions !== false,
       ...(ui.captionStyle && typeof ui.captionStyle === 'object' ? { captionStyle: ui.captionStyle } : {}),
       allowAi: ALLOW[ui.allowAi] ? ui.allowAi : 'stock_and_ai',
-      platforms: (Array.isArray(ui.platforms) ? ui.platforms : ['instagram']).filter((p) => PLATFORMS[p]),
+      shape: SHAPES[ui.shape] ? ui.shape : '9:16',
     };
-    if (!brief.platforms.length) brief.platforms = ['instagram'];
     const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
     const runnable = brief.message.length >= 10;
     const el = document.createElement('div');
@@ -1686,7 +1686,7 @@
       ${brief.voiceover && brief.voice && window.VoicePicker ? '<button type="button" data-vdp-listen class="text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer mt-1" aria-pressed="false">&#9654; Listen to the voice</button>' : ''}
       ${brief.voiceover ? row('Captions', brief.captions ? `On${brief.captionStyle && window.CaptionStyle ? ` — ${window.CaptionStyle.describe(brief.captionStyle).toLowerCase()}` : ''}` : 'Off') : ''}
       ${row('Pictures from', ALLOW[brief.allowAi])}
-      ${row('For', brief.platforms.map((p) => PLATFORMS[p]).join(', '))}
+      ${row('Shape', SHAPES[brief.shape])}
       <p class="text-xs text-gray-600 mt-2">Planning the storyboard is free. You check it on the Videos tab before anything is made — the cost of making it is shown there first.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-vdp-save ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Plan this video</button>
@@ -1754,6 +1754,102 @@
     return el;
   }
 
+  // { type: 'footage_review_proposal', assetIds, message, lengthS?, voiceover?, cta? }
+  //
+  // The chat twin of "Use my own footage" (docs/video-producer-footage-and-ai-plan.md §4.3). It cannot
+  // review from here: only the browser can read a video (footage-reader.js), and the review can use
+  // tasks. So the card opens the Videos tab's footage form filled in, where the owner ticks the
+  // permission box and presses "Review my footage", which states the cost. On a page without the
+  // Videos tab (the standalone chat), the form is filled in the next time that tab opens.
+  function renderFootageReviewProposalCard(ui, esc) {
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const prefill = {
+      assetIds: (Array.isArray(ui.assetIds) ? ui.assetIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 10),
+      message: clean(ui.message, 1200),
+      lengthS: [15, 30, 60].includes(Number(ui.lengthS)) ? Number(ui.lengthS) : null,
+      voiceover: ui.voiceover === true,
+      cta: clean(ui.cta, 200),
+    };
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Review your footage</p>
+      ${prefill.message ? `<p class="text-sm text-gray-900 mt-2">${esc(prefill.message)}</p>` : ''}
+      <p class="text-xs text-gray-700 mt-2">${prefill.assetIds.length ? `${prefill.assetIds.length} of your video${prefill.assetIds.length === 1 ? '' : 's'}` : 'Choose your videos'}${prefill.lengthS ? ` · ${prefill.lengthS} seconds` : ''} · ${prefill.voiceover ? 'with a voiceover' : 'keeping your own sound'}</p>
+      <p class="text-xs text-gray-600 mt-2">Opens “Use my own footage” on the Videos tab, filled in. You check it there and press “Review my footage”, which shows what it uses first.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-frp-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Open it</button>
+        <button type="button" data-frp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-frp-status></p>`;
+    const status = el.querySelector('[data-frp-status]');
+    const say = (t) => { status.textContent = t; status.className = 'mt-2 text-xs font-semibold text-indigo-700'; };
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-frp-cancel]')) { el.querySelectorAll('button').forEach((x) => { x.disabled = true; }); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-frp-go]')) return;
+      const tab = document.querySelector('.main-tab-btn[data-maintab="videos"]:not(.hidden)');
+      if (tab && window.AssistantVideos && typeof window.AssistantVideos.openFootage === 'function') {
+        tab.click();
+        window.AssistantVideos.openFootage(prefill);
+        say('Opened on the Videos tab.');
+      } else {
+        try { sessionStorage.setItem('bms-footage-prefill', JSON.stringify(prefill)); } catch { /* private window */ }
+        say('Open your Video Producer’s Videos tab — it’s filled in for you there.');
+      }
+    });
+    return el;
+  }
+
+  register('footage_review_proposal', renderFootageReviewProposalCard);
+
+  // { type: 'video_handover_proposal', projectId, to: 'post' | 'blog' }
+  //
+  // The chat twin of "Use in a post" / "Use in a blog post" on a Ready video (studio plan Phase 4). It
+  // opens the SAME flows — the Social Media Manager's "Where should this video go?" or a new Blog Writer
+  // draft with the video in it — so platforms, words and approval stay with that assistant. Free.
+  function renderVideoHandoverProposalCard(ui, esc) {
+    const projectId = Number(ui.projectId);
+    const to = ui.to === 'blog' ? 'blog' : 'post';
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${to === 'blog' ? 'Use in a blog post' : 'Use in a post'}</p>
+      <p class="text-xs text-gray-700 mt-2">${to === 'blog'
+        ? 'Starts a new article for your Blog Writer with this video in it. You write and publish it there.'
+        : 'Your Social Media Assistant makes a draft post with this video. You choose where it goes, and approve it in the Review Queue.'} Free.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vhp-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Open it</button>
+        <button type="button" data-vhp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vhp-status></p>`;
+    const status = el.querySelector('[data-vhp-status]');
+    const say = (t, bad) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${bad ? 'text-red-600' : 'text-indigo-700'}`; };
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-vhp-cancel]')) { el.querySelectorAll('button').forEach((x) => { x.disabled = true; }); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-vhp-go]')) return;
+      try {
+        const [p, tm] = await Promise.all([
+          fetch(`/.netlify/functions/video-projects?id=${projectId}`, { credentials: 'same-origin' }).then((r) => r.json()),
+          fetch('/.netlify/functions/video-projects?teammates=1', { credentials: 'same-origin' }).then((r) => r.json()),
+        ]);
+        const v = p && p.project;
+        if (!v || v.status !== 'ready' || !v.outputAssetId) { say('That video isn’t ready yet — it needs to be finished first.', true); return; }
+        const words = (v.storyboard && v.storyboard.caption) || '';
+        if (to === 'post') {
+          if (!tm.social) { say('You don’t have an active Social Media Assistant. Download the video from the Videos tab instead.', true); return; }
+          if (typeof window.pceStartPostWithVideo !== 'function') { say('Open your Video Producer’s Videos tab and press “Use in a post” there.', true); return; }
+          window.pceStartPostWithVideo(tm.social.id, { assetId: v.outputAssetId, caption: words || v.title, title: v.title, shape: (v.brief && v.brief.shape) || '9:16' });
+        } else {
+          if (!tm.blog) { say('You don’t have an active Blog Writer. Download the video from the Videos tab instead.', true); return; }
+          if (typeof window.openBlogStudio !== 'function') { say('Open your Video Producer’s Videos tab and press “Use in a blog post” there.', true); return; }
+          window.openBlogStudio({ assistantId: tm.blog.id, withVideo: { assetId: v.outputAssetId, title: v.title, words } });
+        }
+        say('Opened.');
+      } catch { say('That didn’t open — try the button on the Videos tab.', true); }
+    });
+    return el;
+  }
+  register('video_handover_proposal', renderVideoHandoverProposalCard);
   register('video_brief_proposal', renderVideoBriefProposalCard);
   register('video_replan_proposal', renderVideoReplanProposalCard);
 
@@ -2658,6 +2754,7 @@
     bookings: 'People book time with us (appointments, classes, tables or events)',
     visits: 'Customers visit us (a shop, venue or studio)',
     menu: 'We serve food or drink',
+    stays: 'Guests stay with us (holiday lets, B&B or guest house rooms)',
   };
   function renderOfferProfileCard(ui, esc) {
     const offers = Array.isArray(ui.offers) ? ui.offers.filter((k) => OFFER_LABELS[k]) : [];
@@ -3697,6 +3794,105 @@
     return el;
   }
   register('listings_add', renderListingsAddCard);
+
+  // ── Holiday lets and B&B rooms (docs/holiday-lets-plan.md) ─────────────────────────────────────
+  // Shared look for the three stay cards: a heading, lines, a primary button and "Not now". The click
+  // dispatches `eventName` with { ...detail, respond } — chat-session.js calls the same server action
+  // as Business Information ▸ Stays (stays.ts) or the Website tab ▸ Bookings (sites.ts).
+  function stayCard(ui, esc, { kicker, lines, note, go, eventName, detail, done }) {
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${esc(kicker)}</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="mt-2 space-y-1">${lines.map((l) => `<li class="text-xs text-gray-700">${esc(l)}</li>`).join('')}</ul>
+      ${note ? `<p class="text-xs text-gray-600 mt-2">${esc(note)}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-st-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${lines.length ? '' : 'disabled'}>${esc(go)}</button>
+        <button type="button" data-st-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-st-status></p>`;
+    const status = el.querySelector('[data-st-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-st-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-st-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent(eventName, { bubbles: true, detail: { ...detail, respond(r) {
+        if (!r || !r.ok) { setBusy(false); say((r && r.error) || 'That couldn\'t be saved.', 'error'); return; }
+        say(done(r));
+      } } }));
+    });
+    return el;
+  }
+
+  // { type: 'stay_setup', summary, stayId: number | null, stay: { …only the fields that change } }
+  // A new holiday let / room type, or a change to one — what the owner told the chat. Nothing is saved
+  // until the click; stays.ts runs the same checks as the Stays tab (and a change is laid over what's saved).
+  const STAY_PER = { stay: 'per stay', night: 'a night', guest_night: 'per guest per night' };
+  const STAY_DAYS = { mon: 'Mondays', tue: 'Tuesdays', wed: 'Wednesdays', thu: 'Thursdays', fri: 'Fridays', sat: 'Saturdays', sun: 'Sundays' };
+  /** "2027-05-10" → "10 May 2027" (a calendar date: no timezone). */
+  const stayDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d)) ? new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : String(d || '?'));
+  function renderStaySetupCard(ui, esc) {
+    const st = ui.stay && typeof ui.stay === 'object' ? ui.stay : {};
+    const stayId = Number.isInteger(ui.stayId) && ui.stayId > 0 ? ui.stayId : null;
+    const cur = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$', CAD: 'C$' }[st.currency] || '';
+    const money = (v) => (v === null || v === undefined || v === '' ? null : `${cur}${v}`);
+    const lines = [];
+    if (st.name) lines.push(`${st.stayType === 'room' ? 'Room type' : st.stayType === 'whole' ? 'Whole property' : 'Name'}: ${st.name}`);
+    if (st.maxGuests) lines.push(`Sleeps ${st.maxGuests}${st.stayType === 'room' ? ' per room' : ''}${st.bedrooms != null ? ` · ${st.bedrooms} bedrooms` : ''}${st.bathrooms != null ? ` · ${st.bathrooms} bathrooms` : ''}${st.beds ? ` · ${st.beds}` : ''}`);
+    if (Array.isArray(st.rooms) && st.rooms.length) lines.push(`Rooms: ${st.rooms.slice(0, 30).join(', ')}`);
+    if (st.checkInTime || st.checkOutTime) lines.push(`Check-in ${st.checkInTime || '—'}, check-out ${st.checkOutTime || '—'}`);
+    for (const r of (Array.isArray(st.rates) ? st.rates : []).slice(0, 12)) {
+      lines.push(`${r.name || (r.startsOn ? 'Season' : 'Standard')}${r.startsOn ? ` (${stayDay(r.startsOn)} to ${stayDay(r.endsOn)})` : ''}: ${money(r.nightly) || '?'} a night${r.weekendNightly ? `, Fri–Sat ${money(r.weekendNightly)}` : ''}${r.weeklyNightly ? `, 7+ nights ${money(r.weeklyNightly)}` : ''}${r.minNights ? `, at least ${r.minNights} night${r.minNights === 1 ? '' : 's'}` : ''}${Array.isArray(r.changeoverDays) && r.changeoverDays.length ? `, starting on ${r.changeoverDays.map((d) => STAY_DAYS[d] || d).join(' or ')}` : ''}`);
+    }
+    for (const f of (Array.isArray(st.fees) ? st.fees : []).slice(0, 12)) lines.push(`${f.label || f.kind}: ${money(f.amount) || '?'} ${STAY_PER[f.per] || ''}`);
+    if (st.depositPercent != null) lines.push(Number(st.depositPercent) ? `${st.depositPercent}% deposit when booking; the rest ${st.balanceDays != null ? `${st.balanceDays} days before arrival` : 'before arrival'}${st.balanceCollection ? ` (${st.balanceCollection === 'auto' ? 'card charged automatically' : 'payment link emailed'})` : ''}` : 'Paid in full when booking');
+    if (st.damageDeposit !== undefined) lines.push(st.damageDeposit ? `Refundable damage deposit: ${money(st.damageDeposit)}` : 'No damage deposit');
+    if (Array.isArray(st.cancellation)) lines.push(`Cancellation: ${st.cancellation.map((c) => `${c.refund}% back ${c.days}+ days before`).join('; ') || 'no refund'}`);
+    if (st.mode) lines.push(st.mode === 'instant' ? 'Bookings confirmed straight away' : 'You confirm each booking');
+    if (Array.isArray(st.amenities)) lines.push(`Amenities: ${st.amenities.join(', ') || 'none'}`);
+    if (st.houseRules) lines.push(`House rules: ${String(st.houseRules).slice(0, 160)}`);
+    if (st.arrivalDetails) lines.push('Arrival details: as you gave them (private — emailed to guests only)');
+    if (st.licenceNumber) lines.push(`Licence number: ${st.licenceNumber}`);
+    if (st.summary) lines.push(`About it: ${String(st.summary).slice(0, 200)}`);
+    return stayCard(ui, esc, {
+      kicker: stayId ? 'Change a stay' : 'New stay', lines,
+      note: stayId ? 'Only these change; everything else stays as it is. You can edit it all in Business Information ▸ Stays.' : 'Saved in Business Information ▸ Stays, where you can add photos and edit everything. Add a "Stays" section to your website to show it.',
+      go: stayId ? 'Save the change' : 'Add it', eventName: 'site:staySetup', detail: { stayId, stay: st },
+      done: () => (stayId ? 'Saved.' : 'Added — it\'s in Business Information ▸ Stays.'),
+    });
+  }
+  register('stay_setup', renderStaySetupCard);
+
+  // { type: 'stay_block', summary, blocks: [{ unitId, startsOn, endsOn, note }] } — close dates (stays.ts POST { block }).
+  function renderStayBlockCard(ui, esc) {
+    const blocks = (Array.isArray(ui.blocks) ? ui.blocks : []).slice(0, 20).filter((b) => b && Number.isInteger(b.unitId) && /^\d{4}-\d{2}-\d{2}$/.test(b.startsOn) && /^\d{4}-\d{2}-\d{2}$/.test(b.endsOn));
+    return stayCard(ui, esc, {
+      kicker: 'Close dates', lines: blocks.map((b) => `Closed from the night of ${stayDay(b.startsOn)}, open again on ${stayDay(b.endsOn)}${b.note ? ` — ${b.note}` : ''}`),
+      note: 'Nobody can book these nights on your website. Open them again in Business Information ▸ Stays.',
+      go: blocks.length === 1 ? 'Close these dates' : `Close all ${blocks.length}`, eventName: 'site:stayBlock', detail: { blocks },
+      done: (r) => `Closed${r.done > 1 ? ` (${r.done})` : ''}.`,
+    });
+  }
+  register('stay_block', renderStayBlockCard);
+
+  // { type: 'stay_damage', summary, bookingId, decision: 'return' | 'keep', keep, reason } — sites.ts damage_return / damage_keep.
+  function renderStayDamageCard(ui, esc) {
+    const keep = ui.decision === 'keep';
+    const lines = Number.isInteger(ui.bookingId) ? (keep
+      ? [`Keep ${ui.keep || '?'} of the damage deposit and return the rest`, `Reason the guest is sent: ${ui.reason || '(none given)'}`]
+      : ['Return all of the damage deposit to the guest now']) : [];
+    return stayCard(ui, esc, {
+      kicker: 'Damage deposit', lines, note: 'It goes back to the card they paid with, and they\'re emailed.',
+      go: keep ? 'Keep it and return the rest' : 'Return it now', eventName: 'site:stayDamage',
+      detail: { bookingId: ui.bookingId, decision: keep ? 'keep' : 'return', keep: ui.keep || null, reason: ui.reason || null },
+      done: () => (keep ? 'Done — the rest is on its way back to them.' : 'Returned — it\'s on its way back to them.'),
+    });
+  }
+  register('stay_damage', renderStayDamageCard);
 
   // { type: 'site_picture', pageId, sectionId, sectionLabel, place: 'in' | 'after', kind: 'picture' | 'video', source: 'ai' | 'stock', description, alt }
   // A picture for one section, found or made RIGHT HERE (owner, 2026-11-05: the chat said "I'm generating

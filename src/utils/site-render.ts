@@ -22,6 +22,9 @@ import type { SiteBlogCard, SiteBlogIndex, SiteBlogPost, SiteRenderBlog } from '
 import type { SessionView } from './class-sessions';
 import { LISTING_PATH, listingLd, listingsFor, type SiteRenderListing, type SiteRenderListings } from './site-listings';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
+import { STAY_PATH, staysFor, type SiteRenderStay, type SiteRenderStays, type StayPageView } from './site-stays';
+import { describeCancellation } from './stay-quote';
+import { STAY_AMENITIES } from './stay-clean';
 import type { WeeklyHours } from './booking-availability';
 import { INLINE_LINK, SUBHEADING } from './site-rich-text';
 import { contrastRatio, readableInkOn } from './brand-kit';
@@ -135,6 +138,8 @@ export interface RenderContext {
     blog?: SiteRenderBlog | null;
     /** The workspace's published listings (site-listings.ts loadSiteListings); null = no listings section. */
     listings?: SiteRenderListings | null;
+    /** Holiday lets and B&B rooms (site-stays.ts loadSiteStays); null = no stays section. */
+    stays?: SiteRenderStays | null;
     /** The page's query string (without '?') on the live site — a listings section's ?category= filter. */
     query?: string;
     /** "Now", for the Open-now badge (tests pass a fixed time). */
@@ -272,7 +277,13 @@ video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r)
 .lf{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0}.lf a{border:1px solid rgba(0,0,0,.18);border-radius:999px;padding:6px 14px;text-decoration:none;color:var(--t);font-size:.92rem}.lf a[aria-current]{background:var(--p);color:var(--ink);border-color:var(--p)}.lcat{text-transform:uppercase;letter-spacing:.06em;font-weight:700}.when{font-weight:700}
 .ls{list-style:none;padding:0;margin:24px 0 0;display:grid;gap:14px}.lr{display:flex;gap:16px;align-items:flex-start;border-bottom:1px solid rgba(0,0,0,.08);padding-bottom:14px}.lr img{width:112px;aspect-ratio:4/3;object-fit:cover;border-radius:var(--r);flex-shrink:0}.lr h2,.lr h3{margin:0;font-size:1.15rem}.lr p{margin:4px 0 0}.lr h2 a,.lr h3 a{color:var(--t)}
 .li .facts{display:grid;gap:6px;margin:16px 0 20px;padding:16px 18px;border-radius:var(--r);background:rgba(0,0,0,.04)}.li .facts p{margin:0}
-.fm button{border:0;cursor:pointer;font:inherit;justify-self:start}.fm button[disabled]{opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}`;
+.fm button{border:0;cursor:pointer;font:inherit;justify-self:start}.fm button[disabled]{opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.st .facts{display:flex;flex-wrap:wrap;gap:6px 18px;margin:12px 0 18px;padding:14px 18px;border-radius:var(--r);background:rgba(0,0,0,.04)}.st .facts span{white-space:nowrap}.st .price{font-weight:700;font-size:1.1rem}
+.st .pics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:20px 0}.st .pics img{border-radius:var(--r);width:100%;aspect-ratio:3/2;object-fit:cover}.st .pics img:first-child{grid-column:1/-1}@media(min-width:700px){.st .pics{grid-template-columns:2fr 1fr 1fr}.st .pics img:first-child{grid-column:auto;grid-row:span 2;height:100%}}.st .fm{margin-bottom:36px}.st h2{margin-top:1.6em}
+.st .am{columns:2 180px;padding-left:1.1em;margin:8px 0 20px}.cals{display:grid;gap:24px;margin:14px 0}@media(min-width:700px){.cals{grid-template-columns:1fr 1fr}}
+.cal{width:100%;border-collapse:collapse;table-layout:fixed;font-size:.92rem}.cal caption{font-weight:700;text-align:left;padding-bottom:6px}.cal th{font-weight:600;font-size:.8rem;opacity:.7;padding:4px 0}.cal td{text-align:center;padding:2px}
+.cal td span,.cal td a{display:block;padding:7px 0;border-radius:var(--r)}.cal td a{background:rgba(0,0,0,.05);color:var(--t);text-decoration:none;font-weight:600}.cal td a:hover{background:var(--p);color:var(--ink)}.cal .gone{opacity:.35;text-decoration:line-through}.cal .past{opacity:.3}
+.calnav{display:flex;justify-content:space-between;gap:12px}.qt{width:100%;border-collapse:collapse;margin:12px 0}.qt td{padding:7px 0;border-bottom:1px solid rgba(0,0,0,.08)}.qt td:last-child{text-align:right;white-space:nowrap}.qt tr.tot td{font-weight:700;border-bottom:0}`;
 }
 
 /**
@@ -333,6 +344,7 @@ let socialFeedData: SiteRenderSocialFeed | null = null;
 /** Set per render call — the listings a listings section may show, and the category picked in its filter. */
 let listingsData: SiteRenderListings | null = null;
 let listingPicked: string | null = null;
+let staysData: SiteRenderStays | null = null;
 /** Set per render call — the blog posts a blog_posts section may show, and whether the blog is on. */
 let blogData: { latest: SiteRenderBlog | null; on: boolean } = { latest: null, on: false };
 /** Which posts a social_feed section shows: those that went to one of its platforms (none ticked = all), newest first. */
@@ -399,6 +411,24 @@ function listingCardHtml(l: SiteRenderListing, tag: 'h2' | 'h3', layout: 'cards'
     const inner = `${l.category ? `<p class="fine lcat">${esc(l.category)}</p>` : ''}<${tag}><a href="${esc(link)}">${esc(l.title)}</a></${tag}>${meta ? `<p class="fine">${meta}</p>` : ''}${l.summary ? `<p>${esc(l.summary)}</p>` : ''}`;
     if (layout === 'list') return `<li class="lr">${src ? `<a href="${esc(link)}" tabindex="-1" aria-hidden="true"><img src="${esc(src)}" alt="" loading="lazy"></a>` : ''}<div>${inner}</div></li>`;
     return `<article class="card bp">${src ? `<a href="${esc(link)}" tabindex="-1" aria-hidden="true"><img src="${esc(src)}" alt="" loading="lazy"></a>` : ''}<div class="bpb">${inner}<a class="more" href="${esc(link)}" aria-label="More about ${esc(l.title)}">More</a></div></article>`;
+}
+
+/** "Sleeps 4 · 2 bedrooms · 1 bathroom" — the facts a guest compares first. */
+function stayFacts(x: SiteRenderStay): string[] {
+    return [
+        `Sleeps ${x.maxGuests}${x.stayType === 'room' ? ' per room' : ''}`,
+        x.bedrooms !== null ? `${x.bedrooms} bedroom${x.bedrooms === 1 ? '' : 's'}` : '',
+        x.bathrooms !== null ? `${x.bathrooms} bathroom${x.bathrooms === 1 ? '' : 's'}` : '',
+        x.beds || '',
+        x.breakfast === 'included' ? 'Breakfast included' : x.breakfast === 'optional' ? 'Breakfast available' : '',
+    ].filter(Boolean);
+}
+
+function stayCardHtml(x: SiteRenderStay, tag: 'h2' | 'h3', button: string): string {
+    const link = href(`${STAY_PATH}/${x.slug}`);
+    const img = x.images[0];
+    const src = img ? assetUrlOf(img.assetId) || '' : '';
+    return `<article class="card bp">${src ? `<a href="${esc(link)}" tabindex="-1" aria-hidden="true"><img src="${esc(src)}" alt="" loading="lazy"></a>` : ''}<div class="bpb"><${tag}><a href="${esc(link)}">${esc(x.name)}</a></${tag}><p class="fine">${esc(stayFacts(x).slice(0, 3).join(' · '))}</p>${x.summary ? `<p>${esc(x.summary)}</p>` : ''}${x.fromPrice ? `<p><strong>${esc(x.fromPrice)}</strong></p>` : ''}<a class="btn s" href="${esc(link)}">${esc(button)}</a></div></article>`;
 }
 
 /** One section. `h1` is true for the single section that carries the page's main heading. */
@@ -549,6 +579,16 @@ ${formButton(p.buttonLabel)}
                 ? (p.layout === 'list' ? `<ul class="ls">${items.map((l) => listingCardHtml(l, tag, 'list')).join('')}</ul>` : `<div class="grid">${items.map((l) => listingCardHtml(l, tag, 'cards')).join('')}</div>`)
                 : `<p>${none}${formState.preview && !listingsData?.all.length ? ' <span class="fine">(Add listings on the Listings tab — this note is only in your preview.)</span>' : ''}</p>`;
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${filter}${list}${post}</div></section>`;
+        }
+        case 'stays': {
+            // Holiday lets and B&B rooms from Business Information ▸ Stays, read when the page is drawn.
+            const p = s.props;
+            const list = staysFor(staysData, p.stayIds);
+            if (!list.length) {
+                return formState.preview ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Stays: nothing to show yet. Add your holiday let or rooms in Business Information ▸ Stays. Until then this doesn't appear on your live site.</p></div></section>` : '';
+            }
+            const tag = h1 ? 'h2' : 'h3';
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid">${list.map((x) => stayCardHtml(x, tag, p.buttonLabel)).join('')}</div></div></section>`;
         }
         case 'gallery': {
             const p = s.props;
@@ -779,6 +819,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
     socialFeedData = ctx.socialFeed ?? null;
     blogData = { latest: ctx.blog ?? null, on: blogOn(def) };
     listingsData = ctx.listings ?? null;
+    staysData = ctx.stays ?? null;
     // ?category= reaches here inside the path (the preview) or as the live site's query string.
     try { listingPicked = new URLSearchParams(path.includes('?') ? path.split('?')[1].split('#')[0] : (ctx.query || '')).get('category')?.slice(0, 40) || null; } catch { listingPicked = null; }
     business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
@@ -921,15 +962,104 @@ ${buttons ? `<p>${buttons}</p>` : ''}
     });
 }
 
+/** Two months of a stay's calendar. A free night links to the booking step starting that day. */
+function stayCalendarHtml(v: StayPageView, bookBase: string): string {
+    const head = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<th scope="col" abbr="${d}">${d.slice(0, 2)}</th>`).join('');
+    const months = v.months.map((m) => {
+        const cells = m.days.map((d) => {
+            if (!d) return '<td></td>';
+            const n = Number(d.date.slice(8));
+            const label = new Date(`${d.date}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+            if (d.past || !d.open) return `<td><span class="past">${n}</span></td>`;
+            if (d.free <= 0) return `<td><span class="gone" aria-label="${esc(`${label}: booked`)}">${n}</span></td>`;
+            return `<td><a href="${esc(href(`${bookBase}&in=${d.date}`))}" aria-label="${esc(`Arrive ${label}`)}">${n}</a></td>`;
+        });
+        const rows: string[] = [];
+        for (let i = 0; i < cells.length; i += 7) rows.push(`<tr>${cells.slice(i, i + 7).join('')}${'<td></td>'.repeat(Math.max(0, 7 - cells.slice(i, i + 7).length))}</tr>`);
+        return `<table class="cal"><caption>${esc(m.label)}</caption><thead><tr>${head}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
+    }).join('');
+    const here = `${STAY_PATH}/${v.stay.slug}`;
+    const nav = v.prevMonth || v.nextMonth
+        ? `<nav class="calnav" aria-label="Other months">${v.prevMonth ? `<a href="${esc(href(`${here}?month=${v.prevMonth}`))}#dates">← Earlier</a>` : '<span></span>'}${v.nextMonth ? `<a href="${esc(href(`${here}?month=${v.nextMonth}`))}#dates">Later →</a>` : ''}</nav>` : '';
+    return `<div class="cals">${months}</div>${nav}`;
+}
+
+/** /stays/<slug> — one holiday let or room type: photos, facts, prices from, calendar, and "check dates". */
+export function renderSiteStay(def: SiteDefinition, ctx: RenderContext, v: StayPageView, bookPath: string): string {
+    startRender(def, ctx);
+    const s = def.settings;
+    const x = v.stay;
+    const pageUrl = `${ctx.origin}${STAY_PATH}/${encodeURIComponent(x.slug)}`;
+    const pics = x.images.map((im) => ({ src: assetUrlOf(im.assetId) || '', alt: im.alt })).filter((im) => im.src);
+    const back = def.pages.find((p) => p.sections.some((sec) => sec.type === 'stays'));
+    const backPath = back ? (back.slug ? `/${back.slug}` : '/') : '/';
+    const bookBase = `${bookPath}?stay=${x.id}`;
+    const maxRooms = x.stayType === 'room' ? Math.max(1, x.units) : 1;
+    const guestOpts = Array.from({ length: x.maxGuests * maxRooms }, (_, i) => `<option value="${i + 1}"${i + 1 === Math.min(2, x.maxGuests) ? ' selected' : ''}>${i + 1}</option>`).join('');
+    const roomOpts = maxRooms > 1 ? `<label>Rooms<select name="rooms">${Array.from({ length: maxRooms }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}</select></label>` : '';
+    const facts = stayFacts(x);
+    const times = `Check-in from ${esc(fmtClock(x.checkInTime))} · check-out by ${esc(fmtClock(x.checkOutTime))}`;
+    const amenities = x.amenities.map((a) => STAY_AMENITIES[a]).filter(Boolean);
+    const body = `<article><section><div class="w art st">
+<p class="meta"><a href="${esc(href(backPath))}">← ${esc(back ? back.title : 'Home')}</a></p>
+<h1>${esc(x.name)}</h1>
+${x.summary ? `<p class="sub">${esc(x.summary)}</p>` : ''}
+${pics.length ? `<div class="pics">${pics.slice(0, 5).map((im, i) => `<img src="${esc(im.src)}" alt="${esc(im.alt)}"${i ? ' loading="lazy"' : ''}>`).join('')}</div>` : ''}
+<div class="facts">${facts.map((f) => `<span>${esc(f)}</span>`).join('')}${x.fromPrice ? `<span class="price">${esc(x.fromPrice)}</span>` : ''}</div>
+${x.description ? `<div class="body">${paragraphs(x.description)}</div>` : ''}
+${amenities.length ? `<h2>What's there</h2><ul class="am">${amenities.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+<h2 id="dates">Dates and prices</h2>
+<p class="fine">${times}. Choose the day you arrive, or put in your dates below. Crossed-out dates are booked.</p>
+${stayCalendarHtml(v, bookBase)}
+<form class="fm" method="get" action="${esc(href(bookPath))}">
+<input type="hidden" name="stay" value="${x.id}">
+<label>Arrive<input type="date" name="in" required min="${esc(v.today)}"></label>
+<label>Leave<input type="date" name="out" required min="${esc(v.today)}"></label>
+<label>Guests<select name="guests">${guestOpts}</select></label>
+${roomOpts}
+<button class="btn" type="submit">Check price</button>
+</form>
+${x.houseRules ? `<h2>House rules</h2><div class="body">${paragraphs(x.houseRules)}</div>` : ''}
+<h2>Cancellation</h2><p>${esc(describeCancellation(x.pricing.cancellation))}</p>
+${x.address ? `<p><strong>Where:</strong> ${esc(x.address)}</p>` : ''}
+${x.licenceNumber ? `<p class="fine">Licence / registration number: ${esc(x.licenceNumber)}</p>` : ''}
+</div></section></article>`;
+    const isRoom = x.stayType === 'room';
+    const ld: Record<string, unknown> = {
+        '@context': 'https://schema.org', '@type': isRoom ? 'HotelRoom' : 'VacationRental', name: x.name, url: pageUrl,
+        ...(x.summary || x.description ? { description: x.summary || x.description!.slice(0, 300) } : {}),
+        ...(pics.length ? { image: pics.map((p) => p.src) } : {}),
+        ...(x.address ? { address: x.address } : {}),
+        occupancy: { '@type': 'QuantitativeValue', maxValue: x.maxGuests },
+        ...(x.bedrooms !== null ? { numberOfBedrooms: x.bedrooms } : {}),
+        ...(x.bathrooms !== null ? { numberOfBathroomsTotal: x.bathrooms } : {}),
+        ...(amenities.length ? { amenityFeature: amenities.map((a) => ({ '@type': 'LocationFeatureSpecification', name: a, value: true })) } : {}),
+        ...(isRoom ? { containedInPlace: { '@type': 'BedAndBreakfast', name: s.siteName, url: ctx.origin } } : { checkinTime: x.checkInTime, checkoutTime: x.checkOutTime }),
+    };
+    return documentHtml(def, null, ctx, body, {
+        title: `${x.name} | ${s.siteName}`,
+        description: x.summary || (x.description ? x.description.replace(/\s+/g, ' ').slice(0, 160) : `${facts.join(', ')}.`),
+        canonical: pageUrl, pageUrl, robots: null, ogType: 'website', image: pics[0]?.src ?? null, menuId: back?.id ?? '',
+        ld: [ld],
+    });
+}
+
+/** "16:00" → "4pm", "10:30" → "10:30am". */
+function fmtClock(t: string): string {
+    const [h, m] = t.split(':').map(Number);
+    return `${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''}${h < 12 ? 'am' : 'pm'}`;
+}
+
 /** `blog`: the blog's own addresses when it is on — only posts whose canonical is this site belong here. */
-export function renderSitemap(def: SiteDefinition, origin: string, blog: Array<{ slug: string; lastmod: string | null }> = [], listings: Array<{ slug: string; lastmod: string | null }> = []): string {
+export function renderSitemap(def: SiteDefinition, origin: string, blog: Array<{ slug: string; lastmod: string | null }> = [], listings: Array<{ slug: string; lastmod: string | null }> = [], stays: string[] = []): string {
     const blogUrls = blogOn(def)
         ? [`  <url><loc>${esc(`${origin}${BLOG_PATH}`)}</loc></url>`, ...blog.map((b) => `  <url><loc>${esc(`${origin}${BLOG_PATH}/${encodeURIComponent(b.slug)}`)}</loc>${b.lastmod ? `<lastmod>${esc(b.lastmod.slice(0, 10))}</lastmod>` : ''}</url>`)]
         : [];
     return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${[...def.pages.map((p) => `  <url><loc>${esc(`${origin}${p.slug ? `/${p.slug}` : '/'}`)}</loc></url>`), ...blogUrls,
-    ...listings.map((l) => `  <url><loc>${esc(`${origin}${LISTING_PATH}/${encodeURIComponent(l.slug)}`)}</loc>${l.lastmod ? `<lastmod>${esc(l.lastmod.slice(0, 10))}</lastmod>` : ''}</url>`)].join('\n')}
+    ...listings.map((l) => `  <url><loc>${esc(`${origin}${LISTING_PATH}/${encodeURIComponent(l.slug)}`)}</loc>${l.lastmod ? `<lastmod>${esc(l.lastmod.slice(0, 10))}</lastmod>` : ''}</url>`),
+    ...stays.map((slug) => `  <url><loc>${esc(`${origin}${STAY_PATH}/${slug}`)}</loc></url>`)].join('\n')}
 </urlset>
 `;
 }

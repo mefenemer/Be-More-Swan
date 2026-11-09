@@ -9,7 +9,7 @@
 // Services are Business Information products (org_products) with a duration; their names and
 // prices are read from there, never typed here. Opening hours and rules: booking_settings.
 
-import { and, asc, eq, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNotNull, lt, ne, or, sql } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import type { getDb } from '../../db/client';
 import { aiAssistants, bookableResources, bookingSettings, bookings, orgProducts, users } from '../../db/schema';
@@ -84,7 +84,8 @@ async function takenOn(db: Db | Tx, orgId: number, date: string): Promise<TakenB
     const to = new Date(`${addDays(date, 2)}T00:00:00Z`);
     const rows = await db.select({ resourceId: bookings.resourceId, startsAt: bookings.startsAt, endsAt: bookings.endsAt, partySize: bookings.partySize })
         .from(bookings)
-        .where(and(eq(bookings.organisationId, orgId), holdsTime, gte(bookings.startsAt, from), lt(bookings.startsAt, to)));
+        // Stays (holiday lets, B&B rooms) hold houses and rooms, never staff or tables (stays.ts).
+        .where(and(eq(bookings.organisationId, orgId), holdsTime, ne(bookings.kind, 'stay'), gte(bookings.startsAt, from), lt(bookings.startsAt, to)));
     return rows.map((r) => ({ resourceId: r.resourceId, startsAt: new Date(r.startsAt), endsAt: new Date(r.endsAt), partySize: r.partySize }));
 }
 
@@ -232,6 +233,15 @@ export async function announceCustomerChange(db: Db, change: 'cancelled' | 'move
 export type BookingRow = typeof bookings.$inferSelect;
 
 export function describeBooking(b: BookingRow, tz: string): { when: string; what: string } {
+    // A stay (holiday let / B&B room, stays.ts): dates and nights, not a time of day.
+    if (b.kind === 'stay' && b.checkIn && b.checkOut) {
+        const nights = Math.round((Date.parse(`${b.checkOut}T00:00:00Z`) - Date.parse(`${b.checkIn}T00:00:00Z`)) / 86_400_000);
+        const rooms = (b.rooms ?? 1) > 1 ? `${b.rooms} rooms, ` : '';
+        return {
+            what: `${b.serviceName ?? 'Stay'} (${rooms}${b.partySize} guest${b.partySize === 1 ? '' : 's'})`,
+            when: `${formatDate(b.checkIn)} to ${formatDate(b.checkOut)} (${nights} night${nights === 1 ? '' : 's'})`,
+        };
+    }
     const z = utcToZoned(new Date(b.startsAt), tz);
     const end = utcToZoned(new Date(b.endsAt), tz);
     const what = b.kind === 'table'
@@ -352,6 +362,8 @@ export async function decideBooking(db: Db, orgId: number, id: number, action: '
     if (!row) return { ok: false, error: 'That booking has already been dealt with.' };
     // Declined or cancelled by the business: a deposit always goes back, before they're told.
     if (action !== 'confirm' && row.paymentStatus === 'paid') row.paymentStatus = await refundDeposit(db, row) === 'refunded' ? 'refunded' : 'refund_failed';
+    // A stay may also have taken its balance and a damage deposit: all of it goes back, and nothing more is asked for.
+    if (action !== 'confirm' && row.kind === 'stay') await (await import('./stay-charges')).refundStayRest(db, row);
     const [owner] = ctx.assistantId ? await db.select({ email: users.email }).from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId)).where(eq(aiAssistants.id, ctx.assistantId)).limit(1) : [];
     await emailCustomer(row, ({ confirm: 'confirmed', decline: 'declined', cancel: 'cancelled' } as const)[action], ctx, owner?.email ?? null);
     await calendarSoon(db, orgId);
@@ -361,7 +373,9 @@ export async function decideBooking(db: Db, orgId: number, id: number, action: '
 /** Upcoming and recent bookings for the owner (newest decisions needed first, then by time). */
 export async function listBookings(db: Db, orgId: number, sinceDaysAgo = 30): Promise<BookingRow[]> {
     const since = new Date(Date.now() - sinceDaysAgo * 86_400_000);
-    return db.select().from(bookings).where(and(eq(bookings.organisationId, orgId), gte(bookings.startsAt, since))).orderBy(asc(bookings.startsAt));
+    // A stay whose damage deposit is still held stays on the list however long ago it began (stay-jobs.ts).
+    return db.select().from(bookings).where(and(eq(bookings.organisationId, orgId), or(gte(bookings.startsAt, since), and(eq(bookings.kind, 'stay'), eq(bookings.damageDepositStatus, 'held')))))
+        .orderBy(asc(bookings.startsAt));
 }
 
 /** The customer's email address, hashed — for a per-person rate limit without storing it twice. */

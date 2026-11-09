@@ -3,7 +3,7 @@
 -- Sorts after db/help-articles-2026-12zzzzzzzzzzzzzz-mentor-sees-discussions.sql. Three articles
 -- (docs/video-producer-plan.md §7.3, go-live copy):
 --   Meet Your Video Producer                         set-up, what it makes, what it can't do, which plans
---   Making a Video: From Storyboard to Finished Post  the Videos tab, the storyboard, the cost, the Review Queue
+--   Making a Video: From Storyboard to Finished Post  the Videos tab, the storyboard, the cost, My Content (studio, 2026-11-09)
 --   Weekly Videos, Video Versions and Campaign Videos  autopilot, "Make a video version", commission_video
 --
 -- ⚠️ INSERTED UNPUBLISHED (is_published = FALSE). The Video Producer role is Hidden until go-live, and
@@ -17,11 +17,12 @@
 --     src/lib/storyboard.ts VIDEO_LENGTHS, MIN_SCENES, MAX_SCENES, MAX_AI_CLIPS, storyboardSystemPrompt
 --   tasks: AI clip 20, AI picture 1, voiceover 1 — src/config/task-weights.ts, video-producer.ts buildTasks
 --   part-way stops keep made scenes, 20-minute stop — video-producer.ts buildProject, STUCK_AFTER_MS
---   one post per platform, Review Queue, nothing posts unapproved — video-producer.ts buildProject
+--   saved to My Content, Ready, Download, Try the render again — video-producer.ts buildProject, video-render.ts
+--   (docs/video-producer-studio-plan.md, Phases 1–5)
 --   set-up questions — src/public/assistant-onboarding-schemas.js video_producer
 --   autopilot 1–3 a week, spacing, waits while 2 wait, topics — src/utils/video-autopilot.ts
---   "Make a video version", one per post, platform rule — src/utils/video-handoff.ts, workspace.html
---   Commission a video, 2 tasks, delivered on approval — src/config/campaign-vocab.ts, campaign-video-order.ts
+--   "Make a video version", one per post, back onto the post or a draft beside it — video-handoff.ts, video-post-media.ts
+--   Commission a video, 2 tasks, delivered when Ready, onto a campaign post — campaign-vocab.ts, campaign-video-order.ts, video-post-media.ts
 --   plans — src/utils/ai-credits.ts VIDEO_TIERS (Busywork Buster), video-projects.ts gate
 --
 -- Same rules as the other help files: bodies dollar-quoted, titles single-quoted with '' for
@@ -35,9 +36,9 @@ INSERT INTO help_articles (category, sort_order, title, content_md, is_published
 ('Your Assistants', 70, 'Meet Your Video Producer', $$
 # Meet Your Video Producer
 
-Your Video Producer makes short vertical videos for **Instagram Reels**, **YouTube Shorts** and **Facebook Reels**. Tell it what a video should say. It writes the script from your business details and **Products & Services**, plans the scenes, adds a voiceover and captions, and puts the finished video in your **Review Queue**.
+Your Video Producer makes short videos: vertical for Reels, Shorts and Stories, square for feeds, or wide for YouTube and your website. Tell it what a video should say, or give it your own footage. It writes the script from your business details and **Products & Services**, plans the scenes, adds a voiceover and captions, and saves the finished video to **My Content**.
 
-You check the storyboard before anything is made, and you approve the finished video before it goes out. Nothing posts on its own.
+You check the storyboard before anything is made. The finished video plays on its **Videos** tab, where you can download it. Your Social Media Assistant or Blog Writer can use it from **My Content**. Your Video Producer never posts anything itself.
 
 ## Setting it up
 
@@ -45,6 +46,7 @@ When you hire it, it asks:
 
 - **Which voice should read your voiceovers?** Six voices, from Warm and friendly to Deep and confident.
 - **How long should your videos usually be?** 15, 30 or 60 seconds.
+- **What shape should your videos usually be?** Vertical 9:16, square 1:1 or wide 16:9.
 - **What should viewers do at the end?** Optional. Used as the call to action unless you give a different one on a video.
 - **Should it plan videos for you each week?** No, or one, two or three a week. See Weekly Videos, Video Versions and Campaign Videos.
 - **Where should scenes come from by default?** Stock first with AI where stock won't fit, stock and your own pictures only, or lean on AI.
@@ -62,9 +64,8 @@ Each video has 3 to 8 scenes. A scene can be stock footage, a stock photo, one o
 
 ## What it can't do yet
 
-- It doesn't watch footage you give it or pick the best moments from it.
 - It makes videos up to 60 seconds. It doesn't make long YouTube videos.
-- It doesn't post to TikTok.
+- It doesn't post videos anywhere. Download the finished video, or let your Social Media Assistant post it.
 
 ## Which plans include it
 
@@ -82,7 +83,7 @@ Press **New video** and fill in:
 
 - **What should it say?** A sentence or two, in your own words.
 - **Length**, **Call to action**, **Voice** and **Pictures from**. These start from your set-up answers.
-- **Post it as**: Instagram Reel, YouTube Short, Facebook Reel, or more than one.
+- **Shape**: Vertical 9:16, Square 1:1 or Wide 16:9.
 
 Press **Plan this video**. Planning is free.
 
@@ -107,9 +108,15 @@ In about a minute the storyboard appears: each scene with its voiceover line, an
 
 Making takes a few minutes and you can leave the page. If it stops part-way, the scenes already made are kept and you aren't charged for the rest. Press **Make the video** again to finish it. If something takes longer than 20 minutes, it is stopped and what wasn't made isn't charged.
 
-## 4. Approve it
+## 4. Watch it and use it
 
-The finished video lands in your **Review Queue**, one post for each platform you chose, like any other post. Open it to watch it, change the caption or edit it further in the post editor, then approve it. The **Show captions** switch on the voiceover turns the captions off if you don't want them. Nothing goes out until you approve it.
+When it's made, the finished video is rendered and saved to **My Content**. This takes a few more minutes. On the **Videos** tab it moves to **Ready**, where you can play it, see the words it suggests posting with it, and press **Download**. If the finished video fails to render, press **Try the render again**. That's free.
+
+- **Use in a post** hands it to your Social Media Assistant. You choose where it goes, the draft starts with the video and the suggested words, and you approve it in the **Review Queue** as usual.
+- **Use in a blog post** starts a new article for your Blog Writer with the video in it.
+- **Change it** makes a new version. Everything already made is kept, so only the scenes you change are made, and paid for, again. The earlier version stays in **My Content**.
+
+Handing a video over is free. The buttons appear when you have that assistant hired and working. Any of your assistants can also pick the video from **My Content**.
 
 Your Video Producer's **Results** tab counts **Videos Published**.
 $$, FALSE),
@@ -132,10 +139,10 @@ Answer **Should it plan videos for you each week?** with one, two or three a wee
 
 Open any post in your **Review Queue** and press **Make a video version**. Your Video Producer plans a storyboard saying what the post says. You can also ask your Social Media Assistant in chat to hand a post over.
 
-- The post itself stays as it is.
-- The video goes to the post's own platform when that platform takes vertical video (Instagram, YouTube or Facebook). Otherwise it goes to Instagram.
+- When the video is finished, it goes onto that post, keeping its words, and waits for your approval there.
+- If the post can't take a video as it is (it's already scheduled, its platform doesn't take video, or you've put text on its picture), the post stays as it is and a new draft with the video and the post's words waits beside it.
 - Each post gets one video. Pressing it again opens the one already started.
-- These are marked **From one of your posts**, and the finished video shows **Requested by** the assistant whose post it was.
+- These are marked **From one of your posts**. The finished video is also in **My Content**.
 
 The button only appears when your Video Producer is active and your plan includes video.
 
@@ -144,8 +151,8 @@ The button only appears when your Video Producer is active and your plan include
 Your Campaign Assistant can include **Commission a video** in a campaign plan: one short video on the campaign's message, using 2 of the campaign's tasks. Approving the plan starts the storyboard. It never makes the video.
 
 - The storyboard is marked **For a campaign**.
-- When you approve the finished video in the Review Queue, the campaign marks that work done and starts anything that was waiting for it.
-- The finished video shows **Requested by** your Campaign Assistant.
+- When the video is finished, the campaign marks that work done and starts anything that was waiting for it.
+- The video goes onto one of the campaign's posts that is still waiting for your approval, in place of the picture that post found for itself. A picture you chose yourself is never replaced. The video is also in **My Content**.
 $$, FALSE)
 
 ON CONFLICT (title) DO UPDATE SET

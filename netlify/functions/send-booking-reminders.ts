@@ -6,7 +6,7 @@
 // reminded; emails each customer with the details and their "Change or cancel" link; and stamps
 // reminder_sent_at so nobody is reminded twice. A reminder is a message, not AI work: no tasks.
 
-import { and, eq, gt, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, isNull, lte, ne, sql } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { bookingSettings, bookings, organisations, sites } from '../../db/schema';
@@ -14,13 +14,15 @@ import { emailCustomer, type BookingRow } from '../../src/utils/bookings';
 import { settingsFromRow } from '../../src/utils/booking-settings';
 import { siteOrigin } from '../../src/utils/site-hosting';
 import { sweepExpiredHolds } from '../../src/utils/booking-deposits';
+import { runStayMoneyJobs } from '../../src/utils/stay-jobs';
 
 const BATCH = 200;
 
 export async function sendDueReminders(db: ReturnType<typeof getDb>, now: Date): Promise<number> {
     const soon = new Date(now.getTime() + 24 * 3600_000);
     const due = await db.select().from(bookings).where(and(
-        eq(bookings.status, 'confirmed'), isNull(bookings.reminderSentAt),
+        // Stays (holiday lets, B&B rooms) aren't "see you tomorrow" — they get their own emails (stay-jobs.ts).
+        eq(bookings.status, 'confirmed'), isNull(bookings.reminderSentAt), ne(bookings.kind, 'stay'),
         gt(bookings.startsAt, now), lte(bookings.startsAt, soon),
         sql`${bookings.createdAt} < ${bookings.startsAt} - interval '24 hours'`,
     )).limit(BATCH);
@@ -57,6 +59,9 @@ export default withLambda(async () => {
         if (lapsed) console.log(`[send-booking-reminders] released ${lapsed} unpaid holds`);
         const sent = await sendDueReminders(getDb(), new Date());
         if (sent) console.log(`[send-booking-reminders] sent ${sent}`);
+        // Holiday lets and B&B rooms: balances due, unpaid reminders, damage deposits going back (stay-jobs.ts).
+        const stays = await runStayMoneyJobs(getDb(), new Date());
+        if (Object.values(stays).some(Boolean)) console.log('[send-booking-reminders] stays', stays);
         return { statusCode: 200, body: JSON.stringify({ sent }) };
     } catch (err) {
         console.error('[send-booking-reminders] failed', err instanceof Error ? err.message : err);

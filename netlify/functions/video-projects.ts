@@ -4,13 +4,21 @@
 //   GET                                   → { projects: [...] }           (this workspace, newest first)
 //   GET  ?id=N                            → { project }
 //   POST { action:'create', assistantId, brief }        → plans in the background → { project }
+//        brief.footageAssetIds + brief.footageConsent    → reviews the owner's own footage first ('reviewing'),
+//                                                          FOOTAGE_REVIEW_TASKS when a video is new to it (footage-review.ts)
+//   POST { action:'plan_from_review', id, ticks:{e1:true,…}, notes? } → the storyboard from the ticked edits (free)
 //   POST { action:'replan', id, feedback? }              → re-plans with the owner's notes
 //   POST { action:'edit_scene', id, sceneId, patch }    → changes one scene (re-checked by the rules)
 //   POST { action:'build', id }                          → holds the estimate, builds in the background
+//   POST { action:'change', id }                         → "Change it" on a ready video: a new version (free), video-producer.ts newVersion
+//        replan / edit_scene on a READY video do the same first, then act on the new version (chat parity)
+//   POST { action:'rerender', id }                       → a render_failed video: render the saved timeline again (free)
 //   POST { action:'cancel', id }
 //   POST { action:'from_post', postId }                 → "Make a video version" of a post (video-handoff.ts):
 //                                                          plans a storyboard for the active Video Producer
 //   GET  ?producer=1                                    → { producer: { id, name } | null } — is the button offered?
+//   GET  ?teammates=1                                   → { social, blog } — the ACTIVE Social Media Manager and Blog
+//                                                          Writer a finished video can be handed to (studio plan Phase 4), or null
 //
 // Planning is free (one model call, like any draft). Building spends: the estimate is on the project
 // before the click, held at the click, settled scene by scene (src/utils/video-producer.ts).
@@ -25,9 +33,12 @@ import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/ut
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
-import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker } from '../../src/utils/video-producer';
+import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion } from '../../src/utils/video-producer';
 import { enforceStoryboard, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
-import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
+import { activeVideoProducer, activeAssistantInRole, videoFromPost } from '../../src/utils/video-handoff';
+import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../src/utils/footage-review';
+import { FOOTAGE_REVIEW_TASKS, tightenStoryboard, type FootageReview } from '../../src/lib/footage';
+import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -52,6 +63,13 @@ export default withLambda(async (event) => {
             const producer = await activeVideoProducer(db, orgId);
             const can = !!producer && tierCanGenerateVideo(await getActiveTierKeyByOrg(db, orgId));
             return json(200, { producer: can ? { id: producer!.id, name: producer!.name } : null });
+        }
+        if (event.queryStringParameters?.teammates) {
+            const [social, blog] = await Promise.all([
+                activeAssistantInRole(db, orgId, 'social_media_manager'),
+                activeAssistantInRole(db, orgId, 'blog_writer'),
+            ]);
+            return json(200, { social, blog });
         }
         await sweepStuckProjects(db, orgId).catch((err) => console.error('[video-projects] sweep failed:', err));
         const id = Number(event.queryStringParameters?.id);
@@ -94,6 +112,17 @@ export default withLambda(async (event) => {
         if ('error' in parsed) return json(400, { error: parsed.error });
         const blocked = await enforcePromptModeration({ text: `${parsed.brief.message}\n${parsed.brief.cta ?? ''}`, userId, organisationId: orgId, source: 'video-projects' });
         if (blocked) return blocked;
+        const footage = parsed.brief.footageAssetIds ?? [];
+        if (footage.length) {
+            // The owner says the people and music in their videos may be used (plan §6) — every review.
+            if ((body.brief as Record<string, unknown> | undefined)?.footageConsent !== true) {
+                return json(400, { error: 'Tick “I have permission to use the people and music in these videos” first.' });
+            }
+            const status = await footageStatus(db, orgId, footage);
+            if (status.length !== footage.length) return json(404, { error: 'One of those videos isn’t one of your own uploads.' });
+            if (status.some((x) => x.needsReading)) return json(409, { error: 'Some of those videos haven’t been read yet. Press “Review my footage” again.' });
+            if (!await canAffordReview(db, orgId, footage)) return json(402, { error: 'insufficient_credits', unit: 'tasks', cost: FOOTAGE_REVIEW_TASKS, message: TASK_LIMIT_MESSAGE });
+        }
         const started = await startProject(db, {
             organisationId: orgId, assistantId, createdBy: userId, brief: body.brief, onboardingContext: a.onboardingContext, origin: 'user', headers,
         });
@@ -113,11 +142,44 @@ export default withLambda(async (event) => {
     }
 
     const id = Number(body.id);
-    const row = Number.isInteger(id) ? await load(id) : null;
+    let row = Number.isInteger(id) ? await load(id) : null;
     if (!row) return json(404, { error: 'Video not found.' });
 
+    // A finished video is never changed in place (D-S1: every version is kept). "Change it", and a
+    // replan or scene edit on a ready video — from the tab or a chat card — first make a new version.
+    if (action === 'change') {
+        if (row.status !== 'ready' || !row.storyboard) return json(409, { error: 'Only a finished video can be changed into a new version.' });
+        return json(201, { project: await projectView(db, orgId, await newVersion(db, row)) });
+    }
+    if ((action === 'replan' || action === 'edit_scene') && row.status === 'ready' && row.storyboard) {
+        row = await newVersion(db, row);
+    }
+    if ((action === 'replan' || action === 'edit_scene') && row.status === 'rendering') {
+        return json(409, { error: 'The finished video is rendering — wait a moment, then change it.' });
+    }
+
+    if (action === 'plan_from_review') {
+        if (row.status !== 'reviewed' && !(row.status === 'planned' && row.footageReview) && !(row.status === 'failed' && row.footageReview)) {
+            return json(409, { error: 'This video has no footage review to plan from.' });
+        }
+        const review = structuredClone(row.footageReview) as FootageReview;
+        const ticks = (body.ticks && typeof body.ticks === 'object' ? body.ticks : {}) as Record<string, unknown>;
+        // Only what the owner ticked is applied (plan §4.3): an id absent from `ticks` counts as unticked.
+        for (const sgn of review.suggestions) sgn.ticked = ticks[sgn.id] === true;
+        const notes = typeof body.notes === 'string' ? body.notes.trim().slice(0, 600) : '';
+        if (notes) {
+            const blocked = await enforcePromptModeration({ text: notes, userId, organisationId: orgId, source: 'video-projects' });
+            if (blocked) return blocked;
+        }
+        await db.update(videoProjects).set({ status: 'planning', footageReview: review, note: null, sceneAssets: {}, voiceoverAssetId: null, updatedAt: new Date() })
+            .where(eq(videoProjects.id, row.id));
+        await wakeVideoWorker({ projectId: row.id, action: 'plan', feedback: notes || null }, headers);
+        return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+
     if (action === 'replan') {
-        if (row.status === 'planning' || row.status === 'building') return json(409, { error: 'It is already working on this video.' });
+        if (row.status === 'planning' || row.status === 'building' || row.status === 'reviewing') return json(409, { error: 'It is already working on this video.' });
+        if (row.status === 'reviewed') return json(409, { error: 'Tick the edits you want first, then press “Make the storyboard”.' });
         const feedback = typeof body.feedback === 'string' ? body.feedback.trim().slice(0, 600) : '';
         if (feedback) {
             const blocked = await enforcePromptModeration({ text: feedback, userId, organisationId: orgId, source: 'video-projects' });
@@ -136,6 +198,11 @@ export default withLambda(async (event) => {
         const scene = sb.scenes.find((s) => s.id === body.sceneId);
         if (!scene) return json(404, { error: 'Scene not found.' });
         const patch = (body.patch && typeof body.patch === 'object' ? body.patch : {}) as Record<string, unknown>;
+        // What the scene SHOWS before the edit: only a change to it re-sources the scene. New words on
+        // screen over the same clip keep the clip (they're an overlay) — except on a branded card,
+        // whose words are drawn into the picture (staging, 2026-11-09: a words-only edit swapped the stock clip).
+        const looks = (s: typeof scene) => JSON.stringify([s.source, s.keywords ?? '', s.prompt ?? '', s.assetId ?? null, s.inS ?? null, s.outS ?? null, s.source === 'brand_card' ? (s.onScreenText ?? '') : '']);
+        const before = looks(scene);
         let voiceChanged = false;
         if (typeof patch.voiceover === 'string' && patch.voiceover !== scene.voiceover) { scene.voiceover = patch.voiceover; voiceChanged = true; }
         if (typeof patch.onScreenText === 'string') scene.onScreenText = patch.onScreenText;
@@ -143,14 +210,24 @@ export default withLambda(async (event) => {
         if (typeof patch.keywords === 'string') scene.keywords = patch.keywords;
         if (typeof patch.prompt === 'string') scene.prompt = patch.prompt;
         if (patch.assetId != null) scene.assetId = Number(patch.assetId);
+        if (typeof patch.tighten === 'boolean') { if (patch.tighten) delete scene.tighten; else scene.tighten = false; }
+        if (patch.inS != null) scene.inS = Number(patch.inS);
+        if (patch.outS != null) scene.outS = Number(patch.outS);
         const text = [scene.voiceover, scene.onScreenText, scene.prompt, scene.keywords].filter(Boolean).join('\n');
         if (text) {
             const blocked = await enforcePromptModeration({ text, userId, organisationId: orgId, source: 'video-projects' });
             if (blocked) return blocked;
         }
-        const { storyboard, changes } = enforceStoryboard(sb, row.brief as VideoBrief, await libraryPictures(db, orgId));
+        const brief = row.brief as VideoBrief;
+        const footage = await loadFootage(db, orgId, brief.footageAssetIds ?? []);
+        const enforced = enforceStoryboard(sb, brief, await libraryPictures(db, orgId), asOwnVideos(footage));
+        // A changed cut, or "Keep as filmed", is tightened again from the review's words.
+        const tightened = footage.length ? tightenStoryboard(enforced.storyboard, brief, footage) : { storyboard: enforced.storyboard, changes: [] };
+        const storyboard = tightened.storyboard;
+        const changes = [...enforced.changes, ...tightened.changes];
         const assets = { ...(row.sceneAssets as Record<string, number>) };
-        delete assets[scene.id];   // this scene is re-sourced on the next build
+        const after = storyboard.scenes.find((s) => s.id === scene.id);
+        if (!after || looks(after) !== before) delete assets[scene.id];   // re-sourced on the next build
         await db.update(videoProjects).set({
             storyboard, changes, sceneAssets: assets, status: 'planned',
             // The voiceover is one track for the whole script — any line changing re-records it.
@@ -162,7 +239,7 @@ export default withLambda(async (event) => {
 
     if (action === 'build') {
         if (!['planned', 'failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video is not ready to make.' });
-        const hold = await holdBuild(db, orgId, row.storyboard as Storyboard, row.brief as VideoBrief);
+        const hold = await holdBuild(db, orgId, row.storyboard as Storyboard, row.brief as VideoBrief, row);
         if (!hold.ok) return json(402, { error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit });
         await db.update(videoProjects).set({ status: 'building', creditHold: hold.credits, startedAt: new Date(), note: null, updatedAt: new Date() })
             .where(eq(videoProjects.id, row.id));
@@ -170,8 +247,18 @@ export default withLambda(async (event) => {
         return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
     }
 
+    if (action === 'rerender') {
+        if (row.status !== 'render_failed' || !row.timeline) return json(409, { error: 'There is nothing to render again for this video.' });
+        await db.update(videoProjects).set({ status: 'rendering', renderId: null, note: null, updatedAt: new Date() })
+            .where(eq(videoProjects.id, row.id));
+        await wakeRenderWorker(row.id, headers);
+        return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+
     if (action === 'cancel') {
         if (row.status === 'building') return json(409, { error: 'It is making this video right now — wait for it to finish.' });
+        if (row.status === 'reviewing') return json(409, { error: 'It is watching your footage right now — wait a moment.' });
+        if (row.status === 'rendering') return json(409, { error: 'The finished video is rendering — wait a moment.' });
         await db.update(videoProjects).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
         return json(200, { ok: true });
     }
