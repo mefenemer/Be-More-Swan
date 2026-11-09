@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bramble Street Bakery</title>
+<link rel="stylesheet" href="/css/site.css">
+<script src="https://identity.netlify.com/v1/netlify-identity-widget.js"></script>
+</head>
+<body>
+<header class="site-header">
+  <a href="/" class="logo"><img src="/images/uploads/logo.png" alt="Bramble Street Bakery" width="120" height="60"></a>
+  <nav><ul><li><a href="/">Home</a></li><li><a href="/about.html">About</a></li><li><a href="/order.html">Order</a></li></ul></nav>
+</header>
+<main>
+  <section class="hero">
+    <img data-cms-src="hero_image" alt="" class="hero-img">
+    <h1 data-cms-field="title"></h1>
+    <p data-cms-field="intro"></p>
+  </section>
+  <section class="hours">
+    <h2>Opening hours</h2>
+    <ul data-cms-list="hours" data-cms-item="{{day}}: {{time}}"></ul>
+  </section>
+  <p><a href="/order.html" class="button">Order for tomorrow</a></p>
+</main>
+<footer><p>Bramble Street Bakery · <a href="mailto:hello@bramblestreet.example">hello@bramblestreet.example</a></p></footer>
+<script src="/js/cms-fill.js" data-content="/content/pages/home.json"></script>
+<script>
+  if (window.netlifyIdentity) { window.netlifyIdentity.on("init", function (user) { if (!user) { window.netlifyIdentity.on("login", function () { document.location.href = "/admin/"; }); } }); }
+</script>
+</body>
+</html>
