@@ -13,7 +13,7 @@ import {
     footagePlannerBlock, MAX_FRAMES, MAX_SUGGESTIONS, FOOTAGE_REVIEW_TASKS, type FootageVideo,
 } from '../src/lib/footage';
 import { ownWindow, sceneClips, playedDurations, readFootageIds, readBrief, livePieces } from '../src/utils/video-producer';
-import { tightenSegment, tightenStoryboard, retakeIndexes, isFiller, capPieces, describeTightening, MAX_PAUSE_S } from '../src/lib/footage';
+import { tightenSegment, tightenStoryboard, retakeIndexes, isFiller, capPieces, describeTightening, MAX_PAUSE_S, loudSeconds, restoreLoudGaps } from '../src/lib/footage';
 import { MAX_CLIPS } from '../src/lib/video-edit';
 import { TASK_WEIGHTS } from '../src/config/task-weights';
 
@@ -266,7 +266,8 @@ check('the review costs 2 tasks (owner decision D-F1) and is recorded only after
     const fn = src.slice(src.indexOf('export async function reviewProject'));
     assert.ok(fn.indexOf("status: 'reviewed'") > 0);
     assert.ok(fn.indexOf("recordCompletedWork(db, orgId, 'footage_review'") > fn.indexOf("status: 'reviewed'"), 'charged after the review is saved');
-    assert.ok(/const charged = todo\.length \? FOOTAGE_REVIEW_TASKS : 0/.test(fn), 'free when every video was already analysed');
+    assert.ok(/const charged = fresh \? FOOTAGE_REVIEW_TASKS : 0/.test(fn), 'free when every video was analysed before');
+    assert.ok(fn.includes('todo.filter((r) => r.analysis == null)'), 'a redo after a rules change is free');
 });
 
 check('create refuses footage without consent, unread videos or tasks; ticks decide the edits', () => {
@@ -440,6 +441,63 @@ check('a library video is downloaded fresh, never read from the cached non-CORS 
     assert.ok(js.includes("cache: 'no-store'"));
     const prep = js.slice(js.indexOf('async function prepare'));
     assert.ok(prep.indexOf('await download(') > 0 && prep.indexOf('await download(') < prep.indexOf('openVideo('), 'downloaded before it is opened');
+});
+
+// ── Fixes from the first real-speech run (staging, 2026-11-09) ──────────────────────────────────
+
+check('the transcription is TOLD the language (English unless the brief says otherwise)', () => {
+    assert.ok(read('src/lib/tts.ts').includes("form.append('language', file.language)"));
+    const src = read('src/utils/footage-review.ts');
+    assert.ok(src.includes('language: ctx.language'));
+    assert.ok(src.includes("languageLabel(brief.language) ? brief.language : 'en'"));
+});
+
+check('a footage storyboard always states the language for the caption and on-screen words', () => {
+    const p = storyboardUserPrompt({ brief: brief({ voiceover: false }), businessName: 'B', businessFacts: '', library: [], today: '2026-11-09', language: 'English', footageBlock: 'X' });
+    assert.ok(/LANGUAGE: write .* in English/.test(p));
+    const q = storyboardUserPrompt({ brief: brief({ footageAssetIds: [] }), businessName: 'B', businessFacts: '', library: [], today: '2026-11-09', language: 'English' });
+    assert.ok(!/LANGUAGE:/.test(q), 'an ordinary English video is unchanged');
+});
+
+check('loudness safety net: a loud stretch the transcript has no words for is never cut', () => {
+    // Speech from 1 s to 9 s, but the transcript only heard words from 6 s on (the staging failure).
+    const loud = Array.from({ length: 100 }, (_, i) => (i >= 10 && i < 90 ? 30 : 2));
+    const heard = W('and this is our studio we film here', 6, 0.35);
+    const without = tightenSegment(0, 10, heard);
+    assert.ok(without.pieces[0].inS > 5, 'without loudness it would cut the opening');
+    const withIt = tightenSegment(0, 10, heard, loud);
+    assert.strictEqual(withIt.pieces[0].inS, 0, 'the unheard opening stays');
+});
+
+check('loudness safety net: a real silent pause is still cut, and an um is still cut', () => {
+    const words = [...W('hello there everyone', 0, 0.4), ...W('welcome in', 3.2, 0.4), { word: 'um', start: 4.2, end: 4.9 }, ...W('to the studio', 5.0, 0.4)];
+    const loud = Array.from({ length: 70 }, (_, i) => { const t = i / 10; return words.some((w) => t >= w.start && t < w.end) ? 30 : 1; });
+    const r = tightenSegment(0, 7, words, loud);
+    assert.ok(r.pieces.length >= 2 && r.stats.savedS > 1, 'the silent gap went');
+    assert.ok(!r.pieces.some((p) => p.inS < 4.4 && p.outS > 4.7), 'the um did not come back');
+});
+
+check('loudSeconds and restoreLoudGaps', () => {
+    assert.strictEqual(loudSeconds([0, 50, 50, 0, 50], 0, 0.5, 10), 0.30000000000000004);
+    const kept = [{ word: 'a', start: 0, end: 1 }, { word: 'b', start: 3, end: 4 }];
+    const loud = [30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30];
+    assert.deepStrictEqual(restoreLoudGaps([{ inS: 0, outS: 1.2 }, { inS: 2.9, outS: 4 }], 0, 4, loud, kept, []), [{ inS: 0, outS: 4 }]);
+});
+
+check('a video reviewed before is free to review again; the form says so', () => {
+    const src = read('src/utils/footage-review.ts');
+    assert.ok(src.includes('reviewedBefore: r?.analysis != null'));
+    assert.ok(src.includes('status.every((s) => s.reviewedBefore)'));
+    assert.ok(read('src/components/assistant-videos.js').includes('known.get(id).reviewedBefore'));
+    assert.ok(read('src/components/footage-reader.js').includes('frames, audioKey, loudness'));
+});
+
+check('the finished video is rendered right after it is made, so the review shows the real cut', () => {
+    const src = read('src/utils/video-producer.ts');
+    const b = src.slice(src.indexOf('export async function buildProject'));
+    assert.ok(b.indexOf('renderFinishedVideo(db') > b.indexOf("status: 'built'"));
+    assert.ok(src.includes('queuePostRender(db, {'));
+    assert.ok(read('src/components/assistant-videos.js').includes("v.postRenderStatus === 'pending' ? 'rendering'"));
 });
 
 check('the clip limit is 40 in the render and in the post editor', () => {

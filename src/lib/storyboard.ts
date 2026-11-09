@@ -409,7 +409,9 @@ export function storyboardUserPrompt(args: {
         keepsOwnSound(brief)
             ? 'No voiceover — the video keeps the footage\'s OWN sound. Leave voiceover empty. An own_video scene plays exactly its segment, so cut segments at natural pauses, never mid-sentence. Its targetS is ignored. Pauses, "um"s and repeated takes inside a segment are taken out automatically afterwards, so choose whole sentences and do not chop a segment up to remove them yourself. Use onScreenText where the footage needs words.'
             : brief.voiceover ? 'It has a voiceover — every scene needs a voiceover line.' : 'No voiceover — leave voiceover empty and use onScreenText to carry the message.',
-        args.language && args.language !== 'English'
+        // A footage video always says it: the shot list quotes what was SAID, and a mis-heard language
+        // there wrote the whole post in Welsh for an English speaker (staging, 2026-11-09).
+        args.language && (args.language !== 'English' || args.footageBlock)
             ? `LANGUAGE: write every voiceover line, every onScreenText and the caption in ${args.language}. Keep search keywords and AI prompts in English.`
             : '',
         allow,

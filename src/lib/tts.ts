@@ -214,12 +214,16 @@ export async function transcribeWords(mp3: Buffer, fetchImpl: typeof fetch = fet
  * WAV the browser made (src/components/footage-reader.js), ~10 MB for five minutes, so it gets longer.
  */
 export async function transcribeAudio(
-    bytes: Buffer, file: { filename: string; type: string; timeoutMs?: number }, fetchImpl: typeof fetch = fetch,
+    bytes: Buffer, file: { filename: string; type: string; timeoutMs?: number; language?: string; prompt?: string }, fetchImpl: typeof fetch = fetch,
 ): Promise<{ words: SpokenWord[]; durationS: number | null }> {
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new TtsError('Voiceovers are not configured.', 'not_configured');
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(bytes)], { type: file.type }), file.filename);
+    // Said, not guessed: left to detect the language, whisper heard an English speaker as Welsh and
+    // got every word time wrong with it (footage review on staging, 2026-11-09).
+    if (file.language) form.append('language', file.language);
+    if (file.prompt) form.append('prompt', file.prompt.slice(0, 600));
     form.append('model', TRANSCRIBE_MODEL);
     form.append('response_format', 'verbose_json');
     form.append('timestamp_granularities[]', 'word');

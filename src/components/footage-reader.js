@@ -81,7 +81,10 @@
     return frames;
   }
 
-  /** 16 kHz mono 16-bit WAV of the sound, or null when there is none worth reading. */
+  /**
+   * The sound: a 16 kHz mono 16-bit WAV (null when there's none worth reading) and its loudness every
+   * 0.1 s (RMS × 1000) — the tightening safety net (src/lib/footage.ts restoreLoudGaps).
+   */
   async function soundAsWav(source, durationS) {
     let buf;
     try {
@@ -104,9 +107,17 @@
       const d = audio.getChannelData(ch);
       for (let i = 0; i < n; i++) mono[i] += d[i] / audio.numberOfChannels;
     }
+    const step = RATE / 10;
+    const loudness = [];
+    for (let s = 0; s < n; s += step) {
+      let e = 0;
+      const end = Math.min(n, s + step);
+      for (let i = s; i < end; i++) e += mono[i] * mono[i];
+      loudness.push(Math.min(1000, Math.round(Math.sqrt(e / Math.max(1, end - s)) * 1000)));
+    }
     let sum = 0;
     for (let i = 0; i < n; i += 16) sum += mono[i] * mono[i];
-    if (Math.sqrt(sum / Math.max(1, n / 16)) < 0.002) return null;   // silence: nothing to transcribe
+    if (Math.sqrt(sum / Math.max(1, n / 16)) < 0.002) return { wav: null, loudness: [] };   // silence: nothing to transcribe
     const out = new DataView(new ArrayBuffer(44 + n * 2));
     const str = (o, s) => { for (let i = 0; i < s.length; i++) out.setUint8(o + i, s.charCodeAt(i)); };
     str(0, 'RIFF'); out.setUint32(4, 36 + n * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
@@ -114,7 +125,7 @@
     out.setUint32(24, RATE, true); out.setUint32(28, RATE * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true);
     str(36, 'data'); out.setUint32(40, n * 2, true);
     for (let i = 0; i < n; i++) out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, mono[i])) * 0x7fff, true);
-    return new Blob([out.buffer], { type: 'audio/wav' });
+    return { wav: new Blob([out.buffer], { type: 'audio/wav' }), loudness };
   }
 
   async function post(body) {
@@ -153,7 +164,7 @@
       const width = v.videoWidth || null, height = v.videoHeight || null;
       v.removeAttribute('src'); v.load();
       onProgress?.('Listening to your video… 80%');
-      const wav = await soundAsWav(source instanceof Blob ? source : src, durationS);
+      const { wav, loudness } = (await soundAsWav(source instanceof Blob ? source : src, durationS)) || { wav: null, loudness: [] };
       let audioKey = null;
       if (wav) {
         const { uploadUrl, key } = await post({ action: 'audio_url', assetId, size: wav.size });
@@ -162,7 +173,7 @@
         audioKey = key;
       }
       onProgress?.('Saving what it saw… 95%');
-      await post({ action: 'prepare', assetId, durationS, width, height, frames, audioKey });
+      await post({ action: 'prepare', assetId, durationS, width, height, frames, audioKey, loudness });
     } finally {
       if (source instanceof Blob) URL.revokeObjectURL(src);
     }

@@ -21,7 +21,7 @@ import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
 import { putR2Object } from '../lib/media-persist';
 import { presignR2Get } from './social-publish';
-import { transcribeAudio } from '../lib/tts';
+import { languageLabel, transcribeAudio } from '../lib/tts';
 import { recordCompletedWork, hasTaskCapacity } from './work-metering';
 import { recordPlatformIncident } from './platform-incident';
 import {
@@ -33,8 +33,17 @@ import type { OwnVideo, VideoBrief } from '../lib/storyboard';
 
 type Db = ReturnType<typeof getDb>;
 
-/** Bump when the shot-list prompt or rules change, so old analyses are redone on the next review. */
-export const ANALYSIS_VERSION = 1;
+/**
+ * Bump when the shot-list prompt or rules change, so old analyses are redone on the next review.
+ * 2 (2026-11-09): the transcription is told the language, and the browser sends loudness. A video
+ * analysed before is redone FREE (reviewProject charges only for videos never analysed).
+ */
+export const ANALYSIS_VERSION = 2;
+
+/** The language the owner's footage is transcribed in: the brief's, else English. Pure. */
+export function footageLanguage(brief: Pick<VideoBrief, 'language'>): string {
+    return typeof brief.language === 'string' && /^[a-z]{2}$/.test(brief.language) && languageLabel(brief.language) ? brief.language : 'en';
+}
 
 /** Where the browser's WAV for one video goes. Scoped by workspace and asset, checked on prepare. */
 export function footageAudioPrefix(orgId: number, assetId: number): string {
@@ -96,6 +105,8 @@ export interface PrepareInput {
     frames: Array<{ t: number; data: string }>;
     /** The R2 key the browser PUT the WAV to, or null when the video has no sound to read. */
     audioKey: string | null;
+    /** Loudness every 0.1 s (RMS × 1000), from the browser — the tightening safety net. */
+    loudness?: number[];
 }
 
 /** Validate and store what the browser read. Returns a user-facing error or ok. */
@@ -115,14 +126,19 @@ export async function prepareFootage(db: Db, orgId: number, input: PrepareInput)
     if (audioKey && (!audioKey.startsWith(footageAudioPrefix(orgId, input.assetId)) || audioKey.includes('..'))) {
         return { ok: false, status: 400, error: 'That sound file doesn’t belong to this video.' };
     }
+    const loudness = (Array.isArray(input.loudness) ? input.loudness : [])
+        .slice(0, Math.ceil((MAX_FOOTAGE_S + 1) / 0.1))
+        .map((n) => Math.max(0, Math.min(1000, Math.round(Number(n) || 0))));
     const framesKey = `${footageAudioPrefix(orgId, input.assetId)}frames-${Date.now()}.json`;
-    await putR2Object({ key: framesKey, bytes: Buffer.from(JSON.stringify(frames)), contentType: 'application/json' });
+    await putR2Object({ key: framesKey, bytes: Buffer.from(JSON.stringify({ frames, loudness })), contentType: 'application/json' });
     const w = Number(input.width), h = Number(input.height);
     const width = Number.isInteger(w) && w > 0 ? w : null;
     const height = Number.isInteger(h) && h > 0 ? h : null;
+    // `analysis` is left as it was: whether a video was EVER analysed decides whether a review of it
+    // is charged (reviewProject), and an old analysis is never used once the version moves on.
     const values = {
         organisationId: orgId, status: 'prepared', durationS, width, height, framesKey, frameCount: frames.length,
-        audioKey, analysis: null, words: [], error: null, version: ANALYSIS_VERSION, updatedAt: new Date(),
+        audioKey, words: [], error: null, version: ANALYSIS_VERSION, updatedAt: new Date(),
     };
     await db.insert(footageAnalyses).values({ assetId: input.assetId, ...values })
         .onConflictDoUpdate({ target: footageAnalyses.assetId, set: values });
@@ -149,6 +165,8 @@ export async function footageStatus(db: Db, orgId: number, ids: number[]) {
             // A failed analysis is read again from scratch: the frames may have been the problem.
             needsReading: !r || r.status === 'failed' || r.version !== ANALYSIS_VERSION,
             analysed,
+            // Reviewed under any version of the rules → reviewing it again is free (reviewProject).
+            reviewedBefore: r?.analysis != null,
             durationS: r?.durationS ?? null,
             summary: analysed ? ((r!.analysis as ShotList | null)?.summary ?? null) : null,
         };
@@ -165,14 +183,20 @@ async function r2Bytes(key: string): Promise<Buffer> {
 }
 
 /** Transcribe and shot-list one prepared video. Throws with a message the owner can act on. */
-async function analyseOne(db: Db, row: typeof footageAnalyses.$inferSelect, ctx: { orgId: number; assistantId: number | null; model: Awaited<ReturnType<typeof gatewayRoleModel>> }): Promise<void> {
+async function analyseOne(db: Db, row: typeof footageAnalyses.$inferSelect, ctx: { orgId: number; assistantId: number | null; model: Awaited<ReturnType<typeof gatewayRoleModel>>; language: string; businessName: string }): Promise<void> {
     let words: SpokenWord[] = [];
     if (row.audioKey) {
         const wav = await r2Bytes(row.audioKey);
         if (wav.length > 25 * 1024 * 1024) throw new Error('The sound in that video is too long to read. Trim the video first.');
-        ({ words } = await transcribeAudio(wav, { filename: 'footage.wav', type: 'audio/wav', timeoutMs: 90_000 }));
+        ({ words } = await transcribeAudio(wav, {
+            filename: 'footage.wav', type: 'audio/wav', timeoutMs: 90_000, language: ctx.language,
+            prompt: ctx.businessName ? `A short video for ${ctx.businessName}.` : undefined,
+        }));
     }
-    const frames = JSON.parse((await r2Bytes(row.framesKey)).toString('utf8')) as Array<{ t: number; data: string }>;
+    // Stored as { frames, loudness } since 2026-11-09; a bare array before.
+    const stored = JSON.parse((await r2Bytes(row.framesKey)).toString('utf8')) as Array<{ t: number; data: string }> | { frames: Array<{ t: number; data: string }>; loudness?: number[] };
+    const frames = Array.isArray(stored) ? stored : stored.frames;
+    const loudness = Array.isArray(stored) ? [] : (stored.loudness ?? []);
     const content: Array<Record<string, unknown>> = [];
     for (const f of frames.slice(0, MAX_FRAMES)) {
         content.push({ type: 'text', text: `Frame at ${Number(f.t).toFixed(1)} s:` });
@@ -188,7 +212,7 @@ async function analyseOne(db: Db, row: typeof footageAnalyses.$inferSelect, ctx:
         usage: { workspaceId: ctx.orgId, assistantId: ctx.assistantId },
         ...ctx.model,
     });
-    const analysis = enforceShotList(parseJsonObject(res.text), row.durationS, words);
+    const analysis: ShotList = { ...enforceShotList(parseJsonObject(res.text), row.durationS, words), ...(loudness.length ? { loudness } : {}) };
     await db.update(footageAnalyses).set({ status: 'done', analysis, words, error: null, version: ANALYSIS_VERSION, updatedAt: new Date() })
         .where(eq(footageAnalyses.assetId, row.assetId));
 }
@@ -207,11 +231,16 @@ export async function reviewProject(db: Db, projectId: number): Promise<void> {
         const missing = ids.filter((id) => !rows.some((r) => r.assetId === id));
         if (missing.length) throw new Error('Some of the videos weren’t read in your browser first. Choose them again and press “Review my footage”.');
         const todo = rows.filter((r) => !(r.status === 'done' && r.version === ANALYSIS_VERSION));
+        // Charged only for a video never analysed before: redoing one because our rules moved on
+        // (ANALYSIS_VERSION) is our cost, not the owner's.
+        const fresh = todo.filter((r) => r.analysis == null).length;
+        const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+        const language = footageLanguage(brief);
         // Two at a time: each is a vision call of up to 40 frames plus a transcription.
         for (let i = 0; i < todo.length; i += 2) {
             await Promise.all(todo.slice(i, i + 2).map(async (row) => {
                 try {
-                    await analyseOne(db, row, { orgId, assistantId: p.aiAssistantId ?? null, model });
+                    await analyseOne(db, row, { orgId, assistantId: p.aiAssistantId ?? null, model, language, businessName: org?.name ?? '' });
                 } catch (err) {
                     const msg = err instanceof Error ? err.message.slice(0, 300) : 'It couldn’t be read.';
                     await db.update(footageAnalyses).set({ status: 'failed', error: msg, updatedAt: new Date() }).where(eq(footageAnalyses.assetId, row.assetId));
@@ -220,7 +249,6 @@ export async function reviewProject(db: Db, projectId: number): Promise<void> {
             }));
         }
         const videos = await loadFootage(db, orgId, ids);
-        const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
         const res = await gatewayGenerate({
             system: reviewSystemPrompt(),
             messages: [{ role: 'user', content: reviewUserPrompt({ brief, businessName: org?.name ?? '', videos }) }],
@@ -229,7 +257,7 @@ export async function reviewProject(db: Db, projectId: number): Promise<void> {
             usage: { workspaceId: orgId, assistantId: p.aiAssistantId ?? null },
             ...model,
         });
-        const charged = todo.length ? FOOTAGE_REVIEW_TASKS : 0;
+        const charged = fresh ? FOOTAGE_REVIEW_TASKS : 0;
         const review: FootageReview = enforceReview(parseJsonObject(res.text), videos, charged);
         await db.update(videoProjects).set({ status: 'reviewed', footageReview: review, note: null, updatedAt: new Date() })
             .where(and(eq(videoProjects.id, projectId), eq(videoProjects.status, 'reviewing')));
@@ -249,6 +277,6 @@ export async function reviewProject(db: Db, projectId: number): Promise<void> {
 /** Can this workspace pay for a review of these videos? Free when all are analysed already. */
 export async function canAffordReview(db: Db, orgId: number, ids: number[]): Promise<boolean> {
     const status = await footageStatus(db, orgId, ids);
-    if (status.every((s) => s.analysed)) return true;
+    if (status.every((s) => s.reviewedBefore)) return true;
     return hasTaskCapacity(db, orgId, FOOTAGE_REVIEW_TASKS);
 }

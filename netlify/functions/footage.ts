@@ -60,6 +60,7 @@ export default withLambda(async (event) => {
                 url: v.storageKey ? await presignR2Get(v.storageKey, 3600, { stableWindowSec: 1800 }).catch(() => null) : null,
                 needsReading: status.get(v.id)?.needsReading ?? true,
                 analysed: status.get(v.id)?.analysed ?? false,
+                reviewedBefore: status.get(v.id)?.reviewedBefore ?? false,
                 summary: status.get(v.id)?.summary ?? null,
             })));
             return json(200, { videos });
@@ -96,6 +97,7 @@ export default withLambda(async (event) => {
             height: body.height as number | null,
             frames: Array.isArray(body.frames) ? body.frames as Array<{ t: number; data: string }> : [],
             audioKey: typeof body.audioKey === 'string' ? body.audioKey : null,
+            loudness: Array.isArray(body.loudness) ? body.loudness as number[] : [],
         });
         return done.ok ? json(200, { ok: true }) : json(done.status, { error: done.error });
     }
