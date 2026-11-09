@@ -627,10 +627,11 @@
     const empty = state.stage === 'check'
       ? `No videos to check. Press “New video”, or tell ${who()} in chat what you’d like a video about.`
       : `No videos ${esc(stageLabel.toLowerCase())}.`;
-    // The standard tab header and card (owner, 2026-11-07).
+    // The standard tab header and card (owner, 2026-11-07). Full screen, then "+ New video" right beside
+    // it (e2e/full-screen-buttons.spec.ts), then "Use my own footage".
     const full = `<button type="button" data-vid-act="full" aria-pressed="${state.full ? 'true' : 'false'}" title="${state.full ? 'Back to the page (Esc)' : 'Use the whole screen for your videos and the chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg whitespace-nowrap">${state.full ? 'Exit full screen' : 'Full screen'}</button>`;
     el.innerHTML = `
-      ${window._tabHead({ title: 'Videos', explain: 'video-videos', right: `${full}${state.footage ? '' : `<button type="button" data-vid-act="footage" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg whitespace-nowrap">Use my own footage</button>`}${state.form ? '' : window._tabNewBtn('New video', 'data-vid-act="new"')}` })}
+      ${window._tabHead({ title: 'Videos', explain: 'video-videos', right: `${full}${state.form ? '' : window._tabNewBtn('New video', 'data-vid-act="new"')}${state.footage ? '' : `<button type="button" data-vid-act="footage" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg whitespace-nowrap">Use my own footage</button>`}` })}
       ${formHtml()}
       ${footageFormHtml()}
       <div class="tab-card">
