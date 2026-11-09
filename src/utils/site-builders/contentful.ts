@@ -236,10 +236,11 @@ function entry(o: Obj, ctx: Ctx, depth: number): void {
 function walk(v: Json, ctx: Ctx, depth = 0): void {
     if (depth > 30 || ctx.budget <= 0 || !v || typeof v !== 'object') return;
     if (Array.isArray(v)) { for (const x of v) walk(x, ctx, depth + 1); return; }
-    if (isDoc(v)) { document(v, undefined, ctx); return; }
-    if (isDoc(v.json)) { document(v.json, v.links, ctx); return; }
-    if (isObj(v.sys) || typeof v.__typename === 'string') { entry(v, ctx, depth + 1); return; }
-    for (const x of Object.values(v)) walk(x, ctx, depth + 1);
+    const o: Obj = v;
+    if (o.nodeType === 'document' && Array.isArray(o.content)) { document(o, undefined, ctx); return; }
+    if (isDoc(o.json)) { document(o.json, o.links, ctx); return; }
+    if (isObj(o.sys) || typeof o.__typename === 'string') { entry(o, ctx, depth + 1); return; }
+    for (const x of Object.values(o)) walk(x, ctx, depth + 1);
 }
 
 /** The page's data scripts, parsed: Next's __NEXT_DATA__ props and the App Router's RSC rows. */
