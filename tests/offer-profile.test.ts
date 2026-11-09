@@ -34,6 +34,10 @@ check('the guess follows what the business already did, then its industry', () =
     assert.deepStrictEqual(inferOffers({ industry: 'Health & Wellbeing' }), ['services', 'bookings']);
     // "bar" must be a word, not "barrister"
     assert.deepStrictEqual(inferOffers({ industry: 'Barristers' }), []);
+    assert.deepStrictEqual(inferOffers({ industry: 'Holiday lets' }), ['stays']);
+    assert.deepStrictEqual(inferOffers({ industry: 'B&B' }), ['stays']);
+    assert.deepStrictEqual(inferOffers({ siteFeatures: ['stays'] }), ['stays']);
+    assert.deepStrictEqual(inferOffers({ hasStays: true }), ['stays']);
 });
 
 check('only known kinds are saved; anything else is refused', () => {
@@ -44,9 +48,11 @@ check('only known kinds are saved; anything else is refused', () => {
 
 check('an answer to the OLD two-box question is not read as "sells nothing"', () => {
     const src = read('src/utils/offer-profile.ts');
-    assert.ok(src.includes("const ASKED_ALL = 'asked:6'") && src.includes('const stored = [...offers, ASKED_ALL]'));
+    assert.ok(src.includes("const ASKED_ALL = 'asked:7'") && src.includes('const stored = [...offers, ASKED_ALL]'));
+    // A six-option answer (before stays, 2026-11-09) is still complete — nobody is asked again.
+    assert.ok(src.includes("const ASKED_SIX = 'asked:6'") && src.includes('offers.includes(ASKED_ALL) || six'));
     // Only a complete answer reaches every assistant.
-    assert.ok(src.includes('return r.complete ? { offers: r.offers, answered: true } : null;'));
+    assert.ok(src.includes('return r.complete ? { offers: await withStays(db, organisationId, r), answered: true } : null;'));
 });
 
 check('assistants are told what is NOT ticked — firmly only when it is the owner\'s answer', () => {
@@ -63,6 +69,7 @@ check('every tick changes something real', () => {
     assert.ok(html.includes("offers('subscriptions') ? { priceType: 'fixed', priceUnit: 'a month' }"));
     assert.ok(html.includes("tab('bookings')?.classList.toggle('hidden', !books)"));
     assert.ok(html.includes("const hours = books || o.offers.includes('visits')"));
+    assert.ok(html.includes("tab('stays')?.classList.toggle('hidden', !o.offers.includes('stays'))"));
     // The chat card and the prompt name the same six.
     const card = read('src/components/disruptive-ui-registry.js');
     for (const k of OFFER_KINDS) assert.ok(card.includes(`${k}: '`), `card ${k}`);

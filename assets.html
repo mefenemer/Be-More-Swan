@@ -28,6 +28,8 @@
       <button type="button" class="bizinfo-tab" data-tab="hours">Hours &amp; Location</button>
       <!-- Shown only for a business that takes bookings ("What does your business offer?"). -->
       <button type="button" class="bizinfo-tab hidden" data-tab="bookings">Bookings</button>
+      <!-- Shown only for a business guests stay with (holiday lets, B&B rooms — offer "stays"). -->
+      <button type="button" class="bizinfo-tab hidden" data-tab="stays">Stays</button>
       <button type="button" class="bizinfo-tab" data-tab="sitepages">Website Pages</button>
       <button type="button" class="bizinfo-tab" data-tab="legal">Legal &amp; Billing</button>
       <button type="button" class="bizinfo-tab" data-tab="team">Team Members</button>
@@ -244,6 +246,7 @@
         <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="bookings" class="mt-1"> People book time with us (appointments, classes, tables or events)</label>
         <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="visits" class="mt-1"> Customers visit us (a shop, venue or studio)</label>
         <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="menu" class="mt-1"> We serve food or drink</label>
+        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="stays" class="mt-1"> Guests stay with us (holiday lets, B&amp;B or guest house rooms)</label>
       </div>
       <p id="op-offer-note" class="text-xs mt-1.5"></p>
     </div>
@@ -1274,6 +1277,8 @@
       const hours = books || o.offers.includes('visits');
       const tab = (name) => document.querySelector(`.bizinfo-tab[data-tab="${name}"]`);
       tab('bookings')?.classList.toggle('hidden', !books);
+      // Holiday lets and B&B rooms (stays-editor.js): their own tab.
+      tab('stays')?.classList.toggle('hidden', !o.offers.includes('stays'));
       tab('hours')?.classList.toggle('hidden', !hours);
       // Never leave someone looking at a tab that just went away.
       const open = document.querySelector('.bizinfo-tab.active');
@@ -1294,6 +1299,15 @@
   })();
   </script>
   </div><!-- /panel: bookings -->
+
+  <!-- ══ Stays (docs/holiday-lets-plan.md) ═════════════════════════════════════════════════════
+       Holiday lets and B&B room types: details, photos, nightly prices and seasons, extra charges,
+       deposit / balance / damage deposit, cancellation, rules, rooms, closed dates. The website's
+       "Stays" section and each stay's page read these. stays-editor.js ↔ netlify/functions/stays.ts. -->
+  <div class="bizinfo-tab-panel hidden max-w-4xl" data-panel="stays">
+    <section id="stays-root" class="mb-8"></section>
+    <script src="/src/components/stays-editor.js?v=20261109"></script>
+  </div><!-- /panel: stays -->
 
 
   <!-- ══ Legal & Billing ════════════════════════════════════════════════════ -->

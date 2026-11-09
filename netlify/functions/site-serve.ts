@@ -21,7 +21,9 @@ import { eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { sites } from '../../db/schema';
-import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BOOKING_PAGE_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH, LISTING_POST_PATH, renderSiteListing } from '../../src/utils/site-render';
+import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BOOKING_PAGE_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH, LISTING_POST_PATH, renderSiteListing, renderSiteStay } from '../../src/utils/site-render';
+import { siteHasStays, stayRoute } from '../../src/utils/site-stays';
+import { loadSiteStays, loadStayPage, staySlugs } from '../../src/utils/site-stays-load';
 import { reviewPage, reviewSubmit } from '../../src/utils/site-review';
 import { bookStep, bookSubmit } from '../../src/utils/site-booking';
 import { loadSiteReviews } from '../../src/utils/reviews';
@@ -257,7 +259,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
     if (path === '/sitemap.xml') {
         const blog = blogOn(definition) ? await siteBlogSlugs(db, site.organisationId, origin, origins) : [];
         const hasListings = definition.pages.some((p) => p.sections.some((x) => x.type === 'listings'));
-        return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin, blog, hasListings ? await listingSlugs(db, site.organisationId) : []) };
+        return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin, blog, hasListings ? await listingSlugs(db, site.organisationId) : [], siteHasStays(definition) ? await staySlugs(db, site.organisationId) : []) };
     }
 
     // ── The Blog Assistant's posts (site-blog.ts): /blog and /blog/<slug>, while the blog is on ──
@@ -298,6 +300,16 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : renderSiteListing(definition, ctx, l) };
     }
 
+    // ── A holiday let / B&B room type's own page, with its calendar: /stays/<slug> (site-stays.ts) ──
+    const sr = stayRoute(path);
+    if (sr && siteHasStays(definition)) {
+        const month = new URLSearchParams(String(event.queryStringParameters?.q || '')).get('month');
+        const v = await loadStayPage(db, site.organisationId, sr.slug, month, new Date());
+        if (!v) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
+        // The calendar changes with every booking: kept a minute, like other pages.
+        return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : renderSiteStay(definition, ctx, v, BOOK_PATH) };
+    }
+
     // An old address that moved (an imported page's former path — site-definition.ts redirects).
     const moved = redirectFor(definition, path);
     if (moved) return { statusCode: 301, headers: { Location: moved, 'Cache-Control': 'public, max-age=3600' } as Record<string, string>, body: '' };
@@ -315,6 +327,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         socialFeed: await loadSiteSocialFeed(db, site.organisationId, definition),
         blog: await loadSiteBlogLatest(db, site.organisationId, definition),
         listings: await loadSiteListings(db, site.organisationId, definition),
+        stays: await loadSiteStays(db, site.organisationId, definition),
         query: String(event.queryStringParameters?.q || ''),
     });
     return { statusCode: page.status, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : page.html };

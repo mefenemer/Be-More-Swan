@@ -2124,6 +2124,44 @@
         .then(() => { respond({ ok: true }); siteChanged(); })
         .catch((err) => respond({ ok: false, error: err.message }));
     }
+    // Holiday lets and B&B rooms (docs/holiday-lets-plan.md): the same calls as Business Information ▸ Stays
+    // (stays.ts) and the Website tab ▸ Bookings (sites.ts damage_return / damage_keep).
+    async function staysCall(method, body) {
+      const r = await fetch('/.netlify/functions/stays', { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'That couldn\'t be saved.');
+      return j;
+    }
+    // "Add it" / "Save the change" on a stay_setup card — a change names only what changes (PUT partial).
+    function onStaySetup(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const stay = d.stay && typeof d.stay === 'object' ? d.stay : {};
+      (d.stayId ? staysCall('PUT', { ...stay, id: d.stayId, partial: true }) : staysCall('POST', stay))
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+    // "Close these dates" on a stay_block card — one block at a time; stops at the first refusal.
+    async function onStayBlock(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      let done = 0;
+      try {
+        for (const b of (Array.isArray(d.blocks) ? d.blocks : [])) { await staysCall('POST', { block: b }); done++; }
+        respond({ ok: true, done });
+        siteChanged();
+      } catch (err) { respond({ ok: false, error: `${done ? `${done} closed, then: ` : ''}${err.message}` }); }
+    }
+    // "Return it now" / "Keep it and return the rest" on a stay_damage card.
+    function onStayDamage(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost(d.decision === 'keep'
+        ? { action: 'damage_keep', assistantId, id: d.bookingId, keep: d.keep, reason: d.reason }
+        : { action: 'damage_return', assistantId, id: d.bookingId })
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
     // "Do it" on a listing_decisions card → site-listings.ts PATCH { id, decision }, one at a time.
     async function onListingDecisions(e) {
       const d = e.detail || {};
@@ -2519,6 +2557,9 @@
     container.addEventListener('site:picturePlace', onSitePicturePlace);
     container.addEventListener('blog:blockEdit', onBlogBlockEdit);
     container.addEventListener('site:listingDecisions', onListingDecisions);
+    container.addEventListener('site:staySetup', onStaySetup);
+    container.addEventListener('site:stayBlock', onStayBlock);
+    container.addEventListener('site:stayDamage', onStayDamage);
     if (refEl) refEl.addEventListener('click', onRefClick);
     container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
     container.addEventListener('campaign:edit', onCampaignEdit);
@@ -2642,6 +2683,9 @@
         container.removeEventListener('site:picturePlace', onSitePicturePlace);
         container.removeEventListener('blog:blockEdit', onBlogBlockEdit);
         container.removeEventListener('site:listingDecisions', onListingDecisions);
+        container.removeEventListener('site:staySetup', onStaySetup);
+        container.removeEventListener('site:stayBlock', onStayBlock);
+        container.removeEventListener('site:stayDamage', onStayDamage);
         if (refEl) refEl.removeEventListener('click', onRefClick);
         container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);
         container.removeEventListener('campaign:edit', onCampaignEdit);

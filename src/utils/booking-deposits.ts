@@ -23,7 +23,7 @@ import { bookings, orgProducts } from '../../db/schema';
 // site-store.ts (in chat-orchestrator) imports that. See src/lib/render-libs.ts.
 const stripeClient = async () => (await import('./stripe')).getStripe();
 import { connectAccountFor } from './site-shop';
-import { depositFor, formatPounds } from './product-price';
+import { depositFor, formatMoney } from './product-price';
 import { BOOK_PATH, FORM_SENT_PATH } from './site-render';
 import { signBookingId } from './booking-links';
 
@@ -143,14 +143,17 @@ export async function refundDeposit(db: Db, b: Pick<BookingRow, 'id' | 'organisa
 }
 
 /** Where a booking's money stands, in words, for emails and the owner's list. */
-export function depositNote(b: Pick<BookingRow, 'depositPence' | 'paymentStatus'>): string | null {
+export function depositNote(b: Pick<BookingRow, 'depositPence' | 'paymentStatus'> & Partial<Pick<BookingRow, 'currency' | 'kind' | 'balancePence'>>): string | null {
     if (!b.depositPence) return null;
-    const amount = formatPounds(b.depositPence);
+    // A stay can be in euros or dollars (stays.ts); everything else was always pounds.
+    const amount = formatMoney(b.depositPence, b.currency ?? 'GBP');
+    // A stay paid in full is a payment, not a deposit.
+    const word = b.kind === 'stay' && !b.balancePence ? 'payment' : 'deposit';
     switch (b.paymentStatus) {
-        case 'paid': return `${amount} deposit paid`;
-        case 'refunded': return `${amount} deposit refunded`;
-        case 'refund_failed': return `${amount} deposit — refund failed, please refund it in Stripe`;
-        case 'unpaid': return `Waiting for the ${amount} deposit`;
+        case 'paid': return `${amount} ${word} paid`;
+        case 'refunded': return `${amount} ${word} refunded`;
+        case 'refund_failed': return `${amount} ${word} — refund failed, please refund it in Stripe`;
+        case 'unpaid': return `Waiting for the ${amount} ${word}`;
         default: return null;
     }
 }

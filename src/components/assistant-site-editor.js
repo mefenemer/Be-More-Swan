@@ -31,7 +31,7 @@
   const API = '/.netlify/functions/sites';
   const POLL_MS = 5000;
 
-  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list', gallery: 'Gallery', reviews: 'Reviews', social_feed: 'Latest social posts', blog_posts: 'Latest blog posts', listings: 'Listings' };
+  const TYPE_LABEL = { hero: 'Hero', features: 'Features', steps: 'Steps', text: 'Text', faq: 'Questions', testimonials: 'Testimonials', cta: 'Call to action', contact: 'Contact form', signup: 'Sign-up form', products: 'Products for sale', booking: 'Bookings', hours: 'Opening hours & contact', menu: 'Menu / price list', gallery: 'Gallery', reviews: 'Reviews', social_feed: 'Latest social posts', blog_posts: 'Latest blog posts', listings: 'Listings', stays: 'Stays (holiday lets, rooms)' };
   /** The edit form for each section type — the props the gate accepts (site-definition.ts cleanSection). */
   const FORMS = {
     hero: [
@@ -107,6 +107,12 @@
       { k: 'filter', kind: 'checkbox', label: 'Show category buttons so visitors can pick one' },
       { k: 'allowPosts', kind: 'checkbox', label: 'Let visitors send one in — it waits for your approval before it appears' },
       { k: 'postLabel', kind: 'text', label: 'Text on that button' }],
+    // Stays (docs/holiday-lets-plan.md): holiday lets and B&B room types from Business Information ▸ Stays.
+    // The section holds no names or prices — every active stay is shown, each with its own page and calendar.
+    stays: [{ k: '_staysInfo', kind: 'staysInfo', label: 'What this shows' },
+      { k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
+      { k: 'buttonLabel', kind: 'text', label: 'Text on each button' },
+      { k: '_page', kind: 'pagePick', label: 'Show it on' }],
     // Gallery: the owner's own pictures, each with what it shows (needed) and an optional caption.
     gallery: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'layout', kind: 'select', label: 'Layout', options: [['square', 'Even squares (pictures are cropped to fit)'], ['natural', 'Each picture at its own shape']] },
@@ -137,6 +143,7 @@
     social_feed: { enabled: true, heading: 'Latest from us', intro: '', platforms: [], count: 6 },
     blog_posts: { enabled: true, heading: 'From our blog', intro: '', count: 3 },
     gallery: { heading: 'Gallery', intro: '', layout: 'square', images: [] },
+    stays: { heading: 'Stay with us', intro: '', stayIds: [], buttonLabel: 'See dates and prices' },
     listings: { kind: 'event', heading: 'What\'s on', intro: '', categories: [], show: 'upcoming', count: 12, layout: 'cards', filter: true, allowPosts: false, postLabel: 'Post your event' },
     menu: { heading: 'Prices', intro: '', groups: [{ title: '', productIds: [] }], showDescriptions: true, showDurations: false, note: '' },
   };
@@ -444,6 +451,9 @@
     if (f.kind === 'select') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><select name="${name}" class="${inputCls}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
     if (f.kind === 'checkbox') return `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" name="${name}" ${value ? 'checked' : ''}> ${esc(f.label)}</label>`;
     if (f.kind === 'csv') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><input name="${name}" class="${inputCls}" value="${esc((Array.isArray(value) ? value : []).join(', '))}" placeholder="e.g. Music, Food & drink, Family">`;
+    if (f.kind === 'staysInfo') {
+      return `<p class="text-xs text-gray-600 mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3">Shows every holiday let and room type you've set up in <a class="link font-bold" href="/workspace.html?view=assets&amp;tab=stays">Business Information ▸ Stays</a> — names, photos, prices and rules are kept there. Each one gets its own page with a calendar where guests book.</p>`;
+    }
     if (f.kind === 'listingsInfo') {
       const n = (state.listings && state.listings.listings) ? state.listings.listings.filter((x) => x.status === 'published').length : null;
       return `<p class="text-xs text-gray-600 mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3">The entries themselves are kept on the ${btn('data-site-open-listings', 'Listings tab')}${n != null ? ` (${n} on show)` : ''} — add, edit and approve them there, or ask ${esc(state.assistantName || 'your assistant')} in the chat. Each has its own page on your site.</p>`;
@@ -804,6 +814,7 @@
     social_feed: ['📣', 'Your latest posts published through Be More Swan'],
     blog_posts: ['📰', 'Your newest posts from your Blog Assistant'],
     listings: ['📅', 'An events calendar or a directory, from your Listings tab'],
+    stays: ['🏡', 'Your holiday lets or B&B rooms, each with dates and prices'],
   };
   function addPickerHtml(here) {
     const types = state.data.vocab.sectionTypes.filter((t) => typeAllowed(t) && FORMS[t]);
@@ -1422,16 +1433,31 @@
       const past = new Date(x.startsAt).getTime() < now;
       return `<li class="border ${x.status === 'pending' ? 'border-emerald-200' : 'border-gray-200'} rounded-lg p-3 ${past ? 'opacity-70' : ''}">
         <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-xs font-bold text-gray-900">${esc(x.when)}</p><span class="text-xs font-bold ${tone}">${esc(label)}</span></div>
-        <p class="text-xs text-gray-800 mt-1">${esc(x.what)} · ${esc(x.customerName)}${x.reminded ? ' <span class="text-gray-500">· reminder sent</span>' : ''}</p>
+        <p class="text-xs text-gray-800 mt-1">${esc(x.what)} · ${esc(x.customerName)}${x.reminded ? ` <span class="text-gray-500">· ${x.stay ? 'arrival details sent' : 'reminder sent'}</span>` : ''}</p>
         <p class="text-xs text-gray-600 mt-1"><a class="underline" href="mailto:${esc(x.customerEmail)}">${esc(x.customerEmail)}</a>${x.customerPhone ? ` · <a class="underline" href="tel:${esc(x.customerPhone)}">${esc(x.customerPhone)}</a>` : ''}</p>
         ${x.meeting ? `<p class="text-xs text-gray-700 mt-1">${esc(x.meeting)}</p>` : ''}
         ${x.notes ? `<p class="text-xs text-gray-700 mt-1" style="white-space:pre-wrap">${esc(x.notes)}</p>` : ''}
         ${x.deposit ? `<p class="text-xs font-semibold ${/failed/.test(x.deposit) ? 'text-red-600' : 'text-gray-700'} mt-1">${esc(x.deposit)}</p>` : ''}
+        ${x.stay ? stayMoneyHtml(x) : ''}
         ${!past && (x.status === 'pending' || x.status === 'confirmed') ? `<div class="flex flex-wrap gap-2 mt-2">
           ${x.status === 'pending' ? btn(`data-site-booking="${esc(x.id)}" data-decision="confirm"`, 'Confirm', true) + btn(`data-site-booking="${esc(x.id)}" data-decision="decline"`, 'Decline') : ''}
           ${x.status === 'confirmed' ? btn(`data-site-booking="${esc(x.id)}" data-decision="cancel"`, 'Cancel booking') : ''}</div>` : ''}
       </li>`;
     }).join('')}</ul>`);
+  }
+  // A holiday let / B&B stay's balance and damage deposit (stay-jobs.ts): in words, plus Return / Keep part.
+  function stayMoneyHtml(x) {
+    const m = x.stay;
+    const lines = [m.balance ? `<p class="text-xs font-semibold ${m.balanceProblem ? 'text-red-600' : 'text-gray-700'} mt-1">${esc(m.balance)}</p>` : '',
+      m.damage ? `<p class="text-xs font-semibold ${/failed/.test(m.damage) ? 'text-red-600' : 'text-gray-700'} mt-1">${esc(m.damage)}</p>` : ''].join('');
+    if (!m.damageHeld) return lines;
+    if (state.damageKeep === x.id) {
+      return `${lines}<div class="border border-gray-200 rounded-lg p-3 mt-2 bg-gray-50" data-damage-form="${esc(x.id)}">
+        <label class="block text-xs font-bold text-gray-700">How much are you keeping? <span class="font-normal text-gray-500">(of ${esc(m.damageAmount)})</span><input data-damage-keep inputmode="decimal" class="${inputCls} mt-1" placeholder="40"></label>
+        <label class="block text-xs font-bold text-gray-700 mt-2">Why <span class="font-normal text-gray-500">(the guest is sent this)</span><textarea data-damage-reason rows="2" maxlength="500" class="${inputCls} mt-1" placeholder="A broken lamp in the sitting room — replacement cost."></textarea></label>
+        <div class="flex flex-wrap gap-2 mt-2">${btn(`data-damage-keep-save="${esc(x.id)}"`, 'Keep this and return the rest', true)}${btn('data-damage-keep-cancel', 'Cancel')}</div></div>`;
+    }
+    return `${lines}<div class="flex flex-wrap gap-2 mt-2">${btn(`data-damage-return="${esc(x.id)}"`, 'Return deposit now')}${m.canKeep ? btn(`data-damage-keep-open="${esc(x.id)}"`, 'Keep part') : ''}</div>`;
   }
   async function loadBookings() {
     try {
@@ -2755,6 +2781,27 @@
         const r = await post({ action: 'session_cancel', assistantId: state.assistantId, id: Number(sCancel.dataset.sessionCancel), wholeSeries: series });
         state.timetable = r.sessions || state.timetable;
         state.note = { text: `${r.cancelled === 1 ? 'Cancelled' : `${r.cancelled} dates cancelled`}${r.told ? ` — ${r.told} booking${r.told === 1 ? '' : 's'} cancelled and emailed` : ''}.`, tone: 'ok' };
+      } catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      await loadBookings();
+      return;
+    }
+    // A stay's damage deposit: return it all now, or keep part with a reason (sites.ts damage_return / damage_keep).
+    if (t('[data-damage-keep-open]')) { state.damageKeep = Number(t('[data-damage-keep-open]').dataset.damageKeepOpen); rerender(); return; }
+    if (t('[data-damage-keep-cancel]')) { state.damageKeep = null; rerender(); return; }
+    const dmgReturn = t('[data-damage-return]');
+    const dmgKeep = t('[data-damage-keep-save]');
+    if (dmgReturn || dmgKeep) {
+      const id = Number(dmgReturn ? dmgReturn.dataset.damageReturn : dmgKeep.dataset.damageKeepSave);
+      const form = dmgKeep ? document.querySelector(`[data-damage-form="${id}"]`) : null;
+      const keep = form ? form.querySelector('[data-damage-keep]').value : '';
+      const reason = form ? form.querySelector('[data-damage-reason]').value : '';
+      const ok = await window.confirmModal(dmgReturn ? 'All of it goes back to their card now, and they\'re emailed.' : `You keep ${keep || '0'} and the rest goes back to their card now. They're emailed your reason.`,
+        { title: dmgReturn ? 'Return the damage deposit?' : 'Keep part of the damage deposit?', confirmLabel: dmgReturn ? 'Return it' : 'Keep and return the rest', cancelLabel: 'Not yet' });
+      if (!ok) return;
+      try {
+        await post(dmgReturn ? { action: 'damage_return', assistantId: state.assistantId, id } : { action: 'damage_keep', assistantId: state.assistantId, id, keep, reason });
+        state.damageKeep = null;
+        state.note = { text: dmgReturn ? 'Damage deposit returned.' : 'Done — the rest is on its way back to them.', tone: 'ok' };
       } catch (err) { state.note = { text: err.message, tone: 'error' }; }
       await loadBookings();
       return;

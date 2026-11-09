@@ -15,7 +15,9 @@ import { getDb } from '../../db/client';
 import { aiAssistants, sites } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
-import { renderSiteBlogIndex, renderSiteBlogPost, renderSitePage, renderSiteListing } from '../../src/utils/site-render';
+import { renderSiteBlogIndex, renderSiteBlogPost, renderSitePage, renderSiteListing, renderSiteStay } from '../../src/utils/site-render';
+import { stayRoute } from '../../src/utils/site-stays';
+import { loadSiteStays, loadStayPage } from '../../src/utils/site-stays-load';
 import { loadSiteBlogIndex, loadSiteBlogLatest, loadSiteBlogPost, siteBlogRoute } from '../../src/utils/site-blog';
 import { applySiteOperation, blogOn } from '../../src/utils/site-definition';
 import { definitionOf, maxPagesFor } from '../../src/utils/site-store';
@@ -90,6 +92,7 @@ export default withLambda(async (event) => {
         socialFeed: await loadSiteSocialFeed(db, ctx.organisationId, definition),
         blog: await loadSiteBlogLatest(db, ctx.organisationId, definition),
         listings: await loadSiteListings(db, ctx.organisationId, definition),
+        stays: await loadSiteStays(db, ctx.organisationId, definition),
     };
     // "Post your event": the visitor's form, to look at (posting works on the live site only).
     if (path.split('?')[0] === '/_post') {
@@ -101,6 +104,12 @@ export default withLambda(async (event) => {
     if (lr && !lr.ics) {
         const l = await loadListingBySlug(db, ctx.organisationId, lr.slug);
         if (l) return page(200, renderSiteListing(definition, renderCtx, l));
+    }
+    // A holiday let / room type's own page (/stays/<slug>), with its calendar — as the live site shows it.
+    const sr = stayRoute(path);
+    if (sr) {
+        const v = await loadStayPage(db, ctx.organisationId, sr.slug, new URLSearchParams(path.split('?')[1] || '').get('month'), new Date()).catch(() => null);
+        if (v) return page(200, renderSiteStay(definition, renderCtx, v, '/_book'));
     }
     // The blog's pages, so the preview's Blog menu entry and post links lead somewhere (site-blog.ts).
     const blogRoute = blogOn(definition) ? siteBlogRoute(path) : null;

@@ -145,6 +145,8 @@ export function sectionForKind(def: SiteDefinition, kind: string): string | null
 async function managePage(b: BookCtx, q: URLSearchParams): Promise<BookPage> {
     const row = await bookingFromLink(b, q.get('manage'), q.get('t'));
     if (!row) return page(b, 'Booking not found', '<h1>We couldn\'t find that booking</h1><p>The link may be incomplete. Please get in touch with us.</p><p><a class="btn" href="/">Go to the home page</a></p>', 404);
+    // A holiday let / B&B stay has its own page: dates, and a refund by the cancellation policy (site-stay-booking.ts).
+    if (row.kind === 'stay') return (await import('./site-stay-booking')).stayManagePage(b, row, String(q.get('t')), q.get('do') === 'cancel');
     const setup = await loadBookingSetup(b.db, b.site.organisationId);
     const { when, what } = describeBooking(row, setup.settings.timezone);
     const status = { pending: 'Waiting to be confirmed', confirmed: 'Confirmed', declined: 'Not accepted', cancelled: 'Cancelled' }[row.status] ?? row.status;
@@ -178,6 +180,10 @@ export async function bookStep(b: BookCtx, q: URLSearchParams, message: string |
         }
         return { status: 303, location: safeBack(b.def, q.get('b')) };
     }
+    // Holiday lets and B&B rooms: dates and nights, not times (site-stay-booking.ts).
+    if (q.get('stay')) return (await import('./site-stay-booking')).stayStep(b, q, message);
+    // A stay's balance, from the "your balance is due" email (stay-jobs.ts).
+    if (q.get('pay')) return (await import('./site-stay-booking')).stayPayPage(b, q);
     const c = readChoice(q);
     const found = findBookingSection(b.def, c.s);
     if (!found) return page(b, 'Booking isn\'t available', '<h1>Booking isn\'t available</h1><p>This page has changed since you opened it.</p><p><a class="btn" href="/">Go to the home page</a></p>', 404);
@@ -264,6 +270,8 @@ ${svc && takesDeposits && depositFor(svc) ? `<p class="fine"><strong>A ${esc(for
 /** POST /_book — make, cancel or move a booking. */
 export async function bookSubmit(b: BookCtx, body: URLSearchParams, ip: string): Promise<BookPage> {
     if (body.get('_action') === 'cancel') return cancelSubmit(b, body);
+    if (body.get('stay')) return (await import('./site-stay-booking')).stayBookSubmit(b, body, ip);
+    if (body.get('_action') === 'pay_balance') return (await import('./site-stay-booking')).stayPaySubmit(b, body);
     if (body.get('mv')) return moveSubmit(b, body);
     if (body.get('_action') === 'class_book' || body.get('_action') === 'class_wait') {
         const f = findBookingSection(b.def, String(body.get('s') || '').slice(0, 24));
@@ -335,6 +343,8 @@ export async function payDeposit(b: BookCtx, booking: BookingRow, pence: number,
 /** A local path from the query, or the home page. */
 function safeBack(def: SiteDefinition, raw: string | null): string {
     const p = String(raw || '/');
+    // A stay's own page (/stays/<slug>) is where "Back" from paying for a stay returns to.
+    if (/^\/stays\/[a-z0-9-]{1,80}$/.test(p) && def.pages.some((pg) => pg.sections.some((x) => x.type === 'stays'))) return p;
     return /^\/[a-z0-9-]*$/.test(p) && (p === '/' || p === BOOKING_PAGE_PATH || def.pages.some((pg) => `/${pg.slug}` === p)) ? p : '/';
 }
 
@@ -346,6 +356,8 @@ function noticeCtx(b: BookCtx, setup: BookingSetup) {
 async function cancelSubmit(b: BookCtx, body: URLSearchParams): Promise<BookPage> {
     const row = await bookingFromLink(b, body.get('manage'), body.get('t'));
     if (!row) return page(b, 'Booking not found', '<h1>We couldn\'t find that booking</h1>', 404);
+    // A stay refunds by its cancellation policy, never the whole deposit (site-stay-booking.ts).
+    if (row.kind === 'stay') return (await import('./site-stay-booking')).stayCancelSubmit(b, row, String(body.get('t')));
     const setup = await loadBookingSetup(b.db, b.site.organisationId);
     if (!customerCanChange(row, setup.settings.minNoticeMinutes, b.now)) return managePage(b, new URLSearchParams({ manage: String(row.id), t: String(body.get('t')) }));
     const done = await customerCancel(b.db, b.site.organisationId, row.id);

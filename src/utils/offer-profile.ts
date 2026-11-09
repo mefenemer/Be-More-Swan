@@ -15,6 +15,8 @@
 //                    Bookings tab (rules, who can be booked, calendar)
 //   visits         — customers come to them: the Hours & Location tab (bookings needs hours too)
 //   menu           — food or drink: dietary markers and allergens
+//   stays          — holiday lets, B&Bs, guest houses: the Stays tab (properties, rooms, nightly
+//                    prices) — added 2026-11-09 (docs/holiday-lets-plan.md)
 //
 // The keys match the website's own feature words where they overlap (site-definition.ts
 // SITE_FEATURES: shop ↔ products, hours ↔ visits, bookings, menu).
@@ -28,11 +30,11 @@
 
 import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { bookingSettings, bookings, organisations, orgOfferProfile, orgProducts, sites } from '../../db/schema';
+import { bookingSettings, bookings, organisations, orgOfferProfile, orgProducts, sites, stayTypes } from '../../db/schema';
 
 type Db = ReturnType<typeof getDb>;
 
-export const OFFER_KINDS = ['products', 'services', 'subscriptions', 'bookings', 'visits', 'menu'] as const;
+export const OFFER_KINDS = ['products', 'services', 'subscriptions', 'bookings', 'visits', 'menu', 'stays'] as const;
 export type OfferKind = typeof OFFER_KINDS[number];
 
 export const OFFER_LABELS: Record<OfferKind, string> = {
@@ -42,6 +44,7 @@ export const OFFER_LABELS: Record<OfferKind, string> = {
     bookings: 'People book time with us (appointments, classes, tables or events)',
     visits: 'Customers visit us (a shop, venue or studio)',
     menu: 'We serve food or drink',
+    stays: 'Guests stay with us (holiday lets, B&B or guest house rooms)',
 };
 
 /**
@@ -50,7 +53,12 @@ export const OFFER_LABELS: Record<OfferKind, string> = {
  * so those are guessed and the owner is asked again, rather than every assistant being told firmly
  * that the business sells nothing. Stripped on read (cleanOffers keeps known kinds only).
  */
-const ASKED_ALL = 'asked:6';
+const ASKED_ALL = 'asked:7';
+/**
+ * An answer to the six-option question (before "stays", 2026-11-09). Still a complete answer for those
+ * six — nobody is asked again — and stays is ticked for them only when they have set a stay up.
+ */
+const ASKED_SIX = 'asked:6';
 
 export interface OfferProfile {
     offers: OfferKind[];
@@ -71,7 +79,9 @@ const INDUSTRY_WORDS: Record<OfferKind, RegExp> = {
     subscriptions: /\b(saas|software|subscriptions?|memberships?|telecom\w*|apps?)\b/i,
     bookings: /\b(beauty|wellness|wellbeing|salon|barber|spa|fitness|sport|gym|yoga|pilates|clinic|healthcare|therap\w*|physio|dental|massage|tutor\w*|coach\w*|restaurant|hospitality|events?|travel|tourism)\b/i,
     visits: /\b(retail|shop|store|hospitality|restaurant|caf[eé]|coffee|bar|pub|salon|barber|spa|gym|fitness|clinic|dental|venue|hotel|bakery|deli|garden centre|showroom)\b/i,
-    menu: /\b(food|beverage|drink|hospitality|restaurant|caf[eé]|coffee|bakery|bar|pub|catering|takeaway|deli|brewery|winery)\b/i,
+    // "self-catering" is a holiday let, not food.
+    menu: /\b(food|beverage|drink|hospitality|restaurant|caf[eé]|coffee|bakery|bar|pub|(?<!self[- ])catering|takeaway|deli|brewery|winery)\b/i,
+    stays: /\b(holiday lets?|holiday homes?|self[- ]catering|b ?& ?b|bed and breakfast|guest ?houses?|cottages?|vacation rentals?|accommodation|hotels?|inns?|glamping|hostels?|airbnb)\b/i,
 };
 
 /**
@@ -88,6 +98,7 @@ export function inferOffers(signals: {
     hasDietary?: boolean;
     hasBookingData?: boolean;
     hasVisitAddress?: boolean;
+    hasStays?: boolean;
 }): OfferKind[] {
     const out = new Set<OfferKind>();
     const f = Array.isArray(signals.siteFeatures) ? signals.siteFeatures : [];
@@ -95,20 +106,37 @@ export function inferOffers(signals: {
     if (f.includes('bookings')) out.add('bookings');
     if (f.includes('menu')) out.add('menu');
     if (f.includes('hours')) out.add('visits');
+    if (f.includes('stays')) out.add('stays');
     if (signals.hasProducts) out.add('products');
     if (signals.hasServices) out.add('services');
     if (signals.hasRecurringPrice) out.add('subscriptions');
     if (signals.hasDietary) out.add('menu');
     if (signals.hasBookingData) out.add('bookings');
     if (signals.hasVisitAddress) out.add('visits');
+    if (signals.hasStays) out.add('stays');
     const ind = (signals.industry || '').trim();
     if (ind) for (const k of OFFER_KINDS) if (INDUSTRY_WORDS[k].test(ind)) out.add(k);
     return OFFER_KINDS.filter((k) => out.has(k));
 }
 
-/** The stored row, read as an answer: complete (six-option), legacy (two-box), or none. */
-function readRow(offers: unknown): { offers: OfferKind[]; complete: boolean } {
-    return { offers: cleanOffers(offers) ?? [], complete: Array.isArray(offers) && offers.includes(ASKED_ALL) };
+/** The stored row, read as an answer: complete (seven- or six-option), legacy (two-box), or none. */
+function readRow(offers: unknown): { offers: OfferKind[]; complete: boolean; six: boolean } {
+    const six = Array.isArray(offers) && offers.includes(ASKED_SIX) && !offers.includes(ASKED_ALL);
+    return { offers: cleanOffers(offers) ?? [], complete: Array.isArray(offers) && (offers.includes(ASKED_ALL) || six), six };
+}
+
+/** Whether the workspace has set up a holiday let or room type (db/z-stays.sql; false when not applied). */
+async function hasStayData(db: Db, organisationId: number): Promise<boolean> {
+    try {
+        const [row] = await db.select({ id: stayTypes.id }).from(stayTypes).where(and(eq(stayTypes.organisationId, organisationId), eq(stayTypes.status, 'active'))).limit(1);
+        return Boolean(row);
+    } catch { return false; }
+}
+
+/** A six-option answer never covered stays: ticked only when they have actually set one up. */
+async function withStays(db: Db, organisationId: number, r: { offers: OfferKind[]; six: boolean }): Promise<OfferKind[]> {
+    if (!r.six || r.offers.includes('stays') || !(await hasStayData(db, organisationId))) return r.offers;
+    return OFFER_KINDS.filter((k) => k === 'stays' || r.offers.includes(k));
 }
 
 /**
@@ -121,7 +149,7 @@ export async function loadAnsweredOffer(db: Db, organisationId: number): Promise
             .where(eq(orgOfferProfile.organisationId, organisationId)).limit(1);
         if (!row) return null;
         const r = readRow(row.offers);
-        return r.complete ? { offers: r.offers, answered: true } : null;
+        return r.complete ? { offers: await withStays(db, organisationId, r), answered: true } : null;
     } catch {
         return null;
     }
@@ -134,7 +162,7 @@ export async function loadOfferProfile(db: Db, organisationId: number): Promise<
     const [row] = await safe(db.select({ offers: orgOfferProfile.offers }).from(orgOfferProfile)
         .where(eq(orgOfferProfile.organisationId, organisationId)).limit(1), []);
     const stored = row ? readRow(row.offers) : null;
-    if (stored?.complete) return { offers: stored.offers, answered: true };
+    if (stored?.complete) return { offers: await withStays(db, organisationId, stored), answered: true };
 
     const [org] = await safe(db.select({ industry: organisations.industry }).from(organisations).where(eq(organisations.id, organisationId)).limit(1), []);
     const siteRows = await safe(db.select({ draft: sites.draft }).from(sites).where(eq(sites.organisationId, organisationId)).limit(1), []);
@@ -158,6 +186,7 @@ export async function loadOfferProfile(db: Db, organisationId: number): Promise<
         hasDietary: Number(stats?.dietary) > 0,
         hasBookingData: Number(stats?.booking) > 0 || Boolean(booked),
         hasVisitAddress: Boolean(bs?.visitAddress && bs.visitAddress.trim()),
+        hasStays: await hasStayData(db, organisationId),
     });
     if (!stored) return { offers: guess, answered: false };
     // An answer to the old two-box question: keep what it said about bookings and food, guess the rest.
