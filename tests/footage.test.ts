@@ -497,7 +497,7 @@ check('the finished video is rendered right after it is made, so the review show
     const b = src.slice(src.indexOf('export async function buildProject'));
     assert.ok(b.indexOf('renderFinishedVideo(db') > b.indexOf("status: 'built'"));
     assert.ok(src.includes('queuePostRender(db, {'));
-    assert.ok(read('src/components/assistant-videos.js').includes("v.postRenderStatus === 'pending' ? 'rendering'"));
+    assert.ok(read('src/components/assistant-videos.js').includes("(v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'rendering'"), 'both render states say so');
 });
 
 check('the clip limit is 40 in the render and in the post editor', () => {
