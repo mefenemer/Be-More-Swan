@@ -28,7 +28,7 @@ import {
 import { chunkBodies } from './site-words';
 import { inlineEmbeds, type EmbedFetchers } from './site-embeds';
 import { linkFirst, PLACEHOLDER, plainOf } from './site-rich-text';
-import { fontKeyFor, lookFound, readImportedLook, themeWithLook, type ImportedLook } from './site-import-theme';
+import { fontKeyFor, lookFound, readImportedLook, readsOn, themeWithLook, type ImportedLook } from './site-import-theme';
 import { ADAPTERS } from './site-builders';
 import * as cheerio from 'cheerio';
 import { harvestBrandSignals } from './brand-extract';
@@ -142,9 +142,11 @@ const describe = (b: ImportBlock): string => {
     }
 };
 
-export function buildImportPrompt(pages: ReadPage[], blocks: NumberedBlock[], opts: { siteName: string; pictures: PictureChoice; allowed: (t: SectionType) => boolean }): { system: string; user: string } {
+export function buildImportPrompt(pages: ReadPage[], blocks: NumberedBlock[], opts: { siteName: string; pictures: PictureChoice; allowed: (t: SectionType) => boolean; only?: number[] }): { system: string; user: string } {
     const shown = (s: string, n = 400) => (s.length > n ? `${s.slice(0, n)}… (${s.length} characters)` : s);
-    const pageText = pages.map((p, i) => {
+    // `only`: the pages (0-based) this request covers, keeping their numbers and block numbers — a large
+    // site is planned in batches (planInBatches).
+    const pageText = pages.map((p, i) => ({ p, i })).filter(({ i }) => !opts.only || opts.only.includes(i)).map(({ p, i }) => {
         const own = blocks.filter((b) => b.page === i);
         const label = p.menuLabel ? ` menu="${p.menuLabel}"` : '';
         return `<page number="${i + 1}" address="${new URL(p.url).pathname}"${label}>\n${own.map((b) => `[${b.n}] ${shown(describe(b.block))}`).join('\n') || '(nothing readable)'}\n</page>`;
@@ -879,8 +881,7 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
     const { blocks, prices } = numberBlocks(read);
     const allowed = (t: SectionType) => sectionAllowed(input.current.settings, t);
     let plan: ImportPlan | null = null;
-    try { plan = readImportPlan(await deps.plan(buildImportPrompt(read, blocks, { siteName: input.current.settings.siteName, pictures: input.pictures, allowed }))); }
-    catch { plan = null; }
+    plan = await planInBatches(read, blocks, { siteName: input.current.settings.siteName, pictures: input.pictures, allowed }, deps);
 
     const report = baseReport();
     report.prices = prices.slice(0, 40);
@@ -926,6 +927,34 @@ function findBlogIndexSafe(html: string, url: string, menuUrls: string[]): BlogI
 /** The Blog Assistant's widget on their page (blog-widget embed): its posts are already in Be More Swan. */
 const BLOG_WIDGET = /bemoreswan\.com\/widget\.js|data-bms-blog\b/i;
 
+/**
+ * The site's layout plan, in batches of pages when the site is large. One request for a whole large
+ * site failed outright (a 17-page, 17,000-word site, live check 2026-11-09) and every page fell back to
+ * plain text. Each batch keeps the pages' own numbers and block numbers, so the plans join up; a batch
+ * that fails leaves only its own pages as text.
+ */
+export const PLAN_BATCH_BLOCKS = 260;
+export const PLAN_BATCH_PAGES = 6;
+export async function planInBatches(pages: ReadPage[], blocks: NumberedBlock[], opts: { siteName: string; pictures: PictureChoice; allowed: (t: SectionType) => boolean }, deps: Pick<ImportDeps, 'plan'>): Promise<ImportPlan | null> {
+    const batches: number[][] = [];
+    let cur: number[] = [];
+    let size = 0;
+    pages.forEach((_, i) => {
+        const n = blocks.filter((b) => b.page === i).length;
+        if (cur.length && (size + n > PLAN_BATCH_BLOCKS || cur.length >= PLAN_BATCH_PAGES)) { batches.push(cur); cur = []; size = 0; }
+        cur.push(i); size += n;
+    });
+    if (cur.length) batches.push(cur);
+    const one = async (only?: number[]) => {
+        try { return readImportPlan(await deps.plan(buildImportPrompt(pages, blocks, { ...opts, only }))); } catch { return null; }
+    };
+    if (batches.length <= 1) return one();
+    const plans = await inTurns(batches, 2, (b) => one(b));
+    const ok = plans.filter((x): x is ImportPlan => !!x);
+    if (!ok.length) return null;
+    return { pages: ok.flatMap((x) => x.pages), skip: ok.flatMap((x) => x.skip) };
+}
+
 /** Stylesheets read for the look: their own first; a site with thirty is a build artefact. */
 const LOOK_MAX_STYLESHEETS = 4;
 async function readLook(html: string, finalUrl: string, deps: ImportDeps, platform: string | null = null): Promise<ImportedLook | null> {
@@ -953,6 +982,8 @@ export function withOwnLook(look: ImportedLook, own: Partial<ImportedLook>): Imp
     const out: ImportedLook = { ...look };
     for (const [k, v] of Object.entries(own) as Array<[keyof ImportedLook, unknown]>) if (v !== null && v !== undefined && v !== '') (out as unknown as Record<string, unknown>)[k] = v;
     if (own.headingFont && !own.font) out.font = fontKeyFor(own.headingFont) ?? look.font;
+    // The adapter's main colour must read on the page too, or the shared reading stands.
+    if (out.primaryColor && !readsOn(out.primaryColor, out.backgroundColor ?? '#ffffff')) out.primaryColor = look.primaryColor;
     return out;
 }
 const safeUrlOf = (u: string): URL | null => { try { return new URL(u); } catch { return null; } };

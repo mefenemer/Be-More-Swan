@@ -665,6 +665,28 @@ function detectBuilder(html: string, $: cheerio.CheerioAPI): ImportPage['builder
     return 'other';
 }
 
+/**
+ * A link to their PROFILE on a social site, as an https address with no tracking (?ref=, utm_…), or null:
+ * share buttons, single videos and posts, playlists and groups are not profiles (live check, 2026-11-09:
+ * YouTube watch/playlist links and Facebook groups came through as "social links").
+ */
+export function socialProfile(href: string): string | null {
+    if (!socialSiteOf(href)) return null;
+    let u: URL;
+    try { u = new URL(href); } catch { return null; }
+    if (/\/(sharer|share|intent|shareArticle)\b/i.test(u.pathname) || u.searchParams.has('u') || u.searchParams.has('url')) return null;
+    if (/^(www\.)?youtube\.com$/i.test(u.hostname) && /^\/(watch|playlist|shorts|embed|live|results)\b/i.test(u.pathname)) return null;
+    if (/facebook\.com$/i.test(u.hostname) && /^\/(groups|events|photo|watch|story\.php|permalink\.php|share)\b/i.test(u.pathname)) return null;
+    if (/(x|twitter)\.com$/i.test(u.hostname) && /\/status\//i.test(u.pathname)) return null;
+    if (/instagram\.com$/i.test(u.hostname) && /^\/(p|reel|reels|stories|explore)\//i.test(u.pathname)) return null;
+    if (/linkedin\.com$/i.test(u.hostname) && /^\/(posts|feed|pulse|shareArticle)\b/i.test(u.pathname)) return null;
+    if (u.pathname === '/' || u.pathname === '') return null;
+    // Facebook's own profile.php?id=… needs its id; everything else is its path alone.
+    const keep = /facebook\.com$/i.test(u.hostname) && u.pathname === '/profile.php' && u.searchParams.get('id') ? `?id=${u.searchParams.get('id')}` : '';
+    u.protocol = 'https:';
+    return `${u.origin}${u.pathname}${keep}`;
+}
+
 /** The owner's page as ordered blocks of their own words and pictures. `url` is the FINAL url. */
 /** A drop-down's own box (the sub-menu), by the names builders give it — never its heading. */
 const SUBMENU_CLASS = /(?:^|[\s_-])(?:sub-?menu|dropdown[-_]*(?:panel|menu|content|list|items)|folder-content|nav-group__(?:items|list|content|panel)|menu-children|children-menu|flyout|mega-?menu)(?:$|[\s_-])/i;
@@ -791,13 +813,18 @@ export function readImportPage(html: string, url: string): ImportPage {
         if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type) || /bot|honeypot|captcha/i.test($f.attr('name') ?? '')) return;
         const id = $f.attr('id');
         const label = clean((id ? $(`label[for="${id.replace(/"/g, '')}"]`).first().text() : '') || $f.closest('label').text() || $f.attr('aria-label') || $f.attr('placeholder') || $f.attr('name') || '').replace(/\s*\*$/, '');
-        if (label && label.length <= 60 && !formFields.includes(label) && formFields.length < 15) formFields.push(label);
+        // A machine name ("srfm-dropdown-1-18390f9c-lbl-…", live check 2026-11-09) is not a question anyone was asked.
+        const machine = !/\s/.test(label) && (label.length > 24 || /\d.*[-_]|[-_].*\d/.test(label) && label.split(/[-_]/).length >= 3);
+        if (label && label.length <= 60 && !machine && !formFields.includes(label) && formFields.length < 15) formFields.push(label);
     });
     // Their social profiles, wherever on the page they are linked (usually the footer, removed below).
     const socialLinks: string[] = [];
+    const seenProfile = new Set<string>();
     $('a[href^="http"]').each((_, a) => {
-        const h = ($(a).attr('href') ?? '').trim();
-        if (socialSiteOf(h) && !/\/(sharer|share|intent|shareArticle)\b|[?&](u|url)=/i.test(h) && !socialLinks.includes(h) && socialLinks.length < 8) socialLinks.push(h);
+        const h = socialProfile(($(a).attr('href') ?? '').trim());
+        if (!h) return;
+        const key = h.toLowerCase().replace(/^https:\/\/(www\.|m\.)?/, '').replace(/^twitter\.com\//, 'x.com/').replace(/\/$/, '');
+        if (!seenProfile.has(key) && socialLinks.length < 8) { seenProfile.add(key); socialLinks.push(h); }
     });
     // The page's own content: no menus, header, footer or forms (a form's labels are not content).
     // A <header> inside the main content or an article is that page's own title area (WordPress puts

@@ -14,7 +14,7 @@
 // Pure: HTML and CSS strings in, a partial theme out. The fetching is site-import.ts's deps.
 
 import { harvestBrandSignals } from './brand-extract';
-import { normalizeHex, saturation } from './brand-kit';
+import { contrastRatio, normalizeHex, saturation } from './brand-kit';
 import type { CardStyleKey, FontKey, RadiusKey, SiteTheme } from './site-definition';
 
 /** What we brought across, for the import report ("Their colours and lettering"). */
@@ -115,6 +115,12 @@ function classColour(classes: string, prefix: 'bg' | 'text', tw: TailwindLook | 
 }
 
 const differs = (a: string | null, b: string | null) => (a && a !== b ? a : null);
+/**
+ * Whether a main colour can be told apart on the page. 2:1 — the colour mostly fills buttons (with ink
+ * that reads on it, buttonInk), so orange and red brands (#f97015 on white is 2.8:1) keep their colour,
+ * while washed-out picks (pale pink 1.3:1, pale blue 1.6:1) give way.
+ */
+export const readsOn = (colour: string, background: string) => contrastRatio(colour, background) >= 2;
 
 /** The rounding their buttons use, by the classes on their links (Tailwind) or button rules in their CSS. */
 function buttonRadius(html: string, css: string): RadiusKey | null {
@@ -267,7 +273,10 @@ export function readImportedLook(html: string, baseUrl: string, css = ''): Impor
     const tokens = designTokens(`${[...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n')}\n${css}`);
     const background = classColour(bodyClass, 'bg', tw) ?? tokens.background ?? signals.lights[0] ?? null;
     const text = classColour(bodyClass, 'text', tw) ?? tokens.foreground ?? signals.darks[0] ?? null;
-    const primary = tokens.primary ?? signals.candidates[0]?.hex ?? null;
+    // A main colour colours links and buttons on the page, so it must read on it: a pale pick (Squarespace's
+    // #fed9db, a Webflow site's #8dd9e7 on white, 2026-11-09) gives way to the next candidate that does.
+    const bg = background ?? '#ffffff';
+    const primary = [tokens.primary, ...signals.candidates.map((c) => c.hex)].find((c) => c && readsOn(c, bg)) ?? null;
 
     // Headings by their own rule (h1/h2 in their CSS or <style>), the body by body's; the brand
     // reader's single font is whichever it found first.

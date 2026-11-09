@@ -252,6 +252,9 @@ function requestOnce(
                 method: 'GET',
                 lookup,
                 timeout: remaining,
+                // Node's default is 16 KB; big sites send more (webflow.com: 17.6 KB of security
+                // headers), and the request then failed as "couldn't reach that link" (2026-11-09).
+                maxHeaderSize: 64 * 1024,
                 headers: {
                     // Honest identification — a scraper that lies about who it is is one we
                     // shouldn't be running on a customer's behalf.

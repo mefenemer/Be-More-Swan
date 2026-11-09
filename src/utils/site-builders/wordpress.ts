@@ -166,8 +166,20 @@ const NOISE = /^(proudly powered by wordpress\.?|powered by wordpress\.?|designe
 
 export const adapter: BuilderAdapter = {
     key: 'wordpress',
+    // WordPress's block library styles every button #32373c by default; on wordpress.org that grey came out
+    // as the brand colour (live check, 2026-11-09). It is WordPress's, never the owner's.
+    // So is the default palette core prints on every site (vivid-cyan-blue #0693e3 came next): those
+    // declarations go before the shared reading counts colours; the theme's own presets stay.
+    lookCss: ({ html, css }) => {
+        const strip = (t: string) => t.replace(/#32373c\b/gi, '').replace(new RegExp(`--wp--preset--(?:color|gradient)--(?:${[...CORE_PALETTE].join('|')}|[\\w-]*(?:${[...CORE_PALETTE].join('|')})[\\w-]*)\\s*:[^;}]*;?`, 'gi'), '');
+        return { html: strip(html), css: strip(css) };
+    },
     // The theme's own colours and fonts (theme.json presets), over the shared reading (main session, 2026-11-09).
-    look: ({ html, css }) => { const l = readWordPressLook(html, css); return { primaryColor: l.primaryColor, secondaryColor: l.secondaryColor, textColor: l.textColor, backgroundColor: l.backgroundColor, headingFont: l.headingFont }; },
+    look: ({ html, css }) => {
+        const l = readWordPressLook(html, css);
+        const own = (c: string | null) => (c && c.toLowerCase() !== '#32373c' ? c : null);   // WordPress's default, as in lookCss
+        return { primaryColor: own(l.primaryColor), secondaryColor: own(l.secondaryColor), textColor: l.textColor, backgroundColor: l.backgroundColor, headingFont: l.headingFont };
+    },
     label: 'WordPress',
     detect: (html, gen) => looksLikeWordPress(html, gen),
     prepare: ($) => prepareWordPress($),

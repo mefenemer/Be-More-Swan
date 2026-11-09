@@ -26,13 +26,29 @@ export async function fetchSiteCss(url: string, crawler: Crawler, opts: { timeou
     return fetchSite(url, crawler, opts, /css|text\/plain/i);
 }
 
+/**
+ * Shops throttle a burst of reads: Shopify answered 7 of 11 menu pages "429 Too Many Requests" when the
+ * import read three at a time (2026-11-09). A 429 or 503 is tried again after a short pause, twice.
+ */
+export const RETRY_WAITS_MS = [1500, 4000];
+async function withRetry<T>(run: () => Promise<T>, waits: number[] = RETRY_WAITS_MS): Promise<T> {
+    for (let i = 0; ; i++) {
+        try { return await run(); } catch (err) {
+            const busy = err instanceof SafeFetchError && /\((429|503)\)/.test(err.message);
+            if (!busy || i >= waits.length) throw err;
+            await new Promise((r) => setTimeout(r, waits[i]));
+        }
+    }
+}
+export const _withRetryForTests = withRetry;
+
 async function fetchSite(url: string, crawler: Crawler, opts: { timeoutMs: number; maxBytes: number }, accept: RegExp): Promise<HtmlFetch> {
     try {
         const u = new URL(url);
         if (!(await robotsAllows(u.host, u.pathname + u.search, crawler))) {
             return { ok: false, message: `${u.host} asks crawlers like ours not to read this page (robots.txt), so we didn't.` };
         }
-        const res = await safeFetchText(url, { userAgent: crawler.userAgent, timeoutMs: opts.timeoutMs, maxBytes: opts.maxBytes });
+        const res = await withRetry(() => safeFetchText(url, { userAgent: crawler.userAgent, timeoutMs: opts.timeoutMs, maxBytes: opts.maxBytes }));
         if (res.contentType && !accept.test(res.contentType)) {
             return { ok: false, message: 'That link isn\'t a web page (it returned a file).' };
         }
