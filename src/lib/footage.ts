@@ -196,8 +196,10 @@ Say briefly what you saw in each video, then suggest the edits that would make t
 - fill: a gap their footage can't fill — a branded card, stock footage or an AI clip ("Add a branded card with the booking link at the end")
 - text: words on screen, or captions
 - sound: keep their sound, replace music, add a voiceover
-- frame: fit the vertical frame, keep faces in
-Point at a video by its id and at a stretch by inS/outS in seconds where the edit is about one. Use only stretches from the shot lists. Never name or guess who a person is. At most ${MAX_SUGGESTIONS} suggestions, the most important first.
+- frame: keep a face or the subject in the vertical frame where it would be cut off
+Point at a video by its id and at a stretch by inS/outS in seconds ONLY when the edit is about that stretch (a cut, a trim, a moment to move). Use only stretches from the shot lists. Write times as minutes:seconds, e.g. 0:08 or 1:15 — never 8:00 for eight seconds. Never name or guess who a person is. At most ${MAX_SUGGESTIONS} suggestions, the most important first.
+
+Suggest ONLY what this video maker can do: cut, trim and reorder their footage; fill a gap with stock footage, a stock photo, a branded card (their logo, a headline and their website) or an AI clip or picture; short words on screen; captions; keep their sound or put a voiceover over it. It can NOT add background music, animations, lower-thirds, transitions, effects, colour grading or logos over footage — never suggest those. Do not suggest what happens anyway: every video is made vertical (9:16) and the call to action goes at the end.
 
 Return STRICT JSON only:
 {"seen": [{"assetId": 1, "summary": "...", "problems": ["..."]}], "suggestions": [{"kind": "cut|trim|reorder|fill|text|sound|frame|other", "text": "...", "reason": "...", "assetId": 1, "inS": 0, "outS": 3}]}`;
@@ -249,7 +251,10 @@ export function enforceReview(raw: unknown, videos: FootageVideo[], charged: num
         if (v) {
             s.assetId = v.id;
             const a = Number(o.inS), b = Number(o.outS);
-            if (Number.isFinite(a) && Number.isFinite(b) && b > a) {
+            // A stretch only where the edit is ABOUT one; "add a card" pointing at the whole video
+            // printed "(0:00–0:08)" on every suggestion (staging, 2026-11-09).
+            const aboutStretch = kind === 'cut' || kind === 'trim' || kind === 'reorder' || kind === 'frame';
+            if (aboutStretch && Number.isFinite(a) && Number.isFinite(b) && b > a) {
                 s.inS = round1(Math.max(0, Math.min(v.durationS, a)));
                 s.outS = round1(Math.max(0, Math.min(v.durationS, b)));
                 if (s.outS - s.inS < 0.3) { delete s.inS; delete s.outS; }
