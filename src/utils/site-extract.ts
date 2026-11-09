@@ -597,7 +597,7 @@ export interface ImportPage {
     /** The platform adapter that read it (site-builders/ key), or null when none matched. */
     platform?: string | null;
     /** Which builder made the page, from its generator tag or tell-tale markup. */
-    builder: 'wix' | 'squarespace' | 'wordpress' | 'webflow' | 'square' | 'other';
+    builder: 'wix' | 'wix-studio' | 'squarespace' | 'wordpress' | 'webflow' | 'square' | 'other';
 }
 
 export const IMPORT_LIMITS = { blocks: 160, images: 40, navLinks: 20 } as const;
@@ -690,9 +690,10 @@ function menuGroupOf($: cheerio.CheerioAPI, el: AnyNode): string | null {
 export function readImportPage(html: string, url: string): ImportPage {
     const $ = cheerio.load(html);
     const base = safeUrl(url);
-    const builder = detectBuilder(html, $);
     // The platform's own adapter (site-builders/): tidies its markup before anything is read.
     const adapter = adapterFor(html, $);
+    // Wix Studio pages carry classic Wix's tells too; the adapter tells them apart.
+    const builder = adapter?.key === 'wix-studio' ? 'wix-studio' : detectBuilder(html, $);
     try { adapter?.prepare?.($, base); } catch { /* a broken adapter never stops an import */ }
     const fullSize = (src: string) => { try { return adapter?.fullSizeImage?.(src) ?? fullSizeImageUrl(src); } catch { return fullSizeImageUrl(src); } };
 
@@ -760,7 +761,7 @@ export function readImportPage(html: string, url: string): ImportPage {
     const logoEl = headerImgs.find((el) => /logo/i.test(`${$(el).attr('class') ?? ''} ${$(el).attr('id') ?? ''} ${$(el).attr('alt') ?? ''} ${$(el).attr('src') ?? ''}`)) ?? headerImgs[0];
     if (logoEl) {
         const src = absolutise(largestFromSrcset($(logoEl).attr('srcset')) ?? $(logoEl).attr('src') ?? $(logoEl).attr('data-src') ?? '', base);
-        if (src && /^https?:/.test(src)) logo = { src: fullSizeImageUrl(src), alt: realAlt($(logoEl).attr('alt')) || `${siteName ?? 'Business'} logo` };
+        if (src && /^https?:/.test(src)) logo = { src: fullSize(src), alt: realAlt($(logoEl).attr('alt')) || `${siteName ?? 'Business'} logo` };
     }
 
     const hasForm = $('form').length > 0;

@@ -60,8 +60,25 @@ export function cleanImportUrl(raw: unknown): string | null {
 // ── Which pages ─────────────────────────────────────────────────────────────────────────────────
 
 /** Pages that are never the business's content: shop machinery, accounts, legal small print, posts. */
-export const SKIP_PATH = /\/(cart|basket|checkout|account|my-account|login|log-in|signin|sign-in|register|members?|search|privacy|privacy-policy|cookies?|cookie-policy|terms|terms-and-conditions|legal|accessibility|sitemap|feed|tag|category|author|wp-admin|wp-login)(\/|$)|\/(blog|news|post|posts|product|products|shop|store|events?)\/.+/i;
+export const SKIP_PATH = /\/(cart|basket|checkout|account|my-account|customer|login|log-in|signin|sign-in|register|members?|search|wishlist|compare|gift-certificates?|privacy|privacy-policy|cookies?|cookie-policy|terms|terms-and-conditions|legal|accessibility|sitemap|feed|tag|category|author|wp-admin|wp-login)(\/|$)|\/(blog|news|post|posts|product|products|shop|store|events?)\/.+/i;
 export const FILE_PATH = /\.(pdf|jpe?g|png|gif|webp|svg|zip|docx?|xlsx?|mp4|mp3)$/i;
+/** Shop machinery written as scripts (BigCommerce's cart.php, login.php…): never a page of theirs. */
+const SHOP_SCRIPT = /\/(cart|login|account|checkout|wishlist|compare|search|giftcertificates?)\.php$/i;
+/** A shop's catalogue listing (a category or collection of products), read after their own pages. */
+export const CATALOGUE_PATH = /\/(collections?|product-category|product-categories|categories|category|shop|store|catalog|catalogue|departments?)(\/|$)/i;
+
+/**
+ * The menu pages to read, at most `n`: their own pages first, then catalogue listings with what is
+ * left — in menu order, so the new site's menu still follows theirs. (A shop's menu is mostly
+ * categories; the about, contact and story pages matter more to a website.)
+ */
+export function choosePages(menu: SiteLink[], n: number): SiteLink[] {
+    const isCatalogue = (l: SiteLink) => { try { return CATALOGUE_PATH.test(new URL(l.href).pathname); } catch { return false; } };
+    const chosen = new Set<SiteLink>();
+    for (const l of menu) if (chosen.size < n && !isCatalogue(l)) chosen.add(l);
+    for (const l of menu) if (chosen.size < n && isCatalogue(l)) chosen.add(l);
+    return menu.filter((l) => chosen.has(l));
+}
 
 const CONTACT_PAGE = /contact|get-in-touch|get in touch|enquir|find-us|find us/;
 
@@ -79,7 +96,7 @@ export function pickImportPages(home: ImportPage, limit: number): SiteLink[] {
         if (out.length >= limit) break;
         let u: URL;
         try { u = new URL(l.href); } catch { continue; }
-        if (samePath(l.href, home.url) || u.pathname === '/' || FILE_PATH.test(u.pathname) || SKIP_PATH.test(u.pathname)) continue;
+        if (samePath(l.href, home.url) || u.pathname === '/' || FILE_PATH.test(u.pathname) || SKIP_PATH.test(u.pathname) || SHOP_SCRIPT.test(u.pathname)) continue;
         if (out.some((o) => samePath(o.href, l.href))) continue;
         out.push(l);
     }
@@ -737,10 +754,10 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
     const homePage = home.page;
     const pageCap = Math.max(1, Math.min(IMPORT_MAX_PAGES, input.maxPages));
     const menu = pickImportPages(homePage, IMPORT_MAX_PAGES * 2);
-    const toRead = menu.slice(0, pageCap - 1);
+    const toRead = choosePages(menu, pageCap - 1);
     // Their contact page matters more than the last page that fits: it is where the enquiry form goes.
     const contactAt = menu.findIndex((l) => CONTACT_PAGE.test(new URL(l.href).pathname) || CONTACT_PAGE.test(l.text.toLowerCase()));
-    if (contactAt >= pageCap - 1 && toRead.length) toRead[toRead.length - 1] = menu[contactAt];
+    if (contactAt >= 0 && !toRead.includes(menu[contactAt]) && toRead.length) toRead[toRead.length - 1] = menu[contactAt];
     const homeLabel = homePage.navLinks.find((l) => samePath(l.href, homePage.url))?.text ?? null;
 
     const reports: ImportReport['pages'] = [{ url: homePage.url, title: homeLabel ?? 'Home', words: homePage.words, read: true, note: null }];

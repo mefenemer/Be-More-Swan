@@ -41,6 +41,19 @@ check('the saved builder pages are recognised', () => {
     assert.strictEqual(found('<html><body><main><p>Hand-made page</p></main></body></html>'), null);
 });
 
+check('Wix and Wix Studio never claim each other\'s pages; the report names Studio as Studio', () => {
+    const dir = (d: string) => readdirSync(join(root, d)).filter((f) => f.endsWith('.html')).map((f) => [f, readFileSync(join(root, d, f), 'utf8')] as const);
+    const classic = [...dir('tests/fixtures/site-platforms/wix'), ['site-import/wix-home.html', readFileSync(join(root, 'tests/fixtures/site-import/wix-home.html'), 'utf8')] as const,
+        ...dir('tests/fixtures/site-platforms/wix-studio').filter(([f]) => f.startsWith('classic-'))];
+    const studio = dir('tests/fixtures/site-platforms/wix-studio').filter(([f]) => f.startsWith('studio-'));
+    assert.ok(classic.length >= 3 && studio.length >= 2);
+    for (const [f, html] of classic) assert.strictEqual(found(html), 'wix', `${f} is classic Wix`);
+    for (const [f, html] of studio) {
+        assert.strictEqual(found(html), 'wix-studio', `${f} is Wix Studio`);
+        assert.strictEqual(readImportPage(html, 'https://x.example/').builder, 'wix-studio');
+    }
+});
+
 check('a broken adapter never stops an import, and the page says which adapter read it', () => {
     const a = ADAPTERS.find((x) => x.key === 'carrd')! as { detect: unknown; prepare?: unknown };
     const [d, p] = [a.detect, a.prepare];
