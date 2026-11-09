@@ -7,7 +7,7 @@
 
 import assert from 'node:assert';
 import { readFileSync, existsSync } from 'node:fs';
-import { enforceStoryboard, fitLength, clampSegment, keepsOwnSound, storyboardUserPrompt, type VideoBrief, type Scene } from '../src/lib/storyboard';
+import { enforceStoryboard, fitLength, clampSegment, keepsOwnSound, minScenesFor, storyboardUserPrompt, type VideoBrief, type Scene } from '../src/lib/storyboard';
 import {
     enforceShotList, enforceReview, reviewSystemPrompt, frameTimes, ownSpeechOnTimeline, silentWav, quoteIsInTranscript, suggestionLine,
     footagePlannerBlock, MAX_FRAMES, MAX_SUGGESTIONS, FOOTAGE_REVIEW_TASKS, type FootageVideo,
@@ -101,6 +101,16 @@ check('the planner prompt carries the footage, the ticked edits and the turned-d
     assert.ok(/ACCEPTED[\s\S]*Cut 0:12–0:19/.test(p));
     assert.ok(/TURNED DOWN[\s\S]*Add music/.test(p));
     assert.ok(/OWN sound/.test(p));
+});
+
+check('a footage video may be one take plus a card (staging 2026-11-09: the 3-scene rule failed it)', () => {
+    const { storyboard, changes } = enforceStoryboard(raw([sc({ inS: 0, outS: 25, voiceover: '' }), sc({ source: 'brand_card', voiceover: '', targetS: 3 })]), brief({ voiceover: false }), [], own);
+    assert.strictEqual(storyboard.scenes.length, 2);
+    assert.ok(!changes.some((c) => /needs at least/.test(c)));
+    assert.strictEqual(minScenesFor(brief({ footageAssetIds: [] })), 3);
+    assert.ok(read('src/utils/video-producer.ts').includes('scenes.length < minScenesFor(brief)'));
+    const p = reviewSystemPrompt();
+    assert.ok(/never over someone speaking/.test(p) && /crop and reframe/.test(p));
 });
 
 check('readBrief keeps up to 10 unique own video ids', () => {
