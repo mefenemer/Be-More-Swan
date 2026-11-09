@@ -302,7 +302,7 @@ export default withLambda(async (event) => {
     }
 
     if (action === 'import_accept') {
-        const r = await acceptImport(db, site, maxPages);
+        const r = await acceptImport(db, site, maxPages, userId);
         if (!r.ok) return json(r.status, { error: r.error });
         return json(200, await view(r.site, ['Your imported site is now your draft. Nothing is live until you publish.', ...r.warnings]));
     }

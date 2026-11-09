@@ -2013,6 +2013,23 @@
     </details>`;
   }
 
+  function importBlogCount() {
+    const b = state.data && state.data.import && state.data.import.report && state.data.import.report.blog;
+    return b && b.posts ? b.posts.length : 0;
+  }
+
+  // Posts from a blog on their old site (site-import-blog.ts): drafts for the Blog Assistant on "Use this as my draft".
+  function importBlogList(b) {
+    if (!b || !b.posts || !b.posts.length) return '';
+    const n = b.posts.length;
+    const when = (d) => { if (!d) return ''; const t = new Date(d); return isNaN(t) ? '' : ` · ${t.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}`; };
+    const items = b.posts.map((p) => `<li class="text-xs text-gray-700">${esc(p.title)}<span class="text-gray-500">${esc(when(p.date))} · ${esc(p.words)} words${p.picture ? ' · picture' : ''}</span>${p.mentionsPrice ? ' <span class="font-semibold text-amber-800">· mentions a price — check it\'s still right</span>' : ''}</li>`).join('');
+    const failed = (b.failed || []).length ? `<p class="text-xs text-amber-800 mt-1">${esc(b.failed.length)} post${b.failed.length === 1 ? '' : 's'} couldn't be read: ${esc(b.failed.slice(0, 5).map((f) => f.title).join(', '))}${b.failed.length > 5 ? '…' : ''}.</p>` : '';
+    return `<details class="mt-2" open><summary class="text-xs font-bold text-gray-800 cursor-pointer">Posts from your blog (${esc(n)}${b.more ? ', the newest' : ''}) — become drafts in your Blog Assistant</summary>
+      <ul class="mt-1 space-y-1 list-disc pl-5">${items}</ul>${failed}
+      <p class="text-xs text-gray-500 mt-1">"Use this as my draft" adds ${n === 1 ? 'it' : 'them'} to your Blog Assistant as draft${n === 1 ? '' : 's'}, in your words as they were${b.pictures && b.pictures.copied ? `, with ${esc(b.pictures.copied)} picture${b.pictures.copied === 1 ? '' : 's'} copied into your library` : ''}. Nothing is published until you publish each one there; then its old address leads to the new one on your blog.</p></details>`;
+  }
+
   function importReviewCard(imp) {
     const r = imp.report || {};
     const pics = r.pictures || {};
@@ -2032,6 +2049,7 @@
       ${list(`Left out as menus or notices (${(r.leftOut || []).length}) — check nothing important is here`, r.leftOut)}
       ${list(`Didn't fit on its page (${(r.notCarried || []).length})`, r.notCarried, 'text-amber-800')}
       ${list(`Pages in your menu not imported (${(r.notImported || []).length}) — add them yourself with + Page`, r.notImported)}
+      ${importBlogList(r.blog)}
       ${r.hadForm ? `<p class="text-xs text-gray-500 mt-2">Your old site had a form${(r.formFields || []).length ? ` asking: ${esc(r.formFields.join(', '))}` : ''}. The new contact form asks for a name, email${(r.formFields || []).some((f) => /phone|tel\b|mobile|number/i.test(f)) || !(r.formFields || []).length ? ', phone' : ''} and message, and enquiries come to you on the Enquiries tab. For an email sign-up, add a sign-up section with one of your forms.</p>` : ''}
       <div class="flex flex-wrap gap-2 mt-3">
         ${btn('data-site-import-preview', state.previewImport ? 'Show my current draft' : 'Preview the imported site', !state.previewImport)}
@@ -3064,7 +3082,7 @@
     }
     if (t('[data-site-import-use]')) {
       const ok = typeof window.confirmModal === 'function'
-        ? await window.confirmModal(`Your current draft is replaced with the ${state.data.import.pages.length} imported page${state.data.import.pages.length === 1 ? '' : 's'}. Your design stays. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing goes live until you publish.'}`, { title: 'Use the imported site as your draft?', confirmLabel: 'Use this as my draft', cancelLabel: 'Not now' })
+        ? await window.confirmModal(`Your current draft is replaced with the ${state.data.import.pages.length} imported page${state.data.import.pages.length === 1 ? '' : 's'}.${importBlogCount() ? ` ${importBlogCount()} post${importBlogCount() === 1 ? '' : 's'} from your old blog go${importBlogCount() === 1 ? 'es' : ''} to your Blog Assistant as draft${importBlogCount() === 1 ? '' : 's'}.` : ''} Your design stays. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing goes live until you publish.'}`, { title: 'Use the imported site as your draft?', confirmLabel: 'Use this as my draft', cancelLabel: 'Not now' })
         : true;
       if (!ok) return;
       try {
