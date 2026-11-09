@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<!-- SYNTHETIC fixture: the shape of a hand-built static page an owner makes in an AI code editor
+     (single index.html, Tailwind Play CDN with an inline config, Google Fonts, anchors for a menu).
+     The business, words, people and addresses are invented. -->
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fernbrook Plant Studio | Houseplants &amp; Workshops in Otterby</title>
+  <meta name="description" content="Independent plant shop and workshop space in Otterby. Repotting, plant care clinics and terrarium classes.">
+  <meta property="og:site_name" content="Fernbrook Plant Studio">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600&family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { moss: '#2f5d3a', clay: '#c96f4a', cream: '#faf6ee' },
+          fontFamily: { display: ['Fraunces', 'serif'], sans: ['Inter', 'sans-serif'] }
+        }
+      }
+    }
+  </script>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"LocalBusiness","name":"Fernbrook Plant Studio","telephone":"01632 960 418","email":"hello@fernbrook.example","address":{"@type":"PostalAddress","streetAddress":"12 Mill Lane","addressLocality":"Otterby","postalCode":"OT1 4ZZ"}}
+  </script>
+</head>
+<body class="bg-cream font-sans text-stone-800">
+  <header class="sticky top-0 z-50 bg-cream/90 backdrop-blur border-b border-stone-200">
+    <div class="max-w-6xl mx-auto flex items-center justify-between px-6 py-4">
+      <a href="/" class="flex items-center gap-2"><img src="/images/logo.png" alt="Fernbrook Plant Studio logo" class="h-10 w-auto"></a>
+      <nav class="hidden md:flex gap-8 text-sm font-semibold">
+        <a href="#workshops" class="hover:text-moss">Workshops</a>
+        <a href="#clinic" class="hover:text-moss">Plant clinic</a>
+        <a href="#visit" class="hover:text-moss">Visit</a>
+        <a href="/about.html" class="hover:text-moss">About</a>
+      </nav>
+      <button id="menu-toggle" class="md:hidden" aria-label="Open menu"><svg class="w-6 h-6" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+    </div>
+  </header>
+
+  <main>
+    <section class="relative min-h-[70vh] flex items-center bg-[url('/images/hero-greenhouse.jpg')] bg-cover bg-center">
+      <div class="absolute inset-0 bg-moss/60"></div>
+      <div class="relative max-w-3xl mx-auto px-6 text-center text-cream">
+        <h1 class="font-display text-5xl md:text-6xl">Bring the outside in</h1>
+        <p class="mt-6 text-lg">We are a small plant studio on Mill Lane, helping Otterby grow happier houseplants since 2019.</p>
+        <div class="mt-8 flex justify-center gap-4">
+          <a href="#workshops" class="rounded-full bg-clay px-6 py-3 font-semibold text-white hover:bg-clay/90">Book a workshop</a>
+          <a href="#visit" class="rounded-full border border-cream px-6 py-3 font-semibold">Find the studio</a>
+        </div>
+      </div>
+    </section>
+
+    <section id="workshops" class="max-w-6xl mx-auto px-6 py-20">
+      <h2 class="font-display text-4xl text-moss">Workshops</h2>
+      <p class="mt-4 max-w-2xl">Small hands-on classes on Saturday mornings. Everything you need is provided, and you take your creation home.</p>
+      <div class="mt-10 grid gap-8 md:grid-cols-3">
+        <div class="rounded-2xl bg-white p-6 shadow-sm">
+          <img src="/images/terrarium.jpg" alt="A glass terrarium with moss and ferns" class="rounded-xl" width="600" height="400" loading="lazy">
+          <h3 class="mt-4 font-display text-2xl">Terrarium building</h3>
+          <p class="mt-2 text-stone-600">Layer stones, charcoal and moss into a little glass world that looks after itself.</p>
+          <span class="mt-4 inline-block font-semibold text-clay">£35 per person</span>
+        </div>
+        <div class="rounded-2xl bg-white p-6 shadow-sm">
+          <img src="/images/kokedama.jpg" alt="Two kokedama moss balls hanging by a window" class="rounded-xl" width="600" height="400" loading="lazy">
+          <h3 class="mt-4 font-display text-2xl">Kokedama</h3>
+          <p class="mt-2 text-stone-600">The Japanese art of the moss ball: wrap, bind and hang a fern you can water in a bowl.</p>
+        </div>
+        <div class="rounded-2xl bg-white p-6 shadow-sm">
+          <img src="/images/repotting.jpg" alt="" class="rounded-xl" width="600" height="400" loading="lazy">
+          <h3 class="mt-4 font-display text-2xl">Repotting basics</h3>
+          <p class="mt-2 text-stone-600">Bring a plant that has outgrown its pot and leave with it settled in fresh compost.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="clinic" class="bg-moss text-cream">
+      <div class="max-w-6xl mx-auto px-6 py-20 grid md:grid-cols-2 gap-12 items-center">
+        <div>
+          <h2 class="font-display text-4xl">Plant clinic</h2>
+          <ul class="mt-6 space-y-3">
+            <li class="flex gap-3"><svg class="w-5 h-5"><path d="M5 13l4 4L19 7"/></svg><span>Yellowing leaves and drooping stems diagnosed</span></li>
+            <li class="flex gap-3"><svg class="w-5 h-5"><path d="M5 13l4 4L19 7"/></svg><span>Pest checks with a gentle, pet-safe treatment plan</span></li>
+            <li class="flex gap-3"><svg class="w-5 h-5"><path d="M5 13l4 4L19 7"/></svg><span>Light and watering advice for your actual rooms</span></li>
+          </ul>
+        </div>
+        <blockquote class="rounded-2xl bg-cream/10 p-8 text-lg italic">“My fiddle-leaf fig was on its last legs. Two visits later it has three new leaves.” — Priya, Otterby</blockquote>
+      </div>
+    </section>
+
+    <section id="visit" class="max-w-6xl mx-auto px-6 py-20">
+      <h2 class="font-display text-4xl text-moss">Visit the studio</h2>
+      <p class="mt-4">Open Wednesday to Sunday, 10am to 5pm. Read our <a href="/care-guides.html" class="underline">free care guides</a> before you come.</p>
+      <iframe src="https://www.google.com/maps/embed?pb=!1m18!fake" class="mt-8 w-full h-80 rounded-2xl" loading="lazy" title="Map to the studio"></iframe>
+    </section>
+  </main>
+
+  <footer class="border-t border-stone-200">
+    <div class="max-w-6xl mx-auto px-6 py-10 flex flex-col md:flex-row justify-between gap-6 text-sm">
+      <address class="not-italic">12 Mill Lane, Otterby OT1 4ZZ</address>
+      <div class="flex gap-4">
+        <a href="mailto:hello@fernbrook.example">hello@fernbrook.example</a>
+        <a href="tel:+441632960418">01632 960 418</a>
+        <a href="https://www.instagram.com/fernbrook.example">Instagram</a>
+      </div>
+      <p>© 2026 Fernbrook Plant Studio</p>
+    </div>
+  </footer>
+  <script>document.getElementById('menu-toggle').addEventListener('click',()=>{});</script>
+</body>
+</html>
