@@ -497,7 +497,9 @@
   function videoHtml(v) {
     const sb = v.storyboard;
     const busy = state.busy.has(v.id);
-    const canMake = (v.status === 'planned' || v.status === 'failed') && sb && sb.scenes && sb.scenes.length >= 3;
+    // One scene is a video when it's the owner's own take (storyboard.ts minScenesFor); three otherwise.
+    const minScenes = v.brief && v.brief.footageAssetIds && v.brief.footageAssetIds.length ? 1 : 3;
+    const canMake = (v.status === 'planned' || v.status === 'failed') && sb && sb.scenes && sb.scenes.length >= minScenes;
     // The same figure the hold takes, in the workspace's unit (video-producer.ts buildEstimate).
     const unit = v.unit === 'credits' ? 'credit' : 'task';
     const cost = v.estimate == null ? '' : (v.estimate === 0 ? ' — free' : ` — uses ${v.estimate} ${unit}${v.estimate === 1 ? '' : 's'}`);

@@ -195,11 +195,10 @@ Say briefly what you saw in each video, then suggest the edits that would make t
 - reorder: change what comes first ("Open on the latte art")
 - fill: a gap their footage can't fill — a branded card, stock footage or an AI clip ("Add a branded card with the booking link at the end")
 - text: words on screen, or captions
-- sound: keep their sound, replace music, add a voiceover
-- frame: keep a face or the subject in the vertical frame where it would be cut off
+- sound: keep their sound, or put a voiceover over it
 Point at a video by its id and at a stretch by inS/outS in seconds ONLY when the edit is about that stretch (a cut, a trim, a moment to move). Use only stretches from the shot lists. Write times as minutes:seconds, e.g. 0:08 or 1:15 — never 8:00 for eight seconds. Never name or guess who a person is. At most ${MAX_SUGGESTIONS} suggestions, the most important first.
 
-Suggest ONLY what this video maker can do: cut, trim and reorder their footage; fill a gap with stock footage, a stock photo, a branded card (their logo, a headline and their website) or an AI clip or picture; short words on screen; captions; keep their sound or put a voiceover over it. It can NOT add background music, animations, lower-thirds, transitions, effects, colour grading or logos over footage — never suggest those. Do not suggest what happens anyway: every video is made vertical (9:16) and the call to action goes at the end.
+Suggest ONLY what this video maker can do: cut, trim and reorder their footage; fill a gap with stock footage, a stock photo, a branded card (their logo, a headline and their website) or an AI clip or picture; short words on screen; captions; keep their sound or put a voiceover over it. It can NOT add background music, animations, lower-thirds, transitions, effects, colour grading, logos over footage, or crop and reframe a clip — never suggest those. Scenes play one AFTER another: stock or a card can go between sentences, never over someone speaking, so never suggest cutaways while someone talks. Do not suggest what happens anyway: every video is made vertical (9:16) and the call to action goes at the end.
 
 Return STRICT JSON only:
 {"seen": [{"assetId": 1, "summary": "...", "problems": ["..."]}], "suggestions": [{"kind": "cut|trim|reorder|fill|text|sound|frame|other", "text": "...", "reason": "...", "assetId": 1, "inS": 0, "outS": 3}]}`;
@@ -253,7 +252,7 @@ export function enforceReview(raw: unknown, videos: FootageVideo[], charged: num
             const a = Number(o.inS), b = Number(o.outS);
             // A stretch only where the edit is ABOUT one; "add a card" pointing at the whole video
             // printed "(0:00–0:08)" on every suggestion (staging, 2026-11-09).
-            const aboutStretch = kind === 'cut' || kind === 'trim' || kind === 'reorder' || kind === 'frame';
+            const aboutStretch = kind === 'cut' || kind === 'trim' || kind === 'reorder';
             if (aboutStretch && Number.isFinite(a) && Number.isFinite(b) && b > a) {
                 s.inS = round1(Math.max(0, Math.min(v.durationS, a)));
                 s.outS = round1(Math.max(0, Math.min(v.durationS, b)));

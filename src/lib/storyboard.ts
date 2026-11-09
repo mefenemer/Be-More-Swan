@@ -104,6 +104,15 @@ export interface LibraryPicture { id: number; name: string }
 /** One of the owner's videos the planner may cut own_video scenes from. `durationS` is MEASURED. */
 export interface OwnVideo { id: number; name: string; durationS: number }
 
+/**
+ * The fewest scenes a usable video has. Three for a made-up video (hook, body, call to action) — but
+ * a video from the owner's own footage is often ONE take plus a closing card, and the three-scene
+ * rule failed the first real talking-head plan on staging (2026-11-09). Pure.
+ */
+export function minScenesFor(brief: Pick<VideoBrief, 'footageAssetIds'>): number {
+    return brief.footageAssetIds?.length ? 1 : MIN_SCENES;
+}
+
 /** A cut shorter than this is a flash, not a scene. */
 export const MIN_OWN_SEGMENT_S = 0.8;
 
@@ -213,8 +222,8 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
     });
 
     // Too few scenes is not repairable by rules — the caller re-plans or falls back.
-    if (scenes.length < MIN_SCENES) {
-        changes.push(`The plan had ${scenes.length} scene${scenes.length === 1 ? '' : 's'}; a video needs at least ${MIN_SCENES}.`);
+    if (scenes.length < minScenesFor(brief)) {
+        changes.push(`The plan had ${scenes.length} scene${scenes.length === 1 ? '' : 's'}; a video needs at least ${minScenesFor(brief)}.`);
     }
 
     // AI allowance, then the per-video clip cap. Earliest AI clips are kept (the hook matters most).
@@ -392,7 +401,9 @@ export function storyboardUserPrompt(args: {
         `Today is ${args.today}.`,
         `BUSINESS: ${args.businessName}`,
         args.businessFacts ? `BUSINESS INFORMATION:\n${args.businessFacts}` : '',
-        `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, ${MIN_SCENES}–${MAX_SCENES} scenes, scene lengths adding up to ${brief.lengthS} seconds.`,
+        brief.footageAssetIds?.length
+            ? `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, 1–${MAX_SCENES} scenes, about ${brief.lengthS} seconds. One continuous take is ONE own_video scene — never split a sentence across scenes; a closing branded card is its own scene.`
+            : `VIDEO: a ${brief.lengthS}-second ${clip(brief.purpose, 60) || 'promo'} video, ${MIN_SCENES}–${MAX_SCENES} scenes, scene lengths adding up to ${brief.lengthS} seconds.`,
         `WHAT IT MUST SAY: ${clip(brief.message, 600)}`,
         brief.cta ? `CALL TO ACTION (use these words in the last scene): ${clip(brief.cta, 200)}` : '',
         keepsOwnSound(brief)

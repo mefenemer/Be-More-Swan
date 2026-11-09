@@ -52,7 +52,7 @@ import { PAD_RATIO, type Overlay } from '../lib/overlay-geometry';
 import { recordPlatformIncident } from './platform-incident';
 import { asOwnVideos, footageStatus, loadFootage, ownVideos } from './footage-review';
 import { describeTightening, footagePlannerBlock, ownSpeechOnTimeline, silentWav, suggestionLine, tightenStoryboard, MAX_VIDEOS_PER_REVIEW, type FootageReview, type SpokenWord as FootageWord } from '../lib/footage';
-import { keepsOwnSound } from '../lib/storyboard';
+import { keepsOwnSound, minScenesFor } from '../lib/storyboard';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -249,9 +249,9 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
         const over = scriptOverBudget(storyboard, brief);
         if (over) {
             const again = await ask([opts.feedback, `The voiceover is ${over.words} words; a ${brief.lengthS}-second video has room for about ${over.budget}. Cut it to ${over.budget} words or fewer — shorter lines, not fewer facts that matter.`].filter(Boolean).join(' '));
-            if (again.storyboard.scenes.length >= 3 && (scriptOverBudget(again.storyboard, brief)?.words ?? 0) < over.words) ({ storyboard, changes } = again);
+            if (again.storyboard.scenes.length >= minScenesFor(brief) && (scriptOverBudget(again.storyboard, brief)?.words ?? 0) < over.words) ({ storyboard, changes } = again);
         }
-        if (storyboard.scenes.length < 3) throw new Error('The plan came back too short to make a video from. Try again, or add more detail to the brief.');
+        if (storyboard.scenes.length < minScenesFor(brief)) throw new Error('The plan came back too short to make a video from. Try again, or add more detail to the brief.');
         // Footage in its own sound: pauses, "um"s and repeated takes out, from the review's words.
         if (footage.length) {
             const t = tightenStoryboard(storyboard, brief, footage);
