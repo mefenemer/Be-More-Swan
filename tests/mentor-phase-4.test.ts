@@ -122,6 +122,7 @@ test('every incident kind is labelled, and every call site is deterministic', ()
         ['netlify/functions/process-discovery-jobs.ts', "kind: 'lead_search_job'"],
         ['src/utils/video-producer.ts', "kind: 'video_plan'"],
         ['src/utils/video-producer.ts', "kind: 'video_build'"],
+        ['src/utils/footage-review.ts', "kind: 'video_footage_review'"],
         ['netlify/functions/process-media-job-background.ts', "kind: 'media_job'"],
         ['src/utils/visual-briefs.ts', "kind: 'design_round'"],
         ['src/utils/site-store.ts', "kind: 'site_draft'"],

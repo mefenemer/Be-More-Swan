@@ -4,7 +4,11 @@ Added 2026-11-01, from the owner. Builds on [video-producer-plan.md](./video-pro
 role, the storyboard, sourcing, the build worker, all LIVE on prod 2026-11-01) and
 [video-editing-plan.md](./video-editing-plan.md) (the `video_edit` model and the post editor).
 
-Status: **plan only, nothing built.** The decisions in §9 are the owner's.
+Status: **Phases 0–4 BUILT on staging branch 2026-11-09, not yet deployed or tried end to end.**
+Phases 5–8 (AI clips on their own, styles, labelling, go-live copy) not started. Owner decisions
+2026-11-09: D-F1 2 tasks per review, D-F3 every plan with the Video Producer, D-F5 5 min / 500 MB / 10.
+⚠️ `db/z-video-producer-footage.sql` on BOTH databases before the code deploys (every project read
+selects `video_projects.footage_review`). See §11 for how it was built and what differs from this plan.
 
 ---
 
@@ -244,3 +248,47 @@ Each phase is shippable on its own, behind the role being active and the plan ha
 - Never: "the best AI video on the market" or "replaces CapCut". Say instead that it uses leading
   AI video models, reviewed every quarter, and keep the bake-off file as the evidence.
 - Not in this plan: avatars or talking heads, voice cloning, lip-sync, long-form, TikTok.
+
+
+## 11. As built (2026-11-09, Phases 1–4)
+
+| Piece | Where |
+|---|---|
+| `own_video` scenes, segment clamped to the measured length, own-sound scenes fixed at their segment | `src/lib/storyboard.ts` (`clampSegment`, `keepsOwnSound`, `fitLength(…, fixed)`) |
+| Shot lists, the review, suggested edits, captions remapped for own sound, frame times | `src/lib/footage.ts` (pure; `tests/footage.test.ts`) |
+| Reading a video: frames + 16 kHz mono WAV, in the browser | `src/components/footage-reader.js` |
+| Store what the browser read; transcribe + shot-list; review; charge | `src/utils/footage-review.ts`, `netlify/functions/footage.ts` |
+| `reviewing → reviewed` statuses, `plan_from_review`, own-video scene edits | `netlify/functions/video-projects.ts`, `process-video-project-background.ts` (`review`) |
+| Build: own clips windowed inside their file, gain 1 (own sound) or 0 (voiceover); stock muted in own sound | `src/utils/video-producer.ts` (`ownWindow`, `sceneClips`, `playedDurations`) |
+| Videos tab: "Use my own footage", tick list, "Make the storyboard" | `src/components/assistant-videos.js` |
+| Chat: `footage_review_proposal` card, own videos in the snapshot, prompt | `disruptive-ui-registry.js`, `chat-orchestrator.ts`, `buildVideosSnapshot` |
+| Review Queue: "Suggest edits" on a video post | `workspace.html` (`_rqSuggestEditsPaint`) |
+
+Differences from the plan, on purpose:
+
+- **No Remotion frame/measure function.** Every video is read in the browser, library videos too
+  (R2 already answers GETs from the app's origins, `scripts/set-r2-cors.ts`). No Remotion redeploy.
+  The sound is decoded in the browser and sent as a WAV, so there is no 25 MB-video problem.
+- **Two steps, not one.** The review (paid) returns what was seen and the suggestions, ticked by
+  default; "Make the storyboard" (free) plans from the ticked ones only. Unticked = turned down,
+  and the planner is told not to apply them.
+- **Captions for footage in its own sound** come from the transcript, carried on a silent
+  caption-only voiceover track (`makeCaptionTrack`) because the render reads caption words from a
+  voiceover asset. No render change.
+- **Consent is a tick on every review**, not once per workspace, and the server refuses without it.
+- **"Suggest edits" (§4.4) makes a new video** from the post's clips via the footage form; it does not
+  edit the post's own timeline.
+- **Charged only when a video is new to the review.** Reviewing videos already analysed is free.
+
+**Tightening (2026-11-09, after reviewing Format Finder's demo).** Footage in its own sound has
+pauses over 0.5 s, hesitations ("um", "uh" — never "like" or "so") and false starts (3+ words said
+again within 3 words; the last take is kept) cut out, from the review's word timings — rules in
+`src/lib/footage.ts` (`tightenSegment`, `tightenStoryboard`), no model call, free. A scene becomes
+`cuts` (pieces of the same file, played back to back; captions follow them). "Keep as filmed" per
+scene, "Tighten my clips" on the form (on by default). Not under a voiceover. The clip limit went
+from 20 to 40 (`MAX_CLIPS`, `_PCE_MAX_CLIPS`) and `capPieces` keeps a video inside it by rejoining the
+shortest gaps first. Tightening makes the video shorter than asked rather than stretching other scenes.
+
+Not done yet / to check on staging: one real review of a phone video (MOV/HEVC), a 5-minute file,
+a silent video; old frames/WAVs are not deleted when a video is read again; help articles still say
+it "doesn't watch footage" (Phase 8 copy).

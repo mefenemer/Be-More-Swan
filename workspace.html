@@ -6229,6 +6229,7 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/assistant-briefs.js"></script>
 <script src="/src/components/voice-picker.js"></script>
 <script src="/src/components/caption-style.js"></script>
+<script src="/src/components/footage-reader.js"></script>
 <script src="/src/components/assistant-videos.js"></script>
 <script src="/src/components/assistant-mentor-overview.js"></script>
 <script src="/src/components/assistant-mentor-plan.js"></script>
@@ -8431,7 +8432,7 @@ function _rqRenderTimeline() {
 //
 // Stored on the post as video_edit and rendered by Remotion at approval (src/lib/video-edit.ts).
 // Nothing is re-encoded here — this is a description of a cut, not the cut itself.
-const _PCE_MAX_CLIPS = 20;
+const _PCE_MAX_CLIPS = 40;   // = MAX_CLIPS in src/lib/video-edit.ts
 // Three minutes is where YouTube stops calling it a Short and wants a 16:9 video instead, which
 // would be a third render of the same material. The editor states the limit rather than enforcing
 // it, because the post may not be going to YouTube at all.
@@ -18573,7 +18574,9 @@ async function _rqVideoPaint(post) {
     el.classList.add('hidden');
     el.innerHTML = '';
     _rqVideoBusy = false;
-    if (!post || _rqMediaIsVideo(post) || !String(post.caption || '').trim() || post.status === 'rejected') return;
+    if (!post || post.status === 'rejected') return;
+    if (_rqMediaIsVideo(post)) { _rqSuggestEditsPaint(post, el); return; }
+    if (!String(post.caption || '').trim()) return;
     const shownFor = _rqReviewPostId;
     const producer = await _rqVideoProducerLoad();
     if (!producer || _rqReviewPostId !== shownFor) return;   // the user may have moved on to another post
@@ -18611,6 +18614,34 @@ async function _rqVideoFromPost() {
         if (go) { go.disabled = false; go.textContent = 'Make a video version'; }
         _rqVideoBusy = false;
     }
+}
+
+// ── "Suggest edits" on a video post (docs/video-producer-footage-and-ai-plan.md §4.4) ───────────
+// The Video Producer watches this post's own clips and suggests edits for a better cut. Only the
+// browser can read a video, so this opens the producer's "Use my own footage" form filled in with the
+// post's clips (assistant-videos.js reads the prefill when its Videos tab opens). The post itself is
+// never changed: the edits make a new video, which comes back to the Review Queue.
+let _rqSuggestPrefill = null;
+async function _rqSuggestEditsPaint(post, el) {
+    const shownFor = _rqReviewPostId;
+    const producer = await _rqVideoProducerLoad();
+    if (!producer || _rqReviewPostId !== shownFor) return;
+    const edit = post.videoEdit || post.video_edit;
+    const fromEdit = edit && Array.isArray(edit.clips) ? edit.clips.filter(c => c && c.kind !== 'image').map(c => Number(c.assetId)) : [];
+    const ids = [...new Set((fromEdit.length ? fromEdit : (post.contentAssetIds || post.content_asset_ids || []).map(Number)).filter(n => Number.isInteger(n) && n > 0))].slice(0, 10);
+    if (!ids.length) return;
+    _rqSuggestPrefill = { assetIds: ids, message: `A better cut of this post: ${String(post.caption || '').slice(0, 600)}`, voiceover: false };
+    el.className = 'mt-3 text-xs rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-700';
+    el.innerHTML = `
+        <p class="font-semibold text-gray-800">Suggest edits</p>
+        <p class="mt-0.5 text-gray-600">${_rqEsc(producer.name)} watches this video and suggests edits — cuts, order, captions — for a new version. You tick the ones you want. This post isn’t changed.</p>
+        <button type="button" onclick="_rqSuggestEdits(${Number(producer.id)})" class="btn-secondary mt-2 py-1.5 px-3 text-xs font-bold border rounded-lg transition cursor-pointer">Suggest edits</button>`;
+    el.classList.remove('hidden');
+}
+function _rqSuggestEdits(assistantId) {
+    if (!_rqSuggestPrefill) return;
+    try { sessionStorage.setItem('bms-footage-prefill', JSON.stringify(_rqSuggestPrefill)); } catch (e) { /* private window */ }
+    _rqVideoOpenTab(assistantId);
 }
 
 function _rqVideoOpenTab(assistantId) {
