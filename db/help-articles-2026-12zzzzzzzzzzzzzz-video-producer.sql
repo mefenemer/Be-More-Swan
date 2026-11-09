@@ -18,11 +18,11 @@
 --   tasks: AI clip 20, AI picture 1, voiceover 1 — src/config/task-weights.ts, video-producer.ts buildTasks
 --   part-way stops keep made scenes, 20-minute stop — video-producer.ts buildProject, STUCK_AFTER_MS
 --   saved to My Content, Ready, Download, Try the render again — video-producer.ts buildProject, video-render.ts
---   (docs/video-producer-studio-plan.md; ⚠️ the video-version and campaign passages change in its Phase 5)
+--   (docs/video-producer-studio-plan.md, Phases 1–5)
 --   set-up questions — src/public/assistant-onboarding-schemas.js video_producer
 --   autopilot 1–3 a week, spacing, waits while 2 wait, topics — src/utils/video-autopilot.ts
---   "Make a video version", one per post, platform rule — src/utils/video-handoff.ts, workspace.html
---   Commission a video, 2 tasks, delivered on approval — src/config/campaign-vocab.ts, campaign-video-order.ts
+--   "Make a video version", one per post, back onto the post or a draft beside it — video-handoff.ts, video-post-media.ts
+--   Commission a video, 2 tasks, delivered when Ready, onto a campaign post — campaign-vocab.ts, campaign-video-order.ts, video-post-media.ts
 --   plans — src/utils/ai-credits.ts VIDEO_TIERS (Busywork Buster), video-projects.ts gate
 --
 -- Same rules as the other help files: bodies dollar-quoted, titles single-quoted with '' for
@@ -139,10 +139,10 @@ Answer **Should it plan videos for you each week?** with one, two or three a wee
 
 Open any post in your **Review Queue** and press **Make a video version**. Your Video Producer plans a storyboard saying what the post says. You can also ask your Social Media Assistant in chat to hand a post over.
 
-- The post itself stays as it is.
-- The video goes to the post's own platform when that platform takes vertical video (Instagram, YouTube or Facebook). Otherwise it goes to Instagram.
+- When the video is finished, it goes onto that post, keeping its words, and waits for your approval there.
+- If the post can't take a video as it is (it's already scheduled, its platform doesn't take video, or you've put text on its picture), the post stays as it is and a new draft with the video and the post's words waits beside it.
 - Each post gets one video. Pressing it again opens the one already started.
-- These are marked **From one of your posts**, and the finished video shows **Requested by** the assistant whose post it was.
+- These are marked **From one of your posts**. The finished video is also in **My Content**.
 
 The button only appears when your Video Producer is active and your plan includes video.
 
@@ -151,8 +151,8 @@ The button only appears when your Video Producer is active and your plan include
 Your Campaign Assistant can include **Commission a video** in a campaign plan: one short video on the campaign's message, using 2 of the campaign's tasks. Approving the plan starts the storyboard. It never makes the video.
 
 - The storyboard is marked **For a campaign**.
-- When you approve the finished video in the Review Queue, the campaign marks that work done and starts anything that was waiting for it.
-- The finished video shows **Requested by** your Campaign Assistant.
+- When the video is finished, the campaign marks that work done and starts anything that was waiting for it.
+- The video goes onto one of the campaign's posts that is still waiting for your approval, in place of the picture that post found for itself. A picture you chose yourself is never replaced. The video is also in **My Content**.
 $$, FALSE)
 
 ON CONFLICT (title) DO UPDATE SET

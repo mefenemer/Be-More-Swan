@@ -570,7 +570,7 @@
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
               <span>${esc(v.title)}</span></button>
             <p class="text-xs text-gray-600 mt-0.5">${v.version > 1 ? `Version ${esc(v.version)} · ` : ''}${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
-            ${v.note ? `<p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mt-1.5">${esc(v.note)}</p>` : ''}
+            ${v.note ? `<p class="text-xs ${v.status === 'ready' ? 'text-emerald-800 bg-emerald-50 border-emerald-200' : 'text-amber-800 bg-amber-50 border-amber-200'} border rounded-md px-2 py-1 mt-1.5">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
           ${chatPaneAvailable() ? `<button type="button" data-vid-act="talk" data-id="${v.id}" class="text-xs font-bold text-indigo-700 hover:underline shrink-0 whitespace-nowrap">Talk it through</button>` : ''}
