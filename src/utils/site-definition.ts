@@ -865,9 +865,16 @@ function cleanRedirects(v: unknown, pagePaths: Set<string>): SiteRedirect[] {
 }
 /** Where an old address now lives, or null. Only for an address no page answers at. */
 export function redirectFor(def: SiteDefinition, path: string): string | null {
-    if (!def.redirects?.length) return null;
     const key = redirectKey(path);
-    return def.redirects.find((r) => r.from === key)?.to ?? null;
+    const listed = def.redirects?.find((r) => r.from === key)?.to;
+    if (listed) return listed;
+    // An old file-style address of a page that now lives at its plain one (about.html, /About.HTML →
+    // /about): an imported site's links and search results still arrive (2026-11-09).
+    const raw = (path || '/').split(/[?#]/)[0];
+    if (/\.(html?|php|aspx?|jsp)$/i.test(raw) || /[A-Z]/.test(raw)) {
+        if (def.pages.some((p) => (p.slug ? `/${p.slug}` : '/') === key) && key !== raw) return key;
+    }
+    return null;
 }
 
 /** The social sites a footer link may go to, by host, with the name it is shown as. */

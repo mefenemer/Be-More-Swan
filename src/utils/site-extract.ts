@@ -21,6 +21,7 @@ import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import { socialSiteOf } from './site-definition';
 import { adapterFor } from './site-builders';
+import { expandThinPage, fillClosedPanels, removePhoneDrawers, spliceStreamed } from './site-page-data';
 import type { ImportedProduct } from './site-builders/types';
 export type { ImportedProduct };
 
@@ -469,7 +470,14 @@ function absolutise(href: string, base: URL | null): string | null {
     const h = href.trim();
     if (!h || h.startsWith('#') || /^(javascript|data):/i.test(h)) return null;
     if (/^(mailto|tel):/i.test(h)) return h;   // a "Call us" button is a real CTA with no page behind it
-    try { return base ? new URL(h, base).toString() : new URL(h).toString(); } catch { return null; }
+    try { return withoutTracking(base ? new URL(h, base) : new URL(h)).toString(); } catch { return null; }
+}
+
+/** Tracking parameters never belong in an address we keep (utm_*, ad click ids, HubSpot and Mailchimp ids). */
+const TRACKING = /^(utm_[a-z_]+|fbclid|gclid|gbraid|wbraid|dclid|msclkid|yclid|twclid|ttclid|li_fat_id|mc_cid|mc_eid|_hs[a-z_]*|__hs[a-z_]*|hsctatracking|_ga|_gl|igshid|si)$/i;
+export function withoutTracking(u: URL): URL {
+    for (const k of [...u.searchParams.keys()]) if (TRACKING.test(k)) u.searchParams.delete(k);
+    return u;
 }
 
 /**
@@ -573,7 +581,7 @@ export function describeChanges(changes: SiteChange[]): string[] {
 // never HTML or styles: nothing of the old site's markup can reach the new one.
 
 export type ImportBlock =
-    | { kind: 'heading'; level: number; text: string }
+    | { kind: 'heading'; level: number; text: string; anchor?: string }
     | { kind: 'text'; text: string; links?: InlineLink[] }
     | { kind: 'item'; text: string; links?: InlineLink[] }
     | { kind: 'quote'; text: string; links?: InlineLink[] }
@@ -599,6 +607,8 @@ export interface ImportPage {
     hasForm: boolean;
     /** The questions their form asked (its field labels), for the import report — our contact form has its own. */
     formFields?: string[];
+    /** A one-page site's menu: entries that jump down the page to a section, by its id. */
+    anchorNav?: Array<{ text: string; id: string }>;
     /** Their profiles on social sites, linked anywhere on the page (footer included). */
     socialLinks?: string[];
     /** The platform adapter that read it (site-builders/ key), or null when none matched. */
@@ -622,7 +632,30 @@ const PRICE_TEST = new RegExp(PRICE.source, 'i');
 export function statesPrice(text: string): boolean { return PRICE_TEST.test(text); }
 
 /** A builder's resized picture → the original (Wix's /v1/fill/…, Squarespace's ?format=300w). */
+/**
+ * A framework's picture route → the picture it serves (2026-11-09): Next.js /_next/image?url=,
+ * Vercel's /_vercel/image?url=, Netlify's /.netlify/images?url=, Astro's /_image?href=, Nuxt's /_ipx/<modifiers>/<path> and
+ * Cloudflare's /cdn-cgi/image/<options>/<path>. Null when it is none of them.
+ */
+export function unwrapImageRoute(src: string): string | null {
+    let u: URL;
+    try { u = new URL(src); } catch { return null; }
+    if (/^\/(_next\/image|_vercel\/image|\.netlify\/images|_image)\/?$/.test(u.pathname)) {
+        // Astro's astro:assets route names the picture `href`; the others `url`.
+        const inner = u.searchParams.get('url') ?? (u.pathname.startsWith('/_image') ? u.searchParams.get('href') : null);
+        if (!inner) return null;
+        try { return new URL(inner, u.origin).toString(); } catch { return null; }
+    }
+    const ipx = u.pathname.match(/^\/_ipx\/[^/]+\/(.+)$/);
+    if (ipx) { try { return new URL(/^https?:\/\//.test(ipx[1]) ? ipx[1] : `/${ipx[1]}`, u.origin).toString(); } catch { return null; } }
+    const cf = u.pathname.match(/^\/cdn-cgi\/image\/[^/]+\/(.+)$/);
+    if (cf) { try { return new URL(/^https?:\/\//.test(cf[1]) ? cf[1] : `/${cf[1]}`, u.origin).toString(); } catch { return null; } }
+    return null;
+}
+
 export function fullSizeImageUrl(src: string): string {
+    const inner = unwrapImageRoute(src);
+    if (inner) src = inner;
     try {
         const u = new URL(src);
         if (/(^|\.)wixstatic\.com$/.test(u.hostname)) {
@@ -635,14 +668,30 @@ export function fullSizeImageUrl(src: string): string {
     } catch { return src; }
 }
 
-function largestFromSrcset(srcset: string | undefined): string | null {
+/**
+ * The largest picture in a srcset, read as the HTML spec reads it: an address runs to the next space
+ * (commas inside it are part of it — GoDaddy's ".../rs=w:400,h:400,m 2x", Wix CDN addresses), then an
+ * optional descriptor runs to the next comma.
+ */
+export function largestFromSrcset(srcset: string | undefined): string | null {
     if (!srcset) return null;
     let best: { url: string; w: number } | null = null;
-    for (const part of srcset.split(',')) {
-        const [url, size] = part.trim().split(/\s+/);
+    let i = 0;
+    const n = srcset.length;
+    while (i < n) {
+        while (i < n && /[\s,]/.test(srcset[i])) i++;
+        let url = '';
+        while (i < n && !/\s/.test(srcset[i])) url += srcset[i++];
+        let descriptor = '';
+        if (url.endsWith(',')) url = url.replace(/,+$/, '');
+        else {
+            while (i < n && srcset[i] !== ',') descriptor += srcset[i++];
+            i++;
+        }
         if (!url) continue;
+        const size = descriptor.trim().split(/\s+/)[0] ?? '';
         const w = size ? parseFloat(size) * (size.endsWith('x') ? 1000 : 1) : 0;
-        if (!best || w > best.w) best = { url, w };
+        if (!best || w > best.w) best = { url, w: isNaN(w) ? 0 : w };
     }
     return best?.url ?? null;
 }
@@ -732,6 +781,9 @@ export function readImportPage(html: string, url: string): ImportPage {
     let products: ImportedProduct[] = [];
     try { products = adapter?.products?.($, base) ?? []; } catch { products = []; }
     try { adapter?.prepare?.($, base); } catch { /* a broken adapter never stops an import */ }
+    // Any framework's page: streamed parts put in place, and a shell's words read from its page data
+    // (site-page-data.ts) — after the adapter, so an adapter that reads its own data better goes first.
+    try { spliceStreamed($); removePhoneDrawers($); if (!expandThinPage($)) fillClosedPanels($); } catch { /* the plain read still stands */ }
     const fullSize = (src: string) => { try { return adapter?.fullSizeImage?.(src) ?? fullSizeImageUrl(src); } catch { return fullSizeImageUrl(src); } };
 
     // Facts from structured data, before scripts go.
@@ -777,6 +829,15 @@ export function readImportPage(html: string, url: string): ImportPage {
     // The menu: links in <nav> or the header, same host, in order.
     const navLinks: SiteLink[] = [];
     const seenNav = new Set<string>();
+    // A one-page site's menu jumps down the page (#about, /#services): its sections, by their id.
+    const anchorNav: Array<{ text: string; id: string }> = [];
+    $('nav a[href], header a[href], [role="navigation"] a[href]').each((_, el) => {
+        const raw = ($(el).attr('href') ?? '').trim();
+        const m = raw.match(/^(?:\/)?#([\w-]{1,80})$/) ?? (base ? raw.match(new RegExp(`^${base.origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/?#([\\w-]{1,80})$`)) : null);
+        const text = clean($(el).text()) || clean($(el).attr('aria-label'));
+        if (m && text && text.length <= 40 && !anchorNav.some((a) => a.id === m[1]) && $(`[id="${m[1]}"]`).length) anchorNav.push({ text, id: m[1] });
+    });
+    const anchorIds = new Set(anchorNav.map((a) => a.id));
     $('nav a[href], header a[href], [role="navigation"] a[href]').each((_, el) => {
         if (navLinks.length >= IMPORT_LIMITS.navLinks) return;
         const href = absolutise($(el).attr('href') ?? '', base);
@@ -866,6 +927,7 @@ export function readImportPage(html: string, url: string): ImportPage {
         const alt = realAlt($el.attr('alt'));
         blocks.push({ kind: 'image', src, alt: alt || lastHeading || siteName || 'A picture from our website', altFromSite: !!alt });
     };
+    const anchorHeaded = new Set<string>();
     const hasBlockChild = (node: AnyNode) => node.type === 'tag' && node.children.some((c) => c.type === 'tag' && (BLOCK_TAGS.has(c.name) || c.name === 'img'));
     // A picture drawn as a CSS background (style="background-image:url(…)", or Tailwind's bg-[url(…)]):
     // read like an <img>, described by the nearest heading.
@@ -907,7 +969,11 @@ export function readImportPage(html: string, url: string): ImportPage {
             const t = blockText(node);
             if (t && !IMPORT_NOISE.test(t) && /[a-z0-9]/i.test(t)) {
                 const k = normaliseText(t);
-                if (!seenText.has(k)) { seenText.add(k); blocks.push({ kind: 'heading', level: Number(name[1]), text: t }); }
+                // The section it heads, when a one-page menu jumps to it (its own id, or its section's).
+                const holder = $(node).closest('[id]').attr('id');
+                const anchor = holder && anchorIds.has(holder) && !anchorHeaded.has(holder) ? holder : undefined;
+                if (anchor) anchorHeaded.add(anchor);
+                if (!seenText.has(k)) { seenText.add(k); blocks.push(anchor ? { kind: 'heading', level: Number(name[1]), text: t, anchor } : { kind: 'heading', level: Number(name[1]), text: t }); }
                 lastHeading = t.slice(0, LIMITS_ALT);
             }
             $(node).find('img').each((_, im) => addImage(im));
@@ -920,7 +986,9 @@ export function readImportPage(html: string, url: string): ImportPage {
         if (name === 'li') { addText('item', blockText(node), node); $(node).find('img').each((_, im) => addImage(im)); return; }
         if (name === 'a' || name === 'button') {
             const $el = $(node);
-            const text = clean($el.text()) || clean($el.attr('aria-label'));
+            // A <button> with no words of its own (carousel arrows, play, close — only an aria-label) is never
+            // content; a link keeps its label (an icon link to a page still goes somewhere).
+            const text = clean($el.text()) || (name === 'a' ? clean($el.attr('aria-label')) : '');
             const cls = `${$el.attr('class') ?? ''} ${$el.attr('id') ?? ''}`;
             const href = absolutise($el.attr('href') ?? '', base);
             // A link standing on its own (not inside a sentence — those arrive inside their paragraph)
@@ -957,7 +1025,7 @@ export function readImportPage(html: string, url: string): ImportPage {
         url,
         title: orNull(clean($('title').first().text())) ?? orNull(clean($('meta[property="og:title"]').attr('content'))),
         description: orNull(clean($('meta[name="description"]').attr('content'))),
-        navLinks, blocks, words, formFields, socialLinks,
+        navLinks, blocks, words, formFields, socialLinks, ...(anchorNav.length ? { anchorNav } : {}),
         contact: { emails: [...emails].slice(0, 3), phones: [...phones].slice(0, 3), address, locality },
         siteName, logo, hasForm, builder, platform: adapter?.key ?? null,
         ...(products.length ? { products: cleanProducts(products, base, fullSize) } : {}),

@@ -141,13 +141,13 @@ async function main() {
         assert.strictEqual(r.report.look?.primaryColor, null);
     });
 
-    await check('LOST today: "about.html" becomes the address /about-html (the .html is slugged, not dropped)', async () => {
+    await check('"about.html" becomes the address /about (file extensions are dropped, shared fix 2026-11-09)', async () => {
         const r = await runImport({ url: `${HL}/`, pictures: 'skip', current: current(), maxPages: 20 }, deps(TAILWIND));
         assert.ok(r.ok);
         if (!r.ok) return;
-        assert.deepStrictEqual(r.definition.pages.map((p) => p.slug), ['', 'about-html', 'mediation-html', 'contact-html']);
-        // The old addresses still arrive: redirects drop .html.
-        assert.ok(r.definition.redirects?.some((x) => x.from === '/about' && x.to === '/about-html'));
+        assert.deepStrictEqual(r.definition.pages.map((p) => p.slug), ['', 'about', 'mediation', 'contact']);
+        // The old address (about.html) is the same page once .html is read off, so no redirect is needed.
+        assert.ok(!r.definition.redirects?.some((x) => x.to === '/about-html'));
     });
 
     console.log('\nA page filled from /content/*.json by its own script');

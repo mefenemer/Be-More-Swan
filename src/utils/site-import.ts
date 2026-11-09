@@ -30,6 +30,8 @@ import { inlineEmbeds, type EmbedFetchers } from './site-embeds';
 import { linkFirst, PLACEHOLDER, plainOf } from './site-rich-text';
 import { fontKeyFor, lookFound, readImportedLook, readsOn, themeWithLook, type ImportedLook } from './site-import-theme';
 import { ADAPTERS } from './site-builders';
+import { isWooShop } from './site-builders/woocommerce';
+import { readShopifyFeed, readWooFeed, SHOP_FEED_MAX, shopFeedUrl, shopifyCurrency } from './site-shop-feeds';
 import * as cheerio from 'cheerio';
 import { harvestBrandSignals } from './brand-extract';
 import { findBlogIndex, readImportedBlog, type BlogIndexSignal, type ImportedBlog } from './site-import-blog';
@@ -329,7 +331,11 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
     const slugs: string[] = [];
     pages.slice(0, cap).forEach((p, i) => {
         if (i === 0) { slugs.push(''); return; }
-        const last = new URL(p.url).pathname.split('/').filter(Boolean).pop() ?? '';
+        // A file name is not an address: about.html → about, and …/index.html takes its folder's name.
+        const segs = new URL(p.url).pathname.split('/').filter(Boolean);
+        let last = segs.pop() ?? '';
+        if (/^(index|default|home)\.(html?|php|aspx?)$/i.test(last)) last = segs.pop() ?? '';
+        last = last.replace(/\.(html?|php|aspx?|jsp)$/i, '');
         let s = slugify(decodeURIComponent(last)) || slugify(pageTitle(p, i)) || `page-${i + 1}`;
         if (RESERVED_SLUGS.has(s)) s = `${s}-page`;
         let k = 2;
@@ -639,6 +645,23 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         };
     });
 
+    // A one-page site (Carrd, a landing page): its menu jumps to sections. Each section a menu entry jumped
+    // to is labelled with that entry, and when the home page is all there is, the new site is one page too
+    // (structure 'one_page': its menu links down the page to the labelled sections).
+    const anchorNav = pages[0]?.page.anchorNav ?? [];
+    const navTextOf = new Map(anchorNav.map((a) => [a.id, a.text]));
+    const anchorByHeading = new Map<string, string>();
+    for (const b of blocks) if (b.page === 0 && b.block.kind === 'heading' && b.block.anchor && navTextOf.has(b.block.anchor)) anchorByHeading.set(b.block.text, navTextOf.get(b.block.anchor)!);
+    if (anchorByHeading.size && outPages[0]) {
+        const labelled = new Set<string>();
+        for (const sec of outPages[0].sections as Array<{ type: string; props: Record<string, unknown>; look?: Record<string, unknown> }>) {
+            const head = String(sec.props.headline ?? sec.props.heading ?? '');
+            const label = anchorByHeading.get(head);
+            if (label && !labelled.has(label)) { labelled.add(label); sec.look = { ...(sec.look ?? {}), menuLabel: label.slice(0, LIMITS.navLabel) }; }
+        }
+    }
+    const onePage = pages.length === 1 && anchorNav.length >= 2 && anchorByHeading.size >= 2;
+
     // An enquiry form, where their old site had a contact page — or a page of its own, when there is room.
     if (!outPages.some((p) => p.sections.some((s) => s.type === 'contact'))) {
         const contactPage = outPages.find((p) => CONTACT_PAGE.test(p.slug));
@@ -662,7 +685,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
             // Their profiles on social sites (footer links), when the new site has none yet.
             socialLinks: current.settings.socialLinks?.length ? current.settings.socialLinks : importedSocialLinks(pages),
         },
-        nav: [], footer: current.footer, structure: 'pages', pages: outPages,
+        nav: [], footer: current.footer, structure: onePage ? 'one_page' : 'pages', pages: outPages,
         // Their old addresses that changed (/services/coaching → /coaching) keep working on the new site.
         redirects: pages.slice(0, cap).flatMap((p, i) => {
             const from = redirectKey(new URL(p.url).pathname);
@@ -904,6 +927,8 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
         }
     }
     report.products = importedProducts(read, blocks, assets);
+    // Every product the shop sells, from its own public feed (site-shop-feeds.ts): a page shows only some.
+    report.products = await withShopFeed(report.products, homePage.platform ?? null, home.html, home.finalUrl, deps);
     if (!report.products.length) delete report.products;
     const built = assembleImport({ current: input.current, pages: read, blocks, plan, assets, maxPages: input.maxPages, blogUrls: blog?.urls });
     let definition = built.definition;
@@ -962,6 +987,26 @@ export async function planInBatches(pages: ReadPage[], blocks: NumberedBlock[], 
     const ok = plans.filter((x): x is ImportPlan => !!x);
     if (!ok.length) return null;
     return { pages: ok.flatMap((x) => x.pages), skip: ok.flatMap((x) => x.skip) };
+}
+
+/** The pages' products, then the shop feed's others (each name once), up to Business Information's limit. */
+async function withShopFeed(fromPages: NonNullable<ImportReport['products']>, platform: string | null, html: string, finalUrl: string, deps: ImportDeps): Promise<NonNullable<ImportReport['products']>> {
+    try {
+        const origin = new URL(finalUrl).origin;
+        const url = shopFeedUrl(platform, origin);
+        if (!url || !deps.fetchJson || (platform === 'elementor' && !isWooShop(html))) return fromPages;
+        const r = await deps.fetchJson(url).catch(() => null);
+        if (!r?.ok) return fromPages;
+        const feed = platform === 'shopify' ? readShopifyFeed(r.html, origin, shopifyCurrency(html)) : readWooFeed(r.html);
+        const seen = new Set(fromPages.map((p) => p.name.trim().toLowerCase()));
+        const out = [...fromPages];
+        for (const p of feed) {
+            const k = p.name.trim().toLowerCase();
+            if (seen.has(k) || out.length >= SHOP_FEED_MAX) continue;
+            seen.add(k); out.push(p);
+        }
+        return out;
+    } catch { return fromPages; }
 }
 
 /** Stylesheets read for the look: their own first; a site with thirty is a build artefact. */

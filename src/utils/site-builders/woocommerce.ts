@@ -10,6 +10,7 @@ import type * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import type { BuilderAdapter, ImportedProduct } from './types';
 import { adapter as wordpress } from './wordpress';
+import { prepareElementor } from './elementor';
 
 /**
  * Markup only WooCommerce writes. Never the bare word: a WordPress blog post ABOUT WooCommerce says it too.
@@ -17,6 +18,8 @@ import { adapter as wordpress } from './wordpress';
  * classes it adds to every page of the site (woocommerce-no-js, swapped to -js by its inline script), its
  * script settings, and its blocks.
  */
+/** Whether the page is a WooCommerce shop's (any page of it). */
+export const isWooShop = (html: string) => WOO.test(html);
 const WOO = /<meta[^>]+content=["']WooCommerce\b|\/wp-content\/plugins\/woocommerce\/|\bwoocommerce-(?:no-js|js|page|active|uses-block-theme)\b|\bwc_add_to_cart_params\b|\bwoocommerce_params\b|\bwp-block-woocommerce-[a-z]|\bwc-block-(?:components|product|mini-cart)/;
 
 /** Cart, checkout and account pages, and add-to-basket links: shop machinery, never a page. */
@@ -198,6 +201,8 @@ export const adapter: BuilderAdapter = {
         $('.woocommerce-Reviews #comments, .woocommerce-Reviews .comments-area').removeAttr('id').removeClass('comments-area');
         try { wordpress.prepare?.($, url); } catch { /* the WordPress tidy never stops a shop's */ }
         prepareWoo($);
+        // Built with Elementor: its phone copies and widgets tidied too (main session, 2026-11-09).
+        if (/\belementor-(?:widget|element|section|kit)/.test($.html())) { try { prepareElementor($); } catch { /* the shop's tidy still stands */ } }
     },
     get contentRoot() { return wordpress.contentRoot; },
     get noise() { return noise(); },
