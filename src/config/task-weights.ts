@@ -41,6 +41,10 @@ export const TASK_WEIGHTS = {
     flyer_words: 1,
     // Taking the background out of a picture in the design editor (owner, 2026-11-06): a paid AI call per picture.
     background_removal: 1,
+    // The Video Producer reviewing the owner's own footage (owner decision D-F1, 2026-11-09): frames
+    // read by AI plus the sound transcribed. Charged once per review that analyses a new video;
+    // suggesting again from the same analysis is free (src/utils/footage-review.ts).
+    footage_review: 2,
     // Behind basicWorkCharged below (docs/basic-work-charging.md).
     chat_messages: 1,
     editing_helper: 1,
@@ -119,6 +123,7 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     mentor_review: 'Business Mentor weekly reviews',
     flyer_words: 'Flyer words',
     background_removal: 'Background removals',
+    footage_review: 'Footage reviews',
     chat_messages: 'Chat (every 10 messages)',
     editing_helper: 'Editing helpers',
     design_round: 'Design rounds',

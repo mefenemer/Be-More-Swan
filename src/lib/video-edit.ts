@@ -85,8 +85,12 @@ export interface VideoEdit {
  * A reel of twenty segments is already an unusual post; past that the render cost stops being
  * bounded by anything the reviewer can see. Rejecting the payload (rather than truncating it) keeps
  * the failure in front of the person who can fix it.
+ *
+ * 40 since 2026-11-09 (was 20): tightening the owner's own footage (src/lib/footage.ts
+ * tightenSegment) cuts a talking-head take into many short pieces of the SAME file. Pieces add cuts,
+ * not frames, so the render's length and cost are unchanged. workspace.html _PCE_MAX_CLIPS matches.
  */
-export const MAX_CLIPS = 20;
+export const MAX_CLIPS = 40;
 
 /** The master frame when nothing says otherwise. Vertical serves four of six platforms as-is. */
 export const DEFAULT_TARGET_RATIO = '9:16';

@@ -34,6 +34,7 @@ export const INCIDENT_KINDS = {
     lead_search_job: 'Lead search',
     video_plan: 'Video storyboard',
     video_build: 'Video making',
+    video_footage_review: 'Footage review',
     media_job: 'AI video',
     design_round: 'Brand Designer options',
     site_draft: 'Website drafting',

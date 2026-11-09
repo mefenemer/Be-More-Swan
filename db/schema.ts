@@ -5416,7 +5416,30 @@ export const videoProjects = pgTable("video_projects", {
   sourcePostId: integer("source_post_id").references(() => scheduledPosts.id, { onDelete: "set null" }),
   campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
   campaignOrderId: integer("campaign_order_id").references(() => campaignOrders.id, { onDelete: "set null" }),
+  // db/z-video-producer-footage.sql — a video from the owner's own footage: what was seen, the
+  // suggested edits and the owner's ticks (src/lib/footage.ts FootageReview). NULL for other videos.
+  footageReview: jsonb("footage_review"),
   startedAt: timestamp("started_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// What the Video Producer understood of one of the workspace's own videos — made once per video
+// (db/z-video-producer-footage.sql, src/utils/footage-review.ts). Frames and sound live in R2.
+export const footageAnalyses = pgTable("footage_analyses", {
+  assetId: integer("asset_id").primaryKey().references(() => contentAssets.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  status: text().notNull().default("prepared"),
+  durationS: real("duration_s").notNull(),
+  width: integer(),
+  height: integer(),
+  framesKey: text("frames_key").notNull(),
+  frameCount: integer("frame_count").notNull().default(0),
+  audioKey: text("audio_key"),
+  analysis: jsonb(),
+  words: jsonb().notNull().default([]),
+  error: text(),
+  version: integer().notNull().default(1),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
