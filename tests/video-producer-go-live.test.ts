@@ -101,8 +101,9 @@ console.log('\n──── costs are shown in tasks ────');
 check('the Videos tab shows the figure the hold takes, in the workspace\'s unit', () => {
     const vp = read('src/utils/video-producer.ts');
     assert.match(vp, /export async function buildEstimate\(/);
-    assert.match(vp, /\? \{ estimate: buildTasks\(storyboard, brief\), unit: 'tasks' \}/);
-    assert.match(vp, /holdCredits\(db, \{ orgId, amount: credits, tasks: buildTasks\(storyboard, brief\)/, 'the hold takes buildTasks under task metering');
+    // Both count only what is still to be made (a re-build or a new version keeps the rest).
+    assert.match(vp, /\? \{ estimate: buildTasks\(storyboard, brief, made\), unit: 'tasks' \}/);
+    assert.match(vp, /holdCredits\(db, \{ orgId, amount: credits, tasks: buildTasks\(storyboard, brief, made\)/, 'the hold takes buildTasks under task metering');
     assert.match(read('src/components/assistant-videos.js'), /const unit = v\.unit === 'credits' \? 'credit' : 'task';/);
 });
 

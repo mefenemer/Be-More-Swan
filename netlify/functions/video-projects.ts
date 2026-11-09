@@ -10,11 +10,15 @@
 //   POST { action:'replan', id, feedback? }              → re-plans with the owner's notes
 //   POST { action:'edit_scene', id, sceneId, patch }    → changes one scene (re-checked by the rules)
 //   POST { action:'build', id }                          → holds the estimate, builds in the background
+//   POST { action:'change', id }                         → "Change it" on a ready video: a new version (free), video-producer.ts newVersion
+//        replan / edit_scene on a READY video do the same first, then act on the new version (chat parity)
 //   POST { action:'rerender', id }                       → a render_failed video: render the saved timeline again (free)
 //   POST { action:'cancel', id }
 //   POST { action:'from_post', postId }                 → "Make a video version" of a post (video-handoff.ts):
 //                                                          plans a storyboard for the active Video Producer
 //   GET  ?producer=1                                    → { producer: { id, name } | null } — is the button offered?
+//   GET  ?teammates=1                                   → { social, blog } — the ACTIVE Social Media Manager and Blog
+//                                                          Writer a finished video can be handed to (studio plan Phase 4), or null
 //
 // Planning is free (one model call, like any draft). Building spends: the estimate is on the project
 // before the click, held at the click, settled scene by scene (src/utils/video-producer.ts).
@@ -29,9 +33,9 @@ import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/ut
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
-import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker } from '../../src/utils/video-producer';
+import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion } from '../../src/utils/video-producer';
 import { enforceStoryboard, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
-import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
+import { activeVideoProducer, activeAssistantInRole, videoFromPost } from '../../src/utils/video-handoff';
 import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../src/utils/footage-review';
 import { FOOTAGE_REVIEW_TASKS, tightenStoryboard, type FootageReview } from '../../src/lib/footage';
 import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
@@ -59,6 +63,13 @@ export default withLambda(async (event) => {
             const producer = await activeVideoProducer(db, orgId);
             const can = !!producer && tierCanGenerateVideo(await getActiveTierKeyByOrg(db, orgId));
             return json(200, { producer: can ? { id: producer!.id, name: producer!.name } : null });
+        }
+        if (event.queryStringParameters?.teammates) {
+            const [social, blog] = await Promise.all([
+                activeAssistantInRole(db, orgId, 'social_media_manager'),
+                activeAssistantInRole(db, orgId, 'blog_writer'),
+            ]);
+            return json(200, { social, blog });
         }
         await sweepStuckProjects(db, orgId).catch((err) => console.error('[video-projects] sweep failed:', err));
         const id = Number(event.queryStringParameters?.id);
@@ -131,8 +142,21 @@ export default withLambda(async (event) => {
     }
 
     const id = Number(body.id);
-    const row = Number.isInteger(id) ? await load(id) : null;
+    let row = Number.isInteger(id) ? await load(id) : null;
     if (!row) return json(404, { error: 'Video not found.' });
+
+    // A finished video is never changed in place (D-S1: every version is kept). "Change it", and a
+    // replan or scene edit on a ready video — from the tab or a chat card — first make a new version.
+    if (action === 'change') {
+        if (row.status !== 'ready' || !row.storyboard) return json(409, { error: 'Only a finished video can be changed into a new version.' });
+        return json(201, { project: await projectView(db, orgId, await newVersion(db, row)) });
+    }
+    if ((action === 'replan' || action === 'edit_scene') && row.status === 'ready' && row.storyboard) {
+        row = await newVersion(db, row);
+    }
+    if ((action === 'replan' || action === 'edit_scene') && row.status === 'rendering') {
+        return json(409, { error: 'The finished video is rendering — wait a moment, then change it.' });
+    }
 
     if (action === 'plan_from_review') {
         if (row.status !== 'reviewed' && !(row.status === 'planned' && row.footageReview) && !(row.status === 'failed' && row.footageReview)) {
@@ -209,7 +233,7 @@ export default withLambda(async (event) => {
 
     if (action === 'build') {
         if (!['planned', 'failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video is not ready to make.' });
-        const hold = await holdBuild(db, orgId, row.storyboard as Storyboard, row.brief as VideoBrief);
+        const hold = await holdBuild(db, orgId, row.storyboard as Storyboard, row.brief as VideoBrief, row);
         if (!hold.ok) return json(402, { error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit });
         await db.update(videoProjects).set({ status: 'building', creditHold: hold.credits, startedAt: new Date(), note: null, updatedAt: new Date() })
             .where(eq(videoProjects.id, row.id));

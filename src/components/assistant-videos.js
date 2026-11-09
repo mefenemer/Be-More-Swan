@@ -68,6 +68,8 @@
     stage: null, userStage: false, opened: new Set(), full: false,
     // "Use my own footage": the form, the library's own videos, what is ticked, and files just added.
     footage: null,
+    // The ACTIVE Social Media Manager and Blog Writer a finished video can be handed to (Phase 4).
+    teammates: null,
   };
 
   // Stages as pills, like the Brand Designer's Briefs (owner, 2026-11-06: the Briefs tab's patterns on
@@ -115,7 +117,16 @@
     return data;
   }
 
+  async function loadTeammates() {
+    try {
+      const r = await fetch(`${API}?teammates=1`, { credentials: 'same-origin' });
+      state.teammates = r.ok ? await r.json() : { social: null, blog: null };
+    } catch { state.teammates = { social: null, blog: null }; }
+    if (state.rendered) render();
+  }
+
   async function load() {
+    if (!state.teammates) loadTeammates();
     try {
       const data = await call('GET', null, `?assistantId=${encodeURIComponent(state.assistantId)}`);
       state.videos = (data.projects || []).filter((p) => p.aiAssistantId == null || p.aiAssistantId === state.assistantId);
@@ -494,6 +505,7 @@
     const shape = (v.brief && v.brief.shape) || '9:16';
     const wide = shape === '16:9';
     const ai = v.storyboard && (v.storyboard.scenes || []).some((s) => s.source === 'ai_video' || s.source === 'ai_image');
+    const tm = state.teammates || {};
     return `
       <div class="mt-3 flex flex-col sm:flex-row gap-3 items-start">
         <video src="${esc(v.outputUrl)}" controls playsinline preload="metadata" class="${wide ? 'w-full sm:w-96' : shape === '1:1' ? 'w-56' : 'w-44'} rounded-lg bg-black shrink-0"></video>
@@ -502,8 +514,13 @@
           ${v.storyboard && v.storyboard.caption ? `<p class="text-xs text-gray-600"><span class="font-bold">Suggested words to post with it:</span> ${esc(v.storyboard.caption)}</p>` : ''}
           <div class="flex flex-wrap gap-2">
             <a href="/.netlify/functions/content-asset-download?assetId=${encodeURIComponent(v.outputAssetId)}" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Download</a>
+            ${tm.social ? `<button type="button" data-vid-act="use-post" data-id="${v.id}" title="${esc(tm.social.name)} makes a draft post with this video" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg">Use in a post</button>` : ''}
+            ${tm.blog ? `<button type="button" data-vid-act="use-blog" data-id="${v.id}" title="${esc(tm.blog.name)} starts an article with this video" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg">Use in a blog post</button>` : ''}
+            <button type="button" data-vid-act="change" data-id="${v.id}" ${state.busy.has(v.id) ? 'disabled' : ''} title="Make a new version. This one stays in My Content." class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Change it</button>
           </div>
-          <p class="text-[11px] text-gray-500">Saved in My Content, where your other assistants can use it.</p>
+          <p class="text-[11px] text-gray-500">${tm.social || tm.blog
+            ? `Saved in My Content. ${[tm.social ? `“Use in a post” hands it to ${esc(tm.social.name)}` : '', tm.blog ? `“Use in a blog post” to ${esc(tm.blog.name)}` : ''].filter(Boolean).join('; ')} — free.`
+            : 'Saved in My Content. Download it, or hire a Social Media Assistant or Blog Writer to post it for you.'}</p>
         </div>
       </div>`;
   }
@@ -552,7 +569,7 @@
               class="flex items-start gap-1.5 text-left text-sm font-bold text-gray-900 break-words cursor-pointer hover:text-gray-700">
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
               <span>${esc(v.title)}</span></button>
-            <p class="text-xs text-gray-600 mt-0.5">${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
+            <p class="text-xs text-gray-600 mt-0.5">${v.version > 1 ? `Version ${esc(v.version)} · ` : ''}${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
             ${v.note ? `<p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mt-1.5">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
@@ -669,6 +686,46 @@
     await load();
   }
 
+  /**
+   * Hand a finished video to a teammate (studio plan Phase 4). Both open THAT assistant's own flow —
+   * the Social Media Manager's "Where should this video go?" (workspace.html pceStartPostWithVideo),
+   * or a new Blog Writer draft with the video in it (blog-studio-modal.js withVideo). Free.
+   */
+  function handOver(id, to) {
+    const v = state.videos.find((x) => x.id === id);
+    const tm = state.teammates || {};
+    if (!v || !v.outputAssetId) return;
+    const words = (v.storyboard && v.storyboard.caption) || '';
+    const shape = (v.brief && v.brief.shape) || '9:16';
+    if (to === 'post' && tm.social && typeof window.pceStartPostWithVideo === 'function') {
+      window.pceStartPostWithVideo(tm.social.id, { assetId: v.outputAssetId, caption: words || v.title, title: v.title, shape });
+    } else if (to === 'blog' && tm.blog && typeof window.openBlogStudio === 'function') {
+      window.openBlogStudio({ assistantId: tm.blog.id, withVideo: { assetId: v.outputAssetId, title: v.title, words } });
+    } else {
+      state.notes[id] = { text: 'That assistant isn’t available on this page. It’s in My Content — add it from there.', error: true };
+      render();
+    }
+  }
+
+  /**
+   * "Change it": a new version of a finished video (video-projects 'change'). It opens on "To check"
+   * with everything already made kept — only what's changed is made again. This one stays Ready.
+   */
+  async function changeVideo(id) {
+    state.busy.add(id); render();
+    try {
+      const data = await call('POST', { action: 'change', id });
+      const nv = data.project;
+      state.stage = 'check'; state.userStage = true;
+      if (nv && nv.id) { state.opened.add(nv.id); saveFolded(); state.notes[nv.id] = { text: 'A new version. Change any scene, then press “Make the video” — only what you change is made again.' }; }
+    } catch (err) {
+      state.notes[id] = { text: err.message, error: true };
+    }
+    state.busy.delete(id);
+    await load();
+    if (state.stage === 'check') host()?.querySelector('[data-video]')?.scrollIntoView({ block: 'start' });
+  }
+
   document.addEventListener('click', (e) => {
     const pill = e.target.closest('[data-vid-stage]');
     if (pill && host() && host().contains(pill)) {
@@ -760,6 +817,9 @@
       case 'cancel-replan': state.replanning = null; render(); break;
       case 'build': act(id, { action: 'build', id }, 'Making the video — it’s saved to My Content when it’s done.'); break;
       case 'rerender': act(id, { action: 'rerender', id }, 'Rendering the finished video again — a few minutes.'); break;
+      case 'change': changeVideo(id); break;
+      case 'use-post':
+      case 'use-blog': handOver(id, b.dataset.vidAct === 'use-post' ? 'post' : 'blog'); break;
       case 'cancel': act(id, { action: 'cancel', id }, null); break;
       case 'open-review': document.querySelector('[data-maintab="review-queue"]')?.click(); break;
     }
@@ -867,7 +927,7 @@
       state.setup = setup && typeof setup === 'object' ? setup : {};
       // A new view: the old full-screen box went with the old page, so only the lock is left to drop.
       if (state.full) { state.full = false; window.ScrollLock?.release('videos-full'); }
-      state.rendered = false; state.form = false; state.footage = null; state.editing = null; state.replanning = null; state.notes = {};
+      state.rendered = false; state.form = false; state.footage = null; state.teammates = null; state.editing = null; state.replanning = null; state.notes = {};
       state.stage = null; state.userStage = false;
       loadFolded();
       load();   // eager: the planned count is the tab badge

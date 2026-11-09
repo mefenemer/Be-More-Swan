@@ -7,7 +7,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { VIDEO_SHAPES, isVideoShape, shapeFrame, shapeOrientation, storyboardUserPrompt, type VideoBrief } from '../src/lib/storyboard';
-import { readBrief, withSetupDefaults } from '../src/utils/video-producer';
+import { readBrief, withSetupDefaults, buildTasks, stillToMake } from '../src/utils/video-producer';
 import { outputName, containsAi } from '../src/utils/video-render';
 import { judgeVideoProject } from '../src/utils/campaign-video-order';
 
@@ -115,6 +115,72 @@ check('the SQL adds the studio columns and statuses; Drizzle mirrors them', () =
     assert.ok(/'rendering', 'ready',\s*'render_failed'/.test(sql) && sql.includes("'archived'"));
     const schema = read('db/schema.ts');
     assert.ok(schema.includes('outputAssetId: integer("output_asset_id")') && schema.includes('timeline: jsonb()'));
+});
+
+// ── Phase 3: versions ───────────────────────────────────────────────────────────────────────────
+
+check('Change it makes a new version that keeps what was made; the finished one is never changed', () => {
+    const nv = vp.slice(vp.indexOf('export async function newVersion'));
+    assert.ok(nv.includes('version: (row.version ?? 1) + 1, parentProjectId: row.id'));
+    assert.ok(nv.includes('sceneAssets: row.sceneAssets, voiceoverAssetId: row.voiceoverAssetId'));
+    assert.ok(nv.includes("status: 'planned'"));
+    const ep = read('netlify/functions/video-projects.ts');
+    assert.ok(ep.includes("if (action === 'change')") && ep.includes("row.status !== 'ready'"));
+    assert.ok(ep.includes("(action === 'replan' || action === 'edit_scene') && row.status === 'ready'") && ep.includes('row = await newVersion(db, row)'), 'chat replans and scene edits on a ready video make a version first');
+    assert.ok(read('netlify/functions/chat-orchestrator.ts').includes("['planned', 'failed', 'ready'].includes(project.status)"));
+});
+
+check('only what is still to be made is estimated and held', () => {
+    const sb = { title: 'T', caption: '', scenes: [
+        { id: 's1', beat: 'hook' as const, voiceover: 'a b c', source: 'ai_image' as const, targetS: 3 },
+        { id: 's2', beat: 'cta' as const, voiceover: 'd e f', source: 'ai_image' as const, targetS: 3 },
+    ] };
+    const brief: VideoBrief = { purpose: 'promo', lengthS: 15, message: 'x', voiceover: true, allowAi: 'stock_and_ai' };
+    const all = buildTasks(sb, brief);
+    assert.strictEqual(buildTasks(sb, brief, { sceneAssets: { s1: 5 }, voiceoverAssetId: 9 }), all - 1 - 1, 'one picture and the voiceover are already made');
+    assert.deepStrictEqual(stillToMake(sb, { sceneAssets: { s1: 5, s2: 6 } }).scenes, []);
+    assert.ok(read('netlify/functions/video-projects.ts').includes('holdBuild(db, orgId, row.storyboard as Storyboard, row.brief as VideoBrief, row)'));
+});
+
+check('the Videos tab offers Change it and shows the version', () => {
+    const t = read('src/components/assistant-videos.js');
+    assert.ok(t.includes('data-vid-act="change"') && t.includes("call('POST', { action: 'change', id })"));
+    assert.ok(t.includes('Version ${esc(v.version)}'));
+});
+
+// ── Phase 4: hand-offs ──────────────────────────────────────────────────────────────────────────
+
+check('hand-offs go only to ACTIVE teammates, looked up by role', () => {
+    const h = read('src/utils/video-handoff.ts');
+    assert.ok(h.includes('export async function activeAssistantInRole') && h.includes('isWorking(r.lifecycleStatus, r.provisioningStatus)'));
+    const ep = read('netlify/functions/video-projects.ts');
+    assert.ok(ep.includes("activeAssistantInRole(db, orgId, 'social_media_manager')") && ep.includes("activeAssistantInRole(db, orgId, 'blog_writer')"));
+    const t = read('src/components/assistant-videos.js');
+    assert.ok(t.includes('${tm.social ? `<button type="button" data-vid-act="use-post"') && t.includes('${tm.blog ? `<button type="button" data-vid-act="use-blog"'));
+});
+
+check('"Use in a post" uses the Social Media Manager\'s own new-post flow, with video formats for the shape', () => {
+    const ws = read('workspace.html');
+    assert.ok(ws.includes('window.pceStartPostWithVideo = async function (assistantId, video)'));
+    assert.ok(ws.includes('await pceOpenDestinationsForCreate(assistantId);'));
+    assert.ok(ws.includes("f.a === 'live' && (f.m === 'video' || f.m === 'mixed')"));
+    assert.ok(ws.includes('...(withVideo ? { caption: withVideo.caption, contentAssetIds: [withVideo.assetId] } : { blank: true })'), 'a real draft with the video, into the Review Queue');
+    const close = ws.slice(ws.indexOf('function pceCloseDestinations()'));
+    assert.ok(close.slice(0, 600).includes('_pceCreateWith = null;'), 'a cancelled hand-off never attaches its video to the next post');
+});
+
+check('"Use in a blog post" opens a new Blog Writer draft with the video in it', () => {
+    const b = read('src/components/blog-studio-modal.js');
+    assert.ok(b.includes('state.pendingVideo = opts.withVideo && opts.withVideo.assetId ? opts.withVideo : null;'));
+    assert.ok(b.includes('if (video) attachInline({ assetId: Number(video.assetId) });'));
+});
+
+check('the chat has the same hand-off, as a card that opens the flow (never posts)', () => {
+    const reg = read('src/components/disruptive-ui-registry.js');
+    assert.ok(reg.includes("register('video_handover_proposal'"));
+    const card = reg.slice(reg.indexOf('function renderVideoHandoverProposalCard'), reg.indexOf("register('video_handover_proposal'"));
+    assert.ok(card.includes('window.pceStartPostWithVideo(') && card.includes('window.openBlogStudio(') && !card.includes('create-manual-post'));
+    assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"type": "video_handover_proposal"'));
 });
 
 console.log(`\nvideo studio: ${passed} passed`);

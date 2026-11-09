@@ -58,7 +58,8 @@ check('on-screen words can be taken off', () => {
 
 check('the card is only for this workspace\'s video, while it can still be changed; its words stay honest', () => {
     assert.ok(chat.includes('eq(videoProjects.id, req.projectId), eq(videoProjects.organisationId, orgId)'));
-    assert.ok(chat.includes("['planned', 'failed'].includes(project.status)"));
+    // 'ready' too since the studio's Phase 3: approving the card makes a new version first.
+    assert.ok(chat.includes("['planned', 'failed', 'ready'].includes(project.status)"));
     assert.ok(chat.includes('(!!sceneEdit && uiElement === sceneEdit)'), 'the reply can claim the change is made');
 });
 

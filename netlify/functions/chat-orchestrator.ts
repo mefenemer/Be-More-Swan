@@ -1827,6 +1827,10 @@ AUTOPILOT. ${perWeek > 0 ? `It is ON: you plan ${perWeek} storyboard${perWeek ==
 
 OTHER WAYS A VIDEO STARTS. "Make a video version" on one of their posts in the Review Queue plans a storyboard from that post ("From one of your posts"); the Campaign Assistant can commission one for a campaign ("For a campaign"). Both arrive on the "Videos" tab as storyboards for them to check, like any other.
 
+USING A FINISHED VIDEO. A READY video is in My Content. They can download it on the "Videos" tab. To post it, emit { "type": "video_handover_proposal", "projectId": <a READY video's id from the list>, "to": "post" } — it opens their Social Media Assistant's new-post flow with the video and your suggested words in it, where they pick the platforms and approve it. To put it in an article, the same with "to": "blog" — it opens a new Blog Writer draft with the video in it. Both are free, and need that assistant to be hired; you never post anything yourself.
+
+CHANGING A FINISHED VIDEO. A READY video is never changed in place: approving a replan or scene-edit card on it makes a NEW VERSION (everything already made is kept, so only what changes is made and paid for again), and the finished one stays in My Content. Tell them that. "Change it" on the "Videos" tab does the same.
+
 CHANGING A STORYBOARD. When the user wants a planned video done differently, emit a video_replan_proposal with the video's id from the list above and their notes. Approving it plans the storyboard again with those notes (free). To change ONE scene, emit { "type": "video_scene_edit", "projectId": <its id>, "scene": <the scene's number>, "voiceover": "<only if it changes, at most 240 characters>", "onScreenText": "<only if it changes, at most 60 characters, \"\" to take it off>", "source": "stock_video" | "stock_photo" | "ai_video" | "ai_image" | "brand_card" (only if it changes), "picture": "<only if it changes: what to show or search for, under 120 characters>", "summary": "<one sentence: what changes>" }. The user may have selected it: their message then starts "About this scene of my video N". Keep their facts; invent nothing. It only changes the plan: nothing is made or spent until they press "Make the video", so tell them that, and never say the scene has been changed. An AI source there costs more when they do. You cannot put their own clip or picture in a scene from here: for that they press "Change" on it. The voice belongs to the whole video, not one scene, so a different voice means a new video.
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is one of the shapes below, or null:
@@ -4076,7 +4080,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             const req = videoSceneRequestFromUiElement(uiElement);
             const [project] = req ? await db.select({ status: videoProjects.status, storyboard: videoProjects.storyboard }).from(videoProjects)
                 .where(and(eq(videoProjects.id, req.projectId), eq(videoProjects.organisationId, orgId))).limit(1) : [];
-            sceneEdit = req && project && ['planned', 'failed'].includes(project.status) ? videoSceneCard(req, project.storyboard as Storyboard | null) : null;
+            // A ready video too: approving the card makes a new version first (video-projects edit_scene).
+            sceneEdit = req && project && ['planned', 'failed', 'ready'].includes(project.status) ? videoSceneCard(req, project.storyboard as Storyboard | null) : null;
             uiElement = sceneEdit;
             if (!sceneEdit) content = 'I couldn’t set that up on the scene, so nothing has changed. Which video and scene do you mean? You can also press “Change” on the scene, on the "Videos" tab.';
         }

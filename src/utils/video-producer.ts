@@ -320,15 +320,34 @@ export function scriptOverBudget(storyboard: Storyboard, brief: VideoBrief): { w
 
 // ── Build ───────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * What is already made for a project — scenes (scene id → asset) and the voiceover. A re-build, or a
+ * new version made by "Change it", reuses them, so they are neither held for nor charged again.
+ */
+export interface MadeSoFar { sceneAssets?: unknown; voiceoverAssetId?: number | null }
+
+/** The storyboard's scenes and voiceover still to be made (what costs). Pure. */
+export function stillToMake(storyboard: Storyboard, made?: MadeSoFar): { scenes: Scene[]; voiceover: boolean } {
+    const done = (made?.sceneAssets && typeof made.sceneAssets === 'object' ? made.sceneAssets : {}) as Record<string, number>;
+    return { scenes: storyboard.scenes.filter((s) => !done[s.id]), voiceover: !made?.voiceoverAssetId };
+}
+
 /** Tasks a build holds under the single task allowance — the same weights the ledger records. Pure. */
-export function buildTasks(storyboard: Storyboard, brief: VideoBrief): number {
+export function buildTasks(storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar): number {
+    const todo = stillToMake(storyboard, made);
     let n = 0;
-    for (const s of storyboard.scenes) {
+    for (const s of todo.scenes) {
         if (s.source === 'ai_image') n += TASK_WEIGHTS.ai_image;
         if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)));
     }
-    if (brief.voiceover && scriptOf(storyboard)) n += TASK_WEIGHTS.ai_voiceover;
+    if (brief.voiceover && scriptOf(storyboard) && todo.voiceover) n += TASK_WEIGHTS.ai_voiceover;
     return n;
+}
+
+/** The same, in legacy credits. Pure. */
+export function buildCredits(storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar): number {
+    const todo = stillToMake(storyboard, made);
+    return estimateCredits({ ...storyboard, scenes: todo.scenes }, todo.voiceover ? brief : { ...brief, voiceover: false }, BUILD_COSTS);
 }
 
 /**
@@ -740,6 +759,23 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
     }
 }
 
+/**
+ * "Change it" on a finished video (studio plan Phase 3, owner decision D-S1: keep every version). A
+ * NEW project, version + 1, copying the brief, storyboard, footage review and everything already made
+ * — so only what the owner changes is made, and paid for, again. The finished video it came from stays
+ * Ready in My Content. Free: nothing is made until "Make the video".
+ */
+export async function newVersion(db: Db, row: typeof videoProjects.$inferSelect): Promise<typeof videoProjects.$inferSelect> {
+    const [v] = await db.insert(videoProjects).values({
+        organisationId: row.organisationId, aiAssistantId: row.aiAssistantId, createdBy: row.createdBy,
+        title: row.title, status: 'planned', brief: row.brief, storyboard: row.storyboard, changes: [],
+        sceneAssets: row.sceneAssets, voiceoverAssetId: row.voiceoverAssetId, footageReview: row.footageReview,
+        origin: row.origin, sourcePostId: row.sourcePostId, campaignId: null, campaignOrderId: null,
+        version: (row.version ?? 1) + 1, parentProjectId: row.id,
+    }).returning();
+    return v;
+}
+
 /** Longer than any honest plan or build runs (the worker's own ceiling is 15 minutes). */
 export const STUCK_AFTER_MS = 20 * 60 * 1000;
 
@@ -769,10 +805,10 @@ export async function sweepStuckProjects(db: Db, orgId: number, now = new Date()
 }
 
 /** Hold what a build will spend. Pure-ish wrapper so the endpoint and tests share the arithmetic. */
-export async function holdBuild(db: Db, orgId: number, storyboard: Storyboard, brief: VideoBrief) {
-    const credits = estimateCredits(storyboard, brief, BUILD_COSTS);
+export async function holdBuild(db: Db, orgId: number, storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar) {
+    const credits = buildCredits(storyboard, brief, made);
     if (credits === 0) return { ok: true as const, credits: 0 };
-    const hold = await holdCredits(db, { orgId, amount: credits, tasks: buildTasks(storyboard, brief), mediaType: 'video' });
+    const hold = await holdCredits(db, { orgId, amount: credits, tasks: buildTasks(storyboard, brief, made), mediaType: 'video' });
     return hold.ok ? { ok: true as const, credits } : { ok: false as const, credits, balance: hold.balance, unit: hold.unit, cost: hold.cost };
 }
 
@@ -782,10 +818,10 @@ export async function holdBuild(db: Db, orgId: number, storyboard: Storyboard, b
  * everyone since 2026-10-17) that is weighted tasks: 20 per AI clip, 1 per AI picture, 1 for the
  * voiceover. Before go-live the Videos tab still quoted credits (5 per clip) while the hold took tasks.
  */
-export async function buildEstimate(orgId: number, storyboard: Storyboard, brief: VideoBrief): Promise<{ estimate: number; unit: 'tasks' | 'credits' }> {
+export async function buildEstimate(orgId: number, storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar): Promise<{ estimate: number; unit: 'tasks' | 'credits' }> {
     return await isUnifiedTaskMetering(orgId)
-        ? { estimate: buildTasks(storyboard, brief), unit: 'tasks' }
-        : { estimate: estimateCredits(storyboard, brief, BUILD_COSTS), unit: 'credits' };
+        ? { estimate: buildTasks(storyboard, brief, made), unit: 'tasks' }
+        : { estimate: buildCredits(storyboard, brief, made), unit: 'credits' };
 }
 
 /** A project as the review panel shows it — presigned thumbnails for the scenes already made. */
@@ -822,7 +858,8 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         footageReview: (row.footageReview as FootageReview | null) ?? null,
         // The finished video in My Content (a studio video): plays on the Videos tab, downloads from there.
         outputAssetId: row.outputAssetId, version: row.version, outputUrl, outputDurationS,
-        ...(sb ? await buildEstimate(orgId, sb, row.brief as VideoBrief) : { estimate: null, unit: null }),
+        ...(sb ? await buildEstimate(orgId, sb, row.brief as VideoBrief, row) : { estimate: null, unit: null }),
+        parentProjectId: row.parentProjectId,
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),
         createdAt: row.createdAt, updatedAt: row.updatedAt,
     };
@@ -854,7 +891,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         const sb = r.storyboard as Storyboard | null;
         const brief = r.brief as VideoBrief;
         const scenes = sb ? ` · ${sb.scenes.length} scenes` : '';
-        const n = sb ? (tasks ? buildTasks(sb, brief) : estimateCredits(sb, brief, BUILD_COSTS)) : 0;
+        const n = sb ? (tasks ? buildTasks(sb, brief, r) : buildCredits(sb, brief, r)) : 0;
         const unit = tasks ? (n === 1 ? 'task' : 'tasks') : (n === 1 ? 'credit' : 'credits');
         const cost = sb && (r.status === 'planned' || r.status === 'failed') ? ` · would use ${n} ${unit} to make` : '';
         const note = r.note ? ` · note: ${r.note.slice(0, 160)}` : '';

@@ -14969,6 +14969,43 @@ async function _pceLoadEnabledPlatforms(assistantId) {
     } catch { /* unknown → show everything, as before; the server still refuses nothing new */ }
 }
 
+// ── "Use in a post" from the Video Producer (docs/video-producer-studio-plan.md Phase 4) ─────────
+// The Video Producer makes videos; posting is the Social Media Manager's job. So a finished video is
+// handed over through THIS assistant's own new-post flow: "Where should this go?" with the video
+// formats ticked for its shape, then a draft carrying the video and the producer's suggested words,
+// opened in the post editor. Free — no model call (owner decision D-S3).
+let _pceCreateWith = null;          // { assetId, caption, shape } while a video hand-off is open
+
+/** The live video format a platform takes for this shape (Reel / Short for vertical, …), or null. */
+function _pceVideoFormatFor(platform, shape) {
+    const live = _pceFormatsFor(platform).filter(f => f.a === 'live' && (f.m === 'video' || f.m === 'mixed'));
+    const fits = (f) => !Array.isArray(f.ar) || !f.ar.length || f.ar.includes(shape);
+    return live.find(f => f.m === 'video' && fits(f)) || live.find(f => fits(f)) || null;
+}
+
+window.pceStartPostWithVideo = async function (assistantId, video) {
+    if (!assistantId || !video || !video.assetId) return;
+    _pceCreateWith = { assetId: Number(video.assetId), caption: String(video.caption || video.title || 'New video').slice(0, 2000), shape: video.shape || '9:16' };
+    await pceOpenDestinationsForCreate(assistantId);
+    // Re-tick: every connected platform that takes this shape of video, in its video format.
+    const keep = [];
+    for (const key of _pceDestChosen) {
+        const { platform } = _pceDestParse(key);
+        const f = _pceVideoFormatFor(platform, _pceCreateWith.shape);
+        if (f) keep.push(_pceDestKey(platform, f.k));
+    }
+    if (!keep.length) {
+        const any = window.PlatformConstants.all.map(p => p.id).filter(id => !_pceDestEnabled || _pceDestEnabled.has(id))
+            .map(id => [id, _pceVideoFormatFor(id, _pceCreateWith.shape)]).find(([, f]) => f);
+        if (any) keep.push(_pceDestKey(any[0], any[1].k));
+    }
+    _pceDestChosen = new Set(keep);
+    document.getElementById('pce-dest-title').textContent = 'Where should this video go?';
+    document.getElementById('pce-dest-sub').textContent = 'Your Social Media Assistant makes a draft with the video and the suggested words. You check it in the Review Queue before anything posts.';
+    document.getElementById('pce-dest-confirm').textContent = 'Make the draft';
+    _pceRenderDestinations();
+};
+
 async function pceOpenDestinationsForCreate(assistantId) {
     _pceDestMode = 'create';
     _pceDestAssistantId = assistantId;
@@ -15030,6 +15067,8 @@ function _pceShowDestinations() {
 function pceCloseDestinations() {
     // A Calendar day's date belongs to the one post it was clicked for, created or not.
     window._gpPrefillPublishDate = null;
+    // So does a Video Producer hand-off: a cancelled one must not attach its video to the next post.
+    _pceCreateWith = null;
     const m = document.getElementById('pce-dest-modal');
     if (!m) return;
     m.classList.add('hidden');
@@ -15161,10 +15200,14 @@ async function pceConfirmDestinations() {
             // button below says "Working…" but is dismissed before the slow half even begins.
             _rqSetBusyCursor(true);
             busy = true;
+            // "Use in a post" from the Video Producer (pceStartPostWithVideo): the draft starts WITH the
+            // finished video and its suggested words, so it lands in the Review Queue like any draft.
+            const withVideo = _pceCreateWith;
             const res = await fetch('/.netlify/functions/create-manual-post', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 // A post started from a Calendar day carries that day (calendar.js _calNewPost).
-                body: JSON.stringify({ assistantId: _pceDestAssistantId, destinations, blank: true,
+                body: JSON.stringify({ assistantId: _pceDestAssistantId, destinations,
+                    ...(withVideo ? { caption: withVideo.caption, contentAssetIds: [withVideo.assetId] } : { blank: true }),
                     ...(window._gpPrefillPublishDate ? { publishDate: window._gpPrefillPublishDate } : {}) }),
             });
             const d = await res.json().catch(() => ({}));
@@ -15172,6 +15215,7 @@ async function pceConfirmDestinations() {
             const created = (d.created || [])[0];
             if (!created) throw new Error('Could not start a new post.');
             _gpCurrentAssistantId = _pceDestAssistantId;
+            _pceCreateWith = null;
             pceCloseDestinations();
             await openPostReview(created.id);
         } else {
