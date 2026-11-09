@@ -493,12 +493,11 @@ check('a video reviewed before is free to review again; the form says so', () =>
     assert.ok(read('src/components/footage-reader.js').includes('frames, audioKey, loudness'));
 });
 
-check('the finished video is rendered right after it is made, so the review shows the real cut', () => {
+check('the finished video is rendered right after it is made (to My Content, not a post)', () => {
     const src = read('src/utils/video-producer.ts');
     const b = src.slice(src.indexOf('export async function buildProject'));
-    assert.ok(b.indexOf('renderFinishedVideo(db') > b.indexOf("status: 'built'"));
-    assert.ok(src.includes('queuePostRender(db, {'));
-    assert.ok(read('src/components/assistant-videos.js').includes("(v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'rendering'"), 'both render states say so');
+    assert.ok(b.indexOf('wakeRenderWorker(projectId)') > b.indexOf("status: 'rendering'"));
+    assert.ok(read('src/components/assistant-videos.js').includes("(v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering'"), 'old post videos still say so');
 });
 
 check('on-screen text over your own take shows for the opening 3 s; elsewhere for the whole scene', () => {

@@ -10,6 +10,7 @@
 //   POST { action:'replan', id, feedback? }              → re-plans with the owner's notes
 //   POST { action:'edit_scene', id, sceneId, patch }    → changes one scene (re-checked by the rules)
 //   POST { action:'build', id }                          → holds the estimate, builds in the background
+//   POST { action:'rerender', id }                       → a render_failed video: render the saved timeline again (free)
 //   POST { action:'cancel', id }
 //   POST { action:'from_post', postId }                 → "Make a video version" of a post (video-handoff.ts):
 //                                                          plans a storyboard for the active Video Producer
@@ -28,7 +29,7 @@ import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/ut
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
-import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker } from '../../src/utils/video-producer';
+import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker } from '../../src/utils/video-producer';
 import { enforceStoryboard, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
 import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../src/utils/footage-review';
@@ -216,9 +217,18 @@ export default withLambda(async (event) => {
         return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
     }
 
+    if (action === 'rerender') {
+        if (row.status !== 'render_failed' || !row.timeline) return json(409, { error: 'There is nothing to render again for this video.' });
+        await db.update(videoProjects).set({ status: 'rendering', renderId: null, note: null, updatedAt: new Date() })
+            .where(eq(videoProjects.id, row.id));
+        await wakeRenderWorker(row.id, headers);
+        return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+
     if (action === 'cancel') {
         if (row.status === 'building') return json(409, { error: 'It is making this video right now — wait for it to finish.' });
         if (row.status === 'reviewing') return json(409, { error: 'It is watching your footage right now — wait a moment.' });
+        if (row.status === 'rendering') return json(409, { error: 'The finished video is rendering — wait a moment.' });
         await db.update(videoProjects).set({ status: 'cancelled', updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
         return json(200, { ok: true });
     }

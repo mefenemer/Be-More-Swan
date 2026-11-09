@@ -3,7 +3,7 @@
 -- Sorts after db/help-articles-2026-12zzzzzzzzzzzzzz-mentor-sees-discussions.sql. Three articles
 -- (docs/video-producer-plan.md §7.3, go-live copy):
 --   Meet Your Video Producer                         set-up, what it makes, what it can't do, which plans
---   Making a Video: From Storyboard to Finished Post  the Videos tab, the storyboard, the cost, the Review Queue
+--   Making a Video: From Storyboard to Finished Post  the Videos tab, the storyboard, the cost, My Content (studio, 2026-11-09)
 --   Weekly Videos, Video Versions and Campaign Videos  autopilot, "Make a video version", commission_video
 --
 -- ⚠️ INSERTED UNPUBLISHED (is_published = FALSE). The Video Producer role is Hidden until go-live, and
@@ -17,7 +17,8 @@
 --     src/lib/storyboard.ts VIDEO_LENGTHS, MIN_SCENES, MAX_SCENES, MAX_AI_CLIPS, storyboardSystemPrompt
 --   tasks: AI clip 20, AI picture 1, voiceover 1 — src/config/task-weights.ts, video-producer.ts buildTasks
 --   part-way stops keep made scenes, 20-minute stop — video-producer.ts buildProject, STUCK_AFTER_MS
---   one post per platform, Review Queue, nothing posts unapproved — video-producer.ts buildProject
+--   saved to My Content, Ready, Download, Try the render again — video-producer.ts buildProject, video-render.ts
+--   (docs/video-producer-studio-plan.md; ⚠️ the video-version and campaign passages change in its Phase 5)
 --   set-up questions — src/public/assistant-onboarding-schemas.js video_producer
 --   autopilot 1–3 a week, spacing, waits while 2 wait, topics — src/utils/video-autopilot.ts
 --   "Make a video version", one per post, platform rule — src/utils/video-handoff.ts, workspace.html
@@ -35,9 +36,9 @@ INSERT INTO help_articles (category, sort_order, title, content_md, is_published
 ('Your Assistants', 70, 'Meet Your Video Producer', $$
 # Meet Your Video Producer
 
-Your Video Producer makes short vertical videos for **Instagram Reels**, **YouTube Shorts** and **Facebook Reels**. Tell it what a video should say. It writes the script from your business details and **Products & Services**, plans the scenes, adds a voiceover and captions, and puts the finished video in your **Review Queue**.
+Your Video Producer makes short videos: vertical for Reels, Shorts and Stories, square for feeds, or wide for YouTube and your website. Tell it what a video should say, or give it your own footage. It writes the script from your business details and **Products & Services**, plans the scenes, adds a voiceover and captions, and saves the finished video to **My Content**.
 
-You check the storyboard before anything is made, and you approve the finished video before it goes out. Nothing posts on its own.
+You check the storyboard before anything is made. The finished video plays on its **Videos** tab, where you can download it. Your Social Media Assistant or Blog Writer can use it from **My Content**. Your Video Producer never posts anything itself.
 
 ## Setting it up
 
@@ -45,6 +46,7 @@ When you hire it, it asks:
 
 - **Which voice should read your voiceovers?** Six voices, from Warm and friendly to Deep and confident.
 - **How long should your videos usually be?** 15, 30 or 60 seconds.
+- **What shape should your videos usually be?** Vertical 9:16, square 1:1 or wide 16:9.
 - **What should viewers do at the end?** Optional. Used as the call to action unless you give a different one on a video.
 - **Should it plan videos for you each week?** No, or one, two or three a week. See Weekly Videos, Video Versions and Campaign Videos.
 - **Where should scenes come from by default?** Stock first with AI where stock won't fit, stock and your own pictures only, or lean on AI.
@@ -62,9 +64,8 @@ Each video has 3 to 8 scenes. A scene can be stock footage, a stock photo, one o
 
 ## What it can't do yet
 
-- It doesn't watch footage you give it or pick the best moments from it.
 - It makes videos up to 60 seconds. It doesn't make long YouTube videos.
-- It doesn't post to TikTok.
+- It doesn't post videos anywhere. Download the finished video, or let your Social Media Assistant post it.
 
 ## Which plans include it
 
@@ -82,7 +83,7 @@ Press **New video** and fill in:
 
 - **What should it say?** A sentence or two, in your own words.
 - **Length**, **Call to action**, **Voice** and **Pictures from**. These start from your set-up answers.
-- **Post it as**: Instagram Reel, YouTube Short, Facebook Reel, or more than one.
+- **Shape**: Vertical 9:16, Square 1:1 or Wide 16:9.
 
 Press **Plan this video**. Planning is free.
 
@@ -107,9 +108,11 @@ In about a minute the storyboard appears: each scene with its voiceover line, an
 
 Making takes a few minutes and you can leave the page. If it stops part-way, the scenes already made are kept and you aren't charged for the rest. Press **Make the video** again to finish it. If something takes longer than 20 minutes, it is stopped and what wasn't made isn't charged.
 
-## 4. Approve it
+## 4. Watch it and use it
 
-The finished video lands in your **Review Queue**, one post for each platform you chose, like any other post. Open it to watch it, change the caption or edit it further in the post editor, then approve it. The **Show captions** switch on the voiceover turns the captions off if you don't want them. Nothing goes out until you approve it.
+When it's made, the finished video is rendered and saved to **My Content**. This takes a few more minutes. On the **Videos** tab it moves to **Ready**, where you can play it, see the words it suggests posting with it, and press **Download**. If the finished video fails to render, press **Try the render again**. That's free.
+
+To post it, open your Social Media Assistant and add the video from **My Content** to a post. Your Blog Writer can put it in an article the same way.
 
 Your Video Producer's **Results** tab counts **Videos Published**.
 $$, FALSE),

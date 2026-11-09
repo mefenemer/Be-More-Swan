@@ -72,13 +72,14 @@ check('the figures match the code', () => {
 
 check('every button and label it names is on the page', () => {
     const videos = read('src/components/assistant-videos.js');
-    for (const s of ['New video', 'Plan this video', 'Plan it again', 'Make the video', 'Change', 'What should it say?', 'Post it as', 'Pictures from']) {
+    for (const s of ['New video', 'Plan this video', 'Plan it again', 'Make the video', 'Change', 'What should it say?', 'Shape', 'Pictures from', 'Download', 'Try the render again']) {
         assert.ok(videos.includes(s), `Videos tab has "${s}"`);
         assert.ok(helpText.includes(s), `article names "${s}"`);
     }
     for (const s of ['Planned by autopilot', 'From one of your posts', 'For a campaign']) assert.ok(videos.includes(s) && helpText.includes(s), s);
     const ws = read('workspace.html');
-    for (const s of ['Make a video version', 'Show captions']) assert.ok(ws.includes(s) && helpText.includes(s), s);
+    // 'Show captions' was the post editor's switch; a studio video's captions are chosen on the form.
+    for (const s of ['Make a video version']) assert.ok(ws.includes(s) && helpText.includes(s), s);
     assert.ok(read('src/public/assistant-onboarding-schemas.js').includes('Should it plan videos for you each week?'));
     assert.ok(helpText.includes('Should it plan videos for you each week?'));
     assert.ok(read('src/config/goal-metrics.ts').includes("label: 'Videos Published'") && helpText.includes('Videos Published'));
@@ -86,8 +87,11 @@ check('every button and label it names is on the page', () => {
 });
 
 check('it promises nothing §9 rules out', () => {
-    assert.match(helpText, /doesn't watch footage you give it/);
-    assert.match(helpText, /doesn't post to TikTok/);
+    // Since 2026-11-09 it reviews footage you give it (docs/video-producer-footage-and-ai-plan.md) and is
+    // a studio that never posts (docs/video-producer-studio-plan.md).
+    assert.doesNotMatch(helpText, /doesn't watch footage you give it/);
+    assert.match(helpText, /doesn't post videos anywhere/);
+    assert.match(helpText, /never posts anything itself/);
     assert.doesNotMatch(helpText, /\b(the first|the only|unique|replaces)\b/i, 'no claim the competitor check would have to back');
     assert.doesNotMatch(helpText, /credit/i, 'costs are in tasks');
 });

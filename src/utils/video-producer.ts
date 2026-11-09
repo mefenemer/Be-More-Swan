@@ -50,11 +50,9 @@ import type { VideoClip, VideoEdit } from '../lib/video-edit';
 import type { AudioOverlay } from '../lib/audio-overlays';
 import { PAD_RATIO, type Overlay } from '../lib/overlay-geometry';
 import { recordPlatformIncident } from './platform-incident';
-import { frameMeta, queuePostRender, readPostVideoEdit, renderPlanFor, resolveOverlayVideoBase } from '../lib/post-render';
-import { remotionConfigured } from '../lib/remotion-lambda';
 import { asOwnVideos, footageStatus, loadFootage, ownVideos } from './footage-review';
 import { describeTightening, footagePlannerBlock, ownSpeechOnTimeline, silentWav, suggestionLine, tightenStoryboard, MAX_VIDEOS_PER_REVIEW, type FootageReview, type SpokenWord as FootageWord } from '../lib/footage';
-import { keepsOwnSound, minScenesFor } from '../lib/storyboard';
+import { keepsOwnSound, minScenesFor, isVideoShape, shapeFrame, shapeOrientation, type VideoShape } from '../lib/storyboard';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -90,6 +88,7 @@ export function withSetupDefaults(raw: unknown, onboardingContext: unknown): Rec
     if (!has('cta') && typeof setup.defaultCta === 'string' && setup.defaultCta.trim()) b.cta = setup.defaultCta;
     if (!has('language') && typeof setup.defaultLanguage === 'string' && setup.defaultLanguage) b.language = setup.defaultLanguage;
     if (b.captions == null && (setup.defaultCaptions === 'off' || setup.defaultCaptions === false)) b.captions = false;
+    if (!has('shape') && isVideoShape(setup.defaultShape)) b.shape = setup.defaultShape;
     if (!has('captionStyle') && setup.captionStyle) {
         // Saved by the setup screens as JSON text (a hidden input), or as an object.
         let style: unknown = setup.captionStyle;
@@ -124,6 +123,7 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
             captionStyle: b.captionStyle && typeof b.captionStyle === 'object' ? normalizeCaptionStyle(b.captionStyle) : null,
             platforms: platforms.length ? [...new Set(platforms)] : ['instagram'],
             ...(footage.length ? { footageAssetIds: footage, tighten: b.tighten !== false } : {}),
+            shape: isVideoShape(b.shape) ? b.shape : '9:16',
         },
     };
 }
@@ -159,6 +159,38 @@ export async function wakeVideoWorker(payload: Record<string, unknown>, headers?
         return true;
     } catch (err) {
         console.error('[video-producer] could not wake the worker:', err);
+        return false;
+    } finally { clearTimeout(timer); }
+}
+
+/**
+ * What a finished video IS before it renders: the timeline the build assembled (clips, on-screen
+ * text, voiceover / caption tracks) and its frame. Saved on video_projects.timeline; rendered by
+ * render-video-project-background into a content_asset in My Content.
+ */
+export interface ProjectTimeline {
+    videoEdit: VideoEdit;
+    overlays: Overlay[];
+    audio: AudioOverlay[];
+    targetRatio: string;
+    width: number;
+    height: number;
+    durationS: number;
+}
+
+/** Wake the project render worker. MUST be awaited (Lambda freezes on return). */
+export async function wakeRenderWorker(projectId: number, headers?: Record<string, string | undefined>): Promise<boolean> {
+    const baseUrl = resolveBaseUrl(headers);
+    if (!baseUrl) { console.error('[video-producer] no base URL — render worker not woken', projectId); return false; }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+        await fetch(`${baseUrl}/.netlify/functions/render-video-project-background`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId }), signal: controller.signal,
+        });
+        return true;
+    } catch (err) {
+        console.error('[video-producer] could not wake the render worker:', err);
         return false;
     } finally { clearTimeout(timer); }
 }
@@ -458,9 +490,11 @@ export function playedDurations(scenes: Scene[], durations: number[], fileS: Map
 
 async function sourceScene(db: Db, args: {
     scene: Scene; orgId: number; userId: number; assistantId: number | null; brandName: string; exclude: string[];
-    kit: ReturnType<typeof normalizeBrandKit>; seed: number;
+    kit: ReturnType<typeof normalizeBrandKit>; seed: number; shape?: VideoShape;
 }): Promise<{ assetId: number; mediaKind?: MediaKind; cost?: number; tasks?: number; asStill?: boolean } | null> {
     const { scene, orgId, userId } = args;
+    const shape: VideoShape = args.shape ?? '9:16';
+    const orientation = shapeOrientation(shape);
     const context = scene.keywords || scene.prompt || scene.voiceover;
     switch (scene.source) {
         case 'product_photo':
@@ -485,7 +519,7 @@ async function sourceScene(db: Db, args: {
             const need = scene.targetS + 0.3;
             const longEnough = (cs: PexelsVideoCandidate[]) => cs.find((x) => (x.duration ?? 0) >= need);
             const opts = { limit: 8, keywords: scene.keywords, exclude: args.exclude };
-            const c = longEnough((await searchUniqueVideos(db, orgId, context, { ...opts, orientation: 'portrait' })).candidates)
+            const c = longEnough((await searchUniqueVideos(db, orgId, context, { ...opts, orientation })).candidates)
                 ?? longEnough((await searchUniqueVideos(db, orgId, context, opts)).candidates);
             if (c) {
                 args.exclude.push(c.providerAssetId);
@@ -496,7 +530,7 @@ async function sourceScene(db: Db, args: {
         }
         case 'stock_photo': {
             const opts = { limit: 3, keywords: scene.keywords, exclude: args.exclude };
-            const r = await searchUniqueImages(db, orgId, context, { ...opts, orientation: 'portrait' });
+            const r = await searchUniqueImages(db, orgId, context, { ...opts, orientation });
             const c = r.candidates[0] ?? (await searchUniqueImages(db, orgId, context, opts)).candidates[0];
             if (!c) return null;
             args.exclude.push(c.providerAssetId);
@@ -504,11 +538,11 @@ async function sourceScene(db: Db, args: {
         }
         case 'brand_card': {
             const headline = scene.onScreenText || scene.voiceover.split(/[.!?]/)[0] || args.brandName;
-            return { assetId: await renderAndPersistBrandCard(db, { orgId, userId, headline: headline.slice(0, 80), kit: args.kit, aspectRatio: '9:16', orgName: args.brandName, ...VIDEO_CARD }) };
+            return { assetId: await renderAndPersistBrandCard(db, { orgId, userId, headline: headline.slice(0, 80), kit: args.kit, aspectRatio: shape, orgName: args.brandName, ...VIDEO_CARD }) };
         }
         case 'ai_image':
             return {
-                assetId: await generateAndPersistImage(db, { orgId, userId, prompt: scene.prompt || context, aspectRatio: '9:16' }),
+                assetId: await generateAndPersistImage(db, { orgId, userId, prompt: scene.prompt || context, aspectRatio: shape }),
                 mediaKind: 'image', cost: IMAGE_CREDIT_COST,
             };
         case 'ai_video': {
@@ -518,7 +552,7 @@ async function sourceScene(db: Db, args: {
             for (let attempt = 1; attempt <= AI_CLIP_ATTEMPTS && !sub; attempt++) {
                 const tried = await submitFramedVideo({
                     prompt: `${scene.prompt || context}. Slow, steady camera movement; one continuous shot.`,
-                    imagePrompt: scene.prompt || context, startImageUrl: frameUrl, aspectRatio: '9:16',
+                    imagePrompt: scene.prompt || context, startImageUrl: frameUrl, aspectRatio: shape,
                     durationSeconds: aiClipSeconds(scene.targetS),
                     usage: { workspaceId: orgId, userId, assistantId: args.assistantId },
                 });
@@ -542,7 +576,7 @@ async function sourceScene(db: Db, args: {
             const [asset] = await db.insert(contentAssets).values({
                 userId, organisationId: orgId, name: `AI scene — ${(scene.prompt || context).slice(0, 60)}`,
                 assetType: 'video', mimeType: 'video/mp4', fileSize: stored.fileSize, storageKey: stored.storageKey,
-                durationS: sub.billedSeconds, provider: 'fal', prompt: scene.prompt || context, aspectRatio: '9:16', status: 'pending',
+                durationS: sub.billedSeconds, provider: 'fal', prompt: scene.prompt || context, aspectRatio: shape, status: 'pending',
             }).returning({ id: contentAssets.id });
             return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: aiVideoTasks(sub.billedSeconds) };
         }
@@ -639,7 +673,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             let made: Awaited<ReturnType<typeof sourceScene>> = null;
             const paid = scene.source === 'ai_image' ? IMAGE_CREDIT_COST : scene.source === 'ai_video' ? VIDEO_CREDIT_COST : 0;
             try {
-                made = await sourceScene(db, { scene: { ...scene, targetS: durations[i] }, orgId, userId, assistantId: p.aiAssistantId ?? null, brandName: org?.name ?? '', exclude, kit, seed: projectId * 10 + i });
+                made = await sourceScene(db, { scene: { ...scene, targetS: durations[i] }, orgId, userId, assistantId: p.aiAssistantId ?? null, brandName: org?.name ?? '', exclude, kit, seed: projectId * 10 + i, shape: brief.shape ?? '9:16' });
             } catch (err) {
                 console.error(`[video-producer] build ${projectId} scene ${scene.id} failed:`, err);
             }
@@ -665,7 +699,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
 
         // 3. The post — one row per platform, one cross-post group.
         const clips = sceneClips(storyboard.scenes, done, durations, { fileS, ownSound });
-        const edit: VideoEdit = { clips, targetRatio: '9:16' };
+        const shape: VideoShape = brief.shape ?? '9:16';
+        const edit: VideoEdit = { clips, targetRatio: shape };
         const audio: AudioOverlay[] = voiceoverAssetId
             ? [{ id: `vp_vo_${voiceoverAssetId}`, assetId: voiceoverAssetId, label: 'Voiceover', volume: 1, fadeInS: 0.05, fadeOutS: 0.2, captions: brief.captions !== false, ...(brief.captionStyle ? { captionStyle: normalizeCaptionStyle(brief.captionStyle) } : {}) }]
             : [];
@@ -680,38 +715,20 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             }
         }
         const overlays = sceneOverlays(storyboard.scenes, durations, brief.captions !== false ? normalizeCaptionStyle(brief.captionStyle).position : 'bottom');
-        const assetIds = clips.map((c) => c.assetId);
-        const platforms = (brief.platforms?.length ? brief.platforms : ['instagram']).filter((x) => x in VIDEO_DESTINATIONS);
-        const group = platforms.length > 1 ? (p.crosspostGroupId ?? randomUUID()) : null;
-        const caption = storyboard.caption || brief.message.slice(0, 300);
-        let firstPostId: number | null = null;
-        for (const platform of platforms) {
-            const [post] = await db.insert(scheduledPosts).values({
-                userId, organisationId: orgId, assistantId: p.aiAssistantId ?? null,
-                platform, postFormat: 'video', formatKey: VIDEO_DESTINATIONS[platform],
-                // A placeholder slot a day out — approving it is what schedules it for real.
-                publishDate: new Date(Date.now() + 24 * 3600 * 1000),
-                caption, contentAssetIds: assetIds,
-                imageOverlays: overlays, audioOverlays: audio, videoEdit: edit,
-                status: 'pending_approval', isAutonomous: false,
-                ownerId: userId, ownerLabel: 'Video Producer', generatedAt: new Date(),
-                crosspostGroupId: group,
-            } as typeof scheduledPosts.$inferInsert).returning({ id: scheduledPosts.id });
-            if (assetIds.length) {
-                await db.insert(scheduledPostAssets)
-                    .values(assetIds.map((contentAssetId, position) => ({ scheduledPostId: post.id, contentAssetId, position })))
-                    .onConflictDoNothing();
-            }
-            firstPostId ??= post.id;
-        }
+        // 3. The timeline — saved on the project and rendered to My Content. No post: the Video Producer
+        // is a studio (owner, 2026-11-09; docs/video-producer-studio-plan.md). Posting is the Social
+        // Media Manager's job, from the finished video.
+        const timeline: ProjectTimeline = {
+            videoEdit: edit, overlays, audio, targetRatio: shape, ...shapeFrame(shape),
+            durationS: Math.round(durations.reduce((a, d) => a + d, 0) * 100) / 100,
+        };
 
         // Anything still held (a scene that turned out free, say) goes back.
         if (held > 0) { await settleHold(db, { orgId, amount: held, success: false, mediaType: 'image', userId }); held = 0; }
-        await save({ status: 'built', scheduledPostId: firstPostId, crosspostGroupId: group, note: null });
-        // The finished file now, not at approval: until it renders, the Review Queue can only play the
-        // raw source — an owner watched their untrimmed 29 s clip with no captions or closing card and
-        // was asked to approve it (staging, 2026-11-09). Never fails the build.
-        if (firstPostId) await renderFinishedVideo(db, { orgId, userId, postId: firstPostId, durationS: durations.reduce((a, d) => a + d, 0) });
+        await save({ status: 'rendering', timeline, outputAssetId: null, renderId: null, note: null });
+        // The finished file, rendered now (render-video-project-background). A wake that never arrives
+        // leaves the project 'rendering' until the stuck sweep marks it render_failed — never silent.
+        await wakeRenderWorker(projectId);
     } catch (err) {
         console.error(`[video-producer] build ${projectId} failed:`, err);
         // Not a fault: the user is told to change those scenes; the person who started it has left.
@@ -720,41 +737,6 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         }
         if (held > 0) { await settleHold(db, { orgId, amount: held, success: false, mediaType: 'image', userId }).catch(() => {}); held = 0; }
         await save({ status: 'failed', note: err instanceof Error ? err.message.slice(0, 400) : 'The video could not be made.' }).catch(() => {});
-    }
-}
-
-/**
- * Start the Remotion render of a just-built video, the same render approval would start, so what the
- * owner reviews is what posts. Approval still queues its own (trigger-post-render). Never throws; a
- * render that can't start leaves the post as before (render_status cleared by queuePostRender).
- */
-export async function renderFinishedVideo(db: Db, args: { orgId: number; userId: number; postId: number; durationS: number }): Promise<boolean> {
-    try {
-        if (!remotionConfigured() || !r2IsConfigured()) return false;
-        const [post] = await db.select({
-            id: scheduledPosts.id, platform: scheduledPosts.platform, formatKey: scheduledPosts.formatKey,
-            imageOverlays: scheduledPosts.imageOverlays, audioOverlays: scheduledPosts.audioOverlays,
-        }).from(scheduledPosts).where(and(eq(scheduledPosts.id, args.postId), eq(scheduledPosts.organisationId, args.orgId))).limit(1);
-        if (!post) return false;
-        const base = await resolveOverlayVideoBase(db, args.postId, args.orgId);
-        if (!base) return false;
-        const videoEdit = await readPostVideoEdit(db, args.postId, args.orgId);
-        const audio = Array.isArray(post.audioOverlays) ? post.audioOverlays.length : 0;
-        const plan = renderPlanFor({ ...post, videoEdit }, base, audio > 0);
-        const queued = await queuePostRender(db, {
-            orgId: args.orgId, postId: args.postId, userId: args.userId,
-            input: {
-                ...frameMeta({ width: 1080, height: 1920, durationS: args.durationS }, base),
-                ...(plan.targetRatio ? { targetRatio: plan.targetRatio } : {}),
-                fingerprint: plan.fingerprint,
-            },
-            baseUrl: resolveBaseUrl(),
-        });
-        if (!queued.ok) console.warn(`[video-producer] render of post ${args.postId} not started: ${queued.error}`);
-        return queued.ok;
-    } catch (err) {
-        console.error(`[video-producer] render of post ${args.postId} failed to start:`, err);
-        return false;
     }
 }
 
@@ -767,6 +749,11 @@ export const STUCK_AFTER_MS = 20 * 60 * 1000;
  */
 export async function sweepStuckProjects(db: Db, orgId: number, now = new Date()): Promise<number> {
     const cutoff = new Date(now.getTime() - STUCK_AFTER_MS);
+    // A render nobody finished: the video was made and paid for, only the file is missing — say so,
+    // and offer "Try the render again" rather than failing the whole video.
+    await db.update(videoProjects)
+        .set({ status: 'render_failed', note: 'The finished video took too long to render. Press “Try the render again”.', updatedAt: now })
+        .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.status, 'rendering'), lt(videoProjects.updatedAt, cutoff)));
     const stuck = await db.select({ id: videoProjects.id, creditHold: videoProjects.creditHold, createdBy: videoProjects.createdBy })
         .from(videoProjects)
         .where(and(eq(videoProjects.organisationId, orgId), inArray(videoProjects.status, ['reviewing', 'planning', 'building']), lt(videoProjects.updatedAt, cutoff)));
@@ -811,6 +798,14 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         for (const a of assets) thumbs[a.id] = a.storageKey ? await presignR2Get(a.storageKey).catch(() => null) : a.externalUrl;
     }
     const sb = row.storyboard as Storyboard | null;
+    let outputUrl: string | null = null;
+    let outputDurationS: number | null = null;
+    if (row.outputAssetId) {
+        const [o] = await db.select({ storageKey: contentAssets.storageKey, durationS: contentAssets.durationS }).from(contentAssets)
+            .where(and(eq(contentAssets.id, row.outputAssetId), eq(contentAssets.organisationId, orgId), isNull(contentAssets.purgedAt))).limit(1);
+        outputUrl = o?.storageKey ? await presignR2Get(o.storageKey, 3600, { stableWindowSec: 1800 }).catch(() => null) : null;
+        outputDurationS = o?.durationS ?? null;
+    }
     // A 'built' project's post can still fail its final render (the text burn-in), and until that is
     // retried the post can never publish. The Videos tab said "Made. It's in the Review Queue" over a
     // post the Review Queue was showing as failed (SWAN-6), so it reads the post's render state too.
@@ -825,6 +820,8 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         scheduledPostId: row.scheduledPostId, postRenderStatus, creditsSpent: row.creditsSpent,
         origin: row.origin, sourcePostId: row.sourcePostId, campaignId: row.campaignId,
         footageReview: (row.footageReview as FootageReview | null) ?? null,
+        // The finished video in My Content (a studio video): plays on the Videos tab, downloads from there.
+        outputAssetId: row.outputAssetId, version: row.version, outputUrl, outputDurationS,
         ...(sb ? await buildEstimate(orgId, sb, row.brief as VideoBrief) : { estimate: null, unit: null }),
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),
         createdAt: row.createdAt, updatedAt: row.updatedAt,
@@ -847,7 +844,10 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         reviewing: 'watching their footage',
         reviewed: 'footage reviewed — suggested edits waiting for the user to tick and press "Make the storyboard"',
         planning: 'writing the storyboard', planned: 'storyboard waiting for the user to check it and press "Make the video"',
-        building: 'being made', built: 'made — the finished video is in the Review Queue for approval',
+        building: 'being made', rendering: 'made — the finished video is rendering (a few minutes)',
+        ready: 'READY — the finished video is in My Content; they can play and download it on the "Videos" tab',
+        render_failed: 'made, but the finished video failed to render — they press "Try the render again" on the "Videos" tab',
+        built: 'made (the old way, before 9 Nov) — its post is in the Review Queue for approval',
         failed: 'stopped', cancelled: 'cancelled', draft: 'not started',
     };
     return ['YOUR VIDEOS (newest first; use only these ids):', ...rows.map((r) => {

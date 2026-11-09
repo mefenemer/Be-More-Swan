@@ -1647,7 +1647,7 @@
   register('visual_brief_proposal', renderVisualBriefProposalCard);
 
   // ── Built-ins: Video Producer cards (docs/video-producer-plan.md §5.10) ─────────────────────
-  // { type: 'video_brief_proposal', message, purpose?, lengthS?, cta?, voiceover?, allowAi?, platforms? }
+  // { type: 'video_brief_proposal', message, purpose?, lengthS?, cta?, voiceover?, allowAi?, shape? }
   // { type: 'video_replan_proposal', projectId, feedback? }
   //
   // The chat twins of "New video" and "Plan it again" on the Videos tab — the same video-projects.ts
@@ -1655,7 +1655,8 @@
   // can do it: that is "Make the video" on the Videos tab, which states the cost first.
   function renderVideoBriefProposalCard(ui, esc) {
     const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
-    const PLATFORMS = { instagram: 'Instagram Reel', youtube: 'YouTube Short', facebook: 'Facebook Reel' };
+    // A shape, not platforms: the Video Producer saves the finished video to My Content (studio plan D-S2).
+    const SHAPES = { '9:16': 'Vertical 9:16', '1:1': 'Square 1:1', '16:9': 'Wide 16:9' };
     const ALLOW = { stock_and_ai: 'Stock first, AI where it fits', stock_only: 'Stock and your own pictures only', ai_first: 'Leans on AI' };
     const brief = {
       message: clean(ui.message, 1200),
@@ -1669,9 +1670,8 @@
       captions: ui.captions !== false,
       ...(ui.captionStyle && typeof ui.captionStyle === 'object' ? { captionStyle: ui.captionStyle } : {}),
       allowAi: ALLOW[ui.allowAi] ? ui.allowAi : 'stock_and_ai',
-      platforms: (Array.isArray(ui.platforms) ? ui.platforms : ['instagram']).filter((p) => PLATFORMS[p]),
+      shape: SHAPES[ui.shape] ? ui.shape : '9:16',
     };
-    if (!brief.platforms.length) brief.platforms = ['instagram'];
     const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
     const runnable = brief.message.length >= 10;
     const el = document.createElement('div');
@@ -1686,7 +1686,7 @@
       ${brief.voiceover && brief.voice && window.VoicePicker ? '<button type="button" data-vdp-listen class="text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer mt-1" aria-pressed="false">&#9654; Listen to the voice</button>' : ''}
       ${brief.voiceover ? row('Captions', brief.captions ? `On${brief.captionStyle && window.CaptionStyle ? ` — ${window.CaptionStyle.describe(brief.captionStyle).toLowerCase()}` : ''}` : 'Off') : ''}
       ${row('Pictures from', ALLOW[brief.allowAi])}
-      ${row('For', brief.platforms.map((p) => PLATFORMS[p]).join(', '))}
+      ${row('Shape', SHAPES[brief.shape])}
       <p class="text-xs text-gray-600 mt-2">Planning the storyboard is free. You check it on the Videos tab before anything is made — the cost of making it is shown there first.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-vdp-save ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Plan this video</button>
