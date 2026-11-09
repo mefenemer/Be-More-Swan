@@ -62,7 +62,15 @@ export interface ShotList {
     speech: boolean;
     /** Music can be heard (copyright is the owner's — §6). */
     music: boolean;
+    /**
+     * How loud the sound is every LOUDNESS_STEP_S (RMS × 1000), measured by the browser. Tightening
+     * never cuts a loud stretch the transcript can't account for — a transcription that misses words
+     * must not cost the owner their own sentence. Absent on analyses made before 2026-11-09.
+     */
+    loudness?: number[];
 }
+
+export const LOUDNESS_STEP_S = 0.1;
 
 export const SUGGESTION_KINDS = ['cut', 'trim', 'reorder', 'fill', 'text', 'sound', 'frame', 'other'] as const;
 export type SuggestionKind = typeof SUGGESTION_KINDS[number];
@@ -339,7 +347,7 @@ export function retakeIndexes(words: SpokenWord[]): { drop: Set<number>; retakes
  * One segment of the owner's video → the pieces that play. Silent footage (no words in it) plays as
  * it is: a shot of the shop with no one speaking has no pauses to cut. Pure.
  */
-export function tightenSegment(inS: number, outS: number, words: SpokenWord[]): { pieces: Piece[]; stats: TightenStats } {
+export function tightenSegment(inS: number, outS: number, words: SpokenWord[], loudness?: number[]): { pieces: Piece[]; stats: TightenStats } {
     const whole = { pieces: [{ inS, outS }], stats: { pauses: 0, fillers: 0, retakes: 0, savedS: 0 } };
     const inside = words.filter((w) => w.start >= inS - 0.02 && w.end <= outS + 0.02 && w.end > w.start);
     if (!inside.length) return whole;
@@ -374,11 +382,57 @@ export function tightenSegment(inS: number, outS: number, words: SpokenWord[]): 
     }));
     // Padding can make neighbours touch: join them. Then fold flashes into a neighbour.
     pieces = joinPieces(pieces, 0.05);
+    // The safety net: a stretch about to be cut that is LOUD for longer than the words left out of it
+    // can explain is speech the transcript missed, and stays (staging, 2026-11-09: a missed opening
+    // sentence was cut as a 5.8 s "pause").
+    if (loudness?.length) {
+        const dropped = inside.filter((w) => !keptIdx.has(inside.indexOf(w)));
+        pieces = restoreLoudGaps(pieces, inS, outS, loudness, kept, dropped);
+        pauses = Math.min(pauses, Math.max(0, pieces.length - 1));
+    }
     pieces = foldShortPieces(pieces);
     const kept2 = pieces.reduce((a, p) => a + (p.outS - p.inS), 0);
     const savedS = Math.max(0, (outS - inS) - kept2);
     if (savedS < 0.3) return whole;   // nothing worth a cut
     return { pieces: pieces.map((p) => ({ inS: round2(p.inS), outS: round2(p.outS) })), stats: { pauses, fillers, retakes, savedS: round1(savedS) } };
+}
+
+/** Seconds of [a, b) that are louder than `level`. Pure. */
+export function loudSeconds(loudness: number[], a: number, b: number, level: number): number {
+    let n = 0;
+    for (let i = Math.max(0, Math.floor(a / LOUDNESS_STEP_S)); i < Math.min(loudness.length, Math.ceil(b / LOUDNESS_STEP_S)); i++) {
+        if (loudness[i] > level) n++;
+    }
+    return n * LOUDNESS_STEP_S;
+}
+
+/**
+ * Put back every cut gap (between pieces, and before the first / after the last) that is loud for
+ * longer than the dropped words inside it explain. "Loud" = over 40% of the typical loudness of the
+ * words that were kept. Pure.
+ */
+export function restoreLoudGaps(pieces: Piece[], inS: number, outS: number, loudness: number[], kept: SpokenWord[], dropped: SpokenWord[]): Piece[] {
+    const levels: number[] = [];
+    for (const w of kept) {
+        for (let i = Math.floor(w.start / LOUDNESS_STEP_S); i < Math.ceil(w.end / LOUDNESS_STEP_S) && i < loudness.length; i++) levels.push(loudness[i]);
+    }
+    if (!levels.length) return pieces;
+    levels.sort((x, y) => x - y);
+    const level = levels[Math.floor(levels.length / 2)] * 0.4;
+    const unexplained = (a: number, b: number) => {
+        const said = dropped.filter((w) => w.start >= a - 0.05 && w.end <= b + 0.05).reduce((t, w) => t + (w.end - w.start), 0);
+        return loudSeconds(loudness, a, b, level) > said + 0.5;
+    };
+    const out = pieces.map((p) => ({ ...p }));
+    if (out.length && unexplained(inS, out[0].inS)) out[0].inS = inS;
+    if (out.length && unexplained(out[out.length - 1].outS, outS)) out[out.length - 1].outS = outS;
+    const merged: Piece[] = [];
+    for (const p of out) {
+        const last = merged[merged.length - 1];
+        if (last && unexplained(last.outS, p.inS)) last.outS = p.outS;
+        else merged.push(p);
+    }
+    return merged;
 }
 
 function joinPieces(pieces: Piece[], within: number): Piece[] {
@@ -450,7 +504,8 @@ export function tightenStoryboard(sb: Storyboard, brief: VideoBrief, videos: Foo
     const tight: Array<{ i: number; pieces: Piece[]; stats: TightenStats; segS: number }> = [];
     scenes.forEach((s, i) => {
         if (s.source !== 'own_video' || s.tighten === false || s.inS == null || s.outS == null || !s.assetId) return;
-        const { pieces, stats } = tightenSegment(s.inS, s.outS, words.get(s.assetId) ?? []);
+        const v = videos.find((x) => x.id === s.assetId);
+        const { pieces, stats } = tightenSegment(s.inS, s.outS, words.get(s.assetId) ?? [], v?.analysis?.loudness);
         if (stats.savedS > 0) tight.push({ i, pieces, stats, segS: s.outS - s.inS });
     });
     if (!tight.length) return { storyboard: { ...sb, scenes }, changes: [] };

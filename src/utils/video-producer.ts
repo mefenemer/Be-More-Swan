@@ -50,6 +50,8 @@ import type { VideoClip, VideoEdit } from '../lib/video-edit';
 import type { AudioOverlay } from '../lib/audio-overlays';
 import { PAD_RATIO, type Overlay } from '../lib/overlay-geometry';
 import { recordPlatformIncident } from './platform-incident';
+import { frameMeta, queuePostRender, readPostVideoEdit, renderPlanFor, resolveOverlayVideoBase } from '../lib/post-render';
+import { remotionConfigured } from '../lib/remotion-lambda';
 import { asOwnVideos, footageStatus, loadFootage, ownVideos } from './footage-review';
 import { describeTightening, footagePlannerBlock, ownSpeechOnTimeline, silentWav, suggestionLine, tightenStoryboard, MAX_VIDEOS_PER_REVIEW, type FootageReview, type SpokenWord as FootageWord } from '../lib/footage';
 import { keepsOwnSound, minScenesFor } from '../lib/storyboard';
@@ -698,6 +700,10 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         // Anything still held (a scene that turned out free, say) goes back.
         if (held > 0) { await settleHold(db, { orgId, amount: held, success: false, mediaType: 'image', userId }); held = 0; }
         await save({ status: 'built', scheduledPostId: firstPostId, crosspostGroupId: group, note: null });
+        // The finished file now, not at approval: until it renders, the Review Queue can only play the
+        // raw source — an owner watched their untrimmed 29 s clip with no captions or closing card and
+        // was asked to approve it (staging, 2026-11-09). Never fails the build.
+        if (firstPostId) await renderFinishedVideo(db, { orgId, userId, postId: firstPostId, durationS: durations.reduce((a, d) => a + d, 0) });
     } catch (err) {
         console.error(`[video-producer] build ${projectId} failed:`, err);
         // Not a fault: the user is told to change those scenes; the person who started it has left.
@@ -706,6 +712,41 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         }
         if (held > 0) { await settleHold(db, { orgId, amount: held, success: false, mediaType: 'image', userId }).catch(() => {}); held = 0; }
         await save({ status: 'failed', note: err instanceof Error ? err.message.slice(0, 400) : 'The video could not be made.' }).catch(() => {});
+    }
+}
+
+/**
+ * Start the Remotion render of a just-built video, the same render approval would start, so what the
+ * owner reviews is what posts. Approval still queues its own (trigger-post-render). Never throws; a
+ * render that can't start leaves the post as before (render_status cleared by queuePostRender).
+ */
+export async function renderFinishedVideo(db: Db, args: { orgId: number; userId: number; postId: number; durationS: number }): Promise<boolean> {
+    try {
+        if (!remotionConfigured() || !r2IsConfigured()) return false;
+        const [post] = await db.select({
+            id: scheduledPosts.id, platform: scheduledPosts.platform, formatKey: scheduledPosts.formatKey,
+            imageOverlays: scheduledPosts.imageOverlays, audioOverlays: scheduledPosts.audioOverlays,
+        }).from(scheduledPosts).where(and(eq(scheduledPosts.id, args.postId), eq(scheduledPosts.organisationId, args.orgId))).limit(1);
+        if (!post) return false;
+        const base = await resolveOverlayVideoBase(db, args.postId, args.orgId);
+        if (!base) return false;
+        const videoEdit = await readPostVideoEdit(db, args.postId, args.orgId);
+        const audio = Array.isArray(post.audioOverlays) ? post.audioOverlays.length : 0;
+        const plan = renderPlanFor({ ...post, videoEdit }, base, audio > 0);
+        const queued = await queuePostRender(db, {
+            orgId: args.orgId, postId: args.postId, userId: args.userId,
+            input: {
+                ...frameMeta({ width: 1080, height: 1920, durationS: args.durationS }, base),
+                ...(plan.targetRatio ? { targetRatio: plan.targetRatio } : {}),
+                fingerprint: plan.fingerprint,
+            },
+            baseUrl: resolveBaseUrl(),
+        });
+        if (!queued.ok) console.warn(`[video-producer] render of post ${args.postId} not started: ${queued.error}`);
+        return queued.ok;
+    } catch (err) {
+        console.error(`[video-producer] render of post ${args.postId} failed to start:`, err);
+        return false;
     }
 }
 

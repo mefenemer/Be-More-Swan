@@ -43,6 +43,8 @@
     planned: 'Storyboard ready. Check the scenes, then press “Make the video”.',
     building: 'Making the video — a few minutes. You can leave this page.',
     built: 'Made. It’s in the Review Queue waiting for your approval.',
+    // Not a project status: built, and its finished file is still rendering (video-producer.ts renderFinishedVideo).
+    rendering: 'Made — the finished video is rendering, a few minutes. Watch it in the Review Queue once it’s done.',
     // Not a project status: a built project whose post then failed its final render (postRenderStatus).
     render_failed: 'Made, but the final render failed. Open it in the Review Queue to try the render again.',
     failed: 'Stopped.',
@@ -124,7 +126,7 @@
 
   function schedulePoll() {
     clearTimeout(state.pollTimer);
-    if (state.videos.some((v) => v.status === 'reviewing' || v.status === 'planning' || v.status === 'building')) state.pollTimer = setTimeout(load, POLL_MS);
+    if (state.videos.some((v) => v.status === 'reviewing' || v.status === 'planning' || v.status === 'building' || (v.status === 'built' && v.postRenderStatus === 'pending'))) state.pollTimer = setTimeout(load, POLL_MS);
   }
 
   function updateBadge() {
@@ -253,7 +255,7 @@
         <span class="flex items-start gap-1.5 p-1.5 text-xs text-gray-800">
           <input type="checkbox" data-vid-footage-pick="${v.id}" ${on ? 'checked' : ''} ${why ? 'disabled' : ''} class="mt-0.5">
           <span class="min-w-0"><span class="block truncate font-bold">${esc(v.name)}</span>
-          <span class="block text-gray-500">${v.durationS ? mmss(v.durationS) : ''}${why ? ` · ${esc(why)}` : (v.analysed ? ' · already reviewed' : '')}</span></span>
+          <span class="block text-gray-500">${v.durationS ? mmss(v.durationS) : ''}${why ? ` · ${esc(why)}` : (v.reviewedBefore ? ' · already reviewed' : '')}</span></span>
         </span></label></li>`;
     }).join('')}</ul>`;
   }
@@ -269,7 +271,7 @@
     if (!f || !btn) return;
     const picked = [...f.picked];
     const known = new Map((f.videos || []).map((v) => [v.id, v]));
-    const fresh = picked.some((id) => !(known.get(id) && known.get(id).analysed));
+    const fresh = picked.some((id) => !(known.get(id) && known.get(id).reviewedBefore));
     btn.textContent = `Review my footage${picked.length ? (fresh ? ` — uses ${REVIEW_TASKS} tasks` : ' — free') : ''}`;
     btn.disabled = f.busy || !picked.length;
   }
@@ -515,7 +517,7 @@
               class="flex items-start gap-1.5 text-left text-sm font-bold text-gray-900 break-words cursor-pointer hover:text-gray-700">
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
               <span>${esc(v.title)}</span></button>
-            <p class="text-xs text-gray-600 mt-0.5">${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'render_failed' : v.status] || v.status)}</p>
+            <p class="text-xs text-gray-600 mt-0.5">${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'render_failed' : v.status === 'built' && v.postRenderStatus === 'pending' ? 'rendering' : v.status] || v.status)}</p>
             ${v.note ? `<p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mt-1.5">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
