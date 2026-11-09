@@ -121,6 +121,9 @@
     width: min(420px, 100%); box-shadow: -8px 0 30px rgba(0,0,0,.18); } }
   /* Over the post on a narrow screen, so it steps aside while they pick a part of it ("Select"). */
   @media (max-width: 1279px) { .pce-chat-col.pce-chat-aside { display: none; } }
+  /* Folded to its strip (chat-pane.js, owner 2026-11-09): the post gets the room. */
+  .pce-chat-col:has(.is-collapsed[data-chatpane]) { width: 80px; }
+  @media (max-width: 1279px) { .pce-chat-col:has(.is-collapsed[data-chatpane]) { bottom: auto; background: transparent; border: 0; box-shadow: none; } }
   .pce-selecting [data-caption-host], .pce-selecting [data-media-host], .pce-selecting [data-overlay-layer] > * { cursor: crosshair !important; }
   .pce-selecting [data-caption-host]:hover, .pce-selecting [data-overlay-layer] > *:hover { outline: 2px solid #db2777; outline-offset: 2px; background: rgba(219,39,119,.06); }
   .pce-selecting [data-media-host]:hover { outline: 2px solid #db2777; outline-offset: -2px; }
@@ -21606,6 +21609,8 @@ async function _pceChatSync() {
                 : null,
             composerRows: 3,
             draftTarget: () => window.ChatDockedDraftTarget,
+            // Folding the chat changes the post's width, as hiding it does: its text boxes are sized off the picture.
+            onCollapse: () => requestAnimationFrame(() => { const p = _rqPostCache[_rqReviewPostId]; if (p) _rqRenderCanvasOverlays(p, true); }),
         }),
     };
 }

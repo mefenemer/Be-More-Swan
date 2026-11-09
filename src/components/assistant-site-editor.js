@@ -392,6 +392,9 @@
       '[data-sb-editor-full] { position: fixed; inset: 0; z-index: 10400; background: #f9fafb; overflow: auto; padding: 16px; }',
       '@media (min-width: 1024px) { [data-sb-editor-full] [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(400px, 520px) !important; } [data-sb-editor-full] iframe[data-site-preview] { height: calc(100vh - 140px) !important; } [data-sb-editor-full] [data-sb-chatbox] { height: calc(100vh - 32px - 56px); } }',
       '[data-sb-full] { position: fixed; inset: 0; z-index: 10500; background: #fff; overflow: auto; }',
+      // The chat folded to its strip (chat-pane.js, owner 2026-11-09): the preview gets the room; on a phone it is a bar.
+      '@media (min-width: 1024px) { [data-site-layout]:has([data-sb-pane] .is-collapsed[data-chatpane]) { grid-template-columns: minmax(0, 1fr) 56px !important; } }',
+      '[data-sb-chatbox]:has(.is-collapsed[data-chatpane]) { height: auto !important; flex: none !important; }',
       '[data-sb-full] > div { height: 100%; display: flex; flex-direction: column; padding: 8px !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }',
       '[data-sb-full] [data-sb-frame-box] { flex: 1; min-height: 0; }',
       '[data-sb-full] iframe[data-site-preview] { height: 100% !important; }',

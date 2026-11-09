@@ -208,6 +208,9 @@
     + '@media (max-width:1279px){.bs-grid.bs-chat-on{grid-template-columns:300px minmax(0,1fr);}'
     + '.bs-chat-col{position:fixed;right:12px;top:76px;bottom:12px;height:auto;min-height:0;width:min(420px,calc(100vw - 24px));z-index:6;box-shadow:0 18px 50px rgba(0,0,0,.25);border-radius:16px;}}'
     + '@media (max-width:860px){.bs-grid.bs-chat-on{grid-template-columns:minmax(0,1fr);}}'
+    // Folded to its strip (chat-pane.js, owner 2026-11-09): the article gets the room.
+    + '@media (min-width:1280px){.bs-grid.bs-chat-on:has(.bs-chat-col .is-collapsed[data-chatpane]){grid-template-columns:300px minmax(0,1fr) 56px;}}'
+    + '@media (max-width:1279px){.bs-chat-col:has(.is-collapsed[data-chatpane]){width:56px;bottom:auto;}}'
     // "Select": click a paragraph, heading or list to talk about it in the chat.
     + '@media (max-width:1279px){.bs-chat-col.bs-chat-aside{display:none;}}'   // over the article there, so it steps aside
     + '.bs-selecting .bmsme-block{cursor:crosshair;}'
