@@ -66,7 +66,7 @@ async function main() {
     await check('words, headings, the button and the link inside a sentence come through, in order', () => {
         const p = home();
         assert.strictEqual(p.platform, 'wix-studio');
-        assert.strictEqual(p.builder, 'wix');
+        assert.strictEqual(p.builder, 'wix-studio');   // the report names Studio as Studio (main session, 2026-11-09)
         const h1 = p.blocks.find((b) => b.kind === 'heading' && b.level === 1);
         assert.ok(h1 && 'text' in h1 && h1.text === 'Stoneware made slowly, by hand');
         const intro = p.blocks.find((b) => b.kind === 'text' && b.text.startsWith('We throw'));

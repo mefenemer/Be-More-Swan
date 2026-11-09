@@ -2159,6 +2159,15 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // A site_import_products card — sites.ts import_products, the Website tab's same button (all products).
+    function onSiteImportProducts(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost({ action: 'import_products', assistantId })
+        .then((r) => { respond({ ok: true, message: ((r && r.warnings) || []).join(' ') }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     function onSiteDraft(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -2549,6 +2558,7 @@
     container.addEventListener('site:draftOptions', onSiteDraftOptions);
     container.addEventListener('site:import', onSiteImport);
     container.addEventListener('site:importDecision', onSiteImportDecision);
+    container.addEventListener('site:importProducts', onSiteImportProducts);
     container.addEventListener('site:words', onSiteWords);
     container.addEventListener('site:bookingSetup', onBookingSetup);
     container.addEventListener('site:reviewsAdd', onReviewsAdd);
@@ -2671,6 +2681,7 @@
         container.removeEventListener('site:draftOptions', onSiteDraftOptions);
         container.removeEventListener('site:import', onSiteImport);
         container.removeEventListener('site:importDecision', onSiteImportDecision);
+        container.removeEventListener('site:importProducts', onSiteImportProducts);
         container.removeEventListener('site:words', onSiteWords);
         container.removeEventListener('site:bookingSetup', onBookingSetup);
         container.removeEventListener('site:reviewsAdd', onReviewsAdd);

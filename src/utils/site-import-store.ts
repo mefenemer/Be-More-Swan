@@ -8,9 +8,9 @@
 // It never publishes. It shares the draft claim (sites.drafting_at) with the AI whole-site draft, so
 // only one of the two runs at a time, and spends tasks the same way: 1 task, only once a draft exists.
 
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, contentAssets, organisations, siteImports, sites } from '../../db/schema';
+import { aiAssistants, contentAssets, organisations, orgProducts, siteImports, sites } from '../../db/schema';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
 import { persistBufferToR2, r2IsConfigured } from '../lib/media-persist';
@@ -22,7 +22,7 @@ import { normaliseSiteDefinition, type SiteDefinition } from './site-definition'
 import { fetchSiteCss, fetchSiteHtml, fetchSiteJson } from './site-fetch';
 import { themeWithLook } from './site-import-theme';
 import { createPageRenderer, type PageRenderer } from './site-js-render';
-import { cleanImportUrl, runImport, type ImportDeps, type ImportReport, type PictureChoice } from './site-import';
+import { cleanImportUrl, productFieldsFromImport, runImport, type ImportDeps, type ImportReport, type PictureChoice } from './site-import';
 import { readImportPage } from './site-extract';
 import { isOwnSitePage, sourcePageText } from './site-source-page';
 import { claimDraft, definitionOf, endDraft, maxPagesFor, verifySiteAssets, type SiteRow, SITE_WRITE_DEADLINE_MS } from './site-store';
@@ -265,7 +265,62 @@ export function describeImportForChat(imp: ImportView | null, drafting: boolean)
     if (imp.status === 'reading' && drafting) return `Import of their current site: reading ${imp.sourceUrl} right now — the imported draft appears on the Website tab in a minute or two.`;
     if (imp.status === 'ready') {
         const r = imp.report;
-        return `Import of their current site: an imported DRAFT from ${imp.sourceUrl} is READY for review and has NOT replaced their draft — ${imp.pages.map((p) => `"${p.title}" (${p.path}, ${p.sections} sections)`).join(', ')}; ${r?.wordsRead ?? 0} of their words read; pictures ${imp.pictures === 'copy' ? `copied: ${r?.pictures.copied ?? 0}` : 'left out (their choice)'}; prices found and NOT copied: ${r?.prices.length ?? 0}${r?.prices.length ? ` (${r.prices.slice(0, 5).map((x) => `"${x.slice(0, 80)}"`).join('; ')}) — they belong in Business Information ▸ Products & Services` : ''}; left out as clutter: ${r?.leftOut.length ?? 0}; their old site's look ${r?.look ? `read (main colour ${r.look.primaryColor ?? 'not found'}, lettering ${r.look.font ?? 'unchanged'}) — using the import sets it as the site's design` : 'not read — using the import keeps their current design'}. When they decide, a site_import_decision card ("use" or "discard").`;
+        return `Import of their current site: an imported DRAFT from ${imp.sourceUrl} is READY for review and has NOT replaced their draft — ${imp.pages.map((p) => `"${p.title}" (${p.path}, ${p.sections} sections)`).join(', ')}; ${r?.wordsRead ?? 0} of their words read; pictures ${imp.pictures === 'copy' ? `copied: ${r?.pictures.copied ?? 0}` : 'left out (their choice)'}; prices found and NOT copied: ${r?.prices.length ?? 0}${r?.prices.length ? ` (${r.prices.slice(0, 5).map((x) => `"${x.slice(0, 80)}"`).join('; ')}) — they belong in Business Information ▸ Products & Services` : ''}; products found on their old shop: ${r?.products?.length ?? 0}${r?.products?.length ? ` (${r.products.slice(0, 5).map((p) => `"${p.name.slice(0, 60)}"${p.price ? ` ${p.price.slice(0, 20)}` : ''}`).join('; ')}) — a site_import_products card adds them to Business Information, before they use or discard the import` : ''}; left out as clutter: ${r?.leftOut.length ?? 0}; their old site's look ${r?.look ? `read (main colour ${r.look.primaryColor ?? 'not found'}, lettering ${r.look.font ?? 'unchanged'}) — using the import sets it as the site's design` : 'not read — using the import keeps their current design'}. When they decide, a site_import_decision card ("use" or "discard").`;
     }
     return `Import of their current site: the last attempt (${imp.sourceUrl}) did not make a draft — ${imp.message ?? 'it failed'}`;
+}
+
+/** Business Information holds at most this many (org-products.ts MAX_PRODUCTS). */
+const PRODUCTS_MAX = 200;
+/** Pictures fetched in one request when the import hadn't copied a product's picture yet. */
+const PRODUCT_PICTURES_PER_REQUEST = 12;
+
+/**
+ * The products the import found on their old shop (report.products) into Business Information ▸
+ * Products & Services — the owner's choice from the import card (GUI) or the chat's
+ * site_import_products card; both send sites.ts import_products. `names` = the ones they ticked (all
+ * when omitted). A product already in Business Information by that name is skipped, never overwritten.
+ * Its picture comes too when they chose to copy pictures: the library copy the import made, else
+ * fetched now through the SSRF fence (a few per request). Prices go only into Business Information.
+ */
+export async function addImportedProducts(db: Db, site: SiteRow, opts: { names?: unknown; userId: number | null }): Promise<{ ok: true; added: number; skipped: number; withoutPicture: number } | { ok: false; status: number; error: string }> {
+    const row = await loadImport(db, site.id);
+    const all = (row?.report as ImportReport | null)?.products ?? [];
+    if (!row || !all.length) return { ok: false, status: 404, error: 'There are no products from your old shop to add.' };
+    const ticked = Array.isArray(opts.names) ? new Set(opts.names.filter((n): n is string => typeof n === 'string').map((n) => n.trim().toLowerCase())) : null;
+    const wanted = all.filter((p) => !ticked || ticked.has(p.name.toLowerCase()));
+    if (!wanted.length) return { ok: false, status: 400, error: 'Choose at least one product to add.' };
+    const orgId = site.organisationId;
+    const have = await db.select({ name: orgProducts.name, sortOrder: orgProducts.sortOrder }).from(orgProducts).where(eq(orgProducts.organisationId, orgId));
+    const taken = new Set(have.map((h) => h.name.trim().toLowerCase()));
+    const fresh = wanted.filter((p) => !taken.has(p.name.trim().toLowerCase()));
+    const room = Math.max(0, PRODUCTS_MAX - have.length);
+    if (fresh.length && !room) return { ok: false, status: 409, error: `Business Information holds up to ${PRODUCTS_MAX} products and services. Archive or remove some first.` };
+    const adding = fresh.slice(0, room);
+    // Pictures: only ones still in this workspace's library, or — if they chose to copy pictures — fetched now.
+    const ids = adding.map((p) => p.imageAssetId).filter((x): x is number => typeof x === 'number');
+    const ours = new Set(ids.length ? (await db.select({ id: contentAssets.id }).from(contentAssets).where(and(eq(contentAssets.organisationId, orgId), inArray(contentAssets.id, ids)))).map((r) => r.id) : []);
+    let fetches = 0;
+    const pictures: Array<number | null> = [];
+    for (const p of adding) {
+        if (p.imageAssetId && ours.has(p.imageAssetId)) { pictures.push(p.imageAssetId); continue; }
+        if (row.pictures === 'copy' && p.image && opts.userId && fetches < PRODUCT_PICTURES_PER_REQUEST) {
+            fetches++;
+            pictures.push(await saveImportedPicture(db, orgId, opts.userId, p.image, p.name));
+            continue;
+        }
+        pictures.push(null);
+    }
+    const start = have.reduce((m, h) => Math.max(m, h.sortOrder ?? -1), -1) + 1;
+    if (adding.length) {
+        await db.insert(orgProducts).values(adding.map((p, i) => {
+            const f = productFieldsFromImport(p);
+            return {
+                organisationId: orgId, createdBy: opts.userId ?? null, kind: 'product', status: 'active', sortOrder: start + i,
+                name: f.name, url: f.url, priceType: f.priceType, priceAmount: f.priceAmount, priceCurrency: f.priceCurrency, price: f.price,
+                imageAssetId: pictures[i],
+            };
+        }));
+    }
+    return { ok: true, added: adding.length, skipped: wanted.length - adding.length, withoutPicture: pictures.filter((x) => x === null).length };
 }

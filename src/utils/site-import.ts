@@ -18,8 +18,9 @@
 //     at the end of its page; what the model calls clutter is listed in the review for the owner.
 //   · A contact section never offers "send me news" — enquiries never go to the Audience.
 
-import type { ImportBlock, ImportPage, SiteLink } from './site-extract';
-import { normaliseText, readImportPage, statesPrice } from './site-extract';
+import type { ImportBlock, ImportedProduct, ImportPage, SiteLink } from './site-extract';
+import { IMPORT_LIMITS, normaliseText, readImportPage, statesPrice } from './site-extract';
+import { priceDisplay, priceFromText, type PriceCurrency, type PriceType } from './product-price';
 import {
     cleanHref, LIMITS, normaliseSiteDefinition, RESERVED_SLUGS, sectionAllowed, type SectionType, type SiteDefinition,
     BLOG_PATH, redirectKey,
@@ -60,7 +61,8 @@ export function cleanImportUrl(raw: unknown): string | null {
 // ── Which pages ─────────────────────────────────────────────────────────────────────────────────
 
 /** Pages that are never the business's content: shop machinery, accounts, legal small print, posts. */
-export const SKIP_PATH = /\/(cart|basket|checkout|account|my-account|customer|login|log-in|signin|sign-in|register|members?|search|wishlist|compare|gift-certificates?|privacy|privacy-policy|cookies?|cookie-policy|terms|terms-and-conditions|legal|accessibility|sitemap|feed|tag|category|author|wp-admin|wp-login)(\/|$)|\/(blog|news|post|posts|product|products|shop|store|events?)\/.+/i;
+/** Shop machinery and legal pages are never pages to copy (Magento's own: catalogsearch, sales/guest, search/term, product_compare). */
+export const SKIP_PATH = /\/(cart|basket|checkout|account|my-account|customer|wishlist|compare|catalogsearch|gift-certificates?|login|log-in|signin|sign-in|register|members?|search|privacy|privacy-policy|privacy-policy-cookie-restriction-mode|cookies?|cookie-policy|terms|terms-and-conditions|legal|accessibility|sitemap|feed|tag|category|author|wp-admin|wp-login)(\/|$)|\/sales\/guest\/|\/search\/term\/|\/catalog\/product_compare\/|\/(blog|news|post|posts|product|products|shop|store|events?)\/.+/i;
 export const FILE_PATH = /\.(pdf|jpe?g|png|gif|webp|svg|zip|docx?|xlsx?|mp4|mp3)$/i;
 /** Shop machinery written as scripts (BigCommerce's cart.php, login.php…): never a page of theirs. */
 const SHOP_SCRIPT = /\/(cart|login|account|checkout|wishlist|compare|search|giftcertificates?)\.php$/i;
@@ -73,7 +75,8 @@ export const CATALOGUE_PATH = /\/(collections?|product-category|product-categori
  * categories; the about, contact and story pages matter more to a website.)
  */
 export function choosePages(menu: SiteLink[], n: number): SiteLink[] {
-    const isCatalogue = (l: SiteLink) => { try { return CATALOGUE_PATH.test(new URL(l.href).pathname); } catch { return false; } };
+    // The platform adapter's mark (catalogueLink, e.g. Magento's category menu), else the address.
+    const isCatalogue = (l: SiteLink) => { if (l.catalogue) return true; try { return CATALOGUE_PATH.test(new URL(l.href).pathname); } catch { return false; } };
     const chosen = new Set<SiteLink>();
     for (const l of menu) if (chosen.size < n && !isCatalogue(l)) chosen.add(l);
     for (const l of menu) if (chosen.size < n && isCatalogue(l)) chosen.add(l);
@@ -102,6 +105,7 @@ export function pickImportPages(home: ImportPage, limit: number): SiteLink[] {
     }
     return out;
 }
+
 
 // ── Numbered blocks ─────────────────────────────────────────────────────────────────────────────
 
@@ -259,6 +263,12 @@ export interface ImportReport {
     pictures: { choice: PictureChoice; found: number; copied: number; failed: number; undescribed: number };
     /** Words stating a price: left off the site, to be added in Business Information. */
     prices: string[];
+    /**
+     * Products their shop showed (name, price as stated, page, picture), one per name across pages — offered
+     * to Business Information ▸ Products & Services (sites.ts import_products), never put on the site.
+     * `imageAssetId`: their picture, when the import already copied it into the library.
+     */
+    products?: Array<ImportedProduct & { imageAssetId?: number | null }>;
     /** Blocks the plan called clutter — shown so the owner can see nothing important went. */
     leftOut: string[];
     /** Text that would not fit on its page (over the section limit). */
@@ -655,6 +665,37 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
 }
 
 /** Their social profile links across the pages read, home first, each once. */
+/** Every page's products, one per name, with the library picture when the import copied that one. */
+export function importedProducts(pages: ReadPage[], blocks: NumberedBlock[], assets: Map<number, number>): NonNullable<ImportReport['products']> {
+    const copied = new Map<string, number>();
+    for (const [n, id] of assets) { const b = blocks[n - 1]?.block; if (b?.kind === 'image') copied.set(b.src, id); }
+    const out: NonNullable<ImportReport['products']> = [];
+    const seen = new Set<string>();
+    for (const p of pages) for (const x of p.page.products ?? []) {
+        const k = x.name.toLowerCase();
+        if (seen.has(k) || out.length >= IMPORT_LIMITS.products) continue;
+        seen.add(k);
+        out.push({ ...x, imageAssetId: x.image ? copied.get(x.image) ?? null : null });
+    }
+    return out;
+}
+
+/**
+ * One imported product as a Business Information row's fields: its price read into the structured form
+ * when it is a plain amount ("£28.00", "From €12"), else kept in their own words; nothing invented.
+ */
+export function productFieldsFromImport(p: ImportedProduct): { name: string; url: string | null; priceType: PriceType | null; priceAmount: number | null; priceCurrency: PriceCurrency; price: string | null } {
+    const name = p.name.trim().slice(0, 120);
+    const url = p.href && /^https?:\/\//.test(p.href) ? p.href.slice(0, 500) : null;
+    const said = (p.price ?? '').trim();
+    const s = priceFromText(said.replace(/,/g, ''));
+    const priceCurrency: PriceCurrency = (s as { priceCurrency?: PriceCurrency }).priceCurrency ?? 'GBP';
+    if (s.priceType && s.priceAmount != null && s.priceAmount > 0) {
+        return { name, url, priceType: s.priceType, priceAmount: s.priceAmount, priceCurrency, price: priceDisplay({ ...s, priceCurrency }) };
+    }
+    return { name, url, priceType: said ? 'text' : null, priceAmount: null, priceCurrency: 'GBP', price: said ? said.slice(0, 60) : null };
+}
+
 export function importedSocialLinks(pages: ReadPage[]): string[] {
     return [...new Set(pages.flatMap((p) => p.page.socialLinks ?? []))].slice(0, 8);
 }
@@ -808,6 +849,8 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
             if (id) { assets.set(n, id); report.pictures.copied++; if (!b.altFromSite) report.pictures.undescribed++; } else report.pictures.failed++;
         }
     }
+    report.products = importedProducts(read, blocks, assets);
+    if (!report.products.length) delete report.products;
     const built = assembleImport({ current: input.current, pages: read, blocks, plan, assets, maxPages: input.maxPages, blogUrls: blog?.urls });
     let definition = built.definition;
     if (blog) {

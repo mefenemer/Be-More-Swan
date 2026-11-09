@@ -21,6 +21,8 @@ import * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import { socialSiteOf } from './site-definition';
 import { adapterFor } from './site-builders';
+import type { ImportedProduct } from './site-builders/types';
+export type { ImportedProduct };
 
 export interface SiteCta {
     text: string;
@@ -36,6 +38,11 @@ export interface SiteLink {
      * that name in the new site's menu (SitePageDef.menuParent).
      */
     group?: string;
+    /**
+     * Menu links only: the platform adapter says this goes to a catalogue page (a shop category
+     * listing). The import reads their own pages first (site-import.ts choosePages).
+     */
+    catalogue?: true;
 }
 
 export interface SitePage {
@@ -596,11 +603,16 @@ export interface ImportPage {
     socialLinks?: string[];
     /** The platform adapter that read it (site-builders/ key), or null when none matched. */
     platform?: string | null;
+    /**
+     * Products the page shows (the adapter's cards, schema.org Product data): for Business Information
+     * only — the import never puts a price on the site.
+     */
+    products?: ImportedProduct[];
     /** Which builder made the page, from its generator tag or tell-tale markup. */
     builder: 'wix' | 'wix-studio' | 'squarespace' | 'wordpress' | 'webflow' | 'square' | 'other';
 }
 
-export const IMPORT_LIMITS = { blocks: 160, images: 40, navLinks: 20 } as const;
+export const IMPORT_LIMITS = { blocks: 160, images: 40, navLinks: 20, products: 60 } as const;
 
 /** Lines every builder adds that are not the owner's content (Wix's "top of page", cookie buttons…). */
 const IMPORT_NOISE = /^(top of page|bottom of page|skip to (main )?content|use tab to navigate.*|powered by .*|created with .*|proudly created with .*|©.*|copyright\b.*|all rights reserved\.?|back to top|scroll( down)?|menu|close|open menu|search|log ?in|sign ?in|cart|basket|(view )?cart \(\d+\)|\d+ items?|accept( all)?( cookies)?|decline|reject( all)?|cookie (settings|policy|preferences)|manage (cookies|preferences)|share|tweet|pin it|previous|next|play video|0)$/i;
@@ -694,6 +706,9 @@ export function readImportPage(html: string, url: string): ImportPage {
     const adapter = adapterFor(html, $);
     // Wix Studio pages carry classic Wix's tells too; the adapter tells them apart.
     const builder = adapter?.key === 'wix-studio' ? 'wix-studio' : detectBuilder(html, $);
+    // Products, from the page as it arrived (prepare may rebuild the cards it reads them from).
+    let products: ImportedProduct[] = [];
+    try { products = adapter?.products?.($, base) ?? []; } catch { products = []; }
     try { adapter?.prepare?.($, base); } catch { /* a broken adapter never stops an import */ }
     const fullSize = (src: string) => { try { return adapter?.fullSizeImage?.(src) ?? fullSizeImageUrl(src); } catch { return fullSizeImageUrl(src); } };
 
@@ -705,6 +720,7 @@ export function readImportPage(html: string, url: string): ImportPage {
     let locality: string | null = null;
     walkLd(readJsonLd($), (o) => {
         const t = String(Array.isArray(o['@type']) ? o['@type'][0] : o['@type'] ?? '');
+        if (t === 'Product') { const p = ldProduct(o, base); if (p) products.push(p); }
         if (!siteName && typeof o.name === 'string' && t && !/^(WebPage|WebSite|BreadcrumbList|ListItem|Question|Answer|ImageObject|PostalAddress|Offer|Product|Review|Rating|AggregateRating|Person)$/.test(t)) siteName = clean(o.name);
         if (!ldPhone && typeof o.telephone === 'string') ldPhone = clean(o.telephone);
         if (!ldEmail && typeof o.email === 'string') ldEmail = clean(o.email).replace(/^mailto:/i, '');
@@ -752,7 +768,9 @@ export function readImportPage(html: string, url: string): ImportPage {
         if (seenNav.has(key) || !text || text.length > 40) return;
         seenNav.add(key);
         const group = menuGroupOf($, el);
-        navLinks.push(group && group.toLowerCase() !== text.toLowerCase() ? { text, href: key, group } : { text, href: key });
+        const link: SiteLink = group && group.toLowerCase() !== text.toLowerCase() ? { text, href: key, group } : { text, href: key };
+        try { if (adapter?.catalogueLink?.(key, $(el))) link.catalogue = true; } catch { /* never stops an import */ }
+        navLinks.push(link);
     });
 
     // The logo: the header's picture that says it is one, else the header's first picture.
@@ -883,7 +901,8 @@ export function readImportPage(html: string, url: string): ImportPage {
             // "Book now" as plain <a> tags with utility classes (Restorative Futures, 2026-11-08).
             const standalone = name === 'a' && !!href && !hasBlockChild(node);
             if (text && text.length <= 40 && (name === 'button' || $el.attr('role') === 'button' || BUTTONISH.test(cls) || standalone)) {
-                if (!IMPORT_NOISE.test(text)) blocks.push({ kind: 'button', text, href });
+                // The platform's own control labels ("Previous slide") are noise as buttons too.
+                if (!IMPORT_NOISE.test(text) && !adapter?.noise?.test(text)) blocks.push({ kind: 'button', text, href });
                 $el.find('img').each((_, im) => addImage(im));
                 return;
             }
@@ -914,6 +933,51 @@ export function readImportPage(html: string, url: string): ImportPage {
         navLinks, blocks, words, formFields, socialLinks,
         contact: { emails: [...emails].slice(0, 3), phones: [...phones].slice(0, 3), address, locality },
         siteName, logo, hasForm, builder, platform: adapter?.key ?? null,
+        ...(products.length ? { products: cleanProducts(products, base, fullSize) } : {}),
     };
 }
 const LIMITS_ALT = 150;
+
+const LD_SYMBOL: Record<string, string> = { GBP: '£', EUR: '€', USD: 'US$', AUD: 'AU$', CAD: 'CA$' };
+
+/** A schema.org Product as one product: its name, first offer's price as a shop states it, picture, page. */
+function ldProduct(o: Record<string, unknown>, base: URL | null): ImportedProduct | null {
+    const name = typeof o.name === 'string' ? clean(o.name) : '';
+    if (!name) return null;
+    const offers = Array.isArray(o.offers) ? o.offers[0] : o.offers;
+    let price: string | null = null;
+    if (offers && typeof offers === 'object') {
+        const of = offers as Record<string, unknown>;
+        const amount = of.price ?? of.lowPrice;
+        const n = typeof amount === 'number' ? amount : typeof amount === 'string' ? Number(amount.replace(/,/g, '')) : NaN;
+        const cur = typeof of.priceCurrency === 'string' ? of.priceCurrency.toUpperCase() : '';
+        if (Number.isFinite(n) && n > 0) {
+            const num = n.toFixed(2);
+            const sym = LD_SYMBOL[cur];
+            price = sym ? `${of.lowPrice !== undefined && of.price === undefined ? 'From ' : ''}${sym}${num}` : `${num}${cur ? ` ${cur}` : ''}`;
+        }
+    }
+    const img = Array.isArray(o.image) ? o.image[0] : o.image;
+    const imgSrc = typeof img === 'string' ? img : img && typeof img === 'object' && typeof (img as { url?: unknown }).url === 'string' ? (img as { url: string }).url : '';
+    return { name, price, href: typeof o.url === 'string' ? absolutise(o.url, base) : null, image: imgSrc ? absolutise(imgSrc, base) : null };
+}
+
+/** One entry per product name (cards and structured data often list the same one), full-size pictures, capped. */
+function cleanProducts(list: ImportedProduct[], base: URL | null, fullSize: (src: string) => string): ImportedProduct[] {
+    const out: ImportedProduct[] = [];
+    const seen = new Map<string, ImportedProduct>();
+    for (const p of list) {
+        const name = clean(p.name).slice(0, 120);
+        if (!name || name.length < 2) continue;
+        const href = p.href ? absolutise(p.href, base) : null;
+        const image = p.image ? absolutise(p.image, base) : null;
+        const item: ImportedProduct = { name, price: p.price ? clean(p.price).slice(0, 60) || null : null, href: href && /^https?:/.test(href) ? href : null, image: image && /^https?:/.test(image) ? fullSize(image) : null };
+        const k = name.toLowerCase();
+        const had = seen.get(k);
+        if (had) { had.price ??= item.price; had.href ??= item.href; had.image ??= item.image; continue; }
+        if (out.length >= IMPORT_LIMITS.products) break;
+        seen.set(k, item);
+        out.push(item);
+    }
+    return out;
+}

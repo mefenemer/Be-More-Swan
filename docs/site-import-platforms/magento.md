@@ -1,6 +1,6 @@
 # Adobe Commerce (Magento 2)
 
-Adapter `src/utils/site-builders/magento.ts` · test `tests/site-platform-magento.test.ts` (17 checks) ·
+Adapter `src/utils/site-builders/magento.ts` · test `tests/site-platform-magento.test.ts` (20 checks) ·
 fixtures `tests/fixtures/site-platforms/magento/` (all synthetic: two invented shops on `.example` domains,
 modelled on the markup of the public Luma and Hyvä demo stores — no real business's words or pictures).
 
@@ -96,11 +96,10 @@ Each line is a check in `tests/site-platform-magento.test.ts`:
   same, maps turned into their name, `<address>` (becomes the page's address), opening note, phone link and a
   `maps.google.com/maps/embed?q=lat,lng` frame the reader turns into "See us on the map" (*Page Builder*,
   *banner*, *map* checks). "Home Page" title dropped on the home page only.
-- **Product cards** (Luma and Hyvä): rebuilt as `<li><img alt=name><a href=product>Name</a></li>` plus a
-  separate line "Name: £price" (final price, not the crossed-out one). That price line is dropped from the
-  site by `numberBlocks` and lands in `report.prices` — the route towards Business Information. Ratings,
-  swatches, stock, add-to-basket / wish-list / compare removed; placeholders skipped (*product cards*,
-  *category page*, *runImport prices*).
+- **Product cards** (Luma and Hyvä): rebuilt as `<li><img alt=name><a href=product>Name</a></li>` with no
+  price; ratings, swatches, stock, add-to-basket / wish-list / compare removed; placeholders skipped. The
+  adapter's `products()` reads each card first — name, final price (not the crossed-out one), page,
+  full-size picture — for Business Information (*product cards*, *products for Business Information*).
 - **Category furniture**: toolbars, layered navigation, compare / wish-list / recently-viewed blocks,
   breadcrumbs, messages, newsletter, carousel controls, Hyvä `.sr-only` labels; a `noise` list catches the
   rest ("Add to Cart …", "View more about …", "Out of stock" …).
@@ -109,9 +108,33 @@ Each line is a check in `tests/site-platform-magento.test.ts`:
 - **Full-size pictures**: `/cache/<hash>/` (M2) and `/cache/1/<type>/<size>/<hash>/` (M1) stripped,
   `.renditions/` stripped, resize query parameters dropped (*full-size* check; whole-import check confirms
   no cache path is copied).
+- **Catalogue links**: `catalogueLink()` marks the category menu, so a small page cap is spent on About,
+  Delivery and Contact first (*catalogue* and *small page cap* checks).
 - Whole import with fake deps: reads Home, categories, About us (from the footer) and Contact; no
-  machinery page read or listed; prices only in the report; look read from `styles-m.css` (primary
-  `#7a4b2a` from the fixture).
+  machinery page read or listed; products in `report.products`, never on the draft; look read from
+  `styles-m.css` (primary `#7a4b2a` from the fixture).
+
+### Shared changes made in the second pass (owner asked for them, 2026-11-08)
+
+These touch shared import code, so the main session should review them when merging:
+
+- **Products → Business Information.** `types.ts`: `ImportedProduct` and an optional
+  `BuilderAdapter.products($, url)` (read before `prepare`). `site-extract.ts`: `ImportPage.products`,
+  filled by the adapter **and by schema.org Product data on any platform** (`ldProduct`), one per name,
+  full-size pictures, capped at 60. `site-import.ts`: `ImportReport.products` (with `imageAssetId` when the
+  import already copied that picture), `importedProducts`, `productFieldsFromImport` (a plain amount becomes
+  a structured price, anything else is kept as their words). `site-import-store.ts addImportedProducts` +
+  `sites.ts import_products { names? }`: inserts into `org_products`, skipping names already there, picture
+  from the library or fetched through the SSRF fence only when they chose to copy pictures (12 a request).
+  GUI: a ticked list on the import review card. Chat: a `site_import_products` card (registry,
+  chat-session handler, orchestrator prompt, snapshot line). Offered only while the import waits —
+  "Use"/"Discard" deletes the import row. No SQL. Prices never reach the site.
+- **Catalogue pages last.** `SiteLink.catalogue`, optional `BuilderAdapter.catalogueLink(href, el)`,
+  `site-import.ts choosePages`: own pages first within the cap, returned in menu order.
+- **`SKIP_PATH`** gains Magento's machinery paths (exact change below, now applied).
+- **Adapter noise applies to stand-alone buttons**; the **logo** goes through the adapter's full-size rule.
+  Other platforms' `noise` lists will now also drop buttons that match — worth a glance when merging theirs.
+- Tests: `tests/site-import.test.ts` (7 new checks, 48 in all).
 
 Also checked locally (not committed) against the public Luma and Hyvä demo stores: Luma menu becomes
 What's New, Women, Men, Gear, Training, Sale, About us, Customer Service, Contact Us, then sub-categories;
@@ -119,7 +142,10 @@ Hyvä home goes from 1 to 16 products with full-size pictures.
 
 ## Can be done (not done yet)
 
-- **Products into Business Information (M).** The price lines are already in `report.prices` as
+- ~~Products into Business Information~~ — done in the second pass (above). Left: a product's
+  description from its product page (only cards are read today), and offering the products again after
+  the import is used (the report goes with the import row).
+- *Original note, for the record:* **Products into Business Information (M).** The price lines are already in `report.prices` as
   "Name: £price". A shared step could offer them as products: in `site-import.ts` keep, per price line, the
   product name, price and picture block number, and in the import's accept flow (`sites.ts import_accept`,
   Business Information product store) offer "Add these N products to Business Information". Magento also
@@ -128,12 +154,12 @@ Hyvä home goes from 1 to 16 products with full-size pictures.
   `ImportPage.products?: {name, price, currency, image, href}[]` field the adapter could fill in `prepare`
   by writing `data-bms-product` attributes, or a new optional `BuilderAdapter.products?($)` hook in
   `types.ts`), and the accept UI. Prices stay off the site.
-- **Rank catalogue pages after content pages (S).** Category listings are still read as pages when the
+- ~~Rank catalogue pages after content pages~~ — done (`choosePages`). *Original note:* **(S).** Category listings are still read as pages when the
   cap allows. A shared hint — e.g. optional `BuilderAdapter.pageKind?(url, navLink): 'content' | 'catalogue'`
   in `types.ts`, used by `pickImportPages` in `site-import.ts` to read content pages first — would let a
   shop with 30 categories keep About, Delivery and Contact. The adapter would answer from the `.html`
   category suffix and the `category-item` class.
-- **`SKIP_PATH` additions (S)**, `site-import.ts`: `catalogsearch|sales/guest|search/term|wishlist|checkout|
+- ~~`SKIP_PATH` additions~~ — applied. *Original note:* **(S)**, `site-import.ts`: `catalogsearch|sales/guest|search/term|wishlist|checkout|
   customer|privacy-policy-cookie-restriction-mode|catalog/product_compare`. The adapter already removes
   these links, but a link that reaches the menu by another route (a CMS block in the header) would still
   be read. Exact change:
@@ -164,14 +190,9 @@ Hyvä home goes from 1 to 16 products with full-size pictures.
 
 ## Suggested improvements to our import
 
-- A shared **products** route (above) helps every shop platform (Shopify, WooCommerce, BigCommerce,
-  Magento): one `ImportPage.products` shape, filled by each adapter.
-- Let adapters **classify pages** (content vs catalogue) so `pickImportPages` spends the cap on words.
-- Apply `adapter.noise` to stand-alone **buttons** too (today only `IMPORT_NOISE` is applied to buttons), so
-  a platform can drop its own control labels ("Previous slide") without deleting elements. In
-  `site-extract.ts` walk: `if (!IMPORT_NOISE.test(text) && !adapter?.noise?.test(text)) blocks.push(…)`.
-- `readImportPage` reads the **logo** with the shared `fullSizeImageUrl`, not `adapter.fullSizeImage`;
-  using the adapter's (same `fullSize` helper as pictures) would undo resized logos on any platform.
+- Done in the second pass: the shared **products** route (Shopify, WooCommerce and BigCommerce adapters
+  can now fill `products()`; schema.org Product data already works for them), **catalogue** marks,
+  **button noise**, **logo full size**.
 - `menuGroupOf` stops at `NAV_ROOT`; that's what made a copied tree keep its groups — worth a comment there,
   since adapters may rely on it.
 

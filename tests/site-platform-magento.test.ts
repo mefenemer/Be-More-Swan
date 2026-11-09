@@ -97,7 +97,7 @@ async function main() {
         assert.ok(buttons(hyvaHome()).includes(`Book a fitting → ${HYVA}/saddle-fitting`));
     });
 
-    await check('product cards: the name (linked to its page) and full-size picture, the price on its own line, no shop buttons', () => {
+    await check('product cards: the name (linked to its page) and full-size picture, no price and no shop buttons on the page', () => {
         for (const p of [lumaHome(), hyvaHome()]) {
             const all = texts(p).join(' | ');
             for (const bad of ['Add to Cart', 'Add to Wish List', 'Add to Compare', 'Rating', 'Reviews', 'Regular Price', 'Out of stock', 'View more about', 'Press to skip', 'slide']) assert.ok(!all.includes(bad), bad);
@@ -105,13 +105,29 @@ async function main() {
         const p = lumaHome();
         const mug = p.blocks.find((b) => b.kind === 'item' && b.text === 'Speckled oat mug');
         assert.ok(mug && mug.kind === 'item' && mug.links?.[0].href === `${LUMA}/speckled-oat-mug.html`);
-        assert.ok(texts(p).includes('Speckled oat mug: £28.00') && texts(p).includes('Sage linen tea towel: £12.00'), 'final price, not the old one');
+        assert.ok(!texts(p).some((t) => t.includes('£')), 'prices travel with the products, not as words');
         assert.ok(images(p).includes(`${LUMA}/media/catalog/product/s/p/speckled-oat-mug.jpg`));
         const towel = p.blocks.find((b) => b.kind === 'image' && b.src.endsWith('sage-tea-towel.jpg'));
         assert.ok(towel && towel.kind === 'image' && towel.alt === 'Sage linen tea towel', 'an empty alt becomes the product name');
         const h = hyvaHome();
         assert.ok(h.blocks.some((b) => b.kind === 'item' && b.text === 'Wool-lined girth'), 'Hyvä cards are <form>s and used to vanish');
         assert.ok(images(h).includes(`${HYVA}/media/catalog/product/c/a/cavesson-bridle-havana.jpg`), 'cache path and ?width= dropped');
+    });
+
+    await check('products for Business Information: name, final price (not the crossed-out one), page and full-size picture', () => {
+        assert.deepStrictEqual(lumaHome().products, [
+            { name: 'Speckled oat mug', price: '£28.00', href: `${LUMA}/speckled-oat-mug.html`, image: `${LUMA}/media/catalog/product/s/p/speckled-oat-mug.jpg` },
+            { name: 'Sage linen tea towel', price: '£12.00', href: `${LUMA}/sage-linen-tea-towel.html`, image: `${LUMA}/media/catalog/product/s/a/sage-tea-towel.jpg` },
+        ]);
+        assert.deepStrictEqual(hyvaHome().products?.map((x) => [x.name, x.price]), [['Cavesson bridle – havana', '£95.00'], ['Wool-lined girth', '£48.00']]);
+        const cat = readImportPage(fixture('luma-category.html'), `${LUMA}/candles.html`).products ?? [];
+        assert.strictEqual(cat.find((x) => x.name === 'Bowl candle – woodsmoke')?.image, null, 'the placeholder is not its picture');
+    });
+
+    await check('category-menu links are marked catalogue; the footer\'s pages are not', () => {
+        const marked = lumaHome().navLinks.filter((l) => l.catalogue).map((l) => l.text);
+        assert.deepStrictEqual(marked, ['Ceramics', 'Linens', 'Candles', 'Workshops', 'Mugs', 'Bowls', 'Vases', 'Tea towels', 'Napkins']);
+        assert.deepStrictEqual(hyvaHome().navLinks.filter((l) => !l.catalogue).map((l) => l.text), ['About', 'Contact']);
     });
 
     await check('a category page: its description and picture, products, never the toolbar, filters or empty compare boxes', () => {
@@ -186,9 +202,9 @@ async function main() {
         assert.ok(r.report.pages.some((p) => p.url === `${LUMA}/contact/` && p.read), 'the contact page is read');
     });
 
-    await check('product prices go to the report\'s price list (for Business Information), never onto the draft', () => {
+    await check('products go to the report (for Business Information) with their prices, never onto the draft', () => {
         if (!r.ok) return;
-        assert.ok(r.report.prices.includes('Speckled oat mug: £28.00'));
+        assert.deepStrictEqual(r.report.products?.map((x) => `${x.name} ${x.price}`), ['Speckled oat mug £28.00', 'Sage linen tea towel £12.00', 'Teacup candle – fig leaf £18.00', 'Bowl candle – woodsmoke £24.00']);
         const all = JSON.stringify(r.definition.pages);
         assert.ok(!all.includes('£'), 'no price on the site');
         assert.ok(all.includes('Speckled oat mug') && all.includes('Thrown by hand in Shropshire'));
@@ -202,6 +218,14 @@ async function main() {
         assert.ok(pictures.includes(`${LUMA}/media/logo/stores/1/hartley-finch-logo.png`), 'the logo');
         assert.ok(r.report.look, 'a look was read');
         assert.strictEqual(r.report.look?.primaryColor?.toLowerCase(), '#7a4b2a');
+    });
+
+    await check('a small page cap goes to their own pages first (About, Delivery, Contact); the menu order is kept', async () => {
+        const small = await runImport({ url: `${LUMA}/`, pictures: 'skip', current: current(), maxPages: 4 }, deps);
+        assert.ok(small.ok);
+        if (!small.ok) return;
+        assert.deepStrictEqual(small.report.pages.map((p) => p.title), ['Home', 'About us', 'Delivery & returns', 'Contact Us']);
+        assert.ok(small.report.notImported.some((p) => p.title === 'Ceramics'));
     });
 
     console.log(`\n${passed}/${total} passed`);

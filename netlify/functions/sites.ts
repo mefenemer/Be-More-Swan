@@ -48,6 +48,11 @@
 //   import_accept  { assistantId }            → "Use this as my draft": the imported site replaces the
 //                                               draft (never the live site)
 //   import_discard { assistantId }            → throw the imported draft away (pictures stay in the library)
+//   import_products { assistantId, names? }   → the products the import found on their old shop become
+//                                               Business Information products (prices there, never on
+//                                               the site); names = the ones ticked, all when omitted.
+//                                               The import card's button and the chat's
+//                                               site_import_products card both send this.
 //
 // domain_add { assistantId, domain } · domain_check · domain_remove → their own domain (site-domains.ts),
 // owner or admin only.
@@ -114,7 +119,7 @@ import {
 import { triggerSiteDraft } from '../../src/utils/trigger-site-draft';
 import { DRAFT_NOTE_ADDING_MEDIA, DRAFT_NOTE_MEDIA_STOPPED, draftNoteIsFailure, resolveDraftMedia } from '../../src/utils/site-draft-media';
 import { draftMediaOptions } from '../../src/utils/site-draft-media-options';
-import { acceptImport, discardImport, importView, loadImport, readOwnSitePage, startSiteImport } from '../../src/utils/site-import-store';
+import { acceptImport, addImportedProducts, discardImport, importView, loadImport, readOwnSitePage, startSiteImport } from '../../src/utils/site-import-store';
 import { cleanImportUrl } from '../../src/utils/site-import';
 import { refreshDirectoryAfterAddressChange, refreshDirectoryAfterPublish } from '../../src/utils/site-directory-store';
 import { hasTaskCapacity, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
@@ -300,6 +305,14 @@ export default withLambda(async (event) => {
         const r = await acceptImport(db, site, maxPages);
         if (!r.ok) return json(r.status, { error: r.error });
         return json(200, await view(r.site, ['Your imported site is now your draft. Nothing is live until you publish.', ...r.warnings]));
+    }
+
+    if (action === 'import_products') {
+        const r = await addImportedProducts(db, site, { names: body.names, userId: userId ?? null });
+        if (!r.ok) return json(r.status, { error: r.error });
+        const said = [`${r.added} product${r.added === 1 ? '' : 's'} added to Business Information ▸ Products & Services, with ${r.added === 1 ? 'its price' : 'their prices'} — change them there from now on.`];
+        if (r.skipped) said.push(`${r.skipped} ${r.skipped === 1 ? 'was' : 'were'} already there by name, so left as ${r.skipped === 1 ? 'it was' : 'they were'}.`);
+        return json(200, await view(site, said));
     }
 
     if (action === 'import_discard') {

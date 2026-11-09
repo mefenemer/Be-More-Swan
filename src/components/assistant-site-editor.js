@@ -2001,6 +2001,18 @@
     return `<p class="text-xs text-gray-700 mt-1">Look: your old site's colours and lettering come across — ${sw(look.primaryColor, 'main colour')}${sw(look.backgroundColor, 'background')}${sw(look.textColor, 'words')}${sw(look.secondaryColor, 'second colour')}${sw(look.headerColor, 'header')}${sw(look.footerColor, 'footer')}${look.font ? `lettering ${esc(pairs[look.font] || look.font)}${look.headingFont && !String(pairs[look.font] || '').includes(look.headingFont) ? ` (closest to your ${esc(look.headingFont)})` : ''}` : ''}. Using this draft sets them in Design, where you can change them.</p>`;
   }
 
+  // Products their old shop showed (report.products): ticked ones become Business Information products
+  // (sites.ts import_products — the chat's site_import_products card sends the same). Prices go there,
+  // never onto the site. Only while the import waits: using or discarding it ends the offer.
+  function importProductsBlock(products) {
+    if (!products || !products.length) return '';
+    return `<details class="mt-2" open data-site-import-products-box><summary class="text-xs font-bold text-gray-800 cursor-pointer">Products we found on your shop (${esc(products.length)}) — add them to Business Information</summary>
+      <p class="text-xs text-gray-500 mt-1">Each ticked one becomes a product in Business Information ▸ Products & Services, with its price and a link to its page on your old shop${state.data.import && state.data.import.pictures === 'copy' ? ', and its picture' : ''}. Prices never go on your website. Add them before you use or discard this import.</p>
+      <ul class="mt-1 space-y-1">${products.slice(0, 60).map((p, i) => `<li class="text-xs text-gray-700"><label class="inline-flex items-start gap-2"><input type="checkbox" checked data-site-import-product="${esc(i)}" class="mt-0.5"> <span>${esc(p.name)}${p.price ? ` <span class="text-gray-500">— ${esc(p.price)}</span>` : ''}</span></label></li>`).join('')}</ul>
+      <div class="mt-2">${btn('data-site-import-products', 'Add ticked products to Business Information')}</div>
+    </details>`;
+  }
+
   function importReviewCard(imp) {
     const r = imp.report || {};
     const pics = r.pictures || {};
@@ -2015,6 +2027,7 @@
       ${importLookLine(r.look)}
       ${contact.email || contact.phone ? `<p class="text-xs text-gray-700 mt-1">Contact details found: ${esc([contact.email, contact.phone].filter(Boolean).join(' · '))}.</p>` : ''}
       ${r.placeholders ? `<p class="text-xs font-semibold text-amber-800 mt-1">${esc(r.placeholders)} part${r.placeholders === 1 ? '' : 's'} in [square brackets] to fill in before you publish.</p>` : ''}
+      ${importProductsBlock(r.products)}
       ${list(`Prices we found (${(r.prices || []).length}) — not copied: add them in Business Information ▸ Products & Services`, r.prices, 'text-amber-800')}
       ${list(`Left out as menus or notices (${(r.leftOut || []).length}) — check nothing important is here`, r.leftOut)}
       ${list(`Didn't fit on its page (${(r.notCarried || []).length})`, r.notCarried, 'text-amber-800')}
@@ -3059,6 +3072,18 @@
         state.previewImport = false; state.previewPath = '/'; state.version++;
         state.pageId = def().pages[0].id;
         state.note = { text: (state.data.warnings || []).join(' ') || 'Your imported site is now your draft.', tone: 'ok' };
+      } catch (err) { say(err.message, 'error'); }
+      rerender();
+      return;
+    }
+    if (t('[data-site-import-products]')) {
+      const all = (state.data.import && state.data.import.report && state.data.import.report.products) || [];
+      const box = t('[data-site-import-products]').closest('[data-site-import-products-box]');
+      const names = [...(box ? box.querySelectorAll('[data-site-import-product]:checked') : [])].map((c) => all[Number(c.dataset.siteImportProduct)]).filter(Boolean).map((p) => p.name);
+      if (!names.length) { say('Tick at least one product to add.', 'error'); rerender(); return; }
+      try {
+        state.data = await post({ action: 'import_products', assistantId: state.assistantId, names });
+        state.note = { text: (state.data.warnings || []).join(' ') || 'Added to Business Information.', tone: 'ok' };
       } catch (err) { say(err.message, 'error'); }
       rerender();
       return;

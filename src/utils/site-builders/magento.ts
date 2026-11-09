@@ -3,7 +3,7 @@
 // Findings, what is covered and what is not: docs/site-import-platforms/magento.md
 // Tests: tests/site-platform-magento.test.ts (fixtures in tests/fixtures/site-platforms/magento/).
 import type * as cheerio from 'cheerio';
-import type { BuilderAdapter } from './types';
+import type { BuilderAdapter, ImportedProduct } from './types';
 
 /**
  * Tell-tale markup. Never a bare `mage/`: it sits inside every `image/png` and once claimed plain pages.
@@ -49,16 +49,22 @@ function cardPrice($: cheerio.CheerioAPI, card: cheerio.Cheerio<any>): string {
     return pick.text().replace(/\s+/g, ' ').trim();
 }
 
-function tidyCards($: cheerio.CheerioAPI): void {
-    const cards = $('.product-item').filter((_, el) => $(el).parents('.product-item').length === 0);
-    cards.each((_, el) => {
+/** Product cards (Luma <li>, Hyvä <form>), outermost only, with what each shows. */
+function readCards($: cheerio.CheerioAPI) {
+    return $('.product-item').filter((_, el) => $(el).parents('.product-item').length === 0).toArray().flatMap((el) => {
         const card = $(el);
         const link = card.find('a.product-item-link').first();
         const name = (link.text() || card.find('.product-item-name').first().text()).replace(/\s+/g, ' ').trim();
-        if (!name) return;
+        if (!name) return [];
         const href = link.attr('href') ?? card.find('a.product-item-photo').attr('href') ?? '';
         const img = card.find('img.product-image-photo').first().length ? card.find('img.product-image-photo').first() : card.find('img').first();
-        const price = cardPrice($, card);
+        const src = img.attr('src') ?? img.attr('data-src') ?? '';
+        return [{ el, card, name, href, img, src: /\/placeholder\//i.test(src) ? '' : src, price: cardPrice($, card) }];
+    });
+}
+
+function tidyCards($: cheerio.CheerioAPI): void {
+    for (const { card, name, href, img } of readCards($)) {
         card.find(CARD_FURNITURE).remove();
         // One list item: the picture and the product's name, linked to its page on their shop.
         const li = $('<li></li>');
@@ -71,11 +77,9 @@ function tidyCards($: cheerio.CheerioAPI): void {
         const a = $('<a></a>').text(name);
         if (href) a.attr('href', href);
         li.append(a);
-        // Its price, as its own line beside it: the import lists prices for Business Information and
-        // never puts them on the site (numberBlocks drops any block that states one).
-        const out = price ? [li, $('<p></p>').text(`${name}: ${price}`)] : [li];
-        card.replaceWith(out.map((x) => $.html(x)).join(''));
-    });
+        // Its price is not on the card any more: products() carried it to Business Information.
+        card.replaceWith(li);
+    }
 }
 
 /** Page Builder: hidden elements, phone-only copies, background pictures, banner buttons, maps. */
@@ -154,6 +158,13 @@ export const adapter: BuilderAdapter = {
     key: 'magento',
     label: 'Adobe Commerce (Magento)',
     detect: (html) => MAGENTO.test(html),
+    products($, url) {
+        const abs = (h: string) => { try { return h ? new URL(h, url ?? undefined).toString() : null; } catch { return null; } };
+        return readCards($).map((c): ImportedProduct => ({ name: c.name, price: c.price || null, href: abs(c.href), image: abs(c.src) }));
+    },
+    // Magento's menu is its category tree (Luma li.category-item, Hyvä's "Main menu"); the footer's
+    // pages, copied into the menu by prepare, are their own pages.
+    catalogueLink: (_href, el) => el.closest('li.category-item, nav.navigation, nav[aria-label="Main menu" i], nav[data-bms-from="magento-submenus"]').length > 0,
     prepare($, url) {
         // Links to accounts, cart, search and guest orders are never pages; in the menu they used up places.
         $('header a[href], nav a[href], footer a[href], .nav-sections a[href]').filter((_, a) => MACHINERY.test($(a).attr('href') ?? '')).remove();
