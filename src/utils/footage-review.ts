@@ -38,7 +38,19 @@ type Db = ReturnType<typeof getDb>;
  * 2 (2026-11-09): the transcription is told the language, and the browser sends loudness. A video
  * analysed before is redone FREE (reviewProject charges only for videos never analysed).
  */
-export const ANALYSIS_VERSION = 2;
+export const ANALYSIS_VERSION = 3;   // 3 (2026-11-09): "um"s are transcribed (transcriptionPrompt)
+
+/**
+ * What whisper is primed with. It drops "um"s by default — and then tightening can't see them, and its
+ * loudness safety net protects them as "unheard speech" (staging, 2026-11-09: two opening ums stayed).
+ * A prompt written WITH hesitations makes it write them down (OpenAI's documented technique); English
+ * only, because a hesitation prompt in the wrong language pulls the transcript towards it. Pure.
+ */
+export function transcriptionPrompt(language: string, businessName: string): string | undefined {
+    const biz = businessName ? ` A short video for ${businessName}.` : '';
+    if (language === 'en') return `Umm, so, uh, let me think, like, hmm... Okay, here's what I'm, um, thinking.${biz}`;
+    return biz.trim() || undefined;
+}
 
 /** The language the owner's footage is transcribed in: the brief's, else English. Pure. */
 export function footageLanguage(brief: Pick<VideoBrief, 'language'>): string {
@@ -190,7 +202,7 @@ async function analyseOne(db: Db, row: typeof footageAnalyses.$inferSelect, ctx:
         if (wav.length > 25 * 1024 * 1024) throw new Error('The sound in that video is too long to read. Trim the video first.');
         ({ words } = await transcribeAudio(wav, {
             filename: 'footage.wav', type: 'audio/wav', timeoutMs: 90_000, language: ctx.language,
-            prompt: ctx.businessName ? `A short video for ${ctx.businessName}.` : undefined,
+            prompt: transcriptionPrompt(ctx.language, ctx.businessName),
         }));
     }
     // Stored as { frames, loudness } since 2026-11-09; a bare array before.

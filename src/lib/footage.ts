@@ -492,10 +492,16 @@ export function capPieces(lists: Piece[][], maxTotal: number, fixedCount = 0): P
  * render's clip limit. Returns a new storyboard and what changed. Pure.
  */
 export function tightenStoryboard(sb: Storyboard, brief: VideoBrief, videos: FootageVideo[]): { storyboard: Storyboard; changes: string[] } {
+    const byId = new Map(videos.map((v) => [v.id, v]));
     const scenes = sb.scenes.map((s) => {
         const c: Scene = { ...s };
         delete c.cuts; delete c.tightened;
-        if (c.source === 'own_video' && c.inS != null && c.outS != null && keepsOwnSound(brief)) c.targetS = round1(c.outS - c.inS);
+        if (c.source === 'own_video' && c.inS != null && c.outS != null && keepsOwnSound(brief)) {
+            // In its own sound a scene never starts or ends mid-sentence, tightened or not.
+            const v = c.assetId ? byId.get(c.assetId) : undefined;
+            if (v && v.durationS > 0) ({ inS: c.inS, outS: c.outS } = snapSegment(c.inS, c.outS, v.words, v.durationS, v.analysis?.loudness));
+            c.targetS = round1(c.outS - c.inS);
+        }
         return c;
     });
     const on = keepsOwnSound(brief) && brief.tighten !== false;
@@ -527,6 +533,50 @@ export function tightenStoryboard(sb: Storyboard, brief: VideoBrief, videos: Foo
         storyboard: { ...sb, scenes },
         changes: saved >= 0.5 ? [`Pauses, “um”s and repeated takes cut from your clips: ${saved.toFixed(1)} s shorter, about ${Math.round(total)} s in all.`] : [],
     };
+}
+
+/**
+ * Move a segment's ends out of the middle of speech: an end that falls inside a word, or just before
+ * more words follow, runs on to the next pause (or the end of the file); a start does the same going
+ * back. Then, with loudness, an end that is still loud runs on while it stays loud (up to 3 s), for
+ * words the transcript missed. The planner cut a speaker off at 0:25 of 0:29 (staging, 2026-11-09). Pure.
+ */
+export function snapSegment(inS: number, outS: number, words: SpokenWord[], durationS: number, loudness?: number[]): { inS: number; outS: number } {
+    const ws = words.filter((w) => w.end > w.start).slice().sort((a, b) => a.start - b.start);
+    let a = inS, b = outS;
+    // Is time t mid-speech? Inside a word, or inside a gap between two words shorter than a pause.
+    const midSpeech = (t: number): number => {
+        const k = ws.findIndex((w) => w.end > t);       // the first word not over by t
+        if (k < 0) return -1;
+        if (ws[k].start <= t) return k;                  // inside a word
+        if (k > 0 && ws[k].start - ws[k - 1].end < MAX_PAUSE_S) return k;   // a breath, not a pause
+        return -1;
+    };
+    // End: run on through the sentence it falls in.
+    const i = midSpeech(b);
+    if (i >= 0) {
+        let end = ws[i].end;
+        for (let k = i + 1; k < ws.length && ws[k].start - end < MAX_PAUSE_S; k++) end = ws[k].end;
+        b = Math.max(b, end + PAD_AFTER_S);
+    }
+    // Start: back to the beginning of the sentence it falls in.
+    const j = midSpeech(a);
+    if (j >= 0) {
+        let start = ws[j].start;
+        for (let k = j - 1; k >= 0 && start - ws[k].end < MAX_PAUSE_S; k--) start = ws[k].start;
+        a = Math.min(a, start - PAD_BEFORE_S);
+    }
+    if (loudness?.length) {
+        const levels = ws.flatMap((w) => {
+            const out: number[] = [];
+            for (let t = Math.floor(w.start / LOUDNESS_STEP_S); t < Math.ceil(w.end / LOUDNESS_STEP_S) && t < loudness.length; t++) out.push(loudness[t]);
+            return out;
+        }).sort((x, y) => x - y);
+        const level = levels.length ? levels[Math.floor(levels.length / 2)] * 0.4 : Infinity;
+        const limit = Math.min(durationS, b + 3);
+        while (b < limit && loudSeconds(loudness, b, b + 0.3, level) >= 0.2) b += 0.1;
+    }
+    return { inS: round2(Math.max(0, a)), outS: round2(Math.min(durationS, b)) };
 }
 
 /** "2 pauses, 1 “um”, 1 repeated take — 3.1 s shorter". Pure. */
