@@ -120,6 +120,11 @@
       const data = await call('GET', null, `?assistantId=${encodeURIComponent(state.assistantId)}`);
       state.videos = (data.projects || []).filter((p) => p.aiAssistantId == null || p.aiAssistantId === state.assistantId);
       state.loadError = null;
+      // A note about work in progress ("Making the video…") is stale once the video has finished,
+      // one way or the other; errors stay until the next action.
+      for (const v of state.videos) {
+        if (['ready', 'built', 'render_failed', 'failed', 'cancelled'].includes(v.status) && state.notes[v.id] && !state.notes[v.id].error) delete state.notes[v.id];
+      }
     } catch (err) {
       state.loadError = err.message;
     }
