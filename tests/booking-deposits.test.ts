@@ -135,7 +135,7 @@ check('the SQL is re-run safe and keeps one booking per checkout', () => {
     assert.ok(s.includes("(deposit_type = 'percent' AND deposit_amount BETWEEN 1 AND 100)"));
 });
 check('Business Information sets it; the chat explains it', () => {
-    const ui = read('assets.html');
+    const ui = (read('assets.html') + read('src/components/products-editor.js'));
     assert.ok(ui.includes('id="op-deposit-type"') && ui.includes("depositType: get('op-deposit-type') || null, depositAmount: get('op-deposit-amount')"));
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('DEPOSITS: a service or class can ask for a deposit'));
 });

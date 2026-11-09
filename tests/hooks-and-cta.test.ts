@@ -85,7 +85,7 @@ check('the link travels in the BRIEF, so the blog and email link checks keep it'
 check('GUI and chat save through ONE path, naming the same choices', () => {
     const ep = read('netlify/functions/org-products.ts');
     assert.ok(ep.includes('await saveCta(db, orgId, body.callToAction') && ep.includes('callsToAction: { assistants: ctaAssistants, giftForms }'));
-    const html = read('assets.html');
+    const html = (read('assets.html') + read('src/components/products-editor.js'));
     assert.ok(html.includes("call('PATCH', { callToAction: { assistantId: id, kind, formId } })") && html.includes('id="op-cta"'));
     const reg = read('src/components/disruptive-ui-registry.js');
     assert.ok(reg.includes("register('call_to_action', renderCallToActionCard)"));

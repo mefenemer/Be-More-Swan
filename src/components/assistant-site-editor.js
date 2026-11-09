@@ -268,6 +268,28 @@
     schedulePoll();
   }
 
+  // A Business Information editor in the side drawer (site-facts-drawer.js). Whatever is saved there is
+  // read straight back, and the preview reloads, since sections show products and stays from the database.
+  function openFacts(kind, options) {
+    if (!window.SiteFactsDrawer) {
+      window._bizinfoInitialTab = kind;
+      if (typeof window.loadView === 'function') window.loadView('assets');
+      return;
+    }
+    window.SiteFactsDrawer.open({ kind, options, onSaved: factsSaved });
+  }
+  let factsTimer = null;
+  function factsSaved() {
+    // A reorder saves twice in a row: read back once.
+    clearTimeout(factsTimer);
+    factsTimer = setTimeout(async () => {
+      keepEditing();
+      await load();
+      state.version++;
+      rerender();
+    }, 250);
+  }
+
   function schedulePoll() {
     clearTimeout(state.pollTimer);
     if (state.data && state.data.site.drafting) state.pollTimer = setTimeout(load, POLL_MS);
@@ -455,7 +477,11 @@
     if (f.kind === 'checkbox') return `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" name="${name}" ${value ? 'checked' : ''}> ${esc(f.label)}</label>`;
     if (f.kind === 'csv') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><input name="${name}" class="${inputCls}" value="${esc((Array.isArray(value) ? value : []).join(', '))}" placeholder="e.g. Music, Food & drink, Family">`;
     if (f.kind === 'staysInfo') {
-      return `<p class="text-xs text-gray-600 mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3">Shows every holiday let and room type you've set up in <a class="link font-bold" href="/workspace.html?view=assets&amp;tab=stays">Business Information ▸ Stays</a> — names, photos, prices and rules are kept there. Each one gets its own page with a calendar where guests book.</p>`;
+      // The stays themselves are added and changed beside the site, in the drawer (site-facts-drawer.js);
+      // they're saved to Business Information ▸ Stays, which every assistant reads.
+      return `<div class="text-xs text-gray-600 mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <p>Shows every holiday let and room type you've set up — each gets its own page with a calendar where guests book. Their names, photos, prices and rules are saved in your Business Information.</p>
+        <div class="flex flex-wrap gap-2 mt-2">${btn('data-site-open-stays="whole"', '+ Add a holiday let')}${btn('data-site-open-stays="room"', '+ Add a room type')}${btn('data-site-open-stays=""', 'See and change them')}</div></div>`;
     }
     if (f.kind === 'listingsInfo') {
       const n = (state.listings && state.listings.listings) ? state.listings.listings.filter((x) => x.status === 'published').length : null;
@@ -510,7 +536,7 @@
       const b = state.data.booking || {};
       const chosen = new Set((Array.isArray(value) ? value : []).map(Number));
       const hoursNote = `<p class="text-xs ${b.ready ? 'text-gray-500' : 'text-amber-800 font-semibold'} mt-2">${b.ready ? `Opening hours: ${esc(b.hours)}.` : 'Set your opening hours first — booking only shows on your site once they are set.'} ${btn('data-site-open-hours', 'Hours & location')}</p>`;
-      if (!(b.services || []).length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">None of your Products &amp; Services has a length yet. Give a service a length (e.g. 45 minutes) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} to offer it here. (Tables don't need one.)</p>${hoursNote}`;
+      if (!(b.services || []).length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">None of your Products &amp; Services has a length yet. Give a service a length (e.g. 45 minutes) to offer it here. (Tables don't need one.) ${btn('data-site-open-products', 'Give a service a length')}</p>${hoursNote}`;
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         <div class="space-y-1 mt-1">${b.services.map((x) => `<label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
           <input type="checkbox" data-service-pick value="${esc(x.id)}" ${chosen.has(x.id) ? 'checked' : ''}> <span class="font-bold text-gray-900">${esc(x.name)}</span>
@@ -534,7 +560,7 @@
             ${p.buyable ? '<span class="ml-auto text-green-700 font-bold">Can be bought online</span>' : ''}
           </label>`).join('')}</div>`
           : '<p class="text-xs text-gray-500 mt-1">You haven\'t added any products or services yet.</p>'}
-        <p class="text-xs text-gray-500 mt-2">Add products, or change a name, price or picture, in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — every page and checkout follows. Only fixed prices can be bought online.</p>`;
+        <p class="text-xs text-gray-500 mt-2">Names, prices and pictures are saved in your Business Information — change them there and every page and checkout follows. Only fixed prices can be bought online. ${btn('data-site-open-products="new"', '+ Add a product')} ${btn('data-site-open-products', 'Change products and prices')}</p>`;
     }
     if (f.kind === 'platformPick') {
       // Every platform; the count beside each is what has been published through Be More Swan —
@@ -605,7 +631,7 @@
       const list = state.data.catalogue || [];
       const owner = {};
       groups.forEach((g, gi) => (g.productIds || []).forEach((id) => { if (!(id in owner)) owner[id] = gi; }));
-      if (!list.length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">You haven't added any products or services yet. Add them, with their prices, in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')}.</p>`;
+      if (!list.length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">You haven't added any products or services yet. ${btn('data-site-open-products="new"', '+ Add a product or service')}</p>`;
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         <div data-menu-groups class="space-y-2 mt-1">${groups.map((g, gi) => `
           <div class="border border-gray-200 rounded-lg p-3" data-menu-group>
@@ -620,7 +646,7 @@
             }).join('')}</div>
           </div>`).join('')}</div>
         <div class="mt-2">${btn('data-menu-group-add', '+ Add a group')}</div>
-        <p class="text-xs text-gray-500 mt-2">Items appear in Business Information order. Change a name, price or description in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — the menu follows. Nothing on a menu is bought online; use a Products for sale section for that.</p>`;
+        <p class="text-xs text-gray-500 mt-2">Items appear in the order of your products in Business Information. Change a name, price or description there and the menu follows. ${btn('data-site-open-products', 'Change products and prices')} Nothing on a menu is bought online; use a Products for sale section for that.</p>`;
     }
     if (f.kind === 'items') {
       const list = Array.isArray(value) && value.length ? value : [{}];
@@ -1490,7 +1516,7 @@
         <label class="text-xs font-bold text-gray-700">Repeat<select data-sf="repeatWeeks" class="${inputCls} mt-1">${[[0, 'Just this date (an event)'], [3, 'Weekly for 4 weeks'], [7, 'Weekly for 8 weeks'], [11, 'Weekly for 12 weeks'], [25, 'Weekly for 26 weeks']].map(([v, l]) => opt(v, l, f.repeatWeeks ?? 0)).join('')}</select></label>
         <label class="text-xs font-bold text-gray-700 md:col-span-2">Note for customers <span class="font-normal text-gray-500">(optional — e.g. bring a mat)</span><input data-sf="notes" maxlength="300" class="${inputCls} mt-1" value="${esc(f.notes || '')}"></label>
         <div class="md:col-span-2">${btn('data-session-add', 'Add these dates', true)}</div></div>`
-      : `<p class="text-xs text-gray-500 mt-2">First add your classes or events (with their prices) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')}.</p>`;
+      : `<p class="text-xs text-gray-500 mt-2">First add your classes or events, with their prices. ${btn('data-site-open-products="new"', '+ Add a class or event')}</p>`;
     const now = Date.now();
     const rows = !tt ? '<p class="text-xs text-gray-500 mt-3">Loading…</p>'
       : !tt.length ? '<p class="text-xs text-gray-500 mt-3">No dates added yet.</p>'
@@ -2756,7 +2782,12 @@
       await publishAction({ action: 'products_import', sectionId: ed.sectionId }, 'Moved into Business Information.', () => { state.editing = null; });
       return;
     }
-    if (t('[data-site-open-products]')) { window._bizinfoInitialTab = 'products'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    // Products and stays open beside the site, in the drawer (site-facts-drawer.js), and are saved to
+    // Business Information as before (docs/website-business-info-inline-plan.md §4).
+    const openProducts = t('[data-site-open-products]');
+    if (openProducts) { openFacts('products', openProducts.dataset.siteOpenProducts === 'new' ? { openNew: true } : {}); return; }
+    const openStays = t('[data-site-open-stays]');
+    if (openStays) { const v = openStays.dataset.siteOpenStays; openFacts('stays', v === 'whole' || v === 'room' ? { newType: v } : {}); return; }
     if (t('[data-site-open-reviews]')) { window._audienceInitialTab = 'reviews'; if (typeof window.loadView === 'function') window.loadView('audience'); return; }
     if (t('[data-site-open-hours]')) { window._bizinfoInitialTab = 'hours'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
     if (t('[data-site-open-bookings]')) { window._bizinfoInitialTab = 'bookings'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }

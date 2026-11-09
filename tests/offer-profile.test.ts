@@ -63,7 +63,7 @@ check('assistants are told what is NOT ticked — firmly only when it is the own
 });
 
 check('every tick changes something real', () => {
-    const html = read('assets.html');
+    const html = (read('assets.html') + read('src/components/products-editor.js'));
     for (const k of OFFER_KINDS) assert.ok(html.includes(`data-op-offer value="${k}"`), k);
     assert.ok(html.includes("kind: offers('services') && !offers('products') ? 'service' : 'product'"));
     assert.ok(html.includes("offers('subscriptions') ? { priceType: 'fixed', priceUnit: 'a month' }"));
@@ -81,7 +81,7 @@ check('every assistant gets the line, but only the owner\'s answer — never a g
 });
 
 check('the form HIDES a group, never removes it — so saving cannot clear a value', () => {
-    const html = read('assets.html');
+    const html = (read('assets.html') + read('src/components/products-editor.js'));
     assert.ok(html.includes('data-op-group="menu"') && html.includes('data-op-group="bookings"'));
     assert.ok(html.includes("f.querySelector('[data-op-group=\"menu\"]').classList.toggle('hidden', !menu)"));
     // A value already there keeps its group visible.
@@ -91,7 +91,7 @@ check('the form HIDES a group, never removes it — so saving cannot clear a val
 
 check('GUI and chat save through ONE path', () => {
     assert.ok(read('netlify/functions/org-products.ts').includes('saveOfferProfile(db, orgId, offers'));
-    assert.ok(read('assets.html').includes("call('PATCH', { offer: ticked })"));
+    assert.ok((read('assets.html') + read('src/components/products-editor.js')).includes("call('PATCH', { offer: ticked })"));
     const chat = read('src/components/chat-session.js');
     assert.ok(chat.includes("addEventListener('site:offerProfile', onOfferProfile)") && chat.includes("body: JSON.stringify({ offer:"));
     assert.ok(read('src/components/disruptive-ui-registry.js').includes("register('offer_profile', renderOfferProfileCard)"));

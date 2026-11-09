@@ -134,7 +134,7 @@ check('the migration exists, is idempotent, and the Drizzle mirror matches', () 
 });
 
 console.log('\nProducts — the tab');
-const assets = read('assets.html');
+const assets = (read('assets.html') + read('src/components/products-editor.js'));
 check('Business Information has a Products & Services tab and panel', () => {
     assert.ok(assets.includes('data-tab="products">Products &amp; Services</button>'));
     assert.ok(assets.includes('data-panel="products"'));

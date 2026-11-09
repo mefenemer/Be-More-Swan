@@ -93,7 +93,10 @@ check('Business Information has a Stays tab, shown by the "stays" tick, loading 
     assert.ok(html.includes('data-tab="stays"') && html.includes('data-panel="stays"'));
     assert.ok(html.includes('<section id="stays-root"') && html.includes('src="/src/components/stays-editor.js'));
     assert.ok(html.includes("tab('stays')?.classList.toggle('hidden', !o.offers.includes('stays'))"));
-    assert.ok(html.includes('data-op-offer value="stays"'));
+    assert.ok(read('src/components/products-editor.js').includes('data-op-offer value="stays"'));
+    // Mounted by the file itself, the first time the tab is shown; the drawer mounts it on its own.
+    const js = read('src/components/stays-editor.js');
+    assert.ok(js.includes("document.querySelector('.bizinfo-tab-panel[data-panel=\"stays\"]')") && js.includes('window.BizInfoEditors.stays = { mount }'));
 });
 
 check('arrival details are labelled private in the editor', () => {
@@ -117,11 +120,15 @@ check('"stays" is the seventh offer, guessed from holiday-let words, a site feat
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"stays" (holiday lets, B&B or guest house rooms booked by the night — the Stays tab)'));
 });
 
-check('the website editor offers a Stays section that points to Business Information', () => {
+check('the website editor offers a Stays section whose stays are added beside the site', () => {
     const js = read('src/components/assistant-site-editor.js');
     assert.ok(js.includes("stays: 'Stays (holiday lets, rooms)'"));
     assert.ok(js.includes("stays: { heading: 'Stay with us', intro: '', stayIds: [], buttonLabel: 'See dates and prices' }"));
-    assert.ok(js.includes("f.kind === 'staysInfo'") && js.includes('/workspace.html?view=assets&amp;tab=stays'));
+    // The Stays section's buttons open the Business Information Stays editor in the side drawer — never
+    // a trip to another page — and it is still saved to Business Information.
+    assert.ok(js.includes("f.kind === 'staysInfo'") && js.includes(`btn('data-site-open-stays="whole"', '+ Add a holiday let')`) && js.includes(`btn('data-site-open-stays="room"', '+ Add a room type')`));
+    assert.ok(js.includes("openFacts('stays', v === 'whole' || v === 'room' ? { newType: v } : {})"));
+    assert.ok(!js.includes('/workspace.html?view=assets&amp;tab=stays'), 'no link away to the Stays tab');
 });
 
 console.log(`\n${passed}/${total} passed`);
