@@ -54,9 +54,9 @@ magento.detect = (h) => /Magento_|\/static\/(?:version\d+\/)?frontend\/|requirej
         assert.ok(!aem.detect(hot, '', cheerio.load(hot)));
     });
 
-    await check('known clash: Magento\'s detect claims AEM pages today (fix belongs to the Magento adapter)', () => {
-        assert.ok(magentoClaims(fx('eds-home.html')), 'type="image/webp" matches mage/');
-        assert.ok(magentoClaims(fx('core-about.html')), '/is/image/ matches mage/');
+    await check('Magento no longer claims AEM pages (its detect was fixed and merged, 2026-11-09)', () => {
+        assert.ok(!magentoClaims(fx('eds-home.html')), 'type="image/webp" is not Magento');
+        assert.ok(!magentoClaims(fx('core-about.html')), '/is/image/ is not Magento');
     });
 
     console.log('\n2. AEM Sites (Core Components)');

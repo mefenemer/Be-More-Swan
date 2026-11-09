@@ -195,10 +195,9 @@ async function main() {
         const read = [`${SITE}/`, `${SITE}/classes`, `${SITE}/visit`].map((u) => readImportPage(pages[u], u));
         const srcs = read.flatMap((p) => images(p).map((i) => i.src));
         assert.ok(srcs.length >= 5 && srcs.every((s) => s.startsWith('https://images.ctfassets.net/')), srcs.join('\n'));
-        // …but the logo is read with the shared fullSizeImageUrl, not the adapter's, so it stays wrapped in
-        // /_next/image (still fetchable from their site). "Can be done" in docs/site-import-platforms/contentful.md.
+        // The logo goes through the adapter's full-size rule too (main session, 2026-11-09): the original, not /_next/image.
         assert.deepStrictEqual(saved, [read[0].logo!.src]);
-        assert.ok(saved[0].includes('/_next/image?url='));
+        assert.ok(saved[0].startsWith('https://images.ctfassets.net/') && !saved[0].includes('/_next/image'), saved[0]);
     }));
 
     console.log(`\n${passed}/${total} passed`);

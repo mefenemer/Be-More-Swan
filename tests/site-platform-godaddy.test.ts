@@ -120,7 +120,7 @@ async function main() {
     });
 
     await check('the logo: the image logo, from a srcset whose addresses contain commas', () => {
-        assert.ok(home.logo && home.logo.src.startsWith('https://img1.wsimg.com/isteam/ip/') && home.logo.src.includes('rs=w:400,h:400'));
+        assert.ok(home.logo && home.logo.src.startsWith('https://img1.wsimg.com/isteam/ip/') && /rs=w:1600/.test(home.logo.src), home.logo?.src);   // full size through the adapter (main session, 2026-11-09)
         assert.strictEqual(home.logo?.alt, 'Hollin Lane Pottery');
     });
 

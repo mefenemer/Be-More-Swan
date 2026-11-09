@@ -169,7 +169,8 @@ export const adapter: BuilderAdapter = {
         const outside = $(OWN_MODULE).filter((_, el) => $(el).closest('main, header, footer, nav').length === 0 && !!text($, el));
         if (outside.length) $('main').each((_, m) => { (m as Element).name = 'div'; });
     },
-    noise: /^(details|written by:? .+|created by:? .+|category: .+|parent category: .+|published: .+|created: .+|last updated: .+|hits: ?\d+|register to read more.*|read more( …|\s*\.\.\.)?|read more: .+|you are here:?.*|page \d+ of \d+|this email address is being protected from spambots\..*|joomla! is free software.*)$/i,
+    // Noise applies to buttons too (site-extract.ts), so a bare "Read more" — the button prepare makes — is not noise.
+    noise: /^(details|written by:? .+|created by:? .+|category: .+|parent category: .+|published: .+|created: .+|last updated: .+|hits: ?\d+|register to read more.*|read more(?: …|\s*\.\.\.)|read more: .+|you are here:?.*|page \d+ of \d+|this email address is being protected from spambots\..*|joomla! is free software.*)$/i,
     fullSizeImage(src) {
         // The media field's "#joomlaImage://local-images/…?width=…" note is not part of the address.
         const at = src.indexOf('#joomlaImage');

@@ -193,15 +193,20 @@ export const adapter: BuilderAdapter = {
     // Shop category pages in the menu (Shop ▸ Candles) are catalogue listings: read after their own pages.
     catalogueLink: (href, el) => el.closest('li.menu-item-object-product_cat, li.menu-item-object-product, li.menu-item-type-post_type_archive').length > 0 || /\/(product-category|product-tag|product)\//i.test(href),
     prepare($, url) {
+        // A product's reviews sit in WordPress's comments box, which the WordPress tidy removes as
+        // furniture: unmark it first, so prepareWoo can turn the reviews into quotes (main session, 2026-11-09).
+        $('.woocommerce-Reviews #comments, .woocommerce-Reviews .comments-area').removeAttr('id').removeClass('comments-area');
         try { wordpress.prepare?.($, url); } catch { /* the WordPress tidy never stops a shop's */ }
         prepareWoo($);
     },
     get contentRoot() { return wordpress.contentRoot; },
     get noise() { return noise(); },
     fullSizeImage(src) {
+        // The shop's own CDNs (Jetpack, Optimole) on the address as it came, then WordPress's sizes.
+        const woo = wooFullSizeImage(src);
         let wp: string | null | undefined = null;
-        try { wp = wordpress.fullSizeImage?.(src); } catch { wp = null; }
-        return wooFullSizeImage(wp ?? src) ?? wp ?? null;
+        try { wp = wordpress.fullSizeImage?.(woo ?? src); } catch { wp = null; }
+        return wp ?? woo ?? null;
     },
     // Classic and Product Collection pages arrive with their words; only the cart and checkout blocks
     // (never read) and the old "All Products" block draw with JavaScript.
