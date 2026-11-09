@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oak & Ember Pottery</title>
+<meta name="description" content="Hand-thrown stoneware and weekend pottery classes.">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { theme: { extend: { colors: { clay: { 500: "#b4562f", 700: "#8a3f21" } } } } }</script>
+</head>
+<body class="bg-stone-50 text-stone-800">
+<header class="px-4 py-3 flex justify-between">
+  <a href="/" data-cms-field="site.name" class="font-semibold"></a>
+  <nav id="nav" class="flex gap-4"></nav>
+</header>
+<main id="app" class="max-w-5xl mx-auto px-4 py-12">
+  <section data-cms-section="hero">
+    <h1 data-cms-field="hero.title" class="text-4xl"></h1>
+    <p data-cms-field="hero.subtitle" class="mt-4"></p>
+    <a data-cms-field="hero.cta" data-cms-href="hero.ctaLink" class="rounded-full bg-clay-500 text-white px-6 py-3"></a>
+  </section>
+  <section data-cms-list="features" class="grid md:grid-cols-3 gap-6 mt-12"></section>
+  <p class="loading text-sm text-stone-400">Loading…</p>
+</main>
+<footer class="px-4 py-8 text-sm"><span data-cms-field="footer.text"></span></footer>
+<script>
+  // Fills the page from /content/home.json (edited in the site's CMS).
+  fetch("/content/home.json").then(function (r) { return r.json(); }).then(function (c) {
+    document.querySelectorAll("[data-cms-field]").forEach(function (el) {
+      var v = el.getAttribute("data-cms-field").split(".").reduce(function (o, k) { return o && o[k]; }, c);
+      if (typeof v === "string") el.textContent = v;
+    });
+    document.querySelectorAll("[data-cms-href]").forEach(function (el) {
+      var v = el.getAttribute("data-cms-href").split(".").reduce(function (o, k) { return o && o[k]; }, c);
+      if (v) el.setAttribute("href", v);
+    });
+    var list = document.querySelector("[data-cms-list=features]");
+    (c.features || []).forEach(function (f) {
+      var d = document.createElement("div");
+      d.innerHTML = "<img src='" + f.image + "' alt='" + f.alt + "'><h3>" + f.title + "</h3><p>" + f.body + "</p>";
+      list.appendChild(d);
+    });
+    (c.nav || []).forEach(function (n) {
+      var a = document.createElement("a"); a.href = n.href; a.textContent = n.label;
+      document.getElementById("nav").appendChild(a);
+    });
+    document.querySelector(".loading").remove();
+  });
+</script>
+</body>
+</html>
