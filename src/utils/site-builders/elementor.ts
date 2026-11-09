@@ -150,6 +150,9 @@ function prepare($: cheerio.CheerioAPI): void {
 
 export const adapter: BuilderAdapter = {
     key: 'elementor',
+    // The kit's global colours and fonts, from the kit's own stylesheet first (main session, 2026-11-09).
+    lookStylesheets: (html, baseUrl) => { const k = elementorKitStylesheet(html, baseUrl); return k ? [k] : []; },
+    look: ({ html, css }) => { const k = readElementorKit(html, css); return k.defaults ? null : { primaryColor: k.primaryColor, secondaryColor: k.secondaryColor ?? k.accentColor, textColor: k.textColor, headingFont: k.headingFont, font: k.font }; },
     label: 'Elementor',
     detect: (html, gen) => (gen.includes('elementor') || /elementor-(?:kit|section|element|widget)|\/plugins\/elementor\/|\/uploads\/elementor\//.test(html)) && !WOO_PAGE.test(html),
     prepare: ($) => prepare($),

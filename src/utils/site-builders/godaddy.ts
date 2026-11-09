@@ -173,6 +173,8 @@ export function readGoDaddyLook(html: string, $: cheerio.CheerioAPI): Partial<Im
 
 export const adapter: BuilderAdapter = {
     key: 'godaddy',
+    // The main button's colour and the lettering from GoDaddy's per-class rules (main session, 2026-11-09).
+    look: ({ html, $ }) => readGoDaddyLook(html, $),
     label: 'GoDaddy Website Builder',
     // The generator tag survives custom domains ("Starfield Technologies; Go Daddy Website Builder 8.0.0000").
     // Without it: GoDaddy's widget markup AND its picture/script host together — the word "GoDaddy" or a

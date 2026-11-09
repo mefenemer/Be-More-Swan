@@ -192,6 +192,8 @@ const WIX_MARKUP = /static\.wixstatic\.com|wix-thunderbolt|id="SITE_CONTAINER"|\
 
 export const adapter: BuilderAdapter = {
     key: 'wix',
+    // Wix's theme palette and text styles (never its own blue banner) (main session, 2026-11-09).
+    look: ({ html }) => readWixLook(html),
     label: 'Wix',
     detect: (html, gen) => gen.includes('wix') || WIX_MARKUP.test(html),
     prepare: ($) => prepare($),

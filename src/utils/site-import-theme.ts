@@ -183,6 +183,50 @@ function elementColour(html: string, css: string, tag: 'header' | 'footer' | 'h1
     return v ? normalizeHex(v) : null;
 }
 
+// ── Design tokens: HSL triples (shadcn) and oklch() (Tailwind v4) ─────────────────────────────
+
+const hex2 = (n: number) => Math.round(Math.min(255, Math.max(0, n))).toString(16).padStart(2, '0');
+function hslToHex(h: number, s: number, l: number): string {
+    s /= 100; l /= 100;
+    const k = (n: number) => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return `#${hex2(f(0) * 255)}${hex2(f(8) * 255)}${hex2(f(4) * 255)}`;
+}
+/** oklch(L C H) → sRGB hex (via OKLab and linear sRGB), clipped to the gamut. */
+function oklchToHex(L: number, C: number, H: number): string {
+    const a = C * Math.cos((H * Math.PI) / 180), b = C * Math.sin((H * Math.PI) / 180);
+    const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+    const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+    const s = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3;
+    const lin = [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s];
+    const g = (x: number) => (x <= 0.0031308 ? 12.92 * x : 1.055 * Math.max(0, x) ** (1 / 2.4) - 0.055) * 255;
+    return `#${lin.map((x) => hex2(g(x))).join('')}`;
+}
+/** A token's value as hex: a bare HSL triple, hsl(), oklch(), rgb() or hex. Null when not a colour. */
+export function tokenColour(raw: string): string | null {
+    const v = raw.trim().replace(/\s*!important$/, '');
+    const hsl = v.match(/^(?:hsla?\()?\s*(-?[\d.]+)(?:deg)?[\s,]+([\d.]+)%[\s,]+([\d.]+)%\s*(?:[,/]\s*[\d.]+%?\s*)?\)?$/i);
+    if (hsl) return hslToHex(Number(hsl[1]), Number(hsl[2]), Number(hsl[3]));
+    const ok = v.match(/^oklch\(\s*([\d.]+)(%?)\s+([\d.]+)\s+([\d.]+)(?:deg)?\s*(?:\/\s*[\d.]+%?\s*)?\)$/i);
+    if (ok) return oklchToHex(Number(ok[1]) / (ok[2] ? 100 : 1), Number(ok[3]), Number(ok[4]));
+    const rgb = v.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i);
+    if (rgb) return `#${hex2(+rgb[1])}${hex2(+rgb[2])}${hex2(+rgb[3])}`;
+    return normalizeHex(v);
+}
+/** The first light-mode value of each shadcn / Tailwind v4 colour token (the dark-mode block comes later). */
+export function designTokens(css: string): { primary: string | null; background: string | null; foreground: string | null } {
+    const first = (names: string[]) => {
+        for (const n of names) {
+            const m = css.match(new RegExp(`--${n}\\s*:\\s*([^;}]+)`, 'i'));
+            const hex = m ? tokenColour(m[1]) : null;
+            if (hex) return hex;
+        }
+        return null;
+    };
+    return { primary: first(['primary', 'color-primary', 'brand', 'color-brand']), background: first(['background', 'color-background']), foreground: first(['foreground', 'color-foreground']) };
+}
+
 /** The palette a Tailwind colour name belongs to: brand-700 → brand. */
 const paletteOf = (name: string) => name.replace(/-\d{2,3}$/, '');
 
@@ -218,9 +262,12 @@ export function readImportedLook(html: string, baseUrl: string, css = ''): Impor
     const signals = harvestBrandSignals(html, baseUrl, css);
     const tw = readTailwindConfig(html);
     const bodyClass = html.match(/<body\b[^>]*class=['"]([^'"]*)['"]/i)?.[1] ?? '';
-    const background = classColour(bodyClass, 'bg', tw) ?? signals.lights[0] ?? null;
-    const text = classColour(bodyClass, 'text', tw) ?? signals.darks[0] ?? null;
-    const primary = signals.candidates[0]?.hex ?? null;
+    // Design tokens (shadcn's "--primary: 222 47% 11%", Tailwind v4's oklch()) say outright which colour
+    // is which; the brand harvest reads only hex and rgb, so AI-built sites came out uncoloured.
+    const tokens = designTokens(`${[...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n')}\n${css}`);
+    const background = classColour(bodyClass, 'bg', tw) ?? tokens.background ?? signals.lights[0] ?? null;
+    const text = classColour(bodyClass, 'text', tw) ?? tokens.foreground ?? signals.darks[0] ?? null;
+    const primary = tokens.primary ?? signals.candidates[0]?.hex ?? null;
 
     // Headings by their own rule (h1/h2 in their CSS or <style>), the body by body's; the brand
     // reader's single font is whichever it found first.

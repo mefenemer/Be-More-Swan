@@ -3,6 +3,7 @@
 // improve one platform without touching the others.
 import type * as cheerio from 'cheerio';
 import type { AnyNode } from 'domhandler';
+import type { ImportedLook } from '../site-import-theme';
 
 /**
  * A product a shop's page shows: its name, the price as the page states it ("£28.00", "From €12"), its
@@ -55,4 +56,22 @@ export interface BuilderAdapter {
      * to need the headless browser (site-js-render.ts) — used for the report's wording only.
      */
     rendersWithJs?: boolean;
+
+    // ── The look (2026-11-09): builders keep the owner's theme in their own variables, or ship their own
+    // UI colours the shared reader mistakes for the brand's (Hostinger's purple). The import reads the look
+    // in site-import.ts readLook: stylesheets (plus lookStylesheets) → lookCss → readImportedLook → look.
+
+    /** Extra stylesheets worth fetching for the look, absolute addresses (e.g. Elementor's kit file). */
+    lookStylesheets?(html: string, baseUrl: string): string[];
+    /**
+     * Take the platform's own CSS out before the shared reader reads the look (its UI palette, its base
+     * stylesheet). Return what is left. Never adds colours of its own.
+     */
+    lookCss?(input: { html: string; css: string }): { html: string; css: string };
+    /**
+     * Their look, read the platform's own way (theme variables the shared reader can't follow). Every
+     * field it returns, when not null, wins over the shared reading; a headingFont without a font key is
+     * matched to a pairing by name. Only colours and fonts that are on their site.
+     */
+    look?(input: { html: string; css: string; $: cheerio.CheerioAPI; url: URL | null }): Partial<ImportedLook> | null;
 }

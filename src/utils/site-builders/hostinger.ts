@@ -55,6 +55,12 @@ const MAX_EMBED = 200_000;
 
 export const adapter: BuilderAdapter = {
     key: 'hostinger',
+    // Hostinger's own interface palette (--color-meteorite, --color-primary-dark …) is not the owner's:
+    // its purple came out as every site's brand colour. Taken out before the look is read (main session, 2026-11-09).
+    lookCss: ({ html, css }) => {
+        const builder = /[^{}]*\{[^{}]*--color-(?:meteorite|primary-dark|primary-light)[^{}]*\}/gi;
+        return { html: html.replace(builder, ''), css: css.replace(builder, '') };
+    },
     label: 'Hostinger Website Builder',
     // "Hostinger Website Builder" / "Hostinger AI Builder" (older: "Zyro") in the generator tag; else
     // pictures on Hostinger's own picture host together with the builder's grid markup. The bare word

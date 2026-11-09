@@ -10,6 +10,7 @@
 // picture CDN for a sensible full-size copy of each picture.
 import type * as cheerio from 'cheerio';
 import type { BuilderAdapter } from './types';
+import { tokenColour } from '../site-import-theme';
 
 /**
  * Shopify's own markers. A bare cdn.shopify.com address is not enough — hand-made and WordPress pages
@@ -108,6 +109,14 @@ export function shopifyFullSize(src: string): string | null {
 
 export const adapter: BuilderAdapter = {
     key: 'shopify',
+    // The theme's colour scheme and fonts (Dawn and other 2.0 themes: --color-base-*, --font-*-family) (main session, 2026-11-09).
+    look: ({ html, css }) => {
+        const all = `${[...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n')}\n${css}`;
+        const v = (n: string) => all.match(new RegExp(`--${n}\\s*:\\s*([^;}]+)`, 'i'))?.[1]?.trim() ?? null;
+        const rgb = (n: string) => { const x = v(n); return x && /^\d+\s*,\s*\d+\s*,\s*\d+$/.test(x) ? tokenColour(`rgb(${x})`) : x ? tokenColour(x) : null; };
+        const font = (n: string) => v(n)?.split(',')[0].replace(/^['"]|['"]$/g, '').trim() || null;
+        return { primaryColor: rgb('color-base-accent-1') ?? rgb('color-button'), textColor: rgb('color-base-text'), backgroundColor: rgb('color-base-background-1'), headingFont: font('font-heading-family') };
+    },
     label: 'Shopify',
     detect: (html) => SHOPIFY_MARK.test(html),
     prepare($) {

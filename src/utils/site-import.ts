@@ -28,7 +28,9 @@ import {
 import { chunkBodies } from './site-words';
 import { inlineEmbeds, type EmbedFetchers } from './site-embeds';
 import { linkFirst, PLACEHOLDER, plainOf } from './site-rich-text';
-import { lookFound, readImportedLook, themeWithLook, type ImportedLook } from './site-import-theme';
+import { fontKeyFor, lookFound, readImportedLook, themeWithLook, type ImportedLook } from './site-import-theme';
+import { ADAPTERS } from './site-builders';
+import * as cheerio from 'cheerio';
 import { harvestBrandSignals } from './brand-extract';
 
 /**
@@ -866,7 +868,7 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
         }
     }
     // Their look: colours, lettering and corners read from the home page and its stylesheets.
-    const look = await readLook(home.html, home.finalUrl, deps);
+    const look = await readLook(home.html, home.finalUrl, deps, homePage.platform ?? null);
     report.look = lookFound(look) ? look : null;
     if (report.look) definition = normaliseSiteDefinition({ ...definition, theme: themeWithLook(definition.theme, report.look) }, { maxPages: input.maxPages }).definition;
     report.leftOut = built.leftOut.slice(0, 60);
@@ -880,16 +882,34 @@ const BLOG_WIDGET = /bemoreswan\.com\/widget\.js|data-bms-blog\b/i;
 
 /** Stylesheets read for the look: their own first; a site with thirty is a build artefact. */
 const LOOK_MAX_STYLESHEETS = 4;
-async function readLook(html: string, finalUrl: string, deps: ImportDeps): Promise<ImportedLook | null> {
+async function readLook(html: string, finalUrl: string, deps: ImportDeps, platform: string | null = null): Promise<ImportedLook | null> {
     try {
+        // The platform adapter that read the page has its say (site-builders/types.ts lookStylesheets, lookCss, look).
+        const adapter = platform ? ADAPTERS.find((a) => a.key === platform) ?? null : null;
         let css = '';
         if (deps.fetchCss) {
-            const sheets = harvestBrandSignals(html, finalUrl).stylesheets.slice(0, LOOK_MAX_STYLESHEETS);
+            let own: string[] = [];
+            try { own = adapter?.lookStylesheets?.(html, finalUrl) ?? []; } catch { own = []; }
+            const sheets = [...new Set([...own, ...harvestBrandSignals(html, finalUrl).stylesheets])].slice(0, LOOK_MAX_STYLESHEETS + own.length);
             css = (await Promise.all(sheets.map((u) => deps.fetchCss!(u).catch(() => null)))).filter(Boolean).join('\n');
         }
-        return readImportedLook(html, finalUrl, css);
+        let shared = { html, css };
+        try { shared = adapter?.lookCss?.(shared) ?? shared; } catch { shared = { html, css }; }
+        const look = readImportedLook(shared.html, finalUrl, shared.css);
+        let ownLook: Partial<ImportedLook> | null = null;
+        try { ownLook = adapter?.look?.({ html, css, $: cheerio.load(html), url: safeUrlOf(finalUrl) }) ?? null; } catch { ownLook = null; }
+        return ownLook ? withOwnLook(look, ownLook) : look;
     } catch { return null; }
 }
+
+/** The adapter's own reading over the shared one: each field it found wins; a named font finds its pairing. */
+export function withOwnLook(look: ImportedLook, own: Partial<ImportedLook>): ImportedLook {
+    const out: ImportedLook = { ...look };
+    for (const [k, v] of Object.entries(own) as Array<[keyof ImportedLook, unknown]>) if (v !== null && v !== undefined && v !== '') (out as unknown as Record<string, unknown>)[k] = v;
+    if (own.headingFont && !own.font) out.font = fontKeyFor(own.headingFont) ?? look.font;
+    return out;
+}
+const safeUrlOf = (u: string): URL | null => { try { return new URL(u); } catch { return null; } };
 
 /**
  * One page: the plain read, and — when that found almost no words — the page again with its
@@ -913,7 +933,8 @@ async function readPage(url: string, deps: ImportDeps): Promise<{ ok: true; page
     const renderedEmbeds = await inlineEmbeds(rendered.html, r.finalUrl, embedFetchers(deps));
     const fuller = readImportPageSafe(renderedEmbeds.html, r.finalUrl);
     if (fuller.words <= page.words) return { ok: true, page, embedsUnread, html: r.html, finalUrl: r.finalUrl };
-    return { ok: true, page: { ...fuller, navLinks: fuller.navLinks.length ? fuller.navLinks : page.navLinks }, embedsUnread: renderedEmbeds.found - renderedEmbeds.read, html: r.html, finalUrl: r.finalUrl };
+    // The look is read from the page as the browser drew it, too: a JavaScript site's colours arrive with it.
+    return { ok: true, page: { ...fuller, navLinks: fuller.navLinks.length ? fuller.navLinks : page.navLinks }, embedsUnread: renderedEmbeds.found - renderedEmbeds.read, html: rendered.html, finalUrl: r.finalUrl };
 }
 
 function embedFetchers(deps: ImportDeps): EmbedFetchers {

@@ -131,6 +131,8 @@ function expandMaps($: cheerio.CheerioAPI): void {
 
 export const adapter: BuilderAdapter = {
     key: 'squarespace',
+    // 7.1 site styles: the HSL palette and the fonts behind their variables (main session, 2026-11-09).
+    look: ({ html, css }) => readSquarespaceLook(`${[...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n')}\n${css}`),
     label: 'Squarespace',
     detect: (html, gen) => gen.includes('squarespace') || MARKS.test(html),
     prepare($) {

@@ -13,6 +13,7 @@
 import type * as cheerio from 'cheerio';
 import type { AnyNode, Element } from 'domhandler';
 import type { BuilderAdapter } from './types';
+import { tokenColour } from '../site-import-theme';
 
 /** Core and template modules that are site furniture, never the owner's page content. */
 const FURNITURE = [
@@ -130,6 +131,12 @@ function removeWithChrome($: cheerio.CheerioAPI, el: Element): void {
 
 export const adapter: BuilderAdapter = {
     key: 'joomla',
+    // Cassiopeia's colours: its links and buttons (--cassiopeia-color-link) and its header band (--cassiopeia-color-primary) (main session, 2026-11-09).
+    look: ({ html, css }) => {
+        const all = `${[...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n')}\n${css}`;
+        const v = (n: string) => all.match(new RegExp(`--${n}\\s*:\\s*([^;}]+)`, 'i'))?.[1]?.trim() ?? null;
+        return { primaryColor: tokenColour(v('cassiopeia-color-link') ?? '') ?? tokenColour(v('cassiopeia-color-primary') ?? ''), headerColor: tokenColour(v('cassiopeia-color-primary') ?? '') };
+    },
     label: 'Joomla',
     detect: (html, gen) => gen.includes('joomla')
         || /\/media\/jui\/|\/components\/com_|\/media\/system\/js\/|\/media\/templates\/site\/|class="joomla-script-options|<joomla-[a-z-]+|<body[^>]*\bcom_[a-z]+\b[^>]*\bview-/.test(html),

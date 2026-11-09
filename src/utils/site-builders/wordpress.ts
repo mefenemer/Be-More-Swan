@@ -166,6 +166,8 @@ const NOISE = /^(proudly powered by wordpress\.?|powered by wordpress\.?|designe
 
 export const adapter: BuilderAdapter = {
     key: 'wordpress',
+    // The theme's own colours and fonts (theme.json presets), over the shared reading (main session, 2026-11-09).
+    look: ({ html, css }) => { const l = readWordPressLook(html, css); return { primaryColor: l.primaryColor, secondaryColor: l.secondaryColor, textColor: l.textColor, backgroundColor: l.backgroundColor, headingFont: l.headingFont }; },
     label: 'WordPress',
     detect: (html, gen) => looksLikeWordPress(html, gen),
     prepare: ($) => prepareWordPress($),

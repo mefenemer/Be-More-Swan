@@ -120,6 +120,11 @@ function prepare($: cheerio.CheerioAPI): void {
 
 export const adapter: BuilderAdapter = {
     key: 'webflow',
+    // Webflow's base stylesheet (.w-* rules, its default #3898ec button blue) is not the owner's look (main session, 2026-11-09).
+    lookCss: ({ html, css }) => {
+        const base = (t: string) => t.replace(/[^{}]*\.w-[^{}]*\{[^}]*\}/g, '').replace(/#3898ec\b/gi, '');
+        return { html, css: base(css) };
+    },
     label: 'Webflow',
     detect: (html, gen) => gen.includes('webflow') || /webflow\.(js|css)|data-wf-page|data-wf-site|\.webflow\.[\w.]*\.(css|js)\b/.test(html),
     prepare,

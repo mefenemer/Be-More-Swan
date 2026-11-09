@@ -11,6 +11,7 @@
 // search button, bylines, reading times, tags, share buttons and media player controls.
 import type * as cheerio from 'cheerio';
 import type { BuilderAdapter } from './types';
+import { tokenColour } from '../site-import-theme';
 
 /** Ghost's members, search and sharing furniture: the new site has no members, search or Portal. */
 const FURNITURE = [
@@ -86,6 +87,13 @@ function prepare($: cheerio.CheerioAPI): void {
 
 export const adapter: BuilderAdapter = {
     key: 'ghost',
+    // The theme's accent and fonts: --ghost-accent-color (set in Ghost's design settings), --gh-font-* (main session, 2026-11-09).
+    look: ({ html, css }) => {
+        const all = `${[...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/gi)].map((m) => m[1]).join('\n')}\n${css}`;
+        const v = (n: string) => all.match(new RegExp(`--${n}\\s*:\\s*([^;}]+)`, 'i'))?.[1]?.trim() ?? null;
+        const font = (n: string) => v(n)?.split(',')[0].replace(/^['"]|['"]$/g, '').trim() || null;
+        return { primaryColor: tokenColour(v('ghost-accent-color') ?? ''), headingFont: font('gh-font-heading') };
+    },
     label: 'Ghost',
     detect: (html, gen) => gen.startsWith('ghost') || /ghost-(?:portal|sdk)|\/ghost\/api\/|--ghost-accent-color|data-ghost-search|cdn\.jsdelivr\.net\/ghost\//.test(html),
     prepare,

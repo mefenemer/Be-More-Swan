@@ -147,11 +147,10 @@ function deps(over: Partial<ImportDeps> = {}): ImportDeps {
 
     console.log('\nThe look (known gap, shared code)');
 
-    await check('shadcn/ui colours are bare HSL numbers — today the look reader finds the fonts but not the colours', () => {
+    await check('shadcn/ui colours are bare HSL numbers — the look reader reads them (design tokens, main session 2026-11-09)', () => {
         const look = readImportedLook(html('home-rendered'), `${APP}/`, fx('index.css'));
         assert.strictEqual(look.headingFont, 'Playfair Display');
-        // When brand-extract.ts reads "--primary: 152 58% 30%" this becomes about #20794f — see docs/site-import-platforms/replit.md.
-        assert.strictEqual(look.primaryColor, null);
+        assert.strictEqual(look.primaryColor, '#20794f');   // "--primary: 152 58% 30%"
     });
 
     console.log(`\n${passed}/${total} passed`);
