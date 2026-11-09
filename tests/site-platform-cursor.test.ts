@@ -91,17 +91,17 @@ async function main() {
         assert.deepStrictEqual(tw.socialLinks, ['https://www.instagram.com/fernbrook.example']);
     });
 
-    await check('KNOWN GAP: one phone number in 0… and +44… form is kept twice', () => {
-        assert.deepStrictEqual(tw.contact.phones, ['01632 960 418', '+441632960418']);
+    await check('one phone number in 0… and +44… form is kept once (shared fix, 2026-11-09)', () => {
+        assert.deepStrictEqual(tw.contact.phones, ['01632 960 418']);
     });
 
-    await check('KNOWN GAP: in-page #anchor menu links vanish; only the real page link is in the menu', () => {
+    await check('in-page #anchor menu links are not pages; they are read as the one-page menu (anchorNav) instead', () => {
         assert.deepStrictEqual(tw.navLinks.map((l) => l.text), ['About']);
     });
 
-    await check('KNOWN GAP: hero call-to-action links to #anchors read as plain text, not buttons', () => {
-        assert.ok(tw.blocks.some((b) => b.kind === 'text' && b.text === 'Book a workshop'));
-        assert.ok(!buttons(tw.blocks).some((b) => b.text === 'Book a workshop'));
+    await check('hero call-to-action links to #anchors are buttons that jump to their section (shared fix, 2026-11-09)', () => {
+        assert.ok(buttons(tw.blocks).some((b) => b.text === 'Book a workshop'));
+        assert.ok(!tw.blocks.some((b) => b.kind === 'text' && b.text === 'Book a workshop'));
     });
 
     await check('the look: Tailwind CDN config background and the Google Fonts heading face are read; brand colour is not', () => {
@@ -166,9 +166,9 @@ async function main() {
         assert.deepStrictEqual(r.navLinks.map((l) => l.text), ['Quayside', 'Gallery']);
     });
 
-    await check('KNOWN GAP: onClick-only buttons and <a href="#…"><button> keep no link; the testimonial <p> is text, not a quote', () => {
+    await check('an <a href="#…"><button> now jumps to its section; KNOWN GAP: an onClick-only button keeps no link, and the testimonial <p> is text, not a quote', () => {
         const r = readImportPage(fx('vite-rendered'), VITE);
-        assert.deepStrictEqual(buttons(r.blocks).map((b) => [b.text, b.href]), [['Book a groom', null], ['See services', null]]);
+        assert.deepStrictEqual(buttons(r.blocks).map((b) => [b.text, b.href]), [['Book a groom', null], ['See services', '#services']]);
         assert.ok(!r.blocks.some((b) => b.kind === 'quote'));
     });
 

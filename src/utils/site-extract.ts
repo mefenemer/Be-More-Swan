@@ -736,6 +736,21 @@ export function socialProfile(href: string): string | null {
     return `${u.origin}${u.pathname}${keep}`;
 }
 
+/**
+ * The same phone number written two ways ("01632 960123" and "+44 1632 960123", 0044…): compared by
+ * digits with the country code read as the leading 0 (UK +44; other codes compared as written).
+ */
+export function samePhone(a: string, b: string): boolean {
+    const norm = (p: string) => {
+        let d = p.replace(/\D/g, '');
+        if (d.startsWith('00')) d = d.slice(2);
+        if (d.startsWith('44') && d.length >= 11) d = `0${d.slice(2)}`;
+        if (d.startsWith('0')) return d;
+        return d;
+    };
+    return norm(a) === norm(b) || (norm(a).length >= 9 && norm(a).slice(-9) === norm(b).slice(-9) && (a.trim().startsWith('+') || b.trim().startsWith('+')));
+}
+
 /** The owner's page as ordered blocks of their own words and pictures. `url` is the FINAL url. */
 /** A drop-down's own box (the sub-menu), by the names builders give it — never its heading. */
 const SUBMENU_CLASS = /(?:^|[\s_-])(?:sub-?menu|dropdown[-_]*(?:panel|menu|content|list|items)|folder-content|nav-group__(?:items|list|content|panel)|menu-children|children-menu|flyout|mega-?menu)(?:$|[\s_-])/i;
@@ -819,7 +834,7 @@ export function readImportPage(html: string, url: string): ImportPage {
     $('a[href^="tel:" i]').each((_, el) => {
         const p = clean(decodeURIComponent(($(el).attr('href') ?? '').slice(4)));
         // "01423 000000" and "01423000000" are one number.
-        if (/\d{6,}/.test(p.replace(/\D/g, '')) && ![...phones].some((x) => x.replace(/\D/g, '') === p.replace(/\D/g, ''))) phones.add(p);
+        if (/\d{6,}/.test(p.replace(/\D/g, '')) && ![...phones].some((x) => samePhone(x, p))) phones.add(p);
     });
     if (!address) {
         const a = clean($('address').first().text());
@@ -837,7 +852,12 @@ export function readImportPage(html: string, url: string): ImportPage {
         const text = clean($(el).text()) || clean($(el).attr('aria-label'));
         if (m && text && text.length <= 40 && !anchorNav.some((a) => a.id === m[1]) && $(`[id="${m[1]}"]`).length) anchorNav.push({ text, id: m[1] });
     });
+    // …and every section a link on the page jumps to (a "See our work ↓" button), when it exists.
     const anchorIds = new Set(anchorNav.map((a) => a.id));
+    $('a[href^="#"]').each((_, el) => {
+        const id = ($(el).attr('href') ?? '').slice(1);
+        if (/^[\w-]{1,80}$/.test(id) && $(`[id="${id}"]`).length) anchorIds.add(id);
+    });
     $('nav a[href], header a[href], [role="navigation"] a[href]').each((_, el) => {
         if (navLinks.length >= IMPORT_LIMITS.navLinks) return;
         const href = absolutise($(el).attr('href') ?? '', base);
@@ -865,10 +885,20 @@ export function readImportPage(html: string, url: string): ImportPage {
         if (src && /^https?:/.test(src)) logo = { src: fullSize(src), alt: realAlt($(logoEl).attr('alt')) || `${siteName ?? 'Business'} logo` };
     }
 
-    const hasForm = $('form').length > 0;
+    // A search box is not a form anyone fills in to reach the business (2026-11-09): role="search", a
+    // search action, or nothing but a search field.
+    const isSearchForm = (f: AnyNode) => {
+        const $f = $(f);
+        if (($f.attr('role') ?? '').toLowerCase() === 'search' || $f.closest('[role="search"]').length) return true;
+        if (/search|\/s(\?|$)|[?&](q|s)=/i.test($f.attr('action') ?? '')) return true;
+        const fields = $f.find('input, textarea, select').filter((_, el) => !['hidden', 'submit', 'button', 'reset', 'image'].includes(($(el).attr('type') ?? '').toLowerCase()));
+        return fields.length > 0 && fields.toArray().every((el) => ($(el).attr('type') ?? '').toLowerCase() === 'search' || /^(q|s|search|query|keywords?)$/i.test($(el).attr('name') ?? ''));
+    };
+    const realForms = $('form').filter((_, f) => !isSearchForm(f));
+    const hasForm = realForms.length > 0;
     // Their form's questions: each field's label, placeholder or name (buttons and hidden fields aside).
     const formFields: string[] = [];
-    $('form input, form textarea, form select').each((_, el) => {
+    realForms.find('input, textarea, select').each((_, el) => {
         const $f = $(el);
         const type = ($f.attr('type') ?? '').toLowerCase();
         if (['hidden', 'submit', 'button', 'reset', 'image'].includes(type) || /bot|honeypot|captcha/i.test($f.attr('name') ?? '')) return;
@@ -990,7 +1020,10 @@ export function readImportPage(html: string, url: string): ImportPage {
             // content; a link keeps its label (an icon link to a page still goes somewhere).
             const text = clean($el.text()) || (name === 'a' ? clean($el.attr('aria-label')) : '');
             const cls = `${$el.attr('class') ?? ''} ${$el.attr('id') ?? ''}`;
-            const href = absolutise($el.attr('href') ?? '', base);
+            // A jump to a section of this page keeps its target (#id), to be pointed at that section.
+            const rawHref = ($el.attr('href') ?? '').trim();
+            const jump = /^#[\w-]{1,80}$/.test(rawHref) && anchorIds.has(rawHref.slice(1)) ? rawHref : null;
+            const href = jump ?? absolutise(rawHref, base);
             // A link standing on its own (not inside a sentence — those arrive inside their paragraph)
             // is a button whatever its class: Tailwind and hand-made sites draw "Read more" and
             // "Book now" as plain <a> tags with utility classes (Restorative Futures, 2026-11-08).

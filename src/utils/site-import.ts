@@ -346,6 +346,8 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
     // Their links between their own pages follow onto the new ones; tel:, mailto: and other sites stay.
     const mapHref = (href: string | null): string | null => {
         if (!href) return null;
+        // A jump to a section of the same page: a placeholder until the sections have their ids (pointJumps).
+        if (/^#[\w-]{1,35}$/.test(href)) return `#${JUMP}${href.slice(1)}`;
         if (/^(mailto|tel):/i.test(href)) return cleanHref(href.replace(/\s+/g, ''));
         const i = pages.slice(0, cap).findIndex((p) => samePath(p.url, href));
         if (i >= 0) return i === 0 ? '/' : `/${slugs[i]}`;
@@ -673,7 +675,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
 
     const home = pages[0].page;
     const contact = importedContact(pages);
-    const { definition, warnings } = normaliseSiteDefinition({
+    const { definition: drafted, warnings } = normaliseSiteDefinition({
         theme: current.theme,
         settings: {
             ...current.settings,
@@ -693,6 +695,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
             return from !== to ? [{ from, to }] : [];
         }),
     }, { maxPages: input.maxPages });
+    const definition = pointJumps(drafted, blocks, input.maxPages);
 
     const leftOut = [...skip].map((n) => blocks[n - 1]).filter((b) => b && b.block.kind !== 'image' && b.block.kind !== 'button').map((b) => (b.block as { text: string }).text.slice(0, 200));
     return { definition, leftOut, notCarried, warnings };
@@ -738,6 +741,37 @@ export function importedFormFields(pages: ReadPage[]): string[] {
     const withForm = pages.filter((p) => p.page.formFields?.length);
     const best = withForm.find((p) => CONTACT_PAGE.test(new URL(p.url).pathname)) ?? withForm[0];
     return best?.page.formFields ?? [];
+}
+
+/** The placeholder a jump to a section carries until the sections have their ids. */
+const JUMP = 'bmsj-';   // short: the gate keeps in-page anchors of up to 40 characters
+
+/**
+ * Jump buttons and links ("See our work ↓" → #work) pointed at the section they jump to: the section
+ * whose heading sat in the old page's #work. A jump nothing matches goes to the top of its own page, so a
+ * call-to-action keeps its button (2026-11-09).
+ */
+function pointJumps(def: SiteDefinition, blocks: NumberedBlock[], maxPages: number): SiteDefinition {
+    if (!JSON.stringify(def.pages).includes(`#${JUMP}`)) return def;
+    const pages = def.pages.map((pg, i) => {
+        const anchorOf = new Map<string, string>();
+        for (const b of blocks) if (b.page === i && b.block.kind === 'heading' && b.block.anchor) anchorOf.set(b.block.text, b.block.anchor);
+        const target = new Map<string, string>();
+        for (const sec of pg.sections) {
+            const p = sec.props as unknown as Record<string, unknown>;
+            const a = anchorOf.get(String(p.headline ?? p.heading ?? ''));
+            if (a && !target.has(a)) target.set(a, `#${sec.id}`);
+        }
+        const own = pg.slug ? `/${pg.slug}` : '/';
+        const fix = (v: unknown): unknown => {
+            if (typeof v === 'string') return v.startsWith(`#${JUMP}`) ? (target.get(v.slice(JUMP.length + 1)) ?? own) : v.includes(`(#${JUMP}`) ? v.replace(new RegExp(`\\(#${JUMP}([\\w-]+)\\)`, 'g'), (_m, id: string) => `(${target.get(id) ?? own})`) : v;
+            if (Array.isArray(v)) return v.map(fix);
+            if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, fix(x)]));
+            return v;
+        };
+        return { ...pg, sections: pg.sections.map((sec) => ({ ...sec, props: fix(sec.props) })) };
+    });
+    return normaliseSiteDefinition({ ...def, pages }, { maxPages }).definition;
 }
 
 /** The first email, phone and address found across the pages read (home first). */
@@ -996,8 +1030,14 @@ async function withShopFeed(fromPages: NonNullable<ImportReport['products']>, pl
         const url = shopFeedUrl(platform, origin);
         if (!url || !deps.fetchJson || (platform === 'elementor' && !isWooShop(html))) return fromPages;
         const r = await deps.fetchJson(url).catch(() => null);
-        if (!r?.ok) return fromPages;
-        const feed = platform === 'shopify' ? readShopifyFeed(r.html, origin, shopifyCurrency(html)) : readWooFeed(r.html);
+        let feed = r?.ok ? (platform === 'shopify' ? readShopifyFeed(r.html, origin, shopifyCurrency(html)) : readWooFeed(r.html)) : [];
+        // Shopify throttles its JSON feed for scripted clients (429 "retry after 60", live check
+        // 2026-11-09): its "all products" page is an ordinary page, read like the others.
+        if (!feed.length && platform === 'shopify') {
+            const page = await deps.fetchHtml(`${origin}/collections/all`).catch(() => null);
+            if (page?.ok) feed = readImportPage(page.html, page.finalUrl).products ?? [];
+        }
+        if (!feed.length) return fromPages;
         const seen = new Set(fromPages.map((p) => p.name.trim().toLowerCase()));
         const out = [...fromPages];
         for (const p of feed) {

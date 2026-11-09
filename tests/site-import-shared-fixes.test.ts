@@ -12,7 +12,7 @@
 
 import assert from 'node:assert';
 import * as cheerio from 'cheerio';
-import { fullSizeImageUrl, largestFromSrcset, readImportPage, unwrapImageRoute, withoutTracking } from '../src/utils/site-extract';
+import { fullSizeImageUrl, largestFromSrcset, readImportPage, samePhone, unwrapImageRoute, withoutTracking } from '../src/utils/site-extract';
 import { expandThinPage, fillClosedPanels, pageDataBlobs, proseFromData, removePhoneDrawers, spliceStreamed } from '../src/utils/site-page-data';
 import { priceWithCurrency, readShopifyFeed, readWooFeed, shopFeedUrl, shopifyCurrency } from '../src/utils/site-shop-feeds';
 import { adapterFor } from '../src/utils/site-builders';
@@ -187,6 +187,20 @@ async function main() {
         assert.deepStrictEqual(r.report.products?.map((p) => [p.name, p.price]), [['Puff', '£120.00'], ['Tote', '£55.00']]);
     });
 
+    await check('Shopify throttling its JSON feed: the "all products" page is read instead', async () => {
+        const home = `<html><head><script>Shopify.currency = {"active":"GBP"};</script></head><body class="template-index"><div id="shopify-section-header" class="shopify-section"></div><main><h1>Bags</h1><p>${words(260)}</p></main><script src="https://cdn.shopify.com/s/files/theme.js"></script><script>Shopify.theme = {"name":"Dawn"};</script></body></html>`;
+        const all = `<html><body class="template-collection"><div class="shopify-section"></div><main><h1>Products</h1><ul class="product-grid"><li class="grid__item"><div class="card-wrapper product-card-wrapper"><div class="card"><div class="card__content"><h3 class="card__heading"><a href="/products/puff" class="full-unstyled-link">Puff</a></h3><div class="price"><span class="price-item price-item--regular">£120.00 GBP</span></div></div></div></div></li></ul></main><script src="https://cdn.shopify.com/s/files/theme.js"></script><script>Shopify.theme = {"name":"Dawn"};</script></body></html>`;
+        const site: Record<string, string> = { 'https://s.example/': home, 'https://s.example/collections/all': all };
+        const r = await runImport({ url: 'https://s.example/', pictures: 'skip', current: current(), maxPages: 5 }, {
+            async fetchHtml(u) { return site[u] ? { ok: true, html: site[u], finalUrl: u } : { ok: false, message: '404' }; },
+            async fetchJson() { return { ok: false, message: 'That link returned an error (429).' }; },
+            async plan() { return null; }, async savePicture() { return null; },
+        });
+        assert.ok(r.ok, !r.ok ? r.message : '');
+        if (!r.ok) return;
+        assert.ok(r.report.products?.some((p) => p.name === 'Puff'), JSON.stringify(r.report.products));
+    });
+
     console.log('\n7. One-page sites');
 
     await check('a one-page site whose menu jumps to sections becomes a one-page hosted site with that menu', async () => {
@@ -212,6 +226,46 @@ async function main() {
         const site: Record<string, string> = { 'https://k.example/': home, 'https://k.example/prices': prices };
         const r = await runImport({ url: 'https://k.example/', pictures: 'skip', current: current(), maxPages: 5 }, { async fetchHtml(u) { return site[u] ? { ok: true, html: site[u], finalUrl: u } : { ok: false, message: '404' }; }, async plan() { return null; }, async savePicture() { return null; } });
         assert.ok(r.ok && r.definition.structure === 'pages' && r.definition.pages.length >= 2);
+    });
+
+    console.log('\n8. Jump buttons, search boxes, phone numbers');
+
+    await check('a "See our work" button jumps to the section it jumped to on the old page; an unmatched jump goes to the page top', async () => {
+        const html = `<html><body><main>
+<section id="intro"><h1>Hannah Lee Illustration</h1><p>${words(60, 'i')}</p><a class="btn" href="#work">See our work</a><a class="btn" href="#nowhere-matched">Talk to us</a></section>
+<section id="work"><h2>Selected work</h2><p>${words(60, 'w')}</p></section>
+<section id="nowhere-matched"><p>${words(20, 'n')}</p></section></main></body></html>`;
+        const p = readImportPage(html, 'https://h.example/');
+        assert.deepStrictEqual(p.blocks.filter((b) => b.kind === 'button').map((b) => (b as { href: string }).href), ['#work', '#nowhere-matched']);
+        const r = await runImport({ url: 'https://h.example/', pictures: 'skip', current: current(), maxPages: 5 }, { async fetchHtml(u) { return u === 'https://h.example/' ? { ok: true, html, finalUrl: u } : { ok: false, message: '404' }; },
+            async plan(prompt) {
+                const n = (t: string) => Number(prompt.user.match(new RegExp(`\\[(\\d+)\\] [^\\n]*${t}`))![1]);
+                return { pages: [{ page: 1, sections: [{ type: 'hero', headline: n('Hannah Lee'), subheadline: null, button: n('See our work'), button2: n('Talk to us') }, { type: 'text', heading: n('Selected work'), body: [n('w0 w1')] }] }], skip: [] };
+            }, async savePicture() { return null; } });
+        assert.ok(r.ok, !r.ok ? r.message : '');
+        if (!r.ok) return;
+        const secs = r.definition.pages[0].sections;
+        const hero = secs.find((x) => x.type === 'hero')!;
+        const work = secs.find((x) => x.type === 'text' && (x.props as { heading: string }).heading === 'Selected work')!;
+        assert.deepStrictEqual((hero.props as { primaryCta: unknown }).primaryCta, { label: 'See our work', href: `#${work.id}` });
+        assert.deepStrictEqual((hero.props as { secondaryCta: unknown }).secondaryCta, { label: 'Talk to us', href: '/' });
+        assert.ok(!JSON.stringify(r.definition).includes('bmsj-'), 'no placeholder left behind');
+    });
+
+    await check('a search box is not a form: no "your old form asked" note for it; a real form still is', () => {
+        const search = readImportPage('<html><body><header><form role="search" action="/search"><input type="search" name="q" placeholder="Search"></form></header><main><h1>Hi</h1><p>Words.</p><form action="/search"><input name="q"></form></main></body></html>', 'https://x.example/');
+        assert.strictEqual(search.hasForm, false);
+        assert.deepStrictEqual(search.formFields, []);
+        const real = readImportPage('<html><body><main><h1>Contact</h1><form action="/contact"><input name="name" placeholder="Your name"><input type="search" name="q"></form></main></body></html>', 'https://x.example/');
+        assert.strictEqual(real.hasForm, true);
+    });
+
+    await check('the same phone number written two ways is listed once', () => {
+        assert.ok(samePhone('01632 960123', '+44 1632 960123'));
+        assert.ok(samePhone('+441632960123', '0044 1632 960123'));
+        assert.ok(!samePhone('01632 960123', '01632 960124'));
+        const p = readImportPage(`<html><head><script type="application/ld+json">${JSON.stringify({ '@type': 'LocalBusiness', name: 'X', telephone: '01632 960123' })}</script></head><body><main><h1>Hi</h1><p>Call <a href="tel:+441632960123">us</a> or <a href="tel:01632 960999">the shop</a>.</p></main></body></html>`, 'https://x.example/');
+        assert.strictEqual(p.contact.phones.length, 2, p.contact.phones.join(' | '));
     });
 
     console.log(`\n${passed}/${total} passed`);
