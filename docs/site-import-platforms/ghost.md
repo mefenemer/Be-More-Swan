@@ -48,7 +48,9 @@ All in `tests/site-platform-ghost.test.ts`:
   `mage\/` matches `image/png` / `image/svg+xml`, which almost every site has in its favicon `<link type=…>`. Ghost is listed after
   Magento, so real Ghost home pages read as Magento and get none of this adapter. Fix: `/Magento_|\/static\/version\d+\/|requirejs-config|mage\/(?:cookies|bootstrap)/`.
   Safer order in `index.ts`: adapters whose evidence is the generator tag (ghost, drupal, joomla, hubspot) before the
-  substring-only ones (magento, aem, sitecore, strapi, godaddy, bigcommerce). Told the Magento session.
+  substring-only ones (magento, aem, sitecore, strapi, godaddy, bigcommerce). **Fixed by the Magento session** on
+  `claude/laughing-blackwell-36511d` (5aea3b1c, tests 605fe980): no bare `mage/` any more, and a test asserts that image/png pages are not Magento.
+  It reaches Ghost once that branch is merged. When it is, drop the favicon strip in `tests/site-platform-ghost.test.ts`.
 - **Ghost fonts — S, `site-import-theme.ts`**: read `--gh-font-heading` / `--gh-font-body` from inline `<style>` (theme CSS uses
   `var(--gh-font-heading, …)`, which `firstFamily` can't resolve). Today `font` is null for Ghost.
 - **Text colour read as the accent — S, `brand-extract.ts`/`site-import-theme.ts`**: with only the accent variable inline,
