@@ -103,7 +103,8 @@ const absolute = (href: string | undefined, base: string): string | null => {
 };
 
 /** An index page's own address that says "blog" — its children are posts even without a builder's marker. */
-const BLOGGY_INDEX = /(?:^|\/)(?:blog|blogs|news|journal|articles?|insights|stories|updates|diary|posts|musings)(?:\/|$)/i;
+// A builder adds a number when the name is taken (Wix: /blog-1).
+const BLOGGY_INDEX = /(?:^|\/)(?:blog|blogs|news|journal|articles?|insights|stories|updates|diary|posts|musings)(?:-\d+)?(?:\/|$)/i;
 
 /**
  * Whether `url` (on the old site) looks like one post, seen from the index page `indexUrl`. A page
@@ -167,7 +168,10 @@ export function findBlogIndex(html: string, url: string, menuUrls: string[] = []
     const feed = feeds.find((f) => index !== '/' && pathOf(f.href).startsWith(index)) ?? feeds[0] ?? null;
     const wpApi = absolute($('link[rel="https://api.w.org/"]').attr('href'), url);
 
+    // A blog page whose list is drawn by script (Wix: an empty page with only its blog-feed.xml link,
+    // live check 2026-11-09) is still the blog when its address says so and it names a feed.
     const isIndex = (marker && (links.length >= 1 || !!feed))
+        || (BLOGGY_INDEX.test(index) && !!feed)
         || articles >= 2
         || links.length >= 3;
     if (!isIndex) return null;

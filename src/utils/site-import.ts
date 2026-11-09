@@ -844,6 +844,15 @@ export async function runImport(input: ImportInput, deps: ImportDeps): Promise<I
         const signal = findBlogIndexSafe(home.html, home.finalUrl, menuUrls);
         if (signal) otherBlog = { l: { text: homeLabel ?? 'Blog', href: homePage.url } as SiteLink, signal, page: null, at: -1, finalUrl: home.finalUrl };
     }
+    // Wix keeps every site's posts in one feed, /blog-feed.xml, whatever the menu shows: the blog page can
+    // be left out of the menu, or the menu's "Blog" can be an empty page of its own (live check
+    // 2026-11-09: the menu's /blog-1 was empty, the posts were at /blog). The feed is read like any other.
+    if (!otherBlog && !blog && (homePage.platform === 'wix' || homePage.platform === 'wix-studio')) {
+        try {
+            const origin = new URL(home.finalUrl).origin;
+            otherBlog = { l: { text: 'Blog', href: `${origin}/blog` } as SiteLink, signal: { url: `${origin}/blog`, kind: 'wix', feedUrl: `${origin}/blog-feed.xml`, wpApi: null, postLinks: [] }, page: null, at: -1, finalUrl: `${origin}/blog` };
+        } catch { /* no address, no feed */ }
+    }
     let importedBlog: ImportedBlog | null = null;
     if (otherBlog) {
         const label = otherBlog.at < 0 ? 'Blog' : otherBlog.l.text.slice(0, 30) || 'Blog';

@@ -17,7 +17,9 @@ import { _withRetryForTests } from '../src/utils/site-fetch';
 import { readImportedLook, readsOn } from '../src/utils/site-import-theme';
 import { readImportPage, socialProfile } from '../src/utils/site-extract';
 import { ADAPTERS } from '../src/utils/site-builders';
-import { numberBlocks, planInBatches, PLAN_BATCH_PAGES, withOwnLook, type ReadPage } from '../src/utils/site-import';
+import { numberBlocks, planInBatches, PLAN_BATCH_PAGES, runImport, withOwnLook, type ReadPage } from '../src/utils/site-import';
+import { findBlogIndex } from '../src/utils/site-import-blog';
+import { starterSite, themeFromBrandKit } from '../src/utils/site-draft';
 
 let passed = 0;
 let total = 0;
@@ -136,6 +138,50 @@ async function main() {
         const small = bigSite(3);
         await planInBatches(small, numberBlocks(small).blocks, { siteName: 'S', pictures: 'skip', allowed: () => true }, { async plan() { calls++; return null; } });
         assert.strictEqual(calls, 1);
+    });
+
+    console.log('\nWix blogs');
+
+    await check('a blog page whose list is drawn by script still counts when its address and feed say so (incl. /blog-1)', () => {
+        const page = '<html><head><meta name="generator" content="Wix.com Website Builder"><link rel="alternate" href="https://w.example/blog-feed.xml" type="application/rss+xml" title="W - RSS"></head><body><main><p>Loading…</p></main></body></html>';
+        assert.strictEqual(findBlogIndex(page, 'https://w.example/blog', [])?.feedUrl, 'https://w.example/blog-feed.xml');
+        assert.ok(findBlogIndex(page, 'https://w.example/blog-1', []), '/blog-1 is a blog address too');
+        assert.strictEqual(findBlogIndex(page, 'https://w.example/about', []), null, 'a feed alone does not make any page the blog');
+    });
+
+    await check('a Wix site whose menu has no usable blog page still brings its posts, from /blog-feed.xml', async () => {
+        const home = `<!doctype html><html><head><meta name="generator" content="Wix.com Website Builder"></head><body><header><nav><a href="https://w.example/">Home</a><a href="https://w.example/blog-1">Blog</a></nav></header><main><h1>Wellness</h1><p>${'Coaching for nurses who want to grow and thrive in their careers. '.repeat(15)}</p></main><img src="https://static.wixstatic.com/media/a.jpg" width="1" height="1"></body></html>`;
+        const post = (t: string) => `<!doctype html><html><head><meta name="generator" content="Wix.com Website Builder"><meta property="og:title" content="${t}"></head><body><main><article><h1>${t}</h1><p>${'The words of the post, written by the owner. '.repeat(20)}</p></article></main></body></html>`;
+        const feed = '<?xml version="1.0"?><rss version="2.0"><channel><title>W</title><item><title>First post</title><link>https://w.example/post/first-post</link><pubDate>Mon, 02 Nov 2026 10:00:00 GMT</pubDate></item></channel></rss>';
+        const site: Record<string, string> = { 'https://w.example/': home, 'https://w.example/blog-1': '<html><head><meta name="generator" content="Wix.com Website Builder"></head><body><main></main></body></html>', 'https://w.example/blog-feed.xml': feed, 'https://w.example/post/first-post': post('First post') };
+        const r = await runImport({ url: 'https://w.example/', pictures: 'skip', current: starterSite({ name: 'W', industry: null, description: null, audience: null, websiteUrl: null, email: 'o@a.example' }, themeFromBrandKit(null)), maxPages: 5 }, {
+            async fetchHtml(u) { const h = site[u]; return h ? { ok: true, html: h, finalUrl: u } : { ok: false, message: 'That link returned an error (404).' }; },
+            async plan() { return null; }, async savePicture() { return null; },
+        });
+        assert.ok(r.ok, !r.ok ? r.message : '');
+        assert.strictEqual(r.ok && r.report.platform, 'wix');
+        assert.deepStrictEqual(r.ok && r.report.blog?.posts.map((p) => p.title), ['First post']);
+    });
+
+    console.log('\nHelp Centre and the public connections page');
+
+    await check('two Help Centre articles: bringing your site across, and designing it (dated file, house rules)', () => {
+        const sql = read('db/help-articles-website-import-design-2026-11-09.sql');
+        for (const t of ['Bringing Your Current Website Across', 'Designing Your Website']) assert.ok(sql.includes(`'${t}'`), t);
+        for (const body of sql.match(/\$\$[\s\S]*?\$\$/g) ?? []) assert.ok(!body.includes(';'), 'no semicolons inside a body');
+        assert.ok(sql.includes('ON CONFLICT (title) DO NOTHING'));
+        for (const label of ['Read my site', 'Preview the imported site', 'Add ticked products to Business Information', 'Tint for alternate sections', 'Old addresses that forward here']) {
+            assert.ok(read('src/components/assistant-site-editor.js').includes(label), `the app says "${label}"`);
+        }
+    });
+
+    await check('/connections lists bringing your current website across as Live, and its count follows', () => {
+        const html = read('connections.html');
+        const at = html.indexOf('<section id="website"');
+        const section = html.slice(at, html.indexOf('</section>', at));
+        assert.ok(section.includes('<h4>Your current website</h4><span class="cx-pill cx-live">Live</span>'));
+        assert.strictEqual((section.match(/data-live="1"/g) ?? []).length, 2);
+        assert.ok(section.includes('<span class="cx-count">2 live</span>'));
     });
 
     console.log(`\n${passed}/${total} passed`);
