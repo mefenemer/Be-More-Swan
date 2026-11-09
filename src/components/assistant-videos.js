@@ -590,7 +590,7 @@
             <div class="flex gap-2"><button type="submit" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Plan it again</button>
               <button type="button" data-vid-act="cancel-replan" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Cancel</button></div>
           </form>` : ''}
-        ${v.status !== 'cancelled' && v.status !== 'built' && v.status !== 'planning' && v.status !== 'building' && v.status !== 'reviewing' ? `
+        ${!['cancelled', 'built', 'planning', 'building', 'reviewing', 'rendering', 'ready'].includes(v.status) ? `
           <div class="flex flex-wrap gap-2 mt-3">
             ${canMake ? `<button type="button" data-vid-act="build" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Make the video${esc(cost)}</button>` : ''}
             ${!replanning && v.status !== 'reviewed' ? `<button type="button" data-vid-act="replan" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Plan it again</button>` : ''}
