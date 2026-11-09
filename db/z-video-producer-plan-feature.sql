@@ -29,7 +29,7 @@ INSERT INTO plan_features (key, label, description, category, value_type, storag
 VALUES (
   'video_producer',
   'Video Producer',
-  'Short vertical videos with a voiceover and captions, from a storyboard you approve. AI clips use 20 tasks each',
+  'Short videos with a voiceover and captions, from a storyboard you approve, saved to My Content. AI clips use 20 tasks each',
   'AI Media Generation', 'boolean', 'feature', 'true',
   (SELECT COALESCE(MAX(display_order), 0) + 1 FROM plan_features WHERE key = 'ai_video_generation'),
   true

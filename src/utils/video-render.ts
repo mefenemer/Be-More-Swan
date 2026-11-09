@@ -24,6 +24,7 @@ import { RENDER_FPS, renderableOverlays, resolveAudioTracks, resolveCaptionTrack
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../lib/remotion-lambda';
 import { recordPlatformIncident } from './platform-incident';
 import type { ProjectTimeline } from './video-producer';
+import { SOURCE_POST_NOTES, attachVideoToSourcePost, placeVideoOnCampaignPost } from './video-post-media';
 import type { Storyboard } from '../lib/storyboard';
 
 type Db = ReturnType<typeof getDb>;
@@ -132,7 +133,18 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
             renderParams: { kind: 'video_producer', projectId, version: p.version, containsAi: containsAi(sb), suggestedWords: sb?.caption ?? null },
             status: 'pending',
         }).returning({ id: contentAssets.id });
-        await db.update(videoProjects).set({ status: 'ready', outputAssetId: asset.id, renderId: null, note: null, updatedAt: new Date() })
+        // Made FOR a post — "Make a video version", or a campaign — it goes back to it (Phase 5, D-S4).
+        // The note says where it went; the video is in My Content whatever happens.
+        let note: string | null = null;
+        const shape = (p.brief as { shape?: string } | null)?.shape ?? '9:16';
+        if (p.sourcePostId) {
+            note = SOURCE_POST_NOTES[await attachVideoToSourcePost(db, { orgId, userId: p.createdBy, postId: p.sourcePostId, assetId: asset.id, shape })];
+        } else if (p.campaignId) {
+            note = await placeVideoOnCampaignPost(db, { orgId, campaignId: p.campaignId, assetId: asset.id, shape })
+                ? 'It’s now on one of the campaign’s posts, waiting for your approval in the Review Queue.'
+                : null;
+        }
+        await db.update(videoProjects).set({ status: 'ready', outputAssetId: asset.id, renderId: null, note, updatedAt: new Date() })
             .where(eq(videoProjects.id, projectId));
     } catch (err) {
         console.error(`[video-render] project ${projectId} failed:`, err);

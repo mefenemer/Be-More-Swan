@@ -10,6 +10,7 @@ import { VIDEO_SHAPES, isVideoShape, shapeFrame, shapeOrientation, storyboardUse
 import { readBrief, withSetupDefaults, buildTasks, stillToMake } from '../src/utils/video-producer';
 import { outputName, containsAi } from '../src/utils/video-render';
 import { judgeVideoProject } from '../src/utils/campaign-video-order';
+import { videoFormatFor } from '../src/utils/video-post-media';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -191,6 +192,33 @@ check('words-only scene edits keep the clip; a branded card or a new picture is 
 
 check('a ready or rendering video has no "Plan it again" / "Cancel" row — it has Change it', () => {
     assert.ok(read('src/components/assistant-videos.js').includes("!['cancelled', 'built', 'planning', 'building', 'reviewing', 'rendering', 'ready'].includes(v.status)"));
+});
+
+// ── Phase 5: back to the post it was made for ───────────────────────────────────────────────────
+
+check('a video format per platform and shape: Reel / Short for vertical, YouTube video for wide, none for Threads', () => {
+    assert.strictEqual(videoFormatFor('instagram', '9:16')?.key, 'ig_reel');
+    assert.strictEqual(videoFormatFor('youtube', '9:16')?.key, 'yt_short');
+    assert.strictEqual(videoFormatFor('youtube', '16:9')?.key, 'yt_vod');
+    assert.ok(videoFormatFor('linkedin', '1:1'));
+    assert.ok(videoFormatFor('threads', '9:16') === null || videoFormatFor('threads', '9:16')!.media !== 'image');
+});
+
+check('the video goes onto its post only when that is safe, else a new draft beside it', () => {
+    const m = read('src/utils/video-post-media.ts');
+    const a = m.slice(m.indexOf('export async function attachVideoToSourcePost'), m.indexOf('export async function placeVideoOnCampaignPost'));
+    assert.ok(a.includes('isMediaEditable(post.status) && fmt && !hasOverlays(post.imageOverlays)'), 'only an editable post on a video platform with no text on its picture');
+    assert.ok(a.includes("status: 'pending_approval'") && a.includes("return 'new_draft'"), 'otherwise a draft beside it — nothing the owner made is replaced');
+    assert.ok(!a.includes("status: 'scheduled'"));
+    const c = m.slice(m.indexOf('export async function placeVideoOnCampaignPost'));
+    assert.ok(c.includes('carriesOnlyItsOwnPick(db, id, t.auto)'), 'a campaign video never replaces a picture the user chose');
+});
+
+check('the render puts a finished video back where it was made for, and says so', () => {
+    const r = read('src/utils/video-render.ts');
+    assert.ok(r.indexOf('attachVideoToSourcePost(db,') < r.indexOf("status: 'ready', outputAssetId: asset.id"));
+    assert.ok(r.includes('placeVideoOnCampaignPost(db,'));
+    assert.ok(read('src/utils/video-handoff.ts').includes("shape: '9:16',"));
 });
 
 console.log(`\nvideo studio: ${passed} passed`);
