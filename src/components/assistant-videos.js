@@ -4,7 +4,8 @@
  *
  * A video goes: brief → storyboard (planned in the background, free) → the owner checks every scene,
  * changes any, or plans it again with notes → "Make the video" (states the tasks first) → a finished
- * post in the Review Queue.
+ * video in My Content (docs/video-producer-studio-plan.md) — played and downloaded here. Videos made
+ * before 2026-11-09 ('built') are posts in the Review Queue and stay that way.
  *
  * Backed by netlify/functions/video-projects.ts — the SAME actions the chat cards call (chat-session.js
  * → video:create / video:replan), so the two can never disagree. Writes from the chat dispatch
@@ -38,15 +39,18 @@
   const DEFAULT_VOICE = 'british_woman';
   const WAITING = {
     reviewing: 'Watching your footage — a minute or two. You can leave this page.',
+    rendering: 'Made — rendering the finished video, a few minutes. You can leave this page.',
+    ready: 'Ready. It’s in My Content — play it here, or download it.',
+    render_failed: 'Made, but the finished video failed to render.',
     reviewed: 'Footage reviewed. Tick the edits you want, then press “Make the storyboard”.',
     planning: 'Writing the storyboard — about a minute.',
     planned: 'Storyboard ready. Check the scenes, then press “Make the video”.',
     building: 'Making the video — a few minutes. You can leave this page.',
     built: 'Made. It’s in the Review Queue waiting for your approval.',
     // Not a project status: built, and its finished file is still rendering (video-producer.ts renderFinishedVideo).
-    rendering: 'Made — the finished video is rendering, a few minutes. Watch it in the Review Queue once it’s done.',
+    post_rendering: 'Made — the finished video is rendering, a few minutes. Watch it in the Review Queue once it’s done.',
     // Not a project status: a built project whose post then failed its final render (postRenderStatus).
-    render_failed: 'Made, but the final render failed. Open it in the Review Queue to try the render again.',
+    post_render_failed: 'Made, but the final render failed. Open it in the Review Queue to try the render again.',
     failed: 'Stopped.',
     cancelled: 'Cancelled.',
   };
@@ -69,9 +73,10 @@
   // Stages as pills, like the Brand Designer's Briefs (owner, 2026-11-06: the Briefs tab's patterns on
   // every assistant's work tab). "To check" is what waits for the owner, so the tab opens there.
   const STAGES = [
-    { key: 'check', label: 'To check', statuses: ['reviewed', 'planned', 'failed'], urgent: true },
-    { key: 'making', label: 'Being made', statuses: ['reviewing', 'planning', 'building'] },
-    { key: 'made', label: 'Made', statuses: ['built'] },
+    { key: 'check', label: 'To check', statuses: ['reviewed', 'planned', 'failed', 'render_failed'], urgent: true },
+    { key: 'making', label: 'Being made', statuses: ['reviewing', 'planning', 'building', 'rendering'] },
+    // 'built' = made the old way, before 2026-11-09: its post is in the Review Queue.
+    { key: 'made', label: 'Ready', statuses: ['ready', 'built'] },
     { key: 'cancelled', label: 'Cancelled', statuses: ['cancelled'] },
   ];
   const inStage = (key) => {
@@ -126,7 +131,7 @@
 
   function schedulePoll() {
     clearTimeout(state.pollTimer);
-    if (state.videos.some((v) => v.status === 'reviewing' || v.status === 'planning' || v.status === 'building' || (v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering')))) state.pollTimer = setTimeout(load, POLL_MS);
+    if (state.videos.some((v) => v.status === 'reviewing' || v.status === 'planning' || v.status === 'building' || v.status === 'rendering' || (v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering')))) state.pollTimer = setTimeout(load, POLL_MS);
   }
 
   function updateBadge() {
@@ -164,6 +169,18 @@
   }
   const sel = (on) => (on ? ' selected' : '');
 
+  // The finished video's shape (docs/video-producer-studio-plan.md, D-S2). The Video Producer makes a
+  // video for anywhere and saves it to My Content — where it is posted is the Social Media Manager's call.
+  const SHAPES = [['9:16', 'Vertical 9:16', 'Reels, Shorts, Stories'], ['1:1', 'Square 1:1', 'feeds'], ['16:9', 'Wide 16:9', 'YouTube, websites']];
+  function shapeHtml() {
+    const d = ['9:16', '1:1', '16:9'].includes(String((state.setup || {}).defaultShape)) ? String(state.setup.defaultShape) : '9:16';
+    return `<fieldset><legend class="text-xs font-bold text-gray-600 mb-1">Shape</legend>
+          <div class="flex flex-wrap gap-3 text-sm text-gray-700">${SHAPES.map(([v, l, h]) => `
+            <label class="inline-flex items-center gap-1.5"><input type="radio" name="shape" value="${v}"${v === d ? ' checked' : ''}> ${esc(l)} <span class="text-xs text-gray-500">${esc(h)}</span></label>`).join('')}
+          </div>
+          <p class="text-[11px] text-gray-500 mt-1">The finished video is saved to My Content. Download it, or hand it to your Social Media Manager or Blog Writer to use.</p></fieldset>`;
+  }
+
   function formHtml() {
     if (!state.form) return '';
     const d = setupDefaults();
@@ -195,12 +212,7 @@
           <button type="button" data-vid-act="caption-style" class="text-xs font-bold text-indigo-700 hover:underline cursor-pointer">Change the look</button>
           <input type="hidden" name="captionStyle" value="${esc(d.captionStyle ? JSON.stringify(d.captionStyle) : '')}">
         </div>
-        <fieldset><legend class="text-xs font-bold text-gray-600 mb-1">Post it as</legend>
-          <div class="flex flex-wrap gap-3 text-sm text-gray-700">
-            <label class="inline-flex items-center gap-1.5"><input type="checkbox" name="platforms" value="instagram" checked> Instagram Reel</label>
-            <label class="inline-flex items-center gap-1.5"><input type="checkbox" name="platforms" value="youtube"> YouTube Short</label>
-            <label class="inline-flex items-center gap-1.5"><input type="checkbox" name="platforms" value="facebook"> Facebook Reel</label>
-          </div></fieldset>
+        ${shapeHtml()}
         <p class="text-xs text-gray-500">Planning the storyboard is free. You check every scene before anything is made.</p>
         <div class="flex flex-wrap gap-2">
           <button type="submit" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Plan this video</button>
@@ -318,12 +330,7 @@
         </div>
         <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Where it can't use your footage</span>
           <select name="allowAi" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="stock_only"${sel(d.allowAi === 'stock_only')}>Stock footage and branded cards</option><option value="stock_and_ai"${sel(d.allowAi !== 'stock_only')}>Stock, branded cards, or AI where it fits</option></select></label>
-        <fieldset><legend class="text-xs font-bold text-gray-600 mb-1">Post it as</legend>
-          <div class="flex flex-wrap gap-3 text-sm text-gray-700">
-            <label class="inline-flex items-center gap-1.5"><input type="checkbox" name="platforms" value="instagram" checked> Instagram Reel</label>
-            <label class="inline-flex items-center gap-1.5"><input type="checkbox" name="platforms" value="youtube"> YouTube Short</label>
-            <label class="inline-flex items-center gap-1.5"><input type="checkbox" name="platforms" value="facebook"> Facebook Reel</label>
-          </div></fieldset>
+        ${shapeHtml()}
         <label class="flex items-start gap-1.5 text-sm text-gray-700"><input type="checkbox" name="consent" required class="mt-1"> I have permission to use the people and music in these videos.</label>
         <p class="text-xs text-gray-500">Reviewing a video ${who()} hasn’t seen before uses ${REVIEW_TASKS} tasks; videos it has already reviewed are free. Your videos are never changed — edits only go into the new video.</p>
         <p data-vid-footage-progress class="text-xs font-semibold text-gray-700" role="status">${esc(f.progress)}</p>
@@ -387,7 +394,7 @@
         message: String(fd.get('message') || ''), lengthS: Number(fd.get('lengthS')), cta: String(fd.get('cta') || ''),
         voiceover: !!voice, voice: voice || undefined, allowAi: String(fd.get('allowAi') || 'stock_only'),
         captions: !!fd.get('captions'), ...(captionStyle ? { captionStyle } : {}),
-        platforms: fd.getAll('platforms').map(String), footageAssetIds: ids, footageConsent: true,
+        shape: String(fd.get('shape') || '9:16'), footageAssetIds: ids, footageConsent: true,
         tighten: !!fd.get('tighten'),
       };
       await call('POST', { action: 'create', assistantId: state.assistantId, brief });
@@ -473,6 +480,29 @@
       </li>`;
   }
 
+  /** A finished studio video: the player, its length and shape, Download, "Contains AI"; or the retry. */
+  function readyHtml(v) {
+    if (v.status === 'render_failed') {
+      return `<div class="mt-3"><button type="button" data-vid-act="rerender" data-id="${v.id}" ${state.busy.has(v.id) ? 'disabled' : ''} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Try the render again — free</button></div>`;
+    }
+    if (v.status !== 'ready' || !v.outputUrl) return '';
+    const shape = (v.brief && v.brief.shape) || '9:16';
+    const wide = shape === '16:9';
+    const ai = v.storyboard && (v.storyboard.scenes || []).some((s) => s.source === 'ai_video' || s.source === 'ai_image');
+    return `
+      <div class="mt-3 flex flex-col sm:flex-row gap-3 items-start">
+        <video src="${esc(v.outputUrl)}" controls playsinline preload="metadata" class="${wide ? 'w-full sm:w-96' : shape === '1:1' ? 'w-56' : 'w-44'} rounded-lg bg-black shrink-0"></video>
+        <div class="min-w-0 space-y-2">
+          <p class="text-xs text-gray-600">${v.outputDurationS ? `${Math.round(v.outputDurationS)} s · ` : ''}${esc(SHAPES.find((x) => x[0] === shape)?.[1] || shape)}${v.version > 1 ? ` · version ${esc(v.version)}` : ''}${ai ? ' · <span class="font-semibold text-amber-800">Contains AI</span>' : ''}</p>
+          ${v.storyboard && v.storyboard.caption ? `<p class="text-xs text-gray-600"><span class="font-bold">Suggested words to post with it:</span> ${esc(v.storyboard.caption)}</p>` : ''}
+          <div class="flex flex-wrap gap-2">
+            <a href="/.netlify/functions/content-asset-download?assetId=${encodeURIComponent(v.outputAssetId)}" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Download</a>
+          </div>
+          <p class="text-[11px] text-gray-500">Saved in My Content, where your other assistants can use it.</p>
+        </div>
+      </div>`;
+  }
+
   /** "✂ 2 pauses, 1 “um” cut — 3.1 s shorter" and the switch back (own footage in its own sound). */
   function tightenHtml(v, s, editable) {
     const b = v.brief || {};
@@ -517,7 +547,7 @@
               class="flex items-start gap-1.5 text-left text-sm font-bold text-gray-900 break-words cursor-pointer hover:text-gray-700">
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
               <span>${esc(v.title)}</span></button>
-            <p class="text-xs text-gray-600 mt-0.5">${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'rendering' : v.status] || v.status)}</p>
+            <p class="text-xs text-gray-600 mt-0.5">${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
             ${v.note ? `<p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1 mt-1.5">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
@@ -527,6 +557,7 @@
         ${folded ? '' : `<div data-vid-body>
         ${Array.isArray(v.changes) && v.changes.length && (v.status === 'planned' || v.status === 'failed')
           ? `<details class="mt-2"><summary class="text-xs text-gray-500 cursor-pointer">What ${who()} adjusted (${v.changes.length})</summary><ul class="list-disc ml-5 mt-1 text-xs text-gray-600">${v.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></details>` : ''}
+        ${readyHtml(v)}
         ${reviewHtml(v)}
         ${sb && sb.scenes && sb.scenes.length ? `<ol class="mt-3 space-y-2">${sb.scenes.map((s, i) => sceneHtml(v, s, i)).join('')}</ol>` : ''}
         ${sb && sb.caption ? `<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Caption:</span> ${esc(sb.caption)}</p>` : ''}
@@ -722,7 +753,8 @@
       case 'cancel-edit': state.editing = null; render(); break;
       case 'replan': state.replanning = id; render(); break;
       case 'cancel-replan': state.replanning = null; render(); break;
-      case 'build': act(id, { action: 'build', id }, 'Making the video — it lands in the Review Queue when it’s done.'); break;
+      case 'build': act(id, { action: 'build', id }, 'Making the video — it’s saved to My Content when it’s done.'); break;
+      case 'rerender': act(id, { action: 'rerender', id }, 'Rendering the finished video again — a few minutes.'); break;
       case 'cancel': act(id, { action: 'cancel', id }, null); break;
       case 'open-review': document.querySelector('[data-maintab="review-queue"]')?.click(); break;
     }
@@ -763,7 +795,7 @@
         message: String(fd.get('message') || ''), lengthS: Number(fd.get('lengthS')), cta: String(fd.get('cta') || ''),
         voiceover: !!voice, voice: voice || undefined, allowAi: String(fd.get('allowAi') || 'stock_and_ai'),
         captions: !!fd.get('captions'), ...(captionStyle ? { captionStyle } : {}),
-        platforms: fd.getAll('platforms').map(String),
+        shape: String(fd.get('shape') || '9:16'),
       };
       const msg = f.querySelector('[data-vid-form-msg]');
       f.querySelectorAll('button').forEach((x) => { x.disabled = true; });

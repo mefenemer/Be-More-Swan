@@ -26,6 +26,26 @@ export const BEATS = ['hook', 'problem', 'value', 'proof', 'cta'] as const;
 export type Beat = typeof BEATS[number];
 
 export const VIDEO_LENGTHS = [15, 30, 60] as const;
+
+/**
+ * The shape of the finished video (owner decision D-S2, 2026-11-09): the Video Producer makes a video
+ * for anywhere, so it asks for a shape, never platforms. Vertical for Reels, Shorts and Stories;
+ * square for feeds; wide for YouTube and websites.
+ */
+export const VIDEO_SHAPES = ['9:16', '1:1', '16:9'] as const;
+export type VideoShape = typeof VIDEO_SHAPES[number];
+export const SHAPE_LABELS: Record<VideoShape, string> = { '9:16': 'vertical (9:16)', '1:1': 'square (1:1)', '16:9': 'wide (16:9)' };
+export function isVideoShape(v: unknown): v is VideoShape {
+    return (VIDEO_SHAPES as readonly string[]).includes(String(v));
+}
+/** The frame a shape renders at — even pixels, 1080 on the short side. Pure. */
+export function shapeFrame(shape: VideoShape | null | undefined): { width: number; height: number } {
+    return shape === '1:1' ? { width: 1080, height: 1080 } : shape === '16:9' ? { width: 1920, height: 1080 } : { width: 1080, height: 1920 };
+}
+/** Stock search orientation for a shape. Pure. */
+export function shapeOrientation(shape: VideoShape | null | undefined): 'portrait' | 'landscape' | 'square' {
+    return shape === '1:1' ? 'square' : shape === '16:9' ? 'landscape' : 'portrait';
+}
 export type VideoLength = typeof VIDEO_LENGTHS[number];
 export type AiAllowance = 'stock_only' | 'stock_and_ai' | 'ai_first';
 
@@ -60,6 +80,8 @@ export interface VideoBrief {
     footageAssetIds?: number[];
     /** Cut pauses, "um"s and repeated takes out of own footage in its own sound. Absent = on. */
     tighten?: boolean;
+    /** The finished video's shape. Absent = vertical 9:16 (every video before 2026-11-09). */
+    shape?: VideoShape;
 }
 
 export interface Scene {
@@ -362,7 +384,7 @@ export function estimateCredits(storyboard: Storyboard, brief: VideoBrief, costs
 // ── The planner prompt ──────────────────────────────────────────────────────────────────────────
 
 export function storyboardSystemPrompt(): string {
-    return `You are a short-form video producer for a small business. You plan vertical (9:16) promo videos for Instagram Reels, YouTube Shorts and Facebook.
+    return `You are a short-form video producer for a small business. You plan short promo videos (vertical 9:16 unless told another shape) that the business can post anywhere or use on its website.
 
 Rules:
 - One idea per video. Open with a hook that lands in under 3 seconds. End with the call to action.
@@ -399,6 +421,7 @@ export function storyboardUserPrompt(args: {
         : `Prefer stock; AI is allowed where stock would not fit (at most ${MAX_AI_CLIPS} ai_video scenes).`;
     return [
         `Today is ${args.today}.`,
+        brief.shape && brief.shape !== '9:16' ? `SHAPE: the video is ${SHAPE_LABELS[brief.shape]}, not vertical — frame every scene for that.` : '',
         `BUSINESS: ${args.businessName}`,
         args.businessFacts ? `BUSINESS INFORMATION:\n${args.businessFacts}` : '',
         brief.footageAssetIds?.length

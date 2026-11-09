@@ -5419,6 +5419,15 @@ export const videoProjects = pgTable("video_projects", {
   // db/z-video-producer-footage.sql — a video from the owner's own footage: what was seen, the
   // suggested edits and the owner's ticks (src/lib/footage.ts FootageReview). NULL for other videos.
   footageReview: jsonb("footage_review"),
+  // db/z-video-producer-studio.sql — the video as a studio makes it (docs/video-producer-studio-plan.md):
+  // the timeline the build assembled, rendered to `outputAssetId` in My Content. No post is made.
+  timeline: jsonb(),
+  outputAssetId: integer("output_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  version: integer().notNull().default(1),
+  parentProjectId: integer("parent_project_id"),
+  renderId: text("render_id"),
+  renderBucket: text("render_bucket"),
+  renderRegion: text("render_region"),
   startedAt: timestamp("started_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
