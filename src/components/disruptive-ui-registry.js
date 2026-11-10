@@ -1706,11 +1706,14 @@
       button: 'Approve the script', body: id ? { action: 'approve_script', id } : null, done: 'Approved. Check the pictures on the Videos tab, then press “Make the video”.',
     });
   }
-  // { type: 'video_options_proposal', projectId, musicMood?, anotherTrack?, look?, lowerThird?, summary? }
+  // { type: 'video_options_proposal', projectId, musicMood?, musicAssetId?, musicTitle?, anotherTrack?, look?, lowerThird?, summary? }
+  // musicAssetId: a track of the owner's own from My Content; the server checks it is theirs.
   function renderVideoOptionsProposalCard(ui, esc) {
     const id = videoId(ui);
     const body = { action: 'set_options', id };
-    if (VIDEO_MUSIC[ui.musicMood]) body.musicMood = ui.musicMood;
+    const trackId = Number(ui.musicAssetId);
+    if (Number.isInteger(trackId) && trackId > 0) body.musicAssetId = trackId;
+    else if (VIDEO_MUSIC[ui.musicMood]) body.musicMood = ui.musicMood;
     if (ui.anotherTrack === true) body.anotherTrack = true;
     if (VIDEO_LOOKS[ui.look]) body.look = ui.look;
     if (VIDEO_LOWER_THIRDS[ui.lowerThird]) body.lowerThird = ui.lowerThird;
@@ -1719,6 +1722,7 @@
       kicker: 'Change the music and look',
       rows: [
         ui.summary ? ['What changes', String(ui.summary).slice(0, 200)] : null,
+        body.musicAssetId ? ['Music', ui.musicTitle ? `“${String(ui.musicTitle).slice(0, 80)}” from My Content` : `Your track #${body.musicAssetId} from My Content`] : null,
         body.musicMood ? ['Music', VIDEO_MUSIC[body.musicMood]] : null,
         body.anotherTrack ? ['Music', 'Another track, same mood'] : null,
         body.look ? ['Colour look', VIDEO_LOOKS[body.look]] : null,

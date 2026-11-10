@@ -35,7 +35,8 @@
   const mmss = (n) => { const t = Math.max(0, Math.floor(Number(n) || 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
   const BEAT = { hook: 'Hook', problem: 'Problem', value: 'Value', proof: 'Proof', cta: 'Call to action' };
   // The same choices the server reads (src/lib/video-music.ts, video-look.ts, lower-third.ts).
-  const MUSIC = [['auto', 'Picked to suit the video'], ['upbeat', 'Upbeat'], ['chill', 'Chilled'], ['inspiring', 'Inspiring'], ['ambient', 'Calm, in the background'], ['none', 'No music']];
+  // 'mine' = a track of the owner's own from My Content (generated with "✨ Generate music", or uploaded).
+  const MUSIC = [['auto', 'Picked to suit the video'], ['upbeat', 'Upbeat'], ['chill', 'Chilled'], ['inspiring', 'Inspiring'], ['ambient', 'Calm, in the background'], ['mine', 'A track from My Content'], ['none', 'No music']];
   const LOOKS = [['natural', 'Natural (no grade)'], ['brand', 'Your brand colours'], ['warm', 'Warm'], ['cool', 'Cool'], ['punchy', 'Bright and punchy'], ['mono', 'Black and white']];
   const LOWER_THIRDS = [['bar', 'Brand-colour bar, left'], ['clean', 'Plain white words, left'], ['boxed', 'White box, centred']];
   const labelOf = (list, v) => (list.find((x) => x[0] === v) || list[0])[1];
@@ -76,6 +77,9 @@
     footage: null,
     // The ACTIVE Social Media Manager and Blog Writer a finished video can be handed to (Phase 4).
     teammates: null,
+    // The workspace's own tracks for "A track from My Content" (GET ?tracks=1), and the videos whose
+    // Music picker is showing that list before a track is chosen.
+    tracks: null, mineOpen: new Set(),
   };
 
   // Stages as pills, like the Brand Designer's Briefs (owner, 2026-11-06: the Briefs tab's patterns on
@@ -131,8 +135,24 @@
     if (state.rendered) render();
   }
 
+  async function loadTracks() {
+    try {
+      const r = await fetch(`${API}?tracks=1`, { credentials: 'same-origin' });
+      state.tracks = r.ok ? ((await r.json()).tracks || []) : [];
+    } catch { state.tracks = []; }
+    if (state.rendered) render();
+  }
+
+  /** The owner's tracks as <option>s; a note instead when there are none yet. */
+  function trackOptions(selected) {
+    const list = state.tracks || [];
+    return `<option value="">Choose a track…</option>` + list.map((t) => `<option value="${t.assetId}"${sel(Number(selected) === t.assetId)}>${esc(t.title)}${t.durationS ? ` · ${Math.round(t.durationS)}s` : ''}</option>`).join('');
+  }
+  const NO_TRACKS = 'No tracks in My Content yet. Make one with “✨ Generate music” in a post’s Sound layer, or upload one to My Content.';
+
   async function load() {
     if (!state.teammates) loadTeammates();
+    if (!state.tracks) loadTracks();
     try {
       const data = await call('GET', null, `?assistantId=${encodeURIComponent(state.assistantId)}`);
       state.videos = (data.projects || []).filter((p) => p.aiAssistantId == null || p.aiAssistantId === state.assistantId);
@@ -205,8 +225,11 @@
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">What should they do? (optional)</span>
             <input name="goal" maxlength="200" value="${esc(v.goal || d.goal)}" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Book a free taster class"></label>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Music</span>
-            <select name="musicMood" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${options(MUSIC, d.musicMood)}</select>
-            <span class="block text-[11px] text-gray-500 mt-0.5">Royalty-free, from our library. It goes quiet whenever someone speaks.</span></label>
+            <select name="musicMood" data-vid-music-mood class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${options(MUSIC, d.musicMood)}</select>
+            <span data-vid-mine-pick ${d.musicMood === 'mine' ? '' : 'hidden'} class="block mt-1">${(state.tracks || []).length
+              ? `<select name="musicAssetId" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${trackOptions(d.musicAssetId)}</select>`
+              : `<span class="block text-[11px] text-amber-800">${esc(NO_TRACKS)}</span>`}</span>
+            <span class="block text-[11px] text-gray-500 mt-0.5">From our library, or a track of your own. It goes quiet whenever someone speaks.</span></label>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Colour look</span>
             <select name="look" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${options(LOOKS, d.look)}</select></label>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Name captions</span>
@@ -218,7 +241,9 @@
   function briefExtras(fd) {
     return {
       audience: String(fd.get('audience') || ''), goal: String(fd.get('goal') || ''),
-      musicMood: String(fd.get('musicMood') || 'auto'), look: String(fd.get('look') || 'natural'), lowerThird: String(fd.get('lowerThird') || 'bar'),
+      musicMood: String(fd.get('musicMood') || 'auto'),
+      ...(fd.get('musicMood') === 'mine' && Number(fd.get('musicAssetId')) > 0 ? { musicAssetId: Number(fd.get('musicAssetId')) } : {}),
+      look: String(fd.get('look') || 'natural'), lowerThird: String(fd.get('lowerThird') || 'bar'),
     };
   }
   const sel = (on) => (on ? ' selected' : '');
@@ -600,17 +625,26 @@
   function optionsHtml(v) {
     const b = v.brief || {};
     const sb = v.storyboard;
-    if (!sb || !(v.status === 'planned' || v.status === 'failed')) {
+    if (!sb || !(v.status === 'planned' || v.status === 'failed' || v.status === 'render_failed')) {
       if (v.status !== 'ready') return '';
-      const music = b.musicMood === 'none' ? 'No music' : (sb && sb.music ? `“${sb.music.title}” (${labelOf(MUSIC, sb.music.mood).toLowerCase()})` : labelOf(MUSIC, b.musicMood || 'auto'));
-      return `<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Music:</span> ${esc(music)} · <span class="font-bold">Look:</span> ${esc(labelOf(LOOKS, b.look || 'natural'))}${b.audience ? ` · <span class="font-bold">For:</span> ${esc(b.audience)}` : ''}${b.goal ? ` · <span class="font-bold">They should:</span> ${esc(b.goal)}` : ''}</p>`;
+      const mix = v.mix || {};
+      const music = b.musicMood === 'none' ? 'No music'
+        : mix.musicNote ? 'none in this version'
+        : b.musicMood === 'mine' ? (mix.musicTitle ? `“${mix.musicTitle}” (your track)` : 'Your track')
+        : (sb && sb.music ? `“${sb.music.title}” (${labelOf(MUSIC, sb.music.mood).toLowerCase()})` : labelOf(MUSIC, b.musicMood || 'auto'));
+      return `${mix.musicNote ? `<p class="text-xs text-amber-800 mt-2">${esc(mix.musicNote)}</p>` : ''}<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Music:</span> ${esc(music)} · <span class="font-bold">Look:</span> ${esc(labelOf(LOOKS, b.look || 'natural'))}${b.audience ? ` · <span class="font-bold">For:</span> ${esc(b.audience)}` : ''}${b.goal ? ` · <span class="font-bold">They should:</span> ${esc(b.goal)}` : ''}</p>`;
     }
-    const mood = MUSIC.some((x) => x[0] === b.musicMood) ? b.musicMood : 'auto';
+    const mine = b.musicMood === 'mine' || state.mineOpen.has(v.id);
+    const mood = mine ? 'mine' : (MUSIC.some((x) => x[0] === b.musicMood) ? b.musicMood : 'auto');
+    const minePick = !mine ? '' : (state.tracks || []).length
+      ? `<select data-vid-opt="musicAssetId" data-id="${v.id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5" aria-label="Your track">${trackOptions(b.musicMood === 'mine' ? b.musicAssetId : null)}</select>`
+      : `<span class="block mt-1 text-[11px] text-amber-800">${esc(NO_TRACKS)}</span>`;
     return `
       <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2" data-vid-options="${v.id}">
-        <label class="block"><span class="block text-[11px] font-bold text-gray-600">Music${sb.music && mood !== 'none' ? ` — “${esc(sb.music.title)}”` : ''}</span>
+        <label class="block"><span class="block text-[11px] font-bold text-gray-600">Music${sb.music && mood !== 'none' && mood !== 'mine' ? ` — “${esc(sb.music.title)}”` : ''}</span>
           <select data-vid-opt="musicMood" data-id="${v.id}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(MUSIC, mood)}</select>
-          ${sb.music && mood !== 'none' ? `<button type="button" data-vid-act="another-track" data-id="${v.id}" class="text-[11px] font-bold text-indigo-700 hover:underline">Another track</button>` : ''}</label>
+          ${minePick}
+          ${sb.music && mood !== 'none' && mood !== 'mine' ? `<button type="button" data-vid-act="another-track" data-id="${v.id}" class="text-[11px] font-bold text-indigo-700 hover:underline">Another track</button>` : ''}</label>
         <label class="block"><span class="block text-[11px] font-bold text-gray-600">Colour look</span>
           <select data-vid-opt="look" data-id="${v.id}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(LOOKS, b.look || 'natural')}</select></label>
         <label class="block"><span class="block text-[11px] font-bold text-gray-600">Name captions</span>
@@ -729,7 +763,7 @@
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
               <span>${esc(v.title)}</span></button>
             <p class="text-xs text-gray-600 mt-0.5">${v.version > 1 ? `Version ${esc(v.version)} · ` : ''}${v.brief && v.brief.shapeOf ? `${esc((SHAPES.find((x) => x[0] === v.brief.shape) || ['', ''])[1])} copy · ` : ''}${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
-            ${v.note ? `<p class="text-xs ${v.status === 'ready' ? 'text-emerald-800 bg-emerald-50 border-emerald-200' : 'text-amber-800 bg-amber-50 border-amber-200'} border rounded-md px-2 py-1 mt-1.5">${esc(v.note)}</p>` : ''}
+            ${v.note ? `<p class="text-xs ${v.status === 'ready' ? 'text-emerald-800 bg-emerald-50 border-emerald-200' : 'text-amber-800 bg-amber-50 border-amber-200'} border rounded-md px-2 py-1 mt-1.5 break-words" style="overflow-wrap:anywhere">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
           ${chatPaneAvailable() ? `<button type="button" data-vid-act="talk" data-id="${v.id}" class="text-xs font-bold text-indigo-700 hover:underline shrink-0 whitespace-nowrap">Talk it through</button>` : ''}
@@ -1051,9 +1085,23 @@
   // Ticking a video in the footage form; adding files to it.
   document.addEventListener('change', (e) => {
     const t = e.target;
+    if (host() && host().contains(t) && t.matches('[data-vid-music-mood]')) {
+      // The brief form: the track list shows only for "A track from My Content".
+      const pick = t.closest('label')?.querySelector('[data-vid-mine-pick]');
+      if (pick) pick.hidden = t.value !== 'mine';
+      return;
+    }
     if (host() && host().contains(t) && t.matches('[data-vid-opt]')) {
       const id = Number(t.dataset.id);
-      act(id, { action: 'set_options', id, [t.dataset.vidOpt]: t.value }, 'Saved — it’s used when the video is made.');
+      // "A track from My Content" needs a track before anything is saved: show the list first.
+      if (t.dataset.vidOpt === 'musicMood' && t.value === 'mine') { state.mineOpen.add(id); render(); return; }
+      if (t.dataset.vidOpt === 'musicMood') state.mineOpen.delete(id);
+      if (t.dataset.vidOpt === 'musicAssetId' && !t.value) return;
+      const value = t.dataset.vidOpt === 'musicAssetId' ? Number(t.value) : t.value;
+      const v = state.videos.find((x) => x.id === id);
+      act(id, { action: 'set_options', id, [t.dataset.vidOpt]: value }, v && v.status === 'render_failed'
+        ? 'Saved. Press “Make the video” — it’s free, as everything is already made.'
+        : 'Saved — it’s used when the video is made.');
       return;
     }
     if (!host() || !host().contains(t) || !state.footage) return;

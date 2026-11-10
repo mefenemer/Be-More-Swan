@@ -57,12 +57,12 @@ import { recordPlatformIncident } from './platform-incident';
 import { asOwnVideos, footageStatus, loadFootage, ownVideos } from './footage-review';
 import { describeTightening, footagePlannerBlock, ownSpeechOnTimeline, silentWav, suggestionLine, tightenStoryboard, MAX_VIDEOS_PER_REVIEW, type FootageReview, type SpokenWord as FootageWord } from '../lib/footage';
 import { keepsOwnSound, minScenesFor, isVideoShape, shapeFrame, shapeOrientation, type VideoShape } from '../lib/storyboard';
-import { readMusicChoice, moodFor, pickTrack, speechWindows, musicTrack, MUSIC_LABELS } from '../lib/video-music';
+import { readMusicChoice, moodFor, pickTrack, speechWindows, musicTrack, MUSIC_LABELS, type MusicChoice } from '../lib/video-music';
 import { footageLufs, mixLevels, musicLufs, voiceLufs } from '../lib/loudness';
 import { isVideoLook, lookStyle, type LookStyle } from '../lib/video-look';
 import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
 import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
-import { musicAssetFor, usableMusicTracks } from './video-music-asset';
+import { musicAssetFor, ownMusicTrack, storedFileExists, usableMusicTracks } from './video-music-asset';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -113,6 +113,14 @@ export function withSetupDefaults(raw: unknown, onboardingContext: unknown): Rec
     return b;
 }
 
+/** The brief's music: a choice, plus the owner's track when the choice is 'mine'. Pure. */
+export function musicFromBrief(mood: unknown, assetId: unknown): { musicMood: MusicChoice; musicAssetId?: number } {
+    const choice = readMusicChoice(mood);
+    const id = Number(assetId);
+    if (choice !== 'mine') return { musicMood: choice };
+    return Number.isInteger(id) && id > 0 ? { musicMood: 'mine', musicAssetId: id } : { musicMood: 'auto' };
+}
+
 /** Normalise a brief from a request body. Pure; returns an error string when unusable. */
 export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: string[] } } | { error: string } {
     const b = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
@@ -132,8 +140,9 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
             voiceover: b.voiceover !== false,
             voice: isVoiceId(b.voice) ? b.voice : DEFAULT_VOICE,
             allowAi,
-            // 'auto' | a mood | 'none' (No music). Old free-text moods map onto the four (video-music.ts).
-            musicMood: readMusicChoice(b.musicMood),
+            // 'auto' | a mood | 'none' (No music) | 'mine' (a track from My Content). Old free-text moods
+            // map onto the four (video-music.ts). 'mine' without a track id is 'auto'.
+            ...musicFromBrief(b.musicMood, b.musicAssetId),
             audience: typeof b.audience === 'string' && b.audience.trim() ? b.audience.replace(/\s+/g, ' ').trim().slice(0, 200) : null,
             goal: typeof b.goal === 'string' && b.goal.trim() ? b.goal.replace(/\s+/g, ' ').trim().slice(0, 200) : null,
             look: isVideoLook(b.look) ? b.look : 'natural',
@@ -202,7 +211,7 @@ export interface ProjectTimeline {
     /** The colour look (src/lib/video-look.ts). */
     look?: LookStyle | null;
     /** The mix the build chose (src/lib/loudness.ts), for the Videos tab and support. */
-    mix?: { voice: number; ownSound: number; music: number; musicUnder: number; musicTitle?: string | null };
+    mix?: { voice: number; ownSound: number; music: number; musicUnder: number; musicTitle?: string | null; /** Why it has no music, when it should have. */ musicNote?: string | null };
     /** Every file this version was made from: scenes, voiceover, music, captions, footage. */
     sourceAssetIds?: number[];
 }
@@ -317,12 +326,16 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
             if (mode === 'notes' && current) return enforceStoryboard({ ...mergeNotedScenes(current, raw, Object.keys(noted)), scriptApprovedAt: null }, brief, library, own);
             return enforceStoryboard(raw, brief, library, own);
         };
-        let { storyboard, changes } = await ask(opts.feedback);
+        // A rewrite of the words keeps to the length too: "warmer, and mention X" made a 15-second
+        // video's script 45 words — a 26-second video (staging, 2026-11-10).
+        const budgetLine = mode && brief.voiceover ? `Keep the whole voiceover to about ${Math.round(brief.lengthS * WORDS_PER_SECOND)} words: it is a ${brief.lengthS}-second video.` : null;
+        let { storyboard, changes } = await ask([opts.feedback, budgetLine].filter(Boolean).join(' ') || null);
         // The voiceover sets the video's length, so a long script makes a long video: a "30-second"
         // sample came out at 45 s and outran the render Lambdas (2026-11-01). Over budget by more than
         // a fifth → plan once more, told how many words to lose. Still free; never a third attempt.
+        // Words-only changes (script, notes) get the same second try: they used to skip it.
         const over = scriptOverBudget(storyboard, brief);
-        if (over && !mode) {
+        if (over) {
             const again = await ask([opts.feedback, `The voiceover is ${over.words} words; a ${brief.lengthS}-second video has room for about ${over.budget}. Cut it to ${over.budget} words or fewer — shorter lines, not fewer facts that matter.`].filter(Boolean).join(' '));
             if (again.storyboard.scenes.length >= minScenesFor(brief) && (scriptOverBudget(again.storyboard, brief)?.words ?? 0) < over.words) ({ storyboard, changes } = again);
         }
@@ -816,18 +829,31 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         // 3. The post — one row per platform, one cross-post group.
         const shape: VideoShape = brief.shape ?? '9:16';
         const totalS = Math.round(durations.reduce((a, d) => a + d, 0) * 100) / 100;
-        // Music: a library track for the brief's mood, or none ("No music"). Chosen once and kept on
-        // the storyboard, so a new version or another shape keeps the same track.
+        // Music: the owner's own track from My Content ('mine'), a library track for the brief's mood,
+        // or none ("No music"). A library pick is kept on the storyboard, so a new version or another
+        // shape keeps the same track. A track whose file is missing is left out: no music, never no video.
         const mood = moodFor(brief);
-        let music: { assetId: number; title: string; storageKey: string } | null = null;
-        if (mood) {
+        let music: { assetId: number; title: string; storageKey: string | null } | null = null;
+        let musicNote: string | null = null;
+        if (readMusicChoice(brief.musicMood) === 'mine' && brief.musicAssetId) {
+            const own = await ownMusicTrack(db, orgId, brief.musicAssetId).catch(() => null);
+            if (own && (!own.storageKey || await storedFileExists(own.storageKey))) {
+                music = { assetId: own.assetId, title: own.title, storageKey: own.storageKey };
+                storyboard.music = null;
+            } else {
+                musicNote = 'The track you chose from My Content is no longer there, so this version has no music.';
+            }
+        } else if (mood) {
             try {
                 const tracks = await usableMusicTracks(db);
                 const keep = storyboard.music && storyboard.music.mood === mood ? tracks.find((t) => t.id === storyboard.music!.trackId) : null;
                 const track = keep ?? pickTrack(tracks, mood, totalS, projectId, brief.avoidTrackId);
-                if (track) {
+                if (track && await storedFileExists(track.storageKey)) {
                     music = { assetId: await musicAssetFor(db, { orgId, userId, track }), title: track.title, storageKey: track.storageKey };
                     if (!keep) { storyboard.music = { trackId: track.id, title: track.title, mood }; await save({ storyboard }); }
+                } else if (track) {
+                    console.warn(`[video-producer] build ${projectId}: library track ${track.id} has no file (${track.storageKey}) — no music`);
+                    musicNote = 'The music library track’s file is missing, so this version has no music. Choose a track from My Content instead.';
                 }
             } catch (err) {
                 // No music is better than no video: the library may be empty in this environment.
@@ -883,7 +909,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             durationS: totalS,
             sceneTimes: timesOf(storyboard.scenes, durations),
             look: lookStyle(brief.look, [kit.primaryColor]),
-            mix: { ...levels, musicTitle: music?.title ?? null },
+            mix: { ...levels, musicTitle: music?.title ?? null, ...(musicNote ? { musicNote } : {}) },
             // Kept with the version: every file it was made from (the Videos tab lists them).
             sourceAssetIds: [...new Set([...clips.map((c) => c.assetId), ...audio.map((a) => a.assetId)])],
         };

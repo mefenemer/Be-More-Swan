@@ -15,13 +15,19 @@ import type { AudioOverlay } from './audio-overlays';
 
 export const MUSIC_MOODS = ['chill', 'upbeat', 'ambient', 'inspiring'] as const;
 export type MusicMood = typeof MUSIC_MOODS[number];
-export type MusicChoice = MusicMood | 'auto' | 'none';
+/**
+ * 'mine' = a track the owner chose from My Content (`brief.musicAssetId`): one they generated with
+ * "✨ Generate music" or uploaded. Added 2026-11-10 — the owner judged the library tracks not good
+ * enough to put under a video.
+ */
+export type MusicChoice = MusicMood | 'auto' | 'none' | 'mine';
 export const MUSIC_LABELS: Record<MusicChoice, string> = {
     auto: 'Picked to suit the video', chill: 'Chilled', upbeat: 'Upbeat', ambient: 'Calm, in the background', inspiring: 'Inspiring', none: 'No music',
+    mine: 'A track from My Content',
 };
 
 export function isMusicChoice(v: unknown): v is MusicChoice {
-    return v === 'auto' || v === 'none' || (MUSIC_MOODS as readonly string[]).includes(String(v));
+    return v === 'auto' || v === 'none' || v === 'mine' || (MUSIC_MOODS as readonly string[]).includes(String(v));
 }
 
 /** A brief's music choice, read leniently: old free-text moods map onto the four, unknown = auto. Pure. */
@@ -41,7 +47,7 @@ export function readMusicChoice(v: unknown): MusicChoice {
 /** The mood an 'auto' video gets, from what kind of video it is. Pure. */
 export function moodFor(brief: { musicMood?: string | null; purpose?: string | null; message?: string | null }): MusicMood | null {
     const choice = readMusicChoice(brief.musicMood);
-    if (choice === 'none') return null;
+    if (choice === 'none' || choice === 'mine') return null;   // 'mine' is the owner's own track, not a library mood
     if (choice !== 'auto') return choice;
     const text = `${brief.purpose ?? ''} ${brief.message ?? ''}`.toLowerCase();
     if (/offer|sale|launch|event|new|discount|deal|opening/.test(text)) return 'upbeat';

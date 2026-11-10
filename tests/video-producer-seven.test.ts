@@ -8,15 +8,16 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { TARGET_LUFS, MAX_GAIN, gainToTarget, footageLufs, mixLevels, voiceLufs, musicLufs, landedLufs, MUSIC_UNDER_DB } from '../src/lib/loudness';
-import { readMusicChoice, moodFor, pickTrack, speechWindows, musicTrack, type LibraryTrack } from '../src/lib/video-music';
+import { isMusicChoice, readMusicChoice, moodFor, pickTrack, speechWindows, musicTrack, type LibraryTrack } from '../src/lib/video-music';
 import { audioGainAt, duckAt, sanitiseAudioOverlays } from '../src/lib/audio-overlays';
 import { lookStyle, saturation } from '../src/lib/video-look';
 import { lowerThirdOverlays, readNameCaption } from '../src/lib/lower-third';
 import { sceneTimes, sceneAt, addNote, readNotes, notesByScene, mergeNotedScenes, mergeScript } from '../src/lib/video-notes';
 import { videoResults, turnaroundText } from '../src/lib/video-results';
 import { enforceStoryboard, storyboardUserPrompt, storyboardSystemPrompt, type Storyboard, type VideoBrief } from '../src/lib/storyboard';
-import { readBrief, withSetupDefaults, loopToLength, assetsForShape, shapeRoot, sceneOverlays, sceneClips, timesOf, sceneLooks, buildTasks } from '../src/utils/video-producer';
+import { musicFromBrief, readBrief, withSetupDefaults, loopToLength, assetsForShape, shapeRoot, sceneOverlays, sceneClips, timesOf, sceneLooks, buildTasks } from '../src/utils/video-producer';
 import { videoSceneRequestFromUiElement, videoSceneCard } from '../src/utils/chat-video-scene';
+import { renderFailureNote } from '../src/utils/video-render';
 import table from '../src/config/media-loudness.json';
 
 let passed = 0;
@@ -362,6 +363,45 @@ check('chat cards exist for each new action, and the chat can only send those ac
     assert.ok(!cs.slice(cs.indexOf('VIDEO_CARD_ACTIONS')).slice(0, 300).includes("'build'"), 'no card can make (spend on) a video');
     const snap = read('src/utils/video-producer.ts');
     assert.ok(snap.includes("' · script APPROVED'") && snap.includes('their note at ${mmss(n.atS)}'));
+});
+
+// ── A track of the owner's own, and a missing file never costs the video (staging test, 2026-11-10) ──
+check('"A track from My Content" needs a track id; a mood clears it', () => {
+    assert.ok(isMusicChoice('mine'));
+    assert.deepStrictEqual(musicFromBrief('mine', 42), { musicMood: 'mine', musicAssetId: 42 });
+    assert.deepStrictEqual(musicFromBrief('mine', null), { musicMood: 'auto' }, 'no track → auto');
+    assert.deepStrictEqual(musicFromBrief('mine', -3), { musicMood: 'auto' });
+    assert.deepStrictEqual(musicFromBrief('upbeat', 42), { musicMood: 'upbeat' }, 'the id only counts with mine');
+    assert.strictEqual(moodFor({ musicMood: 'mine', message: 'grand opening' }), null, 'the owner\'s track, not a library mood');
+    const r = readBrief({ message: 'Our new studio is open', musicMood: 'mine', musicAssetId: 7 });
+    assert.ok('brief' in r && r.brief.musicMood === 'mine' && r.brief.musicAssetId === 7);
+});
+
+check('the build checks a track\'s file is there, and uses the owner\'s own track org-scoped', () => {
+    const vp = read('src/utils/video-producer.ts');
+    assert.match(vp, /if \(track && await storedFileExists\(track\.storageKey\)\)/, 'a library track with no file is left out');
+    assert.match(vp, /ownMusicTrack\(db, orgId, brief\.musicAssetId\)/);
+    assert.ok(vp.includes('musicNote'), 'the version says why it has no music');
+    const asset = read('src/utils/video-music-asset.ts');
+    assert.ok(asset.includes("<> ${LIBRARY_PROVIDER}") && asset.includes("->>'kind', '') <> 'voiceover'"), 'never a library row, voiceover or caption track');
+    assert.ok(asset.includes('eq(contentAssets.organisationId, orgId)'));
+});
+
+check('a failed render can change its music and be made again; its note carries no links', () => {
+    const fn = read('netlify/functions/video-projects.ts');
+    assert.ok(fn.includes("['planned', 'failed', 'render_failed'].includes(row.status)"), 'set_options on a failed render');
+    assert.ok(fn.includes("row.status === 'render_failed' ? { status: 'planned', note: null }"), 'back to "Make the video" (free: all made)');
+    assert.ok(fn.includes("That track isn’t in your My Content."));
+    const url = 'Error while downloading https://bucket.r2.cloudflarestorage.com/library/music/b86d.mp3?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=abc';
+    const note = renderFailureNote(url);
+    assert.ok(!/https?:/.test(note) && note.includes('the music couldn’t be downloaded'), note);
+    assert.ok(renderFailureNote('Error while downloading https://x/content/org-1/voice.mp3?sig=1').includes('one of its sound files'));
+    assert.ok(!renderFailureNote('Something broke at https://x/y?z=1').includes('https'));
+    const ui = read('src/components/assistant-videos.js');
+    assert.ok(ui.includes("['mine', 'A track from My Content']") && ui.includes('?tracks=1'));
+    assert.ok(ui.includes('overflow-wrap:anywhere'), 'a long note wraps inside its box');
+    const reg = read('src/components/disruptive-ui-registry.js');
+    assert.ok(reg.includes('body.musicAssetId = trackId'), 'chat can propose a track too');
 });
 
 console.log(`\nvideo producer seven: ${passed} passed`);

@@ -15,13 +15,15 @@
 //   POST { action:'rerender', id }                       → a render_failed video: render the saved timeline again (free)
 //   POST { action:'approve_script', id }                → the voiceover script approved on its own, before any picture (free)
 //   POST { action:'rewrite_script', id, feedback? }     → the words rewritten, every scene's picture kept (free)
-//   POST { action:'set_options', id, musicMood?, anotherTrack?, look?, lowerThird? } → music, colour look and
+//   POST { action:'set_options', id, musicMood?, musicAssetId?, anotherTrack?, look?, lowerThird? } → music (a mood,
+//        none, or a track from My Content), colour look and
 //        name-caption style, changed without re-planning (free; a ready video gets a new version first)
 //   POST { action:'add_note', id, atS, text }           → a note on a moment of a ready video, tied to its scene
 //   POST { action:'delete_note', id, noteId }
 //   POST { action:'notes_to_version', id }              → a new version that turns those notes into scene edits (free)
 //   POST { action:'reshape', id, shapes? }              → the same video in the other shapes (free when nothing
 //                                                          paid needs making — then it starts making at once)
+//   GET  ?tracks=1                                      → the workspace's own tracks (generated / uploaded) for the Music picker
 //   GET  ?performance=1&assistantId=N                   → the Results tab's four figures (src/lib/video-results.ts)
 //   GET  ?calendar=1&assistantId=N&from&to              → the Calendar tab: videos started and finished, by day
 //   POST { action:'cancel', id }
@@ -48,6 +50,7 @@ import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects,
 import { enforceStoryboard, isVideoShape, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { isMusicChoice } from '../../src/lib/video-music';
+import { ownMusicTrack, ownMusicTracks } from '../../src/utils/video-music-asset';
 import { isVideoLook } from '../../src/lib/video-look';
 import { isLowerThirdStyle, readNameCaption } from '../../src/lib/lower-third';
 import { contentAssets } from '../../db/schema';
@@ -89,6 +92,8 @@ export default withLambda(async (event) => {
             return json(200, { social, blog });
         }
         const qs = event.queryStringParameters ?? {};
+        // The Music picker's "A track from My Content": the workspace's generated and uploaded tracks.
+        if (qs.tracks) return json(200, { tracks: (await ownMusicTracks(db, orgId)).map(({ storageKey: _k, ...t }) => t) });
         // The Results tab (registry metricsSource 'video'): what a studio makes, not post engagement.
         if (qs.performance) {
             const aid = Number(qs.assistantId);
@@ -269,15 +274,26 @@ export default withLambda(async (event) => {
 
     // ── Music, colour look and name-caption style: no re-plan, nothing re-sourced ──
     if (action === 'set_options') {
-        if (!['planned', 'failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video can’t be changed right now.' });
+        // A failed render can be changed too: its timeline is made again by "Make the video", which is
+        // free when every scene and the voiceover are already made. Without this a video whose music
+        // file had gone could only "Try the render again" — and fail the same way (2026-11-10).
+        if (!['planned', 'failed', 'render_failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video can’t be changed right now.' });
         const brief = { ...(row.brief as VideoBrief) };
         const sb = { ...(row.storyboard as Storyboard) };
-        if (isMusicChoice(body.musicMood) && body.musicMood !== brief.musicMood) { brief.musicMood = body.musicMood; sb.music = null; }
+        // A track from My Content: checked to be this workspace's own music before it is kept.
+        if (body.musicAssetId != null) {
+            const own = await ownMusicTrack(db, orgId, Number(body.musicAssetId));
+            if (!own) return json(400, { error: 'That track isn’t in your My Content.' });
+            brief.musicMood = 'mine'; brief.musicAssetId = own.assetId; sb.music = null;
+        } else if (isMusicChoice(body.musicMood) && body.musicMood !== 'mine' && body.musicMood !== brief.musicMood) {
+            brief.musicMood = body.musicMood; brief.musicAssetId = null; sb.music = null;
+        }
         // "Another track": the same mood, a different track (the build avoids the last one).
         if (body.anotherTrack === true && sb.music) { brief.avoidTrackId = sb.music.trackId; sb.music = null; }
         if (isVideoLook(body.look)) brief.look = body.look;
         if (isLowerThirdStyle(body.lowerThird)) brief.lowerThird = body.lowerThird;
-        await db.update(videoProjects).set({ brief, storyboard: sb, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+        const back = row.status === 'render_failed' ? { status: 'planned', note: null } : {};
+        await db.update(videoProjects).set({ brief, storyboard: sb, ...back, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
         return json(200, { project: await projectView(db, orgId, (await load(row.id))!) });
     }
 

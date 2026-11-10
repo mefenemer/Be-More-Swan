@@ -9,7 +9,8 @@
 //     (find-or-create on org + provider 'library' + providerAssetId) pointing at the one shared object,
 //     which resolveAudioTracks presigns at render time, org-scoped.
 
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { HeadObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type { getDb } from '../../db/client';
 import { contentAssets, musicTracks } from '../../db/schema';
 import { offerableTo, toTrack, usableTracks } from '../lib/music-library';
@@ -50,4 +51,51 @@ export async function musicAssetFor(db: Db, args: { orgId: number; userId: numbe
         provider: LIBRARY_PROVIDER, providerAssetId: String(args.track.id), attributionName: args.artist ?? null, status: 'pending',
     }).returning({ id: contentAssets.id });
     return made.id;
+}
+
+// ── The owner's own tracks (musicMood 'mine') ──────────────────────────────────────────────────────
+//
+// A track from My Content: one made with "✨ Generate music" (provider 'stability') or uploaded. Never a
+// voiceover or a caption track (renderParams.kind 'voiceover'), never a purged file, and never a
+// library row — the owner judged those not good enough (2026-11-10).
+
+export interface OwnTrack { assetId: number; title: string; storageKey: string | null; durationS: number | null }
+
+const isOwnMusic = (orgId: number) => and(
+    eq(contentAssets.organisationId, orgId), eq(contentAssets.assetType, 'audio'), isNull(contentAssets.purgedAt),
+    sql`coalesce(${contentAssets.provider}, '') <> ${LIBRARY_PROVIDER}`,
+    sql`coalesce(${contentAssets.renderParams}->>'kind', '') <> 'voiceover'`,
+);
+
+/** The tracks this workspace could put under a video, newest first (the Music picker's list). */
+export async function ownMusicTracks(db: Db, orgId: number, limit = 50): Promise<OwnTrack[]> {
+    const rows = await db.select({ id: contentAssets.id, name: contentAssets.name, storageKey: contentAssets.storageKey, durationS: contentAssets.durationS })
+        .from(contentAssets).where(isOwnMusic(orgId)).orderBy(desc(contentAssets.createdAt)).limit(limit);
+    return rows.map((r) => ({ assetId: r.id, title: r.name || `Track ${r.id}`, storageKey: r.storageKey, durationS: r.durationS }));
+}
+
+/** One of those tracks, org-scoped; null when it isn't this workspace's music (or is gone). */
+export async function ownMusicTrack(db: Db, orgId: number, assetId: number): Promise<OwnTrack | null> {
+    const [r] = await db.select({ id: contentAssets.id, name: contentAssets.name, storageKey: contentAssets.storageKey, durationS: contentAssets.durationS })
+        .from(contentAssets).where(and(eq(contentAssets.id, assetId), isOwnMusic(orgId))).limit(1);
+    return r ? { assetId: r.id, title: r.name || `Track ${r.id}`, storageKey: r.storageKey, durationS: r.durationS } : null;
+}
+
+let _s3: S3Client | null = null;
+/**
+ * Is the file really there? A library row can outlive its file: on 2026-11-10 every library track's
+ * object was missing from the shared bucket, and the render failed downloading the music — the whole
+ * video lost for want of a bed. Checked before a track is used, so a missing file means no music,
+ * not no video. True when storage isn't configured (nothing to ask; the render will say).
+ */
+export async function storedFileExists(storageKey: string): Promise<boolean> {
+    if (!process.env.R2_ENDPOINT || !process.env.R2_ACCESS_KEY_ID || !process.env.R2_SECRET_ACCESS_KEY || !process.env.R2_BUCKET_NAME) return true;
+    _s3 ??= new S3Client({ region: 'auto', endpoint: process.env.R2_ENDPOINT, credentials: { accessKeyId: process.env.R2_ACCESS_KEY_ID, secretAccessKey: process.env.R2_SECRET_ACCESS_KEY } });
+    try {
+        await _s3.send(new HeadObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: storageKey }));
+        return true;
+    } catch (err) {
+        const status = (err as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
+        return !(status === 404 || (err as { name?: string })?.name === 'NotFound');
+    }
 }

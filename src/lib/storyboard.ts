@@ -69,6 +69,8 @@ export interface VideoBrief {
     voice?: string | null;
     allowAi: AiAllowance;
     musicMood?: string | null;
+    /** With musicMood 'mine': the owner's own audio asset from My Content (src/lib/video-music.ts). */
+    musicAssetId?: number | null;
     /** Language the script is written in (voice-catalogue.json code); absent = the voice's own. */
     language?: string | null;
     /** Burn the spoken words in as captions (default on), and how they look (captions.ts). */

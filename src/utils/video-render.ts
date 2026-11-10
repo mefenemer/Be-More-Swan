@@ -112,7 +112,7 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
                     .where(eq(videoProjects.id, projectId));
                 continue;
             }
-            if (progress.error) return await fail(`The finished video couldn’t be rendered: ${progress.error.slice(0, 200)}`, new Error(progress.error));
+            if (progress.error) return await fail(renderFailureNote(progress.error), new Error(progress.error));
             if (progress.done) {
                 if (!progress.outputUrl) return await fail('The render finished but produced no file. Try the render again.');
                 outputUrl = progress.outputUrl;
@@ -153,4 +153,18 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
         console.error(`[video-render] project ${projectId} failed:`, err);
         await fail('The finished video couldn’t be rendered. Try the render again.', err).catch(() => {});
     }
+}
+
+/**
+ * What the owner reads when a render fails. Remotion's errors carry signed file links — a long
+ * unbreakable URL that ran out of the box on the Videos tab (2026-11-10) and means nothing to the
+ * owner. Links come out; a download failure says which kind of file. The full error is in the log. Pure.
+ */
+export function renderFailureNote(error: string): string {
+    const kind = /error while downloading[^]*?\/library\/music\//i.test(error) ? 'the music'
+        : /error while downloading[^]*?\.(mp3|wav|m4a|aac)\b/i.test(error) ? 'one of its sound files'
+        : /error while downloading/i.test(error) ? 'one of its files' : null;
+    if (kind) return `The finished video couldn’t be rendered: ${kind} couldn’t be downloaded. Change it, or try the render again.`;
+    const plain = error.replace(/https?:\/\/\S+/g, '(a file)').replace(/\s+/g, ' ').trim();
+    return `The finished video couldn’t be rendered: ${plain.slice(0, 200)}`;
 }
