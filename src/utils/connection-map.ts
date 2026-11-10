@@ -58,9 +58,12 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     // the commit that ships it" and that commit forgot, so the Brand Designer could not connect
     // Canva at all until 2026-10-10.
     brand_designer:            ['design'],
-    // Video Producer: its videos publish as posts (Instagram Reels, YouTube Shorts, Facebook Reels),
-    // so it needs the social connections; 'design' for imported pictures (docs/video-producer-plan.md).
-    video_producer:            ['social', 'design'],
+    // Video Producer: a STUDIO that never posts (docs/video-producer-studio-plan.md, 2026-11-09).
+    // Finished videos go to My Content; "Use in a post" hands them to the Social Media Manager,
+    // whose own connections publish. 'social' was removed 2026-11-10 — it was left over from the
+    // 2026-10-31 poster design and let customers connect social accounts to an assistant that
+    // cannot post. 'design' stays for the customer's own Canva designs in videos.
+    video_producer:            ['design'],
     // The Mystery Shopper reads PUBLIC web pages through safe-fetch (src/utils/site-audit.ts) and
     // connects to nothing. Empty, NOT omitted — an omitted role fails OPEN (see campaign_orchestrator).
     mystery_shopper:           [],

@@ -213,7 +213,7 @@ async function main() {
 
     await check('the editor and chat know the text marks, the second colour and social links', () => {
         const js = read('src/components/assistant-site-editor.js');
-        assert.ok(js.includes('a line starting ### is a subheading; [words](/page) makes a link'));
+        assert.ok(js.includes('use the buttons for bold, italics, lists, links and subheadings')); // 2026-11-10: the formatting bar (site-text-formatting.test.ts)
         assert.ok(js.includes('data-theme="secondaryColor"') && js.includes('data-site-social'));
         const chat = read('netlify/functions/chat-orchestrator.ts');
         assert.ok(chat.includes('[words](/page) is a link inside a sentence') && chat.includes('"secondaryColor":"#rrggbb"|null') && chat.includes('"socialLinks":['));

@@ -7075,6 +7075,17 @@ function _applyDashboardRegistry(data) {
         setText(`kpi-${i + 1}-title`, kpi.title);
         setText(`kpi-${i + 1}-desc`, kpi.desc);
     });
+    // A role that declares fewer than four KPIs (the Video Producer has three, 2026-11-10) hides the
+    // cards it doesn't fill, rather than leaving one with no label, and the row closes up.
+    const kpiCount = Math.min(4, (cfg.kpis || []).length) || 4;
+    ['engagement', 'reach', 'ctr', 'value'].forEach((k, i) => {
+        document.getElementById(`kpi-card-${k}`)?.classList.toggle('hidden', i >= kpiCount);
+    });
+    const kpiGrid = document.getElementById('metrics-kpi-grid');
+    if (kpiGrid) {
+        kpiGrid.classList.toggle('lg:grid-cols-4', kpiCount === 4);
+        kpiGrid.classList.toggle('lg:grid-cols-3', kpiCount === 3);
+    }
 
     const mods = cfg.modules || {};
     const toggle = (id, show) => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !show); };
@@ -11739,7 +11750,8 @@ async function _loadBrandMetrics(assistantId) {
 // ── Video Producer KPI cards ─────────────────────────────────────────────────
 // Routed here by `metricsSource: 'video'`. A studio never posts, so reach and engagement would read
 // "nothing published" for ever: these come from video-projects.ts ?performance=1 (src/lib/video-results.ts)
-// — videos made, the share made without changes, average turnaround, and times used in a post or article.
+// — videos made, the share made without changes and average turnaround. Three cards: "Times Used" (in
+// posts and articles) was removed 2026-11-10 — the owner wants nothing here about other assistants' work.
 async function _loadVideoMetrics(assistantId) {
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
@@ -11765,7 +11777,6 @@ async function _loadVideoMetrics(assistantId) {
         const t = m.avgTurnaroundMin;
         const turn = t == null ? '—' : t < 60 ? `${Math.max(1, Math.round(t))} min` : t < 2880 ? `${Math.floor(t / 60)} h${Math.round(t % 60) ? ` ${Math.round(t % 60)} min` : ''}` : `${Math.round(t / 1440)} days`;
         set('ctr', turn, t == null);
-        set('value', String(m.timesUsed ?? 0), !m.timesUsed);
     } catch {
         _setMetricsEmptyState('error');
     }

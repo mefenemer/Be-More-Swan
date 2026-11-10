@@ -38,7 +38,7 @@
       { k: 'layout', kind: 'select', label: 'Layout', options: [['centered', 'Centred'], ['split', 'Text beside picture'], ['banner', 'Coloured banner'], ['cover', 'Picture behind the words (full width)']] },
       { k: 'eyebrow', kind: 'text', label: 'Small label above the headline' },
       { k: 'headline', kind: 'text', label: 'Headline', required: true },
-      { k: 'subheadline', kind: 'textarea', label: 'Line under the headline' },
+      { k: 'subheadline', kind: 'textarea', label: 'Line under the headline', plain: true },
       { k: 'primaryCta', kind: 'link', label: 'Main button' },
       { k: 'secondaryCta', kind: 'link', label: 'Second button' },
       { k: 'image', kind: 'image', label: 'Picture or video', video: true },
@@ -47,7 +47,7 @@
       { k: 'items', kind: 'items', label: 'Features', fields: [['title', 'text', 'Title'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional) — e.g. Read more'], ['image', 'image', 'Picture (optional)']] }],
     steps: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'intro', kind: 'textarea', label: 'Introduction' },
       { k: 'items', kind: 'items', label: 'Steps', fields: [['title', 'text', 'Step'], ['body', 'textarea', 'Text'], ['link', 'link', 'Link (optional)'], ['image', 'image', 'Picture (optional)']] }],
-    text: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'body', kind: 'textarea', label: 'Text (a blank line starts a new paragraph; a line starting ### is a subheading; [words](/page) makes a link)', rows: 8, required: true },
+    text: [{ k: 'heading', kind: 'text', label: 'Heading' }, { k: 'body', kind: 'textarea', label: 'Text (a blank line starts a new paragraph — use the buttons for bold, italics, lists, links and subheadings)', rows: 8, required: true, heading: true },
       { k: 'image', kind: 'image', label: 'Picture or video beside the text (optional)', video: true },
       { k: 'imageSide', kind: 'select', label: 'Picture on the', options: [['right', 'Right'], ['left', 'Left']] }],
     faq: [{ k: 'heading', kind: 'text', label: 'Heading' },
@@ -437,6 +437,9 @@
     return p.headline || p.heading || (p.items && p.items[0] && (p.items[0].title || p.items[0].q || p.items[0].name)) || (p.body || '').slice(0, 60) || '';
   }
 
+  /** Bold / italics / list / link buttons for the text box that follows (text-format-bar.js); none if it didn't load. */
+  const fmtBar = (opts) => (window.TextFormatBar ? window.TextFormatBar.html(opts) : '');
+
   /** The longest a text box may be (sites.ts sends EDITOR_LIMITS), as attributes plus the note it fills. */
   function limitAttr(max) { return max ? ` data-max="${max}"` : ''; }
   function limitNote(max) { return max ? '<p data-len-note class="text-xs mt-1" hidden></p>' : ''; }
@@ -472,7 +475,7 @@
     const req = f.required ? ' <span class="text-red-500">*</span>' : '';
     const max = fieldLimit(f.k);
     if (f.kind === 'text') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><input name="${name}" class="${inputCls}"${limitAttr(max)} value="${esc(value || '')}">${limitNote(max)}`;
-    if (f.kind === 'textarea') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label><textarea name="${name}" rows="${f.rows || 3}" class="${inputCls}"${limitAttr(max)}>${esc(value || '')}</textarea>${limitNote(max)}`;
+    if (f.kind === 'textarea') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}${req}</label>${f.plain ? '' : fmtBar({ heading: !!f.heading })}<textarea name="${name}" rows="${f.rows || 3}" class="${inputCls}"${limitAttr(max)}>${esc(value || '')}</textarea>${limitNote(max)}`;
     if (f.kind === 'select') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><select name="${name}" class="${inputCls}">${f.options.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
     if (f.kind === 'checkbox') return `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" name="${name}" ${value ? 'checked' : ''}> ${esc(f.label)}</label>`;
     if (f.kind === 'csv') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><input name="${name}" class="${inputCls}" value="${esc((Array.isArray(value) ? value : []).join(', '))}" placeholder="e.g. Music, Food & drink, Family">`;
@@ -663,7 +666,7 @@
               ? `<div class="grid gap-2 md:grid-cols-2 mt-1"><input data-item-link="label" aria-label="${esc(f.label)} ${i + 1}: link text" class="${inputCls}" placeholder="${esc(label)}" value="${esc((it[k] && it[k].label) || '')}">
                   <input data-item-link="href" aria-label="${esc(f.label)} ${i + 1}: where the link goes" class="${inputCls}" list="site-pages-list" placeholder="/page or https://…" value="${esc((it[k] && it[k].href) || '')}"></div>`
               : kind === 'textarea'
-              ? `<textarea data-item-field="${esc(k)}" aria-label="${esc(f.label)} ${i + 1}: ${esc(label)}" rows="2" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))}>${esc(it[k] || '')}</textarea>${limitNote(itemMax(k))}`
+              ? `${fmtBar()}<textarea data-item-field="${esc(k)}" aria-label="${esc(f.label)} ${i + 1}: ${esc(label)}" rows="2" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))}>${esc(it[k] || '')}</textarea>${limitNote(itemMax(k))}`
               : `<input data-item-field="${esc(k)}" aria-label="${esc(f.label)} ${i + 1}: ${esc(label)}" class="${inputCls} mt-1" placeholder="${esc(label)}"${limitAttr(itemMax(k))} value="${esc(it[k] || '')}">${limitNote(itemMax(k))}`).join('')}
             <div class="mt-1">${btn(`data-item-remove="${i}"`, 'Remove')}</div>
           </div>`).join('')}</div>
@@ -1281,7 +1284,7 @@
       <label class="block text-xs font-bold text-gray-700 mt-3">Site description (search results)</label><textarea data-setting="description" rows="2" class="${inputCls}">${esc(s.description || '')}</textarea>
       <label class="block text-xs font-bold text-gray-700 mt-3">Your social profiles (one address per line — Instagram, Facebook, LinkedIn, X, TikTok, YouTube…)</label><textarea data-site-social rows="2" class="${inputCls}" placeholder="https://www.instagram.com/yourname">${esc((s.socialLinks || []).join('\n'))}</textarea>
       ${(def().redirects || []).length ? `<p class="block text-xs font-bold text-gray-700 mt-3">Old addresses that forward here</p><p class="text-xs text-gray-500">From your old site, so links and search results that point at them still arrive.</p><ul class="mt-1 space-y-1">${def().redirects.map((r, i) => `<li class="text-xs text-gray-700 flex items-center gap-2"><span>${esc(r.from)} → ${esc(r.to)}</span>${btn(`data-site-redirect-remove="${i}"`, 'Remove')}</li>`).join('')}</ul>` : ''}
-      <label class="block text-xs font-bold text-gray-700 mt-3">Footer text</label><textarea data-site-footer rows="2" class="${inputCls}">${esc(def().footer.text || '')}</textarea>
+      <label class="block text-xs font-bold text-gray-700 mt-3">Footer text</label>${fmtBar()}<textarea data-site-footer rows="2" class="${inputCls}">${esc(def().footer.text || '')}</textarea>
       <div class="mt-4">${btn('data-site-details-save', 'Save details', true)}</div>`);
   }
 
@@ -1369,7 +1372,7 @@
       ${lbl('Where')}<input name="l-location" class="${inputCls}" maxlength="160" value="${f('location')}" placeholder="${event ? 'e.g. Ermoupoli harbour' : 'e.g. 12 High Street, Leeds'}">
       ${lbl('Category')}<input name="l-category" class="${inputCls}" maxlength="40" value="${f('category')}" list="listing-cats" placeholder="e.g. Music"><datalist id="listing-cats">${cats.map((c) => `<option value="${esc(c)}">`).join('')}</datalist>
       ${lbl('In a sentence')}<input name="l-summary" class="${inputCls}" maxlength="300" value="${f('summary')}">
-      ${lbl('More about it')}<textarea name="l-body" rows="4" class="${inputCls}" maxlength="5000">${f('body')}</textarea>
+      ${lbl('More about it')}${fmtBar()}<textarea name="l-body" rows="4" class="${inputCls}" maxlength="5000">${f('body')}</textarea>
       <div class="grid gap-2 sm:grid-cols-2">
         <div>${lbl('A link (tickets, website, email)')}<input name="l-linkUrl" class="${inputCls}" maxlength="500" value="${f('linkUrl')}" placeholder="https://…"></div>
         <div>${lbl('Text on its button')}<input name="l-linkLabel" class="${inputCls}" maxlength="40" value="${f('linkLabel')}" placeholder="${event ? 'Get tickets' : 'Visit'}"></div></div>

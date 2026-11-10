@@ -30,8 +30,6 @@
 //   POST { action:'from_post', postId }                 → "Make a video version" of a post (video-handoff.ts):
 //                                                          plans a storyboard for the active Video Producer
 //   GET  ?producer=1                                    → { producer: { id, name } | null } — is the button offered?
-//   GET  ?teammates=1                                   → { social, blog } — the ACTIVE Social Media Manager and Blog
-//                                                          Writer a finished video can be handed to (studio plan Phase 4), or null
 //
 // Planning is free (one model call, like any draft). Building spends: the estimate is on the project
 // before the click, held at the click, settled scene by scene (src/utils/video-producer.ts).
@@ -55,7 +53,7 @@ import { isVideoLook } from '../../src/lib/video-look';
 import { isLowerThirdStyle, readNameCaption } from '../../src/lib/lower-third';
 import { contentAssets } from '../../db/schema';
 import { randomUUID } from 'crypto';
-import { activeVideoProducer, activeAssistantInRole, videoFromPost } from '../../src/utils/video-handoff';
+import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
 import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../src/utils/footage-review';
 import { FOOTAGE_REVIEW_TASKS, tightenStoryboard, type FootageReview } from '../../src/lib/footage';
 import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
@@ -83,13 +81,6 @@ export default withLambda(async (event) => {
             const producer = await activeVideoProducer(db, orgId);
             const can = !!producer && tierCanGenerateVideo(await getActiveTierKeyByOrg(db, orgId));
             return json(200, { producer: can ? { id: producer!.id, name: producer!.name } : null });
-        }
-        if (event.queryStringParameters?.teammates) {
-            const [social, blog] = await Promise.all([
-                activeAssistantInRole(db, orgId, 'social_media_manager'),
-                activeAssistantInRole(db, orgId, 'blog_writer'),
-            ]);
-            return json(200, { social, blog });
         }
         const qs = event.queryStringParameters ?? {};
         // The Music picker's "A track from My Content": the workspace's generated and uploaded tracks.

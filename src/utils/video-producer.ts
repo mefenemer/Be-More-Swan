@@ -23,7 +23,7 @@
 import { randomUUID } from 'crypto';
 import { and, desc, eq, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { blogPostAssets, contentAssets, organisations, scheduledPostAssets, scheduledPosts, videoProjects } from '../../db/schema';
+import { contentAssets, organisations, scheduledPosts, videoProjects } from '../../db/schema';
 import { videoResults, type ResultRow } from '../lib/video-results';
 import { VIDEO_SHAPES, SHAPE_LABELS } from '../lib/storyboard';
 import { LOOK_LABELS } from '../lib/video-look';
@@ -1048,31 +1048,20 @@ export async function makeOtherShapes(db: Db, row: typeof videoProjects.$inferSe
     return { made, skipped };
 }
 
-/** The Results tab's four figures for one Video Producer (src/lib/video-results.ts). */
+/** The Results tab's three figures for one Video Producer (src/lib/video-results.ts). */
 export async function videoResultsFor(db: Db, orgId: number, assistantId: number) {
     const rows = await db.select({
         id: videoProjects.id, status: videoProjects.status, version: videoProjects.version, editCount: videoProjects.editCount,
         parentProjectId: videoProjects.parentProjectId, brief: videoProjects.brief, createdAt: videoProjects.createdAt,
-        outputAssetId: videoProjects.outputAssetId, readyAt: contentAssets.createdAt,
+        readyAt: contentAssets.createdAt,
     }).from(videoProjects)
         .leftJoin(contentAssets, and(eq(contentAssets.id, videoProjects.outputAssetId), eq(contentAssets.organisationId, orgId)))
         .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, assistantId)));
-    const outputs = rows.map((r) => r.outputAssetId).filter((x): x is number => x != null);
-    let used = 0;
-    if (outputs.length) {
-        const [posts, articles] = await Promise.all([
-            db.select({ n: sql<number>`count(*)::int` }).from(scheduledPostAssets)
-                .innerJoin(scheduledPosts, eq(scheduledPosts.id, scheduledPostAssets.scheduledPostId))
-                .where(and(inArray(scheduledPostAssets.contentAssetId, outputs), eq(scheduledPosts.organisationId, orgId))),
-            db.select({ n: sql<number>`count(*)::int` }).from(blogPostAssets).where(inArray(blogPostAssets.contentAssetId, outputs)),
-        ]);
-        used = Number(posts[0]?.n ?? 0) + Number(articles[0]?.n ?? 0);
-    }
     const resultRows: ResultRow[] = rows.map((r) => ({
         id: r.id, status: r.status, version: r.version, editCount: r.editCount, parentProjectId: r.parentProjectId,
         shapeCopy: !!(r.brief as VideoBrief | null)?.shapeOf, createdAt: r.createdAt, readyAt: r.readyAt ?? null,
     }));
-    return videoResults(resultRows, used);
+    return videoResults(resultRows);
 }
 
 /** Longer than any honest plan or build runs (the worker's own ceiling is 15 minutes). */
@@ -1265,7 +1254,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
  */
 export async function ownMusicSnapshot(db: Db, orgId: number): Promise<string> {
     const tracks = await ownMusicTracks(db, orgId, 15);
-    if (!tracks.length) return 'THEIR OWN MUSIC TRACKS: none yet. They can make one with "✨ Generate music" in a post\'s Sound layer, or upload one to My Content.';
+    if (!tracks.length) return 'THEIR OWN MUSIC TRACKS: none yet. They can upload one to My Content, or choose a mood and a track is made for the video.';
     return ['THEIR OWN MUSIC TRACKS (use only these ids as musicAssetId):', ...tracks.map((t) => `- track ${t.assetId}: "${t.title.slice(0, 80)}"${t.durationS ? ` (${Math.round(t.durationS)} s)` : ''}`)].join('\n');
 }
 

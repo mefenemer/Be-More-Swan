@@ -4,7 +4,10 @@
 // found missing on imported sites (Restorative Futures):
 //   · a link inside a sentence:  "Read our [course notes](/building-relationships) first."
 //   · a subheading inside a text section, on a line of its own:  "### Who it's for"
-// Nothing else is markup — no HTML, no bold, no pictures. Links are drawn only through the same gate
+// And since 2026-11-10, what the editor's formatting buttons (B, I, lists) type:
+//   · **bold** and *italics* inside a line
+//   · a bullet list: lines starting "- " (or "• ");  a numbered list: lines starting "1. "
+// Nothing else is markup — no HTML, no underline, no pictures. Links are drawn only through the same gate
 // as every button (cleanHref: https, mailto, tel, #anchor or one of the site's own pages), and a link
 // to a page that doesn't exist is drawn as its words alone.
 //
@@ -17,9 +20,24 @@ export const PLACEHOLDER = /\[[^\][]{1,60}\](?!\()/g;
 /** A subheading line inside a text body. */
 export const SUBHEADING = /^###\s+(.{1,120})$/;
 
-/** The words alone: links become their labels, subheading marks go. For word counts and checks. */
+/** **bold** — starts and ends on a letter, not a space, on one line. */
+export const BOLD = /\*\*(?=[^\s*])([^*\n]{0,300}?[^\s*])\*\*/g;
+/** *italics* — single stars, not touching a word or another star outside ("5* service" stays as it is). */
+export const ITALIC = /(?<![\w*])\*(?=[^\s*])([^*\n]{0,300}?[^\s*])\*(?![\w*])/g;
+/** A bullet list line: "- words", "* words" or "• words". */
+export const BULLET = /^[ \t]*[-*•][ \t]+(?=\S)/;
+/** A numbered list line: "1. words" or "1) words" (the number is captured). */
+export const NUMBERED = /^[ \t]*(\d{1,3})[.)][ \t]+(?=\S)/;
+
+/** The words with the bold and italic marks taken off. */
+export function withoutEmphasis(text: string): string {
+    return text.replace(BOLD, '$1').replace(ITALIC, '$1');
+}
+
+/** The words alone: links become their labels, subheading, list and bold/italic marks go. For word counts and checks. */
 export function plainOf(text: string): string {
-    return text.replace(INLINE_LINK, '$1').split('\n').map((l) => l.replace(/^###\s+/, '')).join('\n');
+    return withoutEmphasis(text.replace(INLINE_LINK, '$1')).split('\n')
+        .map((l) => l.replace(/^###\s+/, '').replace(BULLET, '').replace(NUMBERED, '')).join('\n');
 }
 
 /** Every link's address rewritten by `fn` (null = keep the words, drop the link). */

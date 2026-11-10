@@ -35,7 +35,7 @@
   const mmss = (n) => { const t = Math.max(0, Math.floor(Number(n) || 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
   const BEAT = { hook: 'Hook', problem: 'Problem', value: 'Value', proof: 'Proof', cta: 'Call to action' };
   // The same choices the server reads (src/lib/video-music.ts, video-look.ts, lower-third.ts).
-  // 'mine' = a track of the owner's own from My Content (generated with "✨ Generate music", or uploaded).
+  // 'mine' = a track of the owner's own from My Content (one made for an earlier video, or uploaded).
   const MUSIC = [['auto', 'Made to suit the video'], ['upbeat', 'Upbeat'], ['chill', 'Chilled'], ['inspiring', 'Inspiring'], ['ambient', 'Calm, in the background'], ['mine', 'A track from My Content'], ['none', 'No music']];
   const LOOKS = [['natural', 'Natural (no grade)'], ['brand', 'Your brand colours'], ['warm', 'Warm'], ['cool', 'Cool'], ['punchy', 'Bright and punchy'], ['mono', 'Black and white']];
   const LOWER_THIRDS = [['bar', 'Brand-colour bar, left'], ['clean', 'Plain white words, left'], ['boxed', 'White box, centred']];
@@ -75,8 +75,6 @@
     stage: null, userStage: false, opened: new Set(), full: false,
     // "Use my own footage": the form, the library's own videos, what is ticked, and files just added.
     footage: null,
-    // The ACTIVE Social Media Manager and Blog Writer a finished video can be handed to (Phase 4).
-    teammates: null,
     // The workspace's own tracks for "A track from My Content" (GET ?tracks=1), and the videos whose
     // Music picker is showing that list before a track is chosen.
     tracks: null, mineOpen: new Set(),
@@ -127,14 +125,6 @@
     return data;
   }
 
-  async function loadTeammates() {
-    try {
-      const r = await fetch(`${API}?teammates=1`, { credentials: 'same-origin' });
-      state.teammates = r.ok ? await r.json() : { social: null, blog: null };
-    } catch { state.teammates = { social: null, blog: null }; }
-    if (state.rendered) render();
-  }
-
   async function loadTracks() {
     try {
       const r = await fetch(`${API}?tracks=1`, { credentials: 'same-origin' });
@@ -148,10 +138,9 @@
     const list = state.tracks || [];
     return `<option value="">Choose a track…</option>` + list.map((t) => `<option value="${t.assetId}"${sel(Number(selected) === t.assetId)}>${esc(t.title)}${t.durationS ? ` · ${Math.round(t.durationS)}s` : ''}</option>`).join('');
   }
-  const NO_TRACKS = 'No tracks in My Content yet. Make one with “✨ Generate music” in a post’s Sound layer, or upload one to My Content.';
+  const NO_TRACKS = 'No tracks in My Content yet. Upload one to My Content, or choose a mood and a track is made for this video.';
 
   async function load() {
-    if (!state.teammates) loadTeammates();
     if (!state.tracks) loadTracks();
     try {
       const data = await call('GET', null, `?assistantId=${encodeURIComponent(state.assistantId)}`);
@@ -249,7 +238,7 @@
   const sel = (on) => (on ? ' selected' : '');
 
   // The finished video's shape (docs/video-producer-studio-plan.md, D-S2). The Video Producer makes a
-  // video for anywhere and saves it to My Content — where it is posted is the Social Media Manager's call.
+  // video for anywhere and saves it to My Content. It never posts or hands a video on (owner, 2026-11-10).
   const SHAPES = [['9:16', 'Vertical 9:16', 'Reels, Shorts, Stories'], ['1:1', 'Square 1:1', 'feeds'], ['16:9', 'Wide 16:9', 'YouTube, websites']];
   function shapeHtml() {
     const d = ['9:16', '1:1', '16:9'].includes(String((state.setup || {}).defaultShape)) ? String(state.setup.defaultShape) : '9:16';
@@ -257,7 +246,7 @@
           <div class="flex flex-wrap gap-3 text-sm text-gray-700">${SHAPES.map(([v, l, h]) => `
             <label class="inline-flex items-center gap-1.5"><input type="radio" name="shape" value="${v}"${v === d ? ' checked' : ''}> ${esc(l)} <span class="text-xs text-gray-500">${esc(h)}</span></label>`).join('')}
           </div>
-          <p class="text-[11px] text-gray-500 mt-1">The finished video is saved to My Content. Download it, or hand it to your Social Media Manager or Blog Writer to use.</p></fieldset>`;
+          <p class="text-[11px] text-gray-500 mt-1">The finished video is saved to My Content. Download it, or use it from My Content.</p></fieldset>`;
   }
 
   function formHtml() {
@@ -664,7 +653,6 @@
     const shape = (v.brief && v.brief.shape) || '9:16';
     const wide = shape === '16:9';
     const ai = v.storyboard && (v.storyboard.scenes || []).some((s) => s.source === 'ai_video' || s.source === 'ai_image');
-    const tm = state.teammates || {};
     const times = v.sceneTimes || [];
     const total = v.outputDurationS || (times.length ? times[times.length - 1].endS : 0);
     // The scene strip under the player: click any point to jump there and leave a note on that moment.
@@ -689,16 +677,11 @@
         </div>
         <div class="min-w-0 space-y-2">
           <p class="text-xs text-gray-600">${v.outputDurationS ? `${Math.round(v.outputDurationS)} s · ` : ''}${esc(SHAPES.find((x) => x[0] === shape)?.[1] || shape)}${v.version > 1 ? ` · version ${esc(v.version)}` : ''}${ai ? ' · <span class="font-semibold text-amber-800">Contains AI</span>' : ''}</p>
-          ${v.storyboard && v.storyboard.caption ? `<p class="text-xs text-gray-600"><span class="font-bold">Suggested words to post with it:</span> ${esc(v.storyboard.caption)}</p>` : ''}
           <div class="flex flex-wrap gap-2">
             <a href="/.netlify/functions/content-asset-download?assetId=${encodeURIComponent(v.outputAssetId)}" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Download</a>
-            ${tm.social ? `<button type="button" data-vid-act="use-post" data-id="${v.id}" title="${esc(tm.social.name)} makes a draft post with this video" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg">Use in a post</button>` : ''}
-            ${tm.blog ? `<button type="button" data-vid-act="use-blog" data-id="${v.id}" title="${esc(tm.blog.name)} starts an article with this video" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg">Use in a blog post</button>` : ''}
             <button type="button" data-vid-act="change" data-id="${v.id}" ${state.busy.has(v.id) ? 'disabled' : ''} title="Make a new version. This one stays in My Content." class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Change it</button>
           </div>
-          <p class="text-[11px] text-gray-500">${tm.social || tm.blog
-            ? `Saved in My Content. ${[tm.social ? `“Use in a post” hands it to ${esc(tm.social.name)}` : '', tm.blog ? `“Use in a blog post” to ${esc(tm.blog.name)}` : ''].filter(Boolean).join('; ')} — free.`
-            : 'Saved in My Content. Download it, or hire a Social Media Assistant or Blog Writer to post it for you.'}</p>
+          <p class="text-[11px] text-gray-500">Saved in My Content. Download it, or pick it from My Content wherever you want to use it.</p>
           ${shapesLeft.length ? `<button type="button" data-vid-act="reshape" data-id="${v.id}" ${state.busy.has(v.id) ? 'disabled' : ''} title="Keeps the voiceover and every clip and picture, cropped to the new shape; branded cards are drawn again." class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Make it ${esc(shapesLeft.map((x) => (SHAPES.find((y) => y[0] === x) || [x, x])[1].toLowerCase()).join(' and '))} too — free</button>` : ''}
           ${notes.length ? `<div class="border border-amber-200 bg-amber-50 rounded-lg p-2">
               <p class="text-xs font-bold text-amber-900">Your notes (${notes.length})</p>
@@ -779,7 +762,6 @@
         ${scriptStepHtml(v)}
         ${optionsHtml(v)}
         ${sb && sb.scenes && sb.scenes.length ? `<ol class="mt-3 space-y-2">${sb.scenes.map((s, i) => sceneHtml(v, s, i)).join('')}</ol>` : ''}
-        ${sb && sb.caption ? `<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Caption:</span> ${esc(sb.caption)}</p>` : ''}
         ${replanning ? `
           <form data-vid-replan-form data-id="${v.id}" class="mt-3 space-y-2">
             <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">What should be different? (optional)</span>
@@ -883,27 +865,6 @@
     }
     state.busy.delete(id);
     await load();
-  }
-
-  /**
-   * Hand a finished video to a teammate (studio plan Phase 4). Both open THAT assistant's own flow —
-   * the Social Media Manager's "Where should this video go?" (workspace.html pceStartPostWithVideo),
-   * or a new Blog Writer draft with the video in it (blog-studio-modal.js withVideo). Free.
-   */
-  function handOver(id, to) {
-    const v = state.videos.find((x) => x.id === id);
-    const tm = state.teammates || {};
-    if (!v || !v.outputAssetId) return;
-    const words = (v.storyboard && v.storyboard.caption) || '';
-    const shape = (v.brief && v.brief.shape) || '9:16';
-    if (to === 'post' && tm.social && typeof window.pceStartPostWithVideo === 'function') {
-      window.pceStartPostWithVideo(tm.social.id, { assetId: v.outputAssetId, caption: words || v.title, title: v.title, shape });
-    } else if (to === 'blog' && tm.blog && typeof window.openBlogStudio === 'function') {
-      window.openBlogStudio({ assistantId: tm.blog.id, withVideo: { assetId: v.outputAssetId, title: v.title, words } });
-    } else {
-      state.notes[id] = { text: 'That assistant isn’t available on this page. It’s in My Content — add it from there.', error: true };
-      render();
-    }
   }
 
   /**
@@ -1057,8 +1018,6 @@
       case 'build': act(id, { action: 'build', id }, 'Making the video — it’s saved to My Content when it’s done.'); break;
       case 'rerender': act(id, { action: 'rerender', id }, 'Rendering the finished video again — a few minutes.'); break;
       case 'change': changeVideo(id); break;
-      case 'use-post':
-      case 'use-blog': handOver(id, b.dataset.vidAct === 'use-post' ? 'post' : 'blog'); break;
       case 'cancel': act(id, { action: 'cancel', id }, null); break;
       case 'approve-script': act(id, { action: 'approve_script', id }, 'Script approved. Now check the pictures, then press “Make the video”.'); break;
       case 'rewrite': state.rewriting = id; render(); host()?.querySelector('[data-vid-rewrite-form] textarea')?.focus(); break;
@@ -1217,7 +1176,7 @@
       state.setup = setup && typeof setup === 'object' ? setup : {};
       // A new view: the old full-screen box went with the old page, so only the lock is left to drop.
       if (state.full) { state.full = false; window.ScrollLock?.release('videos-full'); }
-      state.rendered = false; state.form = false; state.footage = null; state.teammates = null; state.editing = null; state.replanning = null; state.rewriting = null; state.noting = null; state.notes = {};
+      state.rendered = false; state.form = false; state.footage = null; state.editing = null; state.replanning = null; state.rewriting = null; state.noting = null; state.notes = {};
       state.stage = null; state.userStage = false;
       loadFolded();
       load();   // eager: the planned count is the tab badge

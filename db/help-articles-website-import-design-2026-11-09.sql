@@ -98,10 +98,14 @@ Each section has its own **Background**: automatic, plain, soft tint, your main 
 
 Feature and step cards can each have a **picture** across the top and a **link** under the words, such as "Read more" pointing at the page about that service.
 
-In any text you can add:
+In any text box, the buttons above it format your words:
 
-- **A link inside a sentence**: write `[our courses](/our-courses)`
-- **A subheading**: start a line with `###`
+- **B** makes the words you've chosen bold, and **I** puts them in italics. Ctrl+B and Ctrl+I (⌘B and ⌘I on a Mac) do the same.
+- **• List** and **1. List** turn the lines you've chosen into a bullet list or a numbered list.
+- **Link** links the words you've chosen. Type the page, like `/our-courses`, or a web address in the brackets.
+- **Subheading** (in a text section) puts a subheading on a line of its own.
+
+Press a button again to take the format off. In the box you'll see small marks, like `**bold**` or `- ` at the start of a list line. They make the formatting, and your site shows it properly.
 
 Words in square brackets with no address after them, like `[Customer name]`, are placeholders to fill in before you publish.
 

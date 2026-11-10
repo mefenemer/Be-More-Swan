@@ -46,12 +46,16 @@ async function putVideoOn(db: Db, orgId: number, postId: number, assetId: number
 
 export type SourcePostOutcome = 'attached' | 'new_draft' | 'post_gone' | 'failed';
 
-/** One sentence per outcome, for the Videos tab (the project's note) and the chat. */
+/**
+ * One sentence per outcome, for the Videos tab (the project's note) and the chat. Kept short and
+ * about the video only (owner, 2026-11-10): what happens to the post is the Social Media Assistant's
+ * to describe, in its own Review Queue and help article.
+ */
 export const SOURCE_POST_NOTES: Record<SourcePostOutcome, string> = {
-    attached: 'It’s now on the post you made it from, waiting for your approval in the Review Queue.',
-    new_draft: 'That post couldn’t take a video as it is, so a new draft with the video and the post’s words is waiting in the Review Queue beside it.',
-    post_gone: 'The post you made it from no longer exists. The video is in My Content.',
-    failed: 'It couldn’t be put on the post you made it from. The video is in My Content — use “Use in a post”.',
+    attached: 'Sent back to the post that asked for it. It’s also in My Content.',
+    new_draft: 'Sent back to the post that asked for it, as a new draft beside it. It’s also in My Content.',
+    post_gone: 'The post that asked for it no longer exists, so it’s only in My Content.',
+    failed: 'It couldn’t be sent back to the post that asked for it, so it’s only in My Content.',
 };
 
 export async function attachVideoToSourcePost(db: Db, args: { orgId: number; userId: number; postId: number; assetId: number; shape: string }): Promise<SourcePostOutcome> {

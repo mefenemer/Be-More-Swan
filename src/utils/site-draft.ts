@@ -100,7 +100,7 @@ const SECTION_SCHEMA = `Section types and their props (use ONLY these; any other
 - "hero": { "layout": "centered" | "split" | "banner", "eyebrow": short label or null, "headline": max ${LIMITS.headline} chars, "subheadline": max ${LIMITS.subheadline} chars, "primaryCta": { "label", "href" } or null, "secondaryCta": { "label", "href" } or null }
 - "features": { "heading", "intro", "items": [ { "title", "body", "link": { "label", "href" } or null } ] }  (1–${LIMITS.features} items)
 - "steps": { "heading", "intro", "items": [ { "title", "body" } ] }  (${LIMITS.stepsMin}–${LIMITS.steps} steps)
-- "text": { "heading", "body" }  (body: paragraphs separated by a blank line)
+- "text": { "heading", "body" }  (body: paragraphs separated by a blank line; may use **bold** for a few key words and "- " lines for a short bullet list)
 - "faq": { "heading", "items": [ { "q", "a" } ] }  (1–${LIMITS.faqItems})
 - "testimonials": { "heading", "items": [ { "quote", "name", "detail" } ] }
 - "cta": { "heading", "body", "button": { "label", "href" } }

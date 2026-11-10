@@ -393,7 +393,7 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         return assetId ? { assetId, alt: b.block.alt.slice(0, LIMITS.alt) } : null;
     };
     /**
-     * List items run together as lines of one paragraph; everything else is its own paragraph. Callers
+     * List items run together as bullet lines ("- ") of one paragraph; everything else is its own paragraph. Callers
      * pass no buttons, except a leftover one that is really words (an email address) — kept as words.
      */
     const paragraphsOf = (ns: number[]): string[] => {
@@ -402,7 +402,8 @@ export function assembleImport(input: AssembleInput): { definition: SiteDefiniti
         for (const n of ns) {
             const b = blocks[n - 1];
             if (!b || b.block.kind === 'image') continue;
-            const t = withLinks(b.block);
+            // A list item is a "- " bullet line (site-rich-text.ts), so the hosted page draws a real list.
+            const t = b.block.kind === 'item' ? `- ${withLinks(b.block).replace(/^[-*•]\s+/, '')}` : withLinks(b.block);
             if (b.block.kind === 'item' && prevItem && out.length) out[out.length - 1] += `\n${t}`;
             else out.push(t);
             prevItem = b.block.kind === 'item';

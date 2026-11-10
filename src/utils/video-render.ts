@@ -144,7 +144,7 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
             note = SOURCE_POST_NOTES[await attachVideoToSourcePost(db, { orgId, userId: p.createdBy, postId: p.sourcePostId, assetId: asset.id, shape })];
         } else if (p.campaignId) {
             note = await placeVideoOnCampaignPost(db, { orgId, campaignId: p.campaignId, assetId: asset.id, shape })
-                ? 'It’s now on one of the campaign’s posts, waiting for your approval in the Review Queue.'
+                ? 'Sent back to the campaign that asked for it. It’s also in My Content.'
                 : null;
         }
         await db.update(videoProjects).set({ status: 'ready', outputAssetId: asset.id, renderId: null, note, updatedAt: new Date() })

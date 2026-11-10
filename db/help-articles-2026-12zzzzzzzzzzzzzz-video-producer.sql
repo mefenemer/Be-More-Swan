@@ -38,7 +38,7 @@ INSERT INTO help_articles (category, sort_order, title, content_md, is_published
 
 Your Video Producer makes short videos: vertical for Reels, Shorts and Stories, square for feeds, or wide for YouTube and your website. Tell it what a video should say, or give it your own footage. It writes the script from your business details and **Products & Services**, plans the scenes, adds a voiceover and captions, and saves the finished video to **My Content**.
 
-You check the storyboard before anything is made. The finished video plays on its **Videos** tab, where you can download it. Your Social Media Assistant or Blog Writer can use it from **My Content**. Your Video Producer never posts anything itself.
+You check the storyboard before anything is made. The finished video plays on its **Videos** tab, where you can download it. Any of your assistants can use it from **My Content**. Your Video Producer never posts anything itself.
 
 ## Setting it up
 
@@ -65,7 +65,7 @@ Each video has 3 to 8 scenes. A scene can be stock footage, a stock photo, one o
 ## What it can't do yet
 
 - It makes videos up to 60 seconds. It doesn't make long YouTube videos.
-- It doesn't post videos anywhere. Download the finished video, or let your Social Media Assistant post it.
+- It doesn't post videos anywhere. Download the finished video, or use it from **My Content**.
 
 ## Which plans include it
 
@@ -110,15 +110,13 @@ Making takes a few minutes and you can leave the page. If it stops part-way, the
 
 ## 4. Watch it and use it
 
-When it's made, the finished video is rendered and saved to **My Content**. This takes a few more minutes. On the **Videos** tab it moves to **Ready**, where you can play it, see the words it suggests posting with it, and press **Download**. If the finished video fails to render, press **Try the render again**. That's free.
+When it's made, the finished video is rendered and saved to **My Content**. This takes a few more minutes. On the **Videos** tab it moves to **Ready**, where you can play it and press **Download**. If the finished video fails to render, press **Try the render again**. That's free.
 
-- **Use in a post** hands it to your Social Media Assistant. You choose where it goes, the draft starts with the video and the suggested words, and you approve it in the **Review Queue** as usual.
-- **Use in a blog post** starts a new article for your Blog Writer with the video in it.
 - **Change it** makes a new version. Everything already made is kept, so only the scenes you change are made, and paid for, again. The earlier version stays in **My Content**.
 
-Handing a video over is free. The buttons appear when you have that assistant hired and working. Any of your assistants can also pick the video from **My Content**.
+To use the video in a post or an article, pick it from **My Content** in that assistant. Your Video Producer doesn't hand it over or post it.
 
-Your Video Producer's **Results** tab counts **Videos Published**.
+A goal on your Video Producer counts **Videos Made**: the videos it finished and saved to **My Content**.
 $$, FALSE),
 
 ('Your Assistants', 72, 'Weekly Videos, Video Versions and Campaign Videos', $$
@@ -137,22 +135,11 @@ Answer **Should it plan videos for you each week?** with one, two or three a wee
 
 ## A video version of a post
 
-Open any post in your **Review Queue** and press **Make a video version**. Your Video Producer plans a storyboard saying what the post says. You can also ask your Social Media Assistant in chat to hand a post over.
-
-- When the video is finished, it goes onto that post, keeping its words, and waits for your approval there.
-- If the post can't take a video as it is (it's already scheduled, its platform doesn't take video, or you've put text on its picture), the post stays as it is and a new draft with the video and the post's words waits beside it.
-- Each post gets one video. Pressing it again opens the one already started.
-- These are marked **From one of your posts**. The finished video is also in **My Content**.
-
-The button only appears when your Video Producer is active and your plan includes video.
+Your Social Media Assistant can ask for one: press **Make a video version** on a post in its **Review Queue**. The storyboard arrives here marked **From one of your posts**. When the video is finished it is sent back to that post, and it's also in **My Content**. What happens to the post is explained in The Social Media Assistant.
 
 ## A video for a campaign
 
-Your Campaign Assistant can include **Commission a video** in a campaign plan: one short video on the campaign's message, using 2 of the campaign's tasks. Approving the plan starts the storyboard. It never makes the video.
-
-- The storyboard is marked **For a campaign**.
-- When the video is finished, the campaign marks that work done and starts anything that was waiting for it.
-- The video goes onto one of the campaign's posts that is still waiting for your approval, in place of the picture that post found for itself. A picture you chose yourself is never replaced. The video is also in **My Content**.
+Your Campaign Assistant can ask for one with **Commission a video** in a campaign plan, using 2 of the campaign's tasks. The storyboard is marked **For a campaign**. When the video is finished it is sent back to the campaign, and it's also in **My Content**.
 $$, FALSE)
 
 ON CONFLICT (title) DO UPDATE SET

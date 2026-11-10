@@ -387,7 +387,7 @@
     "headline": "Say what the video is about. Check the storyboard. Get a finished video.",
     "overview": [
       "The Video Producer makes short videos, vertical, square or wide. It writes the script from your business details and products, picks stock footage, your own pictures or clips, branded cards or AI scenes, and adds a voiceover and captions. Give it your own footage and it says what it sees, suggests edits and cuts out pauses and “um”s.",
-      "You check the storyboard scene by scene before anything is made. The finished video is saved to My Content: download it, or hand it to your Social Media Assistant or Blog Writer to use. The Video Producer never posts anything itself."
+      "You check the storyboard scene by scene before anything is made. The finished video is saved to My Content: download it, or use it with any of your assistants. The Video Producer never posts anything itself."
     ],
     "highlights": [
       "15, 30 or 60 seconds",
@@ -410,7 +410,7 @@
       },
       {
         "title": "Use it",
-        "body": "Play it and download it, or hand it to your Social Media Assistant or Blog Writer. Change it later and you get a new version."
+        "body": "Play it, download it, or use it from My Content. Change it later and you get a new version."
       }
     ],
     "features": [
@@ -440,7 +440,7 @@
       },
       {
         "q": "Does it post my videos?",
-        "a": "No. It saves the finished video to My Content. Download it for anywhere, including TikTok, or hand it to your Social Media Assistant, who posts it to Instagram, YouTube or Facebook after you approve."
+        "a": "No. It saves the finished video to My Content. Download it for anywhere, including TikTok, or pick it from My Content in any of your assistants."
       }
     ]
   },
