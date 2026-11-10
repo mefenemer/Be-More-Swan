@@ -1123,7 +1123,7 @@
             const q = await postActionCall('generate-blog', d.action === 'revise'
               ? { blogPostId: d.postId, revise: d.instruction }
               : d.action === 'pictures'
-                ? { blogPostId: d.postId, addImages: { source: d.source === 'ai' ? 'ai' : 'stock', instruction: d.instruction || undefined } }
+                ? { blogPostId: d.postId, addImages: { source: d.source === 'ai' ? 'ai' : 'stock', instruction: d.instruction || undefined, replaceAsset: d.replaceAsset || undefined } }
                 : { blogPostId: d.postId, resize: d.action });
             const started = Date.now();
             let job = null;
@@ -1139,17 +1139,17 @@
               message = rewrite.open
                 ? 'Still working — close this article and reopen it in a minute to see the new version.'
                 : d.action === 'pictures'
-                  ? 'Still finding pictures — open the article in Blog Studio in a minute to see them.'
+                  ? d.replaceAsset ? 'Still finding the new picture — open the article in Blog Studio in a minute to see it.' : 'Still finding pictures — open the article in Blog Studio in a minute to see them.'
                   : 'Still rewriting — open the article in Blog Studio in a minute to read the new version.';
             } else if (job.status === 'failed') {
               throw new Error(job.errorMessage || 'That didn’t work. Your article is unchanged.');
             } else {
               outcome = 'done';
-              const what = d.action === 'pictures' ? 'Pictures added' : `${d.action === 'shorter' ? 'Shorter' : d.action === 'longer' ? 'Longer' : 'Rewritten'} — saved`;
+              const what = d.action === 'pictures' ? (d.replaceAsset ? 'Picture replaced' : 'Pictures added') : `${d.action === 'shorter' ? 'Shorter' : d.action === 'longer' ? 'Longer' : 'Rewritten'} — saved`;
               message = rewrite.open
                 ? `${what}. It’s in the article beside this chat.${d.action === 'pictures' && job.errorMessage ? ' ' + job.errorMessage : ''}`
                 : d.action === 'pictures'
-                  ? `Pictures added — open it in Blog Studio to see them.${job.errorMessage ? ' ' + job.errorMessage : ''}`
+                  ? `${what} — open it in Blog Studio to see ${d.replaceAsset ? 'it' : 'them'}.${job.errorMessage ? ' ' + job.errorMessage : ''}`
                   : `${what}. Open it in Blog Studio to read it.`;
             }
           } finally {

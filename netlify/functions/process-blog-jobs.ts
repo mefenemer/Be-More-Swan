@@ -254,6 +254,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
                 userId: job.user_id,
                 source: addImages.source,
                 instruction: addImages.instruction,
+                replaceAssetId: addImages.replaceAsset,
             });
             if (!result.added) {
                 // An ordinary "nothing to add" (no good spot, no stock found, no tasks left) — said to
@@ -266,7 +267,7 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
                 .set({ status: 'completed', errorMessage: result.note ?? null, updatedAt: new Date() })
                 .where(eq(contentGenerationJobs.id, job.id));
             jobCompleted = true;
-            console.log(`[process-blog-jobs] job ${job.job_id}: added ${result.added} picture(s) (${addImages.source}) to post ${job.result_blog_post_id}`);
+            console.log(`[process-blog-jobs] job ${job.job_id}: ${result.replaced ? `replaced picture ${addImages.replaceAsset}` : `added ${result.added} picture(s)`} (${addImages.source}) in post ${job.result_blog_post_id}`);
             return;
         }
 

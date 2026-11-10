@@ -32,6 +32,7 @@
 import { and, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
+import { bodyHasPicture } from './blog-picture-swap';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -89,6 +90,8 @@ export interface BlogActionRequest {
     instruction?: string | null;
     /** Pictures: 'stock' (free, the default) or 'ai'. */
     source?: 'stock' | 'ai' | null;
+    /** Pictures: replace THIS picture (asset id, the one the owner selected) instead of adding. */
+    replaceAsset?: number;
 }
 
 /** Shape check on the model's output. Pure. Null when it is not a usable proposal. */
@@ -114,7 +117,15 @@ export function blogActionFromUiElement(uiElement: unknown): BlogActionRequest |
         instruction: action === 'revise' || action === 'pictures' ? instruction : null,
         // Only on a pictures card, so every other action's shape is unchanged.
         ...(action === 'pictures' ? { source: (ui.source === 'ai' ? 'ai' : 'stock') as 'stock' | 'ai' } : {}),
+        // Only when replacing, so an "add pictures" card keeps its shape.
+        ...(action === 'pictures' && replaceAssetOf(ui.replaceAsset) ? { replaceAsset: replaceAssetOf(ui.replaceAsset) as number } : {}),
     };
+}
+
+/** "2612", 2612 or "asset=2612" → 2612. Null otherwise. Pure. */
+function replaceAssetOf(v: unknown): number | null {
+    const n = Number(String(v ?? '').replace(/^\s*(?:asset\s*=\s*|#)/i, '').trim());
+    return Number.isInteger(n) && n > 0 ? n : null;
 }
 
 export interface BlogActionCard {
@@ -133,6 +144,8 @@ export interface BlogActionCard {
     instruction: string | null;
     /** Pictures only: 'stock' or 'ai'. */
     source?: 'stock' | 'ai' | null;
+    /** Pictures only, when replacing the selected picture: its asset id. */
+    replaceAsset?: number;
     /** Set when the action does not apply; the card says it and offers no button. */
     blocked: string | null;
     settled?: boolean;
@@ -152,6 +165,7 @@ export async function resolveBlogActionProposal(
     try {
         const [post] = await db.select({
             id: blogPosts.id, status: blogPosts.status, title: blogPosts.title, publishDate: blogPosts.publishDate,
+            bodyMarkdown: blogPosts.bodyMarkdown,
         })
             .from(blogPosts)
             .where(and(eq(blogPosts.id, req.postId), eq(blogPosts.organisationId, organisationId), eq(blogPosts.assistantId, aiAssistantId)))
@@ -172,8 +186,12 @@ export async function resolveBlogActionProposal(
             when: req.when,
             instruction: req.instruction ?? null,
             ...(req.action === 'pictures' ? { source: req.source ?? 'stock' } : {}),
+            ...(req.action === 'pictures' && req.replaceAsset ? { replaceAsset: req.replaceAsset } : {}),
             blocked: ACTIONABLE[req.action].includes(post.status) ? null : NOT_NOW[req.action],
         };
+        if (!card.blocked && req.replaceAsset && !bodyHasPicture(String(post.bodyMarkdown ?? ''), req.replaceAsset)) {
+            card.blocked = 'That picture isn’t in this article any more. Select it again in Blog Studio and ask once more.';
+        }
 
         if (!card.blocked && req.action === 'schedule' && req.when) {
             let at: Date | null = null;

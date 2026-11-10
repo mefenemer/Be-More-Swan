@@ -934,8 +934,13 @@
     var kind = blockKind(b.raw);
     var text = String(b.raw).trim();
     var short = text.replace(/\s+/g, ' ').replace(/^#{1,6}\s+/, '');
+    // A picture's chip names it, not its markup; the message below still quotes the line, whose
+    // asset number is what "replace this picture" swaps (issue 35).
+    var pic = kind === 'picture' ? (/\balt\s*=\s*"([^"]+)"/.exec(text) || /^!\[([^\]]+)\]/.exec(text)) : null;
     var ref = {
-      label: kind.charAt(0).toUpperCase() + kind.slice(1) + ' “' + (short.length > 48 ? short.slice(0, 47) + '…' : short) + '”',
+      label: kind === 'picture'
+        ? 'Picture' + (pic ? ' “' + (pic[1].length > 48 ? pic[1].slice(0, 47) + '…' : pic[1]) + '”' : '')
+        : kind.charAt(0).toUpperCase() + kind.slice(1) + ' “' + (short.length > 48 ? short.slice(0, 47) + '…' : short) + '”',
       // The whole block, word for word: the assistant's blog_block_edit card must quote it back exactly.
       message: 'About this part of my article #' + state.postId + ': the ' + kind + ' “' + text.slice(0, 2500) + '”.',
     };

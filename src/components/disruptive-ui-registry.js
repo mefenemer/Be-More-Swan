@@ -5363,7 +5363,11 @@
   };
 
   function renderBlogActionProposalCard(ui, esc) {
-    const copy = BLOG_ACTION_COPY[ui.action];
+    // A picture the user selected, to be swapped in the same place (issue 35).
+    const replaceAsset = ui.action === 'pictures' && Number.isInteger(Number(ui.replaceAsset)) && Number(ui.replaceAsset) > 0 ? Number(ui.replaceAsset) : null;
+    const copy = replaceAsset
+      ? { head: 'Replace this picture', button: 'Replace the picture', busy: 'Finding the new picture — about a minute…' }
+      : BLOG_ACTION_COPY[ui.action];
     const postId = Number(ui.postId);
     if (!copy || !Number.isInteger(postId)) return null;
     const fmt = (iso) => {
@@ -5393,13 +5397,15 @@
         <textarea id="bap-instruction-${postId}" data-bap-instruction rows="3" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
         <p class="text-xs text-gray-600 mt-2">The article is rewritten and saved in place, using your Business Knowledge for anything new — no invented facts. Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
       ${!blocked && ui.action === 'pictures' ? `
-        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">Anything in particular? (optional)</label>
-        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="2" maxlength="500" placeholder="Leave blank and your assistant decides" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
+        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">${replaceAsset ? 'What the new picture should show' : 'Anything in particular? (optional)'}</label>
+        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="2" maxlength="500" placeholder="${replaceAsset ? 'e.g. a woman listening, happily engaged' : 'Leave blank and your assistant decides'}" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
         <div class="flex flex-wrap gap-3 mt-2 text-xs text-gray-700">
           <label class="flex items-center gap-1.5"><input type="radio" name="bap-source-${postId}" data-bap-source value="stock" ${ui.source === 'ai' ? '' : 'checked'}> Stock photos (free)</label>
           <label class="flex items-center gap-1.5"><input type="radio" name="bap-source-${postId}" data-bap-source value="ai" ${ui.source === 'ai' ? 'checked' : ''}> AI images (uses tasks for each)</label>
         </div>
-        <p class="text-xs text-gray-600 mt-2">Up to 3 pictures, placed where they help the reader. The words aren’t changed; move or remove any picture in Blog Studio.</p>` : ''}
+        <p class="text-xs text-gray-600 mt-2">${replaceAsset
+          ? 'The picture you selected is swapped for the new one, in the same place. The words aren’t changed, and the old picture stays in your library.'
+          : 'Up to 3 pictures, placed where they help the reader. The words aren’t changed; move or remove any picture in Blog Studio.'}</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
       ${!blocked && ui.action === 'reject' ? `
         <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-reason-${postId}">What’s wrong with it</label>
@@ -5449,6 +5455,7 @@
             say(error || 'That didn’t work — please try again.', 'error');
           },
         },
+          replaceAsset,
       }));
     });
     return el;
