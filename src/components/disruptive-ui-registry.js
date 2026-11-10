@@ -4016,6 +4016,23 @@
   // preview shows a placeholder where it will go (site:pictureWorking).
   function renderSitePictureCard(ui, esc) {
     const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    // Several sections on one card (FR#9, site-picture-card.ts): a picker per section, each on its own,
+    // worked through in any order. Same kind and source to start with; each can switch.
+    if (Array.isArray(ui.sections) && ui.sections.length > 1) {
+      const items = ui.sections.slice(0, 6)
+        .map((s) => (s && typeof s === 'object' ? renderSitePictureCard({ type: 'site_picture', kind: ui.kind, source: ui.source, ...s, sections: null }, esc) : null))
+        .filter(Boolean);
+      if (items.length > 1) {
+        const wrap = document.createElement('div');
+        wrap.className = 'w-full max-w-md space-y-3';
+        wrap.setAttribute('data-sp-multi', '');
+        wrap.innerHTML = `<p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${esc(`${ui.kind === 'video' ? 'Videos' : 'Pictures'} for ${items.length} sections`)}</p>
+          <p class="text-xs text-gray-600">Each one has its own options below — do them in any order. Nothing is added until you choose one.</p>`;
+        items.forEach((it) => wrap.appendChild(it));
+        return wrap;
+      }
+      if (items.length === 1) return items[0];
+    }
     const pageId = str(ui.pageId, 80);
     const sectionId = str(ui.sectionId, 80);
     if (!pageId || !sectionId) return null;
