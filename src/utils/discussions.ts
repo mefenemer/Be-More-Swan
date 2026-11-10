@@ -20,7 +20,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, discussions, discussionWatches } from '../../db/schema';
 import {
-    DAILY_SCAN_MIN_GAP_MS, DEFAULT_DISCUSSION_SITES, DISCUSSION_FIT_LABELS,
+    DAILY_SCAN_MIN_GAP_MS, DEFAULT_DISCUSSION_SITES, DISCUSSION_FIT_LABELS, DISCUSSIONS_ENABLED,
     MAX_THREAD_AGE_DAYS, MAX_TRIAGE_PER_SCAN, MIN_RELEVANCE, RESULTS_PER_SEARCH, SCAN_STALE_MS,
     discussionQuery, isDiscussionSource, looksLikeThread, normaliseSites, normaliseThreadUrl,
     normaliseTopics, plainForSite, postedAgeDays, siteForUrl, sourceInfo, withDisclosure, TOPIC_WORDING_RULES,
@@ -162,10 +162,11 @@ async function triggerScanWorker(watchId: number): Promise<boolean> {
 
 export type StartScanResult =
     | { ok: true; watch: WatchView }
-    | { ok: false; code: 'no_topics' | 'no_sites' | 'already_running' | 'no_capacity' | 'not_configured' | 'not_started'; error: string };
+    | { ok: false; code: 'no_topics' | 'no_sites' | 'already_running' | 'no_capacity' | 'not_configured' | 'not_started' | 'paused'; error: string };
 
 /** "Scan now" (the tab's button, and the chat card's). Claims the watch and wakes the worker. */
 export async function startScan(db: Db, organisationId: number, assistantId: number): Promise<StartScanResult> {
+    if (!DISCUSSIONS_ENABLED) return { ok: false, code: 'paused', error: 'Discussions is switched off for now.' };
     const watch = await loadWatch(db, organisationId, assistantId);
     if (!watch || !watch.topics.length) return { ok: false, code: 'no_topics', error: 'Add at least one topic to look for first.' };
     if (!normaliseSites(watch.sites).length) return { ok: false, code: 'no_sites', error: 'Choose at least one site to watch first.' };
@@ -184,6 +185,8 @@ export interface DispatchResult { considered: number; queued: number; alreadyRun
 
 /** The daily scan: every enabled watch with topics, on a working assistant, not scanned today. */
 export async function dispatchDueScans(db: Db): Promise<DispatchResult> {
+    // Paused: no daily scan spends anyone's tasks (src/config/discussion-sites.ts DISCUSSIONS_ENABLED).
+    if (!DISCUSSIONS_ENABLED) return { considered: 0, queued: 0, alreadyRunning: 0, failedToStart: 0, deferred: 0 };
     const rows = await db.select({ id: discussionWatches.id, organisationId: discussionWatches.organisationId, topics: discussionWatches.topics, sites: discussionWatches.sites })
         .from(discussionWatches)
         .innerJoin(aiAssistants, eq(aiAssistants.id, discussionWatches.aiAssistantId))
@@ -492,6 +495,7 @@ export const CHAT_SNAPSHOT_THREADS = 10;
  * rather than something false.
  */
 export async function buildDiscussionsChatBlock(db: Db, organisationId: number, assistantId: number): Promise<string | null> {
+    if (!DISCUSSIONS_ENABLED) return null;
     try {
         const { discussions: rows, counts, watch } = await listDiscussions(db, organisationId, assistantId);
         const fresh = rows.filter((r) => r.status === 'new').slice(0, CHAT_SNAPSHOT_THREADS);

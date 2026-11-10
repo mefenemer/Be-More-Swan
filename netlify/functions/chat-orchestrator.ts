@@ -88,6 +88,7 @@ import {
 import { LEAD_BULK_MAX, leadActionFromUiElement, resolveLeadActionProposal, sendableDraft, type LeadActionCard } from '../../src/utils/chat-lead-action';
 import { discussionActionFromUiElement, resolveDiscussionActionProposal } from '../../src/utils/chat-discussion-action';
 import { buildDiscussionsChatBlock } from '../../src/utils/discussions';
+import { DISCUSSIONS_ENABLED } from '../../src/config/discussion-sites';
 import {
     assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
 } from '../../src/utils/chat-assistant-settings';
@@ -536,7 +537,6 @@ function leadGeneratorSurfaces(): string {
   • "Archived" — turned down before anything was sent.
   Nothing chases automatically beyond the follow-up plan, and the user is the one who presses send on a first email. The "Follow-up plan" button on the Outreach tab is where the user sees and changes that plan — whether to chase at all, how many follow-ups, how long each waits and what each says — and you can propose the same change with a follow_up_plan card (YOUR FOLLOW-UP PLAN below).
 - "Results" tab — straight after Outreach: the goals you are working towards and the figures for how the pipeline is doing.
-- "Discussions" tab — public forum threads (Reddit, UK Business Forums, Quora, LinkedIn posts) from the last week where someone is asking for what this business sells, found by a daily scan of the topics the user chose, each with a reply you drafted. You never post: the user presses "Copy reply & open thread", posts it from their own account, then "Mark replied" (or "Dismiss" to drop a thread). The tab's "What to watch" panel sets the topics and sites, and "Scan now" runs a scan straight away. If the user wants you to post or reply on those sites for them, say plainly that you are built not to — automated or undisclosed self-promotion breaks those sites' rules and UK consumer law — and offer the drafted replies instead.
 
 FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. Emit the discovery_campaign_proposal uiElement (shape 3 below). Write the "who to find" brief yourself, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Approving it SAVES the search — the user does not have to retype anything — but saves it as a draft that has not started: a run costs real money and reaches real strangers, so they start it themselves. Tell them exactly where: the search appears at the top of their Searches tab marked "Not started", with a "Start search" button beside it. Say that plainly in your reply and never claim the search is already running or that leads are already coming in. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
 }
@@ -4081,7 +4081,9 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         const discussionReq = route === ROUTES.lead_qualifier ? discussionActionFromUiElement(uiElement) : null;
         if (discussionReq) {
             uiElement = await resolveDiscussionActionProposal(db, orgId, session.aiAssistantId, discussionReq);
-            if (!uiElement) content = 'I couldn’t find that thread on this assistant’s Discussions tab, so I haven’t set anything up. Which one do you mean? You can also find it on the "Discussions" tab.';
+            if (!uiElement) content = !DISCUSSIONS_ENABLED
+                ? 'Watching forums for threads to reply to is switched off for now, so I haven’t set anything up.'
+                : 'I couldn’t find that thread on this assistant’s Discussions tab, so I haven’t set anything up. Which one do you mean? You can also find it on the "Discussions" tab.';
         }
         const leadActionReq = route === ROUTES.lead_qualifier ? leadActionFromUiElement(uiElement) : null;
         if (leadActionReq) {

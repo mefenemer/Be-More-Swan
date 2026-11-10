@@ -21,7 +21,7 @@ import {
     listDiscussions, redraftDiscussion, saveDraft, saveWatch, setDiscussionStatus, startScan, suggestTopicWording,
 } from '../../src/utils/discussions';
 import {
-    DISCUSSION_SITES, DISCUSSION_SITE_KEYS, DISCUSSION_STATUSES, MAX_OWN_FORUMS, MAX_TOPICS, SUGGESTED_FORUMS,
+    DISCUSSIONS_ENABLED, DISCUSSION_SITES, DISCUSSION_SITE_KEYS, DISCUSSION_STATUSES, MAX_OWN_FORUMS, MAX_TOPICS, SUGGESTED_FORUMS,
     normaliseForumAddress, type DiscussionStatus,
 } from '../../src/config/discussion-sites';
 
@@ -39,11 +39,13 @@ function isMissingTable(err: unknown): boolean {
 }
 
 const SCAN_STATUS: Record<string, number> = {
-    no_topics: 422, no_sites: 422, already_running: 409, no_capacity: 402, not_configured: 503, not_started: 502,
+    paused: 410, no_topics: 422, no_sites: 422, already_running: 409, no_capacity: 402, not_configured: 503, not_started: 502,
 };
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
+    // Paused (src/config/discussion-sites.ts DISCUSSIONS_ENABLED): nothing reads, saves or scans.
+    if (!DISCUSSIONS_ENABLED) return json(410, { error: 'Discussions is switched off for now.', code: 'paused' });
 
     const db = getDb();
     const ctx = await requireTenant(event, db);
