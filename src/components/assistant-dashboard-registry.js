@@ -604,11 +604,14 @@
     // is where a video is briefed, its storyboard checked and "Make the video" pressed
     // (assistant-videos.js); My Content opens on its videos (myContentTab.type).
     video_producer: {
+      // A studio's results, not post engagement — it never posts (owner, 2026-11-10). Fed by
+      // video-projects.ts ?performance=1 (routed by metricsSource in assistants.js, src/lib/video-results.ts).
+      metricsSource: 'video',
       kpis: [
-        { label: 'Engagement Rate by Reach', title: 'Watched and Liked', desc: 'Of everyone who saw your videos, how many stopped to engage with them.' },
-        { label: 'Organic Reach Growth', title: 'New Viewers', desc: 'How far your videos are spreading beyond your existing followers.' },
-        { label: 'Click-Through Rate', title: 'Did What You Asked', desc: 'How many viewers took the action your video asked for.' },
-        { label: 'Meaningful Engagement', title: 'Saves, Shares & DMs', desc: 'The signals that turn a view into a customer — weighed above likes.' },
+        { label: 'Videos Made', title: 'Finished Videos', desc: 'Every video it has finished and saved to My Content, in any shape or version.' },
+        { label: 'Made Without Changes', title: 'Right First Time', desc: 'Of the storyboards it planned and you made, how many you made exactly as planned — no scene changed, nothing re-planned, no new version after.' },
+        { label: 'Average Turnaround', title: 'Brief to Finished Video', desc: 'How long it takes from the brief to the finished file, over the last 90 days — including the time a storyboard waited for you.' },
+        { label: 'Times Used', title: 'In Posts & Articles', desc: 'How many times one of its finished videos was put in a post or a blog article.' },
       ],
       hideReviewQueue: true,
       hideDataHub: true,
@@ -625,6 +628,9 @@
       // My Content tab (assistant-my-content.js): the library its finished videos land in, opened on
       // Videos so they are found first. The chat lists the same files (src/utils/chat-my-content.ts).
       myContentTab: { label: 'My Content', type: 'video' },
+      // Calendar tab: each video on the day it was started and the day it was finished (calendar.js
+      // _datedItems, video-projects.ts ?calendar=1). It posts nothing, so there are no posting days.
+      calendarItems: 'videos',
       // Rules tab: read by its storyboard planner and its chat (video-producer.ts, RULE_READING_ROLES).
       rulesScope: 'video',
       defaultMainTab: 'videos',

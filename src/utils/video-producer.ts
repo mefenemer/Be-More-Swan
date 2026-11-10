@@ -21,9 +21,13 @@
 // ⚠️ Still scenes need a Remotion bundle from 2026-10-31 or later — redeploy both sites first.
 
 import { randomUUID } from 'crypto';
-import { and, desc, eq, inArray, isNull, lt, notInArray, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { contentAssets, organisations, scheduledPostAssets, scheduledPosts, videoProjects } from '../../db/schema';
+import { blogPostAssets, contentAssets, organisations, scheduledPostAssets, scheduledPosts, videoProjects } from '../../db/schema';
+import { videoResults, type ResultRow } from '../lib/video-results';
+import { VIDEO_SHAPES, SHAPE_LABELS } from '../lib/storyboard';
+import { LOOK_LABELS } from '../lib/video-look';
+import { LOWER_THIRD_LABELS } from '../lib/lower-third';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
@@ -53,6 +57,12 @@ import { recordPlatformIncident } from './platform-incident';
 import { asOwnVideos, footageStatus, loadFootage, ownVideos } from './footage-review';
 import { describeTightening, footagePlannerBlock, ownSpeechOnTimeline, silentWav, suggestionLine, tightenStoryboard, MAX_VIDEOS_PER_REVIEW, type FootageReview, type SpokenWord as FootageWord } from '../lib/footage';
 import { keepsOwnSound, minScenesFor, isVideoShape, shapeFrame, shapeOrientation, type VideoShape } from '../lib/storyboard';
+import { readMusicChoice, moodFor, pickTrack, speechWindows, musicTrack, MUSIC_LABELS } from '../lib/video-music';
+import { footageLufs, mixLevels, musicLufs, voiceLufs } from '../lib/loudness';
+import { isVideoLook, lookStyle, type LookStyle } from '../lib/video-look';
+import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
+import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
+import { musicAssetFor, usableMusicTracks } from './video-music-asset';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -89,6 +99,11 @@ export function withSetupDefaults(raw: unknown, onboardingContext: unknown): Rec
     if (!has('language') && typeof setup.defaultLanguage === 'string' && setup.defaultLanguage) b.language = setup.defaultLanguage;
     if (b.captions == null && (setup.defaultCaptions === 'off' || setup.defaultCaptions === false)) b.captions = false;
     if (!has('shape') && isVideoShape(setup.defaultShape)) b.shape = setup.defaultShape;
+    if (!has('musicMood') && typeof setup.defaultMusic === 'string' && setup.defaultMusic) b.musicMood = setup.defaultMusic;
+    if (!has('audience') && typeof setup.defaultAudience === 'string' && setup.defaultAudience.trim()) b.audience = setup.defaultAudience;
+    if (!has('goal') && typeof setup.defaultGoal === 'string' && setup.defaultGoal.trim()) b.goal = setup.defaultGoal;
+    if (!has('look') && isVideoLook(setup.defaultLook)) b.look = setup.defaultLook;
+    if (!has('lowerThird') && isLowerThirdStyle(setup.defaultLowerThird)) b.lowerThird = setup.defaultLowerThird;
     if (!has('captionStyle') && setup.captionStyle) {
         // Saved by the setup screens as JSON text (a hidden input), or as an object.
         let style: unknown = setup.captionStyle;
@@ -117,7 +132,13 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
             voiceover: b.voiceover !== false,
             voice: isVoiceId(b.voice) ? b.voice : DEFAULT_VOICE,
             allowAi,
-            musicMood: typeof b.musicMood === 'string' ? b.musicMood.slice(0, 40) : null,
+            // 'auto' | a mood | 'none' (No music). Old free-text moods map onto the four (video-music.ts).
+            musicMood: readMusicChoice(b.musicMood),
+            audience: typeof b.audience === 'string' && b.audience.trim() ? b.audience.replace(/\s+/g, ' ').trim().slice(0, 200) : null,
+            goal: typeof b.goal === 'string' && b.goal.trim() ? b.goal.replace(/\s+/g, ' ').trim().slice(0, 200) : null,
+            look: isVideoLook(b.look) ? b.look : 'natural',
+            lowerThird: isLowerThirdStyle(b.lowerThird) ? b.lowerThird : 'bar',
+            ...(Number.isInteger(Number(b.shapeOf)) && Number(b.shapeOf) > 0 ? { shapeOf: Number(b.shapeOf) } : {}),
             language: languageLabel(b.language) ? String(b.language) : null,
             captions: b.captions !== false,
             captionStyle: b.captionStyle && typeof b.captionStyle === 'object' ? normalizeCaptionStyle(b.captionStyle) : null,
@@ -176,6 +197,14 @@ export interface ProjectTimeline {
     width: number;
     height: number;
     durationS: number;
+    /** Where each scene sits (moment notes tie to these). Since 2026-11-10. */
+    sceneTimes?: SceneTime[];
+    /** The colour look (src/lib/video-look.ts). */
+    look?: LookStyle | null;
+    /** The mix the build chose (src/lib/loudness.ts), for the Videos tab and support. */
+    mix?: { voice: number; ownSound: number; music: number; musicUnder: number; musicTitle?: string | null };
+    /** Every file this version was made from: scenes, voiceover, music, captions, footage. */
+    sourceAssetIds?: number[];
 }
 
 /** Wake the project render worker. MUST be awaited (Lambda freezes on return). */
@@ -239,10 +268,14 @@ export async function libraryPictures(db: Db, orgId: number, limit = 30): Promis
 
 // ── Plan ────────────────────────────────────────────────────────────────────────────────────────
 
-export async function planProject(db: Db, projectId: number, opts: { feedback?: string | null } = {}): Promise<void> {
+export async function planProject(db: Db, projectId: number, opts: { feedback?: string | null; mode?: 'script' | 'notes' | null } = {}): Promise<void> {
     const [p] = await db.select().from(videoProjects).where(eq(videoProjects.id, projectId)).limit(1);
     if (!p || p.status !== 'planning') return;
     const brief = p.brief as VideoBrief;
+    // Words-only changes keep the storyboard and its pictures (src/lib/video-notes.ts).
+    const current = p.storyboard as Storyboard | null;
+    const mode = current && (opts.mode === 'script' || opts.mode === 'notes') ? opts.mode : null;
+    const noted = mode === 'notes' ? notesByScene(readNotes(p.momentNotes)) : {};
     try {
         const [[org], products, library, footage] = await Promise.all([
             db.select({ name: organisations.name, description: organisations.businessDescription, industry: organisations.industry })
@@ -270,20 +303,26 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
                     today: new Date().toISOString().slice(0, 10), feedback,
                     language: languageLabel(brief.language ?? (brief.voiceover ? voiceLanguage(brief.voice ?? DEFAULT_VOICE) : 'en')),
                     footageBlock: footagePlannerBlock(footage), acceptedEdits, declinedEdits,
+                    scriptOf: mode === 'script' ? current : null,
+                    sceneNotes: mode === 'notes' && current ? { storyboard: current, notes: noted } : null,
                 }) }],
                 maxTokens: 2500,
                 deadlineMs: 120_000,
                 usage: { workspaceId: p.organisationId, assistantId: p.aiAssistantId ?? null },
                 ...model,
             });
-            return enforceStoryboard(parseStoryboardJson(res.text), brief, library, own);
+            const raw = parseStoryboardJson(res.text);
+            // A words-only change is merged onto the scenes as they are, so nothing is sourced again.
+            if (mode === 'script' && current) return enforceStoryboard({ ...mergeScript(current, raw), scriptApprovedAt: null }, brief, library, own);
+            if (mode === 'notes' && current) return enforceStoryboard({ ...mergeNotedScenes(current, raw, Object.keys(noted)), scriptApprovedAt: null }, brief, library, own);
+            return enforceStoryboard(raw, brief, library, own);
         };
         let { storyboard, changes } = await ask(opts.feedback);
         // The voiceover sets the video's length, so a long script makes a long video: a "30-second"
         // sample came out at 45 s and outran the render Lambdas (2026-11-01). Over budget by more than
         // a fifth → plan once more, told how many words to lose. Still free; never a third attempt.
         const over = scriptOverBudget(storyboard, brief);
-        if (over) {
+        if (over && !mode) {
             const again = await ask([opts.feedback, `The voiceover is ${over.words} words; a ${brief.lengthS}-second video has room for about ${over.budget}. Cut it to ${over.budget} words or fewer — shorter lines, not fewer facts that matter.`].filter(Boolean).join(' '));
             if (again.storyboard.scenes.length >= minScenesFor(brief) && (scriptOverBudget(again.storyboard, brief)?.words ?? 0) < over.words) ({ storyboard, changes } = again);
         }
@@ -294,8 +333,19 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
             storyboard = t.storyboard;
             changes = [...changes, ...t.changes];
         }
+        // What a words-only change keeps: every scene whose picture is unchanged keeps what was made for
+        // it; any changed voiceover line re-records the one voiceover track.
+        let kept: Record<string, unknown> = {};
+        if (mode && current) {
+            const before = new Map(current.scenes.map((x) => [x.id, x]));
+            const assets = { ...((p.sceneAssets ?? {}) as Record<string, number>) };
+            for (const sc of storyboard.scenes) { const b = before.get(sc.id); if (!b || sceneLooks(b) !== sceneLooks(sc)) delete assets[sc.id]; }
+            const voiceSame = scriptOf(current) === scriptOf(storyboard);
+            kept = { sceneAssets: assets, ...(voiceSame ? {} : { voiceoverAssetId: null }), ...(mode === 'notes' ? { momentNotes: [] } : {}) };
+            if (current.music) storyboard = { ...storyboard, music: current.music };
+        }
         await db.update(videoProjects).set({
-            status: 'planned', storyboard, changes, title: storyboard.title, note: null, updatedAt: new Date(),
+            status: 'planned', storyboard, changes, title: storyboard.title, note: null, updatedAt: new Date(), ...kept,
         }).where(eq(videoProjects.id, projectId));
     } catch (err) {
         console.error(`[video-producer] plan ${projectId} failed:`, err);
@@ -305,6 +355,15 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
             status: 'failed', note: err instanceof Error ? err.message.slice(0, 400) : 'The storyboard could not be written.', updatedAt: new Date(),
         }).where(eq(videoProjects.id, projectId));
     }
+}
+
+/**
+ * What a scene SHOWS — only a change to this re-sources it. New on-screen words over the same clip
+ * keep the clip (they're an overlay), except on a branded card, whose words are drawn into the
+ * picture. A voiceover change never re-sources a picture. Pure.
+ */
+export function sceneLooks(s: Scene): string {
+    return JSON.stringify([s.source, s.keywords ?? '', s.prompt ?? '', s.assetId ?? null, s.inS ?? null, s.outS ?? null, s.source === 'brand_card' ? (s.onScreenText ?? '') : '']);
 }
 
 /**
@@ -401,11 +460,15 @@ export const VIDEO_CARD = {
 /** How long on-screen text stays over the owner's own footage. */
 export const OWN_TITLE_S = 3;
 
-export function sceneOverlays(scenes: Scene[], durations: number[], captionPosition: 'bottom' | 'middle' | 'top' = 'bottom'): Overlay[] {
+export function sceneOverlays(scenes: Scene[], durations: number[], captionPosition: 'bottom' | 'middle' | 'top' = 'bottom', names?: { style?: string | null; accent?: string | null; aspect: number }): Overlay[] {
     const out: Overlay[] = [];
     let t = 0;
     scenes.forEach((s, i) => {
         const d = durations[i] ?? s.targetS;
+        // Who is on screen, as a name caption (src/lib/lower-third.ts).
+        if (s.nameCaption && names) {
+            out.push(...lowerThirdOverlays({ id: `vp_lt_${s.id}`, caption: s.nameCaption, startS: t, d, style: isLowerThirdStyle(names.style) ? names.style : 'bar', accent: names.accent, aspect: names.aspect, captionPosition }));
+        }
         // A branded card already carries these words as its headline (sourceScene 'brand_card') —
         // overlaid as well, the first sample render showed "Pop in this week" three times at once
         // (card, overlay, captions). The card says it; the overlay stays off.
@@ -462,7 +525,8 @@ export function ownWindow(inS: number, d: number, fileS: number): { inS: number;
  * under a voiceover — and stock clips are silenced in a video that keeps its own sound, because the
  * render mutes clips only while some other track exists.
  */
-export function sceneClips(scenes: Scene[], assetIds: Record<string, number>, durations: number[], own?: { fileS: Map<number, number>; ownSound: boolean }): VideoClip[] {
+export function sceneClips(scenes: Scene[], assetIds: Record<string, number>, durations: number[], own?: { fileS: Map<number, number>; ownSound: boolean; ownGain?: number; clipS?: Map<number, number> }): VideoClip[] {
+    const ownGain = own?.ownSound ? Math.max(0, Math.min(1, own.ownGain ?? 1)) : 0;
     return scenes.flatMap((s, i): VideoClip[] => {
         const assetId = assetIds[s.id];
         if (!assetId) return [];
@@ -474,13 +538,35 @@ export function sceneClips(scenes: Scene[], assetIds: Record<string, number>, du
             const fileS = own?.fileS.get(assetId) ?? (s.outS ?? d);
             // Tightened (own sound only): one clip per piece of the same file, back to back.
             if (own?.ownSound && s.cuts?.length) {
-                return livePieces(s.cuts, fileS).map((p, k) => ({ id: `vp_${s.id}_${k + 1}`, assetId, inS: p.inS, outS: p.outS, gain: 1 }));
+                return livePieces(s.cuts, fileS).map((p, k) => ({ id: `vp_${s.id}_${k + 1}`, assetId, inS: p.inS, outS: p.outS, gain: ownGain }));
             }
             const w = ownWindow(s.inS ?? 0, d, fileS);
-            return [{ id: `vp_${s.id}`, assetId, inS: w.inS, outS: w.outS, gain: own?.ownSound ? 1 : 0 }];
+            return [{ id: `vp_${s.id}`, assetId, inS: w.inS, outS: w.outS, gain: ownGain }];
         }
-        return [{ id: `vp_${s.id}`, assetId, inS: 0, outS: d, ...(own?.ownSound ? { gain: 0 } : {}) }];
+        // A stock or AI clip made for an earlier version: a reworded line can now run longer than
+        // the clip, and a clip asked for past its end fails the whole render ("No frame found"). It
+        // plays again from the start for the rest — the picture is kept, never sourced again.
+        return loopToLength(own?.clipS?.get(assetId), d).map((p, k, all) => ({
+            id: all.length > 1 ? `vp_${s.id}_${k + 1}` : `vp_${s.id}`, assetId, inS: p.inS, outS: p.outS, ...(own?.ownSound ? { gain: 0 } : {}),
+        }));
     });
+}
+
+/**
+ * Pieces of a clip `fileS` long that fill `d` seconds: the clip once when it's long enough (or its
+ * length is unknown), otherwise whole plays then a last part. At most 4 pieces. Pure.
+ */
+export function loopToLength(fileS: number | null | undefined, d: number): Array<{ inS: number; outS: number }> {
+    const need = Math.round(d * 100) / 100;
+    if (!fileS || !(fileS > 0.5) || fileS >= need) return [{ inS: 0, outS: need }];
+    const out: Array<{ inS: number; outS: number }> = [];
+    let left = need;
+    while (left > 0.05 && out.length < 4) {
+        const len = Math.min(fileS - 0.05, left);
+        out.push({ inS: 0, outS: Math.round(len * 100) / 100 });
+        left = Math.round((left - len) * 100) / 100;
+    }
+    return out;
 }
 
 /** A tightened scene's pieces that lie inside the file (re-checked at build: never past the end). Pure. */
@@ -504,6 +590,17 @@ export function playedDurations(scenes: Scene[], durations: number[], fileS: Map
             return Math.round(len * 100) / 100;
         }
         return f ? Math.min(d, f) : d;
+    });
+}
+
+/** Where each scene sits on the finished video, from the played durations. Pure. */
+export function timesOf(scenes: Scene[], durations: number[]): SceneTime[] {
+    let t = 0;
+    return scenes.map((s, i) => {
+        const d = durations[i] ?? s.targetS;
+        const st = { sceneId: s.id, startS: Math.round(t * 100) / 100, endS: Math.round((t + d) * 100) / 100 };
+        t += d;
+        return st;
     });
 }
 
@@ -717,12 +814,48 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         if (missing.length) throw new Error(`Couldn't find pictures for ${missing.join(', ')}. Change those scenes or try again — the finished scenes are kept.`);
 
         // 3. The post — one row per platform, one cross-post group.
-        const clips = sceneClips(storyboard.scenes, done, durations, { fileS, ownSound });
         const shape: VideoShape = brief.shape ?? '9:16';
+        const totalS = Math.round(durations.reduce((a, d) => a + d, 0) * 100) / 100;
+        // Music: a library track for the brief's mood, or none ("No music"). Chosen once and kept on
+        // the storyboard, so a new version or another shape keeps the same track.
+        const mood = moodFor(brief);
+        let music: { assetId: number; title: string; storageKey: string } | null = null;
+        if (mood) {
+            try {
+                const tracks = await usableMusicTracks(db);
+                const keep = storyboard.music && storyboard.music.mood === mood ? tracks.find((t) => t.id === storyboard.music!.trackId) : null;
+                const track = keep ?? pickTrack(tracks, mood, totalS, projectId, brief.avoidTrackId);
+                if (track) {
+                    music = { assetId: await musicAssetFor(db, { orgId, userId, track }), title: track.title, storageKey: track.storageKey };
+                    if (!keep) { storyboard.music = { trackId: track.id, title: track.title, mood }; await save({ storyboard }); }
+                }
+            } catch (err) {
+                // No music is better than no video: the library may be empty in this environment.
+                console.warn(`[video-producer] build ${projectId}: no music —`, err);
+            }
+        }
+        // Even loudness (src/lib/loudness.ts): every part levelled from its measured loudness, aimed
+        // at about −14 LUFS, the music ducked under whoever speaks.
+        const footageLoud = footageLufs(footage.flatMap((v) => v.analysis?.loudness ?? []));
+        const levels = mixLevels({
+            voice: voiceLufs(brief.voice ?? DEFAULT_VOICE), footage: footageLoud, music: music ? musicLufs(music.storageKey) : null,
+            hasVoice: !!voiceoverAssetId, hasOwnSound: ownSound, hasMusic: !!music,
+        });
+        // Reused stock / AI clips: their real lengths, so a longer reworded line never runs past one.
+        const reusedIds = storyboard.scenes.filter((s) => s.source === 'stock_video' || s.source === 'ai_video').map((s) => done[s.id]).filter(Boolean);
+        const clipS = new Map<number, number>();
+        if (reusedIds.length) {
+            const rows = await db.select({ id: contentAssets.id, durationS: contentAssets.durationS }).from(contentAssets)
+                .where(and(inArray(contentAssets.id, reusedIds), eq(contentAssets.organisationId, orgId)));
+            for (const r of rows) if (r.durationS && r.durationS > 0) clipS.set(r.id, r.durationS);
+        }
+        const clips = sceneClips(storyboard.scenes, done, durations, { fileS, ownSound, ownGain: levels.ownSound || 1, clipS });
         const edit: VideoEdit = { clips, targetRatio: shape };
+        const voiceGain = levels.voice || 1;
         const audio: AudioOverlay[] = voiceoverAssetId
-            ? [{ id: `vp_vo_${voiceoverAssetId}`, assetId: voiceoverAssetId, label: 'Voiceover', volume: 1, fadeInS: 0.05, fadeOutS: 0.2, captions: brief.captions !== false, ...(brief.captionStyle ? { captionStyle: normalizeCaptionStyle(brief.captionStyle) } : {}) }]
+            ? [{ id: `vp_vo_${voiceoverAssetId}`, assetId: voiceoverAssetId, label: 'Voiceover', volume: Math.min(1, voiceGain), ...(voiceGain > 1 ? { level: voiceGain } : {}), fadeInS: 0.05, fadeOutS: 0.2, captions: brief.captions !== false, ...(brief.captionStyle ? { captionStyle: normalizeCaptionStyle(brief.captionStyle) } : {}) }]
             : [];
+        let spokenWindows = voiceoverAssetId ? speechWindows(words) : [];
         // Footage in its own sound: captions follow what people say in it. The render reads caption
         // words from a voiceover track, so a silent track carries them (volume 0) — no render change.
         if (ownSound && brief.captions !== false) {
@@ -733,13 +866,26 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                 audio.push({ id: `vp_cap_${captionAssetId}`, assetId: captionAssetId, label: 'Captions of what’s said', volume: 0, fadeInS: 0, fadeOutS: 0, captions: true, ...(brief.captionStyle ? { captionStyle: normalizeCaptionStyle(brief.captionStyle) } : {}) });
             }
         }
-        const overlays = sceneOverlays(storyboard.scenes, durations, brief.captions !== false ? normalizeCaptionStyle(brief.captionStyle).position : 'bottom');
+        // Own sound: the music ducks under what people say in the footage.
+        if (ownSound) {
+            const wordsByAsset = new Map(footage.map((v) => [v.id, v.words as FootageWord[]]));
+            spokenWindows = speechWindows(ownSpeechOnTimeline(storyboard.scenes, durations, wordsByAsset));
+        }
+        if (music) audio.push(musicTrack({ assetId: music.assetId, title: music.title, durationS: totalS, gap: levels.music, under: levels.musicUnder, windows: spokenWindows }));
+        const frame = shapeFrame(shape);
+        const overlays = sceneOverlays(storyboard.scenes, durations, brief.captions !== false ? normalizeCaptionStyle(brief.captionStyle).position : 'bottom',
+            { style: brief.lowerThird, accent: kit.primaryColor, aspect: frame.width / frame.height });
         // 3. The timeline — saved on the project and rendered to My Content. No post: the Video Producer
         // is a studio (owner, 2026-11-09; docs/video-producer-studio-plan.md). Posting is the Social
         // Media Manager's job, from the finished video.
         const timeline: ProjectTimeline = {
-            videoEdit: edit, overlays, audio, targetRatio: shape, ...shapeFrame(shape),
-            durationS: Math.round(durations.reduce((a, d) => a + d, 0) * 100) / 100,
+            videoEdit: edit, overlays, audio, targetRatio: shape, ...frame,
+            durationS: totalS,
+            sceneTimes: timesOf(storyboard.scenes, durations),
+            look: lookStyle(brief.look, [kit.primaryColor]),
+            mix: { ...levels, musicTitle: music?.title ?? null },
+            // Kept with the version: every file it was made from (the Videos tab lists them).
+            sourceAssetIds: [...new Set([...clips.map((c) => c.assetId), ...audio.map((a) => a.assetId)])],
         };
 
         // Anything still held (a scene that turned out free, say) goes back.
@@ -765,15 +911,100 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
  * — so only what the owner changes is made, and paid for, again. The finished video it came from stays
  * Ready in My Content. Free: nothing is made until "Make the video".
  */
-export async function newVersion(db: Db, row: typeof videoProjects.$inferSelect): Promise<typeof videoProjects.$inferSelect> {
+export async function newVersion(db: Db, row: typeof videoProjects.$inferSelect, opts: { status?: 'planned' | 'planning'; momentNotes?: unknown } = {}): Promise<typeof videoProjects.$inferSelect> {
     const [v] = await db.insert(videoProjects).values({
         organisationId: row.organisationId, aiAssistantId: row.aiAssistantId, createdBy: row.createdBy,
-        title: row.title, status: 'planned', brief: row.brief, storyboard: row.storyboard, changes: [],
+        title: row.title, status: opts.status ?? 'planned', brief: row.brief, storyboard: row.storyboard, changes: [],
         sceneAssets: row.sceneAssets, voiceoverAssetId: row.voiceoverAssetId, footageReview: row.footageReview,
         origin: row.origin, sourcePostId: row.sourcePostId, campaignId: null, campaignOrderId: null,
         version: (row.version ?? 1) + 1, parentProjectId: row.id,
+        // "Make a new version from my notes": the notes travel to the new version, which acts on them.
+        ...(opts.momentNotes ? { momentNotes: opts.momentNotes } : {}),
     }).returning();
     return v;
+}
+
+/** The scene sources whose picture depends on the frame and costs nothing to make again. */
+const RESHOOT_FOR_SHAPE = new Set(['stock_video', 'stock_photo', 'brand_card']);
+
+/**
+ * What another shape of a finished video keeps: the voiceover, the owner's own footage and pictures,
+ * and every AI scene (already paid for). Stock is searched again in the new orientation and branded
+ * cards are drawn again in the new frame — both free. Pure.
+ */
+export function assetsForShape(storyboard: Storyboard, sceneAssets: unknown): Record<string, number> {
+    const made = (sceneAssets && typeof sceneAssets === 'object' ? sceneAssets : {}) as Record<string, number>;
+    const out: Record<string, number> = {};
+    for (const sc of storyboard.scenes) if (made[sc.id] && !RESHOOT_FOR_SHAPE.has(sc.source)) out[sc.id] = made[sc.id];
+    return out;
+}
+
+/** The family a video belongs to across shapes: the original's id. Pure. */
+export function shapeRoot(row: { id: number; brief: unknown }): number {
+    const of = Number((row.brief as { shapeOf?: unknown } | null)?.shapeOf);
+    return Number.isInteger(of) && of > 0 ? of : row.id;
+}
+
+/**
+ * "Make it in the other shapes": one new video per shape this one doesn't have yet (counting shapes
+ * already made from the same original), each keeping everything already made that fits. Each starts
+ * making straight away when it costs nothing — the usual case, since only free stock and cards are
+ * made again — otherwise it waits on "To check" for "Make the video", which states the cost.
+ */
+export async function makeOtherShapes(db: Db, row: typeof videoProjects.$inferSelect, args: { userId: number; shapes?: VideoShape[]; headers?: Record<string, string | undefined> }): Promise<{ made: Array<typeof videoProjects.$inferSelect>; skipped: VideoShape[] }> {
+    const brief = row.brief as VideoBrief;
+    const sb = row.storyboard as Storyboard;
+    const root = shapeRoot(row);
+    const family = await db.select({ id: videoProjects.id, brief: videoProjects.brief, status: videoProjects.status }).from(videoProjects)
+        .where(and(eq(videoProjects.organisationId, row.organisationId), or(eq(videoProjects.id, root), sql`${videoProjects.brief}->>'shapeOf' = ${String(root)}`)));
+    const have = new Set(family.filter((f) => !['cancelled', 'failed'].includes(f.status)).map((f) => ((f.brief as VideoBrief).shape ?? '9:16')));
+    const wanted = (args.shapes?.length ? args.shapes : [...VIDEO_SHAPES]).filter((x) => x !== (brief.shape ?? '9:16'));
+    const made: Array<typeof videoProjects.$inferSelect> = [];
+    const skipped: VideoShape[] = [];
+    for (const shape of wanted) {
+        if (have.has(shape)) { skipped.push(shape); continue; }
+        const nb = { ...brief, shape, shapeOf: root };
+        const sceneAssets = assetsForShape(sb, row.sceneAssets);
+        const free = buildTasks(sb, nb, { sceneAssets, voiceoverAssetId: row.voiceoverAssetId }) === 0;
+        const [v] = await db.insert(videoProjects).values({
+            organisationId: row.organisationId, aiAssistantId: row.aiAssistantId, createdBy: row.createdBy ?? args.userId,
+            title: row.title, status: free ? 'building' : 'planned', brief: nb, storyboard: sb, changes: [],
+            sceneAssets, voiceoverAssetId: row.voiceoverAssetId, footageReview: row.footageReview,
+            origin: row.origin, sourcePostId: null, campaignId: null, campaignOrderId: null,
+            version: row.version ?? 1, parentProjectId: row.id, ...(free ? { startedAt: new Date() } : {}),
+        }).returning();
+        if (free) await wakeVideoWorker({ projectId: v.id, action: 'build' }, args.headers);
+        made.push(v);
+        have.add(shape);
+    }
+    return { made, skipped };
+}
+
+/** The Results tab's four figures for one Video Producer (src/lib/video-results.ts). */
+export async function videoResultsFor(db: Db, orgId: number, assistantId: number) {
+    const rows = await db.select({
+        id: videoProjects.id, status: videoProjects.status, version: videoProjects.version, editCount: videoProjects.editCount,
+        parentProjectId: videoProjects.parentProjectId, brief: videoProjects.brief, createdAt: videoProjects.createdAt,
+        outputAssetId: videoProjects.outputAssetId, readyAt: contentAssets.createdAt,
+    }).from(videoProjects)
+        .leftJoin(contentAssets, and(eq(contentAssets.id, videoProjects.outputAssetId), eq(contentAssets.organisationId, orgId)))
+        .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, assistantId)));
+    const outputs = rows.map((r) => r.outputAssetId).filter((x): x is number => x != null);
+    let used = 0;
+    if (outputs.length) {
+        const [posts, articles] = await Promise.all([
+            db.select({ n: sql<number>`count(*)::int` }).from(scheduledPostAssets)
+                .innerJoin(scheduledPosts, eq(scheduledPosts.id, scheduledPostAssets.scheduledPostId))
+                .where(and(inArray(scheduledPostAssets.contentAssetId, outputs), eq(scheduledPosts.organisationId, orgId))),
+            db.select({ n: sql<number>`count(*)::int` }).from(blogPostAssets).where(inArray(blogPostAssets.contentAssetId, outputs)),
+        ]);
+        used = Number(posts[0]?.n ?? 0) + Number(articles[0]?.n ?? 0);
+    }
+    const resultRows: ResultRow[] = rows.map((r) => ({
+        id: r.id, status: r.status, version: r.version, editCount: r.editCount, parentProjectId: r.parentProjectId,
+        shapeCopy: !!(r.brief as VideoBrief | null)?.shapeOf, createdAt: r.createdAt, readyAt: r.readyAt ?? null,
+    }));
+    return videoResults(resultRows, used);
 }
 
 /** Longer than any honest plan or build runs (the worker's own ceiling is 15 minutes). */
@@ -860,9 +1091,39 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         outputAssetId: row.outputAssetId, version: row.version, outputUrl, outputDurationS,
         ...(sb ? await buildEstimate(orgId, sb, row.brief as VideoBrief, row) : { estimate: null, unit: null }),
         parentProjectId: row.parentProjectId,
+        // Notes on moments of the finished video, and where each scene sits on it.
+        momentNotes: readNotes(row.momentNotes),
+        sceneTimes: row.timeline ? sceneTimesOf(row.timeline) : [],
+        mix: (row.timeline as ProjectTimeline | null)?.mix ?? null,
+        editCount: row.editCount,
+        sourceFiles: row.status === 'ready' ? await sourceFilesOf(db, orgId, row) : [],
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),
         createdAt: row.createdAt, updatedAt: row.updatedAt,
     };
+}
+
+function sceneTimesOf(timeline: unknown): SceneTime[] {
+    return sceneTimesFrom(timeline as ProjectTimeline);
+}
+
+/**
+ * The files a finished version was made from — its scenes, voiceover, music and caption track —
+ * listed with the version so they are found with it (and downloaded from there). Older videos list
+ * their scenes and voiceover. Never the owner's footage twice.
+ */
+export async function sourceFilesOf(db: Db, orgId: number, row: typeof videoProjects.$inferSelect): Promise<Array<{ id: number; name: string; kind: string }>> {
+    const tl = row.timeline as ProjectTimeline | null;
+    const ids = tl?.sourceAssetIds?.length
+        ? tl.sourceAssetIds
+        : [...Object.values((row.sceneAssets ?? {}) as Record<string, number>), ...(row.voiceoverAssetId ? [row.voiceoverAssetId] : [])];
+    const uniq = [...new Set(ids.filter((x) => Number.isInteger(x) && x > 0))].slice(0, 60);
+    if (!uniq.length) return [];
+    const rows = await db.select({ id: contentAssets.id, name: contentAssets.name, assetType: contentAssets.assetType, provider: contentAssets.provider })
+        .from(contentAssets).where(and(inArray(contentAssets.id, uniq), eq(contentAssets.organisationId, orgId), isNull(contentAssets.purgedAt)));
+    const kindOf = (r: typeof rows[number]) => r.provider === 'library' ? 'Music' : r.assetType === 'audio' ? 'Voiceover / captions'
+        : r.provider === 'pexels' ? 'Stock' : r.provider === 'fal' ? 'AI' : r.provider === 'brand_card' ? 'Branded card' : r.provider == null ? 'Your file' : 'Picture';
+    const order = new Map(uniq.map((id, i) => [id, i]));
+    return rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)).map((r) => ({ id: r.id, name: r.name || `File ${r.id}`, kind: kindOf(r) }));
 }
 
 /**
@@ -898,7 +1159,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         const from = ORIGIN_LABELS[r.origin] ? ` · ${ORIGIN_LABELS[r.origin]}` : '';
         // Its scenes, once it can still be changed: "make the opening punchier" needs the words.
         const lines = sb && (r.status === 'planned' || r.status === 'failed')
-            ? sb.scenes.map((s, i) => `\n    • scene ${i + 1} (${s.beat}, ${s.source}): voiceover "${(s.voiceover || '').slice(0, 240)}"${s.onScreenText ? `; on screen "${s.onScreenText}"` : ''}${s.tightened ? `; tightened: ${describeTightening(s.tightened)}` : s.tighten === false ? '; kept as filmed' : ''}`).join('')
+            ? sb.scenes.map((s, i) => `\n    • scene ${i + 1} (${s.beat}, ${s.source}): voiceover "${(s.voiceover || '').slice(0, 240)}"${s.onScreenText ? `; on screen "${s.onScreenText}"` : ''}${s.nameCaption ? `; name caption "${s.nameCaption.name}${s.nameCaption.role ? ` · ${s.nameCaption.role}` : ''}"` : ''}${s.tightened ? `; tightened: ${describeTightening(s.tightened)}` : s.tighten === false ? '; kept as filmed' : ''}`).join('')
             : '';
         const fr = r.footageReview as FootageReview | null;
         const own = brief.footageAssetIds?.length ? ` · from their own footage (videos ${brief.footageAssetIds.join(', ')})` : '';
@@ -906,7 +1167,21 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
             ? fr.seen.map((v) => `\n    • what you saw in video ${v.assetId} "${v.name.slice(0, 60)}": ${v.summary.slice(0, 200)}${v.problems.length ? ` (problems: ${v.problems.join(', ').slice(0, 160)})` : ''}`).join('')
               + fr.suggestions.map((x) => `\n    • suggestion ${x.id}${x.ticked ? '' : ' (unticked)'}: ${x.text.slice(0, 160)}`).join('')
             : '';
-        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${from}${own}) — ${WAITING[r.status] ?? r.status}${cost}${note}${seen}${lines}`;
+        const shapeTxt = ` · ${SHAPE_LABELS[(brief.shape ?? '9:16') as VideoShape] ?? brief.shape}${brief.shapeOf ? ` (another shape of video ${brief.shapeOf})` : ''}`;
+        const extras = [
+            brief.audience ? `for: ${brief.audience.slice(0, 100)}` : '',
+            brief.goal ? `they should: ${brief.goal.slice(0, 100)}` : '',
+            `music: ${MUSIC_LABELS[readMusicChoice(brief.musicMood)]}${sb?.music ? ` ("${sb.music.title}")` : ''}`,
+            brief.look && brief.look !== 'natural' ? `look: ${LOOK_LABELS[brief.look] ?? brief.look}` : '',
+            sb && sb.scenes.some((x) => x.nameCaption) ? `name captions: ${LOWER_THIRD_LABELS[brief.lowerThird ?? 'bar'] ?? brief.lowerThird}` : '',
+        ].filter(Boolean).join(' · ');
+        const script = sb && (r.status === 'planned' || r.status === 'failed') && brief.voiceover
+            ? (sb.scriptApprovedAt ? ' · script APPROVED' : ' · script not approved yet') : '';
+        const notes = readNotes(r.momentNotes);
+        const noteLines = notes.length
+            ? notes.map((n) => `\n    • their note at ${mmss(n.atS)}${n.sceneId ? ` (scene ${n.sceneId.slice(1)})` : ''}: "${n.text.slice(0, 160)}"`).join('')
+            : '';
+        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${shapeTxt}${from}${own}) — ${WAITING[r.status] ?? r.status}${cost}${script}${note}${extras ? `\n    ${extras}` : ''}${seen}${lines}${noteLines}`;
     }), '', footage].join('\n');
 }
 

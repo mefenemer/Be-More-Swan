@@ -89,6 +89,8 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
             audio,
             overlays: renderableOverlays(tl.overlays),
             ...(captions ? { captions } : {}),
+            // The colour look (src/lib/video-look.ts); an older bundle ignores it and renders ungraded.
+            ...(tl.look ? { look: tl.look } : {}),
             width: tl.width || 1080,
             height: tl.height || 1920,
             fps,
@@ -130,7 +132,8 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
             width: props.width, height: props.height, durationS: Math.round((props.durationInFrames / fps) * 100) / 100,
             aspectRatio: props.targetRatio, provider: 'video_producer',
             // What My Content and the hand-offs read: who made it, which project, and "Contains AI".
-            renderParams: { kind: 'video_producer', projectId, version: p.version, containsAi: containsAi(sb), suggestedWords: sb?.caption ?? null },
+            // sourceAssetIds: the files this version was made from, kept with it (listed on the Videos tab).
+            renderParams: { kind: 'video_producer', projectId, version: p.version, containsAi: containsAi(sb), suggestedWords: sb?.caption ?? null, sourceAssetIds: tl.sourceAssetIds ?? [] },
             status: 'pending',
         }).returning({ id: contentAssets.id });
         // Made FOR a post — "Make a video version", or a campaign — it goes back to it (Phase 5, D-S4).

@@ -539,6 +539,66 @@
             helpText: 'Optional. Used as the call to action unless you give a different one on a video.',
           },
           {
+            // video-producer.ts withSetupDefaults → brief.audience; the storyboard planner writes for them.
+            key: 'defaultAudience',
+            label: 'Who are your videos usually for?',
+            type: 'text',
+            required: false,
+            placeholder: 'e.g. Busy parents in Leeds',
+            helpText: 'Optional. The script is written for them. Every video can say someone else.',
+          },
+          {
+            // video-producer.ts withSetupDefaults → brief.goal; the planner builds towards it.
+            key: 'defaultGoal',
+            label: 'What should they usually do after watching?',
+            type: 'text',
+            required: false,
+            placeholder: 'e.g. Book a free taster class',
+            helpText: 'Optional. The video builds towards it and ends on it.',
+          },
+          {
+            // video-producer.ts withSetupDefaults → brief.musicMood (src/lib/video-music.ts).
+            key: 'defaultMusic',
+            label: 'What music should go under your videos?',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: 'auto', label: 'Picked to suit each video', description: 'Royalty-free tracks from our own library. The music goes quiet whenever someone speaks.' },
+              { value: 'upbeat', label: 'Upbeat', description: 'Lively and bright.' },
+              { value: 'chill', label: 'Chilled', description: 'Relaxed, lo-fi.' },
+              { value: 'inspiring', label: 'Inspiring', description: 'Uplifting, for stories and big news.' },
+              { value: 'ambient', label: 'Calm, in the background', description: 'Soft and unobtrusive.' },
+              { value: 'none', label: 'No music', description: 'Just the voice, or the sound in your own footage.' },
+            ],
+          },
+          {
+            // video-producer.ts withSetupDefaults → brief.look (src/lib/video-look.ts).
+            key: 'defaultLook',
+            label: 'Should your videos have a colour look?',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: 'natural', label: 'Natural', description: 'Every scene as it was filmed.' },
+              { value: 'brand', label: 'Your brand colours', description: 'A faint wash of your brand colour over every scene, so stock and your own footage look like one film.' },
+              { value: 'warm', label: 'Warm', description: 'Golden and friendly.' },
+              { value: 'cool', label: 'Cool', description: 'Crisp and blue.' },
+              { value: 'punchy', label: 'Bright and punchy', description: 'Stronger colour and contrast.' },
+              { value: 'mono', label: 'Black and white', description: 'Classic and simple.' },
+            ],
+          },
+          {
+            // video-producer.ts withSetupDefaults → brief.lowerThird (src/lib/lower-third.ts).
+            key: 'defaultLowerThird',
+            label: 'How should name captions look when someone is on screen?',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: 'bar', label: 'Brand-colour bar, left', description: 'Their name on your brand colour, their role underneath.' },
+              { value: 'clean', label: 'Plain white words, left', description: 'No box — just the words.' },
+              { value: 'boxed', label: 'White box, centred', description: 'Dark words on a white box in the middle.' },
+            ],
+          },
+          {
             // src/utils/video-autopilot.ts (owner decision D7: off by default; always reviewed).
             // Storyboards only — making the video stays a click, so autopilot never spends a task.
             key: 'autopilotPerWeek',

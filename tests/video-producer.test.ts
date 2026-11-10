@@ -201,7 +201,7 @@ check('a script more than a fifth over its length is planned once more, told how
     assert.deepStrictEqual(scriptOverBudget(sb(100) as any, b30), { words: 100, budget: 75 });
     assert.strictEqual(scriptOverBudget(sb(100) as any, { ...b30, voiceover: false }), null, 'no voiceover, no budget');
     const vp = readFileSync(join(root, 'src/utils/video-producer.ts'), 'utf8');
-    assert.match(vp, /const over = scriptOverBudget\(storyboard, brief\);\s*if \(over\) \{/);
+    assert.match(vp, /const over = scriptOverBudget\(storyboard, brief\);\s*if \(over && !mode\) \{/);
     assert.match(vp, /\(scriptOverBudget\(again\.storyboard, brief\)\?\.words \?\? 0\) < over\.words/, 'only a shorter retry replaces it');
 });
 

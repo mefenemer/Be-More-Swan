@@ -5428,6 +5428,9 @@ export const videoProjects = pgTable("video_projects", {
   renderId: text("render_id"),
   renderBucket: text("render_bucket"),
   renderRegion: text("render_region"),
+  // db/z-video-producer-seven.sql — notes on moments of a Ready video, and storyboard edits before it was made.
+  momentNotes: jsonb("moment_notes").notNull().default([]),
+  editCount: integer("edit_count").notNull().default(0),
   startedAt: timestamp("started_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

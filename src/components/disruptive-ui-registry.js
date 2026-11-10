@@ -1647,6 +1647,121 @@
   register('visual_brief_proposal', renderVisualBriefProposalCard);
 
   // ── Built-ins: Video Producer cards (docs/video-producer-plan.md §5.10) ─────────────────────
+  // The choices the server reads (src/lib/video-music.ts, video-look.ts, lower-third.ts).
+  const VIDEO_MUSIC = { auto: 'Picked to suit the video', upbeat: 'Upbeat', chill: 'Chilled', inspiring: 'Inspiring', ambient: 'Calm, in the background', none: 'No music' };
+  const VIDEO_LOOKS = { natural: 'Natural (no grade)', brand: 'Your brand colours', warm: 'Warm', cool: 'Cool', punchy: 'Bright and punchy', mono: 'Black and white' };
+  const VIDEO_LOWER_THIRDS = { bar: 'Brand-colour bar, left', clean: 'Plain white words, left', boxed: 'White box, centred' };
+  const VIDEO_SHAPE_NAMES = { '9:16': 'Vertical 9:16', '1:1': 'Square 1:1', '16:9': 'Wide 16:9' };
+
+  /**
+   * One Video Producer action on a card (2026-11-10): the chat twin of a button on the Videos tab.
+   * The click sends `body` to video-projects.ts through chat-session.js (`video:action`), the same action
+   * as the button. None of these can spend: approving or rewriting the script, notes and options are free,
+   * and other shapes start making only when nothing paid needs making.
+   */
+  function videoActionCard(esc, { kicker, rows, note, button, body, done }) {
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${esc(kicker)} · Approval needed</p>
+      ${rows.filter(Boolean).map(([l, v]) => `<p class="text-xs text-gray-700 mt-1.5"><span class="font-bold">${esc(l)}:</span> ${esc(v)}</p>`).join('')}
+      <p class="text-xs text-gray-600 mt-2">${esc(note)}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vac-go ${body ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(button)}</button>
+        <button type="button" data-vac-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vac-status></p>`;
+    const status = el.querySelector('[data-vac-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vac-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-vac-go]') || !body) return;
+      setBusy(true);
+      say('Working…');
+      el.dispatchEvent(new CustomEvent('video:action', {
+        bubbles: true,
+        detail: { body, respond({ ok, error }) {
+          if (!ok) { setBusy(false); say(error || 'That didn’t work — try the button on the Videos tab.', 'error'); return; }
+          say(done);
+        } },
+      }));
+    });
+    return el;
+  }
+  const videoId = (ui) => (Number.isInteger(Number(ui.projectId)) && Number(ui.projectId) > 0 ? Number(ui.projectId) : null);
+
+  // { type: 'video_script_proposal', projectId, action: 'approve' | 'rewrite', feedback? }
+  function renderVideoScriptProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const rewrite = ui.action === 'rewrite';
+    const feedback = typeof ui.feedback === 'string' ? ui.feedback.replace(/\s+/g, ' ').trim().slice(0, 600) : '';
+    return videoActionCard(esc, rewrite ? {
+      kicker: 'Rewrite the words', rows: [feedback ? ['Your notes', feedback] : null],
+      note: 'Free. Only the words change — every scene keeps its picture. The new script appears on the Videos tab in about a minute for you to approve.',
+      button: 'Rewrite the words', body: id ? { action: 'rewrite_script', id, feedback } : null, done: 'Rewriting. The new words appear on the Videos tab in about a minute.',
+    } : {
+      kicker: 'Approve the script', rows: [],
+      note: 'Free, and nothing is made yet. Next you check the pictures beside each line on the Videos tab and press “Make the video”, which shows what it uses.',
+      button: 'Approve the script', body: id ? { action: 'approve_script', id } : null, done: 'Approved. Check the pictures on the Videos tab, then press “Make the video”.',
+    });
+  }
+  // { type: 'video_options_proposal', projectId, musicMood?, anotherTrack?, look?, lowerThird?, summary? }
+  function renderVideoOptionsProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const body = { action: 'set_options', id };
+    if (VIDEO_MUSIC[ui.musicMood]) body.musicMood = ui.musicMood;
+    if (ui.anotherTrack === true) body.anotherTrack = true;
+    if (VIDEO_LOOKS[ui.look]) body.look = ui.look;
+    if (VIDEO_LOWER_THIRDS[ui.lowerThird]) body.lowerThird = ui.lowerThird;
+    const any = Object.keys(body).length > 2;
+    return videoActionCard(esc, {
+      kicker: 'Change the music and look',
+      rows: [
+        ui.summary ? ['What changes', String(ui.summary).slice(0, 200)] : null,
+        body.musicMood ? ['Music', VIDEO_MUSIC[body.musicMood]] : null,
+        body.anotherTrack ? ['Music', 'Another track, same mood'] : null,
+        body.look ? ['Colour look', VIDEO_LOOKS[body.look]] : null,
+        body.lowerThird ? ['Name captions', VIDEO_LOWER_THIRDS[body.lowerThird]] : null,
+      ],
+      note: 'Free. Used when the video is made; nothing is planned again. A finished video gets a new version — the finished one stays in My Content.',
+      button: 'Change it', body: id && any ? body : null, done: 'Changed. It’s used when you press “Make the video” on the Videos tab.',
+    });
+  }
+  // { type: 'video_note_proposal', projectId, atS? | scene?, note }
+  function renderVideoNoteProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const note = typeof ui.note === 'string' ? ui.note.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+    const scene = Number.isInteger(Number(ui.scene)) && Number(ui.scene) > 0 ? Number(ui.scene) : null;
+    const atS = Number.isFinite(Number(ui.atS)) && ui.atS != null ? Math.max(0, Number(ui.atS)) : null;
+    const where = atS != null ? `${Math.floor(atS / 60)}:${String(Math.floor(atS % 60)).padStart(2, '0')}` : scene ? `Scene ${scene}` : '';
+    return videoActionCard(esc, {
+      kicker: 'Note on the video', rows: [where ? ['At', where] : null, note ? ['Note', note] : null],
+      note: 'Free. It’s added to your notes on the finished video. When you’re done, “Make a new version from my notes” changes only those scenes.',
+      button: 'Add the note', body: id && note && (atS != null || scene) ? { action: 'add_note', id, text: note, ...(atS != null ? { atS } : { sceneNumber: scene }) } : null,
+      done: 'Noted. It’s on the video on the Videos tab.',
+    });
+  }
+  // { type: 'video_notes_version_proposal', projectId }
+  function renderVideoNotesVersionProposalCard(ui, esc) {
+    const id = videoId(ui);
+    return videoActionCard(esc, {
+      kicker: 'New version from your notes', rows: [],
+      note: 'Free. Only the scenes you left notes on change; everything else, and everything already made for it, is kept. You check it before it’s made.',
+      button: 'Make the new version', body: id ? { action: 'notes_to_version', id } : null, done: 'Started. The new version appears on the Videos tab in about a minute.',
+    });
+  }
+  // { type: 'video_reshape_proposal', projectId, shapes? }
+  function renderVideoReshapeProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const shapes = (Array.isArray(ui.shapes) ? ui.shapes : []).filter((x) => VIDEO_SHAPE_NAMES[x]);
+    return videoActionCard(esc, {
+      kicker: 'Make it in other shapes', rows: [['Shapes', shapes.length ? shapes.map((x) => VIDEO_SHAPE_NAMES[x]).join(', ') : 'Every shape it isn’t in yet']],
+      note: 'Free: the voiceover, your own footage and any AI scenes are kept; stock and branded cards are made again for each shape. Each one is saved to My Content when it’s done.',
+      button: 'Make them', body: id ? { action: 'reshape', id, ...(shapes.length ? { shapes } : {}) } : null, done: 'Making them. They appear under “Being made” on the Videos tab.',
+    });
+  }
+
   // { type: 'video_brief_proposal', message, purpose?, lengthS?, cta?, voiceover?, allowAi?, shape? }
   // { type: 'video_replan_proposal', projectId, feedback? }
   //
@@ -1671,6 +1786,13 @@
       ...(ui.captionStyle && typeof ui.captionStyle === 'object' ? { captionStyle: ui.captionStyle } : {}),
       allowAi: ALLOW[ui.allowAi] ? ui.allowAi : 'stock_and_ai',
       shape: SHAPES[ui.shape] ? ui.shape : '9:16',
+      // Who it's for and what they should do (fed to the planner); music, look and name captions are
+      // left out unless asked for, so the set-up answers fill them (video-producer.ts withSetupDefaults).
+      ...(clean(ui.audience, 200) ? { audience: clean(ui.audience, 200) } : {}),
+      ...(clean(ui.goal, 200) ? { goal: clean(ui.goal, 200) } : {}),
+      ...(VIDEO_MUSIC[ui.musicMood] ? { musicMood: ui.musicMood } : {}),
+      ...(VIDEO_LOOKS[ui.look] ? { look: ui.look } : {}),
+      ...(VIDEO_LOWER_THIRDS[ui.lowerThird] ? { lowerThird: ui.lowerThird } : {}),
     };
     const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
     const runnable = brief.message.length >= 10;
@@ -1687,6 +1809,11 @@
       ${brief.voiceover ? row('Captions', brief.captions ? `On${brief.captionStyle && window.CaptionStyle ? ` — ${window.CaptionStyle.describe(brief.captionStyle).toLowerCase()}` : ''}` : 'Off') : ''}
       ${row('Pictures from', ALLOW[brief.allowAi])}
       ${row('Shape', SHAPES[brief.shape])}
+      ${row('Who it’s for', brief.audience)}
+      ${row('What they should do', brief.goal)}
+      ${row('Music', brief.musicMood ? VIDEO_MUSIC[brief.musicMood] : 'Your usual')}
+      ${brief.look ? row('Colour look', VIDEO_LOOKS[brief.look]) : ''}
+      ${brief.lowerThird ? row('Name captions', VIDEO_LOWER_THIRDS[brief.lowerThird]) : ''}
       <p class="text-xs text-gray-600 mt-2">Planning the storyboard is free. You check it on the Videos tab before anything is made — the cost of making it is shown there first.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-vdp-save ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Plan this video</button>
@@ -1852,6 +1979,11 @@
   register('video_handover_proposal', renderVideoHandoverProposalCard);
   register('video_brief_proposal', renderVideoBriefProposalCard);
   register('video_replan_proposal', renderVideoReplanProposalCard);
+  register('video_script_proposal', renderVideoScriptProposalCard);
+  register('video_options_proposal', renderVideoOptionsProposalCard);
+  register('video_note_proposal', renderVideoNoteProposalCard);
+  register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
+  register('video_reshape_proposal', renderVideoReshapeProposalCard);
 
   // ── Built-ins: Mystery Shopper cards (docs/mystery-shopper-plan.md §4.6) ──────────────────────
   // The chat twins of the Website tab's buttons — same server actions (site-audits.ts), handled in
@@ -4919,6 +5051,7 @@
       ${patch.onScreenText != null ? change('On-screen text', now.onScreenText, patch.onScreenText) : ''}
       ${patch.source != null ? change('Picture from', '', VIDEO_SCENE_SOURCES[patch.source] || patch.source) : ''}
       ${words != null ? change('What to show', '', words) : ''}
+      ${'nameCaption' in patch ? change('Name caption', '', patch.nameCaption ? `${patch.nameCaption.name}${patch.nameCaption.role ? ` · ${patch.nameCaption.role}` : ''}` : '(none)') : ''}
       <p class="text-xs text-gray-600 mt-2">This only changes the plan. Nothing is made until you press “Make the video”, which says what it uses.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-vse-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Change the scene</button>

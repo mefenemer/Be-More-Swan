@@ -15,7 +15,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, organisations, postRenderJobs, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import type { Overlay } from './overlay-geometry';
-import { renderableAudio } from './audio-overlays';
+import { renderableAudio, type AudioDuck } from './audio-overlays';
 import { isStillMotion, type StillMotion } from './still-motion';
 import { buildCaptionCues, normalizeCaptionStyle, styleAccent, withScriptPunctuation, type CaptionSource, type CaptionTrack, type SpokenWordLike } from './captions';
 import { DEFAULT_TARGET_RATIO, editHasStills, readVideoEdit, renderableClips, resolveClipGain, resolveTrim } from './video-edit';
@@ -189,6 +189,8 @@ export interface ResolvedAudio {
     volume: number;
     fadeInS?: number;
     fadeOutS?: number;
+    level?: number;
+    duck?: AudioDuck;
 }
 
 /**
@@ -231,6 +233,9 @@ export async function resolveAudioTracks(
             ...(a.endS != null ? { endS: a.endS } : {}),
             ...(a.fadeInS != null ? { fadeInS: a.fadeInS } : {}),
             ...(a.fadeOutS != null ? { fadeOutS: a.fadeOutS } : {}),
+            // Video Producer loudness and ducking (src/lib/loudness.ts, video-music.ts); absent elsewhere.
+            ...(a.level != null ? { level: a.level } : {}),
+            ...(a.duck ? { duck: a.duck } : {}),
         });
     }
     return out;
