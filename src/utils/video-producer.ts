@@ -58,7 +58,9 @@ import { asOwnVideos, footageStatus, loadFootage, ownVideos } from './footage-re
 import { describeTightening, footagePlannerBlock, ownSpeechOnTimeline, silentWav, suggestionLine, tightenStoryboard, MAX_VIDEOS_PER_REVIEW, type FootageReview, type SpokenWord as FootageWord } from '../lib/footage';
 import { keepsOwnSound, minScenesFor, isVideoShape, shapeFrame, shapeOrientation, type VideoShape } from '../lib/storyboard';
 import { readMusicChoice, moodFor, pickTrack, speechWindows, musicTrack, MUSIC_LABELS, type MusicChoice } from '../lib/video-music';
-import { footageLufs, mixLevels, musicLufs, voiceLufs } from '../lib/loudness';
+import { footageLufs, mixLevels, musicLufs, voiceLufs, TARGET_LUFS } from '../lib/loudness';
+import { LIMIT_CEILING_DB } from '../lib/loudness-measure';
+import { levelledVoiceover, measureAsset } from './audio-levelling';
 import { isVideoLook, lookStyle, type LookStyle } from '../lib/video-look';
 import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
 import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
@@ -860,13 +862,31 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
                 console.warn(`[video-producer] build ${projectId}: no music —`, err);
             }
         }
-        // Even loudness (src/lib/loudness.ts): every part levelled from its measured loudness, aimed
-        // at about −14 LUFS, the music ducked under whoever speaks.
+        // Even loudness (src/lib/loudness.ts): every part levelled to about −14 LUFS, the music ducked
+        // under whoever speaks. The voiceover and music are MEASURED from their real files
+        // (src/utils/audio-levelling.ts); the voiceover is levelled into a copy through a limiter, so a
+        // quiet voice with sharp peaks still reaches the target without clipping. The sample table is
+        // only the fallback when a file can't be read — it once missed the default voice, and a real
+        // voiceover came out 12 dB quieter than the table said (staging, 2026-11-10).
         const footageLoud = footageLufs(footage.flatMap((v) => v.analysis?.loudness ?? []));
+        let voiceTrackId = voiceoverAssetId;
+        let voiceLoud = voiceLufs(brief.voice ?? DEFAULT_VOICE);
+        if (voiceoverAssetId) {
+            const lv = await levelledVoiceover(db, { orgId, userId, assetId: voiceoverAssetId, targetLufs: TARGET_LUFS })
+                .catch((err) => { console.warn(`[video-producer] build ${projectId}: voiceover not levelled —`, err); return null; });
+            if (lv) { voiceTrackId = lv.assetId; voiceLoud = lv.lufs; }
+        }
+        const musicLoud = music ? await measureAsset(db, orgId, music.assetId).catch(() => null) : null;
         const levels = mixLevels({
-            voice: voiceLufs(brief.voice ?? DEFAULT_VOICE), footage: footageLoud, music: music ? musicLufs(music.storageKey) : null,
+            voice: voiceLoud, footage: footageLoud, music: music ? (musicLoud?.lufs ?? musicLufs(music.storageKey)) : null,
             hasVoice: !!voiceoverAssetId, hasOwnSound: ownSound, hasMusic: !!music,
         });
+        // A bed is never raised past its own peaks (the render can only multiply).
+        if (musicLoud && Number.isFinite(musicLoud.peakDb)) {
+            const room = Math.pow(10, (LIMIT_CEILING_DB - musicLoud.peakDb) / 20);
+            levels.music = Math.min(levels.music, Math.round(room * 1000) / 1000);
+            levels.musicUnder = Math.min(levels.musicUnder, levels.music);
+        }
         // Reused stock / AI clips: their real lengths, so a longer reworded line never runs past one.
         const reusedIds = storyboard.scenes.filter((s) => s.source === 'stock_video' || s.source === 'ai_video').map((s) => done[s.id]).filter(Boolean);
         const clipS = new Map<number, number>();
@@ -878,8 +898,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         const clips = sceneClips(storyboard.scenes, done, durations, { fileS, ownSound, ownGain: levels.ownSound || 1, clipS });
         const edit: VideoEdit = { clips, targetRatio: shape };
         const voiceGain = levels.voice || 1;
-        const audio: AudioOverlay[] = voiceoverAssetId
-            ? [{ id: `vp_vo_${voiceoverAssetId}`, assetId: voiceoverAssetId, label: 'Voiceover', volume: Math.min(1, voiceGain), ...(voiceGain > 1 ? { level: voiceGain } : {}), fadeInS: 0.05, fadeOutS: 0.2, captions: brief.captions !== false, ...(brief.captionStyle ? { captionStyle: normalizeCaptionStyle(brief.captionStyle) } : {}) }]
+        const audio: AudioOverlay[] = voiceTrackId
+            ? [{ id: `vp_vo_${voiceTrackId}`, assetId: voiceTrackId, label: 'Voiceover', volume: Math.min(1, voiceGain), ...(voiceGain > 1 ? { level: voiceGain } : {}), fadeInS: 0.05, fadeOutS: 0.2, captions: brief.captions !== false, ...(brief.captionStyle ? { captionStyle: normalizeCaptionStyle(brief.captionStyle) } : {}) }]
             : [];
         let spokenWindows = voiceoverAssetId ? speechWindows(words) : [];
         // Footage in its own sound: captions follow what people say in it. The render reads caption
@@ -1144,9 +1164,11 @@ export async function sourceFilesOf(db: Db, orgId: number, row: typeof videoProj
         : [...Object.values((row.sceneAssets ?? {}) as Record<string, number>), ...(row.voiceoverAssetId ? [row.voiceoverAssetId] : [])];
     const uniq = [...new Set(ids.filter((x) => Number.isInteger(x) && x > 0))].slice(0, 60);
     if (!uniq.length) return [];
-    const rows = await db.select({ id: contentAssets.id, name: contentAssets.name, assetType: contentAssets.assetType, provider: contentAssets.provider })
+    const rows = await db.select({ id: contentAssets.id, name: contentAssets.name, assetType: contentAssets.assetType, provider: contentAssets.provider, kind: sql<string | null>`${contentAssets.renderParams}->>'kind'` })
         .from(contentAssets).where(and(inArray(contentAssets.id, uniq), eq(contentAssets.organisationId, orgId), isNull(contentAssets.purgedAt)));
-    const kindOf = (r: typeof rows[number]) => r.provider === 'library' ? 'Music' : r.assetType === 'audio' ? 'Voiceover / captions'
+    // An audio file is a voiceover (or caption track) only when it says so; any other sound is music —
+    // a generated or uploaded track was listed as "Voiceover / captions" (2026-11-10).
+    const kindOf = (r: typeof rows[number]) => r.assetType === 'audio' ? (r.kind === 'voiceover' ? 'Voiceover / captions' : 'Music')
         : r.provider === 'pexels' ? 'Stock' : r.provider === 'fal' ? 'AI' : r.provider === 'brand_card' ? 'Branded card' : r.provider == null ? 'Your file' : 'Picture';
     const order = new Map(uniq.map((id, i) => [id, i]));
     return rows.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)).map((r) => ({ id: r.id, name: r.name || `File ${r.id}`, kind: kindOf(r) }));

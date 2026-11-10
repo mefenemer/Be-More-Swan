@@ -18,6 +18,7 @@ import { enforceStoryboard, storyboardUserPrompt, storyboardSystemPrompt, type S
 import { musicFromBrief, readBrief, withSetupDefaults, loopToLength, assetsForShape, shapeRoot, sceneOverlays, sceneClips, timesOf, sceneLooks, buildTasks } from '../src/utils/video-producer';
 import { videoSceneRequestFromUiElement, videoSceneCard } from '../src/utils/chat-video-scene';
 import { renderFailureNote } from '../src/utils/video-render';
+import { integratedLufs, levelTo, samplePeakDb, wavBytes, readWav } from '../src/lib/loudness-measure';
 import table from '../src/config/media-loudness.json';
 
 let passed = 0;
@@ -402,6 +403,40 @@ check('a failed render can change its music and be made again; its note carries 
     assert.ok(ui.includes('overflow-wrap:anywhere'), 'a long note wraps inside its box');
     const reg = read('src/components/disruptive-ui-registry.js');
     assert.ok(reg.includes('body.musicAssetId = trackId'), 'chat can propose a track too');
+});
+
+// ── Measured, not assumed: the real files are measured and the voice levelled (staging, 2026-11-10) ──
+const sine = (db: number, s = 5, fs = 48000, hz = 1000) => { const a = Math.pow(10, db / 20); const x = new Float32Array(s * fs); for (let i = 0; i < x.length; i++) x[i] = a * Math.sin(2 * Math.PI * hz * i / fs); return x; };
+check('integrated loudness matches the EBU reference: a stereo 1 kHz sine at −23 dBFS is −23 LUFS', () => {
+    const x = sine(-23);
+    close(integratedLufs({ channels: [x, x], sampleRate: 48000 })!, -23, 0.1);
+    close(integratedLufs({ channels: [sine(-23, 5, 44100), sine(-23, 5, 44100)], sampleRate: 44100 })!, -23, 0.1);
+    close(integratedLufs({ channels: [sine(-33, 5, 24000), sine(-33, 5, 24000)], sampleRate: 24000 })!, -33, 0.2);
+    assert.strictEqual(integratedLufs({ channels: [new Float32Array(48000)], sampleRate: 48000 }), null, 'silence');
+});
+
+check('a quiet voice with sharp peaks reaches −14 LUFS through the limiter, never past −1 dBFS', () => {
+    // −34 dBFS tone with a full-scale click every second: volume alone could gain it only ~1 dB.
+    const fs = 24000; const x = sine(-34, 6, fs, 300);
+    for (let k = 0; k < 6; k++) for (let i = 0; i < 24; i++) x[k * fs + 1000 + i] = 0.98 * Math.sin(Math.PI * i / 24);   // a 1 ms one-sided peak
+    const pcm = { channels: [x, x], sampleRate: fs };
+    const out = levelTo(pcm, -14)!;
+    close(out.lufs!, -14, 0.6);
+    assert.ok(samplePeakDb(out.pcm) <= -1 + 1e-6, `peak ${samplePeakDb(out.pcm)}`);
+    assert.ok(out.gainDb > 15, 'raised a long way');
+    const back = readWav(wavBytes({ channels: [out.pcm.channels[0]], sampleRate: fs }))!;
+    assert.strictEqual(back.sampleRate, fs); assert.strictEqual(back.channels.length, 1);
+    close(back.channels[0][5000], out.pcm.channels[0][5000], 1e-4);
+});
+
+check('the build levels the real voiceover and measures the music; source files call a track Music', () => {
+    const vp = read('src/utils/video-producer.ts');
+    assert.match(vp, /levelledVoiceover\(db, \{ orgId, userId, assetId: voiceoverAssetId, targetLufs: TARGET_LUFS \}\)/);
+    assert.match(vp, /assetId: voiceTrackId/, 'the render plays the levelled copy');
+    assert.match(vp, /measureAsset\(db, orgId, music\.assetId\)/);
+    assert.ok(vp.includes("(r.kind === 'voiceover' ? 'Voiceover / captions' : 'Music')"));
+    const lv = read('src/utils/audio-levelling.ts');
+    assert.ok(lv.includes("renderParams: { ...params, levelled: undefined"), 'the copy keeps the words, so captions follow it');
 });
 
 console.log(`\nvideo producer seven: ${passed} passed`);

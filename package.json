@@ -112,6 +112,7 @@
     "jsonwebtoken": "^9.0.3",
     "mammoth": "^1.13.0",
     "marked": "^18.0.5",
+    "mpg123-decoder": "^1.0.3",
     "node-fetch": "^3.3.2",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
