@@ -89,7 +89,7 @@ export function replyClaimsPicture(content: string): boolean {
 export function pictureReply(content: string, hasPictureCard: boolean): string {
     if (!replyClaimsPicture(content)) return content;
     return hasPictureCard
-        ? 'Here it is — choose “Create with AI” or “Find stock photos” on the card below, then pick the one you like. Nothing is made or added until you do.'
+        ? 'Here it is — choose “Choose from My Content”, “Create with AI” or “Find stock photos” on the card below, then pick the one you like. Nothing is made or added until you do.'
         : 'I can’t make or add a picture from a message — ask me for a picture for a section and I’ll put a card here with options to choose from. Nothing has been made or added.';
 }
 

@@ -104,7 +104,12 @@
     function listHtml() {
       const notice = state.notice ? `<p class="text-sm text-emerald-700 font-semibold mb-3">${esc(state.notice)}</p>` : '';
       const err = state.error ? `<p class="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3 mb-3">${esc(state.error)}</p>` : '';
-      const add = `<div class="flex flex-wrap gap-2"><button type="button" class="btn-primary text-sm font-bold px-3 py-1.5 rounded-md" data-act="new" data-type="whole">+ Add a holiday let</button><button type="button" class="btn-secondary border text-sm font-bold px-3 py-1.5 rounded-md" data-act="new" data-type="room">+ Add a room type</button></div>`;
+      // Which to add, said in full on both buttons (owner, 2026-11-10: "holiday let" or "room type" wasn't
+      // clear, nor why to fill either in). The difference: a whole place is booked as one; a room type is
+      // several matching rooms under one listing, each night booked until none is free.
+      const choice = (type, primary, title, what, eg) => `<button type="button" data-act="new" data-type="${type}" class="${primary ? 'btn-primary' : 'btn-secondary border'} text-left rounded-xl px-4 py-3 flex-1" style="min-width:220px">
+          <span class="block text-sm font-bold">${title}</span><span class="block text-xs font-normal mt-1" style="opacity:.9">${what}</span><span class="block text-xs font-normal mt-1" style="opacity:.75">${eg}</span></button>`;
+      const add = `<div class="flex flex-wrap gap-3 w-full">${choice('whole', true, '+ Add a holiday let', 'A whole place guests have to themselves. One booking takes all of it for those nights.', 'A cottage, flat, villa, cabin or lodge.')}${choice('room', false, '+ Add a room type', 'Rooms in a B&amp;B, guest house or inn. Add one kind of room once and list how many you have; guests can book until they\'re all taken.', 'For example, "Double with sea view": 3 rooms.')}</div>`;
       const cards = state.stays.map((s) => {
         const rooms = s.stayType === 'room' ? ` · ${s.units.length} room${s.units.length === 1 ? '' : 's'}` : '';
         const warn = !s.rates.some((r) => !r.startsOn) ? '<p class="text-xs text-amber-700 mt-1">No standard price yet — guests can only book dates a season covers.</p>' : '';
@@ -115,11 +120,12 @@
           <div class="flex flex-wrap gap-2 justify-end"><button type="button" class="btn-secondary border text-xs font-bold px-3 py-1.5 rounded-md" data-act="edit" data-id="${s.id}">Edit</button>
           <button type="button" class="btn-utility text-xs font-bold px-3 py-1.5 rounded-md" data-act="${s.status === 'archived' ? 'restore' : 'archive'}" data-id="${s.id}">${s.status === 'archived' ? 'Restore' : 'Archive'}</button></div></div>`;
       }).join('');
-      const empty = '<div class="border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-500">Nothing here yet. Add a holiday let (a cottage, flat or villa guests have to themselves) or a room type (for a B&amp;B or guest house — one type with as many rooms as you have).</div>';
+      const empty = '<div class="border border-dashed border-gray-300 rounded-xl p-6 text-center text-sm text-gray-500">Nothing here yet. Choose one of the two above to add your first.</div>';
       const cards2 = state.takesCards ? '' : '<p class="text-xs text-gray-500 mt-4">Guests can book now, and you arrange payment with them yourself. To take card payments on your website, connect Stripe on your Website Assistant\'s Shop settings.</p>';
       // In the drawer its title already says what this is: no second heading.
-      return `${notice}${err}<div class="flex flex-wrap items-start justify-between gap-3 mb-4"><div>${opts.compact ? '' : '<h2 class="text-lg font-bold text-gray-900">Your holiday lets and rooms</h2>'}
-        <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">What guests book by the night on your website. Add a "Stays" section to your website to show them — each gets its own page with a calendar.</p></div>${add}</div>
+      return `${notice}${err}<div class="mb-4">${opts.compact ? '' : '<h2 class="text-lg font-bold text-gray-900">Your holiday lets and rooms</h2>'}
+        <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Why fill this in: guests then see your prices and free dates on your website and book a stay there, without emailing back and forth. Each one gets its own page with a calendar; add a "Stays" section to a page to show them.</p>
+        <p class="text-xs font-bold text-gray-700 mt-3 mb-2">Which do you have? Choose the one that fits; you can add both.</p>${add}</div>
         <div class="space-y-3">${state.stays.length ? cards : empty}</div>${cards2}`;
     }
 

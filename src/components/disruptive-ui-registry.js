@@ -3894,7 +3894,7 @@
   }
   register('stay_damage', renderStayDamageCard);
 
-  // { type: 'site_picture', pageId, sectionId, sectionLabel, place: 'in' | 'after', kind: 'picture' | 'video', source: 'ai' | 'stock', description, alt }
+  // { type: 'site_picture', pageId, sectionId, sectionLabel, place: 'in' | 'after', kind: 'picture' | 'video', source: 'library' | 'ai' | 'stock', description, alt }
   // A picture for one section, found or made RIGHT HERE (owner, 2026-11-05: the chat said "I'm generating
   // it now" and nothing ever came back — a reply can't make a picture; this card does, on a click).
   // Stock (pexels-search.ts, free) or AI (generate-ai-image.ts, charges as it says; blank = the business
@@ -3908,7 +3908,8 @@
     if (!pageId || !sectionId) return null;
     const label = str(ui.sectionLabel, 120) || 'this section';
     const place = ui.place === 'after' ? 'after' : 'in';
-    let source = ui.source === 'stock' ? 'stock' : 'ai';
+    // 'library': one of their own, from My Content (owner, 2026-11-10: the chat couldn't open it).
+    let source = ui.source === 'stock' ? 'stock' : ui.source === 'library' ? 'library' : 'ai';
     // Picture or video (owner, 2026-11-05: "do the same for videos"). A video plays silently on a loop
     // with a pause button, in a hero, a text section or a gallery (site-definition.ts markVideos).
     let kind = ui.kind === 'video' ? 'video' : 'picture';
@@ -3925,6 +3926,7 @@
       <label class="block text-xs font-bold text-gray-700 mt-2"><span data-sp-desc-label></span>
         <textarea data-sp-desc rows="2" maxlength="600" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1">${esc(str(ui.description, 600))}</textarea></label>
       <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sp-go="library" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Choose from My Content</button>
         <button type="button" data-sp-go="ai" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Create with AI</button>
         <button type="button" data-sp-go="stock" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50" data-sp-stock-label></button>
       </div>
@@ -3949,6 +3951,10 @@
       aiBtn.disabled = !canAi;
       aiBtn.title = canAi ? '' : video ? (caps && caps.assistantCanVideo ? 'AI video is on the Busywork Buster and Digital Employee plans' : 'None of your assistants can create videos') : 'None of your assistants can create pictures';
       if (!canAi && source === 'ai') source = 'stock';
+      // My Content needs the picture window (media-picker.js) on the page.
+      const libBtn = el.querySelector('[data-sp-go="library"]');
+      libBtn.hidden = !(window.MediaPicker && typeof window.MediaPicker.open === 'function');
+      if (libBtn.hidden && source === 'library') source = 'stock';
       el.querySelectorAll('[data-sp-go]').forEach((b) => { b.className = `${b.dataset.spGo === source ? 'btn-primary' : 'btn-secondary'} px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50`; });
       const cost = caps && (video ? caps.videoCost : caps.imageCost);
       $('[data-sp-cost]').textContent = !caps || !canAi || !cost ? (video ? 'Stock videos are free.' : 'Stock photos are free.')
@@ -4028,13 +4034,27 @@
       } catch (err) { if (mine === run) { say(err.message, 'error'); working(false); } }
       if (mine === run) setBusy(false);
     }
+    // My Content: the same picture window as "Choose picture" on the Website tab — their library, or upload one.
+    function fromLibrary() {
+      if (!window.MediaPicker || typeof window.MediaPicker.open !== 'function') { say('Your content can\'t be opened on this page — use "Choose picture" on the section instead.', 'error'); return; }
+      run++; grid.innerHTML = ''; $('[data-sp-more]').innerHTML = ''; status.className = 'hidden';
+      // A sign-up form holds a picture, never a video (markVideos).
+      const videoOk = !(place === 'in' && /sign.?up/i.test(label));
+      window.MediaPicker.open({
+        title: `Choose from My Content for “${label}”`, video: videoOk, topic: $('[data-sp-desc]').value.trim() || label,
+        onPick: (asset) => { if (asset && asset.id) choose(asset); },
+      });
+    }
     async function choose(key) {
       setBusy(true);
       say('Saving it and putting it on your page…');
-      const video = kind === 'video';
+      const video = typeof key === 'object' && key ? !!key.video : kind === 'video';
       try {
         let assetId; let alt = str(ui.alt, 150) || $('[data-sp-desc]').value.trim().slice(0, 150);
-        if (key[0] === 's') {
+        if (typeof key === 'object' && key) {
+          // From My Content: already in the library.
+          assetId = Number(key.id); alt = alt || key.name || label;
+        } else if (key[0] === 's') {
           const c = stock.candidates[Number(key.slice(1))];
           const res = await call('pexels-search', { action: 'save', candidate: c, mediaType: video ? 'video' : 'image' });
           if (!res.ok || !res.body.assetId) throw new Error((res.body && res.body.error) || 'It couldn\'t be saved.');
@@ -4061,6 +4081,7 @@
       const k = e.target.closest('[data-sp-kind]');
       if (k) { if (k.dataset.spKind !== kind) { kind = k.dataset.spKind; run++; grid.innerHTML = ''; $('[data-sp-more]').innerHTML = ''; status.className = 'hidden'; working(false); setBusy(false); paint(); } return; }
       const go = e.target.closest('[data-sp-go]');
+      if (go && go.dataset.spGo === 'library') { source = 'library'; paint(); fromLibrary(); return; }
       if (go) { source = go.dataset.spGo; paint(); find(false); return; }
       if (e.target.closest('[data-sp-again]')) { find(true); return; }
       const pick = e.target.closest('[data-sp-pick]');
@@ -4838,7 +4859,8 @@
   }
   register('post_text_edit', renderPostTextEditCard);
 
-  // { type: 'post_picture', postId, kind: 'image' | 'video', description }
+  // { type: 'post_picture', postId, kind: 'image' | 'video', description, source?: 'library' }
+  // "Choose from My Content" opens the same step on "Use my own" — their library (owner, 2026-11-10).
   // A new picture or video for a post. Opens the post editor's own picture step with the description
   // filled in (post:pictureAsk, workspace.html): its search, its Generate button, its charge.
   function renderPostPictureCard(ui, esc) {
@@ -4854,7 +4876,8 @@
           class="block w-full mt-1 px-3 py-2 text-sm font-normal bg-white border border-gray-200 rounded-lg">
       </label>
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        <button type="button" data-pp-go="stock" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Find stock ${noun === 'video' ? 'videos' : 'photos'}</button>
+        <button type="button" data-pp-go="library" class="${ui.source === 'library' ? 'btn-primary' : 'btn-secondary border'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Choose from My Content</button>
+        <button type="button" data-pp-go="stock" class="${ui.source === 'library' ? 'btn-secondary border' : 'btn-primary'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Find stock ${noun === 'video' ? 'videos' : 'photos'}</button>
         <button type="button" data-pp-go="ai" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Create with AI</button>
       </div>
       <p class="text-xs text-gray-600 mt-2">Stock is free. AI uses tasks when you press Generate in the picture window.</p>

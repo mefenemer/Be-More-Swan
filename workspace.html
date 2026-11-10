@@ -21706,6 +21706,11 @@ document.addEventListener('post:pictureAsk', (e) => {
     d.handled = true;
     _pceOpenMediaPicker();   // sets the post the search and Generate act on
     gpAiSetMediaType(d.kind === 'video' ? 'video' : 'image');
+    if (d.source === 'library') {
+        gpAiUseOwn();
+        d.respond({ ok: true, message: 'Your content is open in the picture window. Pick the one you want.' });
+        return;
+    }
     if (d.source === 'ai') {
         const ai = document.getElementById('gp-ai-src-ai');
         if (!ai || ai.disabled || ai.closest('.hidden')) { d.respond({ ok: false, error: ai?.title || 'AI pictures aren’t available on this post. Stock photos are.' }); return; }

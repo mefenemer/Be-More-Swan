@@ -481,6 +481,7 @@
       // they're saved to Business Information ▸ Stays, which every assistant reads.
       return `<div class="text-xs text-gray-600 mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3">
         <p>Shows every holiday let and room type you've set up — each gets its own page with a calendar where guests book. Their names, photos, prices and rules are saved in your Business Information.</p>
+        <p class="mt-1"><strong>Holiday let</strong>: a whole place guests have to themselves (a cottage, flat or villa). <strong>Room type</strong>: rooms in a B&amp;B or guest house; add each kind of room once with how many you have.</p>
         <div class="flex flex-wrap gap-2 mt-2">${btn('data-site-open-stays="whole"', '+ Add a holiday let')}${btn('data-site-open-stays="room"', '+ Add a room type')}${btn('data-site-open-stays=""', 'See and change them')}</div></div>`;
     }
     if (f.kind === 'listingsInfo') {
@@ -845,13 +846,27 @@
     listings: ['📅', 'An events calendar or a directory, from your Listings tab'],
     stays: ['🏡', 'Your holiday lets or B&B rooms, each with dates and prices'],
   };
+  // The kinds of section in groups by what they are for (owner, 2026-11-10: one long list was hard to choose
+  // from). A kind in no group is listed under "More"; a group with nothing this site offers is left out.
+  const SECTION_GROUPS = [
+    ['Introduce your business', ['hero', 'text', 'features', 'steps']],
+    ['Sell, book and show what you offer', ['products', 'booking', 'stays', 'menu', 'listings']],
+    ['Build trust', ['testimonials', 'reviews', 'gallery', 'faq']],
+    ['Get people to act or get in touch', ['cta', 'contact', 'signup', 'hours']],
+    ['Keep it fresh', ['blog_posts', 'social_feed']],
+  ];
   function addPickerHtml(here) {
     const types = state.data.vocab.sectionTypes.filter((t) => typeAllowed(t) && FORMS[t]);
+    const tile = (t) => `<button type="button" data-site-new-section="${esc(t)}" class="sb-tap text-left bg-white border border-gray-200 rounded-lg p-2 hover:shadow-sm flex gap-2 items-start">
+          <span aria-hidden="true" style="font-size:18px;line-height:1.2">${(TYPE_INFO[t] || ['➕'])[0]}</span>
+          <span class="min-w-0"><span class="block text-xs font-bold text-gray-900">${esc(TYPE_LABEL[t] || t)}</span><span class="block text-xs text-gray-500">${esc((TYPE_INFO[t] || ['', ''])[1])}</span></span></button>`;
+    const grouped = new Set(SECTION_GROUPS.flatMap(([, ks]) => ks));
+    const groups = [...SECTION_GROUPS, ['More', types.filter((t) => !grouped.has(t))]]
+      .map(([name, ks]) => [name, ks.filter((t) => types.includes(t))]).filter(([, ks]) => ks.length);
     return `<li data-site-add-picker class="border border-gray-300 rounded-lg p-3 bg-gray-50">
       <div class="flex items-center justify-between gap-2"><p class="text-xs font-black text-gray-900">What would you like to add${here ? ' here' : ''}?</p>${btn('data-site-add-close', 'Cancel')}</div>
-      <div class="grid gap-2 sm:grid-cols-2 mt-2">${types.map((t) => `<button type="button" data-site-new-section="${esc(t)}" class="sb-tap text-left bg-white border border-gray-200 rounded-lg p-2 hover:shadow-sm flex gap-2 items-start">
-          <span aria-hidden="true" style="font-size:18px;line-height:1.2">${(TYPE_INFO[t] || ['➕'])[0]}</span>
-          <span class="min-w-0"><span class="block text-xs font-bold text-gray-900">${esc(TYPE_LABEL[t] || t)}</span><span class="block text-xs text-gray-500">${esc((TYPE_INFO[t] || ['', ''])[1])}</span></span></button>`).join('')}</div></li>`;
+      ${groups.map(([name, ks]) => `<div role="group" aria-label="${esc(name)}" class="mt-3"><p class="text-xs font-bold text-gray-500 uppercase tracking-wide">${esc(name)}</p>
+        <div class="grid gap-2 sm:grid-cols-2 mt-1">${ks.map(tile).join('')}</div></div>`).join('')}</li>`;
   }
 
   function pagesPanel() {
@@ -879,7 +894,8 @@
       ${card(`
         <div class="flex flex-wrap gap-2 items-center">${pageTabs}
           ${d.pages.length < state.data.maxPages ? btn('data-site-add-page', '+ Page') : `<span class="text-xs text-gray-500">${esc(state.data.maxPages)} pages is the most a site can have.</span>`}</div>
-        <p class="text-sm font-black text-gray-900 mt-4 mb-3">Sections on ${esc(p.title)}</p>
+        <div class="flex flex-wrap items-center justify-between gap-2 mt-4 mb-3"><p class="text-sm font-black text-gray-900">Sections on ${esc(p.title)}</p>
+          ${p.slug ? btn(`data-site-remove-page aria-label="Delete the page ${esc(p.title)}"`, 'Delete this page') : '<span class="text-xs text-gray-500">The home page can\'t be deleted — every site needs one.</span>'}</div>
         <ul class="space-y-2">${sections || (adding ? '' : '<li class="text-xs text-gray-500">No sections yet.</li>')}${adding && adding.at == null ? addPickerHtml(false) : ''}</ul>
         ${adding && adding.at == null ? '' : `<div class="mt-4">${btn('data-site-add-open', '+ Add a section')}</div>`}`)}
       ${state.editing ? editorHtml() : ''}
@@ -894,7 +910,7 @@
         </div>
         ${p.slug ? `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" data-site-page-hidden ${p.hideFromMenu ? 'checked' : ''}> Hide from the menu <span class="font-normal text-gray-500">— still there for anyone with its address, e.g. a page for an ad or an offer</span></label>` : ''}
         ${menuPlaceHtml(p)}
-        <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-page-save', 'Save page details', true)}${p.slug ? btn('data-site-remove-page', 'Remove this page') : ''}</div>`)}`;
+        <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-page-save', 'Save page details', true)}</div>`)}`;
   }
 
   // Where the page sits in the menu: its own entry, or in another page's drop-down (menuParent,
@@ -1184,14 +1200,61 @@
       <div class="mt-4">${btn('data-site-theme-save', 'Save design', true)}</div>`);
   }
 
+  // "What your website does" as questions in order (owner, 2026-11-10: ten ticks in one list gave no path
+  // through). Each question's choices are the same features; a follow-up shows once an earlier answer
+  // makes it relevant — opening hours when people visit or book, a menu when people visit. `needs` names
+  // what reveals it ('visit' is the "people come to us" tick, the rest are feature keys). A choice that
+  // hides is unticked, so what is saved is always what is on screen. Unknown keys go under "Anything else".
+  const FEATURE_STEPS = [
+    { q: 'How do customers buy from you or book?', hint: 'Tick any that fit. Tick none if people just get in touch.', keys: ['shop', 'bookings', 'stays'] },
+    { q: 'Do customers come to you?', hint: 'A shop, café, salon, studio, venue or office people visit.', visit: true, keys: [['hours', ['visit', 'bookings']], ['menu', ['visit']]] },
+    { q: 'What helps people choose you?', hint: 'Show your work and what others say.', keys: ['gallery', 'reviews', 'faq'] },
+    { q: 'Anything else?', hint: 'Keep in touch with visitors, or list events and entries.', keys: ['signup', 'listings'] },
+  ];
   function featuresCard(first) {
     const list = (state.data.vocab.features || []);
+    const byKey = Object.fromEntries(list.map((f) => [f.key, f]));
+    const placed = new Set();
+    // "People come to us": ticked when what it reveals is already on.
+    const visitOn = featureOn('hours') || featureOn('menu');
+    const box = (key, needs) => {
+      const f = byKey[key];
+      if (!f) return '';
+      placed.add(key);
+      const on = featureOn(key);
+      const shown = !needs || needs.some((n) => (n === 'visit' ? visitOn : featureOn(n)));
+      return `<label class="flex items-center gap-2 text-xs text-gray-800"${needs ? ` data-site-feature-needs="${esc(needs.join(' '))}"` : ''}${shown ? '' : ' hidden style="display:none"'}><input type="checkbox" data-site-feature="${esc(f.key)}" ${on && shown ? 'checked' : ''}> ${esc(f.label)}</label>`;
+    };
+    const steps = FEATURE_STEPS.map((st, i) => {
+      const boxes = st.keys.map((k) => (Array.isArray(k) ? box(k[0], k[1]) : box(k))).join('');
+      const visit = st.visit ? `<label class="flex items-center gap-2 text-xs font-bold text-gray-800"><input type="checkbox" data-site-visit ${visitOn ? 'checked' : ''}> Yes, people come to us</label>` : '';
+      return `<fieldset class="border-t border-gray-100 pt-3 mt-3"><legend class="text-xs font-black text-gray-900"><span class="text-gray-400">${i + 1}.</span> ${esc(st.q)}</legend>
+        <p class="text-xs text-gray-500 mt-0.5">${esc(st.hint)}</p>
+        <div class="grid gap-2 sm:grid-cols-2 mt-2">${visit}${boxes}</div></fieldset>`;
+    }).join('');
+    const rest = list.filter((f) => !placed.has(f.key));
+    const more = rest.length ? `<fieldset class="border-t border-gray-100 pt-3 mt-3"><legend class="text-xs font-black text-gray-900">More</legend><div class="grid gap-2 sm:grid-cols-2 mt-2">${rest.map((f) => box(f.key)).join('')}</div></fieldset>` : '';
     return card(`
       <p class="text-sm font-black text-gray-900">${first ? 'First, choose what your website does' : 'What your website does'}</p>
-      <p class="text-xs text-gray-500 mt-1">Untick what you don't need: it's hidden here, ${esc(state.assistantName || 'your assistant')} won't suggest it, and its tab disappears. You can switch it back on any time.</p>
-      <div class="grid gap-2 sm:grid-cols-2 mt-3">${list.map((f) => `<label class="flex items-center gap-2 text-xs text-gray-800"><input type="checkbox" data-site-feature="${esc(f.key)}" ${featureOn(f.key) ? 'checked' : ''}> ${esc(f.label)}</label>`).join('')}</div>
-      <div class="mt-3">${btn('data-site-features-save', first ? 'Use these' : 'Save', true)}</div>`, first ? 'border-emerald-200' : '');
+      <p class="text-xs text-gray-500 mt-1">Answer in order — the next options appear as they become relevant. What you leave off is hidden here, ${esc(state.assistantName || 'your assistant')} won't suggest it, and its tab disappears. You can switch it back on any time.</p>
+      <div data-site-features-form>${steps}${more}</div>
+      <div class="mt-4">${btn('data-site-features-save', first ? 'Use these' : 'Save', true)}</div>`, first ? 'border-emerald-200' : '');
   }
+  /** Show each follow-up only while what it needs is ticked; a hidden one is unticked (featuresCard). */
+  function syncFeatureReveal(form) {
+    if (!form) return;
+    const ticked = (name) => !!form.querySelector(name === 'visit' ? '[data-site-visit]:checked' : `[data-site-feature="${CSS.escape(name)}"]:checked`);
+    form.querySelectorAll('[data-site-feature-needs]').forEach((row) => {
+      const show = row.dataset.siteFeatureNeeds.split(' ').some(ticked);
+      row.hidden = !show;
+      row.style.display = show ? '' : 'none';
+      if (!show) { const cb = row.querySelector('input'); if (cb) cb.checked = false; }
+    });
+  }
+  document.addEventListener('change', (e) => {
+    const form = e.target.closest && e.target.closest('[data-site-features-form]');
+    if (form && e.target.matches('[data-site-visit], [data-site-feature]')) syncFeatureReveal(form);
+  });
 
   /** The Blog Assistant's posts on the site (site-blog.ts): a switch and the menu label — the posts are written there. */
   function blogCard() {
@@ -1874,9 +1937,12 @@
       : '<span class="tab-head-chip">Not live yet</span>';
     const full = `<button type="button" data-site-editor-full data-sb-wide-only aria-pressed="${!!state.editorFull}" title="${state.editorFull ? 'Back to the normal view (Esc)' : 'Use the whole window for your website and chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap shrink-0">${state.editorFull ? 'Exit full screen' : 'Full screen'}</button>`;
     const newPage = state.data && !isFresh() ? window._tabNewBtn('New page', 'data-site-add-page') : '';
+    // "Preview my site" left of Full screen (owner, 2026-11-10: at the bottom of the column it went unseen).
+    // On the Preview tab the preview is already beside the chat on a wide screen, so there it shows on a phone only.
+    const preview = `<button type="button" data-site-preview-full ${state.panel === 'chat' ? 'data-sb-narrow-only ' : ''}title="See your whole site as visitors will" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap shrink-0">Preview my site</button>`;
     return window._tabHead({ title: 'Website', explain: 'website-builder', emoji: '🌐',
       about: 'Your website: preview it beside the chat, set it up, change its design and pages, and publish it. Nothing goes live until you press Publish.',
-      chip, right: `${full}${newPage}` });
+      chip, right: `${preview}${full}${newPage}` });
   }
   function subtabsHtml() {
     const d = state.data || {};
@@ -2409,13 +2475,7 @@
       ['note', noteHtml(), { live: true }],
       ['drafting', drafting],
       ...blocks.map(([k, h, o]) => [`${P}-${k}`, h, o || {}]),
-      // The preview is a button away: below everything on a narrow Website tab, and not on the page at all
-      // on the others, where the chat has its column. It opens over the page.
-      // Sticky on the wrapper itself — inside it, it could only stick within its own height.
-      ['preview-jump', P === 'chat' ? btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site') : '',
-        { attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
-      ['preview-open', P === 'chat' ? '' : btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site'),
-        { attrs: { style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
+      // The preview is a button away in the tab header ("Preview my site", headHtml): it opens over the page.
     ]);
     paintChat(layout.querySelector('[data-sb-chat]'));
     paintPreview(layout.querySelector('[data-sb-preview-col]'));
@@ -2983,12 +3043,12 @@
       return;
     }
     if (t('[data-site-remove-page]')) {
-      const ok = typeof window.confirmModal === 'function' ? await window.confirmModal(`"${p.title}" and its sections are removed from your draft.`, { title: 'Remove this page?', confirmLabel: 'Remove page', cancelLabel: 'Keep it' }) : true;
+      const ok = typeof window.confirmModal === 'function' ? await window.confirmModal(`"${esc(p.title)}" and its sections are removed from your draft, and from the menu. You can undo it straight after; nothing changes on your live site until you publish.`, { title: 'Delete this page?', confirmLabel: 'Delete page', cancelLabel: 'Keep it' }) : true;
       if (!ok) return;
       const copy = JSON.parse(JSON.stringify(p));
       await apply([{ op: 'remove_page', pageId: p.id }], () => {
         state.undo = { kind: 'page', page: copy };
-        state.note = { text: `Removed the page "${copy.title}".`, tone: 'ok', undo: true };
+        state.note = { text: `Deleted the page "${copy.title}".`, tone: 'ok', undo: true };
         state.pageId = null; state.previewPath = '/';
         state.noteAt = '[data-site-page]';
         state.refocus = '[data-site-undo]';
