@@ -26,7 +26,7 @@ import { STAY_PATH, staysFor, type SiteRenderStay, type SiteRenderStays, type St
 import { describeCancellation } from './stay-quote';
 import { STAY_AMENITIES } from './stay-clean';
 import type { WeeklyHours } from './booking-availability';
-import { INLINE_LINK, SUBHEADING } from './site-rich-text';
+import { BOLD, BULLET, INLINE_LINK, ITALIC, NUMBERED, SUBHEADING } from './site-rich-text';
 import { contrastRatio, readableInkOn } from './brand-kit';
 import { BLOG_MENU_ID, BLOG_PATH, blogOn, buttonInk, cleanHref, menuOf, socialSiteOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
 
@@ -232,7 +232,7 @@ export function themeCss(theme: SiteTheme): string {
     return `${faces}:root{--p:${theme.primaryColor};--t:${theme.textColor};--b:${theme.backgroundColor};--ink:${ink};--r:${RADIUS[theme.radius]};--f:${pair.body};--hf:${pair.heading};--hw:${pair.weight};--sp:${SPACING[theme.spacing ?? 'regular']}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}body{margin:0;font-family:var(--f);color:var(--t);background:var(--b);line-height:1.6;font-size:17px}
 img{max-width:100%;height:auto;display:block}a{color:var(--p)}h1,h2,h3{line-height:1.2;margin:0 0 .5em;font-family:var(--hf);font-weight:var(--hw)${pair.upper ? ';text-transform:uppercase' : ''}${pair.tracking ? `;letter-spacing:${pair.tracking}` : ''}}.brand{font-family:var(--hf)}h1{font-size:clamp(2rem,5vw,3.2rem)}h2{font-size:clamp(1.5rem,3.5vw,2.2rem)}h3{font-size:1.15rem}
-p{margin:0 0 1em}.w{max-width:1080px;margin:0 auto;padding:0 20px}.n{max-width:760px}
+p{margin:0 0 1em}.rt{margin:0 0 1em;padding-left:1.4em}.rt li{margin:.25em 0}.w{max-width:1080px;margin:0 auto;padding:0 20px}.n{max-width:760px}
 .hd{border-bottom:1px solid rgba(0,0,0,.08)}.hd .w{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-top:14px;padding-bottom:14px}
 .brand{font-weight:800;font-size:1.15rem;text-decoration:none;color:var(--t)}.brand img{max-height:40px;width:auto}
 .nav{display:flex;flex-wrap:wrap;gap:4px 18px;margin:0;padding:0;list-style:none}.nav a{text-decoration:none;color:var(--t);font-weight:600;font-size:.95rem}.nav a[aria-current=page]{color:var(--p)}
@@ -287,25 +287,53 @@ video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r)
 }
 
 /**
- * Words in, paragraphs out — escaped, with the two marks site-rich-text.ts allows: [words](address)
+ * Words in, paragraphs out — escaped, with the marks site-rich-text.ts allows: [words](address)
  * links, through the same gate as buttons (an address that isn't safe, or a page that doesn't exist,
- * draws the words alone), and "### " subheading lines.
+ * draws the words alone), "### " subheading lines, **bold**, *italics*, and bullet ("- ") and numbered
+ * ("1. ") list lines. `rich: false` (other people's words: reviews, social captions) keeps links and
+ * paragraphs only, so a "*" someone typed is never read as formatting.
  */
-const inline = (text: string) => {
+const emphasis = (html: string) => html.replace(BOLD, '<strong>$1</strong>').replace(ITALIC, '<em>$1</em>');
+const inline = (text: string, rich = true) => {
+    const plain = (t: string) => (rich ? emphasis(esc(t)) : esc(t)).replace(/\n/g, '<br>');
     let out = '';
     let last = 0;
     for (const m of text.matchAll(INLINE_LINK)) {
-        out += esc(text.slice(last, m.index)).replace(/\n/g, '<br>');
+        out += plain(text.slice(last, m.index));
         const to = cleanHref(m[2]);
         const ok = to && (!to.startsWith('/') || pagePaths.has(to.split(/[?#]/)[0]));
-        out += ok ? `<a href="${esc(href(to!))}">${esc(m[1])}</a>` : esc(m[1]);
+        out += ok ? `<a href="${esc(href(to!))}">${plain(m[1])}</a>` : plain(m[1]);
         last = (m.index ?? 0) + m[0].length;
     }
-    return out + esc(text.slice(last)).replace(/\n/g, '<br>');
+    return out + plain(text.slice(last));
 };
-const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => {
+/** One paragraph's lines: runs of list lines become <ul>/<ol>, the lines between them a <p>. */
+const block = (p: string) => {
+    let out = '';
+    let words: string[] = [];
+    let list: { tag: 'ul' | 'ol'; start: number; items: string[] } | null = null;
+    const endWords = () => { if (words.length) out += `<p>${inline(words.join('\n'))}</p>`; words = []; };
+    const endList = () => {
+        if (list) out += `<${list.tag} class="rt"${list.tag === 'ol' && list.start !== 1 ? ` start="${list.start}"` : ''}>${list.items.map((i) => `<li>${inline(i)}</li>`).join('')}</${list.tag}>`;
+        list = null;
+    };
+    for (const line of p.split('\n')) {
+        const b = line.match(BULLET);
+        const n = b ? null : line.match(NUMBERED);
+        const tag = b ? 'ul' : n ? 'ol' : null;
+        if (!tag) { endList(); words.push(line); continue; }
+        endWords();
+        if (!list || list.tag !== tag) { endList(); list = { tag, start: n ? Number(n[1]) : 1, items: [] }; }
+        list.items.push(line.slice((b ?? n)![0].length));
+    }
+    endWords();
+    endList();
+    return out;
+};
+const paragraphs = (text: string, rich = true) => text.split(/\n{2,}/).map((p) => {
     const sub = p.match(SUBHEADING);
-    return sub ? `<h3>${esc(sub[1])}</h3>` : `<p>${inline(p)}</p>`;
+    if (sub) return `<h3>${rich ? emphasis(esc(sub[1])) : esc(sub[1])}</h3>`;
+    return rich ? block(p) : `<p>${inline(p, false)}</p>`;
 }).join('');
 /** Set per render call — the site's own page addresses, so an inline link to a missing page draws as words. */
 let pagePaths = new Set<string>(['/']);
@@ -531,7 +559,7 @@ ${formButton(p.buttonLabel)}
             const sum = p.showSummary && data?.summary ? data.summary : null;
             if (!chosen.length && !sum) return formState.preview
                 ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Reviews section: add your reviews in Audience ▸ Reviews. Until then it doesn't appear on your live site.</p></div></section>` : '';
-            const card = (r: SiteRenderReview) => `<figure class="card rv">${r.rating ? `<p>${stars(r.rating)}</p>` : ''}<blockquote>${paragraphs(r.body)}</blockquote><figcaption><strong>${esc(r.authorName)}</strong>${r.authorDetail ? `, ${esc(r.authorDetail)}` : ''}<br><span class="fine">${r.sourceUrl ? `<a href="${esc(r.sourceUrl)}" rel="noopener">${esc(r.sourceLabel)}</a>` : esc(r.sourceLabel)}${r.reviewedOn ? ` · ${esc(monthYear(r.reviewedOn))}` : ''}</span></figcaption></figure>`;
+            const card = (r: SiteRenderReview) => `<figure class="card rv">${r.rating ? `<p>${stars(r.rating)}</p>` : ''}<blockquote>${paragraphs(r.body, false)}</blockquote><figcaption><strong>${esc(r.authorName)}</strong>${r.authorDetail ? `, ${esc(r.authorDetail)}` : ''}<br><span class="fine">${r.sourceUrl ? `<a href="${esc(r.sourceUrl)}" rel="noopener">${esc(r.sourceLabel)}</a>` : esc(r.sourceLabel)}${r.reviewedOn ? ` · ${esc(monthYear(r.reviewedOn))}` : ''}</span></figcaption></figure>`;
             const summary = sum ? `<p class="rsum">${stars(Math.round(sum.average))} <strong>${sum.average.toFixed(1)} out of 5</strong> <span class="fine">from ${sum.rated} rated review${sum.rated === 1 ? '' : 's'}</span></p>` : '';
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${summary}${chosen.length ? `<div class="grid">${chosen.map(card).join('')}</div>` : ''}</div></section>`;
         }
@@ -548,7 +576,7 @@ ${formButton(p.buttonLabel)}
                 const src = post.media ? imageSrc({ url: '', assetId: post.media.assetId }) : '';
                 const media = src ? mediaHtml({ alt: `Picture from our ${where} post`, video: post.media!.video }, src, 'lazy') : '';
                 const links = post.links.map((l) => (l.url ? `<a href="${esc(l.url)}" rel="noopener">See it on ${esc(l.label)}</a>` : `<span>On ${esc(l.label)}</span>`)).join('');
-                return `<article class="card sp">${media}<div class="spb"><p class="fine">${esc(shortDate(post.publishedAt))}</p>${post.caption ? `<div class="spt">${paragraphs(post.caption)}</div>` : ''}<p class="spl">${links}</p></div></article>`;
+                return `<article class="card sp">${media}<div class="spb"><p class="fine">${esc(shortDate(post.publishedAt))}</p>${post.caption ? `<div class="spt">${paragraphs(post.caption, false)}</div>` : ''}<p class="spl">${links}</p></div></article>`;
             };
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid">${posts.map(card).join('')}</div></div></section>`;
         }
