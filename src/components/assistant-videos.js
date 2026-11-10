@@ -78,6 +78,8 @@
     // The workspace's own tracks for "A track from My Content" (GET ?tracks=1), and the videos whose
     // Music picker is showing that list before a track is chosen.
     tracks: null, mineOpen: new Set(),
+    // Videos ticked for the bulk bar (Archive / Restore / Delete), cleared when the stage changes.
+    selected: new Set(), bulkBusy: false, bulkNote: null,
   };
 
   // Stages as pills, like the Brand Designer's Briefs (owner, 2026-11-06: the Briefs tab's patterns on
@@ -88,10 +90,15 @@
     // 'built' = made the old way, before 2026-11-09: its post is in the Review Queue.
     { key: 'made', label: 'Ready', statuses: ['ready', 'built'] },
     { key: 'cancelled', label: 'Cancelled', statuses: ['cancelled'] },
+    // Archived by the owner (video_projects.archived_at), whatever its status. Restore puts it back.
+    { key: 'archived', label: 'Archived', statuses: [] },
   ];
+  // A video being made can't be archived or deleted: a hold and a worker are on it (video-projects.ts BULK_BUSY).
+  const MAKING = ['reviewing', 'planning', 'building', 'rendering'];
   const inStage = (key) => {
     const st = STAGES.find((x) => x.key === key) || STAGES[0];
-    return state.videos.filter((v) => st.statuses.includes(v.status));
+    if (st.key === 'archived') return state.videos.filter((v) => v.archivedAt);
+    return state.videos.filter((v) => !v.archivedAt && st.statuses.includes(v.status));
   };
   // Videos start closed; the ones opened are remembered per assistant in this browser (as the Briefs are).
   // A new key: the old one listed the ones hidden.
@@ -166,7 +173,7 @@
   }
 
   function updateBadge() {
-    const waits = (v) => v.status === 'planned' || v.status === 'reviewed';
+    const waits = (v) => !v.archivedAt && (v.status === 'planned' || v.status === 'reviewed');
     const n = state.videos.filter(waits).length;
     // The page's "Needs you" strip counts the same storyboards (assistants.js _renderNeedsYou 'videos').
     window._setNeedsYouCount?.(n);
@@ -742,7 +749,10 @@
     return `
       <article data-no-fold class="bg-white border border-gray-200 rounded-xl p-4" data-video="${v.id}">
         <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
+          ${/* Ticked for Archive / Restore / Delete (the bar above the list). Not while it is being made: a hold and a worker are on it. */ ''}
+          <input type="checkbox" data-vid-pick="${v.id}" ${state.selected.has(v.id) ? 'checked' : ''} ${MAKING.includes(v.status) ? 'disabled title="Being made — cancel it or wait until it’s done"' : ''}
+            aria-label="Select “${esc(v.title)}”" class="mt-1 w-4 h-4 shrink-0 rounded border-gray-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40">
+          <div class="min-w-0 flex-1">
             <button type="button" data-vid-act="fold" data-id="${v.id}" aria-expanded="${folded ? 'false' : 'true'}" title="${folded ? 'Show this video' : 'Hide this video'}"
               class="flex items-start gap-1.5 text-left text-sm font-bold text-gray-900 break-words cursor-pointer hover:text-gray-700">
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
@@ -751,7 +761,8 @@
             ${v.note ? `<p class="text-xs ${v.status === 'ready' ? 'text-emerald-800 bg-emerald-50 border-emerald-200' : 'text-amber-800 bg-amber-50 border-amber-200'} border rounded-md px-2 py-1 mt-1.5 break-words" style="overflow-wrap:anywhere">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
-          ${chatPaneAvailable() ? `<button type="button" data-vid-act="talk" data-id="${v.id}" class="text-xs font-bold text-indigo-700 hover:underline shrink-0 whitespace-nowrap">Talk it through</button>` : ''}
+          ${/* "🎯 Select", as on every assistant's items (Campaigns, Briefs, Mentor plan, this tab's scenes) — owner 2026-11-10: "Talk it through" was this tab's own wording. */
+            chatPaneAvailable() ? `<button type="button" data-vid-act="talk" data-id="${v.id}" title="Ask ${who()} about this video" class="text-xs font-bold text-indigo-700 hover:underline shrink-0 whitespace-nowrap">🎯 Select</button>` : ''}
           ${v.status === 'built' ? `<button type="button" data-vid-act="open-review" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg shrink-0">Open Review</button>` : ''}
         </div>
         ${folded ? '' : `<div data-vid-body>
@@ -787,6 +798,47 @@
     if (name && window.VoicePicker) name.textContent = window.VoicePicker.describe(f.elements.voice.value);
   }
 
+  /** The bar over the list once anything is ticked: Archive (or Restore on Archived) and Delete. */
+  function bulkBarHtml(picked) {
+    const n = picked.length;
+    const note = state.bulkNote ? `<p class="text-xs font-semibold px-4 pt-2 ${state.bulkNote.error ? 'text-red-600' : 'text-gray-700'}" role="status">${esc(state.bulkNote.text)}</p>` : '';
+    if (!n) return note;
+    const dis = state.bulkBusy ? 'disabled' : '';
+    const archived = state.stage === 'archived';
+    return `${note}
+      <div data-vid-bulkbar class="mx-4 mt-2 flex flex-wrap items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+        <span class="text-sm font-bold text-gray-800 mr-auto">${n} selected</span>
+        <button type="button" data-vid-act="${archived ? 'bulk-restore' : 'bulk-archive'}" ${dis} class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">${archived ? 'Restore' : 'Archive'} ${n}</button>
+        <button type="button" data-vid-act="bulk-delete" ${dis} class="btn-destructive border min-h-[44px] sm:min-h-0 px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Delete ${n}</button>
+        <button type="button" data-vid-act="pick-none" ${dis} class="tab-link">Clear</button>
+      </div>`;
+  }
+
+  /** Archive, restore or delete the ticked videos — video-projects.ts, the same action as the chat card. */
+  async function bulk(action) {
+    const ids = inStage(state.stage).filter((v) => state.selected.has(v.id) && !MAKING.includes(v.status)).map((v) => v.id);
+    if (!ids.length) return;
+    const n = ids.length, them = n === 1 ? 'this video' : `these ${n} videos`;
+    if (action === 'delete') {
+      const ok = await window.confirmModal(`${n === 1 ? 'It is' : 'They are'} removed from the Videos tab for good, with ${n === 1 ? 'its' : 'their'} storyboard, notes and versions list. This can’t be undone. Any finished video file stays in My Content until you delete it there.`, {
+        title: `Delete ${them}?`, confirmLabel: `Delete ${n}`, cancelLabel: 'Keep them',
+      });
+      if (!ok) return;
+    }
+    state.bulkBusy = true; state.bulkNote = { text: 'Working…' }; render();
+    try {
+      const data = await call('POST', { action, ids });
+      const done = (data.done || []).length, skipped = data.skipped || [];
+      const verb = action === 'archive' ? 'Archived' : action === 'restore' ? 'Restored' : 'Deleted';
+      state.bulkNote = { text: `${verb} ${done} ${done === 1 ? 'video' : 'videos'}.${skipped.length ? ` ${skipped.length} left as ${skipped.length === 1 ? 'it was' : 'they were'}: ${skipped[0].reason}` : ''}`, error: !done && skipped.length > 0 };
+      state.selected.clear();
+    } catch (err) {
+      state.bulkNote = { text: err.message, error: true };
+    }
+    state.bulkBusy = false;
+    await load();
+  }
+
   function render() {
     const el = host();
     if (!el) return;
@@ -798,6 +850,10 @@
     const visible = inStage(state.stage);
     const stageLabel = (STAGES.find((st) => st.key === state.stage) || STAGES[0]).label;
     const anyOpen = visible.some((v) => state.opened.has(v.id));
+    // Only what is on this stage counts as selected (a video can move stage while ticked).
+    const pickable = visible.filter((v) => !MAKING.includes(v.status));
+    const picked = pickable.filter((v) => state.selected.has(v.id));
+    const allPicked = pickable.length > 0 && picked.length === pickable.length;
     const pills = STAGES.map((st) => {
       const n = inStage(st.key).length;
       const on = st.key === state.stage;
@@ -806,6 +862,7 @@
     }).join('');
     const empty = state.stage === 'check'
       ? `No videos to check. Press “New video”, or tell ${who()} in chat what you’d like a video about.`
+      : state.stage === 'archived' ? 'Nothing archived. Tick videos on any stage, then press “Archive”.'
       : `No videos ${esc(stageLabel.toLowerCase())}.`;
     // The standard tab header and card (owner, 2026-11-07). Full screen, then "+ New video" right beside
     // it (e2e/full-screen-buttons.spec.ts), then "Use my own footage".
@@ -817,8 +874,9 @@
       <div class="tab-card">
         <div class="tab-pillbar">
           <div role="tablist" aria-label="Videos by stage" class="stage-pills tab-scroller">${pills}</div>
-          <div class="tab-pillbar-actions">${visible.length > 1 ? `<button type="button" data-vid-act="fold-all" class="tab-link">${anyOpen ? 'Hide all' : 'Show all'}</button>` : ''}</div>
+          <div class="tab-pillbar-actions">${pickable.length > 1 ? `<button type="button" data-vid-act="pick-all" class="tab-link">${allPicked ? 'Clear selection' : 'Select all'}</button>` : ''}${visible.length > 1 ? `<button type="button" data-vid-act="fold-all" class="tab-link">${anyOpen ? 'Hide all' : 'Show all'}</button>` : ''}</div>
         </div>
+        ${bulkBarHtml(picked)}
         <div class="px-4 pb-4 pt-2">
         ${!state.loaded ? '<p class="text-sm text-gray-500">Loading your videos…</p>'
           : state.loadError ? `<p class="text-sm text-red-600">Your videos couldn’t be loaded: ${esc(state.loadError)}</p>`
@@ -916,7 +974,7 @@
   document.addEventListener('click', (e) => {
     const pill = e.target.closest('[data-vid-stage]');
     if (pill && host() && host().contains(pill)) {
-      state.stage = pill.dataset.vidStage; state.userStage = true; render();
+      state.stage = pill.dataset.vidStage; state.userStage = true; state.selected.clear(); state.bulkNote = null; render();
       host()?.querySelector(`[data-vid-stage="${state.stage}"]`)?.focus();
       return;
     }
@@ -989,6 +1047,18 @@
         break;
       }
       case 'full': setFull(!state.full); break;
+      case 'pick-all': {
+        const pickable = inStage(state.stage).filter((v) => !MAKING.includes(v.status));
+        const all = pickable.every((v) => state.selected.has(v.id));
+        state.selected.clear();
+        if (!all) pickable.forEach((v) => state.selected.add(v.id));
+        state.bulkNote = null; render();
+        break;
+      }
+      case 'pick-none': state.selected.clear(); state.bulkNote = null; render(); break;
+      case 'bulk-archive': bulk('archive'); break;
+      case 'bulk-restore': bulk('restore'); break;
+      case 'bulk-delete': bulk('delete'); break;
       case 'talk': {
         const v = state.videos.find((x) => x.id === id);
         if (v) getChatDock()?.refer({ label: `Video “${v.title}”`, message: `About my video ${v.id} “${v.title}”.` });
@@ -1046,6 +1116,13 @@
   // Ticking a video in the footage form; adding files to it.
   document.addEventListener('change', (e) => {
     const t = e.target;
+    if (host() && host().contains(t) && t.matches('[data-vid-pick]')) {
+      const id = Number(t.dataset.vidPick);
+      if (t.checked) state.selected.add(id); else state.selected.delete(id);
+      state.bulkNote = null; render();
+      host()?.querySelector(`[data-vid-pick="${id}"]`)?.focus();
+      return;
+    }
     if (host() && host().contains(t) && t.matches('[data-vid-music-mood]')) {
       // The brief form: the track list shows only for "A track from My Content".
       const pick = t.closest('label')?.querySelector('[data-vid-mine-pick]');

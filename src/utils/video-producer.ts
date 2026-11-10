@@ -1155,6 +1155,7 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         editCount: row.editCount,
         sourceFiles: row.status === 'ready' ? await sourceFilesOf(db, orgId, row) : [],
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),
+        archivedAt: row.archivedAt ?? null,
         createdAt: row.createdAt, updatedAt: row.updatedAt,
     };
 }
@@ -1192,9 +1193,16 @@ export async function sourceFilesOf(db: Db, orgId: number, row: typeof videoProj
 export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: number): Promise<string> {
     await sweepStuckProjects(db, orgId).catch(() => 0);
     const rows = await db.select().from(videoProjects)
-        .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, assistantId)))
+        .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, assistantId), isNull(videoProjects.archivedAt)))
         .orderBy(desc(videoProjects.createdAt)).limit(10);
-    const footage = [
+    // Archived ones by name only, so "restore" or "delete the archived ones" can name their ids.
+    const archived = await db.select({ id: videoProjects.id, title: videoProjects.title }).from(videoProjects)
+        .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, assistantId), sql`${videoProjects.archivedAt} IS NOT NULL`))
+        .orderBy(desc(videoProjects.archivedAt)).limit(10).catch(() => []);
+    const archivedTxt = archived.length
+        ? `ARCHIVED VIDEOS (on the "Archived" pill of the "Videos" tab; only for video_tidy_proposal restore or delete): ${archived.map((a) => `id ${a.id} "${a.title.slice(0, 60)}"`).join('; ')}`
+        : 'ARCHIVED VIDEOS: none.';
+    const footage = [archivedTxt,
         await ownFootageSnapshot(db, orgId).catch(() => 'THEIR OWN VIDEOS: could not be read this turn — do not name any by id.'),
         await ownMusicSnapshot(db, orgId).catch(() => 'THEIR OWN MUSIC TRACKS: could not be read this turn — do not name any by id.'),
     ].join('\n\n');

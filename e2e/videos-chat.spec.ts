@@ -94,7 +94,7 @@ test.describe('wide screen', () => {
         expect(pageErrors).toEqual([]);
     });
 
-    test('"Talk it through" puts the whole video into the chat', async ({ page, api, pageErrors }) => {
+    test('"🎯 Select" puts the whole video into the chat', async ({ page, api, pageErrors }) => {
         stubVideos(api);
         api.set('chat-orchestrator', { chatSessionId: 8, message: { id: 1, role: 'assistant', content: 'Noted.', uiElement: null } });
         await openTab(page);

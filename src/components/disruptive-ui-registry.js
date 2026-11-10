@@ -1937,6 +1937,28 @@
   register('video_replan_proposal', renderVideoReplanProposalCard);
   register('video_script_proposal', renderVideoScriptProposalCard);
   register('video_options_proposal', renderVideoOptionsProposalCard);
+
+  // { type: 'video_tidy_proposal', action: 'archive' | 'restore' | 'delete', projectIds: [...], titles?: [...] }
+  // The chat twin of the Videos tab's bulk bar (video-projects.ts archive / restore / delete). Free.
+  function renderVideoTidyProposalCard(ui, esc) {
+    const ids = [...new Set((Array.isArray(ui.projectIds) ? ui.projectIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 100);
+    const action = ['archive', 'restore', 'delete'].includes(ui.action) ? ui.action : null;
+    const titles = (Array.isArray(ui.titles) ? ui.titles : []).filter((t) => typeof t === 'string').map((t) => t.slice(0, 80)).slice(0, 8);
+    const n = ids.length;
+    const word = n === 1 ? 'video' : 'videos';
+    const COPY = {
+      archive: { kicker: `Archive ${n} ${word}`, note: 'They move to the Archived pill on the Videos tab, and Restore brings them back. Finished files stay in My Content.', button: `Archive ${n}`, done: 'Archived. They’re on the Archived pill of the Videos tab.' },
+      restore: { kicker: `Restore ${n} ${word}`, note: 'They go back to their stage on the Videos tab.', button: `Restore ${n}`, done: 'Restored to the Videos tab.' },
+      delete: { kicker: `Delete ${n} ${word}`, note: 'Removed from the Videos tab for good, with their storyboards and notes. This can’t be undone. Finished files stay in My Content until you delete them there.', button: `Delete ${n}`, done: 'Deleted.' },
+    };
+    const c = COPY[action] || { kicker: 'Tidy videos', note: 'Nothing to do.', button: 'Go', done: '' };
+    return videoActionCard(esc, {
+      ...c,
+      rows: [titles.length ? ['Videos', titles.join(', ') + (n > titles.length ? ` and ${n - titles.length} more` : '')] : null],
+      body: action && n ? { action, ids } : null,
+    });
+  }
+  register('video_tidy_proposal', renderVideoTidyProposalCard);
   register('video_note_proposal', renderVideoNoteProposalCard);
   register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
   register('video_reshape_proposal', renderVideoReshapeProposalCard);

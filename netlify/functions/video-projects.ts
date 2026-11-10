@@ -27,6 +27,10 @@
 //   GET  ?performance=1&assistantId=N                   → the Results tab's four figures (src/lib/video-results.ts)
 //   GET  ?calendar=1&assistantId=N&from&to              → the Calendar tab: videos started and finished, by day
 //   POST { action:'cancel', id }
+//   POST { action:'archive' | 'restore' | 'delete', ids:[…] }  → { done:[ids], skipped:[{ id, reason }] } — the
+//        Videos tab's bulk bar and the chat's video_tidy_proposal card. Not while a video is being made.
+//        Delete removes the project only; its finished file stays in My Content. Free, and no plan gate:
+//        a workspace that has lost video can still tidy what it made.
 //   POST { action:'from_post', postId }                 → "Make a video version" of a post (video-handoff.ts):
 //                                                          plans a storyboard for the active Video Producer
 //   GET  ?producer=1                                    → { producer: { id, name } | null } — is the button offered?
@@ -36,7 +40,7 @@
 // Gate (owner decision D5, recommended 2026-10-31): the same as AI video — an assistant type with
 // `ai_video_generation` AND a plan that includes video.
 
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, videoProjects } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -58,6 +62,9 @@ import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../
 import { FOOTAGE_REVIEW_TASKS, tightenStoryboard, type FootageReview } from '../../src/lib/footage';
 import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 import { withLambda } from '@netlify/aws-lambda-compat';
+
+/** Statuses a video can't be archived or deleted in: a credit hold and a background worker are on it. */
+const BULK_BUSY = ['reviewing', 'planning', 'building', 'rendering'];
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
@@ -119,19 +126,48 @@ export default withLambda(async (event) => {
             return row ? json(200, { project: await projectView(db, orgId, row) }) : json(404, { error: 'Video not found.' });
         }
         // ?assistantId=N narrows to one assistant's videos (its Videos tab); still org-scoped first.
+        // The newest 50 on the tab, and the newest 50 archived (the Archived pill) — so archiving never
+        // pushes a waiting video off the list.
         const forAssistant = Number(event.queryStringParameters?.assistantId);
-        const rows = await db.select().from(videoProjects)
-            .where(Number.isInteger(forAssistant) && forAssistant > 0
-                ? and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, forAssistant))
-                : eq(videoProjects.organisationId, orgId))
-            .orderBy(desc(videoProjects.createdAt)).limit(50);
-        return json(200, { projects: await Promise.all(rows.map((r) => projectView(db, orgId, r))) });
+        const scope = Number.isInteger(forAssistant) && forAssistant > 0
+            ? and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, forAssistant))
+            : eq(videoProjects.organisationId, orgId);
+        const [live, archived] = await Promise.all([
+            db.select().from(videoProjects).where(and(scope, isNull(videoProjects.archivedAt))).orderBy(desc(videoProjects.createdAt)).limit(50),
+            db.select().from(videoProjects).where(and(scope, isNotNull(videoProjects.archivedAt))).orderBy(desc(videoProjects.archivedAt)).limit(50),
+        ]);
+        return json(200, { projects: await Promise.all([...live, ...archived].map((r) => projectView(db, orgId, r))) });
     }
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     let body: Record<string, unknown>;
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
     const action = String(body.action || '');
+
+    // Tidying: archive, restore, delete — before the plan gate (nothing is made or spent).
+    if (action === 'archive' || action === 'restore' || action === 'delete') {
+        const ids = [...new Set((Array.isArray(body.ids) ? body.ids : [body.id]).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 100);
+        if (!ids.length) return json(400, { error: 'Choose at least one video.' });
+        const rows = await db.select({ id: videoProjects.id, status: videoProjects.status, archivedAt: videoProjects.archivedAt })
+            .from(videoProjects).where(and(eq(videoProjects.organisationId, orgId), inArray(videoProjects.id, ids)));
+        const found = new Set(rows.map((r) => r.id));
+        const skipped: Array<{ id: number; reason: string }> = ids.filter((id) => !found.has(id)).map((id) => ({ id, reason: 'That video wasn’t found.' }));
+        const ok: number[] = [];
+        for (const r of rows) {
+            if (BULK_BUSY.includes(r.status)) skipped.push({ id: r.id, reason: 'It’s being made — cancel it or wait until it’s done.' });
+            else if (action === 'archive' && r.archivedAt) skipped.push({ id: r.id, reason: 'It was already archived.' });
+            else if (action === 'restore' && !r.archivedAt) skipped.push({ id: r.id, reason: 'It wasn’t archived.' });
+            else ok.push(r.id);
+        }
+        if (ok.length) {
+            // The status is checked again in the write: a video started between the read and here is left alone.
+            const where = and(eq(videoProjects.organisationId, orgId), inArray(videoProjects.id, ok));
+            const notBusy = sql`${videoProjects.status} NOT IN ('reviewing','planning','building','rendering')`;
+            if (action === 'delete') await db.delete(videoProjects).where(and(where, notBusy));
+            else await db.update(videoProjects).set({ archivedAt: action === 'archive' ? new Date() : null, updatedAt: new Date() }).where(and(where, notBusy));
+        }
+        return json(200, { done: ok, skipped });
+    }
 
     // The gate, before anything is planned or spent.
     if (!tierCanGenerateVideo(await getActiveTierKeyByOrg(db, orgId))) {
