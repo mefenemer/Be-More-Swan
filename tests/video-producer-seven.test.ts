@@ -403,6 +403,7 @@ check('a failed render can change its music and be made again; its note carries 
     assert.ok(ui.includes('overflow-wrap:anywhere'), 'a long note wraps inside its box');
     const reg = read('src/components/disruptive-ui-registry.js');
     assert.ok(reg.includes('body.musicAssetId = trackId'), 'chat can propose a track too');
+    assert.ok(read('src/utils/video-producer.ts').includes('await ownMusicSnapshot(db, orgId)'), 'and the chat is shown the track ids it may propose');
 });
 
 // ── Measured, not assumed: the real files are measured and the voice levelled (staging, 2026-11-10) ──

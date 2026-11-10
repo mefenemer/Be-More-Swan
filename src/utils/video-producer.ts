@@ -64,7 +64,7 @@ import { levelledVoiceover, measureAsset } from './audio-levelling';
 import { isVideoLook, lookStyle, type LookStyle } from '../lib/video-look';
 import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
 import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
-import { musicAssetFor, ownMusicTrack, storedFileExists, usableMusicTracks } from './video-music-asset';
+import { musicAssetFor, ownMusicTrack, ownMusicTracks, storedFileExists, usableMusicTracks } from './video-music-asset';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -1188,7 +1188,10 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
     const rows = await db.select().from(videoProjects)
         .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, assistantId)))
         .orderBy(desc(videoProjects.createdAt)).limit(10);
-    const footage = await ownFootageSnapshot(db, orgId).catch(() => 'THEIR OWN VIDEOS: could not be read this turn — do not name any by id.');
+    const footage = [
+        await ownFootageSnapshot(db, orgId).catch(() => 'THEIR OWN VIDEOS: could not be read this turn — do not name any by id.'),
+        await ownMusicSnapshot(db, orgId).catch(() => 'THEIR OWN MUSIC TRACKS: could not be read this turn — do not name any by id.'),
+    ].join('\n\n');
     if (!rows.length) return `YOUR VIDEOS: none yet.\n\n${footage}`;
     const tasks = await isUnifiedTaskMetering(orgId);
     const WAITING: Record<string, string> = {
@@ -1236,6 +1239,17 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
             : '';
         return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${shapeTxt}${from}${own}) — ${WAITING[r.status] ?? r.status}${cost}${script}${note}${extras ? `\n    ${extras}` : ''}${seen}${lines}${noteLines}`;
     }), '', footage].join('\n');
+}
+
+/**
+ * The owner's own music tracks the chat may put under a video (video_options_proposal musicAssetId):
+ * generated with "✨ Generate music" or uploaded. Ids, names, lengths — no URLs. Without this the chat
+ * had no id to propose and asked the owner for one (staging, 2026-11-10).
+ */
+export async function ownMusicSnapshot(db: Db, orgId: number): Promise<string> {
+    const tracks = await ownMusicTracks(db, orgId, 15);
+    if (!tracks.length) return 'THEIR OWN MUSIC TRACKS: none yet. They can make one with "✨ Generate music" in a post\'s Sound layer, or upload one to My Content.';
+    return ['THEIR OWN MUSIC TRACKS (use only these ids as musicAssetId):', ...tracks.map((t) => `- track ${t.assetId}: "${t.title.slice(0, 80)}"${t.durationS ? ` (${Math.round(t.durationS)} s)` : ''}`)].join('\n');
 }
 
 /**
