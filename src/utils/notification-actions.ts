@@ -85,6 +85,8 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     post_missed: 'suggested_action', post_generation_failed: 'suggested_action',
     // Empty-Library Draft Fallback (off) — scheduled drafts were skipped; user must upload media.
     content_library_empty: 'suggested_action',
+    // My Content files due to be deleted in a week; Keep stops it (src/utils/library-retention.ts).
+    library_files_expiring: 'suggested_action',
     // The assistant's stored posting_frequency cannot be parsed, so autopilot has never run. Only a
     // human can fix the stored value, and until they do the assistant drafts nothing at all — this
     // belongs in "Action required", not Updates.

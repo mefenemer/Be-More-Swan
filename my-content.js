@@ -106,6 +106,11 @@ let _assets = { pending: [], scheduled: [], posted: [], rejected: [] };
 let _filterSource = 'all';
 let _filterType = 'all';
 let _groupBy = 'status';
+// "Due to be deleted" view: only files with a deletion date — where the deletion notice lands
+// (loadView('my-content', { expiring: true })), with Keep all.
+let _onlyExpiring = false;
+// The workspace's storage against its plan ({ usedBytes, limitBytes|null }), from content-assets GET.
+let _storage = null;
 // Which sections the user has opened or closed, by group key. Kept because filtering re-renders,
 // and re-applying defaultExpanded every time would slam a section shut mid-use.
 let _sectionOpen = {};
@@ -132,6 +137,7 @@ window.initMyContent = async function (param) {
         ? param.assistantName.trim() : '';
     // An assistant page's tab can open on one media type (the Video Producer's on Videos).
     if (param && typeof param === 'object' && Object.prototype.hasOwnProperty.call(MEDIA_TYPES, param.type)) _filterType = param.type;
+    _onlyExpiring = !!(param && typeof param === 'object' && param.expiring);
     await _loadAssets();
     _startPollingIfNeeded();
     _mcRefreshHeaderCredits();
@@ -191,6 +197,7 @@ async function _loadAssets() {
         if (!res.ok) throw new Error('fetch failed');
         const data = await res.json();
         _assets = { pending: [], scheduled: [], posted: [], rejected: [], ...data.assets };
+        _storage = data.storage || null;
         // Try to capture orgId from first asset
         for (const bucket of Object.values(data.assets)) {
             if (Array.isArray(bucket) && bucket.length > 0) {
@@ -254,6 +261,7 @@ function _allAssets() {
 
 /** True when this asset survives the current Source and Type filters. */
 function _passesFilters(a) {
+    if (_onlyExpiring && !a.libraryExpiresAt) return false;
     if (_filterSource !== 'all' && _sourceKey(a) !== _filterSource) return false;
     if (_filterType !== 'all' && _mediaTypeKey(a) !== _filterType) return false;
     return true;
@@ -320,6 +328,7 @@ function _isOpen(sec) {
 function _renderSections() {
     const container = document.getElementById('content-sections');
     if (!container) return;
+    _mcRenderStorage();
     _mcRenderControls();
     const sections = _currentSections();
     const total = _allAssets().length;
@@ -378,7 +387,10 @@ function _mcRenderControls() {
     const byType = all.filter(a => _filterSource === 'all' || _sourceKey(a) === _filterSource);
 
     const cls = 'text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-600';
-    const filtering = _filterSource !== 'all' || _filterType !== 'all';
+    const filtering = _filterSource !== 'all' || _filterType !== 'all' || _onlyExpiring;
+    // Files with a deletion date, under the other filters — the "Due to be deleted" toggle.
+    const expiring = all.filter(a => a.libraryExpiresAt && (_filterSource === 'all' || _sourceKey(a) === _filterSource) && (_filterType === 'all' || _mediaTypeKey(a) === _filterType));
+    const keepable = expiring.filter(a => a.canKeep);
 
     host.innerHTML = `
       <label class="flex flex-col gap-1">
@@ -405,8 +417,51 @@ function _mcRenderControls() {
           <option value="source"${_groupBy === 'source' ? ' selected' : ''}>Media source</option>
         </select>
       </label>
+      ${expiring.length || _onlyExpiring ? `<button type="button" id="mc-only-expiring" aria-pressed="${_onlyExpiring}" onclick="window._mcToggleExpiring()"
+        title="Files that will be deleted unless you keep them"
+        class="${_onlyExpiring ? 'bg-amber-100 border-amber-300 text-amber-900' : 'btn-secondary'} px-3 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Due to be deleted (${expiring.length})</button>` : ''}
+      ${_onlyExpiring && keepable.length ? `<button type="button" id="mc-keep-all" onclick="window._mcKeepAll()"
+        class="btn-primary px-3 py-2 text-xs font-bold rounded-lg transition cursor-pointer">Keep all ${keepable.length}</button>` : ''}
       ${filtering ? `<button type="button" onclick="window._mcClearFilters()"
         class="btn-secondary px-3 py-2 text-xs font-bold rounded-lg border transition cursor-pointer">Clear filters</button>` : ''}`;
+    host.classList.remove('hidden');
+}
+
+// ── Storage bar ───────────────────────────────────────────────────
+// The workspace's stored bytes against its plan's allowance (content-assets GET `storage`, from
+// src/utils/library-retention.ts storageMeter). Amber from 80 %, red from 95 %. A plan with no
+// limit says so instead of drawing a bar that can never fill.
+function _mcRenderStorage() {
+    const host = document.getElementById('mc-storage');
+    if (!host) return;
+    if (!_storage) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    const used = Number(_storage.usedBytes) || 0;
+    const limit = _storage.limitBytes == null ? null : Number(_storage.limitBytes);
+    const usedText = used ? _formatBytes(used) : '0 MB';
+    let inner;
+    if (!limit) {
+        inner = `<div class="flex items-center justify-between gap-3 text-sm">
+            <span class="font-bold text-gray-700">Storage</span>
+            <span class="text-gray-600">${usedText} used · no limit on your plan</span>
+          </div>`;
+    } else {
+        const pct = Math.min(100, Math.round((used / limit) * 1000) / 10);
+        const bar = pct >= 95 ? 'bg-red-600' : pct >= 80 ? 'bg-amber-500' : 'bg-emerald-600';
+        const note = pct >= 95 ? ' You’re almost out of space: delete files you don’t need, or upgrade your plan.'
+            : pct >= 80 ? ' Getting full.' : '';
+        inner = `<div class="flex items-center justify-between gap-3 text-sm mb-2">
+            <span class="font-bold text-gray-700">Storage</span>
+            <span class="text-gray-600"><strong class="text-gray-900">${pct}%</strong> used · ${usedText} of ${_formatBytes(limit)}</span>
+          </div>
+          <div class="h-2 rounded-full bg-gray-100 overflow-hidden" role="progressbar" aria-label="Storage used"
+               aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}">
+            <div class="h-full ${bar} rounded-full" style="width:${Math.max(pct, used ? 1 : 0)}%"></div>
+          </div>
+          ${note ? `<p class="text-xs mt-2 ${pct >= 95 ? 'text-red-700' : 'text-amber-800'}">${note.trim()}</p>` : ''}`;
+    }
+    host.innerHTML = `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm px-4 py-3">${inner}
+        <p class="text-xs text-gray-500 mt-2">Files used in posts are deleted 30 days after posting, and unused generated cards 30 days after they’re made. You’re told a week before, and anything you Keep is never deleted.</p>
+      </div>`;
     host.classList.remove('hidden');
 }
 
@@ -431,6 +486,12 @@ window._mcSetGroupBy = function (value) {
 window._mcClearFilters = function () {
     _filterSource = 'all';
     _filterType = 'all';
+    _onlyExpiring = false;
+    _renderSections();
+};
+
+window._mcToggleExpiring = function () {
+    _onlyExpiring = !_onlyExpiring;
     _renderSections();
 };
 
@@ -518,6 +579,13 @@ function _assetRow(asset, sec) {
     const fileSize = asset.fileSize ? _formatBytes(asset.fileSize) : '';
     const source = _sourceInfo(asset);
 
+    // Keep: on any file that something could delete — a date already set, or media on a post (which
+    // goes 30 days after posting) — unless already kept or refused by the safety check.
+    const deletable = !!asset.libraryExpiresAt || asset.status === 'scheduled' || asset.status === 'posted' || asset.provider === 'brand_card';
+    const keepBtn = asset.canKeep && deletable && !(asset.status === 'pending' && asset.libraryExpiresAt)
+        ? `<button type="button" onclick="window._mcKeepAsset(${asset.id})" title="Keep this file for good — it will never be deleted"
+            class="btn-secondary text-xs font-bold border px-3 py-1.5 rounded-lg transition cursor-pointer">Keep</button>` : '';
+
     // Actions depend on status
     let actions = '';
     if (asset.status === 'pending' && asset.libraryExpiresAt) {
@@ -526,7 +594,7 @@ function _assetRow(asset, sec) {
         // has to offer the way out before it offers the bin.
         actions = `
           <button type="button" onclick="window._mcKeepAsset(${asset.id})"
-            title="Keep this card in your library permanently"
+            title="Keep this file for good — it will never be deleted"
             class="btn-secondary text-xs font-bold border px-3 py-1.5 rounded-lg transition cursor-pointer">
             Keep
           </button>
@@ -549,7 +617,8 @@ function _assetRow(asset, sec) {
             Remove from Post
           </button>`;
     } else if (asset.status === 'posted') {
-        actions = `<span class="text-xs text-gray-400">Auto-removed in ~${_daysUntilPurge(asset.retentionDeleteAfter)}</span>`;
+        // Its deletion date is in the notice under the name; Keep stops it.
+        actions = '';
     } else if (asset.status === 'rejected') {
         // Rejected assets: no actions (reason is read-only, per spec)
         actions = '';
@@ -575,13 +644,19 @@ function _assetRow(asset, sec) {
     // content-retention.ts purges by, so this countdown cannot promise a date the sweep disagrees
     // with. It is null for everything that is not an expiring card, which is what keeps this block
     // off every other row in the library.
+    // Since 2026-11-10 any file with a deletion date shows it (posted and rejected media too), and
+    // the date is never sooner than a week after its owner is told (src/utils/library-retention.ts).
+    const deleteOn = asset.libraryExpiresAt
+        ? new Date(asset.libraryExpiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
     const expiryNotice = asset.libraryExpiresAt
         ? `<div class="flex items-start gap-1.5 mt-1.5 px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded-lg">
              <svg class="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
              <span class="text-xs text-amber-800 font-medium leading-snug">
-               Unused card — removed in ${_daysUntilPurge(asset.libraryExpiresAt)}. Press Keep, or use it on a post, to keep it for good.
+               ${asset.provider === 'brand_card' && asset.status === 'pending' ? 'Unused card — d' : 'D'}eleted on ${deleteOn} (in ${_daysUntilPurge(asset.libraryExpiresAt)}).${asset.canKeep ? ' Press Keep to keep it for good.' : ''}
              </span>
            </div>`
+        : asset.libraryKeptAt && !asset.purgedAt
+        ? `<div class="mt-1.5"><span class="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full" title="You kept this file — it will never be deleted">Kept</span></div>`
         : '';
 
     // Scheduled post context badge
@@ -648,7 +723,7 @@ function _assetRow(asset, sec) {
         ${expiryNotice}
         ${rejectionBadge}
       </div>
-      <div class="shrink-0 flex items-center gap-2">${viewBtn}${actions}</div>
+      <div class="shrink-0 flex items-center gap-2">${viewBtn}${keepBtn}${actions}</div>
     </div>`;
 }
 
@@ -1685,11 +1760,32 @@ window._mcKeepAsset = async function (assetId) {
         // Reload rather than patching the row in place: the server owns libraryExpiresAt, and the
         // notice disappearing is the confirmation that the clock is actually gone.
         await _loadAssets();
-        const msg = 'Kept. This card will stay in your library.';
+        const msg = 'Kept. This file will never be deleted.';
         window.showToast ? window.showToast(msg, { icon: '📌' }) : null;
     } catch {
-        const msg = 'Could not keep that card. Please try again.';
+        const msg = 'Could not keep that file. Please try again.';
         window.showToast ? window.showToast(msg, { icon: '⚠️' }) : window.showToast?.(msg, { icon: '⚠️' });
+    }
+};
+
+// Keep every file shown under "Due to be deleted" (the deletion notice's list) in one go.
+window._mcKeepAll = async function () {
+    const ids = _allAssets().filter(a => a.libraryExpiresAt && a.canKeep && _passesFilters(a)).map(a => a.id);
+    if (!ids.length) return;
+    try {
+        const res = await fetch('/.netlify/functions/content-assets', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'keep', ids }),
+        });
+        if (!res.ok) throw new Error('keep failed');
+        const data = await res.json().catch(() => ({}));
+        _onlyExpiring = false;
+        await _loadAssets();
+        const n = Number(data.kept) || 0;
+        window.showToast?.(`Kept ${n} ${n === 1 ? 'file' : 'files'}. They will never be deleted.`, { icon: '📌' });
+    } catch {
+        window.showToast?.('Could not keep those files. Please try again.', { icon: '⚠️' });
     }
 };
 

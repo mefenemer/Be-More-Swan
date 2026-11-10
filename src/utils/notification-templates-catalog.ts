@@ -969,6 +969,19 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        // src/utils/library-retention.ts warnExpiringFiles — once per file, a week before deletion.
+        templateKey: 'library_files_expiring',
+        name: 'Files due to be deleted',
+        category: 'Content',
+        type: 'library_files_expiring',
+        title: '{{files.count}} in My Content will be deleted on {{files.date}}',
+        message: 'Review them in My Content and press Keep on any you want to keep for good. Kept files are never deleted.',
+        variables: [
+            { key: 'files.count', label: 'Number of files ("3 files")', sample: '3 files' },
+            { key: 'files.date', label: 'Deletion date', sample: '17 November 2026' },
+        ],
+    },
+    {
         templateKey: 'draft_horizon_expanded',
         name: 'Draft horizon extended',
         category: 'Content',
