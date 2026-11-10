@@ -241,7 +241,10 @@ export default withLambda(async (event) => {
         if (!['planned', 'failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video is not ready to make.' });
         const hold = await holdBuild(db, orgId, row.storyboard as Storyboard, row.brief as VideoBrief, row);
         if (!hold.ok) return json(402, { error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit });
-        await db.update(videoProjects).set({ status: 'building', creditHold: hold.credits, startedAt: new Date(), note: null, updatedAt: new Date() })
+        // Campaign orders and the weekly autopilot plan a storyboard with no person behind it
+        // (createdBy null); whoever presses "Make the video" owns what it makes. Without this the
+        // worker refused it seconds later ("…no longer has an account") and it bounced back.
+        await db.update(videoProjects).set({ status: 'building', createdBy: row.createdBy ?? userId, creditHold: hold.credits, startedAt: new Date(), note: null, updatedAt: new Date() })
             .where(eq(videoProjects.id, row.id));
         await wakeVideoWorker({ projectId: row.id, action: 'build' }, headers);
         return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
@@ -249,7 +252,7 @@ export default withLambda(async (event) => {
 
     if (action === 'rerender') {
         if (row.status !== 'render_failed' || !row.timeline) return json(409, { error: 'There is nothing to render again for this video.' });
-        await db.update(videoProjects).set({ status: 'rendering', renderId: null, note: null, updatedAt: new Date() })
+        await db.update(videoProjects).set({ status: 'rendering', createdBy: row.createdBy ?? userId, renderId: null, note: null, updatedAt: new Date() })
             .where(eq(videoProjects.id, row.id));
         await wakeRenderWorker(row.id, headers);
         return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });

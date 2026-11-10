@@ -588,6 +588,9 @@
       briefsTab: {
         label: 'Briefs',
       },
+      // My Content tab (assistant-my-content.js): where every picture and flyer it makes lands once
+      // approved. The chat lists the same files (src/utils/chat-my-content.ts).
+      myContentTab: { label: 'My Content' },
       // Calendar tab: each brief received, drafted, approved and due (calendar.js _datedItems).
       calendarItems: 'briefs',
       // Rules tab: read by its art direction and its chat (visual-briefs.ts, RULE_READING_ROLES).
@@ -595,10 +598,11 @@
       defaultMainTab: 'briefs',
     },
 
-    // Video Producer (docs/video-producer-plan.md). Its videos are ordinary POSTS (one per platform), so
-    // the Review Queue, Calendar and post insights all work as they do for the Social Media Assistant —
-    // the KPI labels below are the post-insights labels, reworded for video. The Videos tab is where a
-    // video is briefed, its storyboard checked and "Make the video" pressed (assistant-videos.js).
+    // Video Producer (docs/video-producer-studio-plan.md). A STUDIO since 2026-11-09: a finished video
+    // goes to My Content, never to a post of its own, so it has no Review Queue tab (owner, 2026-11-10)
+    // — posting is the Social Media Assistant's, and that post is approved in ITS queue. The Videos tab
+    // is where a video is briefed, its storyboard checked and "Make the video" pressed
+    // (assistant-videos.js); My Content opens on its videos (myContentTab.type).
     video_producer: {
       kpis: [
         { label: 'Engagement Rate by Reach', title: 'Watched and Liked', desc: 'Of everyone who saw your videos, how many stopped to engage with them.' },
@@ -606,7 +610,7 @@
         { label: 'Click-Through Rate', title: 'Did What You Asked', desc: 'How many viewers took the action your video asked for.' },
         { label: 'Meaningful Engagement', title: 'Saves, Shares & DMs', desc: 'The signals that turn a view into a customer — weighed above likes.' },
       ],
-      reviewQueue: { kind: 'posts', label: 'Review Queue' },
+      hideReviewQueue: true,
       hideDataHub: true,
       // Goals: 'videos_published' (goal-metrics.ts), counted from its published posts.
       modules: {
@@ -618,6 +622,9 @@
       // ⚠️ If you rename this tab, change videoProducerSurfaces() in chat-orchestrator.ts too —
       // tests/video-producer-role.test.ts fails until both agree.
       videosTab: { label: 'Videos' },
+      // My Content tab (assistant-my-content.js): the library its finished videos land in, opened on
+      // Videos so they are found first. The chat lists the same files (src/utils/chat-my-content.ts).
+      myContentTab: { label: 'My Content', type: 'video' },
       // Rules tab: read by its storyboard planner and its chat (video-producer.ts, RULE_READING_ROLES).
       rulesScope: 'video',
       defaultMainTab: 'videos',

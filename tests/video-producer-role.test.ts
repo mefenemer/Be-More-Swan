@@ -76,7 +76,8 @@ check('the chat names only tabs and buttons that exist', () => {
     const registry = read('src/components/assistant-dashboard-registry.js');
     const tab = read('src/components/assistant-videos.js');
     assert.ok(registry.includes("videosTab: { label: 'Videos' }") && surfaces.includes('"Videos" tab'));
-    assert.ok(registry.includes("reviewQueue: { kind: 'posts', label: 'Review Queue' }") && surfaces.includes('"Review Queue" tab'));
+    // No Review Queue tab since 2026-11-10 (a studio never posts); its videos are on My Content.
+    assert.ok(registry.includes("myContentTab: { label: 'My Content', type: 'video' }") && surfaces.includes('"My Content" tab') && !surfaces.includes('"Review Queue" tab'));
     for (const button of ['New video', 'Change', 'Plan it again', 'Make the video', 'Cancel']) {
         assert.ok(surfaces.includes(`"${button}"`), `chat names "${button}"`);
         assert.ok(tab.includes(`>${button}`) || tab.includes(`>${button}$`) || tab.includes(`${button}</button>`) || tab.includes(`>Make the video\${`), `the tab has "${button}"`);

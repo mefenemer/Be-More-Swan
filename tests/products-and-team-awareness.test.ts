@@ -186,7 +186,8 @@ check('chat: every role gets products, the handoff call too', () => {
     // The free trial / introductory offer card joined it 2026-10-24 (src/utils/intro-offer.ts), then the call-to-action card (src/utils/chat-call-to-action.ts),
     // then its own set-up answers card 2026-10-25 (src/utils/chat-setup-field.ts), then the Mentor's pointer and help-only blocks 2026-10-26 (§8.6, §2.7, each empty where it doesn't apply).
     // The site page directory and its card joined it 2026-10-31 (docs/site-directory-plan.md).
-    assert.ok(/\[rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards \? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT\]/.test(src), 'not on every route');
+    // What is in My Content joined it 2026-11-10 (src/utils/chat-my-content.ts).
+    assert.ok(/\[rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards \? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT\]/.test(src), 'not on every route');
     assert.ok(/buildRolePrompt\(\{[\s\S]{0,400}\}\) \+ \(productsBlock/.test(src), 'the handoff target writes without them');
 });
 

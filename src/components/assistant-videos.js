@@ -46,11 +46,11 @@
     planning: 'Writing the storyboard — about a minute.',
     planned: 'Storyboard ready. Check the scenes, then press “Make the video”.',
     building: 'Making the video — a few minutes. You can leave this page.',
-    built: 'Made. It’s in the Review Queue waiting for your approval.',
+    built: 'Made. Its post is on the Review page, waiting for your approval.',
     // Not a project status: built, and its finished file is still rendering (video-producer.ts renderFinishedVideo).
-    post_rendering: 'Made — the finished video is rendering, a few minutes. Watch it in the Review Queue once it’s done.',
+    post_rendering: 'Made — the finished video is rendering, a few minutes. Watch it on the Review page once it’s done.',
     // Not a project status: a built project whose post then failed its final render (postRenderStatus).
-    post_render_failed: 'Made, but the final render failed. Open it in the Review Queue to try the render again.',
+    post_render_failed: 'Made, but the final render failed. Open it on the Review page to try the render again.',
     failed: 'Stopped.',
     cancelled: 'Cancelled.',
   };
@@ -574,7 +574,7 @@
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
           ${chatPaneAvailable() ? `<button type="button" data-vid-act="talk" data-id="${v.id}" class="text-xs font-bold text-indigo-700 hover:underline shrink-0 whitespace-nowrap">Talk it through</button>` : ''}
-          ${v.status === 'built' ? `<button type="button" data-vid-act="open-review" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg shrink-0">Open the Review Queue</button>` : ''}
+          ${v.status === 'built' ? `<button type="button" data-vid-act="open-review" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg shrink-0">Open Review</button>` : ''}
         </div>
         ${folded ? '' : `<div data-vid-body>
         ${Array.isArray(v.changes) && v.changes.length && (v.status === 'planned' || v.status === 'failed')
@@ -822,7 +822,9 @@
       case 'use-post':
       case 'use-blog': handOver(id, b.dataset.vidAct === 'use-post' ? 'post' : 'blog'); break;
       case 'cancel': act(id, { action: 'cancel', id }, null); break;
-      case 'open-review': document.querySelector('[data-maintab="review-queue"]')?.click(); break;
+      // This page has no Review Queue tab since 2026-11-10: an old-way video's post is approved on
+      // the workspace Review page, which lists every assistant's waiting work.
+      case 'open-review': window.loadView?.('review-queue'); break;
     }
   });
 

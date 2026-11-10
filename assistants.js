@@ -7628,11 +7628,14 @@ function _applyDashboardRegistry(data) {
         });
     }
 
-    // My Content tab — only the content roles (myContentTab: social_media_manager, blog_writer):
-    // the org-wide content library they draw media from (issue #213).
+    // My Content tab — the roles that make or use media (myContentTab: social_media_manager,
+    // blog_writer, brand_designer, video_producer): the content library (issue #213).
+    // `type` = the media type it opens on (the Video Producer's videos), read by assistant-my-content.js.
     const myContent = cfg.myContentTab;
     toggle('maintab-btn-mycontent', !!myContent);
     if (myContent) setText('mycontent-tab-label', myContent.label);
+    const mcHost = document.getElementById('mycontent-host');
+    if (mcHost) mcHost.dataset.type = (myContent && myContent.type) || '';
 }
 
 // Steps from the role's schema-driven onboarding definition

@@ -93,7 +93,8 @@ function _mediaTypeKey(asset) {
  */
 function _sourceKey(asset) {
     if (asset.provider === 'canva') return 'canva';
-    if (asset.provider === 'fal' || asset.provider === 'remotion' || asset.provider === 'brand_card' || asset.provider === 'flyer' || asset.provider === 'design') return 'generated';
+    // 'video_producer' = a finished Video Producer video: made, not found — it read "Sourced" before.
+    if (asset.provider === 'fal' || asset.provider === 'remotion' || asset.provider === 'brand_card' || asset.provider === 'flyer' || asset.provider === 'design' || asset.provider === 'video_producer') return 'generated';
     if (asset.provider) return 'sourced';
     return 'upload';
 }
@@ -129,6 +130,8 @@ window.initMyContent = async function (param) {
     _deepLinkAssetId = param && typeof param === 'object' ? param.assetId : param;
     _hostAssistantName = param && typeof param === 'object' && typeof param.assistantName === 'string'
         ? param.assistantName.trim() : '';
+    // An assistant page's tab can open on one media type (the Video Producer's on Videos).
+    if (param && typeof param === 'object' && Object.prototype.hasOwnProperty.call(MEDIA_TYPES, param.type)) _filterType = param.type;
     await _loadAssets();
     _startPollingIfNeeded();
     _mcRefreshHeaderCredits();

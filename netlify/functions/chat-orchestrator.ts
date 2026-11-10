@@ -105,6 +105,7 @@ import { buildCtaChatBlock, CTA_CARD_TYPE, ctaCardFrom, roleHasCta, type CtaCard
 import { resolveScheduleProposal, scheduleProposalFromUiElement, schedulePromptBlock, type ScheduleCard } from '../../src/utils/chat-schedule';
 import { buildPlatformsBlock, platformsProposalFromUiElement, resolvePlatformsProposal, type PlatformsCard } from '../../src/utils/chat-platforms';
 import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal, type LibraryCard } from '../../src/utils/chat-library';
+import { buildMyContentBlock } from '../../src/utils/chat-my-content';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { confirmCardReply, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
@@ -761,7 +762,7 @@ function brandDesignerSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
 - "Briefs" tab — the tab the user lands on. One card per brief: what it is for, a sentence on what it is waiting for, and its options as a grid. Each option has "Use this" (it goes into their library) and "Not this" (they pick a reason). Each brief has "Ask <your name> for options" / "Ask <your name> for more options" (the cost of a round costs), "Edit brief" and "Archive brief". The briefs sit on tabs, in the order they move through: "To do" (waiting on the user: options to choose from, or a brief that needs them to ask for options), "Being made", "Approved", "Archived". "New brief" at the top asks them your questions here in this chat (it covers pictures, printed flyers and video alike), and answering them opens the editor with the design being made. There is no form to fill in instead: this chat is the way in. The editor shows the design on the left and this chat on the right: they can click, drag and change anything on it, with Undo, "🎯 Select" and "Full screen". "Open in editor" on any option waiting goes there too. "Use this design" approves it. "Select" lets them point at an option or brief to talk about it. "View or change" opens their brand style and picture guidelines in a pop-up. Everything you can do here, the user can also do there by hand.
 - "Calendar" tab — each brief on the day it was received, the day its first options were drafted, the day one was approved and, when it has one, its due date. Opening one goes to the "Briefs" tab.
-- Their content library ("My Content") — where every approved picture goes, and where their other assistants pick pictures from for posts and articles. An approved flyer is there too, with "Print", "PDF for home printing" and "PDF for a print shop". Every flyer is also listed on the "Briefs" tab, where "Preview" shows its page large, an approved one has "Print", and "Change this flyer" starts a new version with its words filled in.`;
+- "My Content" tab — their content library: where every approved picture goes, and where their other assistants pick pictures from for posts and articles. An approved flyer is there too, with "Print", "PDF for home printing" and "PDF for a print shop". Every flyer is also listed on the "Briefs" tab, where "Preview" shows its page large, an approved one has "Print", and "Change this flyer" starts a new version with its words filled in.`;
 }
 
 // ⚠️ The tab and button names below are copied from assistant-dashboard-registry.js (siteAuditTab
@@ -775,7 +776,7 @@ function brandDesignerSurfaces(): string {
 function videoProducerSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
 - "Videos" tab — the tab the user lands on. "New video" at the top writes a brief without chatting. Each video shows one sentence on what it is waiting for. A planned video shows its storyboard — every scene's voiceover line, on-screen text and where its picture comes from — with "Change" on each scene, "Plan it again" (with notes), "Make the video" (it states the credits first) and "Cancel".
-- "Review Queue" tab — where a finished video waits for the user to approve it, like any post. Approving renders it with the captions and schedules it.
+- "My Content" tab — the library every finished video is saved to (it opens on videos; the filter shows their pictures and other files too). They play, download or delete a video there, and their other assistants use it from there.
 - "Calendar" tab — your videos on their posting days.
 Everything you can do here, the user can also do there by hand.`;
 }
@@ -3408,6 +3409,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const platformsBlock = offersOwnCards ? await buildPlatformsBlock(db, orgId, userId, session.aiAssistantId) : null;
     // Its Knowledge Base or Inspo, for the roles with that tab (src/utils/chat-library.ts). Never throws.
     const libraryBlock = offersOwnCards ? await buildLibraryBlock(db, orgId, session.aiAssistantId, assistantRow.roleKey) : null;
+    // What is in My Content, for the roles with that tab (src/utils/chat-my-content.ts). Never throws.
+    const myContentBlock = offersOwnCards ? await buildMyContentBlock(db, { userId, roleKey: assistantRow.roleKey }) : null;
     // Customer reviews for the Email Marketing chat (src/utils/chat-reviews.ts) — the Website Assistant's
     // prompt carries its own. Null for every other role; never throws.
     const reviewsBlock = offersOwnCards ? await buildReviewsBlock(db, orgId, assistantRow.roleKey) : null;
@@ -3437,7 +3440,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
         ].join('\n\n');
     })() : '';
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
 
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
