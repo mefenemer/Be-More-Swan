@@ -16,7 +16,8 @@
 import React from 'react';
 import { AbsoluteFill, Audio, Img, OffthreadVideo, Sequence, Series, continueRender, delayRender, useCurrentFrame, useVideoConfig } from 'remotion';
 import { overlayAnimAt, overlayBoxStyle, overlayFrameRange, type Overlay } from '../src/lib/overlay-geometry';
-import { audioGainAt } from '../src/lib/audio-overlays';
+import { audioGainAt, type AudioDuck } from '../src/lib/audio-overlays';
+import type { LookStyle } from '../src/lib/video-look';
 import { googleFamiliesFor, googleFontsHref, overlayFontStack } from '../src/lib/overlay-fonts';
 import { stillMotionTransform, type StillMotion } from '../src/lib/still-motion';
 import { CAPTION_FALLBACK_ACCENT, CAPTION_FONT_ID, DEFAULT_CAPTION_STYLE, captionLayout, cueAt, type CaptionTrack } from '../src/lib/captions';
@@ -59,6 +60,10 @@ export type AudioTrack = {
     volume?: number;
     fadeInS?: number;
     fadeOutS?: number;
+    /** Extra gain above `volume` (src/lib/loudness.ts). Added 2026-11-10; older bundles ignore it. */
+    level?: number;
+    /** Duck under speech (src/lib/video-music.ts). Added 2026-11-10. */
+    duck?: AudioDuck;
 };
 
 export type PostOverlayProps = {
@@ -111,6 +116,11 @@ export type PostOverlayProps = {
      * older than that ignores the field and renders exactly as before, captionless.
      */
     captions?: CaptionTrack;
+    /**
+     * A colour look over the picture (src/lib/video-look.ts): a CSS filter and an optional soft-light
+     * tint, both under the captions and text. Added 2026-11-10; an older bundle renders ungraded.
+     */
+    look?: LookStyle | null;
     // Frame metadata: the worker passes the base clip's real dimensions/fps/length; calculateMetadata
     // (Root.tsx) reads these so one composition serves every aspect ratio.
     width?: number;
@@ -262,7 +272,7 @@ const MovingStill: React.FC<{ src: string; motion: StillMotion; frames?: number 
     );
 };
 
-export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, imageMotion, audio, videoTrim, clips, framePosition, overlays, captions }) => {
+export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, imageMotion, audio, videoTrim, clips, framePosition, overlays, captions, look }) => {
     const { height, fps, durationInFrames } = useVideoConfig();
     const boxes = (overlays || []).filter((o) => o && String(o.text || '').trim());
     const tracks = (audio || []).filter((a) => a && a.src);
@@ -289,6 +299,7 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
                 cropped — the reviewer picked the picture, not a crop of it. Clips are 'cover'
                 instead: once several clips share one stated frame, letterboxing each of them to its
                 own shape would put black bars in the middle of a reel. */}
+            <AbsoluteFill style={look && look.filter ? { filter: look.filter } : undefined}>
             {timeline.length
                 ? <Series>
                     {timeline.map((c) => (
@@ -322,6 +333,9 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
                         ? <MovingStill src={imageSrc} motion={imageMotion} />
                         : <Img src={imageSrc} style={{ width: '100%', height: '100%', objectFit: 'contain' }} />)
                     : null}
+            </AbsoluteFill>
+            {/* The look's tint, over the picture and under every word. */}
+            {look && look.tint ? <AbsoluteFill style={{ backgroundColor: look.tint, opacity: Math.min(0.5, Math.max(0, look.tintOpacity ?? 0.15)), mixBlendMode: 'soft-light' }} /> : null}
 
             {/* Timed audio. The same [startS, endS) window the text boxes use, through the same
                 helper, so a voice note and a caption timed to the same moment land on the same
@@ -350,6 +364,8 @@ export const PostOverlay: React.FC<PostOverlayProps> = ({ videoSrc, imageSrc, im
                                 volume: a.volume == null ? 1 : a.volume,
                                 fadeInS: a.fadeInS,
                                 fadeOutS: a.fadeOutS,
+                                level: a.level,
+                                duck: a.duck,
                             })}
                             // Trim from the clip's own start: the Sequence decides WHEN it plays, so
                             // without this every clip would also skip its first `from` frames.

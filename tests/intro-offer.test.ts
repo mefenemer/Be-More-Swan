@@ -127,7 +127,7 @@ check('the chat card goes through the same gate, and only the click saves', () =
 
 check('GUI and chat save through ONE path', () => {
     assert.ok(read('netlify/functions/org-products.ts').includes('saveIntroOffer(db, orgId, parsed.offer'));
-    const html = read('assets.html');
+    const html = (read('assets.html') + read('src/components/products-editor.js'));
     assert.ok(html.includes("call('PATCH', { introOffer: payload })") && html.includes('id="op-intro"'));
     assert.ok(html.includes("if (e.target.value === 'no') return saveIntro({ has: false });"));
     const chat = read('src/components/chat-session.js');

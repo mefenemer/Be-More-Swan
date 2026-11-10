@@ -1782,6 +1782,10 @@ export const contentAssets = pgTable("content_assets", {
   // other kind of asset NULL means nothing at all, because nothing else expires this way.
   // Apply db/brand-card-lifecycle.sql by hand BEFORE deploying the code that reads this.
   libraryKeptAt: timestamp("library_kept_at"),
+  // When its owner was told it is due to be deleted (src/utils/library-retention.ts). The purge
+  // only takes a file told about at least 7 days earlier, and kept files never. NULL = not told.
+  // Apply db/z-content-deletion-warning.sql by hand BEFORE deploying the code that reads this.
+  deletionWarnedAt: timestamp("deletion_warned_at"),
 
   // Epic 1 (AI Media Generation): provider 'fal' rows are AI-generated. These columns power
   // the "My AI Uploads" library (US3) — prompt memory + the originating generation job.
@@ -5428,6 +5432,9 @@ export const videoProjects = pgTable("video_projects", {
   renderId: text("render_id"),
   renderBucket: text("render_bucket"),
   renderRegion: text("render_region"),
+  // db/z-video-producer-seven.sql — notes on moments of a Ready video, and storyboard edits before it was made.
+  momentNotes: jsonb("moment_notes").notNull().default([]),
+  editCount: integer("edit_count").notNull().default(0),
   startedAt: timestamp("started_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

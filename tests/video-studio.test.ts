@@ -73,7 +73,7 @@ check('every scene is made in the video\'s shape', () => {
     assert.ok(vp.includes("generateAndPersistImage(db, { orgId, userId, prompt: scene.prompt || context, aspectRatio: shape })"));
     assert.ok(vp.includes('startImageUrl: frameUrl, aspectRatio: shape'));
     assert.ok(vp.includes('{ ...opts, orientation }'));
-    assert.ok(build.includes('targetRatio: shape, ...shapeFrame(shape)'));
+    assert.ok(build.includes('targetRatio: shape, ...frame') && build.includes('const frame = shapeFrame(shape)'));
     const brief: VideoBrief = { purpose: 'promo', lengthS: 30, message: 'x', voiceover: true, allowAi: 'stock_only', shape: '16:9' };
     assert.ok(/SHAPE: the video is wide \(16:9\)/.test(storyboardUserPrompt({ brief, businessName: 'B', businessFacts: '', library: [], today: '2026-11-09' })));
 });
@@ -124,10 +124,10 @@ check('Change it makes a new version that keeps what was made; the finished one 
     const nv = vp.slice(vp.indexOf('export async function newVersion'));
     assert.ok(nv.includes('version: (row.version ?? 1) + 1, parentProjectId: row.id'));
     assert.ok(nv.includes('sceneAssets: row.sceneAssets, voiceoverAssetId: row.voiceoverAssetId'));
-    assert.ok(nv.includes("status: 'planned'"));
+    assert.ok(nv.includes("status: opts.status ?? 'planned'"));
     const ep = read('netlify/functions/video-projects.ts');
     assert.ok(ep.includes("if (action === 'change')") && ep.includes("row.status !== 'ready'"));
-    assert.ok(ep.includes("(action === 'replan' || action === 'edit_scene') && row.status === 'ready'") && ep.includes('row = await newVersion(db, row)'), 'chat replans and scene edits on a ready video make a version first');
+    assert.ok(ep.includes("(action === 'replan' || action === 'edit_scene' || action === 'rewrite_script' || action === 'set_options' || action === 'approve_script') && row.status === 'ready'") && ep.includes('row = await newVersion(db, row)'), 'chat replans and scene edits on a ready video make a version first');
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes("['planned', 'failed', 'ready'].includes(project.status)"));
 });
 
@@ -186,7 +186,9 @@ check('the chat has the same hand-off, as a card that opens the flow (never post
 
 check('words-only scene edits keep the clip; a branded card or a new picture is made again', () => {
     const ep = read('netlify/functions/video-projects.ts');
-    assert.ok(ep.includes("s.source === 'brand_card' ? (s.onScreenText ?? '') : ''"));
+    // The rule moved to video-producer.ts sceneLooks (shared with the script rewrite and notes).
+    assert.ok(read('src/utils/video-producer.ts').includes("s.source === 'brand_card' ? (s.onScreenText ?? '') : ''"));
+    assert.ok(ep.includes('const looks = sceneLooks;'));
     assert.ok(ep.includes('if (!after || looks(after) !== before) delete assets[scene.id];'));
 });
 

@@ -18,6 +18,7 @@ import {
     findEverAttachedAssetIds,
 } from '../../src/utils/brand-card-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { canKeep, deletesAt, storageMeter } from '../../src/utils/library-retention';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -281,9 +282,11 @@ export default withLambda(async (event) => {
                 usedInPosts?: AssetUsage[];
                 scheduledPostId: number | null;
                 assistantName: string | null;
-                /** When an unused generated card will be removed — null for everything else. The
-                 *  UI's countdown; see the lifecycle note below. */
+                /** When this file will be deleted — null when nothing will delete it (kept, an upload
+                 *  on no post…). The UI's countdown; src/utils/library-retention.ts. */
                 libraryExpiresAt?: string | null;
+                /** Whether Keep is offered (not kept, not refused by the safety check). */
+                canKeep?: boolean;
             };
             const grouped: Record<string, AssetWithUsage[]> = {
                 pending: [], scheduled: [], posted: [], rejected: [],
@@ -354,7 +357,9 @@ export default withLambda(async (event) => {
                 // usedInPosts drives the "this is in use" delete warning, which is about work that
                 // would BREAK — a published post is done with, so it stays out of that list.
                 const bucket = grouped[status] ?? [];
-                const expiresAt = brandCardExpiresAt(r, everAttached.has(r.id));
+                // Any clock — posted, rejected, or an unused card's — never sooner than a week after
+                // its owner is told (library-retention.ts deletesAt, the same rule the purge keeps).
+                const expiresAt = deletesAt(r, r.retentionDeleteAfter ?? brandCardExpiresAt(r, everAttached.has(r.id)));
                 bucket.push({
                     ...r,
                     status,
@@ -362,11 +367,14 @@ export default withLambda(async (event) => {
                     assistantName,
                     usedInPosts: usage.filter(u => ACTIVE_POST_STATUSES.includes(u.status)),
                     libraryExpiresAt: expiresAt ? expiresAt.toISOString() : null,
+                    canKeep: canKeep(r),
                 });
                 grouped[status] = bucket;
             });
 
-            return { statusCode: 200, body: JSON.stringify({ assets: grouped }) };
+            // The storage bar at the top of My Content: the workspace's bytes against its plan.
+            const storage = await storageMeter(db, orgId);
+            return { statusCode: 200, body: JSON.stringify({ assets: grouped, storage }) };
         }
 
         // ── POST: create asset record ─────────────────────────────
@@ -446,6 +454,20 @@ export default withLambda(async (event) => {
 
         // ── PATCH: update status ──────────────────────────────────
         if (event.httpMethod === 'PATCH') {
+            // Keep several at once — "Keep all of these" on the files due to be deleted. Same rule
+            // as one Keep below; files the user doesn't own, or that can't be kept, are skipped.
+            if (!event.queryStringParameters?.id) {
+                const body = JSON.parse(event.body || '{}');
+                const ids = Array.isArray(body.ids) ? [...new Set(body.ids.map(Number).filter((n: number) => Number.isInteger(n) && n > 0))].slice(0, 500) as number[] : [];
+                if (body.action !== 'keep' || !ids.length) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
+                const rows = await db.select().from(contentAssets).where(and(inArray(contentAssets.id, ids), eq(contentAssets.userId, userId)));
+                const keep = rows.filter(r => canKeep(r)).map(r => r.id);
+                if (keep.length) {
+                    await db.update(contentAssets).set({ libraryKeptAt: new Date(), retentionDeleteAfter: null, updatedAt: new Date() })
+                        .where(and(inArray(contentAssets.id, keep), eq(contentAssets.userId, userId)));
+                }
+                return { statusCode: 200, body: JSON.stringify({ kept: keep.length, skipped: ids.length - keep.length }) };
+            }
             const assetId = parseInt(event.queryStringParameters?.id || '');
             if (!assetId) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
 
@@ -501,11 +523,14 @@ export default withLambda(async (event) => {
             // rescued back onto a deletion clock is not a feature, and Delete already exists for
             // someone who has changed their mind.
             if (action === 'keep') {
+                // Any file now (owner, 2026-11-10), except one the safety check refused.
+                if (!canKeep(existing) && !existing.libraryKeptAt) {
+                    return { statusCode: 409, body: JSON.stringify({ error: 'This file can’t be kept.' }) };
+                }
                 const [kept] = await db.update(contentAssets).set({
                     libraryKeptAt: existing.libraryKeptAt ?? new Date(),
-                    // Cancels a clock the sweep has already started. Safe for any asset reachable
-                    // here: only a brand card can be given one by that sweep, and a posted or
-                    // rejected asset is never offered a Keep button.
+                    // Cancels whatever clock it is on — an unused card's, or a posted or rejected
+                    // file's. Every clock skips a kept file from now on (library-retention.ts).
                     retentionDeleteAfter: null,
                     updatedAt: new Date(),
                 }).where(and(eq(contentAssets.id, assetId), eq(contentAssets.userId, userId))).returning();

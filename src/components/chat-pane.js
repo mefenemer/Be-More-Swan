@@ -12,9 +12,17 @@
  *     draftTarget?        // () => the post this chat is about, or null: see chat-session.js
  *     turnContext?        // () => extra fields sent with every turn (the Email Studio's forIssueId)
  *     onClose?            // a ✕ on the pane: for where it covers the page and its own toggle
+ *     onCollapse?(collapsed)   // the pane was folded to its strip or opened again (the page's work changed width)
+ *     collapseKey?        // localStorage key for "folded"; by default one per surface, from rememberKey's prefix
  *   });
  *   pane.setReference({ label, message })   — "Select": a part of the page on a chip above the box
- *   pane.focus();  pane.ready (Promise);  pane.destroy();
+ *   pane.focus();  pane.ready (Promise);  pane.destroy();  pane.setCollapsed(bool);  pane.isCollapsed();
+ *
+ * Collapsible (owner, 2026-11-09): the » in the header folds the pane to a slim strip (the assistant's icon
+ * and "Chat"), so the work gets the room; a click on the strip opens it again. Where the pane is full width
+ * (the Website tab on a phone) the strip lies flat as a bar. Each surface's column shrinks with it through
+ * a `:has(.is-collapsed[data-chatpane])` rule beside that surface's own layout CSS. Select, the page's Chat
+ * button and send() open a folded pane first. Remembered per surface in this browser.
  *
  * The conversation is the ordinary one (chat-session.js) — every change still arrives as a card the
  * user approves. The thread is remembered per surface in this browser, so coming back carries on —
@@ -71,10 +79,33 @@
     panes.forEach((p) => { if (Number(p.assistantId) === Number(assistantId)) p.rename(name); });
   }
 
+  /** The strip a folded pane shows, on every surface (each surface's own CSS shrinks its column). */
+  function injectCss() {
+    if (document.getElementById('chatpane-css')) return;
+    const css = document.createElement('style');
+    css.id = 'chatpane-css';
+    css.textContent = `
+      [data-chatpane].is-collapsed { height: auto !important; }
+      [data-chatpane].is-collapsed > :not([data-chatpane-rail]) { display: none !important; }
+      [data-chatpane-rail] { display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; padding: 12px 0; background: none; border: 0; cursor: pointer; color: #4b5563; }
+      [data-chatpane-rail][hidden] { display: none; }
+      [data-chatpane-rail]:hover { background: #f9fafb; color: #111827; }
+      [data-chatpane-rail]:focus-visible { outline: 2px solid #db2777; outline-offset: -2px; }
+      [data-chatpane-rail] .chatpane-rail-label { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 12px; font-weight: 800; letter-spacing: .02em; }
+      [data-chatpane].is-bar [data-chatpane-rail] { flex-direction: row; justify-content: flex-start; padding: 8px 14px; }
+      [data-chatpane].is-bar [data-chatpane-rail] .chatpane-rail-label { writing-mode: horizontal-tb; transform: none; font-size: 13px; }
+      [data-chatpane].is-bar [data-chatpane-rail] .chatpane-rail-chev { margin-left: auto; transform: rotate(-90deg); }`;
+    document.head.appendChild(css);
+  }
+  const readFlag = (k) => { try { return localStorage.getItem(k) === '1'; } catch { return false; } };
+  const writeFlag = (k, on) => { try { if (on) localStorage.setItem(k, '1'); else localStorage.removeItem(k); } catch { /* private window */ } };
+
   function mount(container, opts) {
     opts = opts || {};
     warm();
+    injectCss();
     const key = opts.rememberKey || null;
+    const collapseKey = opts.collapseKey || `bms-chatpane-folded:${String(opts.rememberKey || 'chat').split(':')[0]}`;
     let session = null;
     let destroyed = false;
     let pendingRef = null;
@@ -88,11 +119,18 @@
             <span aria-hidden="true" data-chatpane-avatar style="position:relative;flex-shrink:0;width:28px;height:28px;border-radius:9999px;background:${esc(avatarColor)};color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:800">${esc(avatarLetter)}<span style="position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:9999px;background:#22c55e;border:2px solid #fff"></span></span>
             <p data-chatpane-title class="text-sm font-black text-gray-900 truncate">${esc(opts.title || `Chat with ${opts.assistantName || 'your assistant'}`)}</p>
           </span>
-          <span class="flex items-center gap-1" style="flex-shrink:0">${window.ChatHistoryPanel ? '<button type="button" data-chatpane-history aria-expanded="false" aria-label="Past chats" title="Past chats" class="inline-flex items-center px-2 py-1 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg" style="background:none;border:0;cursor:pointer"><svg aria-hidden="true" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 2m6-2a9 9 0 11-9-9 9 9 0 019 9z"/></svg></button>' : ''}<button type="button" data-chatpane-new title="Start a new conversation" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg" style="background:none;border:0;cursor:pointer"><span aria-hidden="true">+</span> New chat</button>${opts.onClose ? '<button type="button" data-chatpane-close aria-label="Close the chat" class="px-2 py-1 text-lg leading-none text-gray-500 hover:text-gray-900">&times;</button>' : ''}</span>
+          <span class="flex items-center gap-1" style="flex-shrink:0">${window.ChatHistoryPanel ? '<button type="button" data-chatpane-history aria-expanded="false" aria-label="Past chats" title="Past chats" class="inline-flex items-center px-2 py-1 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg" style="background:none;border:0;cursor:pointer"><svg aria-hidden="true" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 2m6-2a9 9 0 11-9-9 9 9 0 019 9z"/></svg></button>' : ''}<button type="button" data-chatpane-new title="Start a new conversation" class="inline-flex items-center gap-1 px-2 py-1 text-xs font-bold text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg" style="background:none;border:0;cursor:pointer"><span aria-hidden="true">+</span> New chat</button><button type="button" data-chatpane-collapse aria-expanded="true" aria-label="Collapse the chat" title="Collapse the chat" class="inline-flex items-center px-2 py-1 text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-lg" style="background:none;border:0;cursor:pointer"><svg aria-hidden="true" class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7"/></svg></button>${opts.onClose ? '<button type="button" data-chatpane-close aria-label="Close the chat" class="px-2 py-1 text-lg leading-none text-gray-500 hover:text-gray-900">&times;</button>' : ''}</span>
         </div>
         <div style="position:relative;flex:1;min-height:0;overflow:hidden"><div data-chatpane-mount style="position:absolute;inset:0"><p class="text-sm text-gray-500 text-center p-8">Loading the chat…</p></div>
           <div data-chatpane-drawer hidden style="position:absolute;top:0;left:0;bottom:0;width:280px;max-width:88%;background:#fff;border-right:1px solid #e5e7eb;box-shadow:6px 0 18px rgba(0,0,0,.08);z-index:2"></div></div>
+        <button type="button" data-chatpane-rail hidden aria-expanded="false" aria-label="Expand the chat" title="Expand the chat">
+          <span aria-hidden="true" data-chatpane-rail-avatar style="flex-shrink:0;width:28px;height:28px;border-radius:9999px;background:${esc(avatarColor)};color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:800">${esc(avatarLetter)}</span>
+          <span class="chatpane-rail-label">Chat</span>
+          <svg aria-hidden="true" class="chatpane-rail-chev w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
+        </button>
       </div>`;
+    const rootEl = container.querySelector('[data-chatpane]');
+    const railEl = container.querySelector('[data-chatpane-rail]');
     const mountEl = container.querySelector('[data-chatpane-mount]');
     const drawerEl = container.querySelector('[data-chatpane-drawer]');
     const historyBtn = container.querySelector('[data-chatpane-history]');
@@ -165,7 +203,32 @@
       });
       if (pendingRef) { session.setReference(pendingRef); pendingRef = null; }
     }
+    // ── Collapse: fold to the strip and back ──
+    let collapsed = false;
+    /** Flat as a bar where the pane is full width (the Website tab on a phone); upright as a strip beside the work. */
+    function syncBar() {
+      rootEl.classList.toggle('is-bar', collapsed && container.getBoundingClientRect().width > 140);
+    }
+    function setCollapsed(next, remember) {
+      next = !!next;
+      if (remember) writeFlag(collapseKey, next);
+      if (next === collapsed) return;
+      collapsed = next;
+      if (collapsed) setHistoryOpen(false);
+      rootEl.classList.toggle('is-collapsed', collapsed);
+      railEl.hidden = !collapsed;
+      const btn = container.querySelector('[data-chatpane-collapse]');
+      if (btn) btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      syncBar();
+      requestAnimationFrame(syncBar);   // the column has the strip's width only once the page has laid out again
+      if (opts.onCollapse) { try { opts.onCollapse(collapsed); } catch { /* the page's own business */ } }
+    }
+    const onResize = () => { if (collapsed) syncBar(); };
+    window.addEventListener('resize', onResize);
+
     const onClick = (e) => {
+      if (e.target.closest('[data-chatpane-collapse]')) { setCollapsed(true, true); railEl.focus(); return; }
+      if (e.target.closest('[data-chatpane-rail]')) { setCollapsed(false, true); if (session) session.focus(); return; }
       if (e.target.closest('[data-chatpane-close]')) { opts.onClose(); return; }
       if (e.target.closest('[data-chatpane-history]')) { setHistoryOpen(drawerEl.hidden); return; }
       if (!e.target.closest('[data-chatpane-new]')) return;
@@ -187,13 +250,16 @@
         const avatar = container.querySelector('[data-chatpane-avatar]');
         const letter = AC && AC.letterFor ? AC.letterFor(opts.assistantId, name) : (String(name || 'A').trim()[0] || 'A').toUpperCase();
         if (avatar && avatar.firstChild && was !== name) avatar.firstChild.textContent = letter;
+        const railAvatar = container.querySelector('[data-chatpane-rail-avatar]');
+        if (railAvatar && was !== name) railAvatar.textContent = letter;
       },
       get assistantId() { return opts.assistantId; },
       ready: start(key ? read(key) : null),
       /** A part of the page onto the chip above the message box (waits for the chat to be ready). */
-      setReference(ref) { if (session) session.setReference(ref); else pendingRef = ref; },
+      setReference(ref) { setCollapsed(false, true); if (session) session.setReference(ref); else pendingRef = ref; },
       /** Say this for the user, once the chat is ready ("New brief" on the Briefs tab). */
       send(text) {
+        setCollapsed(false, true);
         if (viewingArchived) return api.sendFresh(text);
         return Promise.resolve(api.ready).then(() => (session ? session.sendMessage(text, { noReference: true }) : undefined));
       },
@@ -203,11 +269,14 @@
         api.ready = start(null);
         return api.send(text);
       },
-      focus() { if (session) session.focus(); },
+      focus() { setCollapsed(false, true); if (session) session.focus(); },
+      setCollapsed(next) { setCollapsed(next, true); },
+      isCollapsed: () => collapsed,
       get session() { return session; },
       destroy() {
         destroyed = true;
         container.removeEventListener('click', onClick);
+        window.removeEventListener('resize', onResize);
         if (history && history.destroy) { try { history.destroy(); } catch { /* gone */ } }
         history = null;
         if (session && session.destroy) { try { session.destroy(); } catch { /* gone */ } }
@@ -217,6 +286,7 @@
       },
     };
     panes.add(api);
+    if (readFlag(collapseKey)) setCollapsed(true, false);
     return api;
   }
 
@@ -239,9 +309,11 @@
         @media (min-width: 1280px) {
           .chatpane-dock.is-on { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 24px; align-items: start; }
           .chatpane-dock.is-on > .chatpane-dock-col { position: sticky; top: 76px; height: calc(100vh - 92px); }
+          .chatpane-dock.is-on:has(> .chatpane-dock-col .is-collapsed[data-chatpane]) { grid-template-columns: minmax(0, 1fr) 56px; }
         }
         @media (max-width: 1279px) {
           .chatpane-dock.is-on > .chatpane-dock-col { position: fixed; top: 76px; right: 12px; bottom: 12px; z-index: 40; width: min(420px, calc(100vw - 24px)); box-shadow: 0 18px 50px rgba(0,0,0,.25); border-radius: 16px; }
+          .chatpane-dock.is-on > .chatpane-dock-col:has(.is-collapsed[data-chatpane]) { width: 56px; bottom: auto; }
         }`;
       document.head.appendChild(css);
     }

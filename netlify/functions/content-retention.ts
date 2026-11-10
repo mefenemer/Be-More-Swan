@@ -28,6 +28,7 @@
 // with a key must survive to the next run if the delete failed or storage was unconfigured.
 
 import { isSharedLibraryKey } from '../../src/lib/music-library';
+import { purgeGuard, warnExpiringFiles } from '../../src/utils/library-retention';
 import type { Handler } from '@netlify/functions';
 import { lte, and, eq, isNull, isNotNull, inArray, lt, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -179,6 +180,14 @@ export const runContentRetention = async () => {
         console.error('[Retention] Brand-card sweep failed — continuing with the purge pass:', err);
     }
 
+    // A week's notice before anything is deleted, and kept files never (src/utils/library-retention.ts).
+    // A failed notice pass only delays deletions: the purge below takes nobody's files untold.
+    try {
+        await warnExpiringFiles(db, now);
+    } catch (err) {
+        console.error('[Retention] Deletion notices failed — nothing untold is purged:', err);
+    }
+
     try {
         // Find all assets past their retention window that haven't been purged yet
         const due = await db.select({
@@ -190,6 +199,7 @@ export const runContentRetention = async () => {
                 isNotNull(contentAssets.retentionDeleteAfter),
                 lte(contentAssets.retentionDeleteAfter, now),
                 isNull(contentAssets.purgedAt),
+                purgeGuard(now),
             )
         );
 

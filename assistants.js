@@ -7628,11 +7628,14 @@ function _applyDashboardRegistry(data) {
         });
     }
 
-    // My Content tab — only the content roles (myContentTab: social_media_manager, blog_writer):
-    // the org-wide content library they draw media from (issue #213).
+    // My Content tab — the roles that make or use media (myContentTab: social_media_manager,
+    // blog_writer, brand_designer, video_producer): the content library (issue #213).
+    // `type` = the media type it opens on (the Video Producer's videos), read by assistant-my-content.js.
     const myContent = cfg.myContentTab;
     toggle('maintab-btn-mycontent', !!myContent);
     if (myContent) setText('mycontent-tab-label', myContent.label);
+    const mcHost = document.getElementById('mycontent-host');
+    if (mcHost) mcHost.dataset.type = (myContent && myContent.type) || '';
 }
 
 // Steps from the role's schema-driven onboarding definition
@@ -11223,6 +11226,11 @@ function _setMetricsEmptyState(mode, info) {
         if (title) title.textContent = 'No briefs yet';
         if (body)  body.textContent  = 'These fill in as you brief pictures and choose between the options. Press "New brief" on the Briefs tab, or describe what you need in chat.';
         if (note) note.textContent = '';
+    } else if (mode === 'video-no-data') {
+        // The Video Producer is a studio: it never posts, so what is missing is a finished video.
+        if (title) title.textContent = 'No videos made yet';
+        if (body)  body.textContent  = 'These fill in once your first video is made. Press "New video" on the Videos tab, or tell your assistant in chat what you would like a video about.';
+        if (note) note.textContent = '';
     } else if (mode === 'site-no-data') {
         // This assistant publishes nothing; what is missing is the first check of the site.
         if (title) title.textContent = 'No website check yet';
@@ -11728,6 +11736,41 @@ async function _loadBrandMetrics(assistantId) {
     }
 }
 
+// ── Video Producer KPI cards ─────────────────────────────────────────────────
+// Routed here by `metricsSource: 'video'`. A studio never posts, so reach and engagement would read
+// "nothing published" for ever: these come from video-projects.ts ?performance=1 (src/lib/video-results.ts)
+// — videos made, the share made without changes, average turnaround, and times used in a post or article.
+async function _loadVideoMetrics(assistantId) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+    try {
+        const res = await fetch(`/.netlify/functions/video-projects?performance=1&assistantId=${encodeURIComponent(assistantId)}`, { credentials: 'same-origin', bmsRead: true });
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+        if (!data.hasData) { _setMetricsEmptyState('video-no-data'); return; }
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = 'All time · turnaround over the last 90 days';
+        const m = data.metrics || {};
+        const set = (k, text, empty) => {
+            if (!valEl(k)) return;
+            valEl(k).textContent = text;
+            _setKpiCard(k, { empty });
+            if (trendEl(k)) trendEl(k).textContent = '—';
+        };
+        set('engagement', String(m.made ?? 0), !m.made);
+        const hasRate = m.madeWithoutChanges !== null && m.madeWithoutChanges !== undefined;
+        set('reach', hasRate ? `${Math.round(m.madeWithoutChanges * 100)}%` : '—', !hasRate);
+        const t = m.avgTurnaroundMin;
+        const turn = t == null ? '—' : t < 60 ? `${Math.max(1, Math.round(t))} min` : t < 2880 ? `${Math.floor(t / 60)} h${Math.round(t % 60) ? ` ${Math.round(t % 60)} min` : ''}` : `${Math.round(t / 1440)} days`;
+        set('ctr', turn, t == null);
+        set('value', String(m.timesUsed ?? 0), !m.timesUsed);
+    } catch {
+        _setMetricsEmptyState('error');
+    }
+}
+
 // ── Website Assistant KPI cards ──────────────────────────────────────────────
 // Routed here by `metricsSource: 'site'`. From sites.ts `get`: pages built against the plan's cap,
 // the [placeholders] still to fill, sections, and whether the site is live (publishing is step 3).
@@ -11991,6 +12034,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'brand') {
         _setMetricsEmptyState('pending');
         return _loadBrandMetrics(assistantId);
+    }
+    if (source === 'video') {
+        _setMetricsEmptyState('pending');
+        return _loadVideoMetrics(assistantId);
     }
     if (source === 'site') {
         _setMetricsEmptyState('pending');

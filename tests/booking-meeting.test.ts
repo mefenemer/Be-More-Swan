@@ -121,7 +121,7 @@ check('wiring: SQL, schema, booking, emails, saves, chat', () => {
     assert.ok(read('netlify/functions/booking-settings.ts').includes('refreshMeetingLinks'), 'a changed link reaches upcoming bookings');
     assert.ok(read('netlify/functions/sites.ts').includes('cleanMeetingLocation(o.location)'), 'chat card sets where services happen');
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"serviceLocations":[{"serviceId"'));
-    assert.ok(read('assets.html').includes('id="op-meeting"') && read('assets.html').includes('id="bh-meeting"') && read('assets.html').includes('data-rmeet'));
+    assert.ok((read('assets.html') + read('src/components/products-editor.js')).includes('id="op-meeting"') && (read('assets.html') + read('src/components/products-editor.js')).includes('id="bh-meeting"') && (read('assets.html') + read('src/components/products-editor.js')).includes('data-rmeet'));
 });
 
 console.log(`\n${passed}/${total} passed`);

@@ -34,6 +34,13 @@
   const KIND = { cut: 'Cut', trim: 'Trim', reorder: 'Order', fill: 'Fill a gap', text: 'Words', sound: 'Sound', frame: 'Frame', other: 'Edit' };
   const mmss = (n) => { const t = Math.max(0, Math.floor(Number(n) || 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
   const BEAT = { hook: 'Hook', problem: 'Problem', value: 'Value', proof: 'Proof', cta: 'Call to action' };
+  // The same choices the server reads (src/lib/video-music.ts, video-look.ts, lower-third.ts).
+  // 'mine' = a track of the owner's own from My Content (generated with "✨ Generate music", or uploaded).
+  const MUSIC = [['auto', 'Made to suit the video'], ['upbeat', 'Upbeat'], ['chill', 'Chilled'], ['inspiring', 'Inspiring'], ['ambient', 'Calm, in the background'], ['mine', 'A track from My Content'], ['none', 'No music']];
+  const LOOKS = [['natural', 'Natural (no grade)'], ['brand', 'Your brand colours'], ['warm', 'Warm'], ['cool', 'Cool'], ['punchy', 'Bright and punchy'], ['mono', 'Black and white']];
+  const LOWER_THIRDS = [['bar', 'Brand-colour bar, left'], ['clean', 'Plain white words, left'], ['boxed', 'White box, centred']];
+  const labelOf = (list, v) => (list.find((x) => x[0] === v) || list[0])[1];
+  const options = (list, v) => list.map(([k, l]) => `<option value="${k}"${k === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
   // Voices come from src/public/voice-catalogue.json through voice-picker.js — the list the server
   // speaks from — and are chosen by ear there. This is the default when setup named none.
   const DEFAULT_VOICE = 'british_woman';
@@ -44,13 +51,13 @@
     render_failed: 'Made, but the finished video failed to render.',
     reviewed: 'Footage reviewed. Tick the edits you want, then press “Make the storyboard”.',
     planning: 'Writing the storyboard — about a minute.',
-    planned: 'Storyboard ready. Check the scenes, then press “Make the video”.',
+    planned: 'Storyboard ready. Approve the words, check the pictures beside them, then press “Make the video”.',
     building: 'Making the video — a few minutes. You can leave this page.',
-    built: 'Made. It’s in the Review Queue waiting for your approval.',
+    built: 'Made. Its post is on the Review page, waiting for your approval.',
     // Not a project status: built, and its finished file is still rendering (video-producer.ts renderFinishedVideo).
-    post_rendering: 'Made — the finished video is rendering, a few minutes. Watch it in the Review Queue once it’s done.',
+    post_rendering: 'Made — the finished video is rendering, a few minutes. Watch it on the Review page once it’s done.',
     // Not a project status: a built project whose post then failed its final render (postRenderStatus).
-    post_render_failed: 'Made, but the final render failed. Open it in the Review Queue to try the render again.',
+    post_render_failed: 'Made, but the final render failed. Open it on the Review page to try the render again.',
     failed: 'Stopped.',
     cancelled: 'Cancelled.',
   };
@@ -64,12 +71,15 @@
 
   const state = {
     assistantId: null, assistantName: null, setup: {}, videos: [], loaded: false, loadError: null,
-    rendered: false, form: false, editing: null, replanning: null, notes: {}, busy: new Set(), pollTimer: null,
+    rendered: false, form: false, editing: null, replanning: null, rewriting: null, noting: null, notes: {}, busy: new Set(), pollTimer: null,
     stage: null, userStage: false, opened: new Set(), full: false,
     // "Use my own footage": the form, the library's own videos, what is ticked, and files just added.
     footage: null,
     // The ACTIVE Social Media Manager and Blog Writer a finished video can be handed to (Phase 4).
     teammates: null,
+    // The workspace's own tracks for "A track from My Content" (GET ?tracks=1), and the videos whose
+    // Music picker is showing that list before a track is chosen.
+    tracks: null, mineOpen: new Set(),
   };
 
   // Stages as pills, like the Brand Designer's Briefs (owner, 2026-11-06: the Briefs tab's patterns on
@@ -125,8 +135,24 @@
     if (state.rendered) render();
   }
 
+  async function loadTracks() {
+    try {
+      const r = await fetch(`${API}?tracks=1`, { credentials: 'same-origin' });
+      state.tracks = r.ok ? ((await r.json()).tracks || []) : [];
+    } catch { state.tracks = []; }
+    if (state.rendered) render();
+  }
+
+  /** The owner's tracks as <option>s; a note instead when there are none yet. */
+  function trackOptions(selected) {
+    const list = state.tracks || [];
+    return `<option value="">Choose a track…</option>` + list.map((t) => `<option value="${t.assetId}"${sel(Number(selected) === t.assetId)}>${esc(t.title)}${t.durationS ? ` · ${Math.round(t.durationS)}s` : ''}</option>`).join('');
+  }
+  const NO_TRACKS = 'No tracks in My Content yet. Make one with “✨ Generate music” in a post’s Sound layer, or upload one to My Content.';
+
   async function load() {
     if (!state.teammates) loadTeammates();
+    if (!state.tracks) loadTracks();
     try {
       const data = await call('GET', null, `?assistantId=${encodeURIComponent(state.assistantId)}`);
       state.videos = (data.projects || []).filter((p) => p.aiAssistantId == null || p.aiAssistantId === state.assistantId);
@@ -181,6 +207,43 @@
       })(),
       allowAi: ['stock_and_ai', 'stock_only', 'ai_first'].includes(s.defaultAllowAi) ? s.defaultAllowAi : 'stock_and_ai',
       cta: typeof s.defaultCta === 'string' ? s.defaultCta : '',
+      audience: typeof s.defaultAudience === 'string' ? s.defaultAudience : '',
+      goal: typeof s.defaultGoal === 'string' ? s.defaultGoal : '',
+      musicMood: MUSIC.some((x) => x[0] === s.defaultMusic) ? s.defaultMusic : 'auto',
+      look: LOOKS.some((x) => x[0] === s.defaultLook) ? s.defaultLook : 'natural',
+      lowerThird: LOWER_THIRDS.some((x) => x[0] === s.defaultLowerThird) ? s.defaultLowerThird : 'bar',
+    };
+  }
+
+  /** "Who it's for", "What should they do?", music, look and name captions — both brief forms. */
+  function briefExtrasHtml(d, f) {
+    const v = f || {};
+    return `
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Who it’s for (optional)</span>
+            <input name="audience" maxlength="200" value="${esc(v.audience || d.audience)}" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Busy parents in Leeds"></label>
+          <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">What should they do? (optional)</span>
+            <input name="goal" maxlength="200" value="${esc(v.goal || d.goal)}" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Book a free taster class"></label>
+          <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Music</span>
+            <select name="musicMood" data-vid-music-mood class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${options(MUSIC, d.musicMood)}</select>
+            <span data-vid-mine-pick ${d.musicMood === 'mine' ? '' : 'hidden'} class="block mt-1">${(state.tracks || []).length
+              ? `<select name="musicAssetId" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${trackOptions(d.musicAssetId)}</select>`
+              : `<span class="block text-[11px] text-amber-800">${esc(NO_TRACKS)}</span>`}</span>
+            <span class="block text-[11px] text-gray-500 mt-0.5">Made for each video with AI (its cost is on “Make the video”), or a track of your own. It goes quiet whenever someone speaks.</span></label>
+          <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Colour look</span>
+            <select name="look" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${options(LOOKS, d.look)}</select></label>
+          <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Name captions</span>
+            <select name="lowerThird" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${options(LOWER_THIRDS, d.lowerThird)}</select>
+            <span class="block text-[11px] text-gray-500 mt-0.5">How a name and job title look when someone is on screen.</span></label>
+        </div>`;
+  }
+  /** The extras from a submitted brief form. */
+  function briefExtras(fd) {
+    return {
+      audience: String(fd.get('audience') || ''), goal: String(fd.get('goal') || ''),
+      musicMood: String(fd.get('musicMood') || 'auto'),
+      ...(fd.get('musicMood') === 'mine' && Number(fd.get('musicAssetId')) > 0 ? { musicAssetId: Number(fd.get('musicAssetId')) } : {}),
+      look: String(fd.get('look') || 'natural'), lowerThird: String(fd.get('lowerThird') || 'bar'),
     };
   }
   const sel = (on) => (on ? ' selected' : '');
@@ -228,8 +291,9 @@
           <button type="button" data-vid-act="caption-style" class="text-xs font-bold text-indigo-700 hover:underline cursor-pointer">Change the look</button>
           <input type="hidden" name="captionStyle" value="${esc(d.captionStyle ? JSON.stringify(d.captionStyle) : '')}">
         </div>
+        ${briefExtrasHtml(d)}
         ${shapeHtml()}
-        <p class="text-xs text-gray-500">Planning the storyboard is free. You check every scene before anything is made.</p>
+        <p class="text-xs text-gray-500">Planning the storyboard is free. You check the words first, then every scene, before anything is made.</p>
         <div class="flex flex-wrap gap-2">
           <button type="submit" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Plan this video</button>
           <button type="button" data-vid-act="close-form" class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg">Cancel</button>
@@ -346,6 +410,7 @@
         </div>
         <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Where it can't use your footage</span>
           <select name="allowAi" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="stock_only"${sel(d.allowAi === 'stock_only')}>Stock footage and branded cards</option><option value="stock_and_ai"${sel(d.allowAi !== 'stock_only')}>Stock, branded cards, or AI where it fits</option></select></label>
+        ${briefExtrasHtml(d, f)}
         ${shapeHtml()}
         <label class="flex items-start gap-1.5 text-sm text-gray-700"><input type="checkbox" name="consent" required class="mt-1"> I have permission to use the people and music in these videos.</label>
         <p class="text-xs text-gray-500">Reviewing a video ${who()} hasn’t seen before uses ${REVIEW_TASKS} tasks; videos it has already reviewed are free. Your videos are never changed — edits only go into the new video.</p>
@@ -411,7 +476,7 @@
         voiceover: !!voice, voice: voice || undefined, allowAi: String(fd.get('allowAi') || 'stock_only'),
         captions: !!fd.get('captions'), ...(captionStyle ? { captionStyle } : {}),
         shape: String(fd.get('shape') || '9:16'), footageAssetIds: ids, footageConsent: true,
-        tighten: !!fd.get('tighten'),
+        tighten: !!fd.get('tighten'), ...briefExtras(fd),
       };
       await call('POST', { action: 'create', assistantId: state.assistantId, brief });
       state.footage = null;
@@ -476,24 +541,118 @@
                 <input name="inS" type="number" min="0" step="0.1" value="${esc(s.inS)}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
               <label class="block"><span class="block text-[11px] font-bold text-gray-600">To</span>
                 <input name="outS" type="number" min="0" step="0.1" value="${esc(s.outS)}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label></div>` : ''}
-            <p class="text-[11px] text-gray-500">Changing a voiceover line re-records the voiceover when the video is made.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <label class="block"><span class="block text-[11px] font-bold text-gray-600">Name caption (optional)</span>
+                <input name="ncName" maxlength="40" value="${esc((s.nameCaption && s.nameCaption.name) || '')}" placeholder="e.g. Sarah Jones" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
+              <label class="block"><span class="block text-[11px] font-bold text-gray-600">Their role</span>
+                <input name="ncRole" maxlength="50" value="${esc((s.nameCaption && s.nameCaption.role) || '')}" placeholder="e.g. Owner" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
+            </div>
+            <p class="text-[11px] text-gray-500">Changing a voiceover line keeps the picture; the voiceover is recorded again when the video is made.</p>
             <div class="flex gap-2"><button type="submit" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Save scene</button>
               <button type="button" data-vid-act="cancel-edit" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Cancel</button></div>
           </form>
         </li>`;
     }
+    // Words and pictures side by side (script first, 2026-11-10): the words on the left, what is seen
+    // on the right. Stacked on a phone.
+    const notes = (v.momentNotes || []).filter((n) => n.sceneId === s.id);
     return `
-      <li class="flex gap-3 border border-gray-200 rounded-lg p-2.5 bg-white">
-        ${media}
-        <div class="flex-1 min-w-0">
-          <p class="text-[11px] font-bold text-gray-500">Scene ${i + 1} · ${esc(BEAT[s.beat] || s.beat)} · about ${esc(s.targetS)}s · ${esc(SOURCE[s.source] || s.source)}${s.source === 'own_video' && s.inS != null ? ` ${esc(ownName(v, s.assetId))} ${mmss(s.inS)}–${mmss(s.outS)}` : ''}</p>
-          ${s.voiceover ? `<p class="text-sm text-gray-900 mt-0.5 break-words">“${esc(s.voiceover)}”</p>` : ''}
-          ${s.onScreenText ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">On screen:</span> ${esc(s.onScreenText)}</p>` : ''}
-          ${tightenHtml(v, s, editable)}
-          ${editable && chatPaneAvailable() ? `<button type="button" data-vid-act="select-scene" data-id="${v.id}" data-index="${i}" title="Ask ${who()} about this scene" class="mt-1 mr-3 text-xs font-bold text-indigo-700 hover:underline">🎯 Select</button>` : ''}
-          ${editable ? `<button type="button" data-vid-act="edit-scene" data-id="${v.id}" data-scene="${esc(s.id)}" class="mt-1 text-xs font-bold text-indigo-700 hover:underline cursor-pointer">Change</button>` : ''}
+      <li class="border border-gray-200 rounded-lg p-2.5 bg-white" data-vid-scene-row="${esc(s.id)}">
+        <p class="text-[11px] font-bold text-gray-500">Scene ${i + 1} · ${esc(BEAT[s.beat] || s.beat)} · about ${esc(s.targetS)}s</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-1">
+          <div class="min-w-0">
+            <p class="text-[10px] font-bold uppercase tracking-wide text-gray-400">Words</p>
+            ${s.voiceover ? `<p class="text-sm text-gray-900 mt-0.5 break-words">“${esc(s.voiceover)}”</p>` : '<p class="text-xs text-gray-500 mt-0.5">No voiceover in this scene.</p>'}
+            ${s.onScreenText ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">On screen:</span> ${esc(s.onScreenText)}</p>` : ''}
+            ${s.nameCaption ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">Name caption:</span> ${esc(s.nameCaption.name)}${s.nameCaption.role ? ` · ${esc(s.nameCaption.role)}` : ''}</p>` : ''}
+          </div>
+          <div class="flex gap-2 min-w-0">
+            ${media}
+            <div class="min-w-0">
+              <p class="text-[10px] font-bold uppercase tracking-wide text-gray-400">Picture</p>
+              <p class="text-xs text-gray-700 mt-0.5">${esc(SOURCE[s.source] || s.source)}${s.source === 'own_video' && s.inS != null ? ` ${esc(ownName(v, s.assetId))} ${mmss(s.inS)}–${mmss(s.outS)}` : ''}</p>
+              ${s.keywords || s.prompt ? `<p class="text-xs text-gray-500 mt-0.5 break-words">${esc(s.keywords || s.prompt)}</p>` : ''}
+              ${tightenHtml(v, s, editable)}
+            </div>
+          </div>
         </div>
+        ${notes.length ? `<ul class="mt-1.5 space-y-0.5">${notes.map((n) => `<li class="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded px-2 py-0.5">📝 ${mmss(n.atS)} — ${esc(n.text)}</li>`).join('')}</ul>` : ''}
+        ${editable && chatPaneAvailable() ? `<button type="button" data-vid-act="select-scene" data-id="${v.id}" data-index="${i}" title="Ask ${who()} about this scene" class="mt-1 mr-3 text-xs font-bold text-indigo-700 hover:underline">🎯 Select</button>` : ''}
+        ${editable ? `<button type="button" data-vid-act="edit-scene" data-id="${v.id}" data-scene="${esc(s.id)}" class="mt-1 text-xs font-bold text-indigo-700 hover:underline cursor-pointer">Change</button>` : ''}
       </li>`;
+  }
+
+  /**
+   * Script first: a voiceover video's words are checked and approved on their own — free — before
+   * "Make the video" sources a single picture. "Rewrite the words" changes words only; every scene
+   * keeps its picture (video-projects 'rewrite_script').
+   */
+  function scriptStepHtml(v) {
+    const sb = v.storyboard;
+    if (!sb || !(v.status === 'planned' || v.status === 'failed') || !(v.brief && v.brief.voiceover)) return '';
+    const busy = state.busy.has(v.id);
+    const rewriting = state.rewriting === v.id;
+    if (sb.scriptApprovedAt) {
+      return `<p class="mt-3 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1">✓ Script approved. Check the pictures beside each line, then press “Make the video”.
+        <button type="button" data-vid-act="rewrite" data-id="${v.id}" class="ml-1 font-bold text-indigo-700 hover:underline">Rewrite the words</button></p>
+        ${rewriting ? rewriteFormHtml(v) : ''}`;
+    }
+    const words = (sb.scenes || []).map((x) => x.voiceover).filter(Boolean).join(' ');
+    const n = words.split(/\s+/).filter(Boolean).length;
+    return `
+      <div class="mt-3 border border-indigo-200 bg-indigo-50/40 rounded-lg p-3">
+        <p class="text-xs font-bold text-indigo-800">Step 1 of 2 — the words</p>
+        <p class="text-sm text-gray-900 mt-1 whitespace-pre-line break-words">${esc(words)}</p>
+        <p class="text-[11px] text-gray-500 mt-1">${n} words · about ${Math.round(n / 2.5)} seconds spoken. Approving is free and makes nothing yet — the pictures come next.</p>
+        <div class="flex flex-wrap gap-2 mt-2">
+          <button type="button" data-vid-act="approve-script" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Approve the script — free</button>
+          ${rewriting ? '' : `<button type="button" data-vid-act="rewrite" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Rewrite the words</button>`}
+        </div>
+        ${rewriting ? rewriteFormHtml(v) : ''}
+      </div>`;
+  }
+  function rewriteFormHtml(v) {
+    return `<form data-vid-rewrite-form data-id="${v.id}" class="mt-2 space-y-2">
+        <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">How should the words change? (optional)</span>
+          <textarea name="feedback" rows="2" maxlength="600" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5" placeholder="e.g. Warmer, and mention free parking"></textarea></label>
+        <p class="text-[11px] text-gray-500">Only the words change — every scene keeps its picture. Free.</p>
+        <div class="flex gap-2"><button type="submit" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Rewrite the words</button>
+          <button type="button" data-vid-act="cancel-rewrite" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Cancel</button></div>
+      </form>`;
+  }
+
+  /** Music, colour look and name captions on a storyboard — changed here without planning it again. */
+  function optionsHtml(v) {
+    const b = v.brief || {};
+    const sb = v.storyboard;
+    if (!sb || !(v.status === 'planned' || v.status === 'failed' || v.status === 'render_failed')) {
+      if (v.status !== 'ready') return '';
+      const mix = v.mix || {};
+      const music = b.musicMood === 'none' ? 'No music'
+        : mix.musicNote ? 'none in this version'
+        : b.musicMood === 'mine' ? (mix.musicTitle ? `“${mix.musicTitle}” (your track)` : 'Your track')
+        : (sb && sb.music ? `“${sb.music.title}” (${labelOf(MUSIC, sb.music.mood).toLowerCase()})` : labelOf(MUSIC, b.musicMood || 'auto'));
+      const retry = mix.musicNote && b.musicMood && !['none', 'mine'].includes(b.musicMood)
+        ? ` <button type="button" data-vid-act="another-track" data-id="${v.id}" class="font-bold text-indigo-700 hover:underline">Try the music again</button>` : '';
+      return `${mix.musicNote ? `<p class="text-xs text-amber-800 mt-2">${esc(mix.musicNote)}${retry}</p>` : ''}<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Music:</span> ${esc(music)} · <span class="font-bold">Look:</span> ${esc(labelOf(LOOKS, b.look || 'natural'))}${b.audience ? ` · <span class="font-bold">For:</span> ${esc(b.audience)}` : ''}${b.goal ? ` · <span class="font-bold">They should:</span> ${esc(b.goal)}` : ''}</p>`;
+    }
+    const mine = b.musicMood === 'mine' || state.mineOpen.has(v.id);
+    const mood = mine ? 'mine' : (MUSIC.some((x) => x[0] === b.musicMood) ? b.musicMood : 'auto');
+    const minePick = !mine ? '' : (state.tracks || []).length
+      ? `<select data-vid-opt="musicAssetId" data-id="${v.id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5" aria-label="Your track">${trackOptions(b.musicMood === 'mine' ? b.musicAssetId : null)}</select>`
+      : `<span class="block mt-1 text-[11px] text-amber-800">${esc(NO_TRACKS)}</span>`;
+    return `
+      <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2" data-vid-options="${v.id}">
+        <label class="block"><span class="block text-[11px] font-bold text-gray-600">Music${sb.music && mood !== 'none' && mood !== 'mine' ? ` — “${esc(sb.music.title)}”` : ''}</span>
+          <select data-vid-opt="musicMood" data-id="${v.id}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(MUSIC, mood)}</select>
+          ${minePick}
+          ${sb.music && mood !== 'none' && mood !== 'mine' ? `<button type="button" data-vid-act="another-track" data-id="${v.id}" class="text-[11px] font-bold text-indigo-700 hover:underline">Another track</button>` : ''}</label>
+        <label class="block"><span class="block text-[11px] font-bold text-gray-600">Colour look</span>
+          <select data-vid-opt="look" data-id="${v.id}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(LOOKS, b.look || 'natural')}</select></label>
+        <label class="block"><span class="block text-[11px] font-bold text-gray-600">Name captions</span>
+          <select data-vid-opt="lowerThird" data-id="${v.id}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(LOWER_THIRDS, b.lowerThird || 'bar')}</select></label>
+      </div>
+      ${b.audience || b.goal ? `<p class="text-xs text-gray-600 mt-1">${b.audience ? `<span class="font-bold">For:</span> ${esc(b.audience)}` : ''}${b.audience && b.goal ? ' · ' : ''}${b.goal ? `<span class="font-bold">They should:</span> ${esc(b.goal)}` : ''}</p>` : ''}`;
   }
 
   /** A finished studio video: the player, its length and shape, Download, "Contains AI"; or the retry. */
@@ -506,9 +665,28 @@
     const wide = shape === '16:9';
     const ai = v.storyboard && (v.storyboard.scenes || []).some((s) => s.source === 'ai_video' || s.source === 'ai_image');
     const tm = state.teammates || {};
+    const times = v.sceneTimes || [];
+    const total = v.outputDurationS || (times.length ? times[times.length - 1].endS : 0);
+    // The scene strip under the player: click any point to jump there and leave a note on that moment.
+    const strip = times.length && total ? `<div class="mt-1 flex h-5 rounded overflow-hidden border border-gray-200 cursor-crosshair" data-vid-strip="${v.id}" title="Click a moment to leave a note on it" role="group" aria-label="Scenes — click a moment to leave a note">
+        ${times.map((t, k) => `<span class="h-full ${k % 2 ? 'bg-indigo-100' : 'bg-indigo-200'} relative" style="width:${((t.endS - t.startS) / total) * 100}%"><span class="absolute inset-0 text-[9px] text-indigo-900 leading-5 pl-0.5 select-none">${k + 1}</span></span>`).join('')}
+      </div>` : '';
+    const notes = v.momentNotes || [];
+    const noting = state.noting && state.noting.id === v.id ? state.noting : null;
+    const shapesLeft = SHAPES.map((x) => x[0]).filter((x) => x !== shape && !familyShapes(v).has(x));
     return `
       <div class="mt-3 flex flex-col sm:flex-row gap-3 items-start">
-        <video src="${esc(v.outputUrl)}" controls playsinline preload="metadata" class="${wide ? 'w-full sm:w-96' : shape === '1:1' ? 'w-56' : 'w-44'} rounded-lg bg-black shrink-0"></video>
+        <div class="${wide ? 'w-full sm:w-96' : shape === '1:1' ? 'w-56' : 'w-44'} shrink-0">
+          <video src="${esc(v.outputUrl)}" controls playsinline preload="metadata" data-vid-player="${v.id}" class="w-full rounded-lg bg-black"></video>
+          ${strip}
+          <button type="button" data-vid-act="note-here" data-id="${v.id}" class="mt-1 text-xs font-bold text-indigo-700 hover:underline">📝 Note on this moment</button>
+          ${noting ? `<form data-vid-note-form data-id="${v.id}" class="mt-1 space-y-1">
+              <p class="text-[11px] font-bold text-gray-600">At ${mmss(noting.atS)}${noting.scene ? ` · scene ${esc(noting.scene)}` : ''}</p>
+              <textarea name="text" rows="2" maxlength="300" required class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5" placeholder="e.g. Too fast here — show the cake for longer"></textarea>
+              <div class="flex gap-2"><button type="submit" class="btn-primary px-3 py-1 text-xs font-bold rounded-lg">Save note</button>
+                <button type="button" data-vid-act="cancel-note" class="btn-secondary border px-3 py-1 text-xs font-bold rounded-lg">Cancel</button></div>
+            </form>` : ''}
+        </div>
         <div class="min-w-0 space-y-2">
           <p class="text-xs text-gray-600">${v.outputDurationS ? `${Math.round(v.outputDurationS)} s · ` : ''}${esc(SHAPES.find((x) => x[0] === shape)?.[1] || shape)}${v.version > 1 ? ` · version ${esc(v.version)}` : ''}${ai ? ' · <span class="font-semibold text-amber-800">Contains AI</span>' : ''}</p>
           ${v.storyboard && v.storyboard.caption ? `<p class="text-xs text-gray-600"><span class="font-bold">Suggested words to post with it:</span> ${esc(v.storyboard.caption)}</p>` : ''}
@@ -521,8 +699,23 @@
           <p class="text-[11px] text-gray-500">${tm.social || tm.blog
             ? `Saved in My Content. ${[tm.social ? `“Use in a post” hands it to ${esc(tm.social.name)}` : '', tm.blog ? `“Use in a blog post” to ${esc(tm.blog.name)}` : ''].filter(Boolean).join('; ')} — free.`
             : 'Saved in My Content. Download it, or hire a Social Media Assistant or Blog Writer to post it for you.'}</p>
+          ${shapesLeft.length ? `<button type="button" data-vid-act="reshape" data-id="${v.id}" ${state.busy.has(v.id) ? 'disabled' : ''} title="Keeps the voiceover and every clip and picture, cropped to the new shape; branded cards are drawn again." class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Make it ${esc(shapesLeft.map((x) => (SHAPES.find((y) => y[0] === x) || [x, x])[1].toLowerCase()).join(' and '))} too — free</button>` : ''}
+          ${notes.length ? `<div class="border border-amber-200 bg-amber-50 rounded-lg p-2">
+              <p class="text-xs font-bold text-amber-900">Your notes (${notes.length})</p>
+              <ul class="mt-1 space-y-0.5">${notes.map((n) => `<li class="text-xs text-amber-900 flex items-start gap-1"><button type="button" data-vid-act="seek" data-id="${v.id}" data-at="${esc(n.atS)}" class="font-bold hover:underline shrink-0">${mmss(n.atS)}</button><span class="min-w-0 break-words">${n.sceneId ? `scene ${esc(n.sceneId.slice(1))}: ` : ''}${esc(n.text)}</span><button type="button" data-vid-act="delete-note" data-id="${v.id}" data-note="${esc(n.id)}" aria-label="Delete this note" class="ml-auto shrink-0 text-amber-700 hover:text-red-700">×</button></li>`).join('')}</ul>
+              <button type="button" data-vid-act="notes-version" data-id="${v.id}" ${state.busy.has(v.id) ? 'disabled' : ''} class="btn-primary mt-2 px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Make a new version from my notes — free</button>
+              <p class="text-[11px] text-amber-900/80 mt-1">Only the scenes you noted change; everything else is kept. You check it before it’s made.</p>
+            </div>` : ''}
+          ${(v.sourceFiles || []).length ? `<details><summary class="text-xs text-gray-500 cursor-pointer">Source files for this version (${v.sourceFiles.length})</summary>
+              <ul class="mt-1 space-y-0.5">${v.sourceFiles.map((f) => `<li class="text-xs text-gray-700 flex gap-2"><span class="text-gray-500 shrink-0">${esc(f.kind)}</span><span class="truncate">${esc(f.name)}</span><a href="/.netlify/functions/content-asset-download?assetId=${encodeURIComponent(f.id)}" class="ml-auto shrink-0 font-bold text-indigo-700 hover:underline">Download</a></li>`).join('')}</ul></details>` : ''}
         </div>
       </div>`;
+  }
+
+  /** The shapes already made (or being made) from the same original video. */
+  function familyShapes(v) {
+    const root = (v.brief && v.brief.shapeOf) || v.id;
+    return new Set(state.videos.filter((x) => (x.id === root || (x.brief && x.brief.shapeOf === root)) && !['cancelled', 'failed'].includes(x.status)).map((x) => (x.brief && x.brief.shape) || '9:16'));
   }
 
   /** "✂ 2 pauses, 1 “um” cut — 3.1 s shorter" and the switch back (own footage in its own sound). */
@@ -553,7 +746,9 @@
     const busy = state.busy.has(v.id);
     // One scene is a video when it's the owner's own take (storyboard.ts minScenesFor); three otherwise.
     const minScenes = v.brief && v.brief.footageAssetIds && v.brief.footageAssetIds.length ? 1 : 3;
-    const canMake = (v.status === 'planned' || v.status === 'failed') && sb && sb.scenes && sb.scenes.length >= minScenes;
+    // Script first: a voiceover video's words are approved before anything is made.
+    const needsScript = !!(v.brief && v.brief.voiceover) && sb && !sb.scriptApprovedAt;
+    const canMake = (v.status === 'planned' || v.status === 'failed') && sb && sb.scenes && sb.scenes.length >= minScenes && !needsScript;
     // The same figure the hold takes, in the workspace's unit (video-producer.ts buildEstimate).
     const unit = v.unit === 'credits' ? 'credit' : 'task';
     const cost = v.estimate == null ? '' : (v.estimate === 0 ? ' — free' : ` — uses ${v.estimate} ${unit}${v.estimate === 1 ? '' : 's'}`);
@@ -569,18 +764,20 @@
               class="flex items-start gap-1.5 text-left text-sm font-bold text-gray-900 break-words cursor-pointer hover:text-gray-700">
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
               <span>${esc(v.title)}</span></button>
-            <p class="text-xs text-gray-600 mt-0.5">${v.version > 1 ? `Version ${esc(v.version)} · ` : ''}${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
-            ${v.note ? `<p class="text-xs ${v.status === 'ready' ? 'text-emerald-800 bg-emerald-50 border-emerald-200' : 'text-amber-800 bg-amber-50 border-amber-200'} border rounded-md px-2 py-1 mt-1.5">${esc(v.note)}</p>` : ''}
+            <p class="text-xs text-gray-600 mt-0.5">${v.version > 1 ? `Version ${esc(v.version)} · ` : ''}${v.brief && v.brief.shapeOf ? `${esc((SHAPES.find((x) => x[0] === v.brief.shape) || ['', ''])[1])} copy · ` : ''}${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
+            ${v.note ? `<p class="text-xs ${v.status === 'ready' ? 'text-emerald-800 bg-emerald-50 border-emerald-200' : 'text-amber-800 bg-amber-50 border-amber-200'} border rounded-md px-2 py-1 mt-1.5 break-words" style="overflow-wrap:anywhere">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
           ${chatPaneAvailable() ? `<button type="button" data-vid-act="talk" data-id="${v.id}" class="text-xs font-bold text-indigo-700 hover:underline shrink-0 whitespace-nowrap">Talk it through</button>` : ''}
-          ${v.status === 'built' ? `<button type="button" data-vid-act="open-review" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg shrink-0">Open the Review Queue</button>` : ''}
+          ${v.status === 'built' ? `<button type="button" data-vid-act="open-review" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg shrink-0">Open Review</button>` : ''}
         </div>
         ${folded ? '' : `<div data-vid-body>
         ${Array.isArray(v.changes) && v.changes.length && (v.status === 'planned' || v.status === 'failed')
           ? `<details class="mt-2"><summary class="text-xs text-gray-500 cursor-pointer">What ${who()} adjusted (${v.changes.length})</summary><ul class="list-disc ml-5 mt-1 text-xs text-gray-600">${v.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></details>` : ''}
         ${readyHtml(v)}
         ${reviewHtml(v)}
+        ${scriptStepHtml(v)}
+        ${optionsHtml(v)}
         ${sb && sb.scenes && sb.scenes.length ? `<ol class="mt-3 space-y-2">${sb.scenes.map((s, i) => sceneHtml(v, s, i)).join('')}</ol>` : ''}
         ${sb && sb.caption ? `<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Caption:</span> ${esc(sb.caption)}</p>` : ''}
         ${replanning ? `
@@ -593,6 +790,7 @@
         ${!['cancelled', 'built', 'planning', 'building', 'reviewing', 'rendering', 'ready'].includes(v.status) ? `
           <div class="flex flex-wrap gap-2 mt-3">
             ${canMake ? `<button type="button" data-vid-act="build" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Make the video${esc(cost)}</button>` : ''}
+            ${needsScript && (v.status === 'planned' || v.status === 'failed') ? '<span class="self-center text-xs text-gray-500">Approve the script above, then “Make the video”.</span>' : ''}
             ${!replanning && v.status !== 'reviewed' ? `<button type="button" data-vid-act="replan" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Plan it again</button>` : ''}
             <button type="button" data-vid-act="cancel" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-utility px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Cancel</button>
           </div>` : ''}
@@ -727,11 +925,51 @@
     if (state.stage === 'check') host()?.querySelector('[data-video]')?.scrollIntoView({ block: 'start' });
   }
 
+  /** Open the note box for a moment of a ready video (the scene playing then is named). */
+  function openNote(id, atS) {
+    const v = state.videos.find((x) => x.id === id);
+    if (!v) return;
+    const times = v.sceneTimes || [];
+    const at = Math.round((Number(atS) || 0) * 10) / 10;
+    const hit = times.find((t) => at >= t.startS && at < t.endS) || times[times.length - 1];
+    state.noting = { id, atS: at, scene: hit ? String(times.indexOf(hit) + 1) : '' };
+    render();
+    host()?.querySelector('[data-vid-note-form] textarea')?.focus();
+  }
+
+  /** "Make a new version from my notes": opens on "Being made" while the noted scenes are rewritten. */
+  async function versionFromNotes(id) {
+    state.busy.add(id); render();
+    try {
+      const data = await call('POST', { action: 'notes_to_version', id });
+      const nv = data.project;
+      if (nv && nv.id) { state.opened.add(nv.id); saveFolded(); state.notes[nv.id] = { text: 'Turning your notes into changes to those scenes — about a minute. You check it before it’s made.' }; }
+      state.stage = 'making'; state.userStage = true;
+    } catch (err) {
+      state.notes[id] = { text: err.message, error: true };
+    }
+    state.busy.delete(id);
+    await load();
+  }
+
   document.addEventListener('click', (e) => {
     const pill = e.target.closest('[data-vid-stage]');
     if (pill && host() && host().contains(pill)) {
       state.stage = pill.dataset.vidStage; state.userStage = true; render();
       host()?.querySelector(`[data-vid-stage="${state.stage}"]`)?.focus();
+      return;
+    }
+    const strip = e.target.closest('[data-vid-strip]');
+    if (strip && host() && host().contains(strip)) {
+      const v = state.videos.find((x) => x.id === Number(strip.dataset.vidStrip));
+      if (!v) return;
+      const times = (v && v.sceneTimes) || [];
+      const total = (v && v.outputDurationS) || (times.length ? times[times.length - 1].endS : 0);
+      const r = strip.getBoundingClientRect();
+      const at = Math.max(0, Math.min(total, ((e.clientX - r.left) / Math.max(1, r.width)) * total));
+      const p = host()?.querySelector(`[data-vid-player="${v.id}"]`);
+      if (p) { try { p.pause(); p.currentTime = at; } catch { /* not loaded yet */ } }
+      openNote(v.id, at);
       return;
     }
     const b = e.target.closest('[data-vid-act]');
@@ -822,13 +1060,52 @@
       case 'use-post':
       case 'use-blog': handOver(id, b.dataset.vidAct === 'use-post' ? 'post' : 'blog'); break;
       case 'cancel': act(id, { action: 'cancel', id }, null); break;
-      case 'open-review': document.querySelector('[data-maintab="review-queue"]')?.click(); break;
+      case 'approve-script': act(id, { action: 'approve_script', id }, 'Script approved. Now check the pictures, then press “Make the video”.'); break;
+      case 'rewrite': state.rewriting = id; render(); host()?.querySelector('[data-vid-rewrite-form] textarea')?.focus(); break;
+      case 'cancel-rewrite': state.rewriting = null; render(); break;
+      case 'another-track': act(id, { action: 'set_options', id, anotherTrack: true }, 'A new track will be made when you press “Make the video” — it shows what it uses.'); break;
+      case 'note-here': {
+        const p = host()?.querySelector(`[data-vid-player="${id}"]`);
+        openNote(id, p ? p.currentTime : 0);
+        break;
+      }
+      case 'cancel-note': state.noting = null; render(); break;
+      case 'seek': {
+        const p = host()?.querySelector(`[data-vid-player="${id}"]`);
+        if (p) { p.currentTime = Number(b.dataset.at) || 0; p.focus(); }
+        break;
+      }
+      case 'delete-note': act(id, { action: 'delete_note', id, noteId: b.dataset.note }, null); break;
+      case 'notes-version': versionFromNotes(id); break;
+      case 'reshape': act(id, { action: 'reshape', id }, 'Making it in the other shapes — they appear under “Being made”, and in My Content when they’re done.'); break;
+      // This page has no Review Queue tab since 2026-11-10: an old-way video's post is approved on
+      // the workspace Review page, which lists every assistant's waiting work.
+      case 'open-review': window.loadView?.('review-queue'); break;
     }
   });
 
   // Ticking a video in the footage form; adding files to it.
   document.addEventListener('change', (e) => {
     const t = e.target;
+    if (host() && host().contains(t) && t.matches('[data-vid-music-mood]')) {
+      // The brief form: the track list shows only for "A track from My Content".
+      const pick = t.closest('label')?.querySelector('[data-vid-mine-pick]');
+      if (pick) pick.hidden = t.value !== 'mine';
+      return;
+    }
+    if (host() && host().contains(t) && t.matches('[data-vid-opt]')) {
+      const id = Number(t.dataset.id);
+      // "A track from My Content" needs a track before anything is saved: show the list first.
+      if (t.dataset.vidOpt === 'musicMood' && t.value === 'mine') { state.mineOpen.add(id); render(); return; }
+      if (t.dataset.vidOpt === 'musicMood') state.mineOpen.delete(id);
+      if (t.dataset.vidOpt === 'musicAssetId' && !t.value) return;
+      const value = t.dataset.vidOpt === 'musicAssetId' ? Number(t.value) : t.value;
+      const v = state.videos.find((x) => x.id === id);
+      act(id, { action: 'set_options', id, [t.dataset.vidOpt]: value }, v && v.status === 'render_failed'
+        ? 'Saved. Press “Make the video” — it’s free, as everything is already made.'
+        : 'Saved — it’s used when the video is made.');
+      return;
+    }
     if (!host() || !host().contains(t) || !state.footage) return;
     if (t.matches('[data-vid-footage-pick]')) {
       const id = Number(t.dataset.vidFootagePick);
@@ -861,7 +1138,7 @@
         message: String(fd.get('message') || ''), lengthS: Number(fd.get('lengthS')), cta: String(fd.get('cta') || ''),
         voiceover: !!voice, voice: voice || undefined, allowAi: String(fd.get('allowAi') || 'stock_and_ai'),
         captions: !!fd.get('captions'), ...(captionStyle ? { captionStyle } : {}),
-        shape: String(fd.get('shape') || '9:16'),
+        shape: String(fd.get('shape') || '9:16'), ...briefExtras(fd),
       };
       const msg = f.querySelector('[data-vid-form-msg]');
       f.querySelectorAll('button').forEach((x) => { x.disabled = true; });
@@ -882,10 +1159,22 @@
         voiceover: String(fd.get('voiceover') || ''), onScreenText: String(fd.get('onScreenText') || ''), source,
         ...(source === 'ai_image' || source === 'ai_video' ? { prompt: words } : { keywords: words }),
         ...(fd.has('inS') && source === 'own_video' ? { inS: Number(fd.get('inS')), outS: Number(fd.get('outS')) } : {}),
+        nameCaption: String(fd.get('ncName') || '').trim() ? { name: String(fd.get('ncName')), role: String(fd.get('ncRole') || '') } : null,
       };
       const id = Number(f.dataset.id);
       state.editing = null;
       act(id, { action: 'edit_scene', id, sceneId: f.dataset.scene, patch }, 'Scene saved.');
+    } else if (f.matches('[data-vid-rewrite-form]')) {
+      e.preventDefault();
+      const id = Number(f.dataset.id);
+      state.rewriting = null;
+      act(id, { action: 'rewrite_script', id, feedback: String(new FormData(f).get('feedback') || '') }, 'Rewriting the words — about a minute. Every scene keeps its picture.');
+    } else if (f.matches('[data-vid-note-form]')) {
+      e.preventDefault();
+      const id = Number(f.dataset.id);
+      const n = state.noting;
+      state.noting = null;
+      act(id, { action: 'add_note', id, atS: n ? n.atS : 0, text: String(new FormData(f).get('text') || '') }, 'Note saved. Add more, then press “Make a new version from my notes”.');
     } else if (f.matches('[data-vid-replan-form]')) {
       e.preventDefault();
       const id = Number(f.dataset.id);
@@ -928,7 +1217,7 @@
       state.setup = setup && typeof setup === 'object' ? setup : {};
       // A new view: the old full-screen box went with the old page, so only the lock is left to drop.
       if (state.full) { state.full = false; window.ScrollLock?.release('videos-full'); }
-      state.rendered = false; state.form = false; state.footage = null; state.teammates = null; state.editing = null; state.replanning = null; state.notes = {};
+      state.rendered = false; state.form = false; state.footage = null; state.teammates = null; state.editing = null; state.replanning = null; state.rewriting = null; state.noting = null; state.notes = {};
       state.stage = null; state.userStage = false;
       loadFolded();
       load();   // eager: the planned count is the tab badge

@@ -31,7 +31,7 @@ check('ordinary replies are kept', () => {
 
 check('with the card the reply points at it; without, it says plainly nothing was made', () => {
     const claim = 'I\'m creating an image for that now.';
-    assert.match(pictureReply(claim, true), /choose “Create with AI” or “Find stock photos” on the card below/);
+    assert.match(pictureReply(claim, true), /choose “Choose from My Content”, “Create with AI” or “Find stock photos” on the card below/);
     assert.match(pictureReply(claim, false), /Nothing has been made or added/);
     assert.strictEqual(pictureReply('Choose one on the card below.', true), 'Choose one on the card below.');
 });

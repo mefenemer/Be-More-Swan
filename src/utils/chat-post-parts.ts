@@ -17,7 +17,7 @@ const MAX_TEXT_CHARS = 500;
 const MAX_DESCRIPTION_CHARS = 300;
 
 export interface PostTextEditCard { type: typeof POST_TEXT_EDIT_TYPE; postId: number; find: string; replace: string; summary: string | null }
-export interface PostPictureCard { type: typeof POST_PICTURE_TYPE; postId: number; kind: 'image' | 'video'; description: string }
+export interface PostPictureCard { type: typeof POST_PICTURE_TYPE; postId: number; kind: 'image' | 'video'; description: string; source?: 'library' }
 export type PostPartCard = PostTextEditCard | PostPictureCard;
 
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
@@ -29,7 +29,8 @@ export function postPartCardFromUiElement(uiElement: unknown): PostPartCard | nu
     const postId = Number(String(ui.postId ?? '').replace(/^#/, ''));
     if (!Number.isInteger(postId) || postId <= 0) return null;
     if (ui.type === POST_PICTURE_TYPE) {
-        return { type: POST_PICTURE_TYPE, postId, kind: ui.kind === 'video' ? 'video' : 'image', description: str(ui.description, MAX_DESCRIPTION_CHARS) };
+        // "source": "library" — one of their own, from My Content (owner, 2026-11-10).
+        return { type: POST_PICTURE_TYPE, postId, kind: ui.kind === 'video' ? 'video' : 'image', description: str(ui.description, MAX_DESCRIPTION_CHARS), ...(ui.source === 'library' ? { source: 'library' as const } : {}) };
     }
     const find = str(ui.find, MAX_TEXT_CHARS);
     const replace = str(ui.replace, MAX_TEXT_CHARS);

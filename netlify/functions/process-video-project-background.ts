@@ -1,6 +1,8 @@
 // netlify/functions/process-video-project-background.ts
 // The Video Producer's slow steps, off the request path (15-minute ceiling):
-//   POST { projectId, action: 'plan', feedback? }  → planProject  (planning → planned | failed)
+//   POST { projectId, action: 'plan', feedback?, mode? } → planProject (planning → planned | failed);
+//        mode 'script' rewrites the words only, 'notes' acts on the notes left on the finished video —
+//        both keep every scene's picture (src/lib/video-notes.ts)
 //   POST { projectId, action: 'build' }             → buildProject (building → built | failed)
 //   POST { projectId, action: 'review' }            → reviewProject (reviewing → reviewed | failed) — own footage
 // Both act only when the project is in the matching state, so a duplicate wake is a no-op rather
@@ -13,12 +15,12 @@ import { reviewProject } from '../../src/utils/footage-review';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event: HandlerEvent) => {
-    let body: { projectId?: number; action?: string; feedback?: string };
+    let body: { projectId?: number; action?: string; feedback?: string; mode?: string };
     try { body = JSON.parse(event.body || '{}'); } catch { return { statusCode: 400, body: 'Invalid JSON' }; }
     const projectId = Number(body.projectId);
     if (!Number.isInteger(projectId)) return { statusCode: 400, body: 'Missing projectId' };
     const db = getDb();
-    if (body.action === 'plan') await planProject(db, projectId, { feedback: body.feedback ?? null });
+    if (body.action === 'plan') await planProject(db, projectId, { feedback: body.feedback ?? null, mode: body.mode === 'script' || body.mode === 'notes' ? body.mode : null });
     else if (body.action === 'build') await buildProject(db, projectId);
     else if (body.action === 'review') await reviewProject(db, projectId);
     else return { statusCode: 400, body: 'Unknown action' };

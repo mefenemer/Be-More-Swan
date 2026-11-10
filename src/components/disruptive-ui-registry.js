@@ -1647,6 +1647,125 @@
   register('visual_brief_proposal', renderVisualBriefProposalCard);
 
   // ── Built-ins: Video Producer cards (docs/video-producer-plan.md §5.10) ─────────────────────
+  // The choices the server reads (src/lib/video-music.ts, video-look.ts, lower-third.ts).
+  const VIDEO_MUSIC = { auto: 'Made to suit the video', upbeat: 'Upbeat', chill: 'Chilled', inspiring: 'Inspiring', ambient: 'Calm, in the background', none: 'No music' };
+  const VIDEO_LOOKS = { natural: 'Natural (no grade)', brand: 'Your brand colours', warm: 'Warm', cool: 'Cool', punchy: 'Bright and punchy', mono: 'Black and white' };
+  const VIDEO_LOWER_THIRDS = { bar: 'Brand-colour bar, left', clean: 'Plain white words, left', boxed: 'White box, centred' };
+  const VIDEO_SHAPE_NAMES = { '9:16': 'Vertical 9:16', '1:1': 'Square 1:1', '16:9': 'Wide 16:9' };
+
+  /**
+   * One Video Producer action on a card (2026-11-10): the chat twin of a button on the Videos tab.
+   * The click sends `body` to video-projects.ts through chat-session.js (`video:action`), the same action
+   * as the button. None of these can spend: approving or rewriting the script, notes and options are free,
+   * and other shapes start making only when nothing paid needs making.
+   */
+  function videoActionCard(esc, { kicker, rows, note, button, body, done }) {
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${esc(kicker)} · Approval needed</p>
+      ${rows.filter(Boolean).map(([l, v]) => `<p class="text-xs text-gray-700 mt-1.5"><span class="font-bold">${esc(l)}:</span> ${esc(v)}</p>`).join('')}
+      <p class="text-xs text-gray-600 mt-2">${esc(note)}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vac-go ${body ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(button)}</button>
+        <button type="button" data-vac-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vac-status></p>`;
+    const status = el.querySelector('[data-vac-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vac-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-vac-go]') || !body) return;
+      setBusy(true);
+      say('Working…');
+      el.dispatchEvent(new CustomEvent('video:action', {
+        bubbles: true,
+        detail: { body, respond({ ok, error }) {
+          if (!ok) { setBusy(false); say(error || 'That didn’t work — try the button on the Videos tab.', 'error'); return; }
+          say(done);
+        } },
+      }));
+    });
+    return el;
+  }
+  const videoId = (ui) => (Number.isInteger(Number(ui.projectId)) && Number(ui.projectId) > 0 ? Number(ui.projectId) : null);
+
+  // { type: 'video_script_proposal', projectId, action: 'approve' | 'rewrite', feedback? }
+  function renderVideoScriptProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const rewrite = ui.action === 'rewrite';
+    const feedback = typeof ui.feedback === 'string' ? ui.feedback.replace(/\s+/g, ' ').trim().slice(0, 600) : '';
+    return videoActionCard(esc, rewrite ? {
+      kicker: 'Rewrite the words', rows: [feedback ? ['Your notes', feedback] : null],
+      note: 'Free. Only the words change — every scene keeps its picture. The new script appears on the Videos tab in about a minute for you to approve.',
+      button: 'Rewrite the words', body: id ? { action: 'rewrite_script', id, feedback } : null, done: 'Rewriting. The new words appear on the Videos tab in about a minute.',
+    } : {
+      kicker: 'Approve the script', rows: [],
+      note: 'Free, and nothing is made yet. Next you check the pictures beside each line on the Videos tab and press “Make the video”, which shows what it uses.',
+      button: 'Approve the script', body: id ? { action: 'approve_script', id } : null, done: 'Approved. Check the pictures on the Videos tab, then press “Make the video”.',
+    });
+  }
+  // { type: 'video_options_proposal', projectId, musicMood?, musicAssetId?, musicTitle?, anotherTrack?, look?, lowerThird?, summary? }
+  // musicAssetId: a track of the owner's own from My Content; the server checks it is theirs.
+  function renderVideoOptionsProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const body = { action: 'set_options', id };
+    const trackId = Number(ui.musicAssetId);
+    if (Number.isInteger(trackId) && trackId > 0) body.musicAssetId = trackId;
+    else if (VIDEO_MUSIC[ui.musicMood]) body.musicMood = ui.musicMood;
+    if (ui.anotherTrack === true) body.anotherTrack = true;
+    if (VIDEO_LOOKS[ui.look]) body.look = ui.look;
+    if (VIDEO_LOWER_THIRDS[ui.lowerThird]) body.lowerThird = ui.lowerThird;
+    const any = Object.keys(body).length > 2;
+    return videoActionCard(esc, {
+      kicker: 'Change the music and look',
+      rows: [
+        ui.summary ? ['What changes', String(ui.summary).slice(0, 200)] : null,
+        body.musicAssetId ? ['Music', ui.musicTitle ? `“${String(ui.musicTitle).slice(0, 80)}” from My Content` : `Your track #${body.musicAssetId} from My Content`] : null,
+        body.musicMood ? ['Music', VIDEO_MUSIC[body.musicMood]] : null,
+        body.anotherTrack ? ['Music', 'A new track, same mood (made when you press “Make the video”)'] : null,
+        body.look ? ['Colour look', VIDEO_LOOKS[body.look]] : null,
+        body.lowerThird ? ['Name captions', VIDEO_LOWER_THIRDS[body.lowerThird]] : null,
+      ],
+      note: 'Free. Used when the video is made; nothing is planned again. A finished video gets a new version — the finished one stays in My Content.',
+      button: 'Change it', body: id && any ? body : null, done: 'Changed. It’s used when you press “Make the video” on the Videos tab.',
+    });
+  }
+  // { type: 'video_note_proposal', projectId, atS? | scene?, note }
+  function renderVideoNoteProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const note = typeof ui.note === 'string' ? ui.note.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+    const scene = Number.isInteger(Number(ui.scene)) && Number(ui.scene) > 0 ? Number(ui.scene) : null;
+    const atS = Number.isFinite(Number(ui.atS)) && ui.atS != null ? Math.max(0, Number(ui.atS)) : null;
+    const where = atS != null ? `${Math.floor(atS / 60)}:${String(Math.floor(atS % 60)).padStart(2, '0')}` : scene ? `Scene ${scene}` : '';
+    return videoActionCard(esc, {
+      kicker: 'Note on the video', rows: [where ? ['At', where] : null, note ? ['Note', note] : null],
+      note: 'Free. It’s added to your notes on the finished video. When you’re done, “Make a new version from my notes” changes only those scenes.',
+      button: 'Add the note', body: id && note && (atS != null || scene) ? { action: 'add_note', id, text: note, ...(atS != null ? { atS } : { sceneNumber: scene }) } : null,
+      done: 'Noted. It’s on the video on the Videos tab.',
+    });
+  }
+  // { type: 'video_notes_version_proposal', projectId }
+  function renderVideoNotesVersionProposalCard(ui, esc) {
+    const id = videoId(ui);
+    return videoActionCard(esc, {
+      kicker: 'New version from your notes', rows: [],
+      note: 'Free. Only the scenes you left notes on change; everything else, and everything already made for it, is kept. You check it before it’s made.',
+      button: 'Make the new version', body: id ? { action: 'notes_to_version', id } : null, done: 'Started. The new version appears on the Videos tab in about a minute.',
+    });
+  }
+  // { type: 'video_reshape_proposal', projectId, shapes? }
+  function renderVideoReshapeProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const shapes = (Array.isArray(ui.shapes) ? ui.shapes : []).filter((x) => VIDEO_SHAPE_NAMES[x]);
+    return videoActionCard(esc, {
+      kicker: 'Make it in other shapes', rows: [['Shapes', shapes.length ? shapes.map((x) => VIDEO_SHAPE_NAMES[x]).join(', ') : 'Every shape it isn’t in yet']],
+      note: 'Free: the voiceover and every clip and picture are kept, cropped to each shape; branded cards are drawn again. Each one is saved to My Content when it’s done.',
+      button: 'Make them', body: id ? { action: 'reshape', id, ...(shapes.length ? { shapes } : {}) } : null, done: 'Making them. They appear under “Being made” on the Videos tab.',
+    });
+  }
+
   // { type: 'video_brief_proposal', message, purpose?, lengthS?, cta?, voiceover?, allowAi?, shape? }
   // { type: 'video_replan_proposal', projectId, feedback? }
   //
@@ -1671,6 +1790,13 @@
       ...(ui.captionStyle && typeof ui.captionStyle === 'object' ? { captionStyle: ui.captionStyle } : {}),
       allowAi: ALLOW[ui.allowAi] ? ui.allowAi : 'stock_and_ai',
       shape: SHAPES[ui.shape] ? ui.shape : '9:16',
+      // Who it's for and what they should do (fed to the planner); music, look and name captions are
+      // left out unless asked for, so the set-up answers fill them (video-producer.ts withSetupDefaults).
+      ...(clean(ui.audience, 200) ? { audience: clean(ui.audience, 200) } : {}),
+      ...(clean(ui.goal, 200) ? { goal: clean(ui.goal, 200) } : {}),
+      ...(VIDEO_MUSIC[ui.musicMood] ? { musicMood: ui.musicMood } : {}),
+      ...(VIDEO_LOOKS[ui.look] ? { look: ui.look } : {}),
+      ...(VIDEO_LOWER_THIRDS[ui.lowerThird] ? { lowerThird: ui.lowerThird } : {}),
     };
     const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
     const runnable = brief.message.length >= 10;
@@ -1687,6 +1813,11 @@
       ${brief.voiceover ? row('Captions', brief.captions ? `On${brief.captionStyle && window.CaptionStyle ? ` — ${window.CaptionStyle.describe(brief.captionStyle).toLowerCase()}` : ''}` : 'Off') : ''}
       ${row('Pictures from', ALLOW[brief.allowAi])}
       ${row('Shape', SHAPES[brief.shape])}
+      ${row('Who it’s for', brief.audience)}
+      ${row('What they should do', brief.goal)}
+      ${row('Music', brief.musicMood ? VIDEO_MUSIC[brief.musicMood] : 'Your usual')}
+      ${brief.look ? row('Colour look', VIDEO_LOOKS[brief.look]) : ''}
+      ${brief.lowerThird ? row('Name captions', VIDEO_LOWER_THIRDS[brief.lowerThird]) : ''}
       <p class="text-xs text-gray-600 mt-2">Planning the storyboard is free. You check it on the Videos tab before anything is made — the cost of making it is shown there first.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-vdp-save ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Plan this video</button>
@@ -1852,6 +1983,11 @@
   register('video_handover_proposal', renderVideoHandoverProposalCard);
   register('video_brief_proposal', renderVideoBriefProposalCard);
   register('video_replan_proposal', renderVideoReplanProposalCard);
+  register('video_script_proposal', renderVideoScriptProposalCard);
+  register('video_options_proposal', renderVideoOptionsProposalCard);
+  register('video_note_proposal', renderVideoNoteProposalCard);
+  register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
+  register('video_reshape_proposal', renderVideoReshapeProposalCard);
 
   // ── Built-ins: Mystery Shopper cards (docs/mystery-shopper-plan.md §4.6) ──────────────────────
   // The chat twins of the Website tab's buttons — same server actions (site-audits.ts), handled in
@@ -3894,7 +4030,7 @@
   }
   register('stay_damage', renderStayDamageCard);
 
-  // { type: 'site_picture', pageId, sectionId, sectionLabel, place: 'in' | 'after', kind: 'picture' | 'video', source: 'ai' | 'stock', description, alt }
+  // { type: 'site_picture', pageId, sectionId, sectionLabel, place: 'in' | 'after', kind: 'picture' | 'video', source: 'library' | 'ai' | 'stock', description, alt }
   // A picture for one section, found or made RIGHT HERE (owner, 2026-11-05: the chat said "I'm generating
   // it now" and nothing ever came back — a reply can't make a picture; this card does, on a click).
   // Stock (pexels-search.ts, free) or AI (generate-ai-image.ts, charges as it says; blank = the business
@@ -3908,7 +4044,8 @@
     if (!pageId || !sectionId) return null;
     const label = str(ui.sectionLabel, 120) || 'this section';
     const place = ui.place === 'after' ? 'after' : 'in';
-    let source = ui.source === 'stock' ? 'stock' : 'ai';
+    // 'library': one of their own, from My Content (owner, 2026-11-10: the chat couldn't open it).
+    let source = ui.source === 'stock' ? 'stock' : ui.source === 'library' ? 'library' : 'ai';
     // Picture or video (owner, 2026-11-05: "do the same for videos"). A video plays silently on a loop
     // with a pause button, in a hero, a text section or a gallery (site-definition.ts markVideos).
     let kind = ui.kind === 'video' ? 'video' : 'picture';
@@ -3925,6 +4062,7 @@
       <label class="block text-xs font-bold text-gray-700 mt-2"><span data-sp-desc-label></span>
         <textarea data-sp-desc rows="2" maxlength="600" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1">${esc(str(ui.description, 600))}</textarea></label>
       <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sp-go="library" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Choose from My Content</button>
         <button type="button" data-sp-go="ai" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Create with AI</button>
         <button type="button" data-sp-go="stock" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50" data-sp-stock-label></button>
       </div>
@@ -3949,6 +4087,10 @@
       aiBtn.disabled = !canAi;
       aiBtn.title = canAi ? '' : video ? (caps && caps.assistantCanVideo ? 'AI video is on the Busywork Buster and Digital Employee plans' : 'None of your assistants can create videos') : 'None of your assistants can create pictures';
       if (!canAi && source === 'ai') source = 'stock';
+      // My Content needs the picture window (media-picker.js) on the page.
+      const libBtn = el.querySelector('[data-sp-go="library"]');
+      libBtn.hidden = !(window.MediaPicker && typeof window.MediaPicker.open === 'function');
+      if (libBtn.hidden && source === 'library') source = 'stock';
       el.querySelectorAll('[data-sp-go]').forEach((b) => { b.className = `${b.dataset.spGo === source ? 'btn-primary' : 'btn-secondary'} px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50`; });
       const cost = caps && (video ? caps.videoCost : caps.imageCost);
       $('[data-sp-cost]').textContent = !caps || !canAi || !cost ? (video ? 'Stock videos are free.' : 'Stock photos are free.')
@@ -4028,13 +4170,27 @@
       } catch (err) { if (mine === run) { say(err.message, 'error'); working(false); } }
       if (mine === run) setBusy(false);
     }
+    // My Content: the same picture window as "Choose picture" on the Website tab — their library, or upload one.
+    function fromLibrary() {
+      if (!window.MediaPicker || typeof window.MediaPicker.open !== 'function') { say('Your content can\'t be opened on this page — use "Choose picture" on the section instead.', 'error'); return; }
+      run++; grid.innerHTML = ''; $('[data-sp-more]').innerHTML = ''; status.className = 'hidden';
+      // A sign-up form holds a picture, never a video (markVideos).
+      const videoOk = !(place === 'in' && /sign.?up/i.test(label));
+      window.MediaPicker.open({
+        title: `Choose from My Content for “${label}”`, video: videoOk, topic: $('[data-sp-desc]').value.trim() || label,
+        onPick: (asset) => { if (asset && asset.id) choose(asset); },
+      });
+    }
     async function choose(key) {
       setBusy(true);
       say('Saving it and putting it on your page…');
-      const video = kind === 'video';
+      const video = typeof key === 'object' && key ? !!key.video : kind === 'video';
       try {
         let assetId; let alt = str(ui.alt, 150) || $('[data-sp-desc]').value.trim().slice(0, 150);
-        if (key[0] === 's') {
+        if (typeof key === 'object' && key) {
+          // From My Content: already in the library.
+          assetId = Number(key.id); alt = alt || key.name || label;
+        } else if (key[0] === 's') {
           const c = stock.candidates[Number(key.slice(1))];
           const res = await call('pexels-search', { action: 'save', candidate: c, mediaType: video ? 'video' : 'image' });
           if (!res.ok || !res.body.assetId) throw new Error((res.body && res.body.error) || 'It couldn\'t be saved.');
@@ -4061,6 +4217,7 @@
       const k = e.target.closest('[data-sp-kind]');
       if (k) { if (k.dataset.spKind !== kind) { kind = k.dataset.spKind; run++; grid.innerHTML = ''; $('[data-sp-more]').innerHTML = ''; status.className = 'hidden'; working(false); setBusy(false); paint(); } return; }
       const go = e.target.closest('[data-sp-go]');
+      if (go && go.dataset.spGo === 'library') { source = 'library'; paint(); fromLibrary(); return; }
       if (go) { source = go.dataset.spGo; paint(); find(false); return; }
       if (e.target.closest('[data-sp-again]')) { find(true); return; }
       const pick = e.target.closest('[data-sp-pick]');
@@ -4838,7 +4995,8 @@
   }
   register('post_text_edit', renderPostTextEditCard);
 
-  // { type: 'post_picture', postId, kind: 'image' | 'video', description }
+  // { type: 'post_picture', postId, kind: 'image' | 'video', description, source?: 'library' }
+  // "Choose from My Content" opens the same step on "Use my own" — their library (owner, 2026-11-10).
   // A new picture or video for a post. Opens the post editor's own picture step with the description
   // filled in (post:pictureAsk, workspace.html): its search, its Generate button, its charge.
   function renderPostPictureCard(ui, esc) {
@@ -4854,7 +5012,8 @@
           class="block w-full mt-1 px-3 py-2 text-sm font-normal bg-white border border-gray-200 rounded-lg">
       </label>
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        <button type="button" data-pp-go="stock" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Find stock ${noun === 'video' ? 'videos' : 'photos'}</button>
+        <button type="button" data-pp-go="library" class="${ui.source === 'library' ? 'btn-primary' : 'btn-secondary border'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Choose from My Content</button>
+        <button type="button" data-pp-go="stock" class="${ui.source === 'library' ? 'btn-secondary border' : 'btn-primary'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Find stock ${noun === 'video' ? 'videos' : 'photos'}</button>
         <button type="button" data-pp-go="ai" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Create with AI</button>
       </div>
       <p class="text-xs text-gray-600 mt-2">Stock is free. AI uses tasks when you press Generate in the picture window.</p>
@@ -4896,6 +5055,7 @@
       ${patch.onScreenText != null ? change('On-screen text', now.onScreenText, patch.onScreenText) : ''}
       ${patch.source != null ? change('Picture from', '', VIDEO_SCENE_SOURCES[patch.source] || patch.source) : ''}
       ${words != null ? change('What to show', '', words) : ''}
+      ${'nameCaption' in patch ? change('Name caption', '', patch.nameCaption ? `${patch.nameCaption.name}${patch.nameCaption.role ? ` · ${patch.nameCaption.role}` : ''}` : '(none)') : ''}
       <p class="text-xs text-gray-600 mt-2">This only changes the plan. Nothing is made until you press “Make the video”, which says what it uses.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-vse-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Change the scene</button>

@@ -2893,8 +2893,10 @@ window._revokeConnection = async function (connectionId, onSuccess) {
   .main-tab-content[data-rq-full] { position: fixed; inset: 0; z-index: 60; background: #f9fafb; overflow: auto; padding: 16px 20px; }
   /* A role's docked chat (assistants.js _setupTabChat) stays beside the list in full screen, as on the Briefs tab. */
   #tabchat-layout.is-on:has(.main-tab-content[data-rq-full]) > .chatpane-dock-col { position: fixed; top: 16px; right: 20px; bottom: 16px; height: auto; width: min(380px, calc(100vw - 40px)); z-index: 61; }
+  #tabchat-layout.is-on:has(.main-tab-content[data-rq-full]) > .chatpane-dock-col:has(.is-collapsed[data-chatpane]) { width: 56px; bottom: auto; }
   @media (min-width: 1280px) {
     #tabchat-layout.is-on .main-tab-content[data-rq-full] { padding-right: 424px; }
+    #tabchat-layout.is-on:has(> .chatpane-dock-col .is-collapsed[data-chatpane]) .main-tab-content[data-rq-full] { padding-right: 100px; }
     /* A chat docked INSIDE the tab (Campaigns, the Mentor's): the sticky offset allows for a top bar that is covered now. */
     .main-tab-content[data-rq-full] .chatpane-dock.is-on > .chatpane-dock-col { top: 0; height: calc(100vh - 32px); }
     /* Beside the chat, All leads' three buttons (they never shrink) squeezed its description into a column one word wide. */

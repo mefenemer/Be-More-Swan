@@ -78,7 +78,7 @@ check('the migration adds the structure, keeps old prices as words, and reads th
     for (const c of ['price_type', 'price_amount', 'price_unit', 'duration_minutes', 'image_asset_id']) assert.ok(sql.includes(`ADD COLUMN IF NOT EXISTS ${c}`), c);
     assert.ok(sql.includes("SET price_type = 'text'") && sql.includes("WHERE price_type IS NULL"));
     assert.ok(read('db/schema.ts').includes('priceAmount: integer("price_amount")'));
-    const ui = read('assets.html');
+    const ui = (read('assets.html') + read('src/components/products-editor.js'));
     assert.ok(ui.includes('function priceFieldsHtml(v)') && ui.includes("opt('fixed', 'A fixed price')") && ui.includes('This is the one place prices live'));
 });
 
@@ -127,7 +127,7 @@ check('checkout charges in the product\'s currency; the editor, API and migratio
     const sql = read('db/z-product-price-currency.sql');
     assert.ok(sql.includes("ADD COLUMN IF NOT EXISTS price_currency TEXT NOT NULL DEFAULT 'GBP'") && sql.includes("IN ('GBP', 'USD', 'EUR', 'AUD', 'CAD')"));
     assert.ok(read('db/schema.ts').includes('priceCurrency: text("price_currency")'));
-    const ui = read('assets.html');
+    const ui = (read('assets.html') + read('src/components/products-editor.js'));
     assert.ok(ui.includes('id="op-price-currency"') && ui.includes("priceCurrency: get('op-price-currency')"));
 });
 

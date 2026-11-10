@@ -268,6 +268,28 @@
     schedulePoll();
   }
 
+  // A Business Information editor in the side drawer (site-facts-drawer.js). Whatever is saved there is
+  // read straight back, and the preview reloads, since sections show products and stays from the database.
+  function openFacts(kind, options) {
+    if (!window.SiteFactsDrawer) {
+      window._bizinfoInitialTab = kind;
+      if (typeof window.loadView === 'function') window.loadView('assets');
+      return;
+    }
+    window.SiteFactsDrawer.open({ kind, options, onSaved: factsSaved });
+  }
+  let factsTimer = null;
+  function factsSaved() {
+    // A reorder saves twice in a row: read back once.
+    clearTimeout(factsTimer);
+    factsTimer = setTimeout(async () => {
+      keepEditing();
+      await load();
+      state.version++;
+      rerender();
+    }, 250);
+  }
+
   function schedulePoll() {
     clearTimeout(state.pollTimer);
     if (state.data && state.data.site.drafting) state.pollTimer = setTimeout(load, POLL_MS);
@@ -392,6 +414,9 @@
       '[data-sb-editor-full] { position: fixed; inset: 0; z-index: 10400; background: #f9fafb; overflow: auto; padding: 16px; }',
       '@media (min-width: 1024px) { [data-sb-editor-full] [data-site-layout] { grid-template-columns: minmax(0, 1fr) minmax(400px, 520px) !important; } [data-sb-editor-full] iframe[data-site-preview] { height: calc(100vh - 140px) !important; } [data-sb-editor-full] [data-sb-chatbox] { height: calc(100vh - 32px - 56px); } }',
       '[data-sb-full] { position: fixed; inset: 0; z-index: 10500; background: #fff; overflow: auto; }',
+      // The chat folded to its strip (chat-pane.js, owner 2026-11-09): the preview gets the room; on a phone it is a bar.
+      '@media (min-width: 1024px) { [data-site-layout]:has([data-sb-pane] .is-collapsed[data-chatpane]) { grid-template-columns: minmax(0, 1fr) 56px !important; } }',
+      '[data-sb-chatbox]:has(.is-collapsed[data-chatpane]) { height: auto !important; flex: none !important; }',
       '[data-sb-full] > div { height: 100%; display: flex; flex-direction: column; padding: 8px !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }',
       '[data-sb-full] [data-sb-frame-box] { flex: 1; min-height: 0; }',
       '[data-sb-full] iframe[data-site-preview] { height: 100% !important; }',
@@ -452,7 +477,12 @@
     if (f.kind === 'checkbox') return `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" name="${name}" ${value ? 'checked' : ''}> ${esc(f.label)}</label>`;
     if (f.kind === 'csv') return `<label class="block text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</label><input name="${name}" class="${inputCls}" value="${esc((Array.isArray(value) ? value : []).join(', '))}" placeholder="e.g. Music, Food & drink, Family">`;
     if (f.kind === 'staysInfo') {
-      return `<p class="text-xs text-gray-600 mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3">Shows every holiday let and room type you've set up in <a class="link font-bold" href="/workspace.html?view=assets&amp;tab=stays">Business Information ▸ Stays</a> — names, photos, prices and rules are kept there. Each one gets its own page with a calendar where guests book.</p>`;
+      // The stays themselves are added and changed beside the site, in the drawer (site-facts-drawer.js);
+      // they're saved to Business Information ▸ Stays, which every assistant reads.
+      return `<div class="text-xs text-gray-600 mt-2 bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <p>Shows every holiday let and room type you've set up — each gets its own page with a calendar where guests book. Their names, photos, prices and rules are saved in your Business Information.</p>
+        <p class="mt-1"><strong>Holiday let</strong>: a whole place guests have to themselves (a cottage, flat or villa). <strong>Room type</strong>: rooms in a B&amp;B or guest house; add each kind of room once with how many you have.</p>
+        <div class="flex flex-wrap gap-2 mt-2">${btn('data-site-open-stays="whole"', '+ Add a holiday let')}${btn('data-site-open-stays="room"', '+ Add a room type')}${btn('data-site-open-stays=""', 'See and change them')}</div></div>`;
     }
     if (f.kind === 'listingsInfo') {
       const n = (state.listings && state.listings.listings) ? state.listings.listings.filter((x) => x.status === 'published').length : null;
@@ -507,7 +537,7 @@
       const b = state.data.booking || {};
       const chosen = new Set((Array.isArray(value) ? value : []).map(Number));
       const hoursNote = `<p class="text-xs ${b.ready ? 'text-gray-500' : 'text-amber-800 font-semibold'} mt-2">${b.ready ? `Opening hours: ${esc(b.hours)}.` : 'Set your opening hours first — booking only shows on your site once they are set.'} ${btn('data-site-open-hours', 'Hours & location')}</p>`;
-      if (!(b.services || []).length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">None of your Products &amp; Services has a length yet. Give a service a length (e.g. 45 minutes) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} to offer it here. (Tables don't need one.)</p>${hoursNote}`;
+      if (!(b.services || []).length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">None of your Products &amp; Services has a length yet. Give a service a length (e.g. 45 minutes) to offer it here. (Tables don't need one.) ${btn('data-site-open-products', 'Give a service a length')}</p>${hoursNote}`;
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         <div class="space-y-1 mt-1">${b.services.map((x) => `<label class="flex items-center gap-2 border border-gray-200 rounded-lg px-3 py-2 text-xs cursor-pointer">
           <input type="checkbox" data-service-pick value="${esc(x.id)}" ${chosen.has(x.id) ? 'checked' : ''}> <span class="font-bold text-gray-900">${esc(x.name)}</span>
@@ -531,7 +561,7 @@
             ${p.buyable ? '<span class="ml-auto text-green-700 font-bold">Can be bought online</span>' : ''}
           </label>`).join('')}</div>`
           : '<p class="text-xs text-gray-500 mt-1">You haven\'t added any products or services yet.</p>'}
-        <p class="text-xs text-gray-500 mt-2">Add products, or change a name, price or picture, in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — every page and checkout follows. Only fixed prices can be bought online.</p>`;
+        <p class="text-xs text-gray-500 mt-2">Names, prices and pictures are saved in your Business Information — change them there and every page and checkout follows. Only fixed prices can be bought online. ${btn('data-site-open-products="new"', '+ Add a product')} ${btn('data-site-open-products', 'Change products and prices')}</p>`;
     }
     if (f.kind === 'platformPick') {
       // Every platform; the count beside each is what has been published through Be More Swan —
@@ -602,7 +632,7 @@
       const list = state.data.catalogue || [];
       const owner = {};
       groups.forEach((g, gi) => (g.productIds || []).forEach((id) => { if (!(id in owner)) owner[id] = gi; }));
-      if (!list.length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">You haven't added any products or services yet. Add them, with their prices, in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')}.</p>`;
+      if (!list.length) return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p><p class="text-xs text-gray-500">You haven't added any products or services yet. ${btn('data-site-open-products="new"', '+ Add a product or service')}</p>`;
       return `<p class="text-xs font-bold text-gray-700 mt-3">${esc(f.label)}</p>
         <div data-menu-groups class="space-y-2 mt-1">${groups.map((g, gi) => `
           <div class="border border-gray-200 rounded-lg p-3" data-menu-group>
@@ -617,7 +647,7 @@
             }).join('')}</div>
           </div>`).join('')}</div>
         <div class="mt-2">${btn('data-menu-group-add', '+ Add a group')}</div>
-        <p class="text-xs text-gray-500 mt-2">Items appear in Business Information order. Change a name, price or description in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')} — the menu follows. Nothing on a menu is bought online; use a Products for sale section for that.</p>`;
+        <p class="text-xs text-gray-500 mt-2">Items appear in the order of your products in Business Information. Change a name, price or description there and the menu follows. ${btn('data-site-open-products', 'Change products and prices')} Nothing on a menu is bought online; use a Products for sale section for that.</p>`;
     }
     if (f.kind === 'items') {
       const list = Array.isArray(value) && value.length ? value : [{}];
@@ -816,13 +846,27 @@
     listings: ['📅', 'An events calendar or a directory, from your Listings tab'],
     stays: ['🏡', 'Your holiday lets or B&B rooms, each with dates and prices'],
   };
+  // The kinds of section in groups by what they are for (owner, 2026-11-10: one long list was hard to choose
+  // from). A kind in no group is listed under "More"; a group with nothing this site offers is left out.
+  const SECTION_GROUPS = [
+    ['Introduce your business', ['hero', 'text', 'features', 'steps']],
+    ['Sell, book and show what you offer', ['products', 'booking', 'stays', 'menu', 'listings']],
+    ['Build trust', ['testimonials', 'reviews', 'gallery', 'faq']],
+    ['Get people to act or get in touch', ['cta', 'contact', 'signup', 'hours']],
+    ['Keep it fresh', ['blog_posts', 'social_feed']],
+  ];
   function addPickerHtml(here) {
     const types = state.data.vocab.sectionTypes.filter((t) => typeAllowed(t) && FORMS[t]);
+    const tile = (t) => `<button type="button" data-site-new-section="${esc(t)}" class="sb-tap text-left bg-white border border-gray-200 rounded-lg p-2 hover:shadow-sm flex gap-2 items-start">
+          <span aria-hidden="true" style="font-size:18px;line-height:1.2">${(TYPE_INFO[t] || ['➕'])[0]}</span>
+          <span class="min-w-0"><span class="block text-xs font-bold text-gray-900">${esc(TYPE_LABEL[t] || t)}</span><span class="block text-xs text-gray-500">${esc((TYPE_INFO[t] || ['', ''])[1])}</span></span></button>`;
+    const grouped = new Set(SECTION_GROUPS.flatMap(([, ks]) => ks));
+    const groups = [...SECTION_GROUPS, ['More', types.filter((t) => !grouped.has(t))]]
+      .map(([name, ks]) => [name, ks.filter((t) => types.includes(t))]).filter(([, ks]) => ks.length);
     return `<li data-site-add-picker class="border border-gray-300 rounded-lg p-3 bg-gray-50">
       <div class="flex items-center justify-between gap-2"><p class="text-xs font-black text-gray-900">What would you like to add${here ? ' here' : ''}?</p>${btn('data-site-add-close', 'Cancel')}</div>
-      <div class="grid gap-2 sm:grid-cols-2 mt-2">${types.map((t) => `<button type="button" data-site-new-section="${esc(t)}" class="sb-tap text-left bg-white border border-gray-200 rounded-lg p-2 hover:shadow-sm flex gap-2 items-start">
-          <span aria-hidden="true" style="font-size:18px;line-height:1.2">${(TYPE_INFO[t] || ['➕'])[0]}</span>
-          <span class="min-w-0"><span class="block text-xs font-bold text-gray-900">${esc(TYPE_LABEL[t] || t)}</span><span class="block text-xs text-gray-500">${esc((TYPE_INFO[t] || ['', ''])[1])}</span></span></button>`).join('')}</div></li>`;
+      ${groups.map(([name, ks]) => `<div role="group" aria-label="${esc(name)}" class="mt-3"><p class="text-xs font-bold text-gray-500 uppercase tracking-wide">${esc(name)}</p>
+        <div class="grid gap-2 sm:grid-cols-2 mt-1">${ks.map(tile).join('')}</div></div>`).join('')}</li>`;
   }
 
   function pagesPanel() {
@@ -850,7 +894,8 @@
       ${card(`
         <div class="flex flex-wrap gap-2 items-center">${pageTabs}
           ${d.pages.length < state.data.maxPages ? btn('data-site-add-page', '+ Page') : `<span class="text-xs text-gray-500">${esc(state.data.maxPages)} pages is the most a site can have.</span>`}</div>
-        <p class="text-sm font-black text-gray-900 mt-4 mb-3">Sections on ${esc(p.title)}</p>
+        <div class="flex flex-wrap items-center justify-between gap-2 mt-4 mb-3"><p class="text-sm font-black text-gray-900">Sections on ${esc(p.title)}</p>
+          ${p.slug ? btn(`data-site-remove-page aria-label="Delete the page ${esc(p.title)}"`, 'Delete this page') : '<span class="text-xs text-gray-500">The home page can\'t be deleted — every site needs one.</span>'}</div>
         <ul class="space-y-2">${sections || (adding ? '' : '<li class="text-xs text-gray-500">No sections yet.</li>')}${adding && adding.at == null ? addPickerHtml(false) : ''}</ul>
         ${adding && adding.at == null ? '' : `<div class="mt-4">${btn('data-site-add-open', '+ Add a section')}</div>`}`)}
       ${state.editing ? editorHtml() : ''}
@@ -865,7 +910,7 @@
         </div>
         ${p.slug ? `<label class="flex items-center gap-2 text-xs font-bold text-gray-700 mt-3"><input type="checkbox" data-site-page-hidden ${p.hideFromMenu ? 'checked' : ''}> Hide from the menu <span class="font-normal text-gray-500">— still there for anyone with its address, e.g. a page for an ad or an offer</span></label>` : ''}
         ${menuPlaceHtml(p)}
-        <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-page-save', 'Save page details', true)}${p.slug ? btn('data-site-remove-page', 'Remove this page') : ''}</div>`)}`;
+        <div class="flex flex-wrap gap-2 mt-3">${btn('data-site-page-save', 'Save page details', true)}</div>`)}`;
   }
 
   // Where the page sits in the menu: its own entry, or in another page's drop-down (menuParent,
@@ -1155,14 +1200,61 @@
       <div class="mt-4">${btn('data-site-theme-save', 'Save design', true)}</div>`);
   }
 
+  // "What your website does" as questions in order (owner, 2026-11-10: ten ticks in one list gave no path
+  // through). Each question's choices are the same features; a follow-up shows once an earlier answer
+  // makes it relevant — opening hours when people visit or book, a menu when people visit. `needs` names
+  // what reveals it ('visit' is the "people come to us" tick, the rest are feature keys). A choice that
+  // hides is unticked, so what is saved is always what is on screen. Unknown keys go under "Anything else".
+  const FEATURE_STEPS = [
+    { q: 'How do customers buy from you or book?', hint: 'Tick any that fit. Tick none if people just get in touch.', keys: ['shop', 'bookings', 'stays'] },
+    { q: 'Do customers come to you?', hint: 'A shop, café, salon, studio, venue or office people visit.', visit: true, keys: [['hours', ['visit', 'bookings']], ['menu', ['visit']]] },
+    { q: 'What helps people choose you?', hint: 'Show your work and what others say.', keys: ['gallery', 'reviews', 'faq'] },
+    { q: 'Anything else?', hint: 'Keep in touch with visitors, or list events and entries.', keys: ['signup', 'listings'] },
+  ];
   function featuresCard(first) {
     const list = (state.data.vocab.features || []);
+    const byKey = Object.fromEntries(list.map((f) => [f.key, f]));
+    const placed = new Set();
+    // "People come to us": ticked when what it reveals is already on.
+    const visitOn = featureOn('hours') || featureOn('menu');
+    const box = (key, needs) => {
+      const f = byKey[key];
+      if (!f) return '';
+      placed.add(key);
+      const on = featureOn(key);
+      const shown = !needs || needs.some((n) => (n === 'visit' ? visitOn : featureOn(n)));
+      return `<label class="flex items-center gap-2 text-xs text-gray-800"${needs ? ` data-site-feature-needs="${esc(needs.join(' '))}"` : ''}${shown ? '' : ' hidden style="display:none"'}><input type="checkbox" data-site-feature="${esc(f.key)}" ${on && shown ? 'checked' : ''}> ${esc(f.label)}</label>`;
+    };
+    const steps = FEATURE_STEPS.map((st, i) => {
+      const boxes = st.keys.map((k) => (Array.isArray(k) ? box(k[0], k[1]) : box(k))).join('');
+      const visit = st.visit ? `<label class="flex items-center gap-2 text-xs font-bold text-gray-800"><input type="checkbox" data-site-visit ${visitOn ? 'checked' : ''}> Yes, people come to us</label>` : '';
+      return `<fieldset class="border-t border-gray-100 pt-3 mt-3"><legend class="text-xs font-black text-gray-900"><span class="text-gray-400">${i + 1}.</span> ${esc(st.q)}</legend>
+        <p class="text-xs text-gray-500 mt-0.5">${esc(st.hint)}</p>
+        <div class="grid gap-2 sm:grid-cols-2 mt-2">${visit}${boxes}</div></fieldset>`;
+    }).join('');
+    const rest = list.filter((f) => !placed.has(f.key));
+    const more = rest.length ? `<fieldset class="border-t border-gray-100 pt-3 mt-3"><legend class="text-xs font-black text-gray-900">More</legend><div class="grid gap-2 sm:grid-cols-2 mt-2">${rest.map((f) => box(f.key)).join('')}</div></fieldset>` : '';
     return card(`
       <p class="text-sm font-black text-gray-900">${first ? 'First, choose what your website does' : 'What your website does'}</p>
-      <p class="text-xs text-gray-500 mt-1">Untick what you don't need: it's hidden here, ${esc(state.assistantName || 'your assistant')} won't suggest it, and its tab disappears. You can switch it back on any time.</p>
-      <div class="grid gap-2 sm:grid-cols-2 mt-3">${list.map((f) => `<label class="flex items-center gap-2 text-xs text-gray-800"><input type="checkbox" data-site-feature="${esc(f.key)}" ${featureOn(f.key) ? 'checked' : ''}> ${esc(f.label)}</label>`).join('')}</div>
-      <div class="mt-3">${btn('data-site-features-save', first ? 'Use these' : 'Save', true)}</div>`, first ? 'border-emerald-200' : '');
+      <p class="text-xs text-gray-500 mt-1">Answer in order — the next options appear as they become relevant. What you leave off is hidden here, ${esc(state.assistantName || 'your assistant')} won't suggest it, and its tab disappears. You can switch it back on any time.</p>
+      <div data-site-features-form>${steps}${more}</div>
+      <div class="mt-4">${btn('data-site-features-save', first ? 'Use these' : 'Save', true)}</div>`, first ? 'border-emerald-200' : '');
   }
+  /** Show each follow-up only while what it needs is ticked; a hidden one is unticked (featuresCard). */
+  function syncFeatureReveal(form) {
+    if (!form) return;
+    const ticked = (name) => !!form.querySelector(name === 'visit' ? '[data-site-visit]:checked' : `[data-site-feature="${CSS.escape(name)}"]:checked`);
+    form.querySelectorAll('[data-site-feature-needs]').forEach((row) => {
+      const show = row.dataset.siteFeatureNeeds.split(' ').some(ticked);
+      row.hidden = !show;
+      row.style.display = show ? '' : 'none';
+      if (!show) { const cb = row.querySelector('input'); if (cb) cb.checked = false; }
+    });
+  }
+  document.addEventListener('change', (e) => {
+    const form = e.target.closest && e.target.closest('[data-site-features-form]');
+    if (form && e.target.matches('[data-site-visit], [data-site-feature]')) syncFeatureReveal(form);
+  });
 
   /** The Blog Assistant's posts on the site (site-blog.ts): a switch and the menu label — the posts are written there. */
   function blogCard() {
@@ -1487,7 +1579,7 @@
         <label class="text-xs font-bold text-gray-700">Repeat<select data-sf="repeatWeeks" class="${inputCls} mt-1">${[[0, 'Just this date (an event)'], [3, 'Weekly for 4 weeks'], [7, 'Weekly for 8 weeks'], [11, 'Weekly for 12 weeks'], [25, 'Weekly for 26 weeks']].map(([v, l]) => opt(v, l, f.repeatWeeks ?? 0)).join('')}</select></label>
         <label class="text-xs font-bold text-gray-700 md:col-span-2">Note for customers <span class="font-normal text-gray-500">(optional — e.g. bring a mat)</span><input data-sf="notes" maxlength="300" class="${inputCls} mt-1" value="${esc(f.notes || '')}"></label>
         <div class="md:col-span-2">${btn('data-session-add', 'Add these dates', true)}</div></div>`
-      : `<p class="text-xs text-gray-500 mt-2">First add your classes or events (with their prices) in ${btn('data-site-open-products', 'Business Information ▸ Products & Services')}.</p>`;
+      : `<p class="text-xs text-gray-500 mt-2">First add your classes or events, with their prices. ${btn('data-site-open-products="new"', '+ Add a class or event')}</p>`;
     const now = Date.now();
     const rows = !tt ? '<p class="text-xs text-gray-500 mt-3">Loading…</p>'
       : !tt.length ? '<p class="text-xs text-gray-500 mt-3">No dates added yet.</p>'
@@ -1845,9 +1937,12 @@
       : '<span class="tab-head-chip">Not live yet</span>';
     const full = `<button type="button" data-site-editor-full data-sb-wide-only aria-pressed="${!!state.editorFull}" title="${state.editorFull ? 'Back to the normal view (Esc)' : 'Use the whole window for your website and chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap shrink-0">${state.editorFull ? 'Exit full screen' : 'Full screen'}</button>`;
     const newPage = state.data && !isFresh() ? window._tabNewBtn('New page', 'data-site-add-page') : '';
+    // "Preview my site" left of Full screen (owner, 2026-11-10: at the bottom of the column it went unseen).
+    // On the Preview tab the preview is already beside the chat on a wide screen, so there it shows on a phone only.
+    const preview = `<button type="button" data-site-preview-full ${state.panel === 'chat' ? 'data-sb-narrow-only ' : ''}title="See your whole site as visitors will" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap shrink-0">Preview my site</button>`;
     return window._tabHead({ title: 'Website', explain: 'website-builder', emoji: '🌐',
       about: 'Your website: preview it beside the chat, set it up, change its design and pages, and publish it. Nothing goes live until you press Publish.',
-      chip, right: `${full}${newPage}` });
+      chip, right: `${preview}${full}${newPage}` });
   }
   function subtabsHtml() {
     const d = state.data || {};
@@ -2380,13 +2475,7 @@
       ['note', noteHtml(), { live: true }],
       ['drafting', drafting],
       ...blocks.map(([k, h, o]) => [`${P}-${k}`, h, o || {}]),
-      // The preview is a button away: below everything on a narrow Website tab, and not on the page at all
-      // on the others, where the chat has its column. It opens over the page.
-      // Sticky on the wrapper itself — inside it, it could only stick within its own height.
-      ['preview-jump', P === 'chat' ? btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site') : '',
-        { attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
-      ['preview-open', P === 'chat' ? '' : btn('data-site-preview-full style="box-shadow:0 4px 14px rgba(0,0,0,.15)"', 'Preview my site'),
-        { attrs: { style: 'position:sticky;bottom:12px;z-index:5;display:flex;justify-content:flex-end' } }],
+      // The preview is a button away in the tab header ("Preview my site", headHtml): it opens over the page.
     ]);
     paintChat(layout.querySelector('[data-sb-chat]'));
     paintPreview(layout.querySelector('[data-sb-preview-col]'));
@@ -2753,7 +2842,12 @@
       await publishAction({ action: 'products_import', sectionId: ed.sectionId }, 'Moved into Business Information.', () => { state.editing = null; });
       return;
     }
-    if (t('[data-site-open-products]')) { window._bizinfoInitialTab = 'products'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    // Products and stays open beside the site, in the drawer (site-facts-drawer.js), and are saved to
+    // Business Information as before (docs/website-business-info-inline-plan.md §4).
+    const openProducts = t('[data-site-open-products]');
+    if (openProducts) { openFacts('products', openProducts.dataset.siteOpenProducts === 'new' ? { openNew: true } : {}); return; }
+    const openStays = t('[data-site-open-stays]');
+    if (openStays) { const v = openStays.dataset.siteOpenStays; openFacts('stays', v === 'whole' || v === 'room' ? { newType: v } : {}); return; }
     if (t('[data-site-open-reviews]')) { window._audienceInitialTab = 'reviews'; if (typeof window.loadView === 'function') window.loadView('audience'); return; }
     if (t('[data-site-open-hours]')) { window._bizinfoInitialTab = 'hours'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
     if (t('[data-site-open-bookings]')) { window._bizinfoInitialTab = 'bookings'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
@@ -2949,12 +3043,12 @@
       return;
     }
     if (t('[data-site-remove-page]')) {
-      const ok = typeof window.confirmModal === 'function' ? await window.confirmModal(`"${p.title}" and its sections are removed from your draft.`, { title: 'Remove this page?', confirmLabel: 'Remove page', cancelLabel: 'Keep it' }) : true;
+      const ok = typeof window.confirmModal === 'function' ? await window.confirmModal(`"${esc(p.title)}" and its sections are removed from your draft, and from the menu. You can undo it straight after; nothing changes on your live site until you publish.`, { title: 'Delete this page?', confirmLabel: 'Delete page', cancelLabel: 'Keep it' }) : true;
       if (!ok) return;
       const copy = JSON.parse(JSON.stringify(p));
       await apply([{ op: 'remove_page', pageId: p.id }], () => {
         state.undo = { kind: 'page', page: copy };
-        state.note = { text: `Removed the page "${copy.title}".`, tone: 'ok', undo: true };
+        state.note = { text: `Deleted the page "${copy.title}".`, tone: 'ok', undo: true };
         state.pageId = null; state.previewPath = '/';
         state.noteAt = '[data-site-page]';
         state.refocus = '[data-site-undo]';

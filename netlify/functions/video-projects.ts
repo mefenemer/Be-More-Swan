@@ -13,6 +13,19 @@
 //   POST { action:'change', id }                         → "Change it" on a ready video: a new version (free), video-producer.ts newVersion
 //        replan / edit_scene on a READY video do the same first, then act on the new version (chat parity)
 //   POST { action:'rerender', id }                       → a render_failed video: render the saved timeline again (free)
+//   POST { action:'approve_script', id }                → the voiceover script approved on its own, before any picture (free)
+//   POST { action:'rewrite_script', id, feedback? }     → the words rewritten, every scene's picture kept (free)
+//   POST { action:'set_options', id, musicMood?, musicAssetId?, anotherTrack?, look?, lowerThird? } → music (a mood,
+//        none, or a track from My Content), colour look and
+//        name-caption style, changed without re-planning (free; a ready video gets a new version first)
+//   POST { action:'add_note', id, atS, text }           → a note on a moment of a ready video, tied to its scene
+//   POST { action:'delete_note', id, noteId }
+//   POST { action:'notes_to_version', id }              → a new version that turns those notes into scene edits (free)
+//   POST { action:'reshape', id, shapes? }              → the same video in the other shapes (free when nothing
+//                                                          paid needs making — then it starts making at once)
+//   GET  ?tracks=1                                      → the workspace's own tracks (generated / uploaded) for the Music picker
+//   GET  ?performance=1&assistantId=N                   → the Results tab's four figures (src/lib/video-results.ts)
+//   GET  ?calendar=1&assistantId=N&from&to              → the Calendar tab: videos started and finished, by day
 //   POST { action:'cancel', id }
 //   POST { action:'from_post', postId }                 → "Make a video version" of a post (video-handoff.ts):
 //                                                          plans a storyboard for the active Video Producer
@@ -33,8 +46,15 @@ import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/ut
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
-import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion } from '../../src/utils/video-producer';
-import { enforceStoryboard, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
+import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
+import { enforceStoryboard, isVideoShape, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
+import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
+import { isMusicChoice } from '../../src/lib/video-music';
+import { ownMusicTrack, ownMusicTracks } from '../../src/utils/video-music-asset';
+import { isVideoLook } from '../../src/lib/video-look';
+import { isLowerThirdStyle, readNameCaption } from '../../src/lib/lower-third';
+import { contentAssets } from '../../db/schema';
+import { randomUUID } from 'crypto';
 import { activeVideoProducer, activeAssistantInRole, videoFromPost } from '../../src/utils/video-handoff';
 import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../src/utils/footage-review';
 import { FOOTAGE_REVIEW_TASKS, tightenStoryboard, type FootageReview } from '../../src/lib/footage';
@@ -70,6 +90,36 @@ export default withLambda(async (event) => {
                 activeAssistantInRole(db, orgId, 'blog_writer'),
             ]);
             return json(200, { social, blog });
+        }
+        const qs = event.queryStringParameters ?? {};
+        // The Music picker's "A track from My Content": the workspace's generated and uploaded tracks.
+        if (qs.tracks) return json(200, { tracks: (await ownMusicTracks(db, orgId)).map(({ storageKey: _k, ...t }) => t) });
+        // The Results tab (registry metricsSource 'video'): what a studio makes, not post engagement.
+        if (qs.performance) {
+            const aid = Number(qs.assistantId);
+            if (!Number.isInteger(aid) || aid <= 0) return json(400, { error: 'assistantId is required.' });
+            const metrics = await videoResultsFor(db, orgId, aid);
+            return json(200, { hasData: metrics.made > 0, metrics });
+        }
+        // The Calendar tab (registry calendarItems 'videos'): each video on the day it was started and
+        // the day its finished file was saved. Read-only, like every dated item.
+        if (qs.calendar) {
+            const aid = Number(qs.assistantId);
+            const from = new Date(String(qs.from || '')), to = new Date(String(qs.to || ''));
+            if (!Number.isInteger(aid) || aid <= 0 || Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return json(400, { error: 'assistantId, from and to are required.' });
+            const rows = await db.select({ id: videoProjects.id, title: videoProjects.title, status: videoProjects.status, createdAt: videoProjects.createdAt, version: videoProjects.version, readyAt: contentAssets.createdAt })
+                .from(videoProjects)
+                .leftJoin(contentAssets, and(eq(contentAssets.id, videoProjects.outputAssetId), eq(contentAssets.organisationId, orgId)))
+                .where(and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, aid)))
+                .orderBy(desc(videoProjects.createdAt)).limit(300);
+            const items: Array<{ id: number; kind: string; title: string; at: string; done: boolean }> = [];
+            const inRange = (d: Date | null) => !!d && d >= from && d < to;
+            for (const r of rows) {
+                const title = r.version > 1 ? `${r.title} (version ${r.version})` : r.title;
+                if (inRange(r.createdAt) && r.status !== 'cancelled') items.push({ id: r.id, kind: 'video_started', title, at: r.createdAt.toISOString(), done: false });
+                if (r.readyAt && inRange(r.readyAt)) items.push({ id: r.id, kind: 'video_ready', title, at: r.readyAt.toISOString(), done: true });
+            }
+            return json(200, { items });
         }
         await sweepStuckProjects(db, orgId).catch((err) => console.error('[video-projects] sweep failed:', err));
         const id = Number(event.queryStringParameters?.id);
@@ -151,11 +201,101 @@ export default withLambda(async (event) => {
         if (row.status !== 'ready' || !row.storyboard) return json(409, { error: 'Only a finished video can be changed into a new version.' });
         return json(201, { project: await projectView(db, orgId, await newVersion(db, row)) });
     }
-    if ((action === 'replan' || action === 'edit_scene') && row.status === 'ready' && row.storyboard) {
+
+    // ── Notes on moments of a finished video ──
+    if (action === 'add_note') {
+        if (row.status !== 'ready') return json(409, { error: 'Notes go on a finished video.' });
+        const text = typeof body.text === 'string' ? body.text : '';
+        if (text.trim()) {
+            const blocked = await enforcePromptModeration({ text, userId, organisationId: orgId, source: 'video-projects' });
+            if (blocked) return blocked;
+        }
+        const tl = row.timeline as ProjectTimeline | null;
+        // A chat card may name a scene by number instead of a time: the note goes on its start.
+        const n = Number(body.sceneNumber);
+        const times = sceneTimes(tl);
+        const atS = body.atS == null && Number.isInteger(n) && n > 0 && times[n - 1] ? times[n - 1].startS + 0.1 : Number(body.atS);
+        const added = addNote(readNotes(row.momentNotes), { id: randomUUID().slice(0, 8), atS, text, times, by: userId, now: new Date(), durationS: tl?.durationS ?? null });
+        if ('error' in added) return json(400, { error: added.error });
+        await db.update(videoProjects).set({ momentNotes: added.notes, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+        return json(200, { note: added.note, project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+    if (action === 'delete_note') {
+        const notes = readNotes(row.momentNotes).filter((n) => n.id !== body.noteId);
+        await db.update(videoProjects).set({ momentNotes: notes, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+        return json(200, { project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+    if (action === 'notes_to_version') {
+        if (row.status !== 'ready' || !row.storyboard) return json(409, { error: 'Notes become a new version of a finished video.' });
+        const notes = readNotes(row.momentNotes);
+        if (!notes.some((n) => n.sceneId)) return json(409, { error: 'Leave a note on a moment of the video first.' });
+        // The notes move to the new version, which acts on them; the finished one keeps none.
+        const v = await newVersion(db, row, { status: 'planning', momentNotes: notes });
+        await db.update(videoProjects).set({ momentNotes: [], updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+        await wakeVideoWorker({ projectId: v.id, action: 'plan', mode: 'notes' }, headers);
+        return json(202, { project: await projectView(db, orgId, v) });
+    }
+
+    // ── The same video in the other shapes ──
+    if (action === 'reshape') {
+        if (row.status !== 'ready' || !row.storyboard) return json(409, { error: 'Finish the video first, then make it in the other shapes.' });
+        const shapes = (Array.isArray(body.shapes) ? body.shapes : []).filter(isVideoShape);
+        const r = await makeOtherShapes(db, row, { userId, shapes, headers });
+        return json(r.made.length ? 202 : 200, { made: await Promise.all(r.made.map((x) => projectView(db, orgId, x))), skipped: r.skipped });
+    }
+
+    if ((action === 'replan' || action === 'edit_scene' || action === 'rewrite_script' || action === 'set_options' || action === 'approve_script') && row.status === 'ready' && row.storyboard) {
+        if (action === 'approve_script') return json(409, { error: 'This video is already made.' });
         row = await newVersion(db, row);
     }
-    if ((action === 'replan' || action === 'edit_scene') && row.status === 'rendering') {
+    if ((action === 'replan' || action === 'edit_scene' || action === 'rewrite_script' || action === 'set_options') && row.status === 'rendering') {
         return json(409, { error: 'The finished video is rendering — wait a moment, then change it.' });
+    }
+
+    // ── Script first: the words approved, or rewritten, before any picture is made ──
+    if (action === 'approve_script') {
+        if (!['planned', 'failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'There is no storyboard waiting to be checked.' });
+        const sb = { ...(row.storyboard as Storyboard), scriptApprovedAt: new Date().toISOString() };
+        await db.update(videoProjects).set({ storyboard: sb, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+        return json(200, { project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+    if (action === 'rewrite_script') {
+        if (!['planned', 'failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'There is no storyboard waiting to be checked.' });
+        const feedback = typeof body.feedback === 'string' ? body.feedback.trim().slice(0, 600) : '';
+        if (feedback) {
+            const blocked = await enforcePromptModeration({ text: feedback, userId, organisationId: orgId, source: 'video-projects' });
+            if (blocked) return blocked;
+        }
+        // Words only: scene assets stay (planProject mode 'script' keeps every picture).
+        await db.update(videoProjects).set({ status: 'planning', note: null, editCount: row.editCount + 1, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+        await wakeVideoWorker({ projectId: row.id, action: 'plan', feedback, mode: 'script' }, headers);
+        return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+
+    // ── Music, colour look and name-caption style: no re-plan, nothing re-sourced ──
+    if (action === 'set_options') {
+        // A failed render can be changed too: its timeline is made again by "Make the video", which is
+        // free when every scene and the voiceover are already made. Without this a video whose music
+        // file had gone could only "Try the render again" — and fail the same way (2026-11-10).
+        if (!['planned', 'failed', 'render_failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video can’t be changed right now.' });
+        const brief = { ...(row.brief as VideoBrief) };
+        const sb = { ...(row.storyboard as Storyboard) };
+        // A track from My Content: checked to be this workspace's own music before it is kept.
+        if (body.musicAssetId != null) {
+            const own = await ownMusicTrack(db, orgId, Number(body.musicAssetId));
+            if (!own) return json(400, { error: 'That track isn’t in your My Content.' });
+            brief.musicMood = 'mine'; brief.musicAssetId = own.assetId; sb.music = null;
+        } else if (isMusicChoice(body.musicMood) && body.musicMood !== 'mine' && body.musicMood !== brief.musicMood) {
+            brief.musicMood = body.musicMood; brief.musicAssetId = null; sb.music = null;
+        }
+        // "Another track": the same mood, a new track made at "Make the video" (charged then, shown on
+        // the button). Also how a version whose music failed tries again.
+        if (body.anotherTrack === true) { if (sb.music?.trackId) brief.avoidTrackId = sb.music.trackId; sb.music = null; }
+        if (isVideoLook(body.look)) brief.look = body.look;
+        if (isLowerThirdStyle(body.lowerThird)) brief.lowerThird = body.lowerThird;
+        const back = row.status === 'render_failed' ? { status: 'planned', note: null } : {};
+        await db.update(videoProjects).set({ brief, storyboard: sb, ...back, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+        return json(200, { project: await projectView(db, orgId, (await load(row.id))!) });
     }
 
     if (action === 'plan_from_review') {
@@ -186,7 +326,7 @@ export default withLambda(async (event) => {
             if (blocked) return blocked;
         }
         // A new plan means new scenes: what was sourced for the old ones no longer fits.
-        await db.update(videoProjects).set({ status: 'planning', note: null, sceneAssets: {}, voiceoverAssetId: null, updatedAt: new Date() })
+        await db.update(videoProjects).set({ status: 'planning', note: null, sceneAssets: {}, voiceoverAssetId: null, editCount: row.editCount + 1, updatedAt: new Date() })
             .where(eq(videoProjects.id, row.id));
         await wakeVideoWorker({ projectId: row.id, action: 'plan', feedback }, headers);
         return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
@@ -201,7 +341,7 @@ export default withLambda(async (event) => {
         // What the scene SHOWS before the edit: only a change to it re-sources the scene. New words on
         // screen over the same clip keep the clip (they're an overlay) — except on a branded card,
         // whose words are drawn into the picture (staging, 2026-11-09: a words-only edit swapped the stock clip).
-        const looks = (s: typeof scene) => JSON.stringify([s.source, s.keywords ?? '', s.prompt ?? '', s.assetId ?? null, s.inS ?? null, s.outS ?? null, s.source === 'brand_card' ? (s.onScreenText ?? '') : '']);
+        const looks = sceneLooks;
         const before = looks(scene);
         let voiceChanged = false;
         if (typeof patch.voiceover === 'string' && patch.voiceover !== scene.voiceover) { scene.voiceover = patch.voiceover; voiceChanged = true; }
@@ -213,6 +353,10 @@ export default withLambda(async (event) => {
         if (typeof patch.tighten === 'boolean') { if (patch.tighten) delete scene.tighten; else scene.tighten = false; }
         if (patch.inS != null) scene.inS = Number(patch.inS);
         if (patch.outS != null) scene.outS = Number(patch.outS);
+        // A name caption on the scene ({ name, role }), or null / an empty name to take it off.
+        if ('nameCaption' in patch) { const nc = readNameCaption(patch.nameCaption); if (nc) scene.nameCaption = nc; else delete scene.nameCaption; }
+        // Changed words need approving again (script first).
+        if (voiceChanged) sb.scriptApprovedAt = null;
         const text = [scene.voiceover, scene.onScreenText, scene.prompt, scene.keywords].filter(Boolean).join('\n');
         if (text) {
             const blocked = await enforcePromptModeration({ text, userId, organisationId: orgId, source: 'video-projects' });
@@ -229,7 +373,7 @@ export default withLambda(async (event) => {
         const after = storyboard.scenes.find((s) => s.id === scene.id);
         if (!after || looks(after) !== before) delete assets[scene.id];   // re-sourced on the next build
         await db.update(videoProjects).set({
-            storyboard, changes, sceneAssets: assets, status: 'planned',
+            storyboard, changes, sceneAssets: assets, status: 'planned', editCount: row.editCount + 1,
             // The voiceover is one track for the whole script — any line changing re-records it.
             ...(voiceChanged ? { voiceoverAssetId: null } : {}),
             updatedAt: new Date(),
@@ -241,7 +385,10 @@ export default withLambda(async (event) => {
         if (!['planned', 'failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video is not ready to make.' });
         const hold = await holdBuild(db, orgId, row.storyboard as Storyboard, row.brief as VideoBrief, row);
         if (!hold.ok) return json(402, { error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit });
-        await db.update(videoProjects).set({ status: 'building', creditHold: hold.credits, startedAt: new Date(), note: null, updatedAt: new Date() })
+        // Campaign orders and the weekly autopilot plan a storyboard with no person behind it
+        // (createdBy null); whoever presses "Make the video" owns what it makes. Without this the
+        // worker refused it seconds later ("…no longer has an account") and it bounced back.
+        await db.update(videoProjects).set({ status: 'building', createdBy: row.createdBy ?? userId, creditHold: hold.credits, startedAt: new Date(), note: null, updatedAt: new Date() })
             .where(eq(videoProjects.id, row.id));
         await wakeVideoWorker({ projectId: row.id, action: 'build' }, headers);
         return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
@@ -249,7 +396,7 @@ export default withLambda(async (event) => {
 
     if (action === 'rerender') {
         if (row.status !== 'render_failed' || !row.timeline) return json(409, { error: 'There is nothing to render again for this video.' });
-        await db.update(videoProjects).set({ status: 'rendering', renderId: null, note: null, updatedAt: new Date() })
+        await db.update(videoProjects).set({ status: 'rendering', createdBy: row.createdBy ?? userId, renderId: null, note: null, updatedAt: new Date() })
             .where(eq(videoProjects.id, row.id));
         await wakeRenderWorker(row.id, headers);
         return json(202, { project: await projectView(db, orgId, (await load(row.id))!) });
