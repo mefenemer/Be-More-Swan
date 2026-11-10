@@ -299,9 +299,9 @@ check('the Results tab reads the studio figures; the Calendar shows videos, not 
 });
 
 // ── 7. Shapes, look, name captions, source files ────────────────────────────────────────────────
-check('another shape keeps the voiceover, own footage and paid AI scenes; free stock and cards are remade', () => {
+check('another shape keeps the voiceover and every clip (cropped to the frame); only branded cards are redrawn', () => {
     const kept = assetsForShape(sb, { s1: 11, s2: 12, s3: 13 });
-    assert.deepStrictEqual(kept, { s2: 12 });
+    assert.deepStrictEqual(kept, { s1: 11, s2: 12 }, 'stock is kept — searching again found the wrong pictures');
     assert.strictEqual(buildTasks(sb, { ...brief, shape: '1:1' }, { sceneAssets: kept, voiceoverAssetId: 99 }), 0, 'so it costs nothing');
     assert.strictEqual(shapeRoot({ id: 9, brief: { shapeOf: 4 } }), 4);
     assert.strictEqual(shapeRoot({ id: 9, brief: {} }), 9);

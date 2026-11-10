@@ -1761,7 +1761,7 @@
     const shapes = (Array.isArray(ui.shapes) ? ui.shapes : []).filter((x) => VIDEO_SHAPE_NAMES[x]);
     return videoActionCard(esc, {
       kicker: 'Make it in other shapes', rows: [['Shapes', shapes.length ? shapes.map((x) => VIDEO_SHAPE_NAMES[x]).join(', ') : 'Every shape it isn’t in yet']],
-      note: 'Free: the voiceover, your own footage and any AI scenes are kept; stock and branded cards are made again for each shape. Each one is saved to My Content when it’s done.',
+      note: 'Free: the voiceover and every clip and picture are kept, cropped to each shape; branded cards are drawn again. Each one is saved to My Content when it’s done.',
       button: 'Make them', body: id ? { action: 'reshape', id, ...(shapes.length ? { shapes } : {}) } : null, done: 'Making them. They appear under “Being made” on the Videos tab.',
     });
   }

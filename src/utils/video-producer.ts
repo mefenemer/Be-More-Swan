@@ -970,13 +970,18 @@ export async function newVersion(db: Db, row: typeof videoProjects.$inferSelect,
     return v;
 }
 
-/** The scene sources whose picture depends on the frame and costs nothing to make again. */
-const RESHOOT_FOR_SHAPE = new Set(['stock_video', 'stock_photo', 'brand_card']);
+/**
+ * The scene sources made again for another shape: only branded cards, whose words are drawn INTO the
+ * picture for its frame. Stock used to be searched again in the new orientation too, and came back
+ * wrong — ants on a wall for "documentary film reel", a street market for "filmmaker interview
+ * studio" (staging, 2026-11-10: Pexels has few square clips). The same clip, cropped to the new frame,
+ * keeps the subject the owner checked.
+ */
+const RESHOOT_FOR_SHAPE = new Set(['brand_card']);
 
 /**
- * What another shape of a finished video keeps: the voiceover, the owner's own footage and pictures,
- * and every AI scene (already paid for). Stock is searched again in the new orientation and branded
- * cards are drawn again in the new frame — both free. Pure.
+ * What another shape of a finished video keeps: the voiceover, every picture and clip — the owner's
+ * own, stock and AI — cropped to the new frame. Only branded cards are drawn again. Pure.
  */
 export function assetsForShape(storyboard: Storyboard, sceneAssets: unknown): Record<string, number> {
     const made = (sceneAssets && typeof sceneAssets === 'object' ? sceneAssets : {}) as Record<string, number>;
