@@ -22,7 +22,12 @@ import { presignR2Get } from './social-publish';
 type Db = ReturnType<typeof getDb>;
 
 /** Bump when the measuring or levelling changes, so kept results are made again. */
-export const LEVELLING_VERSION = 1;
+export const LEVELLING_VERSION = 2;
+/**
+ * The voice's ceiling: −2 dBFS, a decibel under the mix's −1, so the ducked music under it (peaks
+ * about −18 dBFS) can't push the sum past full scale. At −1 a staging render peaked at +0.1 dBFS.
+ */
+export const VOICE_CEILING_DB = -2;
 /** The longest file worth decoding here (a voiceover or bed is far shorter). */
 const MAX_BYTES = 40 * 1024 * 1024;
 
@@ -94,7 +99,7 @@ export async function levelledVoiceover(db: Db, args: { orgId: number; userId: n
     }
     const bytes = await fetchStored(a.storageKey);
     const pcm = bytes ? await decodeAudio(bytes, a.mimeType ?? a.storageKey) : null;
-    const done = pcm ? levelTo(pcm, args.targetLufs) : null;
+    const done = pcm ? levelTo(pcm, args.targetLufs, { ceilingDb: VOICE_CEILING_DB }) : null;
     if (!done || done.lufs == null) return null;
     // A mono voice goes back as mono: half the bytes, and it plays the same.
     const out = pcm!.channels[0] === pcm!.channels[1] ? { channels: [done.pcm.channels[0]], sampleRate: done.pcm.sampleRate } : done.pcm;

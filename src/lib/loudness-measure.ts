@@ -127,26 +127,35 @@ function limitedGain(pcm: Pcm, gainDb: number, ceilingDb: number): Pcm {
         for (const c of pcm.channels) { const v = Math.abs(c[n]) * g; if (v > peak) peak = v; }
         need[n] = peak > ceil ? ceil / peak : 1;
     }
-    // Look-ahead: the lowest need in the next `look` samples (a monotonic deque, O(n)).
-    const ahead = new Float32Array(len);
-    const dq: number[] = []; let head = 0;
-    for (let n = len - 1; n >= 0; n--) {
-        while (dq.length > head && need[dq[dq.length - 1]] >= need[n]) dq.pop();
-        dq.push(n);
-        while (dq[head] > n + look) head++;
-        ahead[n] = need[dq[head]];
+    // The gain curve, guaranteed under the need at every peak and smooth: hold the lowest need
+    // within ±look samples, then average that over ±look. Every window around a peak contains the
+    // peak, so the average there is at or below what the peak needs — no sample reaches the safety
+    // clip, which made peaks BETWEEN samples (+0.6 dBTP on a −1 dBFS ceiling, staging 2026-11-10).
+    const hold = new Float32Array(len);
+    {
+        const dq: number[] = []; let head = 0;
+        for (let i = 0; i < len + look; i++) {
+            if (i < len) { while (dq.length > head && need[dq[dq.length - 1]] >= need[i]) dq.pop(); dq.push(i); }
+            const n = i - look;
+            if (n < 0) continue;
+            while (dq[head] < n - look) head++;
+            hold[n] = need[dq[head]];
+        }
     }
-    const attack = 1 - Math.exp(-1 / look);
+    const sum = new Float64Array(len + 1);
+    for (let n = 0; n < len; n++) sum[n + 1] = sum[n] + hold[n];
     const release = 1 - Math.exp(-1 / (0.08 * fs));
     const out = pcm.channels.map(() => new Float32Array(len));
     let env = 1;
     for (let n = 0; n < len; n++) {
-        const t = ahead[n];
-        env += (t < env ? attack : release) * (t - env);
+        const a = Math.max(0, n - look), b = Math.min(len, n + look + 1);
+        const smooth = (sum[b] - sum[a]) / (b - a);
+        // Down exactly as the curve says; back up slowly (80 ms), never above the curve.
+        env = smooth < env ? smooth : Math.min(smooth, env + release * (smooth - env));
         const k = g * env;
         for (let ch = 0; ch < pcm.channels.length; ch++) {
             let v = pcm.channels[ch][n] * k;
-            if (v > ceil) v = ceil; else if (v < -ceil) v = -ceil;
+            if (v > ceil) v = ceil; else if (v < -ceil) v = -ceil;   // safety only — the curve already holds it
             out[ch][n] = v;
         }
     }

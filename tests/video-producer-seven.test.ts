@@ -424,6 +424,11 @@ check('a quiet voice with sharp peaks reaches −14 LUFS through the limiter, ne
     close(out.lufs!, -14, 0.6);
     assert.ok(samplePeakDb(out.pcm) <= -1 + 1e-6, `peak ${samplePeakDb(out.pcm)}`);
     assert.ok(out.gainDb > 15, 'raised a long way');
+    // The gain curve holds the peaks itself: nothing rides the safety clip (a hard clip makes peaks
+    // between samples — +0.6 dBTP on a −1 dBFS ceiling before this).
+    const ceil = Math.pow(10, -1 / 20);
+    const clipped = out.pcm.channels[0].filter((v) => Math.abs(v) >= ceil - 1e-6).length;
+    assert.ok(clipped <= 6, `${clipped} samples at the ceiling — at most one touch per peak, never a clipped run`);
     const back = readWav(wavBytes({ channels: [out.pcm.channels[0]], sampleRate: fs }))!;
     assert.strictEqual(back.sampleRate, fs); assert.strictEqual(back.channels.length, 1);
     close(back.channels[0][5000], out.pcm.channels[0][5000], 1e-4);
@@ -437,6 +442,7 @@ check('the build levels the real voiceover and measures the music; source files 
     assert.ok(vp.includes("(r.kind === 'voiceover' ? 'Voiceover / captions' : 'Music')"));
     const lv = read('src/utils/audio-levelling.ts');
     assert.ok(lv.includes("renderParams: { ...params, levelled: undefined"), 'the copy keeps the words, so captions follow it');
+    assert.ok(lv.includes('levelTo(pcm, args.targetLufs, { ceilingDb: VOICE_CEILING_DB })') && lv.includes('export const VOICE_CEILING_DB = -2;'), 'room for the music under the voice');
 });
 
 console.log(`\nvideo producer seven: ${passed} passed`);
