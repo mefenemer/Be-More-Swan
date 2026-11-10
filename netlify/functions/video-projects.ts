@@ -288,8 +288,9 @@ export default withLambda(async (event) => {
         } else if (isMusicChoice(body.musicMood) && body.musicMood !== 'mine' && body.musicMood !== brief.musicMood) {
             brief.musicMood = body.musicMood; brief.musicAssetId = null; sb.music = null;
         }
-        // "Another track": the same mood, a different track (the build avoids the last one).
-        if (body.anotherTrack === true && sb.music) { brief.avoidTrackId = sb.music.trackId; sb.music = null; }
+        // "Another track": the same mood, a new track made at "Make the video" (charged then, shown on
+        // the button). Also how a version whose music failed tries again.
+        if (body.anotherTrack === true) { if (sb.music?.trackId) brief.avoidTrackId = sb.music.trackId; sb.music = null; }
         if (isVideoLook(body.look)) brief.look = body.look;
         if (isLowerThirdStyle(body.lowerThird)) brief.lowerThird = body.lowerThird;
         const back = row.status === 'render_failed' ? { status: 'planned', note: null } : {};

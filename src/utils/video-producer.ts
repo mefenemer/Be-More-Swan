@@ -33,7 +33,7 @@ import { gatewayRoleModel } from './assistant-model';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { loadOrgProducts, renderProductFacts } from './org-products';
 import { normalizeBrandKit } from './brand-kit';
-import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, type MediaKind } from './ai-credits';
+import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, MUSIC_CREDIT_COST, type MediaKind } from './ai-credits';
 import { TASK_WEIGHTS, aiVideoTasks } from '../config/task-weights';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
@@ -57,14 +57,14 @@ import { recordPlatformIncident } from './platform-incident';
 import { asOwnVideos, footageStatus, loadFootage, ownVideos } from './footage-review';
 import { describeTightening, footagePlannerBlock, ownSpeechOnTimeline, silentWav, suggestionLine, tightenStoryboard, MAX_VIDEOS_PER_REVIEW, type FootageReview, type SpokenWord as FootageWord } from '../lib/footage';
 import { keepsOwnSound, minScenesFor, isVideoShape, shapeFrame, shapeOrientation, type VideoShape } from '../lib/storyboard';
-import { readMusicChoice, moodFor, pickTrack, speechWindows, musicTrack, MUSIC_LABELS, type MusicChoice } from '../lib/video-music';
+import { readMusicChoice, moodFor, speechWindows, musicTrack, wantsMadeMusic, MUSIC_LABELS, type MusicChoice } from '../lib/video-music';
 import { footageLufs, mixLevels, musicLufs, voiceLufs, TARGET_LUFS } from '../lib/loudness';
 import { LIMIT_CEILING_DB } from '../lib/loudness-measure';
 import { levelledVoiceover, measureAsset } from './audio-levelling';
 import { isVideoLook, lookStyle, type LookStyle } from '../lib/video-look';
 import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
 import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
-import { musicAssetFor, ownMusicTrack, ownMusicTracks, storedFileExists, usableMusicTracks } from './video-music-asset';
+import { makeVideoTrack, ownMusicTrack, ownMusicTracks, storedFileExists } from './video-music-asset';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -407,9 +407,16 @@ export function stillToMake(storyboard: Storyboard, made?: MadeSoFar): { scenes:
 }
 
 /** Tasks a build holds under the single task allowance — the same weights the ledger records. Pure. */
+/** Is a music track still to be made for this storyboard (a mood, and none made for it yet)? Pure. */
+export function musicToMake(storyboard: Storyboard, brief: VideoBrief): boolean {
+    const mood = moodFor(brief);
+    if (!mood || !wantsMadeMusic(brief)) return false;
+    return !(storyboard.music?.assetId && storyboard.music.mood === mood);
+}
+
 export function buildTasks(storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar): number {
     const todo = stillToMake(storyboard, made);
-    let n = 0;
+    let n = musicToMake(storyboard, brief) ? TASK_WEIGHTS.ai_music : 0;
     for (const s of todo.scenes) {
         if (s.source === 'ai_image') n += TASK_WEIGHTS.ai_image;
         if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)));
@@ -421,7 +428,8 @@ export function buildTasks(storyboard: Storyboard, brief: VideoBrief, made?: Mad
 /** The same, in legacy credits. Pure. */
 export function buildCredits(storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar): number {
     const todo = stillToMake(storyboard, made);
-    return estimateCredits({ ...storyboard, scenes: todo.scenes }, todo.voiceover ? brief : { ...brief, voiceover: false }, BUILD_COSTS);
+    return estimateCredits({ ...storyboard, scenes: todo.scenes }, todo.voiceover ? brief : { ...brief, voiceover: false }, BUILD_COSTS)
+        + (musicToMake(storyboard, brief) ? MUSIC_CREDIT_COST : 0);
 }
 
 /**
@@ -845,21 +853,30 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             } else {
                 musicNote = 'The track you chose from My Content is no longer there, so this version has no music.';
             }
-        } else if (mood) {
-            try {
-                const tracks = await usableMusicTracks(db);
-                const keep = storyboard.music && storyboard.music.mood === mood ? tracks.find((t) => t.id === storyboard.music!.trackId) : null;
-                const track = keep ?? pickTrack(tracks, mood, totalS, projectId, brief.avoidTrackId);
-                if (track && await storedFileExists(track.storageKey)) {
-                    music = { assetId: await musicAssetFor(db, { orgId, userId, track }), title: track.title, storageKey: track.storageKey };
-                    if (!keep) { storyboard.music = { trackId: track.id, title: track.title, mood }; await save({ storyboard }); }
-                } else if (track) {
-                    console.warn(`[video-producer] build ${projectId}: library track ${track.id} has no file (${track.storageKey}) — no music`);
-                    musicNote = 'The music library track’s file is missing, so this version has no music. Choose a track from My Content instead.';
+        } else if (mood && wantsMadeMusic(brief)) {
+            // A track MADE for this video (owner, 2026-11-10): once, then kept on the storyboard so a
+            // new version or another shape reuses it free. Made after the voiceover, so it is as long
+            // as the video. A failure costs nothing and leaves the video without music, never unmade.
+            const keptId = storyboard.music?.assetId && storyboard.music.mood === mood ? storyboard.music.assetId : null;
+            const kept = keptId ? await ownMusicTrack(db, orgId, keptId).catch(() => null) : null;
+            if (kept && (!kept.storageKey || await storedFileExists(kept.storageKey))) {
+                music = { assetId: kept.assetId, title: kept.title, storageKey: kept.storageKey };
+            } else if (keptId) {
+                // Its track has gone (deleted from My Content). A new one wasn't in what this build
+                // held, so it isn't made here: "Try the music again" makes one, with its cost shown.
+                musicNote = 'The music made for this video is no longer in My Content, so this version has no music.';
+            } else {
+                try {
+                    const t = await makeVideoTrack(db, { orgId, userId, assistantId: p.aiAssistantId ?? null, mood, videoS: totalS, title: `Music · ${storyboard.title}` });
+                    await settle('audio', MUSIC_CREDIT_COST, true);
+                    music = { assetId: t.assetId, title: t.title, storageKey: null };
+                    storyboard.music = { assetId: t.assetId, title: t.title, mood };
+                    await save({ storyboard });
+                } catch (err) {
+                    await settle('audio', MUSIC_CREDIT_COST, false);
+                    console.warn(`[video-producer] build ${projectId}: music not made —`, err);
+                    musicNote = 'The music couldn’t be made this time, so this version has no music and nothing was charged for it.';
                 }
-            } catch (err) {
-                // No music is better than no video: the library may be empty in this environment.
-                console.warn(`[video-producer] build ${projectId}: no music —`, err);
             }
         }
         // Even loudness (src/lib/loudness.ts): every part levelled to about −14 LUFS, the music ducked

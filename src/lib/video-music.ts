@@ -9,6 +9,12 @@
 // The mood is the brief's: 'chill' | 'upbeat' | 'ambient' | 'inspiring', 'auto' (picked from what the
 // video is), or 'none' — No music. A brief with no mood at all (every video before 2026-11-10) is 'auto'.
 //
+// ⚠️ Since 2026-11-10 a mood means a track MADE for the video with Stable Audio (owner: the library
+// tracks were not good enough, and their files had gone from storage). It is made once per video, at
+// "Make the video", charged like "✨ Generate music" (an AI music track), and kept on the storyboard so
+// new versions and other shapes reuse it for free. 'mine' is a track of the owner's own from My Content.
+// The library helpers below (pickTrack) remain for the post editor's Sound picker only.
+//
 // PURE: no database, no network. Tested in tests/video-producer-seven.test.ts.
 
 import type { AudioOverlay } from './audio-overlays';
@@ -16,13 +22,41 @@ import type { AudioOverlay } from './audio-overlays';
 export const MUSIC_MOODS = ['chill', 'upbeat', 'ambient', 'inspiring'] as const;
 export type MusicMood = typeof MUSIC_MOODS[number];
 /**
+ * Does this brief get a track made for it? Only a brief that asked — 'auto' or a mood, set explicitly.
+ * A brief from before music existed (no musicMood at all) gets none: remaking an old video must not
+ * start charging for music it never had. Pure.
+ */
+export function wantsMadeMusic(brief: { musicMood?: string | null }): boolean {
+    if (brief.musicMood == null || brief.musicMood === '') return false;
+    const c = readMusicChoice(brief.musicMood);
+    return c !== 'none' && c !== 'mine';
+}
+
+const MOOD_SOUND: Record<MusicMood, { pace: 'slow' | 'medium' | 'fast'; description: string }> = {
+    upbeat: { pace: 'fast', description: 'bright modern pop-electronic groove, punchy drums, catchy synth hook' },
+    chill: { pace: 'medium', description: 'warm lo-fi beat, mellow keys, soft bass, relaxed' },
+    ambient: { pace: 'slow', description: 'soft ambient pads, gentle piano, airy and unobtrusive' },
+    inspiring: { pace: 'medium', description: 'hopeful cinematic build, piano and strings, light pulse' },
+};
+
+/**
+ * What to ask Stable Audio for: the mood's sound, its pace, and a length that covers the video with a
+ * second or two to fade out (the bed is cut to the video anyway). Never the business's own words — the
+ * prompt only describes music. Pure.
+ */
+export function madeMusicRequest(mood: MusicMood, videoS: number): { mood: MusicMood; pace: 'slow' | 'medium' | 'fast'; description: string; durationS: number } {
+    const m = MOOD_SOUND[mood] ?? MOOD_SOUND.upbeat;
+    return { mood, pace: m.pace, description: m.description, durationS: Math.min(190, Math.max(6, Math.ceil(videoS) + 2)) };
+}
+
+/**
  * 'mine' = a track the owner chose from My Content (`brief.musicAssetId`): one they generated with
  * "✨ Generate music" or uploaded. Added 2026-11-10 — the owner judged the library tracks not good
  * enough to put under a video.
  */
 export type MusicChoice = MusicMood | 'auto' | 'none' | 'mine';
 export const MUSIC_LABELS: Record<MusicChoice, string> = {
-    auto: 'Picked to suit the video', chill: 'Chilled', upbeat: 'Upbeat', ambient: 'Calm, in the background', inspiring: 'Inspiring', none: 'No music',
+    auto: 'Made to suit the video', chill: 'Chilled', upbeat: 'Upbeat', ambient: 'Calm, in the background', inspiring: 'Inspiring', none: 'No music',
     mine: 'A track from My Content',
 };
 

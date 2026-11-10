@@ -140,8 +140,11 @@ export interface Storyboard {
      * ("script first", 2026-11-10). Any later change to a voiceover line clears it.
      */
     scriptApprovedAt?: string | null;
-    /** The library track the build chose (src/lib/video-music.ts), kept so a new version keeps it. */
-    music?: { trackId: number; title: string; mood: string } | null;
+    /**
+     * The track made for this video (assetId, Stable Audio — src/lib/video-music.ts), or the library
+     * track an older build chose (trackId). Kept so a new version or another shape reuses it free.
+     */
+    music?: { trackId?: number; assetId?: number; title: string; mood: string } | null;
 }
 
 /** A picture the planner may use for a product_photo scene. */
@@ -320,8 +323,10 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
             scenes,
             // Kept through an edit (edit_scene re-checks the whole storyboard); never set by the model.
             ...(typeof r.scriptApprovedAt === 'string' && r.scriptApprovedAt ? { scriptApprovedAt: r.scriptApprovedAt } : {}),
-            ...(music && Number.isInteger(Number(music.trackId)) && Number(music.trackId) > 0
-                ? { music: { trackId: Number(music.trackId), title: clip(music.title, 120), mood: clip(music.mood, 20) } } : {}),
+            ...(music && Number.isInteger(Number(music.assetId)) && Number(music.assetId) > 0
+                ? { music: { assetId: Number(music.assetId), title: clip(music.title, 120), mood: clip(music.mood, 20) } }
+                : music && Number.isInteger(Number(music.trackId)) && Number(music.trackId) > 0
+                    ? { music: { trackId: Number(music.trackId), title: clip(music.title, 120), mood: clip(music.mood, 20) } } : {}),
         },
         changes,
     };

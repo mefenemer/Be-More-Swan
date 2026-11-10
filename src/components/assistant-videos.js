@@ -36,7 +36,7 @@
   const BEAT = { hook: 'Hook', problem: 'Problem', value: 'Value', proof: 'Proof', cta: 'Call to action' };
   // The same choices the server reads (src/lib/video-music.ts, video-look.ts, lower-third.ts).
   // 'mine' = a track of the owner's own from My Content (generated with "✨ Generate music", or uploaded).
-  const MUSIC = [['auto', 'Picked to suit the video'], ['upbeat', 'Upbeat'], ['chill', 'Chilled'], ['inspiring', 'Inspiring'], ['ambient', 'Calm, in the background'], ['mine', 'A track from My Content'], ['none', 'No music']];
+  const MUSIC = [['auto', 'Made to suit the video'], ['upbeat', 'Upbeat'], ['chill', 'Chilled'], ['inspiring', 'Inspiring'], ['ambient', 'Calm, in the background'], ['mine', 'A track from My Content'], ['none', 'No music']];
   const LOOKS = [['natural', 'Natural (no grade)'], ['brand', 'Your brand colours'], ['warm', 'Warm'], ['cool', 'Cool'], ['punchy', 'Bright and punchy'], ['mono', 'Black and white']];
   const LOWER_THIRDS = [['bar', 'Brand-colour bar, left'], ['clean', 'Plain white words, left'], ['boxed', 'White box, centred']];
   const labelOf = (list, v) => (list.find((x) => x[0] === v) || list[0])[1];
@@ -229,7 +229,7 @@
             <span data-vid-mine-pick ${d.musicMood === 'mine' ? '' : 'hidden'} class="block mt-1">${(state.tracks || []).length
               ? `<select name="musicAssetId" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${trackOptions(d.musicAssetId)}</select>`
               : `<span class="block text-[11px] text-amber-800">${esc(NO_TRACKS)}</span>`}</span>
-            <span class="block text-[11px] text-gray-500 mt-0.5">From our library, or a track of your own. It goes quiet whenever someone speaks.</span></label>
+            <span class="block text-[11px] text-gray-500 mt-0.5">Made for each video with AI (its cost is on “Make the video”), or a track of your own. It goes quiet whenever someone speaks.</span></label>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Colour look</span>
             <select name="look" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${options(LOOKS, d.look)}</select></label>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Name captions</span>
@@ -632,7 +632,9 @@
         : mix.musicNote ? 'none in this version'
         : b.musicMood === 'mine' ? (mix.musicTitle ? `“${mix.musicTitle}” (your track)` : 'Your track')
         : (sb && sb.music ? `“${sb.music.title}” (${labelOf(MUSIC, sb.music.mood).toLowerCase()})` : labelOf(MUSIC, b.musicMood || 'auto'));
-      return `${mix.musicNote ? `<p class="text-xs text-amber-800 mt-2">${esc(mix.musicNote)}</p>` : ''}<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Music:</span> ${esc(music)} · <span class="font-bold">Look:</span> ${esc(labelOf(LOOKS, b.look || 'natural'))}${b.audience ? ` · <span class="font-bold">For:</span> ${esc(b.audience)}` : ''}${b.goal ? ` · <span class="font-bold">They should:</span> ${esc(b.goal)}` : ''}</p>`;
+      const retry = mix.musicNote && b.musicMood && !['none', 'mine'].includes(b.musicMood)
+        ? ` <button type="button" data-vid-act="another-track" data-id="${v.id}" class="font-bold text-indigo-700 hover:underline">Try the music again</button>` : '';
+      return `${mix.musicNote ? `<p class="text-xs text-amber-800 mt-2">${esc(mix.musicNote)}${retry}</p>` : ''}<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Music:</span> ${esc(music)} · <span class="font-bold">Look:</span> ${esc(labelOf(LOOKS, b.look || 'natural'))}${b.audience ? ` · <span class="font-bold">For:</span> ${esc(b.audience)}` : ''}${b.goal ? ` · <span class="font-bold">They should:</span> ${esc(b.goal)}` : ''}</p>`;
     }
     const mine = b.musicMood === 'mine' || state.mineOpen.has(v.id);
     const mood = mine ? 'mine' : (MUSIC.some((x) => x[0] === b.musicMood) ? b.musicMood : 'auto');
@@ -1061,7 +1063,7 @@
       case 'approve-script': act(id, { action: 'approve_script', id }, 'Script approved. Now check the pictures, then press “Make the video”.'); break;
       case 'rewrite': state.rewriting = id; render(); host()?.querySelector('[data-vid-rewrite-form] textarea')?.focus(); break;
       case 'cancel-rewrite': state.rewriting = null; render(); break;
-      case 'another-track': act(id, { action: 'set_options', id, anotherTrack: true }, 'Another track will be picked when the video is made.'); break;
+      case 'another-track': act(id, { action: 'set_options', id, anotherTrack: true }, 'A new track will be made when you press “Make the video” — it shows what it uses.'); break;
       case 'note-here': {
         const p = host()?.querySelector(`[data-vid-player="${id}"]`);
         openNote(id, p ? p.currentTime : 0);

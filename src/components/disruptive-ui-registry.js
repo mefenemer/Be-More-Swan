@@ -1648,7 +1648,7 @@
 
   // ── Built-ins: Video Producer cards (docs/video-producer-plan.md §5.10) ─────────────────────
   // The choices the server reads (src/lib/video-music.ts, video-look.ts, lower-third.ts).
-  const VIDEO_MUSIC = { auto: 'Picked to suit the video', upbeat: 'Upbeat', chill: 'Chilled', inspiring: 'Inspiring', ambient: 'Calm, in the background', none: 'No music' };
+  const VIDEO_MUSIC = { auto: 'Made to suit the video', upbeat: 'Upbeat', chill: 'Chilled', inspiring: 'Inspiring', ambient: 'Calm, in the background', none: 'No music' };
   const VIDEO_LOOKS = { natural: 'Natural (no grade)', brand: 'Your brand colours', warm: 'Warm', cool: 'Cool', punchy: 'Bright and punchy', mono: 'Black and white' };
   const VIDEO_LOWER_THIRDS = { bar: 'Brand-colour bar, left', clean: 'Plain white words, left', boxed: 'White box, centred' };
   const VIDEO_SHAPE_NAMES = { '9:16': 'Vertical 9:16', '1:1': 'Square 1:1', '16:9': 'Wide 16:9' };
@@ -1724,7 +1724,7 @@
         ui.summary ? ['What changes', String(ui.summary).slice(0, 200)] : null,
         body.musicAssetId ? ['Music', ui.musicTitle ? `“${String(ui.musicTitle).slice(0, 80)}” from My Content` : `Your track #${body.musicAssetId} from My Content`] : null,
         body.musicMood ? ['Music', VIDEO_MUSIC[body.musicMood]] : null,
-        body.anotherTrack ? ['Music', 'Another track, same mood'] : null,
+        body.anotherTrack ? ['Music', 'A new track, same mood (made when you press “Make the video”)'] : null,
         body.look ? ['Colour look', VIDEO_LOOKS[body.look]] : null,
         body.lowerThird ? ['Name captions', VIDEO_LOWER_THIRDS[body.lowerThird]] : null,
       ],

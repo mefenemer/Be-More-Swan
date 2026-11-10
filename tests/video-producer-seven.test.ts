@@ -8,7 +8,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { TARGET_LUFS, MAX_GAIN, gainToTarget, footageLufs, mixLevels, voiceLufs, musicLufs, landedLufs, MUSIC_UNDER_DB } from '../src/lib/loudness';
-import { isMusicChoice, readMusicChoice, moodFor, pickTrack, speechWindows, musicTrack, type LibraryTrack } from '../src/lib/video-music';
+import { isMusicChoice, madeMusicRequest, wantsMadeMusic, readMusicChoice, moodFor, pickTrack, speechWindows, musicTrack, type LibraryTrack } from '../src/lib/video-music';
 import { audioGainAt, duckAt, sanitiseAudioOverlays } from '../src/lib/audio-overlays';
 import { lookStyle, saturation } from '../src/lib/video-look';
 import { lowerThirdOverlays, readNameCaption } from '../src/lib/lower-third';
@@ -134,16 +134,33 @@ check('the bed: bounded to the video, faded, ducked under every spoken stretch',
     assert.strictEqual(loud.level, 2);
 });
 
-check('the build lays music, levels every part, and keeps the chosen track on the storyboard', () => {
+check('a mood makes a track for the video once (charged then), kept on the storyboard for versions and shapes', () => {
     const vp = read('src/utils/video-producer.ts');
     assert.ok(vp.includes('const mood = moodFor(brief);'));
-    assert.ok(vp.includes('pickTrack(tracks, mood, totalS, projectId, brief.avoidTrackId)'));
-    assert.ok(vp.includes('storyboard.music = { trackId: track.id, title: track.title, mood }'));
+    assert.ok(vp.includes('await makeVideoTrack(db, { orgId, userId, assistantId: p.aiAssistantId ?? null, mood, videoS: totalS'));
+    assert.ok(vp.includes("await settle('audio', MUSIC_CREDIT_COST, true);") && vp.includes("await settle('audio', MUSIC_CREDIT_COST, false);"), 'charged only when made');
+    assert.ok(vp.includes('storyboard.music = { assetId: t.assetId, title: t.title, mood };'));
     assert.ok(vp.includes('audio.push(musicTrack({'));
-    assert.ok(vp.includes('voiceLufs(brief.voice ?? DEFAULT_VOICE)') && vp.includes('footageLufs(footage.flatMap('));
+    // The cost shown and held includes the track, once.
+    const b = { ...brief, musicMood: 'upbeat' } as VideoBrief;
+    const made = { sceneAssets: { s1: 1, s2: 2, s3: 3 }, voiceoverAssetId: 9 };
+    assert.strictEqual(buildTasks(sb, b, made), 20, 'a music track is 20 tasks, like "Generate music"');
+    assert.strictEqual(buildTasks({ ...sb, music: { assetId: 5, title: 'x', mood: 'upbeat' } }, b, made), 0, 'already made → free');
+    assert.strictEqual(buildTasks({ ...sb, music: { assetId: 5, title: 'x', mood: 'chill' } }, b, made), 20, 'another mood → a new track');
+    assert.strictEqual(buildTasks(sb, { ...brief }, made), 0, 'a brief from before music existed never starts paying for it');
+    assert.strictEqual(buildTasks(sb, { ...brief, musicMood: 'none' } as VideoBrief, made), 0);
+    assert.strictEqual(buildTasks(sb, { ...brief, musicMood: 'mine', musicAssetId: 4 } as VideoBrief, made), 0);
     const ma = read('src/utils/video-music-asset.ts');
-    assert.ok(ma.includes('offerableTo(usableTracks(tracks, now), { creditsEnabled: false })'), 'only tracks we may offer');
-    assert.ok(ma.includes('eq(contentAssets.providerAssetId, String(args.track.id))'), 'one row per workspace per track');
+    assert.ok(ma.includes("candidates: [{ name: args.title, share: false, videoProducer: true }]"), 'private, never shared to the community library');
+    assert.ok(ma.includes('never the business') === false && ma.includes('madeMusicRequest(args.mood, args.videoS)'));
+});
+
+check('the music request describes only music, covers the video, and stays in Stable Audio\'s range', () => {
+    const r = madeMusicRequest('inspiring', 21.5);
+    assert.strictEqual(r.durationS, 24); assert.strictEqual(r.pace, 'medium');
+    assert.strictEqual(madeMusicRequest('upbeat', 400).durationS, 190);
+    assert.strictEqual(madeMusicRequest('ambient', 1).durationS, 6);
+    assert.ok(!wantsMadeMusic({}) && !wantsMadeMusic({ musicMood: 'none' }) && !wantsMadeMusic({ musicMood: 'mine' }) && wantsMadeMusic({ musicMood: 'auto' }));
 });
 
 // ── 3. Audience and goal ────────────────────────────────────────────────────────────────────────
@@ -378,9 +395,9 @@ check('"A track from My Content" needs a track id; a mood clears it', () => {
     assert.ok('brief' in r && r.brief.musicMood === 'mine' && r.brief.musicAssetId === 7);
 });
 
-check('the build checks a track\'s file is there, and uses the owner\'s own track org-scoped', () => {
+check('the build checks a kept track\'s file is there, and uses the owner\'s own track org-scoped', () => {
     const vp = read('src/utils/video-producer.ts');
-    assert.match(vp, /if \(track && await storedFileExists\(track\.storageKey\)\)/, 'a library track with no file is left out');
+    assert.match(vp, /if \(kept && \(!kept\.storageKey \|\| await storedFileExists\(kept\.storageKey\)\)\)/, 'a kept track whose file has gone is made again, not rendered silent');
     assert.match(vp, /ownMusicTrack\(db, orgId, brief\.musicAssetId\)/);
     assert.ok(vp.includes('musicNote'), 'the version says why it has no music');
     const asset = read('src/utils/video-music-asset.ts');

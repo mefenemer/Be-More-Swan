@@ -563,7 +563,7 @@
             type: 'radio',
             required: false,
             options: [
-              { value: 'auto', label: 'Picked to suit each video', description: 'Royalty-free tracks from our own library. The music goes quiet whenever someone speaks.' },
+              { value: 'auto', label: 'Made to suit each video', description: 'A track made with AI for each video — one music track’s worth of tasks, shown before anything is made. It goes quiet whenever someone speaks.' },
               { value: 'upbeat', label: 'Upbeat', description: 'Lively and bright.' },
               { value: 'chill', label: 'Chilled', description: 'Relaxed, lo-fi.' },
               { value: 'inspiring', label: 'Inspiring', description: 'Uplifting, for stories and big news.' },
