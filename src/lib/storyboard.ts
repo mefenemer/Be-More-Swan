@@ -91,6 +91,8 @@ export interface VideoBrief {
     goal?: string | null;
     /** A colour look over every scene (src/lib/video-look.ts). Absent = natural. */
     look?: VideoLook | null;
+    /** How loud the music sits: 'quiet' | 'normal' | 'loud' (src/lib/video-music.ts). Absent = normal. */
+    musicLevel?: 'quiet' | 'normal' | 'loud' | null;
     /** How name captions look (src/lib/lower-third.ts). Absent = 'bar'. */
     lowerThird?: LowerThirdStyle | null;
     /** This video is another shape of video N (one click "Make it in the other shapes"). */

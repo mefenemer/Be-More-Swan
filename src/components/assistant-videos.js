@@ -39,6 +39,8 @@
   const MUSIC = [['auto', 'Made to suit the video'], ['upbeat', 'Upbeat'], ['chill', 'Chilled'], ['inspiring', 'Inspiring'], ['ambient', 'Calm, in the background'], ['mine', 'A track from My Content'], ['none', 'No music']];
   const LOOKS = [['natural', 'Natural (no grade)'], ['brand', 'Your brand colours'], ['warm', 'Warm'], ['cool', 'Cool'], ['punchy', 'Bright and punchy'], ['mono', 'Black and white']];
   const LOWER_THIRDS = [['bar', 'Brand-colour bar, left'], ['clean', 'Plain white words, left'], ['boxed', 'White box, centred']];
+  // How loud the music sits (src/lib/video-music.ts MUSIC_LEVELS) — three words, as every video is levelled.
+  const MUSIC_LEVELS = [['normal', 'Normal'], ['quiet', 'Quiet'], ['loud', 'Loud']];
   const labelOf = (list, v) => (list.find((x) => x[0] === v) || list[0])[1];
   const options = (list, v) => list.map(([k, l]) => `<option value="${k}"${k === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
   // Voices come from src/public/voice-catalogue.json through voice-picker.js — the list the server
@@ -630,7 +632,7 @@
         : (sb && sb.music ? `“${sb.music.title}” (${labelOf(MUSIC, sb.music.mood).toLowerCase()})` : labelOf(MUSIC, b.musicMood || 'auto'));
       const retry = mix.musicNote && b.musicMood && !['none', 'mine'].includes(b.musicMood)
         ? ` <button type="button" data-vid-act="another-track" data-id="${v.id}" class="font-bold text-indigo-700 hover:underline">Try the music again</button>` : '';
-      return `${mix.musicNote ? `<p class="text-xs text-amber-800 mt-2">${esc(mix.musicNote)}${retry}</p>` : ''}<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Music:</span> ${esc(music)} · <span class="font-bold">Look:</span> ${esc(labelOf(LOOKS, b.look || 'natural'))}${b.audience ? ` · <span class="font-bold">For:</span> ${esc(b.audience)}` : ''}${b.goal ? ` · <span class="font-bold">They should:</span> ${esc(b.goal)}` : ''}</p>`;
+      return `${mix.musicNote ? `<p class="text-xs text-amber-800 mt-2">${esc(mix.musicNote)}${retry}</p>` : ''}<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Music:</span> ${esc(music)}${b.musicLevel && b.musicLevel !== 'normal' && b.musicMood !== 'none' ? ` (${esc(labelOf(MUSIC_LEVELS, b.musicLevel).toLowerCase())})` : ''} · <span class="font-bold">Look:</span> ${esc(labelOf(LOOKS, b.look || 'natural'))}${b.audience ? ` · <span class="font-bold">For:</span> ${esc(b.audience)}` : ''}${b.goal ? ` · <span class="font-bold">They should:</span> ${esc(b.goal)}` : ''}</p>`;
     }
     const mine = b.musicMood === 'mine' || state.mineOpen.has(v.id);
     const mood = mine ? 'mine' : (MUSIC.some((x) => x[0] === b.musicMood) ? b.musicMood : 'auto');
@@ -638,11 +640,14 @@
       ? `<select data-vid-opt="musicAssetId" data-id="${v.id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5" aria-label="Your track">${trackOptions(b.musicMood === 'mine' ? b.musicAssetId : null)}</select>`
       : `<span class="block mt-1 text-[11px] text-amber-800">${esc(NO_TRACKS)}</span>`;
     return `
-      <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2" data-vid-options="${v.id}">
+      <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2" data-vid-options="${v.id}">
         <label class="block"><span class="block text-[11px] font-bold text-gray-600">Music${sb.music && mood !== 'none' && mood !== 'mine' ? ` — “${esc(sb.music.title)}”` : ''}</span>
           <select data-vid-opt="musicMood" data-id="${v.id}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(MUSIC, mood)}</select>
           ${minePick}
           ${sb.music && mood !== 'none' && mood !== 'mine' ? `<button type="button" data-vid-act="another-track" data-id="${v.id}" class="text-[11px] font-bold text-indigo-700 hover:underline">Another track</button>` : ''}</label>
+        <label class="block"><span class="block text-[11px] font-bold text-gray-600">Music volume</span>
+          <select data-vid-opt="musicLevel" data-id="${v.id}" ${mood === 'none' ? 'disabled title="No music on this video"' : ''} class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 disabled:opacity-50">${options(MUSIC_LEVELS, b.musicLevel || 'normal')}</select>
+          <span class="block text-[11px] text-gray-500">It still goes quiet whenever someone speaks.</span></label>
         <label class="block"><span class="block text-[11px] font-bold text-gray-600">Colour look</span>
           <select data-vid-opt="look" data-id="${v.id}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(LOOKS, b.look || 'natural')}</select></label>
         <label class="block"><span class="block text-[11px] font-bold text-gray-600">Name captions</span>

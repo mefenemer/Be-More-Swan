@@ -15,7 +15,7 @@
 //   POST { action:'rerender', id }                       → a render_failed video: render the saved timeline again (free)
 //   POST { action:'approve_script', id }                → the voiceover script approved on its own, before any picture (free)
 //   POST { action:'rewrite_script', id, feedback? }     → the words rewritten, every scene's picture kept (free)
-//   POST { action:'set_options', id, musicMood?, musicAssetId?, anotherTrack?, look?, lowerThird? } → music (a mood,
+//   POST { action:'set_options', id, musicMood?, musicAssetId?, anotherTrack?, musicLevel?, look?, lowerThird? } → music (a mood,
 //        none, or a track from My Content), colour look and
 //        name-caption style, changed without re-planning (free; a ready video gets a new version first)
 //   POST { action:'add_note', id, atS, text }           → a note on a moment of a ready video, tied to its scene
@@ -51,7 +51,7 @@ import { enforcePromptModeration } from '../../src/utils/moderation';
 import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
 import { enforceStoryboard, isVideoShape, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
-import { isMusicChoice } from '../../src/lib/video-music';
+import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
 import { ownMusicTrack, ownMusicTracks } from '../../src/utils/video-music-asset';
 import { isVideoLook } from '../../src/lib/video-look';
 import { isLowerThirdStyle, readNameCaption } from '../../src/lib/lower-third';
@@ -320,6 +320,7 @@ export default withLambda(async (event) => {
         if (body.anotherTrack === true) { if (sb.music?.trackId) brief.avoidTrackId = sb.music.trackId; sb.music = null; }
         if (isVideoLook(body.look)) brief.look = body.look;
         if (isLowerThirdStyle(body.lowerThird)) brief.lowerThird = body.lowerThird;
+        if (isMusicLevel(body.musicLevel)) { if (body.musicLevel === 'normal') delete brief.musicLevel; else brief.musicLevel = body.musicLevel; }
         const back = row.status === 'render_failed' ? { status: 'planned', note: null } : {};
         await db.update(videoProjects).set({ brief, storyboard: sb, ...back, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
         return json(200, { project: await projectView(db, orgId, (await load(row.id))!) });

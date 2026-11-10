@@ -57,7 +57,7 @@ import { recordPlatformIncident } from './platform-incident';
 import { asOwnVideos, footageStatus, loadFootage, ownVideos } from './footage-review';
 import { describeTightening, footagePlannerBlock, ownSpeechOnTimeline, silentWav, suggestionLine, tightenStoryboard, MAX_VIDEOS_PER_REVIEW, type FootageReview, type SpokenWord as FootageWord } from '../lib/footage';
 import { keepsOwnSound, minScenesFor, isVideoShape, shapeFrame, shapeOrientation, type VideoShape } from '../lib/storyboard';
-import { readMusicChoice, moodFor, speechWindows, musicTrack, wantsMadeMusic, MUSIC_LABELS, type MusicChoice } from '../lib/video-music';
+import { isMusicLevel, musicLevelGain, MUSIC_LEVEL_LABELS, readMusicChoice, moodFor, speechWindows, musicTrack, wantsMadeMusic, MUSIC_LABELS, type MusicChoice } from '../lib/video-music';
 import { footageLufs, mixLevels, musicLufs, voiceLufs, TARGET_LUFS } from '../lib/loudness';
 import { LIMIT_CEILING_DB } from '../lib/loudness-measure';
 import { levelledVoiceover, measureAsset } from './audio-levelling';
@@ -149,6 +149,7 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
             goal: typeof b.goal === 'string' && b.goal.trim() ? b.goal.replace(/\s+/g, ' ').trim().slice(0, 200) : null,
             look: isVideoLook(b.look) ? b.look : 'natural',
             lowerThird: isLowerThirdStyle(b.lowerThird) ? b.lowerThird : 'bar',
+            ...(isMusicLevel(b.musicLevel) && b.musicLevel !== 'normal' ? { musicLevel: b.musicLevel } : {}),
             ...(Number.isInteger(Number(b.shapeOf)) && Number(b.shapeOf) > 0 ? { shapeOf: Number(b.shapeOf) } : {}),
             language: languageLabel(b.language) ? String(b.language) : null,
             captions: b.captions !== false,
@@ -898,6 +899,9 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             voice: voiceLoud, footage: footageLoud, music: music ? (musicLoud?.lufs ?? musicLufs(music.storageKey)) : null,
             hasVoice: !!voiceoverAssetId, hasOwnSound: ownSound, hasMusic: !!music,
         });
+        // The owner's Music volume (Quiet / Normal / Loud): the bed and its ducked level together.
+        const owned = musicLevelGain(brief.musicLevel);
+        if (owned !== 1) { levels.music = Math.round(levels.music * owned * 1000) / 1000; levels.musicUnder = Math.round(levels.musicUnder * owned * 1000) / 1000; }
         // A bed is never raised past its own peaks (the render can only multiply).
         if (musicLoud && Number.isFinite(musicLoud.peakDb)) {
             const room = Math.pow(10, (LIMIT_CEILING_DB - musicLoud.peakDb) / 20);
@@ -1241,7 +1245,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         const extras = [
             brief.audience ? `for: ${brief.audience.slice(0, 100)}` : '',
             brief.goal ? `they should: ${brief.goal.slice(0, 100)}` : '',
-            `music: ${MUSIC_LABELS[readMusicChoice(brief.musicMood)]}${sb?.music ? ` ("${sb.music.title}")` : ''}`,
+            `music: ${MUSIC_LABELS[readMusicChoice(brief.musicMood)]}${sb?.music ? ` ("${sb.music.title}")` : ''}${isMusicLevel(brief.musicLevel) && brief.musicLevel !== 'normal' ? `, volume ${MUSIC_LEVEL_LABELS[brief.musicLevel].toLowerCase()}` : ''}`,
             brief.look && brief.look !== 'natural' ? `look: ${LOOK_LABELS[brief.look] ?? brief.look}` : '',
             sb && sb.scenes.some((x) => x.nameCaption) ? `name captions: ${LOWER_THIRD_LABELS[brief.lowerThird ?? 'bar'] ?? brief.lowerThird}` : '',
         ].filter(Boolean).join(' · ');

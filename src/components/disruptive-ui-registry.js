@@ -1651,6 +1651,7 @@
   const VIDEO_MUSIC = { auto: 'Made to suit the video', upbeat: 'Upbeat', chill: 'Chilled', inspiring: 'Inspiring', ambient: 'Calm, in the background', none: 'No music' };
   const VIDEO_LOOKS = { natural: 'Natural (no grade)', brand: 'Your brand colours', warm: 'Warm', cool: 'Cool', punchy: 'Bright and punchy', mono: 'Black and white' };
   const VIDEO_LOWER_THIRDS = { bar: 'Brand-colour bar, left', clean: 'Plain white words, left', boxed: 'White box, centred' };
+  const VIDEO_MUSIC_LEVELS = { quiet: 'Quiet', normal: 'Normal', loud: 'Loud' };
   const VIDEO_SHAPE_NAMES = { '9:16': 'Vertical 9:16', '1:1': 'Square 1:1', '16:9': 'Wide 16:9' };
 
   /**
@@ -1706,7 +1707,7 @@
       button: 'Approve the script', body: id ? { action: 'approve_script', id } : null, done: 'Approved. Check the pictures on the Videos tab, then press “Make the video”.',
     });
   }
-  // { type: 'video_options_proposal', projectId, musicMood?, musicAssetId?, musicTitle?, anotherTrack?, look?, lowerThird?, summary? }
+  // { type: 'video_options_proposal', projectId, musicMood?, musicAssetId?, musicTitle?, anotherTrack?, musicLevel?, look?, lowerThird?, summary? }
   // musicAssetId: a track of the owner's own from My Content; the server checks it is theirs.
   function renderVideoOptionsProposalCard(ui, esc) {
     const id = videoId(ui);
@@ -1715,6 +1716,7 @@
     if (Number.isInteger(trackId) && trackId > 0) body.musicAssetId = trackId;
     else if (VIDEO_MUSIC[ui.musicMood]) body.musicMood = ui.musicMood;
     if (ui.anotherTrack === true) body.anotherTrack = true;
+    if (VIDEO_MUSIC_LEVELS[ui.musicLevel]) body.musicLevel = ui.musicLevel;
     if (VIDEO_LOOKS[ui.look]) body.look = ui.look;
     if (VIDEO_LOWER_THIRDS[ui.lowerThird]) body.lowerThird = ui.lowerThird;
     const any = Object.keys(body).length > 2;
@@ -1725,6 +1727,7 @@
         body.musicAssetId ? ['Music', ui.musicTitle ? `“${String(ui.musicTitle).slice(0, 80)}” from My Content` : `Your track #${body.musicAssetId} from My Content`] : null,
         body.musicMood ? ['Music', VIDEO_MUSIC[body.musicMood]] : null,
         body.anotherTrack ? ['Music', 'A new track, same mood (made when you press “Make the video”)'] : null,
+        body.musicLevel ? ['Music volume', `${VIDEO_MUSIC_LEVELS[body.musicLevel]} (it still goes quiet when someone speaks)`] : null,
         body.look ? ['Colour look', VIDEO_LOOKS[body.look]] : null,
         body.lowerThird ? ['Name captions', VIDEO_LOWER_THIRDS[body.lowerThird]] : null,
       ],
