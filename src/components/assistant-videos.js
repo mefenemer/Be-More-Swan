@@ -41,6 +41,14 @@
   const LOWER_THIRDS = [['bar', 'Brand-colour bar, left'], ['clean', 'Plain white words, left'], ['boxed', 'White box, centred']];
   // How loud the music sits (src/lib/video-music.ts MUSIC_LEVELS) — three words, as every video is levelled.
   const MUSIC_LEVELS = [['normal', 'Normal'], ['quiet', 'Quiet'], ['loud', 'Loud']];
+  // The words on a scene (src/lib/scene-text.ts — the same keys and labels the build reads). One line per
+  // scene; the font is the brand's when the render has it, otherwise Impact (owner decisions, 2026-11-10).
+  const TEXT_POS = [['top', 'Top'], ['middle', 'Middle'], ['bottom', 'Bottom']];
+  const TEXT_WHEN = [['scene', 'The whole scene'], ['first', 'The first 3 seconds'], ['last', 'The last 3 seconds'], ['words', 'While its words are said']];
+  const TEXT_STYLE = [['dark', 'Dark box'], ['plain', 'Plain (light backing)'], ['brand', 'Brand-colour box']];
+  const TEXT_ANIM = [['rise', 'Rise'], ['fade', 'Fade'], ['pop', 'Pop'], ['none', 'Cut']];
+  const TEXT_Y = { top: 20, middle: 50, bottom: 70 };
+  const MOVING = ['stock_video', 'ai_video', 'own_video'];
   const labelOf = (list, v) => (list.find((x) => x[0] === v) || list[0])[1];
   const options = (list, v) => list.map(([k, l]) => `<option value="${k}"${k === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
   // Voices come from src/public/voice-catalogue.json through voice-picker.js — the list the server
@@ -82,6 +90,8 @@
     tracks: null, mineOpen: new Set(),
     // Videos ticked for the bulk bar (Archive / Restore / Delete), cleared when the stage changes.
     selected: new Set(), bulkBusy: false, bulkNote: null,
+    // The brand colour and render font for the scene text preview (GET returns it with the videos).
+    brand: { accent: null, font: 'Impact' },
   };
 
   // Stages as pills, like the Brand Designer's Briefs (owner, 2026-11-06: the Briefs tab's patterns on
@@ -154,6 +164,7 @@
     try {
       const data = await call('GET', null, `?assistantId=${encodeURIComponent(state.assistantId)}`);
       state.videos = (data.projects || []).filter((p) => p.aiAssistantId == null || p.aiAssistantId === state.assistantId);
+      if (data.brand) state.brand = data.brand;
       state.loadError = null;
       // A note about work in progress ("Making the video…") is stale once the video has finished,
       // one way or the other; errors stay until the next action.
@@ -510,13 +521,116 @@
     return fresh ? body : `<details class="mt-2"><summary class="text-xs text-gray-500 cursor-pointer">Your footage: what ${who()} saw and the edits you chose</summary>${body}</details>`;
   }
 
+  /** Where the captions sit on this video, and whether it has any (the words keep clear of them). */
+  function captionsOf(v) {
+    const b = v.brief || {};
+    return { on: b.captions !== false, pos: (b.captionStyle && b.captionStyle.position) || 'bottom' };
+  }
+  const textPosOf = (v, s) => s.textPos || (captionsOf(v).pos === 'top' ? 'bottom' : 'top');
+  const textWhenOf = (s) => s.textWhen || (s.source === 'own_video' ? 'first' : 'scene');
+
+  /** " · top · first 3 s · brand box" — only what differs from the plain default. */
+  function textSummary(v, s) {
+    if (s.source === 'brand_card') return '';
+    const bits = [];
+    if (s.textPos) bits.push(labelOf(TEXT_POS, s.textPos).toLowerCase());
+    if (s.textWhen) bits.push(labelOf(TEXT_WHEN, s.textWhen).toLowerCase());
+    if (s.textStyle && s.textStyle !== 'dark') bits.push(labelOf(TEXT_STYLE, s.textStyle).toLowerCase());
+    if (s.textAnim && s.textAnim !== 'rise') bits.push(labelOf(TEXT_ANIM, s.textAnim).toLowerCase());
+    return bits.length ? ` <span class="text-gray-500">· ${esc(bits.join(' · '))}</span>` : '';
+  }
+
+  /** The look of the words in the preview — the same choices as scene-text.ts textLook (a guide, not the render). */
+  function previewBoxCss(style) {
+    const accent = /^#?[0-9a-f]{6}$/i.test(String(state.brand.accent || '')) ? (String(state.brand.accent).startsWith('#') ? state.brand.accent : `#${state.brand.accent}`) : null;
+    if (style === 'plain') return 'background:rgba(0,0,0,0.25);color:#fff';
+    if (style === 'brand' && accent) {
+      const n = parseInt(accent.slice(1), 16);
+      const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+      return `background:${accent};color:${lum > 0.6 ? '#000' : '#fff'}`;
+    }
+    return 'background:rgba(0,0,0,0.55);color:#fff';
+  }
+
+  /** The scene's picture with the words drawn where and how they'll be. Repainted as the form changes. */
+  function textPreviewHtml(v, s, thumb, isVideo, o) {
+    const shape = (v.brief && v.brief.shape) || '9:16';
+    const ratio = shape === '16:9' ? '16 / 9' : shape === '1:1' ? '1 / 1' : '9 / 16';
+    const width = shape === '16:9' ? 224 : shape === '1:1' ? 144 : 112;   // px: the prebuilt CSS has no w-56 / w-36
+    const bg = thumb ? (isVideo ? `<video src="${esc(thumb)}" muted playsinline loop autoplay preload="metadata" class="absolute inset-0 w-full h-full object-cover"></video>` : `<img src="${esc(thumb)}" alt="" class="absolute inset-0 w-full h-full object-cover">`) : '';
+    const cap = captionsOf(v);
+    const words = (o.text || '').trim();
+    const font = state.brand.font === 'Impact' ? `'Anton', Impact, 'Arial Narrow Bold', sans-serif` : `${state.brand.font}, sans-serif`;
+    return `<div data-vid-text-preview class="relative shrink-0 rounded-md overflow-hidden bg-gray-800" style="width:${width}px;aspect-ratio:${ratio}">
+        ${bg}
+        ${cap.on ? `<span class="absolute text-center font-bold" style="left:4px;right:4px;font-size:7px;color:#fef08a;top:${TEXT_Y[cap.pos] || 70}%;transform:translateY(-50%)">captions</span>` : ''}
+        ${words ? `<span class="absolute left-1/2 px-1 rounded leading-tight text-center" style="font-size:9px;top:${TEXT_Y[o.pos]}%;transform:translate(-50%,-50%);max-width:90%;font-family:${font};${previewBoxCss(o.style)}">${esc(words)}</span>` : ''}
+      </div>`;
+  }
+
+  /** The Text group on a scene's Change form: the words, then where / when / look / appears, beside a preview. */
+  function textGroupHtml(v, s, thumb, isVideo) {
+    const card = s.source === 'brand_card';
+    const input = `<label class="block"><span class="block text-[11px] font-bold text-gray-600">On-screen text (optional)</span>
+        <input name="onScreenText" maxlength="60" value="${esc(s.onScreenText || '')}" data-vid-text-input class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>`;
+    if (card) return `${input}<p class="text-[11px] text-gray-500">On a branded card the words are the card’s headline, drawn into the picture.</p>`;
+    const o = { text: s.onScreenText || '', pos: textPosOf(v, s), style: s.textStyle || 'dark' };
+    const sel = (name, list, val) => `<select name="${name}" data-vid-text-opt class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(list, val)}</select>`;
+    return `
+      <fieldset class="border border-gray-200 rounded-lg p-2 bg-white">
+        <legend class="px-1 text-[11px] font-bold text-gray-600">Text on the video</legend>
+        <div class="flex flex-col sm:flex-row gap-3">
+          <div class="flex-1 min-w-0 space-y-2">
+            ${input}
+            <div class="grid grid-cols-2 gap-2">
+              <label class="block"><span class="block text-[11px] font-bold text-gray-600">Where</span>${sel('textPos', TEXT_POS, o.pos)}</label>
+              <label class="block"><span class="block text-[11px] font-bold text-gray-600">When</span>${sel('textWhen', TEXT_WHEN, textWhenOf(s))}</label>
+              <label class="block"><span class="block text-[11px] font-bold text-gray-600">Look</span>${sel('textStyle', TEXT_STYLE, o.style)}</label>
+              <label class="block"><span class="block text-[11px] font-bold text-gray-600">Appears</span>${sel('textAnim', TEXT_ANIM, s.textAnim || 'rise')}</label>
+            </div>
+            <p data-vid-text-clash class="${captionsOf(v).on && o.pos === captionsOf(v).pos ? '' : 'hidden'} text-[11px] font-semibold text-amber-800">That’s where the captions are — the two would overlap. Choose another place.</p>
+            <p class="text-[11px] text-gray-500">The preview is a guide. “While its words are said” needs a voiceover line in this scene.</p>
+          </div>
+          ${textPreviewHtml(v, s, thumb, isVideo, o)}
+        </div>
+      </fieldset>`;
+  }
+
+  /**
+   * The text choices that differ from what the scene would get anyway. Saving a scene untouched must not
+   * pin today's defaults onto it (moving the captions later should still move the words).
+   */
+  function textPatch(f, fd) {
+    if (!fd.has('textPos')) return {};
+    const v = state.videos.find((x) => x.id === Number(f.dataset.id));
+    const s = v && v.storyboard && v.storyboard.scenes.find((x) => x.id === f.dataset.scene);
+    if (!s) return {};
+    const shown = { textPos: textPosOf(v, s), textWhen: textWhenOf(s), textStyle: s.textStyle || 'dark', textAnim: s.textAnim || 'rise' };
+    const out = {};
+    Object.keys(shown).forEach((k) => { const val = String(fd.get(k)); if (val !== shown[k] || s[k]) out[k] = val; });
+    return out;
+  }
+
+  /** Repaint a Change form's preview and overlap warning from what's chosen now. */
+  function paintTextPreview(f) {
+    const v = state.videos.find((x) => x.id === Number(f.dataset.id));
+    const s = v && v.storyboard && v.storyboard.scenes.find((x) => x.id === f.dataset.scene);
+    const old = f.querySelector('[data-vid-text-preview]');
+    if (!v || !s || !old || !f.elements.textPos) return;
+    const thumb = v.sceneThumbs && v.sceneThumbs[s.id];
+    const o = { text: f.elements.onScreenText.value, pos: f.elements.textPos.value, style: f.elements.textStyle.value };
+    old.outerHTML = textPreviewHtml(v, s, thumb, MOVING.includes(s.source), o);
+    const cap = captionsOf(v);
+    f.querySelector('[data-vid-text-clash]')?.classList.toggle('hidden', !(cap.on && o.pos === cap.pos));
+  }
+
   function sceneHtml(v, s, i) {
     const editable = v.status === 'planned' || v.status === 'failed';
     const thumb = v.sceneThumbs && v.sceneThumbs[s.id];
     const isVideo = s.source === 'stock_video' || s.source === 'ai_video' || s.source === 'own_video';
     const at = s.source === 'own_video' && s.inS != null ? `#t=${Number(s.inS)}` : '';
     const media = thumb
-      ? (isVideo ? `<video src="${esc(thumb)}${at}" muted playsinline preload="metadata" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0"></video>` : `<img src="${esc(thumb)}" alt="" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0">`)
+      ? (isVideo ? `<video src="${esc(thumb)}${at}" muted playsinline loop preload="metadata" data-vid-hoverplay title="Moving footage — point at it, or tap, to play" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0 cursor-pointer"></video>` : `<img src="${esc(thumb)}" alt="" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0">`)
       : `<div class="w-14 h-24 rounded-md bg-gray-100 shrink-0 flex items-center justify-center text-[10px] text-gray-400 text-center px-1">${esc(SOURCE[s.source] || s.source)}</div>`;
     const editing = state.editing && state.editing.id === v.id && state.editing.sceneId === s.id;
     if (editing) {
@@ -526,8 +640,7 @@
             <p class="text-xs font-bold text-gray-700">Scene ${i + 1} · ${esc(BEAT[s.beat] || s.beat)}</p>
             <label class="block"><span class="block text-[11px] font-bold text-gray-600">Voiceover</span>
               <textarea name="voiceover" rows="2" maxlength="240" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${esc(s.voiceover)}</textarea></label>
-            <label class="block"><span class="block text-[11px] font-bold text-gray-600">On-screen text (optional)</span>
-              <input name="onScreenText" maxlength="60" value="${esc(s.onScreenText || '')}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
+            ${textGroupHtml(v, s, thumb, isVideo)}
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <label class="block"><span class="block text-[11px] font-bold text-gray-600">Picture from</span>
                 <select name="source" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${Object.entries(SOURCE).filter(([k]) => (k !== 'product_photo' || s.source === 'product_photo') && (k !== 'own_video' || s.source === 'own_video')).map(([k, l]) => `<option value="${k}" ${k === s.source ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
@@ -561,7 +674,7 @@
           <div class="min-w-0">
             <p class="text-[10px] font-bold uppercase tracking-wide text-gray-400">Words</p>
             ${s.voiceover ? `<p class="text-sm text-gray-900 mt-0.5 break-words">“${esc(s.voiceover)}”</p>` : '<p class="text-xs text-gray-500 mt-0.5">No voiceover in this scene.</p>'}
-            ${s.onScreenText ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">On screen:</span> ${esc(s.onScreenText)}</p>` : ''}
+            ${s.onScreenText ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">On screen:</span> ${esc(s.onScreenText)}${textSummary(v, s)}</p>` : ''}
             ${s.nameCaption ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">Name caption:</span> ${esc(s.nameCaption.name)}${s.nameCaption.role ? ` · ${esc(s.nameCaption.role)}` : ''}</p>` : ''}
           </div>
           <div class="flex gap-2 min-w-0">
@@ -569,6 +682,8 @@
             <div class="min-w-0">
               <p class="text-[10px] font-bold uppercase tracking-wide text-gray-400">Picture</p>
               <p class="text-xs text-gray-700 mt-0.5">${esc(SOURCE[s.source] || s.source)}${s.source === 'own_video' && s.inS != null ? ` ${esc(ownName(v, s.assetId))} ${mmss(s.inS)}–${mmss(s.outS)}` : ''}</p>
+              ${/* Moving or still — a paused first frame looked exactly like a picture (owner, 2026-11-10). */ ''}
+              <span class="inline-block mt-0.5 text-[10px] font-bold rounded px-1.5 py-0.5 ${MOVING.includes(s.source) ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-600'}">${MOVING.includes(s.source) ? '▶ Moving' : 'Still'}</span>
               ${s.keywords || s.prompt ? `<p class="text-xs text-gray-500 mt-0.5 break-words">${esc(s.keywords || s.prompt)}</p>` : ''}
               ${tightenHtml(v, s, editable)}
             </div>
@@ -1119,6 +1234,25 @@
   });
 
   // Ticking a video in the footage form; adding files to it.
+  // The scene text preview follows the form as it's typed and chosen.
+  document.addEventListener('input', (e) => {
+    const f = e.target.closest && e.target.closest('[data-vid-scene-form]');
+    if (f && host() && host().contains(f) && (e.target.matches('[data-vid-text-input]') || e.target.matches('[data-vid-text-opt]'))) paintTextPreview(f);
+  });
+  // Moving scenes play while pointed at (and on a tap), so they don't read as still pictures.
+  document.addEventListener('mouseover', (e) => {
+    const vid = e.target.closest && e.target.closest('video[data-vid-hoverplay]');
+    if (vid && host() && host().contains(vid)) vid.play().catch(() => {});
+  });
+  document.addEventListener('mouseout', (e) => {
+    const vid = e.target.closest && e.target.closest('video[data-vid-hoverplay]');
+    if (vid && host() && host().contains(vid) && !vid.contains(e.relatedTarget)) vid.pause();
+  });
+  document.addEventListener('click', (e) => {
+    const vid = e.target.closest && e.target.closest('video[data-vid-hoverplay]');
+    if (vid && host() && host().contains(vid)) { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); }
+  });
+
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (host() && host().contains(t) && t.matches('[data-vid-pick]')) {
@@ -1201,6 +1335,8 @@
         ...(source === 'ai_image' || source === 'ai_video' ? { prompt: words } : { keywords: words }),
         ...(fd.has('inS') && source === 'own_video' ? { inS: Number(fd.get('inS')), outS: Number(fd.get('outS')) } : {}),
         nameCaption: String(fd.get('ncName') || '').trim() ? { name: String(fd.get('ncName')), role: String(fd.get('ncRole') || '') } : null,
+        // A branded card draws its words into the picture: only the words apply there.
+        ...textPatch(f, fd),
       };
       const id = Number(f.dataset.id);
       state.editing = null;

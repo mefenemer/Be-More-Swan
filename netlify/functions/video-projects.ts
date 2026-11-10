@@ -42,7 +42,9 @@
 
 import { and, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, videoProjects } from '../../db/schema';
+import { aiAssistants, organisations, videoProjects } from '../../db/schema';
+import { normalizeBrandKit } from '../../src/utils/brand-kit';
+import { textFont } from '../../src/lib/scene-text';
 import { requireTenant } from '../../src/utils/tenant';
 import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/utils/assistant-capabilities';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
@@ -55,6 +57,7 @@ import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
 import { ownMusicTrack, ownMusicTracks } from '../../src/utils/video-music-asset';
 import { isVideoLook } from '../../src/lib/video-look';
 import { isLowerThirdStyle, readNameCaption } from '../../src/lib/lower-third';
+import { readSceneText } from '../../src/lib/scene-text';
 import { contentAssets } from '../../db/schema';
 import { randomUUID } from 'crypto';
 import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
@@ -132,11 +135,17 @@ export default withLambda(async (event) => {
         const scope = Number.isInteger(forAssistant) && forAssistant > 0
             ? and(eq(videoProjects.organisationId, orgId), eq(videoProjects.aiAssistantId, forAssistant))
             : eq(videoProjects.organisationId, orgId);
-        const [live, archived] = await Promise.all([
+        const [live, archived, [org]] = await Promise.all([
             db.select().from(videoProjects).where(and(scope, isNull(videoProjects.archivedAt))).orderBy(desc(videoProjects.createdAt)).limit(50),
             db.select().from(videoProjects).where(and(scope, isNotNull(videoProjects.archivedAt))).orderBy(desc(videoProjects.archivedAt)).limit(50),
+            db.select({ brandKit: organisations.brandKit }).from(organisations).where(eq(organisations.id, orgId)).limit(1),
         ]);
-        return json(200, { projects: await Promise.all([...live, ...archived].map((r) => projectView(db, orgId, r))) });
+        // The brand colour and the font the render will use, for the scene text preview (scene-text.ts).
+        const kit = normalizeBrandKit(org?.brandKit);
+        return json(200, {
+            projects: await Promise.all([...live, ...archived].map((r) => projectView(db, orgId, r))),
+            brand: { accent: kit.primaryColor, font: textFont(kit.fontFamily) },
+        });
     }
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
@@ -382,6 +391,12 @@ export default withLambda(async (event) => {
         if (patch.inS != null) scene.inS = Number(patch.inS);
         if (patch.outS != null) scene.outS = Number(patch.outS);
         // A name caption on the scene ({ name, role }), or null / an empty name to take it off.
+        // The words' place, timing, look and entrance (scene-text.ts). null clears one back to the default.
+        for (const k of ['textPos', 'textWhen', 'textStyle', 'textAnim'] as const) {
+            if (!(k in patch)) continue;
+            const v = readSceneText({ [k]: patch[k] })[k];
+            if (v) (scene as unknown as Record<string, unknown>)[k] = v; else delete scene[k];
+        }
         if ('nameCaption' in patch) { const nc = readNameCaption(patch.nameCaption); if (nc) scene.nameCaption = nc; else delete scene.nameCaption; }
         // Changed words need approving again (script first).
         if (voiceChanged) sb.scriptApprovedAt = null;

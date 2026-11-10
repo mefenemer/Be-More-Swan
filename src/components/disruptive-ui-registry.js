@@ -5015,6 +5015,13 @@
   // One scene of a storyboard. It only changes the plan: making the video stays the button on the video,
   // which states its cost. chat-session.js → video-projects.ts `edit_scene`, as "Change" on the scene.
   const VIDEO_SCENE_SOURCES = { stock_video: 'Stock footage', stock_photo: 'Stock photo', brand_card: 'Branded card', ai_image: 'AI picture', ai_video: 'AI clip' };
+  // The words' place, timing, look and entrance (src/lib/scene-text.ts labels).
+  const VIDEO_TEXT_LABELS = {
+    textPos: ['Where the words sit', { top: 'Top', middle: 'Middle', bottom: 'Bottom' }],
+    textWhen: ['When they show', { scene: 'The whole scene', first: 'The first 3 seconds', last: 'The last 3 seconds', words: 'While its words are said' }],
+    textStyle: ['How they look', { dark: 'Dark box', plain: 'Plain (light backing)', brand: 'Brand-colour box' }],
+    textAnim: ['How they appear', { none: 'Cut', fade: 'Fade', rise: 'Rise', pop: 'Pop' }],
+  };
   function renderVideoSceneEditCard(ui, esc) {
     const patch = ui.patch && typeof ui.patch === 'object' ? ui.patch : null;
     if (!patch || !Number.isInteger(Number(ui.projectId)) || !ui.sceneId || !Object.keys(patch).length) return null;
@@ -5032,6 +5039,7 @@
       ${patch.onScreenText != null ? change('On-screen text', now.onScreenText, patch.onScreenText) : ''}
       ${patch.source != null ? change('Picture from', '', VIDEO_SCENE_SOURCES[patch.source] || patch.source) : ''}
       ${words != null ? change('What to show', '', words) : ''}
+      ${Object.entries(VIDEO_TEXT_LABELS).filter(([k]) => patch[k] && VIDEO_TEXT_LABELS[k][1][patch[k]]).map(([k, [label, names]]) => change(label, '', names[patch[k]])).join('')}
       ${'nameCaption' in patch ? change('Name caption', '', patch.nameCaption ? `${patch.nameCaption.name}${patch.nameCaption.role ? ` · ${patch.nameCaption.role}` : ''}` : '(none)') : ''}
       <p class="text-xs text-gray-600 mt-2">This only changes the plan. Nothing is made until you press “Make the video”, which says what it uses.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
@@ -5447,6 +5455,7 @@
         detail: {
           action: ui.action, postId, scheduleAt: ui.scheduleAt || null, timezone: ui.timezone || null, reason, instruction,
           source: el.querySelector('[data-bap-source]:checked')?.value === 'ai' ? 'ai' : 'stock',
+          replaceAsset,
           applyAsRule: !!el.querySelector('[data-bap-rule]')?.checked,
           redraft: !!el.querySelector('[data-bap-redraft]')?.checked,
           respond({ ok, message, error }) {
@@ -5455,7 +5464,6 @@
             say(error || 'That didn’t work — please try again.', 'error');
           },
         },
-          replaceAsset,
       }));
     });
     return el;

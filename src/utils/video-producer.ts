@@ -63,6 +63,7 @@ import { LIMIT_CEILING_DB } from '../lib/loudness-measure';
 import { levelledVoiceover, measureAsset } from './audio-levelling';
 import { isVideoLook, lookStyle, type LookStyle } from '../lib/video-look';
 import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
+import { defaultTextPos, textFont, textLook, textWindow, textY } from '../lib/scene-text';
 import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
 import { makeVideoTrack, ownMusicTrack, ownMusicTracks, storedFileExists } from './video-music-asset';
 
@@ -484,7 +485,7 @@ export const VIDEO_CARD = {
 /** How long on-screen text stays over the owner's own footage. */
 export const OWN_TITLE_S = 3;
 
-export function sceneOverlays(scenes: Scene[], durations: number[], captionPosition: 'bottom' | 'middle' | 'top' = 'bottom', names?: { style?: string | null; accent?: string | null; aspect: number }): Overlay[] {
+export function sceneOverlays(scenes: Scene[], durations: number[], captionPosition: 'bottom' | 'middle' | 'top' = 'bottom', names?: { style?: string | null; accent?: string | null; aspect: number }, text?: { brandFont?: string | null; words?: Array<{ start: number; end: number }> }): Overlay[] {
     const out: Overlay[] = [];
     let t = 0;
     scenes.forEach((s, i) => {
@@ -497,17 +498,19 @@ export function sceneOverlays(scenes: Scene[], durations: number[], captionPosit
         // overlaid as well, the first sample render showed "Pop in this week" three times at once
         // (card, overlay, captions). The card says it; the overlay stays off.
         if (s.onScreenText && s.source !== 'brand_card') {
-            const text = onScreenLines(s.onScreenText);
-            // Over the owner's own take, a title is a title: the opening seconds, not the whole scene
-            // ("Marmalade Productions" sat over 23 s of someone talking, staging 2026-11-09).
-            const shown = s.source === 'own_video' && d > OWN_TITLE_S + 1 ? OWN_TITLE_S : d;
+            const words = onScreenLines(s.onScreenText);
+            // The owner's choices (scene-text.ts), each defaulting to what the build always did:
+            // clear of the captions (upper third, or lower when captions are at the top); the whole
+            // scene, or the opening seconds over the owner's own take ("Marmalade Productions" sat
+            // over 23 s of someone talking, staging 2026-11-09); a dark box; rising in.
+            const pos = s.textPos ?? defaultTextPos(captionPosition);
+            const said = text?.words?.filter((w) => w.start >= t - 0.05 && w.end <= t + d + 0.05) ?? [];
+            const win = textWindow(s.textWhen, t, d, { ownVideo: s.source === 'own_video', spoken: said.length ? { startS: said[0].start, endS: said[said.length - 1].end } : null });
             out.push({
-                id: `vp_${s.id}`, text,
-                // Upper third: the captions own the lower part of the frame — unless they were moved
-                // to the top, when the on-screen text takes the lower part instead.
-                x: 0.5, y: captionPosition === 'top' ? 0.7 : 0.2, fontFamily: 'Impact', fontSizePct: onScreenFontPct(text),
-                color: '#FFFFFF', boxStroke: null, boxFill: '#000000', boxOpacity: 0.55,
-                startS: Math.round(t * 10) / 10, endS: Math.round((t + shown) * 10) / 10, anim: 'rise',
+                id: `vp_${s.id}`, text: words,
+                x: 0.5, y: textY(pos), fontFamily: textFont(text?.brandFont), fontSizePct: onScreenFontPct(words),
+                ...textLook(s.textStyle, names?.accent), boxStroke: null,
+                startS: win.startS, endS: win.endS, anim: s.textAnim ?? 'rise',
             });
         }
         t += d;
@@ -941,7 +944,8 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         if (music) audio.push(musicTrack({ assetId: music.assetId, title: music.title, durationS: totalS, gap: levels.music, under: levels.musicUnder, windows: spokenWindows }));
         const frame = shapeFrame(shape);
         const overlays = sceneOverlays(storyboard.scenes, durations, brief.captions !== false ? normalizeCaptionStyle(brief.captionStyle).position : 'bottom',
-            { style: brief.lowerThird, accent: kit.primaryColor, aspect: frame.width / frame.height });
+            { style: brief.lowerThird, accent: kit.primaryColor, aspect: frame.width / frame.height },
+            { brandFont: kit.fontFamily, words });
         // 3. The timeline — saved on the project and rendered to My Content. No post: the Video Producer
         // is a studio (owner, 2026-11-09; docs/video-producer-studio-plan.md). Posting is the Social
         // Media Manager's job, from the finished video.
@@ -1233,7 +1237,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         const from = ORIGIN_LABELS[r.origin] ? ` · ${ORIGIN_LABELS[r.origin]}` : '';
         // Its scenes, once it can still be changed: "make the opening punchier" needs the words.
         const lines = sb && (r.status === 'planned' || r.status === 'failed')
-            ? sb.scenes.map((s, i) => `\n    • scene ${i + 1} (${s.beat}, ${s.source}): voiceover "${(s.voiceover || '').slice(0, 240)}"${s.onScreenText ? `; on screen "${s.onScreenText}"` : ''}${s.nameCaption ? `; name caption "${s.nameCaption.name}${s.nameCaption.role ? ` · ${s.nameCaption.role}` : ''}"` : ''}${s.tightened ? `; tightened: ${describeTightening(s.tightened)}` : s.tighten === false ? '; kept as filmed' : ''}`).join('')
+            ? sb.scenes.map((s, i) => `\n    • scene ${i + 1} (${s.beat}, ${s.source}): voiceover "${(s.voiceover || '').slice(0, 240)}"${s.onScreenText ? `; on screen "${s.onScreenText}"${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).length ? ` (${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).join(', ')})` : ''}` : ''}${s.nameCaption ? `; name caption "${s.nameCaption.name}${s.nameCaption.role ? ` · ${s.nameCaption.role}` : ''}"` : ''}${s.tightened ? `; tightened: ${describeTightening(s.tightened)}` : s.tighten === false ? '; kept as filmed' : ''}`).join('')
             : '';
         const fr = r.footageReview as FootageReview | null;
         const own = brief.footageAssetIds?.length ? ` · from their own footage (videos ${brief.footageAssetIds.join(', ')})` : '';
@@ -1247,6 +1251,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
             brief.goal ? `they should: ${brief.goal.slice(0, 100)}` : '',
             `music: ${MUSIC_LABELS[readMusicChoice(brief.musicMood)]}${sb?.music ? ` ("${sb.music.title}")` : ''}${isMusicLevel(brief.musicLevel) && brief.musicLevel !== 'normal' ? `, volume ${MUSIC_LEVEL_LABELS[brief.musicLevel].toLowerCase()}` : ''}`,
             brief.look && brief.look !== 'natural' ? `look: ${LOOK_LABELS[brief.look] ?? brief.look}` : '',
+            brief.captions === false ? 'captions: off' : (brief.captionStyle?.position && brief.captionStyle.position !== 'bottom' ? `captions: at the ${brief.captionStyle.position}` : ''),
             sb && sb.scenes.some((x) => x.nameCaption) ? `name captions: ${LOWER_THIRD_LABELS[brief.lowerThird ?? 'bar'] ?? brief.lowerThird}` : '',
         ].filter(Boolean).join(' · ');
         const script = sb && (r.status === 'planned' || r.status === 'failed') && brief.voiceover

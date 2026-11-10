@@ -10,7 +10,14 @@ My Content, live on prod) and the seven improvements (music moods made with Stab
 
 Status: **decisions taken 2026-11-10: the owner accepted all six recommendations in §7** (one text line per scene,
 brand heading font, Quiet / Normal / Loud, own voice line by line, no mixed voices, AI presenter left for a separate plan).
-**Phase 1 (music volume) built 2026-11-10, not committed.** Help SQL: db/help-articles-2026-12zzzzzzzzzzzzzzzzzzzzzzzz-video-music-volume.sql (no schema change).
+**Phase 1 (music volume) on staging 6197f842**, help SQL applied to both databases.
+**Phase 2 (scene text + Moving/Still) built 2026-11-10, not committed.** Help SQL:
+db/help-articles-2026-12zzzzzzzzzzzzzzzzzzzzzzzzz-video-scene-text.sql (no schema change).
+As built, differently from §3:
+- **"Plain" keeps a faint 25% backing.** The renderer has no text shadow for overlays, and adding one would mean redeploying the Remotion site.
+- **The brand font is used only when it's one of the 9 fonts the renderer has** (`overlay-fonts.ts`). Otherwise it's Impact, as before.
+- **The planner prompt was not changed.** It can't set the text fields yet, so they come only from the owner (Change form or chat).
+- **Saving a scene stores only the choices that differ from the defaults,** so moving the captions later still moves the words.
 
 ---
 

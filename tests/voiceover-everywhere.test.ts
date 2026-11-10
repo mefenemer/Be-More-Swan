@@ -100,7 +100,7 @@ check('a restyled caption re-renders; the build passes the style and moves text 
     assert.ok(pr.includes("a.captionStyle ? JSON.stringify(a.captionStyle) : ''"), 'the caption look is part of the render fingerprint');
     const vp = read('src/utils/video-producer.ts');
     assert.ok(vp.includes('captions: brief.captions !== false'));
-    assert.ok(vp.includes("captionPosition === 'top' ? 0.7 : 0.2"));
+    assert.ok(vp.includes('const pos = s.textPos ?? defaultTextPos(captionPosition);'))   // scene-text.ts: top captions → words at the bottom (0.7);
 });
 
 console.log(`\n${passed} checks passed`);
