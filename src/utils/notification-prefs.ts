@@ -288,6 +288,8 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // is already in PUBLISHING_ROLE_KEYS below, which is what makes this category visible
             // on that assistant in the first place.
             'newsletter_issue_ready', 'newsletter_issue_sent',
+            // My Content files due to be deleted in a week (src/utils/library-retention.ts).
+            'library_files_expiring',
         ],
     },
     {

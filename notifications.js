@@ -245,6 +245,10 @@ window.NotifKit = (function () {
             return { label: 'Invite User', run: () => window._inviteFromAccessRequest?.(meta.requestingEmail, notif.id) };
         }
         // AI media ready — deep-link straight to the generated asset in My Content.
+        // Files due to be deleted — opens My Content on just those files, to Keep any of them.
+        if (notif.type === 'library_files_expiring') {
+            return { label: 'Review files', run: () => window.loadView?.('my-content', { expiring: true }) };
+        }
         if (notif.type === 'media_ready') {
             return { label: 'View content', run: () => window.loadView?.('my-content', meta.assetId ? { assetId: meta.assetId } : null) };
         }

@@ -67,6 +67,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'post_missed' THEN 'suggested_action'
     WHEN 'post_generation_failed' THEN 'suggested_action'
     WHEN 'content_library_empty' THEN 'suggested_action'  -- Empty-Library Draft Fallback
+    WHEN 'library_files_expiring' THEN 'suggested_action'  -- My Content files due to be deleted (2026-11-10)
     WHEN 'risk_assessment_submitted' THEN 'suggested_action'
     WHEN 'billing_renewal_due' THEN 'suggested_action'
     WHEN 'billing_alert' THEN 'suggested_action'
