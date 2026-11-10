@@ -64,6 +64,7 @@ import { levelledVoiceover, measureAsset } from './audio-levelling';
 import { isVideoLook, lookStyle, type LookStyle } from '../lib/video-look';
 import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
 import { defaultTextPos, textFont, textLook, textWindow, textY } from '../lib/scene-text';
+import { isOwnVoice, keepRecordings, linesToRecord, recordedDurations } from './own-voice';
 import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
 import { makeVideoTrack, ownMusicTrack, ownMusicTracks, storedFileExists } from './video-music-asset';
 
@@ -151,6 +152,7 @@ export function readBrief(raw: unknown): { brief: VideoBrief & { platforms: stri
             look: isVideoLook(b.look) ? b.look : 'natural',
             lowerThird: isLowerThirdStyle(b.lowerThird) ? b.lowerThird : 'bar',
             ...(isMusicLevel(b.musicLevel) && b.musicLevel !== 'normal' ? { musicLevel: b.musicLevel } : {}),
+            ...(b.voiceover !== false && b.ownVoice === true ? { ownVoice: true } : {}),
             ...(Number.isInteger(Number(b.shapeOf)) && Number(b.shapeOf) > 0 ? { shapeOf: Number(b.shapeOf) } : {}),
             language: languageLabel(b.language) ? String(b.language) : null,
             captions: b.captions !== false,
@@ -361,6 +363,8 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
             kept = { sceneAssets: assets, ...(voiceSame ? {} : { voiceoverAssetId: null }), ...(mode === 'notes' ? { momentNotes: [] } : {}) };
             if (current.music) storyboard = { ...storyboard, music: current.music };
         }
+        // The owner's recordings stay on lines whose words didn't change; ids the model wrote are dropped.
+        storyboard = keepRecordings(current, storyboard);
         await db.update(videoProjects).set({
             status: 'planned', storyboard, changes, title: storyboard.title, note: null, updatedAt: new Date(), ...kept,
         }).where(eq(videoProjects.id, projectId));
@@ -423,14 +427,15 @@ export function buildTasks(storyboard: Storyboard, brief: VideoBrief, made?: Mad
         if (s.source === 'ai_image') n += TASK_WEIGHTS.ai_image;
         if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)));
     }
-    if (brief.voiceover && scriptOf(storyboard) && todo.voiceover) n += TASK_WEIGHTS.ai_voiceover;
+    // The owner's own voice is never made, so never charged (own-voice.ts).
+    if (brief.voiceover && !isOwnVoice(brief) && scriptOf(storyboard) && todo.voiceover) n += TASK_WEIGHTS.ai_voiceover;
     return n;
 }
 
 /** The same, in legacy credits. Pure. */
 export function buildCredits(storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar): number {
     const todo = stillToMake(storyboard, made);
-    return estimateCredits({ ...storyboard, scenes: todo.scenes }, todo.voiceover ? brief : { ...brief, voiceover: false }, BUILD_COSTS)
+    return estimateCredits({ ...storyboard, scenes: todo.scenes }, todo.voiceover && !isOwnVoice(brief) ? brief : { ...brief, voiceover: false }, BUILD_COSTS)
         + (musicToMake(storyboard, brief) ? MUSIC_CREDIT_COST : 0);
 }
 
@@ -775,11 +780,32 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         let voiceoverAssetId = p.voiceoverAssetId ?? null;
         let words: Array<{ start: number; end: number }> = [];
         const script = cleanScript(scriptOf(storyboard));
-        if (brief.voiceover && script) {
+        // The owner's own voice, line by line (own-voice.ts): no voice is made — each scene's recording
+        // is placed at its scene below. One recording of the whole script is the voiceover asset, as an AI one is.
+        const ownLines = isOwnVoice(brief) && !voiceoverAssetId;
+        const lineRec = new Map<string, { assetId: number; durationS: number; words: Array<{ word: string; start: number; end: number }> }>();
+        if (ownLines) {
+            const missing = linesToRecord(storyboard, false);
+            if (missing.length) throw new Error(`Scene ${storyboard.scenes.indexOf(missing[0]) + 1} has no recording of its line yet. Record it, then press “Make the video” again.`);
+            const ids = storyboard.scenes.map((s) => s.voiceAssetId).filter((x): x is number => !!x);
+            const rows = ids.length ? await db.select({ id: contentAssets.id, durationS: contentAssets.durationS, renderParams: contentAssets.renderParams }).from(contentAssets)
+                .where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId), eq(contentAssets.assetType, 'audio'), isNull(contentAssets.purgedAt))) : [];
+            const byId = new Map(rows.map((r) => [r.id, r]));
+            for (const s of storyboard.scenes) {
+                if (!s.voiceAssetId) continue;
+                const r = byId.get(s.voiceAssetId);
+                const rp = (r?.renderParams ?? null) as { kind?: string; words?: Array<{ word: string; start: number; end: number }> } | null;
+                if (!r || rp?.kind !== 'voiceover') throw new Error(`The recording for scene ${storyboard.scenes.indexOf(s) + 1} is no longer in My Content. Record the line again.`);
+                lineRec.set(s.id, { assetId: r.id, durationS: r.durationS ?? s.voiceS ?? s.targetS, words: Array.isArray(rp.words) ? rp.words : [] });
+            }
+        }
+        if (brief.voiceover && script && !ownLines) {
             if (voiceoverAssetId) {
                 const [a] = await db.select({ renderParams: contentAssets.renderParams }).from(contentAssets)
                     .where(and(eq(contentAssets.id, voiceoverAssetId), eq(contentAssets.organisationId, orgId))).limit(1);
                 words = ((a?.renderParams as { words?: Array<{ start: number; end: number }> } | null)?.words) ?? [];
+            } else if (isOwnVoice(brief)) {
+                throw new Error('This video is in your own voice, and its recording is missing. Record it again.');
             } else {
                 try {
                     const vo = await makeVoiceoverAsset(db, {
@@ -802,7 +828,19 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         const fileS = new Map(footage.filter((v) => v.durationS > 0).map((v) => [v.id, v.durationS]));
         const ownSound = keepsOwnSound(brief);
         // Own clips can't play past their file, so a scene is never longer than its video.
-        const durations = playedDurations(storyboard.scenes, sceneTimingsFromWords(storyboard, words) ?? storyboard.scenes.map((s) => s.targetS), fileS, ownSound);
+        // Recorded lines set their scene's length exactly (the recording plus a short gap).
+        const durations = playedDurations(storyboard.scenes, (ownLines ? recordedDurations(storyboard.scenes.map((s) => (lineRec.has(s.id) ? { ...s, voiceS: lineRec.get(s.id)!.durationS } : s))) : null) ?? sceneTimingsFromWords(storyboard, words) ?? storyboard.scenes.map((s) => s.targetS), fileS, ownSound);
+        // Every recorded line's words on the video's timeline: captions, "while its words are said", ducking.
+        const lineStarts: number[] = [];
+        if (ownLines) {
+            let t = 0;
+            storyboard.scenes.forEach((s, i) => {
+                lineStarts.push(t);
+                const rec = lineRec.get(s.id);
+                if (rec) for (const w of rec.words) words.push({ start: Math.round((t + w.start) * 100) / 100, end: Math.round((t + w.end) * 100) / 100 });
+                t += durations[i] ?? s.targetS;
+            });
+        }
 
         // 2. Every scene's picture or clip. Already-made scenes are kept (a re-build after a failure).
         // AI clips all at once: each spends minutes at the model (Kling 3 averaged 3 m 48 s in the
@@ -900,7 +938,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         const musicLoud = music ? await measureAsset(db, orgId, music.assetId).catch(() => null) : null;
         const levels = mixLevels({
             voice: voiceLoud, footage: footageLoud, music: music ? (musicLoud?.lufs ?? musicLufs(music.storageKey)) : null,
-            hasVoice: !!voiceoverAssetId, hasOwnSound: ownSound, hasMusic: !!music,
+            hasVoice: !!voiceoverAssetId || lineRec.size > 0, hasOwnSound: ownSound, hasMusic: !!music,
         });
         // The owner's Music volume (Quiet / Normal / Loud): the bed and its ducked level together.
         const owned = musicLevelGain(brief.musicLevel);
@@ -925,7 +963,19 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
         const audio: AudioOverlay[] = voiceTrackId
             ? [{ id: `vp_vo_${voiceTrackId}`, assetId: voiceTrackId, label: 'Voiceover', volume: Math.min(1, voiceGain), ...(voiceGain > 1 ? { level: voiceGain } : {}), fadeInS: 0.05, fadeOutS: 0.2, captions: brief.captions !== false, ...(brief.captionStyle ? { captionStyle: normalizeCaptionStyle(brief.captionStyle) } : {}) }]
             : [];
-        let spokenWindows = voiceoverAssetId ? speechWindows(words) : [];
+        // Recorded lines: one track per scene, at the scene's start, each levelled like the AI voice.
+        if (ownLines) {
+            for (const [i, s] of storyboard.scenes.entries()) {
+                const rec = lineRec.get(s.id);
+                if (!rec) continue;
+                const lv = await levelledVoiceover(db, { orgId, userId, assetId: rec.assetId, targetLufs: TARGET_LUFS })
+                    .catch((err) => { console.warn(`[video-producer] build ${projectId}: line ${s.id} not levelled —`, err); return null; });
+                const startS = Math.round(lineStarts[i] * 100) / 100;
+                audio.push({ id: `vp_vo_${s.id}_${rec.assetId}`, assetId: lv?.assetId ?? rec.assetId, label: `Your voice · scene ${i + 1}`, startS, endS: Math.round((startS + rec.durationS + 0.05) * 100) / 100,
+                    volume: Math.min(1, voiceGain), ...(voiceGain > 1 ? { level: voiceGain } : {}), fadeInS: 0.02, fadeOutS: 0.1, captions: brief.captions !== false, ...(brief.captionStyle ? { captionStyle: normalizeCaptionStyle(brief.captionStyle) } : {}) });
+            }
+        }
+        let spokenWindows = voiceoverAssetId || ownLines ? speechWindows(words) : [];
         // Footage in its own sound: captions follow what people say in it. The render reads caption
         // words from a voiceover track, so a silent track carries them (volume 0) — no render change.
         if (ownSound && brief.captions !== false) {
@@ -1150,6 +1200,8 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
     return {
         id: row.id, aiAssistantId: row.aiAssistantId, title: row.title, status: row.status, brief: row.brief, storyboard: sb, changes: row.changes, note: row.note,
         scheduledPostId: row.scheduledPostId, postRenderStatus, creditsSpent: row.creditsSpent,
+        // The voiceover made (or, in the owner's own voice, one recording of the whole script).
+        voiceoverAssetId: row.voiceoverAssetId,
         origin: row.origin, sourcePostId: row.sourcePostId, campaignId: row.campaignId,
         footageReview: (row.footageReview as FootageReview | null) ?? null,
         // The finished video in My Content (a studio video): plays on the Videos tab, downloads from there.
@@ -1164,8 +1216,23 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         sourceFiles: row.status === 'ready' ? await sourceFilesOf(db, orgId, row) : [],
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),
         archivedAt: row.archivedAt ?? null,
+        // The owner's own recordings, to play back on the tab (own-voice.ts): scene id → URL, and 'whole'.
+        voiceUrls: isOwnVoice(row.brief as VideoBrief) ? await ownVoiceUrls(db, orgId, row) : {},
         createdAt: row.createdAt, updatedAt: row.updatedAt,
     };
+}
+
+async function ownVoiceUrls(db: Db, orgId: number, row: typeof videoProjects.$inferSelect): Promise<Record<string, string>> {
+    const sb = row.storyboard as Storyboard | null;
+    const want = new Map<number, string>();
+    for (const s of sb?.scenes ?? []) if (s.voiceAssetId) want.set(s.voiceAssetId, s.id);
+    if (row.voiceoverAssetId) want.set(row.voiceoverAssetId, 'whole');
+    if (!want.size) return {};
+    const rows = await db.select({ id: contentAssets.id, storageKey: contentAssets.storageKey }).from(contentAssets)
+        .where(and(inArray(contentAssets.id, [...want.keys()]), eq(contentAssets.organisationId, orgId), isNull(contentAssets.purgedAt)));
+    const out: Record<string, string> = {};
+    for (const r of rows) if (r.storageKey) { const u = await presignR2Get(r.storageKey, 3600, { stableWindowSec: 1800 }).catch(() => null); if (u) out[want.get(r.id)!] = u; }
+    return out;
 }
 
 function sceneTimesOf(timeline: unknown): SceneTime[] {
@@ -1250,6 +1317,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
             brief.audience ? `for: ${brief.audience.slice(0, 100)}` : '',
             brief.goal ? `they should: ${brief.goal.slice(0, 100)}` : '',
             `music: ${MUSIC_LABELS[readMusicChoice(brief.musicMood)]}${sb?.music ? ` ("${sb.music.title}")` : ''}${isMusicLevel(brief.musicLevel) && brief.musicLevel !== 'normal' ? `, volume ${MUSIC_LEVEL_LABELS[brief.musicLevel].toLowerCase()}` : ''}`,
+            isOwnVoice(brief) ? `voice: THEIR OWN — ${r.voiceoverAssetId ? 'one recording of the whole script' : (() => { const left = linesToRecord(sb ?? { title: '', caption: '', scenes: [] }, false).map((s) => sb!.scenes.indexOf(s) + 1); return left.length ? `scene${left.length === 1 ? '' : 's'} ${left.join(', ')} still to record (on the "Videos" tab)` : 'every line recorded'; })()}` : '',
             brief.look && brief.look !== 'natural' ? `look: ${LOOK_LABELS[brief.look] ?? brief.look}` : '',
             brief.captions === false ? 'captions: off' : (brief.captionStyle?.position && brief.captionStyle.position !== 'bottom' ? `captions: at the ${brief.captionStyle.position}` : ''),
             sb && sb.scenes.some((x) => x.nameCaption) ? `name captions: ${LOWER_THIRD_LABELS[brief.lowerThird ?? 'bar'] ?? brief.lowerThird}` : '',

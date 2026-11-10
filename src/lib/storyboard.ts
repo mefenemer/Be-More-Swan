@@ -92,6 +92,8 @@ export interface VideoBrief {
     goal?: string | null;
     /** A colour look over every scene (src/lib/video-look.ts). Absent = natural. */
     look?: VideoLook | null;
+    /** The voiceover is the owner's own recordings, not an AI voice (src/utils/own-voice.ts). Never both. */
+    ownVoice?: boolean | null;
     /** How loud the music sits: 'quiet' | 'normal' | 'loud' (src/lib/video-music.ts). Absent = normal. */
     musicLevel?: 'quiet' | 'normal' | 'loud' | null;
     /** How name captions look (src/lib/lower-third.ts). Absent = 'bar'. */
@@ -136,6 +138,12 @@ export interface Scene {
     textWhen?: TextWhen;
     textStyle?: TextStyle;
     textAnim?: TextAnim;
+    /**
+     * The owner's own recording of this scene's line (src/utils/own-voice.ts), and its length. Set only
+     * by the server from an upload; a scene keeps it while its words stay the same (keepRecordings).
+     */
+    voiceAssetId?: number;
+    voiceS?: number;
     targetS: number;
 }
 

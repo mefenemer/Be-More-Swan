@@ -1707,7 +1707,7 @@
       button: 'Approve the script', body: id ? { action: 'approve_script', id } : null, done: 'Approved. Check the pictures on the Videos tab, then press “Make the video”.',
     });
   }
-  // { type: 'video_options_proposal', projectId, musicMood?, musicAssetId?, musicTitle?, anotherTrack?, musicLevel?, look?, lowerThird?, summary? }
+  // { type: 'video_options_proposal', projectId, musicMood?, musicAssetId?, musicTitle?, anotherTrack?, musicLevel?, voiceMode?, look?, lowerThird?, summary? }
   // musicAssetId: a track of the owner's own from My Content; the server checks it is theirs.
   function renderVideoOptionsProposalCard(ui, esc) {
     const id = videoId(ui);
@@ -1717,6 +1717,7 @@
     else if (VIDEO_MUSIC[ui.musicMood]) body.musicMood = ui.musicMood;
     if (ui.anotherTrack === true) body.anotherTrack = true;
     if (VIDEO_MUSIC_LEVELS[ui.musicLevel]) body.musicLevel = ui.musicLevel;
+    if (ui.voiceMode === 'own' || ui.voiceMode === 'ai') body.voiceMode = ui.voiceMode;
     if (VIDEO_LOOKS[ui.look]) body.look = ui.look;
     if (VIDEO_LOWER_THIRDS[ui.lowerThird]) body.lowerThird = ui.lowerThird;
     const any = Object.keys(body).length > 2;
@@ -1727,6 +1728,7 @@
         body.musicAssetId ? ['Music', ui.musicTitle ? `“${String(ui.musicTitle).slice(0, 80)}” from My Content` : `Your track #${body.musicAssetId} from My Content`] : null,
         body.musicMood ? ['Music', VIDEO_MUSIC[body.musicMood]] : null,
         body.anotherTrack ? ['Music', 'A new track, same mood (made when you press “Make the video”)'] : null,
+        body.voiceMode ? ['Voice', body.voiceMode === 'own' ? 'Your own — you record each line on the Videos tab (no voiceover charged)' : 'An AI voice (made when you press “Make the video”)'] : null,
         body.musicLevel ? ['Music volume', `${VIDEO_MUSIC_LEVELS[body.musicLevel]} (it still goes quiet when someone speaks)`] : null,
         body.look ? ['Colour look', VIDEO_LOOKS[body.look]] : null,
         body.lowerThird ? ['Name captions', VIDEO_LOWER_THIRDS[body.lowerThird]] : null,
@@ -4959,7 +4961,7 @@
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
     el.innerHTML = `
-      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change to a text box</p>
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change to the words on the picture</p>
       ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
       <p class="text-xs font-bold text-gray-500 mt-3">Now</p>
       <p class="text-sm text-gray-500 bg-white border border-gray-200 rounded-lg px-3 py-2 mt-1 line-through decoration-gray-300 whitespace-pre-line">${esc(find)}</p>
@@ -4978,9 +4980,9 @@
       if (!e.target.closest('[data-pt-go]')) return;
       setBusy(true);
       say('Changing it…');
-      const detail = { postId, find, replace, handled: false, respond({ ok, error }) {
+      const detail = { postId, find, replace, handled: false, respond({ ok, error, message }) {
         if (!ok) { setBusy(false); say(error || 'That couldn\'t be changed.', 'error'); return; }
-        say('Done — the text box is changed.');
+        say(message || 'Done — the text box is changed.');
       } };
       document.dispatchEvent(new CustomEvent('post:textEdit', { detail }));
       if (!detail.handled) detail.respond({ ok: false, error: 'Open the post to use this.' });

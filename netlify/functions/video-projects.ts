@@ -51,13 +51,14 @@ import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
-import { enforceStoryboard, isVideoShape, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
+import { enforceStoryboard, isVideoShape, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
 import { ownMusicTrack, ownMusicTracks } from '../../src/utils/video-music-asset';
 import { isVideoLook } from '../../src/lib/video-look';
 import { isLowerThirdStyle, readNameCaption } from '../../src/lib/lower-third';
 import { readSceneText } from '../../src/lib/scene-text';
+import { isOwnVoice, keepRecordings, linesToRecord, MAX_LINE_S, MAX_WHOLE_S, prepareOwnRecording } from '../../src/utils/own-voice';
 import { contentAssets } from '../../db/schema';
 import { randomUUID } from 'crypto';
 import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
@@ -280,11 +281,12 @@ export default withLambda(async (event) => {
         return json(r.made.length ? 202 : 200, { made: await Promise.all(r.made.map((x) => projectView(db, orgId, x))), skipped: r.skipped });
     }
 
-    if ((action === 'replan' || action === 'edit_scene' || action === 'rewrite_script' || action === 'set_options' || action === 'approve_script') && row.status === 'ready' && row.storyboard) {
+    const VOICE_ACTIONS = ['set_line_voice', 'set_voice_file'];
+    if ((action === 'replan' || action === 'edit_scene' || action === 'rewrite_script' || action === 'set_options' || action === 'approve_script' || VOICE_ACTIONS.includes(action)) && row.status === 'ready' && row.storyboard) {
         if (action === 'approve_script') return json(409, { error: 'This video is already made.' });
         row = await newVersion(db, row);
     }
-    if ((action === 'replan' || action === 'edit_scene' || action === 'rewrite_script' || action === 'set_options') && row.status === 'rendering') {
+    if ((action === 'replan' || action === 'edit_scene' || action === 'rewrite_script' || action === 'set_options' || VOICE_ACTIONS.includes(action)) && row.status === 'rendering') {
         return json(409, { error: 'The finished video is rendering — wait a moment, then change it.' });
     }
 
@@ -330,9 +332,53 @@ export default withLambda(async (event) => {
         if (isVideoLook(body.look)) brief.look = body.look;
         if (isLowerThirdStyle(body.lowerThird)) brief.lowerThird = body.lowerThird;
         if (isMusicLevel(body.musicLevel)) { if (body.musicLevel === 'normal') delete brief.musicLevel; else brief.musicLevel = body.musicLevel; }
+        // AI voice or the owner's own (never both in one video). Switching drops the voice the video had:
+        // an AI voiceover is made again (shown on "Make the video"); own recordings are asked for line by line.
+        let voiceReset: Record<string, unknown> = {};
+        if ((body.voiceMode === 'own' || body.voiceMode === 'ai') && brief.voiceover !== false && (body.voiceMode === 'own') !== (brief.ownVoice === true)) {
+            if (body.voiceMode === 'own') brief.ownVoice = true; else delete brief.ownVoice;
+            sb.scenes = sb.scenes.map(({ voiceAssetId: _a, voiceS: _s, ...rest }) => rest);
+            voiceReset = { voiceoverAssetId: null };
+        }
         const back = row.status === 'render_failed' ? { status: 'planned', note: null } : {};
-        await db.update(videoProjects).set({ brief, storyboard: sb, ...back, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+        await db.update(videoProjects).set({ brief, storyboard: sb, ...back, ...voiceReset, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
         return json(200, { project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+
+    // ── The owner's own voice (own-voice.ts): one scene's line, or one recording of the whole script ──
+    if (action === 'set_line_voice' || action === 'set_voice_file') {
+        if (!['planned', 'failed', 'render_failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video can’t be changed right now.' });
+        const brief = row.brief as VideoBrief;
+        if (!isOwnVoice(brief)) return json(409, { error: 'This video uses an AI voice. Choose “My own voice” first.' });
+        const sb = structuredClone(row.storyboard) as Storyboard;
+        const back = row.status === 'render_failed' ? { status: 'planned', note: null } : {};
+        const remove = body.assetId == null;
+        if (action === 'set_line_voice') {
+            const scene = sb.scenes.find((s) => s.id === body.sceneId);
+            if (!scene) return json(404, { error: 'Scene not found.' });
+            if (!(scene.voiceover || '').trim()) return json(400, { error: 'This scene has no words to record.' });
+            let differs = false;
+            if (remove) { delete scene.voiceAssetId; delete scene.voiceS; }
+            else {
+                const r = await prepareOwnRecording(db, { orgId, assetId: Number(body.assetId), script: scene.voiceover, maxS: MAX_LINE_S, language: brief.language });
+                if ('error' in r) return json(r.status, { error: r.error });
+                scene.voiceAssetId = r.assetId; scene.voiceS = r.durationS; differs = r.differs;
+            }
+            // A line recorded on its own replaces any one-take recording of the whole script.
+            await db.update(videoProjects).set({ storyboard: sb, voiceoverAssetId: null, ...back, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+            return json(200, { project: await projectView(db, orgId, (await load(row.id))!), differs });
+        }
+        // One recording of the whole script: it becomes the video's voiceover, timed scene by scene from its
+        // words (as the AI voice is), and every line recording is dropped.
+        let voiceoverAssetId: number | null = null, differs = false;
+        if (!remove) {
+            const r = await prepareOwnRecording(db, { orgId, assetId: Number(body.assetId), script: scriptOf(sb), maxS: MAX_WHOLE_S, language: brief.language });
+            if ('error' in r) return json(r.status, { error: r.error });
+            voiceoverAssetId = r.assetId; differs = r.differs;
+        }
+        sb.scenes = sb.scenes.map(({ voiceAssetId: _a, voiceS: _s, ...rest }) => rest);
+        await db.update(videoProjects).set({ storyboard: sb, voiceoverAssetId, ...back, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+        return json(200, { project: await projectView(db, orgId, (await load(row.id))!), differs });
     }
 
     if (action === 'plan_from_review') {
@@ -410,7 +456,8 @@ export default withLambda(async (event) => {
         const enforced = enforceStoryboard(sb, brief, await libraryPictures(db, orgId), asOwnVideos(footage));
         // A changed cut, or "Keep as filmed", is tightened again from the review's words.
         const tightened = footage.length ? tightenStoryboard(enforced.storyboard, brief, footage) : { storyboard: enforced.storyboard, changes: [] };
-        const storyboard = tightened.storyboard;
+        // A scene keeps the owner's recording of its line while the words stay the same.
+        const storyboard = keepRecordings(sb, tightened.storyboard);
         const changes = [...enforced.changes, ...tightened.changes];
         const assets = { ...(row.sceneAssets as Record<string, number>) };
         const after = storyboard.scenes.find((s) => s.id === scene.id);
@@ -426,6 +473,14 @@ export default withLambda(async (event) => {
 
     if (action === 'build') {
         if (!['planned', 'failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video is not ready to make.' });
+        // In the owner's own voice, every line is recorded first (or one recording covers the script).
+        if (isOwnVoice(row.brief as VideoBrief)) {
+            const missing = linesToRecord(row.storyboard as Storyboard, !!row.voiceoverAssetId);
+            if (missing.length) {
+                const nums = missing.map((s) => (row.storyboard as Storyboard).scenes.indexOf(s) + 1);
+                return json(409, { error: `Record ${nums.length === 1 ? `scene ${nums[0]}’s line` : `the lines for scenes ${nums.join(', ')}`} first, or remove ${nums.length === 1 ? 'its' : 'their'} words.` });
+            }
+        }
         const hold = await holdBuild(db, orgId, row.storyboard as Storyboard, row.brief as VideoBrief, row);
         if (!hold.ok) return json(402, { error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit });
         // Campaign orders and the weekly autopilot plan a storyboard with no person behind it

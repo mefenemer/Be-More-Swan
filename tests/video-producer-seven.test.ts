@@ -225,7 +225,7 @@ check('approval survives an edit check, a changed line clears it, and Make the v
     assert.ok(ep.includes('if (voiceChanged) sb.scriptApprovedAt = null;'));
     assert.ok(ep.includes("wakeVideoWorker({ projectId: row.id, action: 'plan', feedback, mode: 'script' }"));
     const ui = read('src/components/assistant-videos.js');
-    assert.ok(ui.includes('Approve the script — free') && ui.includes('&& !needsScript;'));
+    assert.ok(ui.includes('Approve the script — free') && ui.includes('&& !needsScript && !needsRecording;'));
     assert.ok(ui.includes('<p class="text-[10px] font-bold uppercase tracking-wide text-gray-400">Words</p>') && ui.includes('>Picture</p>'), 'words and pictures side by side');
 });
 

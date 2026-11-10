@@ -92,6 +92,10 @@
     selected: new Set(), bulkBusy: false, bulkNote: null,
     // The brand colour and render font for the scene text preview (GET returns it with the videos).
     brand: { accent: null, font: 'Impact' },
+    // "Your recording says something different from this line" — `${videoId}:${sceneId|'whole'}` → true.
+    voiceWarn: {},
+    // Which line the hidden file input is for (Upload on a line, or the whole script).
+    voicePick: null,
   };
 
   // Stages as pills, like the Brand Designer's Briefs (owner, 2026-11-06: the Briefs tab's patterns on
@@ -290,6 +294,7 @@
               <button type="button" data-vid-act="voice-choose" class="shrink-0 text-xs font-bold text-indigo-700 hover:underline cursor-pointer">Change</button>
             </div>
             <label class="mt-1 inline-flex items-center gap-1.5 text-xs text-gray-600"><input type="checkbox" name="noVoice"> No voiceover — on-screen text only</label>
+            <label class="mt-0.5 flex items-start gap-1.5 text-xs text-gray-600"><input type="checkbox" name="ownVoice" class="mt-0.5"> <span>I’ll record it in my own voice <span class="text-gray-500">— you record each line once the script is approved, and no voiceover is charged</span></span></label>
             <p class="text-[11px] text-gray-500 mt-0.5">The script is written in your voice's language.</p></div>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Pictures from</span>
             <select name="allowAi" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="stock_and_ai"${sel(d.allowAi === 'stock_and_ai')}>Stock first, AI where it fits</option><option value="stock_only"${sel(d.allowAi === 'stock_only')}>Stock and my own pictures only</option><option value="ai_first"${sel(d.allowAi === 'ai_first')}>Lean on AI</option></select></label>
@@ -389,6 +394,8 @@
         <div class="flex flex-wrap items-center gap-2">
           <label class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Add a video
             <input type="file" accept="video/mp4,video/quicktime,video/webm" multiple hidden data-vid-footage-file></label>
+          ${/* Film it here (video-recorder.js), into the library like any upload (owner, 2026-11-10). */ ''}
+          <button type="button" data-vid-act="record-video" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">● Record a video</button>
           <span class="text-xs text-gray-500">or tick videos already in your library:</span>
         </div>
         <div data-vid-footage-list>${footageListHtml()}</div>
@@ -706,15 +713,16 @@
     const busy = state.busy.has(v.id);
     const rewriting = state.rewriting === v.id;
     if (sb.scriptApprovedAt) {
-      return `<p class="mt-3 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1">✓ Script approved. Check the pictures beside each line, then press “Make the video”.
+      return `${voiceLineHtml(v)}<p class="mt-2 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1">✓ Script approved. ${isOwn(v) ? 'Record each line below, check the pictures, then press “Make the video”.' : 'Check the pictures beside each line, then press “Make the video”.'}
         <button type="button" data-vid-act="rewrite" data-id="${v.id}" class="ml-1 font-bold text-indigo-700 hover:underline">Rewrite the words</button></p>
-        ${rewriting ? rewriteFormHtml(v) : ''}`;
+        ${rewriting ? rewriteFormHtml(v) : ''}
+        ${isOwn(v) ? recordPanelHtml(v) : ''}`;
     }
     const words = (sb.scenes || []).map((x) => x.voiceover).filter(Boolean).join(' ');
     const n = words.split(/\s+/).filter(Boolean).length;
     return `
       <div class="mt-3 border border-indigo-200 bg-indigo-50/40 rounded-lg p-3">
-        <p class="text-xs font-bold text-indigo-800">Step 1 of 2 — the words</p>
+        <p class="text-xs font-bold text-indigo-800">Step 1 of 2 — the words${isOwn(v) ? ' (you’ll record them next)' : ''}</p>
         <p class="text-sm text-gray-900 mt-1 whitespace-pre-line break-words">${esc(words)}</p>
         <p class="text-[11px] text-gray-500 mt-1">${n} words · about ${Math.round(n / 2.5)} seconds spoken. Approving is free and makes nothing yet — the pictures come next.</p>
         <div class="flex flex-wrap gap-2 mt-2">
@@ -722,8 +730,134 @@
           ${rewriting ? '' : `<button type="button" data-vid-act="rewrite" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Rewrite the words</button>`}
         </div>
         ${rewriting ? rewriteFormHtml(v) : ''}
+      </div>
+      ${voiceLineHtml(v)}`;
+  }
+
+  // ── Your own voice (src/utils/own-voice.ts; plan Phase 3) ─────────────────────────────────────────
+  const isOwn = (v) => !!(v.brief && v.brief.voiceover !== false && v.brief.ownVoice === true);
+  /** Lines still to record — none when one recording covers the whole script. */
+  const unrecorded = (v) => (v.voiceoverAssetId ? [] : ((v.storyboard && v.storyboard.scenes) || []).filter((s) => (s.voiceover || '').trim() && !s.voiceAssetId));
+
+  /** Who speaks, and the switch to the other (never both in one video). */
+  function voiceLineHtml(v) {
+    if (!(v.brief && v.brief.voiceover)) return '';
+    const busy = state.busy.has(v.id) ? 'disabled' : '';
+    return isOwn(v)
+      ? `<p class="mt-2 text-xs text-gray-600"><span class="font-bold">Voice:</span> your own. <button type="button" data-vid-act="voice-mode" data-mode="ai" data-id="${v.id}" ${busy} class="font-bold text-indigo-700 hover:underline disabled:opacity-50">Use an AI voice instead</button></p>`
+      : `<p class="mt-2 text-xs text-gray-600"><span class="font-bold">Voice:</span> ${esc(window.VoicePicker?.describe(v.brief.voice) || 'AI voice')}. <button type="button" data-vid-act="voice-mode" data-mode="own" data-id="${v.id}" ${busy} class="font-bold text-indigo-700 hover:underline disabled:opacity-50">Record it in my own voice instead</button></p>`;
+  }
+
+  /** Each line with Record / Upload, or its recording with Play / Redo / Remove; or one whole-script recording. */
+  function recordPanelHtml(v) {
+    const sb = v.storyboard;
+    const urls = v.voiceUrls || {};
+    const busy = state.busy.has(v.id) ? 'disabled' : '';
+    const warn = (key) => (state.voiceWarn[key] ? `<p class="text-[11px] font-semibold text-amber-800 mt-0.5">Your recording says something different from this line. Keep it if that’s what you meant, or record it again.</p>` : '');
+    const btn = 'btn-secondary border px-2.5 py-1 text-[11px] font-bold rounded-lg disabled:opacity-50';
+    if (v.voiceoverAssetId) {
+      return `<div class="mt-2 border border-indigo-200 bg-white rounded-lg p-3" data-vid-record="${v.id}">
+          <p class="text-xs font-bold text-gray-800">Your voice — one recording of the whole script</p>
+          ${urls.whole ? `<audio controls preload="none" src="${esc(urls.whole)}" class="w-full mt-1.5" style="height:32px"></audio>` : ''}
+          ${warn(`${v.id}:whole`)}
+          <p class="text-[11px] text-gray-500 mt-1">Scenes change where its words reach each line. Recording lines one by one times them exactly.</p>
+          <button type="button" data-vid-act="voice-whole-remove" data-id="${v.id}" ${busy} class="${btn} mt-1.5">Remove it and record line by line</button>
+        </div>`;
+    }
+    const left = unrecorded(v).length;
+    const rows = sb.scenes.map((s, i) => {
+      if (!(s.voiceover || '').trim()) return '';
+      const key = `${v.id}:${s.id}`;
+      const done = !!s.voiceAssetId;
+      return `<li class="border border-gray-200 rounded-lg p-2">
+          <p class="text-[11px] font-bold text-gray-500">Scene ${i + 1}${done ? ` · <span class="text-emerald-700">✓ recorded${s.voiceS ? `, ${esc(Number(s.voiceS).toFixed(1))}s` : ''}</span>` : ''}</p>
+          <p class="text-sm text-gray-900 break-words">“${esc(s.voiceover)}”</p>
+          ${done && urls[s.id] ? `<audio controls preload="none" src="${esc(urls[s.id])}" class="w-full mt-1" style="height:32px"></audio>` : ''}
+          ${warn(key)}
+          <div class="flex flex-wrap gap-2 mt-1.5">
+            <button type="button" data-vid-act="voice-record" data-id="${v.id}" data-scene="${esc(s.id)}" ${busy} class="${done ? btn : 'btn-primary px-2.5 py-1 text-[11px] font-bold rounded-lg disabled:opacity-50'}">${done ? 'Record again' : '● Record'}</button>
+            <button type="button" data-vid-act="voice-upload" data-id="${v.id}" data-scene="${esc(s.id)}" ${busy} class="${btn}">Upload</button>
+            ${done ? `<button type="button" data-vid-act="voice-remove" data-id="${v.id}" data-scene="${esc(s.id)}" ${busy} class="text-[11px] font-bold text-gray-500 hover:text-red-700 disabled:opacity-50">Remove</button>` : ''}
+          </div>
+        </li>`;
+    }).join('');
+    return `<div class="mt-2 border border-indigo-200 bg-white rounded-lg p-3" data-vid-record="${v.id}">
+        <p class="text-xs font-bold text-gray-800">Your voice — ${left ? `${left} line${left === 1 ? '' : 's'} to record` : 'every line recorded'}</p>
+        <p class="text-[11px] text-gray-500 mt-0.5">Each scene lasts as long as your recording of its line. Free — no voiceover is made.</p>
+        <ol class="mt-2 space-y-2">${rows}</ol>
+        <p class="text-[11px] text-gray-500 mt-2">Recorded it somewhere else? <button type="button" data-vid-act="voice-whole-upload" data-id="${v.id}" ${busy} class="font-bold text-indigo-700 hover:underline disabled:opacity-50">Upload one recording of the whole script</button></p>
+        <input type="file" accept="audio/*" data-vid-voice-file data-id="${v.id}" hidden>
       </div>`;
   }
+
+  /**
+   * A recording as a small mono WAV (24 kHz, 16-bit): the server can level it like the AI voice (it reads
+   * WAV and MP3 only) and the transcriber takes it whole. Browsers record WebM or MP4, and uploads vary.
+   */
+  async function toWav(blob) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    let decoded;
+    try { decoded = await ctx.decodeAudioData(await blob.arrayBuffer()); } finally { ctx.close?.().catch(() => {}); }
+    const rate = 24000;
+    const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(decoded.duration * rate)), rate);
+    const src = off.createBufferSource();
+    src.buffer = decoded; src.connect(off.destination); src.start();
+    const pcm = (await off.startRendering()).getChannelData(0);
+    const buf = new ArrayBuffer(44 + pcm.length * 2);
+    const dv = new DataView(buf);
+    const str = (o, t) => { for (let i = 0; i < t.length; i++) dv.setUint8(o + i, t.charCodeAt(i)); };
+    str(0, 'RIFF'); dv.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+    dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, rate, true);
+    dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); str(36, 'data'); dv.setUint32(40, pcm.length * 2, true);
+    for (let i = 0; i < pcm.length; i++) dv.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+    return { file: new File([buf], 'voice.wav', { type: 'audio/wav' }), durationS: decoded.duration };
+  }
+
+  /** Into My Content as audio — the same path as any upload (content-upload-url → PUT → content-assets). */
+  async function uploadVoice(blob, name) {
+    let wav;
+    try { wav = await toWav(blob); } catch { throw new Error('That file couldn’t be read as audio. Try an MP3, M4A or WAV.'); }
+    const file = new File([wav.file], `${name}.wav`.replace(/[^\w .·()-]/g, '').slice(0, 100) || 'voice.wav', { type: 'audio/wav' });
+    const r = await fetch('/.netlify/functions/content-upload-url', {
+      credentials: 'same-origin', method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: file.name, mimeType: file.type, fileSize: file.size }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'Could not start the upload.');
+    if (!j.mock) {
+      const put = await fetch(j.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+      if (!put.ok) throw new Error('The upload failed. Please try again.');
+    }
+    const c = await fetch('/.netlify/functions/content-assets', {
+      credentials: 'same-origin', method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: file.name, assetType: 'audio', mimeType: file.type, fileSize: file.size, storageKey: j.storageKey, storageUrl: j.storageUrl, durationS: Math.round(wav.durationS * 100) / 100 }),
+    });
+    const d = await c.json().catch(() => ({}));
+    if (!c.ok) throw new Error(d.error || 'The upload failed. Please try again.');
+    if (d.rejected) throw new Error((d.asset && d.asset.rejectionReason) || 'That recording was flagged and can’t be used.');
+    return d.asset.id;
+  }
+
+  /** Upload a recording and attach it: one scene's line, or (sceneId null) the whole script. */
+  async function attachVoice(id, sceneId, blob) {
+    const v = state.videos.find((x) => x.id === id);
+    const s = sceneId && v && v.storyboard.scenes.find((x) => x.id === sceneId);
+    state.busy.add(id);
+    state.notes[id] = { text: 'Saving your recording…' };
+    render();
+    try {
+      const assetId = await uploadVoice(blob, s ? `Your voice · ${v.title} · scene ${v.storyboard.scenes.indexOf(s) + 1}` : `Your voice · ${v.title}`);
+      const data = await call('POST', sceneId ? { action: 'set_line_voice', id, sceneId, assetId } : { action: 'set_voice_file', id, assetId });
+      state.voiceWarn[`${(data.project && data.project.id) || id}:${sceneId || 'whole'}`] = !!data.differs;
+      state.notes[id] = { text: 'Recording saved.' };
+    } catch (err) {
+      state.notes[id] = { text: err.message, error: true };
+    }
+    state.busy.delete(id);
+    await load();
+  }
+
   function rewriteFormHtml(v) {
     return `<form data-vid-rewrite-form data-id="${v.id}" class="mt-2 space-y-2">
         <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">How should the words change? (optional)</span>
@@ -858,7 +992,9 @@
     const minScenes = v.brief && v.brief.footageAssetIds && v.brief.footageAssetIds.length ? 1 : 3;
     // Script first: a voiceover video's words are approved before anything is made.
     const needsScript = !!(v.brief && v.brief.voiceover) && sb && !sb.scriptApprovedAt;
-    const canMake = (v.status === 'planned' || v.status === 'failed') && sb && sb.scenes && sb.scenes.length >= minScenes && !needsScript;
+    // Your own voice: every line recorded first (own-voice.ts linesToRecord; the server checks it too).
+    const needsRecording = isOwn(v) && !!sb && unrecorded(v).length > 0;
+    const canMake = (v.status === 'planned' || v.status === 'failed') && sb && sb.scenes && sb.scenes.length >= minScenes && !needsScript && !needsRecording;
     // The same figure the hold takes, in the workspace's unit (video-producer.ts buildEstimate).
     const unit = v.unit === 'credits' ? 'credit' : 'task';
     const cost = v.estimate == null ? '' : (v.estimate === 0 ? ' — free' : ` — uses ${v.estimate} ${unit}${v.estimate === 1 ? '' : 's'}`);
@@ -904,6 +1040,7 @@
           <div class="flex flex-wrap gap-2 mt-3">
             ${canMake ? `<button type="button" data-vid-act="build" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Make the video${esc(cost)}</button>` : ''}
             ${needsScript && (v.status === 'planned' || v.status === 'failed') ? '<span class="self-center text-xs text-gray-500">Approve the script above, then “Make the video”.</span>' : ''}
+            ${!needsScript && needsRecording && (v.status === 'planned' || v.status === 'failed') ? '<span class="self-center text-xs text-gray-500">Record every line above, then “Make the video”.</span>' : ''}
             ${!replanning && v.status !== 'reviewed' ? `<button type="button" data-vid-act="replan" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Plan it again</button>` : ''}
             <button type="button" data-vid-act="cancel" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-utility px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Cancel</button>
           </div>` : ''}
@@ -1176,6 +1313,32 @@
         break;
       }
       case 'pick-none': state.selected.clear(); state.bulkNote = null; render(); break;
+      case 'record-video': {
+        if (!window.VideoRecorder) break;
+        const shape = host()?.querySelector('[data-vid-footage-form] [name="shape"]:checked, [data-vid-footage-form] select[name="shape"]')?.value || '9:16';
+        window.VideoRecorder.open({ shape, onDone: (file) => { if (file) addFootageFiles([file]); } });
+        break;
+      }
+      case 'voice-mode': {
+        const own = b.dataset.mode === 'own';
+        act(id, { action: 'set_options', id, voiceMode: own ? 'own' : 'ai' }, own ? 'Your own voice. Approve the script, then record each line.' : 'An AI voice reads it — made when you press “Make the video”, which shows what it uses.');
+        break;
+      }
+      case 'voice-record': {
+        const v = state.videos.find((x) => x.id === id);
+        const s = v && v.storyboard.scenes.find((x) => x.id === b.dataset.scene);
+        if (!s) break;
+        if (!window.AudioRecorder) { state.notes[id] = { text: 'The recorder didn’t load. Upload a recording instead.', error: true }; render(); break; }
+        window.AudioRecorder.open({ title: `Scene ${v.storyboard.scenes.indexOf(s) + 1} — read this line`, script: s.voiceover, onDone: (file) => { if (file) attachVoice(id, s.id, file); } });
+        break;
+      }
+      case 'voice-upload': case 'voice-whole-upload': {
+        state.voicePick = { id, sceneId: b.dataset.vidAct === 'voice-upload' ? b.dataset.scene : null };
+        host()?.querySelector(`[data-vid-voice-file][data-id="${id}"]`)?.click();
+        break;
+      }
+      case 'voice-remove': act(id, { action: 'set_line_voice', id, sceneId: b.dataset.scene, assetId: null }, 'Recording removed — it stays in My Content.'); break;
+      case 'voice-whole-remove': act(id, { action: 'set_voice_file', id, assetId: null }, 'Removed. Record each line below.'); break;
       case 'bulk-archive': bulk('archive'); break;
       case 'bulk-restore': bulk('restore'); break;
       case 'bulk-delete': bulk('delete'); break;
@@ -1255,6 +1418,13 @@
 
   document.addEventListener('change', (e) => {
     const t = e.target;
+    if (host() && host().contains(t) && t.matches('[data-vid-voice-file]')) {
+      const file = t.files && t.files[0];
+      const pick = state.voicePick;
+      t.value = '';
+      if (file && pick) attachVoice(pick.id, pick.sceneId, file);
+      return;
+    }
     if (host() && host().contains(t) && t.matches('[data-vid-pick]')) {
       const id = Number(t.dataset.vidPick);
       if (t.checked) state.selected.add(id); else state.selected.delete(id);
@@ -1312,6 +1482,7 @@
       const brief = {
         message: String(fd.get('message') || ''), lengthS: Number(fd.get('lengthS')), cta: String(fd.get('cta') || ''),
         voiceover: !!voice, voice: voice || undefined, allowAi: String(fd.get('allowAi') || 'stock_and_ai'),
+        ...(voice && fd.get('ownVoice') ? { ownVoice: true } : {}),
         captions: !!fd.get('captions'), ...(captionStyle ? { captionStyle } : {}),
         shape: String(fd.get('shape') || '9:16'), ...briefExtras(fd),
       };

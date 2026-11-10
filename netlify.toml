@@ -1228,6 +1228,11 @@ node_bundler = "esbuild"
 [functions.generate-voiceover]
   timeout = 26
 
+# Video Producer: "My own voice" transcribes the owner's recording inside the request (own-voice.ts,
+# ≤18 s for one recording of a whole 60 s script). Everything else here answers in well under 10 s.
+[functions.video-projects]
+  timeout = 26
+
 # Admin → Revenue → Partners ▸ Partner Ops chat: a Claude tool loop (read tools + action cards).
 # Synchronous max, and the function keeps its own 21s budget under it (admin-partners-chat.ts).
 [functions.admin-partners-chat]

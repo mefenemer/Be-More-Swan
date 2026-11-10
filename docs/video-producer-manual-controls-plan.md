@@ -11,8 +11,14 @@ My Content, live on prod) and the seven improvements (music moods made with Stab
 Status: **decisions taken 2026-11-10: the owner accepted all six recommendations in §7** (one text line per scene,
 brand heading font, Quiet / Normal / Loud, own voice line by line, no mixed voices, AI presenter left for a separate plan).
 **Phase 1 (music volume) on staging 6197f842**, help SQL applied to both databases.
-**Phase 2 (scene text + Moving/Still) built 2026-11-10, not committed.** Help SQL:
-db/help-articles-2026-12zzzzzzzzzzzzzzzzzzzzzzzzz-video-scene-text.sql (no schema change).
+**Phase 2 (scene text + Moving/Still) on staging 20086ee5**, help SQL applied to both databases.
+**Phase 3 (own voice + Record a video) built 2026-11-10, not committed.** Help SQL:
+db/help-articles-2026-12zzzzzzzzzzzzzzzzzzzzzzzzzz-video-own-voice.sql (no schema change). As built:
+- **Recordings are converted to 24 kHz mono WAV in the browser** before upload, so the build can level them (audio-levelling.ts reads WAV and MP3 only) and whisper takes them whole.
+- **Captions needed no change:** post-render.ts already merges several voiceover clips by their start times.
+- **video-projects gets a 26 s timeout,** because transcription runs inside the request.
+- **"My own voice" is on the main brief form and the switch under the script,** not on the footage form (switch there after planning).
+- **Not yet verified:** a real microphone, a real transcription, or a render with several voice tracks.
 As built, differently from §3:
 - **"Plain" keeps a faint 25% backing.** The renderer has no text shadow for overlays, and adding one would mean redeploying the Remotion site.
 - **The brand font is used only when it's one of the 9 fonts the renderer has** (`overlay-fonts.ts`). Otherwise it's Impact, as before.

@@ -127,7 +127,7 @@ check('Change it makes a new version that keeps what was made; the finished one 
     assert.ok(nv.includes("status: opts.status ?? 'planned'"));
     const ep = read('netlify/functions/video-projects.ts');
     assert.ok(ep.includes("if (action === 'change')") && ep.includes("row.status !== 'ready'"));
-    assert.ok(ep.includes("(action === 'replan' || action === 'edit_scene' || action === 'rewrite_script' || action === 'set_options' || action === 'approve_script') && row.status === 'ready'") && ep.includes('row = await newVersion(db, row)'), 'chat replans and scene edits on a ready video make a version first');
+    assert.ok(ep.includes("(action === 'replan' || action === 'edit_scene' || action === 'rewrite_script' || action === 'set_options' || action === 'approve_script' || VOICE_ACTIONS.includes(action)) && row.status === 'ready'") && ep.includes('row = await newVersion(db, row)'), 'chat replans and scene edits on a ready video make a version first');
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes("['planned', 'failed', 'ready'].includes(project.status)"));
 });
 
