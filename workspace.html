@@ -21723,6 +21723,9 @@ document.addEventListener('post:textEdit', async (e) => {
     const before = ov.text;
     ov.text = d.replace;
     _rqRenderCanvasOverlays(post);
+    // The styling panel's Wording box is built once per box; rebuilt now, or it keeps the old words and
+    // typing there puts them back (staging check, 2026-11-10).
+    if (_pceStyleMountedFor === ov.id) { _pceStyleMountedFor = null; _pceRenderTextStyle(); }
     if (await _rqPersistOverlays(_rqReviewPostId)) { d.respond({ ok: true }); return; }
     ov.text = before;
     _rqRenderCanvasOverlays(post);

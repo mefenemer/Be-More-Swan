@@ -29,6 +29,8 @@ check('the text-edit handler redraws a branded card through its own save', () =>
     assert.ok(h.includes('_pceFlushCardSave()'));
     assert.ok(h.indexOf('post.brandCard') < h.indexOf("That text box has changed since"), 'card checked before the text-box refusal');
     assert.ok(h.includes('d.replace.length > 120'));
+    // The Wording box beside the picture shows the new words, not the old ones (staging check 2026-11-10).
+    assert.ok(h.includes('_pceStyleMountedFor = null; _pceRenderTextStyle();'));
 });
 
 check('the card says what changed; the prompt covers the picture’s words', () => {
