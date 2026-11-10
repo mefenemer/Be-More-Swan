@@ -171,7 +171,9 @@ export interface HeroProps {
  */
 export interface ItemsProps { heading: string | null; intro: string | null; items: Array<{ title: string; body: string; link?: Link | null; image?: Image | null }>; }
 /** Text, optionally with a picture beside it (left or right — on a phone it sits above the words). */
-export interface TextProps { heading: string | null; body: string; image: Image | null; imageSide: 'left' | 'right'; }
+/** headingAlign: where the heading sits (FR#8, 2026-11-10). Absent = left, so older sites read unchanged. */
+export type HeadingAlign = 'left' | 'center' | 'right';
+export interface TextProps { heading: string | null; body: string; image: Image | null; imageSide: 'left' | 'right'; headingAlign?: HeadingAlign; }
 export interface FaqProps { heading: string | null; items: Array<{ q: string; a: string }>; }
 export interface CtaProps { heading: string; body: string | null; button: Link; }
 /** What customers say — the proof a buyer looks for (and the Mystery Shopper checks for). */
@@ -524,7 +526,9 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
         case 'text': {
             const body = cleanText(p.body, LIMITS.textBody, true);
             if (!body) { warn('A text section was left out: it is empty.'); return null; }
-            return { type: 'text', props: { heading: textOrNull(p.heading, LIMITS.headline), body, image: cleanImage(p.image, warn), imageSide: p.imageSide === 'left' ? 'left' : 'right' } };
+            // Heading alignment: kept only when it isn't the default left, so a stored definition only grows when used.
+            const headingAlign = p.headingAlign === 'center' || p.headingAlign === 'centre' ? 'center' : p.headingAlign === 'right' ? 'right' : null;
+            return { type: 'text', props: { heading: textOrNull(p.heading, LIMITS.headline), body, image: cleanImage(p.image, warn), imageSide: p.imageSide === 'left' ? 'left' : 'right', ...(headingAlign ? { headingAlign } : {}) } };
         }
         case 'faq': {
             const list = (Array.isArray(p.items) ? p.items : []).map((x) => {
