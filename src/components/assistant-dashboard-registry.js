@@ -611,11 +611,12 @@
         { label: 'Videos Made', title: 'Finished Videos', desc: 'Every video it has finished and saved to My Content, in any shape or version.' },
         { label: 'Made Without Changes', title: 'Right First Time', desc: 'Of the storyboards it planned and you made, how many you made exactly as planned — no scene changed, nothing re-planned, no new version after.' },
         { label: 'Average Turnaround', title: 'Brief to Finished Video', desc: 'How long it takes from the brief to the finished file, over the last 90 days — including the time a storyboard waited for you.' },
-        { label: 'Times Used', title: 'In Posts & Articles', desc: 'How many times one of its finished videos was put in a post or a blog article.' },
+        // "Times Used" (in posts & articles) removed 2026-11-10 (owner): nothing about other assistants.
+        // Three KPIs, so the fourth card is hidden (_applyDashboardRegistry).
       ],
       hideReviewQueue: true,
       hideDataHub: true,
-      // Goals: 'videos_published' (goal-metrics.ts), counted from its published posts.
+      // Goals: 'videos_published' (goal-metrics.ts) — labelled Videos Made, counts its finished videos.
       modules: {
         hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,

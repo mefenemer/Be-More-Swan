@@ -278,7 +278,7 @@ check('notes are stored on the video, move to the new version, and the planner k
 });
 
 // ── 6. Results and Calendar ─────────────────────────────────────────────────────────────────────
-check('Results: videos made, made without changes, turnaround, times used', () => {
+check('Results: videos made, made without changes, turnaround', () => {
     const now = new Date('2026-11-10T12:00:00Z');
     const at = (m: number) => new Date(now.getTime() - m * 60000);
     const r = videoResults([
@@ -288,12 +288,12 @@ check('Results: videos made, made without changes, turnaround, times used', () =
         { id: 4, status: 'ready', version: 2, editCount: 0, parentProjectId: 3, shapeCopy: false, createdAt: at(15), readyAt: at(5) },
         { id: 5, status: 'ready', version: 1, editCount: 0, parentProjectId: 1, shapeCopy: true, createdAt: at(30), readyAt: at(25) },
         { id: 6, status: 'planned', version: 1, editCount: 0, parentProjectId: null, shapeCopy: false, createdAt: at(10), readyAt: null },
-    ], 3, now);
+    ], now);
     assert.strictEqual(r.made, 5);
     assert.strictEqual(r.madeWithoutChanges, 0.33, '1 of 3 first versions: one edited, one changed later');
     assert.strictEqual(r.avgTurnaroundMin, Math.round((60 + 30 + 30 + 10 + 5) / 5));
-    assert.strictEqual(r.timesUsed, 3);
-    assert.strictEqual(videoResults([], 0, now).madeWithoutChanges, null);
+    assert.ok(!('timesUsed' in r), 'no Times Used (owner, 2026-11-10)');
+    assert.strictEqual(videoResults([], now).madeWithoutChanges, null);
     assert.strictEqual(turnaroundText(95), '1 h 35 min');
 });
 
@@ -301,7 +301,8 @@ check('the Results tab reads the studio figures; the Calendar shows videos, not 
     const reg = read('src/components/assistant-dashboard-registry.js');
     const vpEntry = reg.slice(reg.indexOf('    video_producer: {'), reg.indexOf('    website_assistant: {'));
     assert.ok(vpEntry.includes("metricsSource: 'video'") && vpEntry.includes("calendarItems: 'videos'"));
-    for (const k of ['Videos Made', 'Made Without Changes', 'Average Turnaround', 'Times Used']) assert.ok(vpEntry.includes(`label: '${k}'`), k);
+    for (const k of ['Videos Made', 'Made Without Changes', 'Average Turnaround']) assert.ok(vpEntry.includes(`label: '${k}'`), k);
+    assert.ok(!vpEntry.includes("label: 'Times Used'"), 'Times Used removed (owner, 2026-11-10)');
     assert.ok(!vpEntry.includes('Engagement Rate by Reach'));
     const as = read('assistants.js');
     assert.ok(as.includes("if (source === 'video') {") && as.includes('async function _loadVideoMetrics(assistantId)'));
@@ -312,7 +313,10 @@ check('the Results tab reads the studio figures; the Calendar shows videos, not 
     assert.ok(orch.includes('"Calendar" tab — each video on the day it was started and the day it was finished.'));
     const ep = read('netlify/functions/video-projects.ts');
     assert.ok(ep.includes('if (qs.performance) {') && ep.includes('if (qs.calendar) {'));
-    assert.ok(read('src/utils/video-producer.ts').includes('blogPostAssets'), 'articles count as uses');
+    // Uses in posts and articles are no longer counted (owner, 2026-11-10).
+    const vr = read('src/utils/video-producer.ts');
+    const fn = vr.slice(vr.indexOf('export async function videoResultsFor'), vr.indexOf('export const STUCK_AFTER_MS'));
+    assert.ok(fn.length > 0 && !fn.includes('blogPostAssets') && !fn.includes('scheduledPostAssets'), 'no uses counted');
 });
 
 // ── 7. Shapes, look, name captions, source files ────────────────────────────────────────────────

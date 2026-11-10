@@ -82,7 +82,7 @@ check('every button and label it names is on the page', () => {
     for (const s of ['Make a video version']) assert.ok(ws.includes(s) && helpText.includes(s), s);
     assert.ok(read('src/public/assistant-onboarding-schemas.js').includes('Should it plan videos for you each week?'));
     assert.ok(helpText.includes('Should it plan videos for you each week?'));
-    assert.ok(read('src/config/goal-metrics.ts').includes("label: 'Videos Published'") && helpText.includes('Videos Published'));
+    assert.ok(read('src/config/goal-metrics.ts').includes("label: 'Videos Made'") && helpText.includes('Videos Made'));
     assert.ok(read('src/config/campaign-vocab.ts').includes("label: 'Commission a video'") && helpText.includes('Commission a video'));
 });
 

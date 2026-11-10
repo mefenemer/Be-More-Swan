@@ -56,8 +56,10 @@ check('connectors named as working are Live on connections.html, and the Coming-
     for (const name of ['Facebook', 'Instagram', 'LinkedIn', 'X', 'Gmail', 'Outlook', 'Google Search Console', 'Canva']) {
         assert.ok(live(name), `${name} is Live on connections.html`);
     }
-    // YouTube: Google approved the project's verification on 2026-11-05, so both YouTube cards are Live again.
-    assert.strictEqual((conn.match(/<h4>YouTube<\/h4><span class="cx-pill cx-live">/g) || []).length, 2, 'both YouTube cards are Live');
+    // YouTube: Google approved the project's verification on 2026-11-05, so the YouTube card is Live again.
+    // One card since 2026-11-10: the Video Producer's copy was removed — it posts nothing, the Social
+    // Media Assistant does (connection-map.ts gives video_producer Canva only).
+    assert.strictEqual((conn.match(/<h4>YouTube<\/h4><span class="cx-pill cx-live">/g) || []).length, 1, 'the YouTube card is Live');
     assert.ok(!/<h4>YouTube<\/h4><span class="cx-pill cx-soon">/.test(conn), 'no YouTube card is Coming soon');
     // Slack and Notion only run for the Minute Taker, which is itself coming soon.
     for (const name of ['Slack', 'Notion']) {

@@ -125,7 +125,7 @@ const CATALOG = [
         // is for a FRESH database. Go-live is the admin status change, never an edit here.
         roleKey: 'video_producer',
         name: 'Video Producer',
-        description: 'Makes short videos from what you want to say, or from your own footage — it writes the script from your business details, picks the footage and pictures, adds a voiceover and captions, and cuts out pauses and ums. You check the storyboard before anything is made. The finished video is saved to My Content, to download or hand to your Social Media Assistant or Blog Writer.',
+        description: 'Makes short videos from what you want to say, or from your own footage — it writes the script from your business details, picks the footage and pictures, adds a voiceover and captions, and cuts out pauses and ums. You check the storyboard before anything is made. The finished video is saved to My Content, to download or use with any of your assistants.',
         category: 'Marketing & Sales',
         iconKey: 'megaphone',
         iconColor: 'orange',

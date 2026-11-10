@@ -149,39 +149,32 @@ check('the Videos tab offers Change it and shows the version', () => {
     assert.ok(t.includes('Version ${esc(v.version)}'));
 });
 
-// ── Phase 4: hand-offs ──────────────────────────────────────────────────────────────────────────
+// ── Phase 4: hand-offs — REMOVED 2026-11-10 ─────────────────────────────────────────────────────
+// Owner: "Use in a post" / "Use in a blog post" are not required in the Video Producer. It is a studio:
+// a finished video is in My Content, and any assistant that wants it picks it from there. So the
+// Video Producer names no other assistant — no buttons, no chat card, no teammate lookup.
 
-check('hand-offs go only to ACTIVE teammates, looked up by role', () => {
-    const h = read('src/utils/video-handoff.ts');
-    assert.ok(h.includes('export async function activeAssistantInRole') && h.includes('isWorking(r.lifecycleStatus, r.provisioningStatus)'));
-    const ep = read('netlify/functions/video-projects.ts');
-    assert.ok(ep.includes("activeAssistantInRole(db, orgId, 'social_media_manager')") && ep.includes("activeAssistantInRole(db, orgId, 'blog_writer')"));
+check('the Video Producer hands a finished video to nobody (owner, 2026-11-10)', () => {
     const t = read('src/components/assistant-videos.js');
-    assert.ok(t.includes('${tm.social ? `<button type="button" data-vid-act="use-post"') && t.includes('${tm.blog ? `<button type="button" data-vid-act="use-blog"'));
+    for (const gone of ['use-post', 'use-blog', 'Use in a post', 'Use in a blog post', 'teammates', 'pceStartPostWithVideo', 'openBlogStudio', 'Suggested words to post']) {
+        assert.ok(!t.includes(gone), `Videos tab still has ${gone}`);
+    }
+    assert.ok(t.includes('Saved in My Content.'));
+    assert.ok(!read('netlify/functions/video-projects.ts').includes('teammates'), 'no teammate lookup endpoint');
+    assert.ok(!read('src/components/disruptive-ui-registry.js').includes('video_handover_proposal'), 'no hand-off chat card');
+    const chat = read('netlify/functions/chat-orchestrator.ts');
+    assert.ok(!chat.includes('video_handover_proposal'));
+    assert.ok(chat.includes('You hand it to nobody and post it nowhere'));
 });
 
-check('"Use in a post" uses the Social Media Manager\'s own new-post flow, with video formats for the shape', () => {
-    const ws = read('workspace.html');
-    assert.ok(ws.includes('window.pceStartPostWithVideo = async function (assistantId, video)'));
-    assert.ok(ws.includes('await pceOpenDestinationsForCreate(assistantId);'));
-    assert.ok(ws.includes("f.a === 'live' && (f.m === 'video' || f.m === 'mixed')"));
-    assert.ok(ws.includes('...(withVideo ? { caption: withVideo.caption, contentAssetIds: [withVideo.assetId] } : { blank: true })'), 'a real draft with the video, into the Review Queue');
-    const close = ws.slice(ws.indexOf('function pceCloseDestinations()'));
-    assert.ok(close.slice(0, 600).includes('_pceCreateWith = null;'), 'a cancelled hand-off never attaches its video to the next post');
-});
-
-check('"Use in a blog post" opens a new Blog Writer draft with the video in it', () => {
-    const b = read('src/components/blog-studio-modal.js');
-    assert.ok(b.includes('state.pendingVideo = opts.withVideo && opts.withVideo.assetId ? opts.withVideo : null;'));
-    assert.ok(b.includes('if (video) attachInline({ assetId: Number(video.assetId) });'));
-});
-
-check('the chat has the same hand-off, as a card that opens the flow (never posts)', () => {
-    const reg = read('src/components/disruptive-ui-registry.js');
-    assert.ok(reg.includes("register('video_handover_proposal'"));
-    const card = reg.slice(reg.indexOf('function renderVideoHandoverProposalCard'), reg.indexOf("register('video_handover_proposal'"));
-    assert.ok(card.includes('window.pceStartPostWithVideo(') && card.includes('window.openBlogStudio(') && !card.includes('create-manual-post'));
-    assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"type": "video_handover_proposal"'));
+check('a requested video is still delivered back, but the Video Producer only says so in a line (owner, 2026-11-10)', () => {
+    const notes = read('src/utils/video-post-media.ts');
+    const block = notes.slice(notes.indexOf('export const SOURCE_POST_NOTES'), notes.indexOf('export async function attachVideoToSourcePost'));
+    assert.ok(block.includes('Sent back to the post that asked for it') && !block.includes('Review Queue'));
+    assert.ok(read('src/utils/video-render.ts').includes('Sent back to the campaign that asked for it'));
+    const help = read('db/help-articles-2026-12zzzzzzzzzzzzzzzzzzzzzz-video-delivery.sql');
+    assert.ok(help.includes("WHERE title = 'The Social Media Assistant'") && help.includes('## Video versions of your posts'));
+    assert.ok(help.includes('## A video for your campaign') && help.includes('Commission a video'));
 });
 
 check('words-only scene edits keep the clip; a branded card or a new picture is made again', () => {

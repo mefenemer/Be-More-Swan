@@ -544,17 +544,17 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         realism: { maxDailyDelta: 50 },
     },
     {
-        // Video Producer (docs/video-producer-plan.md). Its videos are posts; counted from scheduled_posts
-        // like content_published, by poll-goal-telemetry.ts. Published, not made: a video nobody
-        // approved is not an outcome.
+        // Video Producer. A STUDIO since 2026-11-09 — it posts nothing — so this counts the videos it
+        // finished (video_projects Ready/built), by poll-goal-telemetry.ts. The key keeps its old name so
+        // goals already set carry on; only the label and the count changed (2026-11-10).
         key: 'videos_published',
-        label: 'Videos Published',
+        label: 'Videos Made',
         unit: 'videos',
         source: 'internal',
         direction: 'increase',
         objective: 'outcome',
         roles: ['video_producer'],
-        description: 'Videos from this assistant that you approved and that went out.',
+        description: 'Videos this assistant finished and saved to My Content.',
         available: true,
         realism: { maxDailyDelta: 20 },
     },
