@@ -73,12 +73,17 @@ check('loaded on the workspace, a modal dialog below the media picker and dialog
     assert.ok(drawer.includes('z-index:10500') && read('src/components/media-picker.js').includes('z-index:11000'));
     assert.ok(drawer.includes('role="dialog" aria-modal="true" aria-labelledby="sfd-title"'));
     // Esc and Tab are left to a picker or dialog opened from inside it.
-    assert.ok(drawer.includes(`[...document.querySelectorAll('[aria-modal="true"]')].some((x) => !el.contains(x))`));
+    assert.ok(drawer.includes(`[...document.querySelectorAll('[aria-modal="true"]')].some((x) => !el.contains(x) && onScreen(x))`));
+    // The workspace keeps ~12 closed dialogs in the page; counting those left Esc and Tab dead (staging 2026-11-10).
+    const onScreen = drawer.slice(drawer.indexOf('function onScreen(x)'), drawer.indexOf('function onKey(e)'));
+    assert.ok(onScreen.includes("x.closest('[inert], [aria-hidden=\"true\"]')") && onScreen.includes('r.width > 0 && r.height > 0'));
 });
 
 check('it says where things are saved, and offers the full page', () => {
     assert.ok(drawer.includes('Saved to your Business Information, so your other assistants use it too.'));
     assert.ok(drawer.includes('Open in Business Information'));
+    // A save redraws the site editor, so focus goes back to the redrawn copy of the opening button.
+    assert.ok(drawer.includes("a.name.startsWith('data-site-open-')") && drawer.includes('document.querySelector(returnSelector)'));
     assert.ok(drawer.includes("editor.mount(host, { ...((o && o.options) || {}), compact: true, onSaved: o && o.onSaved })"));
 });
 

@@ -36,6 +36,7 @@
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   let el = null;
   let returnFocus = null;
+  let returnSelector = '';
   let current = null;
 
   function close() {
@@ -46,14 +47,24 @@
     document.removeEventListener('keydown', onKey, true);
     window.removeEventListener('popstate', close);
     document.documentElement.style.overflow = '';
-    if (returnFocus && returnFocus.isConnected) returnFocus.focus();
-    returnFocus = null;
+    // A save redraws the page behind, replacing the button that opened the drawer: find its new copy.
+    const back = returnFocus && returnFocus.isConnected ? returnFocus : (returnSelector && document.querySelector(returnSelector));
+    if (back) back.focus();
+    returnFocus = null; returnSelector = '';
+  }
+
+  // The workspace keeps many closed dialogs in the page (display:none, zero size, or slid off-screen
+  // and inert), so only one actually on screen counts as open.
+  function onScreen(x) {
+    if (x.closest('[inert], [aria-hidden="true"]') || getComputedStyle(x).visibility === 'hidden') return false;
+    const r = x.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && r.right > 0 && r.bottom > 0 && r.left < innerWidth && r.top < innerHeight;
   }
 
   function onKey(e) {
     if (!el) return;
     // A picker or dialog opened from inside the drawer is on top: its keys are its own.
-    if ([...document.querySelectorAll('[aria-modal="true"]')].some((x) => !el.contains(x))) return;
+    if ([...document.querySelectorAll('[aria-modal="true"]')].some((x) => !el.contains(x) && onScreen(x))) return;
     // Esc closes the drawer.
     if (e.key === 'Escape') {
       // An open editor form keeps its own Esc (the Products editor closes the form first).
@@ -78,6 +89,8 @@
     if (!ed) return;
     close();
     returnFocus = document.activeElement;
+    const attr = returnFocus && [...returnFocus.attributes].find((a) => a.name.startsWith('data-site-open-'));
+    returnSelector = attr ? `[${attr.name}="${CSS.escape(attr.value)}"]` : '';
     const title = (o && o.title) || ed.title;
     el = document.createElement('div');
     el.setAttribute('data-site-facts-drawer', kind);
