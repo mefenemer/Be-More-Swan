@@ -75,7 +75,7 @@ export default withLambda(async (event) => {
                 alreadySent: await alreadySentCount(db, b.key),
             });
         }
-        return json(200, { broadcasts: out, emailsGoToCustomers: emailsGoToCustomers(), you: admin.email });
+        return json(200, { broadcasts: out, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>), you: admin.email });
     }
 
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
@@ -107,7 +107,7 @@ export default withLambda(async (event) => {
         const secret = process.env.CRON_TRIGGER_SECRET;
         const base = resolveBaseUrl(event.headers);
         if (!secret || !base) return json(503, { error: !secret ? 'CRON_TRIGGER_SECRET is not set on this site.' : 'Could not work out this site\'s address.' });
-        await audit('broadcast_started', { waiting, emailsGoToCustomers: emailsGoToCustomers() });
+        await audit('broadcast_started', { waiting, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>) });
         try {
             const res = await fetch(`${base}/.netlify/functions/admin-broadcast-background`, {
                 method: 'POST',
@@ -119,7 +119,7 @@ export default withLambda(async (event) => {
         } catch (err) {
             return json(502, { error: `The sender could not be reached: ${err instanceof Error ? err.message : String(err)}` });
         }
-        return json(202, { started: true, waiting, emailsGoToCustomers: emailsGoToCustomers() });
+        return json(202, { started: true, waiting, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>) });
     }
 
     return json(400, { error: 'Unknown resource.' });

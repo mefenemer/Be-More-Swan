@@ -49,16 +49,29 @@ check('the in-app and email copy say the same date and figures', () => {
 });
 
 check('customer emails only from the production deploy', () => {
-    const was = process.env.CONTEXT;
+    const was = { CONTEXT: process.env.CONTEXT, BRANCH: process.env.BRANCH };
+    const prod = { host: 'bemoreswan.com' };
+    const staging = { host: 'staging--bemoreswan.netlify.app' };
     try {
-        process.env.CONTEXT = 'production'; assert.strictEqual(emailsGoToCustomers(), true);
-        process.env.CONTEXT = 'branch-deploy'; assert.strictEqual(emailsGoToCustomers(), false);
-        delete process.env.CONTEXT; assert.strictEqual(emailsGoToCustomers(), false);
+        process.env.CONTEXT = 'production'; assert.strictEqual(emailsGoToCustomers(staging), true);
+        process.env.CONTEXT = 'branch-deploy'; assert.strictEqual(emailsGoToCustomers(prod), false, 'a branch build never emails customers');
+        delete process.env.CONTEXT; delete process.env.BRANCH;
+        // ⚠️ The case that shipped broken (2026-11-02): no CONTEXT at function runtime ON production.
+        assert.strictEqual(emailsGoToCustomers(prod), true, 'production is known by its host when CONTEXT is missing');
+        assert.strictEqual(emailsGoToCustomers({ host: 'www.bemoreswan.com' }), true);
+        assert.strictEqual(emailsGoToCustomers({ 'x-forwarded-host': 'bemoreswan.com' }), true);
+        assert.strictEqual(emailsGoToCustomers(staging), false, 'staging never emails customers');
+        assert.strictEqual(emailsGoToCustomers({ host: 'deploy-preview-12--bemoreswan.netlify.app' }), false);
+        assert.strictEqual(emailsGoToCustomers({}), false, 'no host: we cannot tell, so no customer email');
+        assert.strictEqual(emailsGoToCustomers(undefined), false);
     } finally {
-        if (was === undefined) delete process.env.CONTEXT; else process.env.CONTEXT = was;
+        for (const [k, v] of Object.entries(was)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     }
     const worker = read('netlify/functions/admin-broadcast-background.ts');
-    assert.match(worker, /const live = emailsGoToCustomers\(\);/);
+    assert.match(worker, /const live = emailsGoToCustomers\(event\.headers/);
+    for (const f of ['netlify/functions/admin-broadcast.ts', 'netlify/functions/admin-task-costs.ts', 'netlify/functions/admin-broadcast-background.ts']) {
+        assert.doesNotMatch(read(f), /emailsGoToCustomers\(\)/, `${f} must pass the request headers`);
+    }
     assert.ok(worker.indexOf('if (!live) continue;') < worker.indexOf('sendTemplatedEmail('), 'no customer email off production');
 });
 
