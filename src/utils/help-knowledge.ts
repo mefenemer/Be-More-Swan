@@ -12,6 +12,8 @@ import { asc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { helpArticles } from '../../db/schema';
 import { planPriceVars, fillPlanPriceTokens } from './plan-price-tokens';
+import { getTaskCosts } from './task-costs';
+import { fillTaskCostTokens } from '../config/task-weights';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -57,7 +59,8 @@ export async function loadHelpKnowledge(db: Db): Promise<HelpKnowledge> {
             .where(eq(helpArticles.isPublished, true))
             .orderBy(asc(helpArticles.category), asc(helpArticles.sortOrder), asc(helpArticles.title));
         const prices = await planPriceVars(db);
-        const value = buildHelpKnowledge(rows.map((r) => ({ ...r, contentMd: fillPlanPriceTokens(r.contentMd ?? '', prices) })));
+        const costs = await getTaskCosts();
+        const value = buildHelpKnowledge(rows.map((r) => ({ ...r, contentMd: fillTaskCostTokens(fillPlanPriceTokens(r.contentMd ?? '', prices), costs) })));
         cache = { at: Date.now(), value };
         return value;
     } catch (err) {

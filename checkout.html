@@ -11,6 +11,7 @@
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
   <link rel="manifest" href="/favicon/manifest.json">
   <script src="https://js.stripe.com/v3/"></script>
+    <script src="/task-costs.js" defer></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
 
@@ -132,7 +133,7 @@
             <span class="text-lg leading-none mt-0.5 flex-shrink-0">🎨</span>
             <div>
               <p class="text-sm font-bold text-pink-800 mb-1">One monthly task allowance</p>
-              <p class="text-xs text-pink-700 leading-relaxed">Every finished post, article, email or lead search is one task, and AI media comes from the same allowance — an AI image is 1 task, an AI video or music track 20. Chat is free. When the allowance runs out, work pauses — you are never charged extra.</p>
+              <p class="text-xs text-pink-700 leading-relaxed">Every finished post, article, email or lead search is one task, and AI media comes from the same allowance — an AI image is <span data-task-cost="ai_image">1 task</span>, an AI video <span data-task-cost="ai_video">20 tasks</span> and an AI music track <span data-task-cost="ai_music">20 tasks</span>. Chat is free. When the allowance runs out, work pauses — you are never charged extra.</p>
             </div>
           </div>
         </div>

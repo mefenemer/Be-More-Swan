@@ -106,13 +106,13 @@ for (const r of ROLES) {
     console.log(`\n${r.role} — chat sees its own ${r.kind} and names real places`);
     const route = routeOf(r.role);
     const reg = regEntry(r.role);
-    const surfaces = span(orchestrator, `function ${r.helper}(): string {`, '\n}\n', `${r.helper}()`)
+    const surfaces = span(orchestrator, `function ${r.helper}(`, '\n}\n', `${r.helper}()`)
         // The non-social helpers share one constant for the Profile cards; read it in.
         .replace('${PROFILE_CARDS_NON_SOCIAL}', span(orchestrator, 'const PROFILE_CARDS_NON_SOCIAL = `', '`;', 'PROFILE_CARDS_NON_SOCIAL'));
 
     check('the route reads its own work every turn and puts it in the prompt', () => {
         assert.ok(new RegExp(`contentSnapshot:\\s*'${r.kind}'`).test(route), `${r.role} must set contentSnapshot: '${r.kind}'`);
-        assert.ok(route.includes(`${r.helper}()`), `the prompt must include ${r.helper}()`);
+        assert.ok(route.includes(`${r.helper}(`), `the prompt must include ${r.helper}()`);
         assert.ok(route.includes('rc.contentSnapshot ??'), 'the prompt must include rc.contentSnapshot with a fallback admission');
     });
 

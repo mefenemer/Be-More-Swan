@@ -178,7 +178,7 @@ check('the page has the tab, its panel and the script; every branch routes to th
 });
 
 check('every name the chat quotes is on the Website tab', () => {
-    const at = chat.indexOf('function websiteAssistantSurfaces()');
+    const at = chat.indexOf('function websiteAssistantSurfaces(');
     const surfaces = chat.slice(at, chat.indexOf('\n}', at));
     // "Templates" and "Details" were panel buttons until the Website tab got its four sub-tabs
     // (Set up · Design · Pages · Publish, 2026-10-21).
@@ -201,7 +201,7 @@ check('chat cards are registered, dispatch events the session handles, and call 
 });
 
 check('the chat is told publishing exists, and the welcome names a real button', () => {
-    const at = chat.indexOf('function websiteAssistantSurfaces()');
+    const at = chat.indexOf('function websiteAssistantSurfaces(');
     const surfaces = chat.slice(at, chat.indexOf('\n}', at));
     assert.ok(!/coming soon/i.test(surfaces), 'surfaces must not say publishing is coming soon');
     const welcome = read('src/components/assistant-welcome-messages.js');
@@ -282,7 +282,7 @@ check('removing a section or page can be undone, and focus comes back after a re
 check('the chat never publishes (step 3a: a click on the Website tab), and nothing spends without saying so', () => {
     assert.ok(!/action: 'publish'/.test(read('src/components/chat-session.js')));
     assert.match(chat, /You cannot publish, take the site offline or choose its address/);
-    assert.match(editor, /uses 1 task/);
+    assert.match(editor, /uses \$\{window\.taskCost\('site_draft'\)\}/, 'the editor says what a draft uses, at the live cost');
     assert.match(cards, /Uses \$\{window\.taskCost\('site_draft'\)\} from your monthly allowance/);
 });
 

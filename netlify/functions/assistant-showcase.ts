@@ -10,6 +10,8 @@
 import { sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { getTaskCosts } from '../../src/utils/task-costs';
+import { fillTaskCostTokensDeep } from '../../src/config/task-weights';
 
 const json = (statusCode: number, body: unknown, cache = false) => ({
     statusCode,
@@ -30,7 +32,8 @@ export default withLambda(async (event) => {
         const rows = await getDb().execute<{ content: unknown }>(
             sql`SELECT content FROM assistant_showcases WHERE role_key = ${roleKey} LIMIT 1`);
         const row = (rows as unknown as Array<{ content: unknown }>)[0];
-        return json(200, { showcase: row ? row.content : null }, true);
+        // The copy quotes task costs as {{tasks.ai_video}}; the live figure is filled in here (Admin → Money → Task costs).
+        return json(200, { showcase: row ? fillTaskCostTokensDeep(row.content, await getTaskCosts()) : null }, true);
     } catch (err) {
         const code = (err as { code?: string; cause?: { code?: string } })?.code
             ?? (err as { cause?: { code?: string } })?.cause?.code;

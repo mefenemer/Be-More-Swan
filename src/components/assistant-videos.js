@@ -1,3 +1,5 @@
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/assistant-videos.js
  * The Video Producer's Videos tab — docs/video-producer-plan.md §5.2–5.8.
@@ -727,7 +729,7 @@
       <form data-vid-clip-form class="tab-card p-4 mb-3 space-y-3">
         <div class="flex items-center justify-between"><p class="text-sm font-bold text-gray-900">New AI clip</p>
           <button type="button" data-vid-act="clip-close" class="text-xs font-bold text-gray-500 hover:text-gray-800">Close</button></div>
-        <p class="text-xs text-gray-600">A short clip made with AI, saved to My Content. You see its first frame (1 task) before the clip is made, and the button says what the clip uses. Made-up people only.</p>
+        <p class="text-xs text-gray-600">A short clip made with AI, saved to My Content. You see its first frame (${window.taskCost('ai_image')}) before the clip is made, and the button says what the clip uses. Made-up people only.</p>
         <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">What should it show?</span>
           <textarea name="description" rows="3" maxlength="400" required class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Steam rising from a fresh cup of coffee on a sunny café table, slow push in"></textarea></label>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -770,7 +772,7 @@
           <p class="text-sm text-gray-900 break-words">“${esc(c.description)}”</p>
           <p class="text-xs text-gray-600">${esc(style)} · ${esc(c.lengthS)} seconds · ${c.sound ? 'with sound' : 'no sound'} · AI clip</p>
           ${open ? `<div class="flex flex-wrap gap-2 pt-1">
-            <button type="button" data-vid-act="clip-frame" data-id="${v.id}" ${busy} class="${v.clipFrameUrl ? 'btn-secondary border' : 'btn-primary'} px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">${v.clipFrameUrl ? 'Try another frame — 1 task' : 'See the first frame — 1 task'}</button>
+            <button type="button" data-vid-act="clip-frame" data-id="${v.id}" ${busy} class="${v.clipFrameUrl ? 'btn-secondary border' : 'btn-primary'} px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">${v.clipFrameUrl ? 'Try another frame' : 'See the first frame'} — ${window.taskCost('ai_image')}</button>
             ${v.clipFrameUrl ? `<button type="button" data-vid-act="build" data-id="${v.id}" ${busy} class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Make the clip${esc(cost)}</button>` : ''}
             <button type="button" data-vid-act="cancel" data-id="${v.id}" ${busy} class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Cancel</button>
           </div>

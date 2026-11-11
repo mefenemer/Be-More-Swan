@@ -28,6 +28,8 @@ import { loadCommitments, renderCommitmentsForMentor } from './mentor-commitment
 import { loadTrackRecord, renderTrackRecordForMentor } from './mentor-outcomes';
 import { loadCustomers, renderCustomersForMentor } from './mentor-customers';
 import { TEAM_FEATURES } from '../config/team-features';
+import { fillTaskCostTokens, type TaskCosts } from '../config/task-weights';
+import { getTaskCosts } from './task-costs';
 import { DISCUSSIONS_ENABLED, isDiscussionSource, sourceInfo } from '../config/discussion-sites';
 import { loadSiteDirectoryGaps } from './site-directory-store';
 import { listedSitesFilter } from './discussions';
@@ -68,6 +70,8 @@ export interface MentorSnapshotData {
      * tables aren't there (unknown, not "not set up"); undefined = not read (older fixtures).
      */
     discussions?: Array<{ assistantId: number; topics: string[]; sites: string[]; enabled: boolean; newCount: number; repliedCount: number; lastScannedAt: Date | null }> | null;
+    /** Today's task costs (Admin → Money → Task costs), for {{tasks.*}} in TEAM_FEATURES text. */
+    costs?: TaskCosts;
     /**
      * What the website lacks, from the site page directory (src/utils/site-directory.ts directoryGaps):
      * no contact/about page, Business Information products no page names. Empty = none found or the
@@ -310,7 +314,11 @@ export function renderTeamFeatures(d: MentorSnapshotData): string[] {
     const out = ['', 'WHAT YOUR TEAM CAN DO (newer features — suggest one only when it fits a goal or gap; only for an ACTIVE assistant, otherwise say what resuming it would add; the user sets it up there, you have no card for it):'];
     for (const k of roles) {
         const names = others.filter((t) => t.roleKey === k).map((t) => t.name).join(', ');
-        for (const f of TEAM_FEATURES[k]) out.push(`- ${names} — ${f.name} (new ${f.since}): ${f.text}`);
+        for (const f of TEAM_FEATURES[k]) {
+            // A cost the snapshot couldn't read reads as "tasks" rather than a raw {{tasks.*}} placeholder.
+            const text = d.costs ? fillTaskCostTokens(f.text, d.costs) : f.text.replace(/\{\{\s*tasks\.[a-z_]+\s*\}\}/g, 'tasks');
+            out.push(`- ${names} — ${f.name} (new ${f.since}): ${text}`);
+        }
     }
     for (const t of others.filter((x) => x.roleKey === 'lead_qualifier')) {
         if (d.discussions === undefined) continue;
@@ -469,6 +477,7 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
         strategyDocs,
         research,
         discussions: discussionState,
+        costs: await getTaskCosts(),
         websiteGaps,
         plan: { status: (planRow?.status as 'active' | 'past_due' | undefined) ?? null, freeSlots, nextPlanName: nextPlan?.name ?? null, canMakeVideo: tierCanGenerateVideo(planRow?.tierKey ?? null) },
         catalogue: catalogue.filter((c: any) => c.roleKey).map((c: any) => ({

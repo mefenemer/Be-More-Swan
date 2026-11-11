@@ -8,6 +8,8 @@ import { getDb } from '../../db/client';
 import { helpArticles } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { planPriceVars, fillPlanPriceTokens } from '../../src/utils/plan-price-tokens';
+import { getTaskCosts } from '../../src/utils/task-costs';
+import { fillTaskCostTokens } from '../../src/config/task-weights';
 
 const HEADERS: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -38,7 +40,9 @@ export default withLambda(async (event) => {
         // Articles quote plan prices as {{plans.saver_price}} / {{plans.buster_price}}; the live
         // value comes from master data here, so no article carries its own copy of a price.
         const prices = await planPriceVars(db);
-        const articles = rows.map((a) => ({ ...a, contentMd: fillPlanPriceTokens(a.contentMd ?? '', prices) }));
+        // …and task costs as {{tasks.ai_image}}, filled from Admin → Money → Task costs.
+        const costs = await getTaskCosts();
+        const articles = rows.map((a) => ({ ...a, contentMd: fillTaskCostTokens(fillPlanPriceTokens(a.contentMd ?? '', prices), costs) }));
 
         return {
             statusCode: 200,

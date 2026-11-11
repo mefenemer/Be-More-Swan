@@ -21,6 +21,10 @@
  *   const schema = window.AssistantOnboardingSchemas['lead_qualifier'];
  *   if (schema) AssistantOnboardingShell.mount({ container, assistantId, configurationSchema: schema });
  */
+
+// Today's figure from Admin → Money → Task costs (/task-costs.js), read each time a description is shown.
+// Plain fallback when this file runs on a page without that script.
+function liveCost(kind) { return (typeof window !== 'undefined' && window.taskCost) ? window.taskCost(kind) : '1 task'; }
 (function (root, factory) {
   // Also read on the server (src/utils/setup-field.ts validates a set-up answer card against it), the
   // same UMD shape as brand-contrast.js: module.exports there, window.AssistantOnboardingSchemas here.
@@ -406,7 +410,7 @@
       },
       {
         title: 'Operational set-up',
-        description: 'When it checks your site again. A check where nothing has changed is free; one that re-scores uses 1 task.',
+        get description() { return `When it checks your site again. A check where nothing has changed is free; one that re-scores uses ${liveCost('site_audit')}.`; },
         operational: true,
         fields: [
           {
@@ -626,7 +630,7 @@
             required: true,
             options: [
               { value: 'stock_and_ai', label: 'Stock first, AI where stock won\u2019t fit', description: 'Stock footage and photos use no extra tasks. An AI picture uses 1 task, an AI clip 20 (at most 3 per video).' },
-              { value: 'stock_only', label: 'Stock footage, photos and my own pictures only', description: 'No tasks for pictures. A voiceover still uses 1 task.' },
+              { value: 'stock_only', label: 'Stock footage, photos and my own pictures only', get description() { return `No tasks for pictures. A voiceover still uses ${liveCost('ai_voiceover')}.`; } },
               { value: 'ai_first', label: 'Lean on AI', description: 'More AI scenes when they suit the video — still at most 3 AI clips.' },
             ],
           },
@@ -888,7 +892,7 @@
             type: 'radio',
             required: false,
             options: [
-              { value: 'on', label: 'Review my week', description: 'Once a week your Mentor compares what happened with your plan and suggests up to 3 changes. 1 task each week.' },
+              { value: 'on', label: 'Review my week', get description() { return `Once a week your Mentor compares what happened with your plan and suggests up to 3 changes. ${liveCost('mentor_review')} each week.`.replace(/^./, (c) => c.toUpperCase()); } },
               { value: 'off', label: 'No weekly review', description: 'You can still ask for one any time.' },
             ],
           },

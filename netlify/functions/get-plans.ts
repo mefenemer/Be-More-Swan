@@ -10,6 +10,8 @@ import { getDb } from '../../db/client';
 import { masterPlans, planFeatures } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { annualAmountGbp } from '../../src/utils/stripe-price';
+import { getTaskCosts } from '../../src/utils/task-costs';
+import { fillTaskCostTokensDeep } from '../../src/config/task-weights';
 
 const HEADERS = {
     'Content-Type': 'application/json',
@@ -93,7 +95,8 @@ export default withLambda(async (event) => {
         };
         return {
             statusCode: 200, headers: HEADERS,
-            body: JSON.stringify({ plans: plans.map(withPrices), enterprisePlan: enterprisePlan ?? null, featureCatalog }),
+            // Plan copy quotes task costs as {{tasks.ai_video}}; the live figure is filled in here.
+            body: JSON.stringify(fillTaskCostTokensDeep({ plans: plans.map(withPrices), enterprisePlan: enterprisePlan ?? null, featureCatalog }, await getTaskCosts())),
         };
     } catch (err) {
         console.error('[get-plans]', err);

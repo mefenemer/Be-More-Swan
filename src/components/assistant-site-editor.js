@@ -1,3 +1,5 @@
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/assistant-site-editor.js
  * The Website Assistant's Website tab — docs/website-assistant-plan.md §5.3, §5.5.
@@ -969,7 +971,7 @@
       <div class="flex flex-wrap gap-2 items-center mt-3">
         ${btn(`data-site-words-place ${w.busy ? 'disabled' : ''}`, w.busy ? 'Placing your words…' : 'Place my words', true)}
         ${btn('data-site-words-cancel', 'Cancel')}
-        <span class="text-xs text-gray-500">Uses 1 task.</span>
+        <span class="text-xs text-gray-500">Uses ${window.taskCost('site_words')}.</span>
       </div>`);
   }
 
@@ -2084,15 +2086,15 @@
     if (where === 'start') {
       return card(`
         ${def().settings.template ? `<p class="text-sm font-black text-gray-900">Let ${who} write the words</p>
-        <p class="text-xs text-gray-500 mt-1">It rewrites every section of your template for your business, from your details, products and set-up answers — the layout and design stay as they are, and so do its pictures unless you choose others below. Anything it doesn't know stays in [square brackets] for you. Uses 1 task.</p>`
+        <p class="text-xs text-gray-500 mt-1">It rewrites every section of your template for your business, from your details, products and set-up answers — the layout and design stay as they are, and so do its pictures unless you choose others below. Anything it doesn't know stays in [square brackets] for you. Uses ${window.taskCost('site_draft')}.</p>`
         : `<p class="text-sm font-black text-gray-900">Let ${who} write your site</p>
-        <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you chose for your website. You then change anything you like. Uses 1 task.</p>`}
+        <p class="text-xs text-gray-500 mt-1">It writes every page from your business details, products and set-up answers, using only the things you chose for your website. You then change anything you like. Uses ${window.taskCost('site_draft')}.</p>`}
         ${form}
         <div class="mt-3">${btn('data-site-draft', def().settings.template ? 'Write the words' : 'Write my site', true)}</div>`, 'border-emerald-200');
     }
     return `<details class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
       <summary class="text-sm font-black text-gray-900 cursor-pointer">Start again from scratch</summary>
-      <p class="text-xs text-gray-500 mt-2">${who} rewrites every page from your business details. <strong>It replaces everything in your draft</strong>, including your own changes (${s.status === 'published' ? 'your live site doesn\'t change until you publish' : 'nothing is live yet'}). Earlier published versions are kept. Uses 1 task.</p>
+      <p class="text-xs text-gray-500 mt-2">${who} rewrites every page from your business details. <strong>It replaces everything in your draft</strong>, including your own changes (${s.status === 'published' ? 'your live site doesn\'t change until you publish' : 'nothing is live yet'}). Earlier published versions are kept. Uses ${window.taskCost('site_draft')}.</p>
       ${form}
       <div class="mt-3">${btn('data-site-draft', 'Replace my draft', false)}</div>
     </details>`;
@@ -2126,7 +2128,7 @@
       <label class="flex items-start gap-2 text-xs text-gray-700 mt-3"><input type="checkbox" data-site-import-own ${f.own ? 'checked' : ''}> <span>This website belongs to my business, and I have the right to use its words and pictures.</span></label>
       ${f.error ? `<p class="text-xs font-semibold text-red-600 mt-2">${esc(f.error)}</p>` : ''}
       <div class="mt-3">${btn('data-site-import-go', 'Read my site', where === 'start')}</div>
-      <p class="text-xs text-gray-500 mt-2">${who} reads your home page and the pages in its menu and lays your own words out as your new site. Nothing is reworded or made up — anything missing is left in [square brackets] for you. Prices aren't copied; they belong in Business Information. You see the result before it replaces anything. Uses 1 task, only if a draft is made.</p>`;
+      <p class="text-xs text-gray-500 mt-2">${who} reads your home page and the pages in its menu and lays your own words out as your new site. Nothing is reworded or made up — anything missing is left in [square brackets] for you. Prices aren't copied; they belong in Business Information. You see the result before it replaces anything. Uses ${window.taskCost('site_draft')}, only if a draft is made.</p>`;
     if (where === 'start') {
       return card(`<p class="text-sm font-black text-gray-900">Already have a website?</p>
         <p class="text-xs text-gray-500 mt-1">Bring it over from Wix, Squarespace, WordPress or anywhere else.</p>${form}`, 'border-emerald-200');
@@ -3222,7 +3224,7 @@
       if (!ok) return;
       await publishAction({ action: 'publish' }, 'Published — your site is live. It can take a minute to show everywhere.', () => {
         state.versions = null;
-        if (state.data?.shopperRecheck) state.publishNote.text += ` ${state.data.shopperRecheck.assistantName} is checking the change now, which uses 1 task if the score is worked out again.`;
+        if (state.data?.shopperRecheck) state.publishNote.text += ` ${state.data.shopperRecheck.assistantName} is checking the change now, which uses ${window.taskCost('site_audit')} if the score is worked out again.`;
       });
       return;
     }
@@ -3313,8 +3315,8 @@
       const keepsPictures = media.images === 'none' && media.videos === 'none';
       const ok = typeof window.confirmModal === 'function'
         ? await window.confirmModal(def().settings.template
-            ? `Your Website Assistant rewrites the words in every section for your business. The layout and design stay${keepsPictures ? ', and so do the pictures' : ''}. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task${costs}.`
-            : `Your Website Assistant writes every page again, replacing your current draft. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses 1 task${costs}.`,
+            ? `Your Website Assistant rewrites the words in every section for your business. The layout and design stay${keepsPictures ? ', and so do the pictures' : ''}. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses ${window.taskCost('site_draft')}${costs}.`
+            : `Your Website Assistant writes every page again, replacing your current draft. ${state.data.site.status === 'published' ? 'Your live site doesn\'t change until you publish.' : 'Nothing is live yet.'} This uses ${window.taskCost('site_draft')}${costs}.`,
           { title: def().settings.template ? 'Write the words?' : 'Draft your whole site?', confirmLabel: def().settings.template ? 'Write the words' : 'Draft my site', cancelLabel: 'Not now' })
         : true;
       if (!ok || state.busy) return;

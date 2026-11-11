@@ -81,6 +81,7 @@
   <script src="/visit-count.js" defer></script>
   <!-- The Mystery Shopper's free website check, mounted after the hero for that role only. -->
   <script src="/src/public/site-taster.js" defer></script>
+    <script src="/task-costs.js"></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen overflow-x-hidden">
 
@@ -137,15 +138,17 @@
   // staging for made-up businesses — never a mock-up. Kept here, like ILLUSTRATIONS, so it ships
   // with the deploy and needs no SQL run. Videos: videos/samples/<role>/ (2026-11-01). Pictures:
   // images/samples/<role>/, an item's `round` being every option of its first round (2026-11-03).
+  // Today's figure from Admin → Money → Task costs (/task-costs.js), read when a sample is drawn.
+  const sampleCost = (kind) => (window.taskCost ? window.taskCost(kind) : '1 task');
   const SAMPLE_WORK = {
     brand_designer: {
       title: 'See what it makes',
       intro: 'Three one-sentence briefs for made-up businesses. Each shows every option the Brand Designer came back with in its first round, and the one we picked. For the flyer we typed in a phone number; the Brand Designer wrote the words. Nothing was edited afterwards.',
       footnote: 'Sample businesses. The phone number is from Ofcom\'s range for TV and radio drama. The flyer\'s photo is by Esra Erdem on Pexels.',
       items: [
-        { business: 'Willowbrook Coffee', kind: 'AI images for a post', brief: 'A photo for our new autumn spiced latte, on the counter by the window.', chosen: 1, meta: 'One round of four AI images · FLUX.2 Pro · Instagram post (4:5) · 1 task',
+        { business: 'Willowbrook Coffee', kind: 'AI images for a post', brief: 'A photo for our new autumn spiced latte, on the counter by the window.', chosen: 1, get meta() { return `One round of four AI images · FLUX.2 Pro · Instagram post (4:5) · ${sampleCost('ai_image')}`; },
           round: [1, 2, 3, 4].map((n) => ({ src: `/images/samples/brand_designer/willowbrook-latte-${n}.jpg`, alt: `AI image option ${n}: a spiced latte on a window sill on a rainy autumn day` })) },
-        { business: 'Brightside Plumbing & Heating', kind: 'Printed flyer', brief: 'A flyer to drop through doors offering boiler services before winter.', chosen: 0, meta: 'Three A5 layouts in their brand colour: photo at the top, framed photo (the same stock photo), words only · 1 task for the words',
+        { business: 'Brightside Plumbing & Heating', kind: 'Printed flyer', brief: 'A flyer to drop through doors offering boiler services before winter.', chosen: 0, get meta() { return `Three A5 layouts in their brand colour: photo at the top, framed photo (the same stock photo), words only · ${sampleCost('flyer_words')} for the words`; },
           pdf: { href: '/images/samples/brand_designer/brightside-flyer-a5.pdf', label: 'Open the print-ready PDF' },
           round: [
             { src: '/images/samples/brand_designer/brightside-flyer-photo-top.jpg', alt: 'A5 flyer, photo at the top with the words on a yellow page: Get your boiler serviced before winter sets in' },

@@ -34,7 +34,7 @@ import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { loadOrgProducts, renderProductFacts } from './org-products';
 import { normalizeBrandKit } from './brand-kit';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, MUSIC_CREDIT_COST, type MediaKind } from './ai-credits';
-import { aiVideoTasks, type TaskCosts } from '../config/task-weights';
+import { aiVideoTasks, formatCost, type TaskCosts } from '../config/task-weights';
 import { getTaskCosts } from './task-costs';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
@@ -1346,7 +1346,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         if (brief.clip) {
             const framed = !!sb?.scenes?.[0]?.assetId;
             const at = r.status === 'planned' || r.status === 'failed'
-                ? (framed ? 'first frame made — waiting for them to press "Make the clip" (or "Try another frame")' : 'saved — waiting for them to press "See the first frame" (1 task)')
+                ? (framed ? 'first frame made — waiting for them to press "Make the clip" (or "Try another frame")' : `saved — waiting for them to press "See the first frame" (${formatCost('ai_image', costs.weights.ai_image)})`)
                 : (WAITING[r.status] ?? r.status);
             return `- id ${r.id}: AI CLIP "${brief.clip.description.slice(0, 100)}" (${brief.clip.style}, ${brief.clip.lengthS}s) — ${at}`;
         }

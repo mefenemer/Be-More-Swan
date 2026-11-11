@@ -180,3 +180,38 @@ export function formatCost(key: CostKey, value: number): string {
     const tasks = `${value} task${value === 1 ? '' : 's'}`;
     return key === 'ai_video_per_second' ? `${tasks} a second` : tasks;
 }
+
+/**
+ * What a cost reads as today, for text a customer sees. `ai_video` follows the per-second switch, as
+ * aiVideoTasks() does: "20 tasks" while every clip is flat, "4 tasks a second" once it is by length.
+ * Matches task-costs.js label(), so a page and the server never word the same cost differently.
+ * Null for a key that is not a cost.
+ */
+export function taskCostLabel(key: string, costs: TaskCosts, now: Date = new Date()): string | null {
+    if (key === 'ai_video' && videoPricedBySecond(now)) return formatCost('ai_video_per_second', costs.videoTasksPerSecond);
+    if (!(COST_KEYS as readonly string[]).includes(key)) return null;
+    return formatCost(key as CostKey, costValue(costs, key as CostKey));
+}
+
+/**
+ * Replace {{tasks.<cost key>}} in text kept in the database (help articles, plan features, assistant
+ * showcases) with today's figure from Admin → Money → Task costs, e.g. "{{tasks.ai_image}}" → "1 task".
+ * Unknown keys are left as they are, so a typo shows rather than silently reading as nothing.
+ * The twin of fillPlanPriceTokens (src/utils/plan-price-tokens.ts) for prices.
+ */
+export function fillTaskCostTokens(text: string, costs: TaskCosts, now: Date = new Date()): string {
+    if (!text || !text.includes('{{')) return text;
+    return text.replace(/\{\{\s*tasks\.([a-z_]+)\s*\}\}/g, (whole, key: string) => taskCostLabel(key, costs, now) ?? whole);
+}
+
+/** fillTaskCostTokens over every string in a JSON-shaped value (an assistant showcase). */
+export function fillTaskCostTokensDeep<T>(value: T, costs: TaskCosts, now: Date = new Date()): T {
+    if (typeof value === 'string') return fillTaskCostTokens(value, costs, now) as unknown as T;
+    if (Array.isArray(value)) return value.map((v) => fillTaskCostTokensDeep(v, costs, now)) as unknown as T;
+    if (value && typeof value === 'object') {
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = fillTaskCostTokensDeep(v, costs, now);
+        return out as T;
+    }
+    return value;
+}
