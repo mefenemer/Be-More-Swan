@@ -19,6 +19,7 @@
 //        none, or a track from My Content), colour look and
 //        name-caption style, changed without re-planning (free; a ready video gets a new version first)
 //   POST { action:'add_note', id, atS, text }           → a note on a moment of a ready video, tied to its scene
+//   POST { action:'rename_chapter', id, chapter | sceneId, title } → rename a ready video's chapter ('' = its own name)
 //   POST { action:'delete_note', id, noteId }
 //   POST { action:'notes_to_version', id }              → a new version that turns those notes into scene edits (free)
 //   POST { action:'reshape', id, shapes? }              → the same video in the other shapes (free when nothing
@@ -53,6 +54,7 @@ import { enforcePromptModeration } from '../../src/utils/moderation';
 import { startClip, holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
 import { enforceStoryboard, isVideoShape, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
+import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
 import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
 import { ownMusicTrack, ownMusicTracks } from '../../src/utils/video-music-asset';
 import { isVideoLook } from '../../src/lib/video-look';
@@ -322,6 +324,22 @@ export default withLambda(async (event) => {
         const notes = readNotes(row.momentNotes).filter((n) => n.id !== body.noteId);
         await db.update(videoProjects).set({ momentNotes: notes, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
         return json(200, { project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+    // ── Chapters of a finished video: rename one ('' puts its own name back). Free; nothing is rendered —
+    // the names show on the Videos tab and go in the YouTube description when it's posted. ──
+    if (action === 'rename_chapter') {
+        if (row.status !== 'ready' || !row.storyboard || !row.timeline) return json(409, { error: 'Chapters are on a finished video.' });
+        const title = typeof body.title === 'string' ? body.title : '';
+        if (title.trim()) {
+            const blocked = await enforcePromptModeration({ text: title, userId, organisationId: orgId, source: 'video-projects' });
+            if (blocked) return blocked;
+        }
+        const tl = row.timeline as ProjectTimeline;
+        const chapters = videoChapters((row.storyboard as Storyboard).scenes ?? [], sceneTimes(tl), tl.chapterTitles);
+        const done = renameChapter(chapters, tl.chapterTitles, { n: Number(body.chapter), sceneId: typeof body.sceneId === 'string' ? body.sceneId : undefined }, title);
+        if ('error' in done) return json(400, { error: done.error });
+        await db.update(videoProjects).set({ timeline: { ...tl, chapterTitles: done.titles }, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+        return json(200, { chapter: done.chapter, project: await projectView(db, orgId, (await load(row.id))!) });
     }
     if (action === 'notes_to_version') {
         if (row.status !== 'ready' || !row.storyboard) return json(409, { error: 'Notes become a new version of a finished video.' });
