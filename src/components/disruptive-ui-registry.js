@@ -1985,6 +1985,39 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     });
   }
   register('video_clip_proposal', renderVideoClipProposalCard);
+
+  // { type: 'ai_video_label_setting', enabled }
+  // The workspace's "Made with AI" caption line for realistic AI video (src/utils/ai-disclosure.ts): the same
+  // switch as Settings ▸ "Made with AI" on AI videos, saved through the same endpoint (ai-video-label.ts).
+  function renderAiVideoLabelSettingCard(ui, esc) {
+    const on = ui.enabled !== false;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">“Made with AI” on AI videos · Approval needed</p>
+      <p class="text-sm text-gray-900 mt-2">${on ? 'Turn it ON: posts whose video contains realistic AI footage get “Made with AI” after the caption when they publish.' : 'Turn it OFF: posts with realistic AI video publish without the “Made with AI” line.'}</p>
+      <p class="text-xs text-gray-600 mt-2">For the whole workspace. 3D animated and cartoon clips are never labelled, and YouTube is always told through its own setting.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-avl-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">${on ? 'Turn it on' : 'Turn it off'}</button>
+        <button type="button" data-avl-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-avl-status role="status"></p>`;
+    const status = el.querySelector('[data-avl-status]');
+    const say = (t, bad) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${bad ? 'text-red-600' : 'text-indigo-700'}`; };
+    const busy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-avl-cancel]')) { busy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-avl-go]')) return;
+      busy(true); say('Saving…');
+      try {
+        const r = await fetch('/.netlify/functions/ai-video-label', { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) });
+        if (!r.ok) throw new Error();
+        say(on ? 'On. Posts with realistic AI video will say “Made with AI”.' : 'Off. Posts with AI video publish without the line.');
+      } catch { busy(false); say('That didn’t save — try the switch in Settings.', true); }
+    });
+    return el;
+  }
+  register('ai_video_label_setting', renderAiVideoLabelSettingCard);
   register('video_note_proposal', renderVideoNoteProposalCard);
   register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
   register('video_reshape_proposal', renderVideoReshapeProposalCard);

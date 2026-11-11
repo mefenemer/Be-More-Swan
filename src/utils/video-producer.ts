@@ -744,6 +744,8 @@ async function sourceScene(db: Db, args: {
                 userId, organisationId: orgId, name: `AI scene — ${(scene.prompt || context).slice(0, 60)}`,
                 assetType: 'video', mimeType: 'video/mp4', fileSize: stored.fileSize, storageKey: stored.storageKey,
                 durationS: sub.billedSeconds, provider: 'fal', prompt: scene.prompt || context, aspectRatio: shape, status: 'pending',
+                // Its look, for the "Made with AI" caption line (ai-disclosure.ts): a clip's style, or a scene in a whole video.
+                renderParams: { aiStyle: args.clip?.style ?? 'scene' },
             }).returning({ id: contentAssets.id });
             // A clip made with sound costs 1.5× (ai-clip.ts) — only when it really was made with sound.
             return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: clipTasksWithSound(aiVideoTasks(sub.billedSeconds, await getTaskCosts()), sub.withSound === true) };

@@ -65,8 +65,10 @@ export function postLinkLine(post: PostLinkFields): string | null {
  * the X credit hold honest: xPostCost/xPostHasLink are computed from this string, and a post billed
  * before the link was appended would be charged at the text rate and published at the link rate.
  */
-export function composePostText(post: PostLinkFields): string {
+export function composePostText(post: PostLinkFields, extra: { aiLabel?: string | null } = {}): string {
     const caption = String(post.caption ?? '').trim();
     const hashtags = String(post.hashtags ?? '').trim();
-    return [caption, hashtags, postLinkLine(post)].filter(Boolean).join('\n\n').trim();
+    // "Made with AI" (src/utils/ai-disclosure.ts) goes after the caption, before the hashtags — never twice.
+    const label = extra.aiLabel && !caption.toLowerCase().includes(extra.aiLabel.toLowerCase()) ? extra.aiLabel : '';
+    return [caption, label, hashtags, postLinkLine(post)].filter(Boolean).join('\n\n').trim();
 }
