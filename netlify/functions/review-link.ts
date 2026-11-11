@@ -21,6 +21,7 @@ import { checkRateLimit } from '../../src/utils/rate-limit';
 import {
     MAX_EMAILS_PER_ORG_PER_DAY, createReviewLink, listReviewLinks, resolveReviewResponse, reviewStatusForPosts, revokeReviewLink,
 } from '../../src/utils/review-links';
+import { createVideoReviewLink, listVideoReviewLinks } from '../../src/utils/video-review-links';
 import { requireTenant } from '../../src/utils/tenant';
 
 const JSON_HEADERS: Record<string, string> = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
@@ -29,12 +30,12 @@ const json = (statusCode: number, body: unknown) => ({ statusCode, headers: JSON
 const esc = (s: string): string => s
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-async function emailLink(to: string, url: string, sender: string, workspace: string): Promise<void> {
+async function emailLink(to: string, url: string, sender: string, workspace: string, what = 'a social media post'): Promise<void> {
     await sendEmail({
         to,
         subject: `${workspace} would like your thoughts`,
         html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:32px auto;color:#111827">
-  <p style="font-size:16px;line-height:1.6"><strong>${esc(sender)}</strong> at <strong>${esc(workspace)}</strong> would like your thoughts on a social media post before it goes out.</p>
+  <p style="font-size:16px;line-height:1.6"><strong>${esc(sender)}</strong> at <strong>${esc(workspace)}</strong> would like your thoughts on ${esc(what)} before it goes out.</p>
   <p style="margin:24px 0"><a href="${esc(url)}" style="display:inline-block;padding:12px 24px;background:#d6006b;color:#fff;font-weight:700;text-decoration:none;border-radius:8px">Take a look</a></p>
   <p style="font-size:13px;color:#6b7280;line-height:1.6">No account is needed. If you weren't expecting this, you can ignore it.</p>
 </div>`,
@@ -53,6 +54,12 @@ export default withLambda(async (event) => {
         if (rawIds) {
             const ids = rawIds.split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 200);
             return json(200, { statuses: await reviewStatusForPosts(db, orgId, ids) });
+        }
+        // A finished video's links and guest comments (video-review-links.ts), its earlier versions' too.
+        const videoId = Number(event.queryStringParameters?.videoProjectId);
+        if (Number.isInteger(videoId) && videoId > 0) {
+            const vlinks = await listVideoReviewLinks(db, orgId, videoId);
+            return vlinks ? json(200, { links: vlinks }) : json(404, { error: 'That video could not be found.' });
         }
         const postId = Number(event.queryStringParameters?.postId);
         if (!Number.isInteger(postId) || postId <= 0) return json(400, { error: 'postId is required.' });
@@ -82,8 +89,10 @@ export default withLambda(async (event) => {
     }
 
     if (body.action !== 'create') return json(400, { error: 'Unknown action.' });
+    const videoProjectId = Number(body.videoProjectId);
+    const isVideo = Number.isInteger(videoProjectId) && videoProjectId > 0;
     const postId = Number(body.postId);
-    if (!Number.isInteger(postId) || postId <= 0) return json(400, { error: 'postId is required.' });
+    if (!isVideo && (!Number.isInteger(postId) || postId <= 0)) return json(400, { error: 'postId is required.' });
 
     // Refuse a bad address before making a link nobody will receive.
     const rawEmail = typeof body.email === 'string' ? body.email.trim() : '';
@@ -98,7 +107,9 @@ export default withLambda(async (event) => {
         if (!limit.allowed) return json(429, { error: 'You have sent a lot of review emails today. Copy the link instead, or try again tomorrow.' });
     }
 
-    const made = await createReviewLink(db, { orgId, userId: ctx.userId, postId, label: body.label });
+    const made = isVideo
+        ? await createVideoReviewLink(db, { orgId, userId: ctx.userId, projectId: videoProjectId, label: body.label })
+        : await createReviewLink(db, { orgId, userId: ctx.userId, postId, label: body.label });
     if (!made.ok) return json(made.status, { error: made.error });
     const url = `${base}/r/${made.token}`;
 
@@ -108,7 +119,7 @@ export default withLambda(async (event) => {
         const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
         const senderName = [sender?.firstName, sender?.lastName].filter(Boolean).join(' ') || 'Someone';
         try {
-            await emailLink(email, url, senderName, org?.name || 'A Be More Swan customer');
+            await emailLink(email, url, senderName, org?.name || 'A Be More Swan customer', isVideo ? 'a video' : 'a social media post');
             emailed = true;
         } catch (err) {
             // The link exists and can still be copied, so this is not a failure of the whole request.

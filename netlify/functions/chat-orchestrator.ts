@@ -81,6 +81,7 @@ import { buildSiteDirectoryChatBlock, resolveSiteDirectoryCard, SITE_DIRECTORY_C
 import { buildTeamActivityBlock } from '../../src/utils/team-activity';
 import { buildBlogSnapshot, buildEmailsSnapshot, buildPostsSnapshot } from '../../src/utils/content-snapshot';
 import { guestResponsesBlock, shareForReviewCard } from '../../src/utils/review-links';
+import { videoResponsesBlock } from '../../src/utils/video-review-links';
 import { postActionFromUiElement, resolvePostActionProposal, type PostActionCard } from '../../src/utils/chat-post-action';
 import { voiceOptionsBlock } from '../../src/utils/chat-voice-options';
 import { blogActionFromUiElement, resolveBlogActionProposal, type BlogActionCard } from '../../src/utils/chat-blog-action';
@@ -1896,6 +1897,8 @@ NOTES ON A FINISHED VIDEO. The list shows their notes on moments of a READY vide
 
 CAPTION FILES AND YOUTUBE. A READY video with a voiceover (or their own spoken footage) has caption files beside the player on the "Videos" tab: the words as spoken in English, free to download as SRT or VTT, and translations into other languages. A translation uses ${rc.taskCosts.weights.caption_translation} ${rc.taskCosts.weights.caption_translation === 1 ? 'task' : 'tasks'} a language and is made only with the "Translate" button there (they pick the language); you never make one. To remove one, emit { "type": "video_caption_remove_proposal", "projectId": <id>, "language": "<its code from the list, e.g. fr>", "languageName": "French" } (free). The captions burned into the video stay in the language spoken. When a video is posted to YouTube it also gets a thumbnail (the post's picture, or the video's first branded card or photo) and, once YouTube is reconnected with caption access, its caption files as caption tracks. The list shows "on YouTube" figures for videos posted there: views, average time watched and where most viewers leave. Use them when they ask how a video did or how to improve it: offer a note on that moment (video_note_proposal) or a different opening. They can press "Check again" on the tab for new figures.
 
+GUEST REVIEW OF A VIDEO. A READY video can be shared through a private link: the person needs no account, watches it, leaves comments on moments ("at 0:12") and approves it or asks for changes, for 30 days. Nothing they do changes the video. To make one, emit { "type": "video_share_review_proposal", "projectId": <id>, "title": "<its title>", "summary": "<one sentence>" }; the user's click on the card creates the link (and can email it). It is free. "GUEST COMMENTS ON VIDEOS" lists what guests said, with names as they typed them (unverified). On the "Videos" tab, beside the video, "Guest review" lists the comments: "Add to my notes" turns a timed comment into their own note on that moment, and "Make a new version from my notes" then changes only those scenes. To act on a guest's comment yourself, offer a video_note_proposal with its moment and words.
+
 OTHER SHAPES. A READY video can be made in the shapes it isn't in yet in one go: emit { "type": "video_reshape_proposal", "projectId": <id>, "shapes": ["1:1", "16:9"] } (leave "shapes" out for every other shape). The voiceover and every clip and picture are kept (cropped to each shape) and only branded cards are drawn again, so it is free; each lands in My Content.
 CHAPTERS. A READY video has chapters — each a run of scenes with one story beat (opening, problem, how it helps, proof, call to action), named from its words. They are listed beside the player on the "Videos" tab: clicking one plays from there, ✎ renames it, and "Copy for YouTube" copies them. When the video is wide and has at least 3 chapters of 10 seconds or more, they are added to the description when it is posted to YouTube; a vertical or square video becomes a Short there, and Shorts have no chapters. The list above gives each video's chapters by number. To rename one for them, emit { "type": "video_chapter_proposal", "projectId": <id>, "chapter": <its number>, "title": "<the new name, at most 60 characters>" } ("" puts its own name back). Free; nothing is made again. You can't add, remove or move a chapter — they follow the scenes; for different chapters the video needs different scenes (a new version).
 
@@ -3346,7 +3349,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
     // Per turn: a storyboard finished a moment ago must be offered as "planned", not "planning".
     const videosSnapshot = route.usesVideosSnapshot
-        ? await buildVideosSnapshot(db, orgId, session.aiAssistantId).catch((err) => {
+        ? await Promise.all([
+            buildVideosSnapshot(db, orgId, session.aiAssistantId),
+            // Guest comments on its shared videos (video-review-links.ts), so "what did Sarah say?" is answered.
+            videoResponsesBlock(db, orgId, session.aiAssistantId).catch(() => ''),
+        ]).then((parts) => parts.filter(Boolean).join('\n\n')).catch((err) => {
             console.error('[chat-orchestrator] videos snapshot failed:', err);
             return null;
         })

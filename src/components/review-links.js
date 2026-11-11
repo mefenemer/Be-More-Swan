@@ -145,12 +145,13 @@
   }
 
   /** The chat card's button: the same endpoint as the panel, and only on the user's click. */
-  async function shareCard(postId, wrap) {
+  // `target` is a post id, or { videoProjectId } for a finished Video Producer video (video-review-links.ts).
+  async function shareCard(target, wrap) {
     const btn = wrap.querySelector('[data-rl-card-create]');
     btn.disabled = true;
     try {
       const data = await postJson({
-        action: 'create', postId,
+        action: 'create', ...(target && typeof target === 'object' ? { videoProjectId: Number(target.videoProjectId) } : { postId: target }),
         label: wrap.querySelector('[data-rl-label]').value,
         email: wrap.querySelector('[data-rl-email]').value,
       });

@@ -86,7 +86,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   const state = {
     assistantId: null, assistantName: null, setup: {}, videos: [], loaded: false, loadError: null,
-    rendered: false, form: false, editing: null, replanning: null, rewriting: null, noting: null, renamingChapter: null, yt: {}, captionLanguages: {}, notes: {}, busy: new Set(), pollTimer: null,
+    rendered: false, form: false, editing: null, replanning: null, rewriting: null, noting: null, renamingChapter: null, yt: {}, captionLanguages: {}, reviews: {}, sharing: null, notes: {}, busy: new Set(), pollTimer: null,
     stage: null, userStage: false, opened: new Set(), full: false,
     // "Use my own footage": the form, the library's own videos, what is ticked, and files just added.
     footage: null,
@@ -1028,6 +1028,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           ${chaptersHtml(v)}
           ${captionsHtml(v)}
           ${youtubeHtml(v)}
+          ${reviewHtml(v)}
           ${notes.length ? `<div class="border border-amber-200 bg-amber-50 rounded-lg p-2">
               <p class="text-xs font-bold text-amber-900">Your notes (${notes.length})</p>
               <ul class="mt-1 space-y-0.5">${notes.map((n) => `<li class="text-xs text-amber-900 flex items-start gap-1"><button type="button" data-vid-act="seek" data-id="${v.id}" data-at="${esc(n.atS)}" class="font-bold hover:underline shrink-0">${mmss(n.atS)}</button><span class="min-w-0 break-words">${n.sceneId ? `scene ${esc(n.sceneId.slice(1))}: ` : ''}${esc(n.text)}</span><button type="button" data-vid-act="delete-note" data-id="${v.id}" data-note="${esc(n.id)}" aria-label="Delete this note" class="ml-auto shrink-0 text-amber-700 hover:text-red-700">×</button></li>`).join('')}</ul>
@@ -1372,6 +1373,59 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       </div>`;
   }
 
+  // ── Guest review links for a video (video-review-links.ts) ───────────────────────────────────────
+  const REVIEW_API = '/.netlify/functions/review-link';
+  async function reviewCall(method, body, query) {
+    const res = await fetch(REVIEW_API + (query || ''), { method, credentials: 'same-origin', headers: body ? { 'Content-Type': 'application/json' } : undefined, body: body ? JSON.stringify(body) : undefined });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'That didn’t work. Try again.');
+    return data;
+  }
+  function loadReviews(id) {
+    const cur = state.reviews[id];
+    if (cur && cur.loading) return;
+    state.reviews[id] = { ...(cur || {}), loading: true };
+    reviewCall('GET', null, `?videoProjectId=${encodeURIComponent(id)}`)
+      .then((d) => { state.reviews[id] = { links: d.links || [], loaded: true, made: cur && cur.made }; })
+      .catch((err) => { state.reviews[id] = { links: [], error: err.message, loaded: true }; })
+      .finally(() => { if (state.rendered) render(); });
+  }
+  /**
+   * "Share for review": a private link anyone can open without an account, to watch the video, comment
+   * on moments and approve it or ask for changes. Their comments appear here with their times; "Add to my
+   * notes" turns one into a note on that moment, which "Make a new version from my notes" acts on.
+   */
+  function reviewHtml(v) {
+    const st = state.reviews[v.id];
+    if (!st) { setTimeout(() => loadReviews(v.id), 0); return ''; }
+    const sharing = state.sharing && state.sharing.id === v.id ? state.sharing : null;
+    const links = st.links || [];
+    const words = (d) => (d === 'approved' ? 'approved it' : d === 'changes' ? 'asked for changes' : 'commented');
+    const resp = links.flatMap((l) => l.responses.map((r) => ({ ...r, link: l })));
+    return `<div class="border border-gray-200 rounded-lg p-2" data-vid-review="${v.id}">
+        <div class="flex items-center gap-2"><p class="text-xs font-bold text-gray-800">Guest review</p>
+          ${sharing ? '' : `<button type="button" data-vid-act="share-review" data-id="${v.id}" class="ml-auto text-[11px] font-bold text-indigo-700 hover:underline">Share for review</button>`}</div>
+        ${sharing ? `<form data-vid-share-form data-id="${v.id}" class="mt-1 space-y-1">
+            ${sharing.url ? `<label class="block text-[11px] font-bold text-gray-600" for="vid-share-url-${v.id}">Anyone with this link can watch and comment for 30 days, without an account</label>
+              <div class="flex gap-1"><input id="vid-share-url-${v.id}" readonly value="${esc(sharing.url)}" class="min-w-0 flex-1 text-xs border border-gray-300 rounded px-1.5 py-1">
+                <button type="button" data-vid-act="copy-review" data-id="${v.id}" class="btn-primary px-2 py-1 text-[11px] font-bold rounded">Copy</button></div>
+              ${sharing.emailed ? `<p class="text-[11px] text-green-800">Emailed to ${esc(sharing.email)}.</p>` : ''}
+              <button type="button" data-vid-act="close-share" class="text-[11px] font-bold text-gray-500 hover:underline">Done</button>`
+            : `<label class="block text-[11px] font-bold text-gray-600" for="vid-share-email-${v.id}">Email it to someone (optional)</label>
+              <input id="vid-share-email-${v.id}" name="email" type="email" placeholder="name@example.com" class="w-full text-xs border border-gray-300 rounded px-1.5 py-1">
+              <div class="flex gap-2"><button type="submit" class="btn-primary px-2 py-1 text-[11px] font-bold rounded">Make the link</button>
+                <button type="button" data-vid-act="close-share" class="text-[11px] font-bold text-gray-500 hover:underline">Cancel</button></div>
+              <p class="text-[11px] text-gray-500">Free. They can watch it, comment on moments and approve it or ask for changes. Nothing they do changes the video.</p>`}
+          </form>` : ''}
+        ${resp.length ? `<ul class="mt-1 space-y-1">${resp.slice(0, 25).map((r) => `<li class="text-xs text-gray-800 ${r.resolution ? 'opacity-60' : ''}">
+            <span class="font-bold">${esc(r.guestName)}</span> ${words(r.decision)}${r.atS != null ? ` at <button type="button" data-vid-act="seek" data-id="${v.id}" data-at="${esc(r.atS)}" class="font-bold text-indigo-700 hover:underline">${mmss(r.atS)}</button>` : ''}${r.body ? `: <span class="break-words">${esc(r.body)}</span>` : ''}
+            ${r.changedSince ? '<span class="text-[10px] text-amber-800">(on an earlier version)</span>' : ''}
+            <span class="block mt-0.5">${r.atS != null && r.body && !r.resolution && !r.changedSince ? `<button type="button" data-vid-act="review-to-note" data-id="${v.id}" data-resp="${r.id}" class="text-[11px] font-bold text-indigo-700 hover:underline">Add to my notes</button> · ` : ''}${r.decision !== 'approved' ? `<button type="button" data-vid-act="review-resolve" data-id="${v.id}" data-resp="${r.id}" data-res="${r.resolution ? '' : 'done'}" class="text-[11px] font-bold text-gray-500 hover:underline">${r.resolution ? 'Bring back' : 'Mark as done'}</button>` : ''}</span>
+          </li>`).join('')}</ul>` : (links.length ? '<p class="text-[11px] text-gray-500 mt-1">No comments yet.</p>' : '')}
+        ${links.filter((l) => l.state === 'live').length ? `<p class="text-[11px] text-gray-500 mt-1">${links.filter((l) => l.state === 'live').map((l) => `Link made ${esc(new Date(l.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}${l.viewed ? ', opened' : ', not opened yet'} · <button type="button" data-vid-act="revoke-review" data-id="${v.id}" data-link="${l.id}" class="font-bold hover:underline">Turn off</button>`).join('<br>')}</p>` : ''}
+      </div>`;
+  }
+
   /** How it's doing on YouTube (youtube-video.ts): loaded once per visit, refreshable. */
   function loadYouTube(id, fresh) {
     const cur = state.yt[id];
@@ -1613,6 +1667,29 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       }
       case 'remove-translation': act(id, { action: 'remove_translation', id, language: b.dataset.lang }, null); break;
       case 'yt-refresh': loadYouTube(id, true); render(); break;
+      case 'share-review': state.sharing = { id }; render(); host()?.querySelector('[data-vid-share-form] input')?.focus(); break;
+      case 'close-share': state.sharing = null; render(); break;
+      case 'copy-review': {
+        const url = state.sharing && state.sharing.url;
+        if (url && navigator.clipboard) navigator.clipboard.writeText(url).then(() => { state.notes[id] = { text: 'Link copied.' }; render(); }, () => {});
+        break;
+      }
+      case 'revoke-review':
+        reviewCall('POST', { action: 'revoke', linkId: Number(b.dataset.link) }).then(() => loadReviews(id), (err) => { state.notes[id] = { text: err.message, error: true }; render(); });
+        break;
+      case 'review-resolve':
+        reviewCall('POST', { action: 'resolve', responseId: Number(b.dataset.resp), resolution: b.dataset.res || null }).then(() => loadReviews(id), (err) => { state.notes[id] = { text: err.message, error: true }; render(); });
+        break;
+      case 'review-to-note': {
+        const r = (state.reviews[id]?.links || []).flatMap((l) => l.responses).find((x) => x.id === Number(b.dataset.resp));
+        if (!r) break;
+        // The guest's words become the owner's own note on that moment, then the comment is marked done.
+        call('POST', { action: 'add_note', id, atS: r.atS, text: `${r.guestName}: ${r.body}`.slice(0, 300) })
+          .then(() => reviewCall('POST', { action: 'resolve', responseId: r.id, resolution: 'done' }))
+          .then(() => { state.notes[id] = { text: 'Added to your notes. Make a new version from your notes when you’re ready.' }; loadReviews(id); return load(); })
+          .catch((err) => { state.notes[id] = { text: err.message, error: true }; render(); });
+        break;
+      }
       case 'copy-chapters': {
         const v = state.videos.find((x) => x.id === id);
         if (!v || !v.youtubeChapters) break;
@@ -1778,6 +1855,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       const n = state.noting;
       state.noting = null;
       act(id, { action: 'add_note', id, atS: n ? n.atS : 0, text: String(new FormData(f).get('text') || '') }, 'Note saved. Add more, then press “Make a new version from my notes”.');
+    } else if (f.matches('[data-vid-share-form]')) {
+      e.preventDefault();
+      const id = Number(f.dataset.id);
+      const email = String(new FormData(f).get('email') || '').trim();
+      reviewCall('POST', { action: 'create', videoProjectId: id, ...(email ? { email } : {}) })
+        .then((d) => { state.sharing = { id, url: d.url, emailed: !!d.emailed, email }; loadReviews(id); })
+        .catch((err) => { state.notes[id] = { text: err.message, error: true }; render(); });
     } else if (f.matches('[data-vid-chapter-form]')) {
       e.preventDefault();
       const id = Number(f.dataset.id);

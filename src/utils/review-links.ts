@@ -184,7 +184,7 @@ async function loadMedia(db: Db, postIds: number[]) {
     return { mediaByPost, assetIdsByPost };
 }
 
-async function workspaceIsLive(db: Db, orgId: number): Promise<boolean> {
+export async function workspaceIsLive(db: Db, orgId: number): Promise<boolean> {
     const [row] = await db
         .select({ id: plans.id })
         .from(plans)
@@ -193,7 +193,7 @@ async function workspaceIsLive(db: Db, orgId: number): Promise<boolean> {
     return !!row;
 }
 
-async function assistantIsLive(db: Db, orgId: number, assistantId: number | null): Promise<boolean> {
+export async function assistantIsLive(db: Db, orgId: number, assistantId: number | null): Promise<boolean> {
     if (assistantId == null) return true;
     const [row] = await db
         .select({ lifecycleStatus: aiAssistants.lifecycleStatus })
@@ -253,7 +253,7 @@ export async function recordTrialClick(db: Db, linkId: number): Promise<void> {
 }
 
 /** Who to tell: whoever made the link, or the owner if they have since left. */
-async function responseRecipient(db: Db, orgId: number, createdBy: number | null): Promise<number | null> {
+export async function responseRecipient(db: Db, orgId: number, createdBy: number | null): Promise<number | null> {
     if (createdBy != null) {
         const [member] = await db
             .select({ userId: userOrganisations.userId })

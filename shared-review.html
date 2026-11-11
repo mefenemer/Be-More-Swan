@@ -48,6 +48,15 @@
     .trap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
     footer { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding-top: 4px; }
     footer a { color: inherit; }
+    #gv { display: block; width: 100%; max-height: 520px; background: #000; border-radius: 8px; }
+    .vchapters { list-style: none; padding: 0; margin: 10px 0 0; font-size: 14px; }
+    .vchapters button { background: none; border: 0; padding: 4px 0; font: inherit; color: var(--ink); cursor: pointer; text-align: left; }
+    .vchapters b { color: var(--brand); margin-right: 6px; }
+    .skip { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+    .skip button { border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 4px 10px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; min-height: 32px; }
+    .moment { display: inline-block; font-weight: 700; color: var(--brand); }
+    .vcomments { list-style: none; padding: 0; margin: 0 0 12px; font-size: 14px; }
+    .vcomments li { border-left: 3px solid var(--brand); padding: 4px 8px; margin-bottom: 6px; background: var(--page); border-radius: 0 6px 6px 0; overflow-wrap: anywhere; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -62,9 +71,33 @@
 
     <div id="review" hidden>
       <h1 id="heading"></h1>
-      <p class="sub">They'd like to know what you think of this post before it goes out.</p>
+      <p class="sub" id="intro">They'd like to know what you think of this post before it goes out.</p>
 
-      <section class="card" aria-label="The post">
+      <!-- A shared video (src/utils/video-review-links.ts): the video, its chapters, and comments on moments. -->
+      <section id="vcard" class="card" aria-label="The video" hidden>
+        <video id="gv" controls playsinline preload="metadata"></video>
+        <div class="skip" role="group" aria-label="Skip back or forward">
+          <button type="button" data-skip="-10" aria-label="Back 10 seconds">⏪ 10s</button>
+          <button type="button" data-skip="-5" aria-label="Back 5 seconds">⏪ 5s</button>
+          <button type="button" data-skip="5" aria-label="Forward 5 seconds">5s ⏩</button>
+          <button type="button" data-skip="10" aria-label="Forward 10 seconds">10s ⏩</button>
+        </div>
+        <ol id="vchapters" class="vchapters" aria-label="Chapters" hidden></ol>
+      </section>
+
+      <form id="vcomment" class="card" novalidate hidden>
+        <h2>Comment on a moment</h2>
+        <p class="hint" style="margin:0 0 10px">Pause the video where you want to comment. Each comment is sent as you add it, marked with that moment.</p>
+        <p id="vcomment-error" class="error" role="alert" hidden></p>
+        <label for="vname">Your name</label>
+        <input id="vname" type="text" maxlength="80" autocomplete="name">
+        <label for="vtext">Your comment at <span id="vat" class="moment">0:00</span></label>
+        <textarea id="vtext" maxlength="2000" style="min-height:72px"></textarea>
+        <div class="actions"><button type="button" class="secondary" id="vadd">Add comment</button></div>
+        <ul id="vsent" class="vcomments" aria-label="Your comments" style="margin-top:12px" hidden></ul>
+      </form>
+
+      <section class="card" aria-label="The post" id="pcard">
         <div id="tabs" class="tabs" role="tablist" aria-label="Where it will be posted" hidden></div>
         <div id="media" class="media"></div>
         <p id="caption" class="caption"></p>
@@ -237,8 +270,9 @@
           }
           $('respond').hidden = true;
           $('thanks-text').textContent = decision === 'approved'
-            ? 'Your approval has been passed on. They make the final call on when it goes out.'
+            ? (isVideo ? 'Your approval has been passed on.' : 'Your approval has been passed on. They make the final call on when it goes out.')
             : 'Your comments have been passed on.';
+          if (isVideo) $('vcomment').hidden = true;
           $('thanks').hidden = false;
           $('offer').hidden = !trialOffer;
           $('thanks').scrollIntoView({ block: 'nearest' });
@@ -246,6 +280,78 @@
           buttons.forEach(function (b) { b.disabled = false; });
           showError('That did not send. Please check your connection and try again.');
         }
+      });
+
+      // ── A shared video ──────────────────────────────────────────────────────────────────────────
+      var isVideo = false;
+      function mmss(s) { s = Math.max(0, Math.floor(Number(s) || 0)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+      function drawVideoReview(data) {
+        isVideo = true;
+        var url = safeUrl(data.video && data.video.url);
+        if (!url) return showDead();
+        trialOffer = !!data.trialOffer;
+        document.title = data.workspaceName + ' would like your thoughts';
+        $('heading').textContent = data.workspaceName + ' would like your thoughts';
+        $('intro').textContent = 'They’d like to know what you think of this video, “' + (data.title || 'Video') + '”. Comment on any moment, then approve it or ask for changes.';
+        var v = $('gv');
+        v.src = url;
+        if (data.video.shape === '9:16') { v.style.maxHeight = '560px'; }
+        $('offer-link').setAttribute('href', '/register.html?src=review-link&cmp=video');
+        $('pcard').hidden = true;
+        $('vcard').hidden = false;
+        $('vcomment').hidden = false;
+        var list = $('vchapters');
+        list.textContent = '';
+        (data.chapters || []).forEach(function (c) {
+          var li = document.createElement('li');
+          var b = document.createElement('button');
+          b.type = 'button';
+          var t = document.createElement('b'); t.textContent = mmss(c.startS);
+          b.appendChild(t); b.appendChild(document.createTextNode(c.title || ''));
+          b.addEventListener('click', function () { v.currentTime = Number(c.startS) || 0; v.focus(); });
+          li.appendChild(b); list.appendChild(li);
+        });
+        list.hidden = (data.chapters || []).length < 2;
+        document.querySelector('#respond .hint').textContent = 'Needed if you’re asking for changes. Your response goes to the person who sent this, and nothing changes in the video because of it.';
+        $('loading').hidden = true;
+        $('review').hidden = false;
+        countViewOnFirstTouch();
+      }
+      var gv = $('gv');
+      function showAt() { $('vat').textContent = mmss(gv.currentTime); }
+      gv.addEventListener('timeupdate', showAt);
+      gv.addEventListener('seeked', showAt);
+      $('vcard').addEventListener('click', function (e) {
+        var b = e.target.closest ? e.target.closest('button[data-skip]') : null;
+        if (!b) return;
+        var end = isFinite(gv.duration) ? gv.duration : Infinity;
+        gv.currentTime = Math.max(0, Math.min(end, gv.currentTime + Number(b.getAttribute('data-skip'))));
+      });
+      // The two name boxes are one name: typing in either fills the other.
+      $('vname').addEventListener('input', function () { $('name').value = this.value; });
+      $('name').addEventListener('input', function () { $('vname').value = this.value; });
+      $('vcomment').addEventListener('submit', function (e) { e.preventDefault(); });
+      $('vadd').addEventListener('click', async function () {
+        var err = $('vcomment-error');
+        err.hidden = true;
+        var name = $('vname').value.trim(), text = $('vtext').value.trim(), at = gv.currentTime || 0;
+        function fail(msg, id) { err.textContent = msg; err.hidden = false; if (id) $(id).focus(); }
+        if (!name) return fail('Please add your name.', 'vname');
+        if (!text) return fail('Please type your comment.', 'vtext');
+        var btn = this; btn.disabled = true;
+        try {
+          var res = await call('respond', { name: name, decision: 'comment', body: text, atS: Math.round(at * 10) / 10, hp: $('website').value, ms: Date.now() - startedAt });
+          if (res.status === 404) return showDead();
+          var data = await res.json().catch(function () { return {}; });
+          if (!res.ok) return fail(data.error || 'That did not send. Please try again.');
+          var li = document.createElement('li');
+          var m = document.createElement('span'); m.className = 'moment'; m.textContent = mmss(at) + ' ';
+          li.appendChild(m); li.appendChild(document.createTextNode(text));
+          $('vsent').appendChild(li); $('vsent').hidden = false;
+          $('vtext').value = '';
+        } catch (e2) {
+          fail('That did not send. Please check your connection and try again.');
+        } finally { btn.disabled = false; }
       });
 
       $('offer-link').addEventListener('click', function () {
@@ -262,6 +368,7 @@
           var res = await call('view');
           if (!res.ok) return showDead();
           var data = await res.json();
+          if (data.kind === 'video') return drawVideoReview(data);
           if (!data.versions || !data.versions.length) return showDead();
           trialOffer = !!data.trialOffer;
           document.title = data.workspaceName + ' would like your thoughts';
