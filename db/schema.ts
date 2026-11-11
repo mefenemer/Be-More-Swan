@@ -3131,6 +3131,41 @@ export const taskLedger = pgTable("task_ledger", {
   uniqueIndex("task_ledger_one_conversion_idx").on(t.organisationId).where(sql`source = 'conversion'`),
 ]);
 
+// What work costs in tasks, set in Admin → Money → Task costs (db/z-task-costs.sql, src/utils/task-costs.ts).
+export const taskCostChanges = pgTable("task_cost_changes", {
+  id: serial().primaryKey(),
+  status: text("status").notNull(),                                // baseline | draft | announced | cancelled
+  effectiveFrom: timestamp("effective_from").notNull(),
+  reason: text("reason").notNull().default(''),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  announcedBy: integer("announced_by").references(() => users.id, { onDelete: "set null" }),
+  announcedAt: timestamp("announced_at"),
+  cancelledBy: integer("cancelled_by").references(() => users.id, { onDelete: "set null" }),
+  cancelledAt: timestamp("cancelled_at"),
+});
+
+export const taskCostChangeItems = pgTable("task_cost_change_items", {
+  changeId: integer("change_id").notNull().references(() => taskCostChanges.id, { onDelete: "cascade" }),
+  costKey: text("cost_key").notNull(),                             // CostKey (src/config/task-weights.ts)
+  oldUnits: integer("old_units"),
+  newUnits: integer("new_units").notNull(),
+}, (t) => [primaryKey({ columns: [t.changeId, t.costKey] })]);
+
+// A workspace owner's acceptance of a change, once per workspace.
+export const taskCostAcceptances = pgTable("task_cost_acceptances", {
+  changeId: integer("change_id").notNull().references(() => taskCostChanges.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  acceptedAt: timestamp("accepted_at").defaultNow().notNull(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+}, (t) => [
+  primaryKey({ columns: [t.changeId, t.organisationId] }),
+  index("task_cost_acceptances_org_idx").on(t.organisationId),
+]);
+
 // The free 14-day trial, one row per workspace (db/z-trial-plan.sql, src/utils/trial.ts).
 export const trials = pgTable("trials", {
   id: serial().primaryKey(),

@@ -34,7 +34,8 @@ import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { loadOrgProducts, renderProductFacts } from './org-products';
 import { normalizeBrandKit } from './brand-kit';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, MUSIC_CREDIT_COST, type MediaKind } from './ai-credits';
-import { TASK_WEIGHTS, aiVideoTasks } from '../config/task-weights';
+import { aiVideoTasks, type TaskCosts } from '../config/task-weights';
+import { getTaskCosts } from './task-costs';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
 import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, i2vModel } from '../lib/fal-gateway';
@@ -423,15 +424,16 @@ export function musicToMake(storyboard: Storyboard, brief: VideoBrief): boolean 
     return !(storyboard.music?.assetId && storyboard.music.mood === mood);
 }
 
-export function buildTasks(storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar): number {
+/** Tasks for what is still to be made, at the live costs (getTaskCosts). Pure. */
+export function buildTasks(storyboard: Storyboard, brief: VideoBrief, costs: TaskCosts, made?: MadeSoFar): number {
     const todo = stillToMake(storyboard, made);
-    let n = musicToMake(storyboard, brief) ? TASK_WEIGHTS.ai_music : 0;
+    let n = musicToMake(storyboard, brief) ? costs.weights.ai_music : 0;
     for (const s of todo.scenes) {
-        if (s.source === 'ai_image') n += TASK_WEIGHTS.ai_image;
-        if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)));
+        if (s.source === 'ai_image') n += costs.weights.ai_image;
+        if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)), costs);
     }
     // The owner's own voice is never made, so never charged (own-voice.ts).
-    if (brief.voiceover && !isOwnVoice(brief) && scriptOf(storyboard) && todo.voiceover) n += TASK_WEIGHTS.ai_voiceover;
+    if (brief.voiceover && !isOwnVoice(brief) && scriptOf(storyboard) && todo.voiceover) n += costs.weights.ai_voiceover;
     return n;
 }
 
@@ -735,7 +737,7 @@ async function sourceScene(db: Db, args: {
                 assetType: 'video', mimeType: 'video/mp4', fileSize: stored.fileSize, storageKey: stored.storageKey,
                 durationS: sub.billedSeconds, provider: 'fal', prompt: scene.prompt || context, aspectRatio: shape, status: 'pending',
             }).returning({ id: contentAssets.id });
-            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: aiVideoTasks(sub.billedSeconds) };
+            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: aiVideoTasks(sub.billedSeconds, await getTaskCosts()) };
         }
     }
     return null;
@@ -1100,7 +1102,7 @@ export async function makeOtherShapes(db: Db, row: typeof videoProjects.$inferSe
         if (have.has(shape)) { skipped.push(shape); continue; }
         const nb = { ...brief, shape, shapeOf: root };
         const sceneAssets = assetsForShape(sb, row.sceneAssets);
-        const free = buildTasks(sb, nb, { sceneAssets, voiceoverAssetId: row.voiceoverAssetId }) === 0;
+        const free = buildTasks(sb, nb, await getTaskCosts(), { sceneAssets, voiceoverAssetId: row.voiceoverAssetId }) === 0;
         const [v] = await db.insert(videoProjects).values({
             organisationId: row.organisationId, aiAssistantId: row.aiAssistantId, createdBy: row.createdBy ?? args.userId,
             title: row.title, status: free ? 'building' : 'planned', brief: nb, storyboard: sb, changes: [],
@@ -1163,7 +1165,7 @@ export async function sweepStuckProjects(db: Db, orgId: number, now = new Date()
 export async function holdBuild(db: Db, orgId: number, storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar) {
     const credits = buildCredits(storyboard, brief, made);
     if (credits === 0) return { ok: true as const, credits: 0 };
-    const hold = await holdCredits(db, { orgId, amount: credits, tasks: buildTasks(storyboard, brief, made), mediaType: 'video' });
+    const hold = await holdCredits(db, { orgId, amount: credits, tasks: buildTasks(storyboard, brief, await getTaskCosts(), made), mediaType: 'video' });
     return hold.ok ? { ok: true as const, credits } : { ok: false as const, credits, balance: hold.balance, unit: hold.unit, cost: hold.cost };
 }
 
@@ -1175,7 +1177,7 @@ export async function holdBuild(db: Db, orgId: number, storyboard: Storyboard, b
  */
 export async function buildEstimate(orgId: number, storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar): Promise<{ estimate: number; unit: 'tasks' | 'credits' }> {
     return await isUnifiedTaskMetering(orgId)
-        ? { estimate: buildTasks(storyboard, brief, made), unit: 'tasks' }
+        ? { estimate: buildTasks(storyboard, brief, await getTaskCosts(), made), unit: 'tasks' }
         : { estimate: buildCredits(storyboard, brief, made), unit: 'credits' };
 }
 
@@ -1325,6 +1327,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         built: 'made (the old way, before 9 Nov) — its post is in the Review Queue for approval',
         failed: 'stopped', cancelled: 'cancelled', draft: 'not started',
     };
+    const costs = await getTaskCosts();
     return ['YOUR VIDEOS (newest first; use only these ids):', ...rows.map((r) => {
         const sb = r.storyboard as Storyboard | null;
         const brief = r.brief as VideoBrief;
@@ -1337,7 +1340,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
             return `- id ${r.id}: AI CLIP "${brief.clip.description.slice(0, 100)}" (${brief.clip.style}, ${brief.clip.lengthS}s) — ${at}`;
         }
         const scenes = sb ? ` · ${sb.scenes.length} scenes` : '';
-        const n = sb ? (tasks ? buildTasks(sb, brief, r) : buildCredits(sb, brief, r)) : 0;
+        const n = sb ? (tasks ? buildTasks(sb, brief, costs, r) : buildCredits(sb, brief, r)) : 0;
         const unit = tasks ? (n === 1 ? 'task' : 'tasks') : (n === 1 ? 'credit' : 'credits');
         const cost = sb && (r.status === 'planned' || r.status === 'failed') ? ` · would use ${n} ${unit} to make` : '';
         const note = r.note ? ` · note: ${r.note.slice(0, 160)}` : '';

@@ -15,7 +15,11 @@ import { lowerThirdOverlays, readNameCaption } from '../src/lib/lower-third';
 import { sceneTimes, sceneAt, addNote, readNotes, notesByScene, mergeNotedScenes, mergeScript } from '../src/lib/video-notes';
 import { videoResults, turnaroundText } from '../src/lib/video-results';
 import { enforceStoryboard, storyboardUserPrompt, storyboardSystemPrompt, type Storyboard, type VideoBrief } from '../src/lib/storyboard';
-import { musicFromBrief, readBrief, withSetupDefaults, loopToLength, assetsForShape, shapeRoot, sceneOverlays, sceneClips, timesOf, sceneLooks, buildTasks } from '../src/utils/video-producer';
+import { musicFromBrief, readBrief, withSetupDefaults, loopToLength, assetsForShape, shapeRoot, sceneOverlays, sceneClips, timesOf, sceneLooks, buildTasks as buildTasksAt } from '../src/utils/video-producer';
+import { DEFAULT_TASK_COSTS } from '../src/config/task-weights';
+// buildTasks takes the live costs since task costs moved to the database; these checks use the defaults.
+const buildTasks = (sb: Parameters<typeof buildTasksAt>[0], b: Parameters<typeof buildTasksAt>[1], made?: Parameters<typeof buildTasksAt>[3]) =>
+    buildTasksAt(sb, b, DEFAULT_TASK_COSTS, made);
 import { videoSceneRequestFromUiElement, videoSceneCard } from '../src/utils/chat-video-scene';
 import { renderFailureNote } from '../src/utils/video-render';
 import { integratedLufs, levelTo, samplePeakDb, wavBytes, readWav } from '../src/lib/loudness-measure';

@@ -48,6 +48,13 @@ export type AdminAction =
     | 'notification_sent'
     // Growth → Broadcast: a test copy to the admin, the send started, and the worker's final counts.
     | 'broadcast_test'
+    | 'task_cost_draft_saved'
+    | 'task_cost_draft_discarded'
+    | 'task_cost_test'
+    | 'task_cost_announced'
+    | 'task_cost_resent'
+    | 'task_cost_cancelled'
+    | 'task_cost_set_unused'
     | 'broadcast_started'
     | 'broadcast_finished'
     | 'session_timeout_config_update'

@@ -13,6 +13,7 @@ import type { getDb } from '../../db/client';
 import { usageCounters } from '../../db/schema';
 import { getPeriodStart } from './atomic-cap-check';
 import { inFlightWeightSql } from './work-metering';
+import { getTaskCosts } from './task-costs';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -38,7 +39,7 @@ export async function readTaskUsage(db: Db, organisationId: number, periodStart:
     // The weights are cast to int: an untyped parameter in SUM(CASE …) is text → 42883.
     const [extra] = await db.execute<{ bonus: number; in_flight: number }>(sql`
         SELECT COALESCE((SELECT bonus_tasks FROM task_bonus WHERE organisation_id = ${organisationId}), 0) AS bonus,
-               COALESCE((SELECT SUM(${inFlightWeightSql()})
+               COALESCE((SELECT SUM(${inFlightWeightSql(await getTaskCosts())})
                            FROM media_generation_jobs
                           WHERE organisation_id = ${organisationId} AND status IN ('queued', 'processing')
                             AND created_at > now() - interval '2 hours'), 0) AS in_flight`) as unknown as Array<{ bonus: number; in_flight: number }>;

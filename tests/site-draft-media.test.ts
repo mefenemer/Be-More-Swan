@@ -12,14 +12,14 @@ import path from 'node:path';
 import { normaliseSiteDefinition, type SiteDefinition } from '../src/utils/site-definition';
 import { siteFromDraftReply, buildDraftPrompt, type DraftBrief } from '../src/utils/site-draft';
 import {
-    AI_IMAGE_TASKS, buildMediaPlanPrompt, cleanMediaPlan, DRAFT_MEDIA_CAPS, DRAFT_NOTE_ADDING_MEDIA, DRAFT_NOTE_MEDIA_STOPPED, DRAFT_NOTE_READY, draftMediaMaxTasks, draftMediaPromptLine,
+    buildMediaPlanPrompt, cleanMediaPlan, DRAFT_MEDIA_CAPS, DRAFT_NOTE_ADDING_MEDIA, DRAFT_NOTE_MEDIA_STOPPED, DRAFT_NOTE_READY, draftMediaMaxTasks, draftMediaPromptLine,
     draftNoteIsFailure, mediaSlots, placeMedia, resolveDraftMedia, wantsDraftMedia, type DraftMediaChoice, type DraftMediaOptions, type MediaSlot,
 } from '../src/utils/site-draft-media';
 import { sourceDraftMedia, type DraftMediaDeps } from '../src/utils/site-draft-media-run';
 import { DRAFT_VIDEO_SECONDS } from '../src/utils/site-draft-media-options';
 import { markVideos } from '../src/utils/site-definition';
 import { renderSitePage } from '../src/utils/site-render';
-import { TASK_WEIGHTS, aiVideoTasks } from '../src/config/task-weights';
+import { DEFAULT_TASK_COSTS, DEFAULT_TASK_WEIGHTS, aiVideoTasks } from '../src/config/task-weights';
 
 const read = (f: string) => readFileSync(path.resolve(__dirname, '..', f), 'utf8');
 let passed = 0;
@@ -38,7 +38,7 @@ const FROM_SCRATCH = site([
 ]);
 
 const options = (over: { imageAi?: boolean; videoAi?: boolean; images?: DraftMediaChoice['images'] | null; videos?: DraftMediaChoice['videos'] | null } = {}): DraftMediaOptions => ({
-    images: { aiAllowed: over.imageAi ?? true, aiWhyNot: over.imageAi === false ? 'No AI images here.' : null, aiTasksEach: AI_IMAGE_TASKS, aiMax: DRAFT_MEDIA_CAPS.aiImages, stockMax: DRAFT_MEDIA_CAPS.stockImages },
+    images: { aiAllowed: over.imageAi ?? true, aiWhyNot: over.imageAi === false ? 'No AI images here.' : null, aiTasksEach: DEFAULT_TASK_WEIGHTS.ai_image, aiMax: DRAFT_MEDIA_CAPS.aiImages, stockMax: DRAFT_MEDIA_CAPS.stockImages },
     videos: { aiAllowed: over.videoAi ?? true, aiWhyNot: over.videoAi === false ? 'AI video is on the higher plans.' : null, aiTasksEach: 20, aiMax: DRAFT_MEDIA_CAPS.aiVideos, stockMax: DRAFT_MEDIA_CAPS.stockVideos },
     answers: { images: over.images ?? null, videos: over.videos ?? null },
 });
@@ -66,13 +66,12 @@ function fakeDeps(slots: MediaSlot[], over: Partial<DraftMediaDeps> = {}) {
 
 (async () => {
     await check('costs come from the live weights, and are a true ceiling', () => {
-        assert.strictEqual(AI_IMAGE_TASKS, TASK_WEIGHTS.ai_image);
         assert.strictEqual(draftMediaMaxTasks({ images: 'stock', videos: 'stock' }, options()), 0, 'stock is free');
         assert.strictEqual(draftMediaMaxTasks({ images: 'none', videos: 'none' }, options()), 0);
-        assert.strictEqual(draftMediaMaxTasks({ images: 'ai', videos: 'ai' }, options()), AI_IMAGE_TASKS * DRAFT_MEDIA_CAPS.aiImages + 20);
+        assert.strictEqual(draftMediaMaxTasks({ images: 'ai', videos: 'ai' }, options()), DEFAULT_TASK_WEIGHTS.ai_image * DRAFT_MEDIA_CAPS.aiImages + 20);
         const run = read('src/utils/site-draft-media-options.ts');
-        assert.ok(run.includes('aiVideoTasks(billedSecondsFor(DRAFT_VIDEO_SECONDS))'), 'the video price is the price the hold uses');
-        assert.ok(aiVideoTasks(DRAFT_VIDEO_SECONDS) > 0);
+        assert.ok(run.includes('aiVideoTasks(billedSecondsFor(DRAFT_VIDEO_SECONDS), costs)'), 'the video price is the price the hold uses, at the live costs');
+        assert.ok(aiVideoTasks(DRAFT_VIDEO_SECONDS, DEFAULT_TASK_COSTS) > 0);
         const line = draftMediaPromptLine(options());
         assert.match(line, /stock is free/);
         assert.match(line, /1 task each, 4 at most/);

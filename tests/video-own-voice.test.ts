@@ -8,7 +8,11 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { saysSomethingElse, keepRecordings, linesToRecord, recordedDurations, isOwnVoice, LINE_GAP_S } from '../src/utils/own-voice';
-import { buildTasks, readBrief } from '../src/utils/video-producer';
+import { buildTasks as buildTasksAt, readBrief } from '../src/utils/video-producer';
+import { DEFAULT_TASK_COSTS } from '../src/config/task-weights';
+// buildTasks takes the live costs since task costs moved to the database; these checks use the defaults.
+const buildTasks = (sb: Parameters<typeof buildTasksAt>[0], b: Parameters<typeof buildTasksAt>[1], made?: Parameters<typeof buildTasksAt>[3]) =>
+    buildTasksAt(sb, b, DEFAULT_TASK_COSTS, made);
 import type { Scene, Storyboard, VideoBrief } from '../src/lib/storyboard';
 
 let passed = 0;

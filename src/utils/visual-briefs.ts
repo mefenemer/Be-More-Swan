@@ -42,7 +42,6 @@ import {
 export { colourWords, readBriefContext, setupAnswer, sourceLabel, withSetupFallback, withoutColourCodes } from './art-direction-context';
 export type { BriefContext, PastRejection } from './art-direction-context';
 import { holdCredits, settleHold, getBalance, tasksForCredits, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, tierCanGenerateVideo } from './ai-credits';
-import { aiVideoTasks } from '../config/task-weights';
 import { getActiveTierKeyByOrg } from './plan-features';
 import { orgHasAssistantFeature } from './assistant-capabilities';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
@@ -62,7 +61,8 @@ import { normaliseFlyerContent } from '../config/flyer-vocab';
 /** Brief purposes whose pictures belong on social posts (blog and email headers have their own briefs). */
 const SOCIAL_PURPOSES = new Set(['social_post', 'story', 'ad', 'other']);
 import { triggerBriefRound } from './trigger-brief-round';
-import { TASK_WEIGHTS, basicWorkCharged } from '../config/task-weights';
+import { aiVideoTasks, basicWorkCharged } from '../config/task-weights';
+import { getTaskCosts } from './task-costs';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 import { recordPlatformIncident } from './platform-incident';
 import {
@@ -295,15 +295,16 @@ export async function startRound(db: Db, args: { orgId: number; brief: BriefRow 
     const videoCredits = videoIncluded ? VIDEO_CREDIT_COST : 0;
     const credits = (aiIncluded ? IMAGE_CREDIT_COST : 0) + videoCredits;
     // The free sources' one task for the round, once they cost (docs/basic-work-charging.md).
-    const basicTasks = free && basicWorkCharged() ? TASK_WEIGHTS.design_round : 0;
+    const costs = await getTaskCosts();
+    const basicTasks = free && basicWorkCharged() ? costs.weights.design_round : 0;
     if (credits === 0 && basicTasks > 0 && !(await hasTaskCapacity(db, orgId, basicTasks))) {
         return { ok: false, status: 402, error: TASK_LIMIT_MESSAGE, code: 'task_limit' };
     }
     if (credits > 0) {
         const hold = await holdCredits(db, {
             orgId, amount: credits,
-            // Single task allowance: an image round is 1 task, a video 20 (tasksForCredits).
-            tasks: basicTasks + (aiIncluded ? tasksForCredits('image', IMAGE_CREDIT_COST) : 0) + (videoIncluded ? aiVideoTasks(billedSecondsFor(BRIEF_CLIP_SECONDS)) : 0),
+            // Single task allowance: what an image round and a clip cost today.
+            tasks: basicTasks + (aiIncluded ? tasksForCredits('image', IMAGE_CREDIT_COST, costs) : 0) + (videoIncluded ? aiVideoTasks(billedSecondsFor(BRIEF_CLIP_SECONDS), costs) : 0),
         });
         if (!hold.ok) return { ok: false, status: 402, error: 'insufficient_credits', code: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit };
     }
@@ -378,7 +379,7 @@ export async function endRound(db: Db, briefId: number, outcome: {
         await settleHold(db, { orgId: row.organisation_id, amount: heldImage, success: outcome.chargeAi, mediaType: 'image', userId: outcome.userId ?? null, assistantId: row.ai_assistant_id });
     }
     if (heldVideo > 0) {
-        await settleHold(db, { orgId: row.organisation_id, amount: heldVideo, success: outcome.chargeVideo === true, mediaType: 'video', userId: outcome.userId ?? null, assistantId: row.ai_assistant_id, tasks: aiVideoTasks(billedSecondsFor(BRIEF_CLIP_SECONDS)) });
+        await settleHold(db, { orgId: row.organisation_id, amount: heldVideo, success: outcome.chargeVideo === true, mediaType: 'video', userId: outcome.userId ?? null, assistantId: row.ai_assistant_id, tasks: aiVideoTasks(billedSecondsFor(BRIEF_CLIP_SECONDS), await getTaskCosts()) });
     }
     return true;
 }

@@ -16,7 +16,7 @@ import { ownWindow, sceneClips, playedDurations, readFootageIds, readBrief, live
 import { tightenSegment, tightenStoryboard, retakeIndexes, isFiller, capPieces, describeTightening, MAX_PAUSE_S, loudSeconds, restoreLoudGaps, snapSegment } from '../src/lib/footage';
 import { transcriptionPrompt } from '../src/utils/footage-review';
 import { MAX_CLIPS } from '../src/lib/video-edit';
-import { TASK_WEIGHTS } from '../src/config/task-weights';
+import { DEFAULT_TASK_WEIGHTS } from '../src/config/task-weights';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -260,14 +260,14 @@ check('suggestion lines and the planner block name the video and the stretch', (
 
 // ── Wiring (source scans) ───────────────────────────────────────────────────────────────────────
 
-check('the review costs 2 tasks (owner decision D-F1) and is recorded only after it succeeds', () => {
-    assert.strictEqual(TASK_WEIGHTS.footage_review, 2);
-    assert.strictEqual(FOOTAGE_REVIEW_TASKS, TASK_WEIGHTS.footage_review);
+check('the review costs the live footage_review figure (2 by default, owner decision D-F1) and is recorded only after it succeeds', () => {
+    assert.strictEqual(DEFAULT_TASK_WEIGHTS.footage_review, 2);
+    assert.strictEqual(FOOTAGE_REVIEW_TASKS, DEFAULT_TASK_WEIGHTS.footage_review);
     const src = read('src/utils/footage-review.ts');
     const fn = src.slice(src.indexOf('export async function reviewProject'));
     assert.ok(fn.indexOf("status: 'reviewed'") > 0);
     assert.ok(fn.indexOf("recordCompletedWork(db, orgId, 'footage_review'") > fn.indexOf("status: 'reviewed'"), 'charged after the review is saved');
-    assert.ok(/const charged = fresh \? FOOTAGE_REVIEW_TASKS : 0/.test(fn), 'free when every video was analysed before');
+    assert.ok(/const charged = fresh \? \(await getTaskCosts\(\)\)\.weights\.footage_review : 0/.test(fn), 'free when every video was analysed before');
     assert.ok(fn.includes('todo.filter((r) => r.analysis == null)'), 'a redo after a rules change is free');
 });
 

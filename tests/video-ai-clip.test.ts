@@ -8,7 +8,11 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { clipPrompt, clipRefusal, clipTargetS, isClipLength, isClipStyle, CLIP_STYLES } from '../src/lib/ai-clip';
 import { plannedClearOfCaptions } from '../src/lib/scene-text';
-import { aiClipSeconds, buildTasks } from '../src/utils/video-producer';
+import { aiClipSeconds, buildTasks as buildTasksAt } from '../src/utils/video-producer';
+import { DEFAULT_TASK_COSTS } from '../src/config/task-weights';
+// buildTasks takes the live costs since task costs moved to the database; these checks use the defaults.
+const buildTasks = (sb: Parameters<typeof buildTasksAt>[0], b: Parameters<typeof buildTasksAt>[1], made?: Parameters<typeof buildTasksAt>[3]) =>
+    buildTasksAt(sb, b, DEFAULT_TASK_COSTS, made);
 import { minScenesFor, storyboardSystemPrompt, storyboardUserPrompt, type Storyboard, type VideoBrief } from '../src/lib/storyboard';
 
 let passed = 0;

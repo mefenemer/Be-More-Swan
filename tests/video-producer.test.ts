@@ -1,3 +1,4 @@
+import { DEFAULT_TASK_COSTS } from '../src/config/task-weights';
 // tests/video-producer.test.ts
 // Video Producer Phase 5 — still scenes on the timeline, assembly, the project endpoints.
 //
@@ -115,8 +116,8 @@ check('on-screen text is timed to its scene and sits clear of the captions', () 
 });
 
 check('a build holds the task weights it will record: AI clip 20, AI image 1, voiceover 1', () => {
-    assert.strictEqual(buildTasks(storyboard, brief), 20 + 1);
-    assert.strictEqual(buildTasks(storyboard, { ...brief, voiceover: false }), 20);
+    assert.strictEqual(buildTasks(storyboard, brief, DEFAULT_TASK_COSTS), 20 + 1);
+    assert.strictEqual(buildTasks(storyboard, { ...brief, voiceover: false }, DEFAULT_TASK_COSTS), 20);
 });
 
 check('the endpoint gates before planning, moderates, holds before building, and the worker is idempotent', () => {

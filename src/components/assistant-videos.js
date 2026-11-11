@@ -28,8 +28,9 @@
     brand_card: 'Branded card', ai_image: 'AI picture', ai_video: 'AI clip', own_video: 'Your video',
   };
   const FOOTAGE_API = '/.netlify/functions/footage';
-  /** What one footage review costs when a video is new to it (src/lib/footage.ts FOOTAGE_REVIEW_TASKS). */
-  const REVIEW_TASKS = 2;
+  /** What one footage review costs when a video is new to it: the live figure from Admin → Money → Task costs
+   *  (/task-costs.js), with the default as the fallback on a page that didn't load it. */
+  const reviewCost = () => (window.taskCost ? window.taskCost('footage_review', '2 tasks') : '2 tasks');
   const MAX_FOOTAGE = 10;
   const KIND = { cut: 'Cut', trim: 'Trim', reorder: 'Order', fill: 'Fill a gap', text: 'Words', sound: 'Sound', frame: 'Frame', other: 'Edit' };
   const mmss = (n) => { const t = Math.max(0, Math.floor(Number(n) || 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
@@ -382,7 +383,7 @@
     const picked = [...f.picked];
     const known = new Map((f.videos || []).map((v) => [v.id, v]));
     const fresh = picked.some((id) => !(known.get(id) && known.get(id).reviewedBefore));
-    btn.textContent = `Review my footage${picked.length ? (fresh ? ` — uses ${REVIEW_TASKS} tasks` : ' — free') : ''}`;
+    btn.textContent = `Review my footage${picked.length ? (fresh ? ` — uses ${reviewCost()}` : ' — free') : ''}`;
     btn.disabled = f.busy || !picked.length;
   }
 
@@ -435,7 +436,7 @@
         ${briefExtrasHtml(d, f)}
         ${shapeHtml()}
         <label class="flex items-start gap-1.5 text-sm text-gray-700"><input type="checkbox" name="consent" required class="mt-1"> I have permission to use the people and music in these videos.</label>
-        <p class="text-xs text-gray-500">Reviewing a video ${who()} hasn’t seen before uses ${REVIEW_TASKS} tasks; videos it has already reviewed are free. Your videos are never changed — edits only go into the new video.</p>
+        <p class="text-xs text-gray-500">Reviewing a video ${who()} hasn’t seen before uses ${reviewCost()}; videos it has already reviewed are free. Your videos are never changed — edits only go into the new video.</p>
         <p data-vid-footage-progress class="text-xs font-semibold text-gray-700" role="status">${esc(f.progress)}</p>
         <div class="flex flex-wrap gap-2">
           <button type="submit" data-vid-footage-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Review my footage</button>

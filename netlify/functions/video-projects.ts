@@ -66,7 +66,8 @@ import { contentAssets } from '../../db/schema';
 import { randomUUID } from 'crypto';
 import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
 import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../src/utils/footage-review';
-import { FOOTAGE_REVIEW_TASKS, tightenStoryboard, type FootageReview } from '../../src/lib/footage';
+import { getTaskCosts } from '../../src/utils/task-costs';
+import { tightenStoryboard, type FootageReview } from '../../src/lib/footage';
 import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -211,7 +212,7 @@ export default withLambda(async (event) => {
             const status = await footageStatus(db, orgId, footage);
             if (status.length !== footage.length) return json(404, { error: 'One of those videos isn’t one of your own uploads.' });
             if (status.some((x) => x.needsReading)) return json(409, { error: 'Some of those videos haven’t been read yet. Press “Review my footage” again.' });
-            if (!await canAffordReview(db, orgId, footage)) return json(402, { error: 'insufficient_credits', unit: 'tasks', cost: FOOTAGE_REVIEW_TASKS, message: TASK_LIMIT_MESSAGE });
+            if (!await canAffordReview(db, orgId, footage)) return json(402, { error: 'insufficient_credits', unit: 'tasks', cost: (await getTaskCosts()).weights.footage_review, message: TASK_LIMIT_MESSAGE });
         }
         const started = await startProject(db, {
             organisationId: orgId, assistantId, createdBy: userId, brief: body.brief, onboardingContext: a.onboardingContext, origin: 'user', headers,

@@ -275,9 +275,9 @@ async function websiteItems(db: Db, args: { orgId: number; assistantId: number; 
             eq(taskLedger.ref, String(site.id)), ...since(taskLedger.createdAt),
         )).orderBy(desc(taskLedger.createdAt)).limit(limit);
     for (const w of work) {
-        if (w.kind === 'site_words') { items.push({ id: `site-words-${w.id}`, type: 'site_words', icon: 'edit', description: 'Placed your own words on a page of your draft (1 task).', createdAt: w.at, status: 'success' }); continue; }
+        if (w.kind === 'site_words') { items.push({ id: `site-words-${w.id}`, type: 'site_words', icon: 'edit', description: 'Placed your own words on a page of your draft.', createdAt: w.at, status: 'success' }); continue; }
         if (imp && imp.status === 'ready' && Math.abs(w.at.getTime() - imp.at.getTime()) < 5 * 60_000) continue;
-        items.push({ id: `site-draft-${w.id}`, type: 'site_draft', icon: 'sparkles', description: 'Wrote a draft of your whole site (1 task). Nothing went live.', createdAt: w.at, status: 'success' });
+        items.push({ id: `site-draft-${w.id}`, type: 'site_draft', icon: 'sparkles', description: 'Wrote a draft of your whole site. Nothing went live.', createdAt: w.at, status: 'success' });
     }
     if (site.draftingAt) items.push({ id: `site-drafting-${site.id}`, type: 'site_draft', icon: 'sparkles', description: 'Writing a draft of your whole site now.', createdAt: site.draftingAt, status: 'in_progress' });
     else if (draftNoteIsFailure(site.draftNote)) items.push({ id: `site-draft-note-${site.id}`, type: 'site_draft', icon: 'alert', description: `A draft didn't finish: ${clip(site.draftNote!, 110)}`, createdAt: site.updatedAt, status: 'failed' });

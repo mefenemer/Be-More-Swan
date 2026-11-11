@@ -12,8 +12,8 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SOURCE_SPECS } from '../src/config/visual-brief-vocab';
-import { TASK_WEIGHTS } from '../src/config/task-weights';
+import { sourceCosts } from '../src/config/visual-brief-vocab';
+import { DEFAULT_TASK_COSTS, DEFAULT_TASK_WEIGHTS } from '../src/config/task-weights';
 import { artefactWaitingOnYou, describeWork, nextStep } from '../src/utils/campaign-work-state';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -27,9 +27,9 @@ function check(name: string, fn: () => void): void {
 console.log('\n──── the Brand Designer quotes tasks ────');
 
 check('every source says what a round takes in tasks, from the task weights', () => {
-    assert.strictEqual(SOURCE_SPECS.ai_image.tasks, TASK_WEIGHTS.ai_image);
-    assert.strictEqual(SOURCE_SPECS.ai_video.tasks, TASK_WEIGHTS.ai_video);
-    for (const k of ['stock', 'brand_card', 'stock_video'] as const) assert.strictEqual(SOURCE_SPECS[k].tasks, 0, k);
+    assert.strictEqual(sourceCosts(DEFAULT_TASK_COSTS).ai_image.tasks, DEFAULT_TASK_WEIGHTS.ai_image);
+    assert.strictEqual(sourceCosts(DEFAULT_TASK_COSTS).ai_video.tasks, DEFAULT_TASK_WEIGHTS.ai_video);
+    for (const k of ['stock', 'brand_card', 'stock_video'] as const) assert.strictEqual(sourceCosts(DEFAULT_TASK_COSTS)[k].tasks, 0, k);
 });
 
 check('the Briefs tab gets the unit and words its cost lines by it', () => {
@@ -44,7 +44,7 @@ check('the Briefs tab gets the unit and words its cost lines by it', () => {
 check('its chat, the campaign order and the team feed no longer say AI credits', () => {
     const chat = read('netlify/functions/chat-orchestrator.ts');
     const route = chat.slice(chat.indexOf('    brand_designer: {'), chat.indexOf('    video_producer: {'));
-    assert.match(route, /A round with AI images uses \$\{SOURCE_SPECS\.ai_image\.tasks\} task/);
+    assert.match(route, /A round with AI images uses \$\{sourceCosts\(rc\.taskCosts\)\.ai_image\.tasks\} from/);
     assert.doesNotMatch(route.replace(/\/\/.*$/gm, ''), /AI credit/);
     assert.doesNotMatch(chat, /that is where the AI credit is shown/);
     assert.doesNotMatch(read('src/config/campaign-vocab.ts').match(/commission_visuals: \{[\s\S]*?\n    \},/)![0], /AI credit is shown/);

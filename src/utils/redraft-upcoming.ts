@@ -24,7 +24,7 @@ import type { getDb } from '../../db/client';
 import { aiAssistants, scheduledPosts } from '../../db/schema';
 import { enqueueScheduleGapFill } from './schedule-gap-fill';
 import { getTaskUsage } from './work-metering';
-import { TASK_WEIGHTS } from '../config/task-weights';
+import { getTaskCosts } from './task-costs';
 import { SMM_ROLE_KEYS } from '../constants/roles';
 
 type Db = ReturnType<typeof getDb>;
@@ -115,7 +115,7 @@ export async function previewRedraft(db: Db, orgId: number, assistantId: number,
     const { slots, kept } = pickRedraftSlots(await upcomingRows(db, orgId, assistantId, now), now);
     const usage = await getTaskUsage(db, orgId).catch(() => null);
     return {
-        ok: true, slots: slots.length, tasks: slots.length * TASK_WEIGHTS.social_post,
+        ok: true, slots: slots.length, tasks: slots.length * (await getTaskCosts()).weights.social_post,
         first: slots[0]?.publishDate ?? null, last: slots[slots.length - 1]?.publishDate ?? null,
         tasksLeft: usage && usage.hasPlan && usage.remaining !== null ? usage.remaining : null,
         kept,
@@ -133,7 +133,7 @@ export async function applyRedraft(db: Db, orgId: number, assistantId: number, n
     if (a.lifecycleStatus !== 'working') return { ok: false, status: 409, error: `${a.name || 'This assistant'} is paused, so nothing would be redrafted. Resume it first.` };
     const { slots } = pickRedraftSlots(await upcomingRows(db, orgId, assistantId, now), now);
     if (!slots.length) return { ok: true, cancelled: 0, queued: 0 };
-    const tasks = slots.length * TASK_WEIGHTS.social_post;
+    const tasks = slots.length * (await getTaskCosts()).weights.social_post;
     const usage = await getTaskUsage(db, orgId).catch(() => null);
     if (usage && usage.hasPlan && usage.remaining !== null && usage.remaining < tasks) {
         return { ok: false, status: 402, error: `Redrafting ${slots.length} posts needs ${tasks} tasks, and ${usage.remaining} ${usage.remaining === 1 ? 'is' : 'are'} left this month. Nothing was changed.` };

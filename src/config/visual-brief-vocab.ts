@@ -8,7 +8,7 @@
 // these lists: brand-briefs.ts sends them with every `list` response.
 
 import { IMAGE_CREDIT_COST, VIDEO_CREDIT_COST } from '../utils/ai-credits';
-import { TASK_WEIGHTS, aiVideoTasks, basicWorkCharged } from './task-weights';
+import { aiVideoTasks, basicWorkCharged, formatCost, type TaskCosts } from './task-weights';
 import { billedSecondsFor } from '../lib/fal-gateway';
 import { DEFAULT_PAPER_SIZE, flyerVocabForClient, normaliseFlyerContent, paperSizeOf, type FlyerContent, type PaperSize } from './flyer-vocab';
 
@@ -58,22 +58,33 @@ export const ASPECT_LABELS: Record<BriefAspectRatio, string> = {
 export const BRIEF_SOURCES = ['stock', 'ai_image', 'brand_card', 'stock_video', 'ai_video'] as const;
 export type BriefSource = typeof BRIEF_SOURCES[number];
 
-/** Once free rounds cost a task (docs/basic-work-charging.md): one for the round, however many of these it uses. */
-const BASIC_ROUND_COST = basicWorkCharged() ? `${TASK_WEIGHTS.design_round} task for the round` : null;
-
-// `tasks` = what one round of that source takes from the monthly allowance under the single task allowance
-// (task-weights.ts) — what the Briefs tab and the chat quote, as the Video Producer does since 2026-10-31.
-export const SOURCE_SPECS: Record<BriefSource, { label: string; cost: string; optionsPerRound: number; credits: number; tasks: number }> = {
-    stock:      { label: 'Stock photos',  cost: BASIC_ROUND_COST ?? 'Free (Pexels)',                                         optionsPerRound: 4, credits: 0, tasks: 0 },
-    // `cost` is what the brief form shows. Since the single task allowance (docs/task-metering.md) it is
-    // in tasks; `credits` stays the internal hold amount that ai-credits.ts converts (tasksForCredits).
-    ai_image:   { label: 'AI images',     cost: `${TASK_WEIGHTS.ai_image} task for 4 images`,           optionsPerRound: 4, credits: IMAGE_CREDIT_COST, tasks: TASK_WEIGHTS.ai_image },
-    brand_card: { label: 'Branded cards', cost: BASIC_ROUND_COST ?? 'Free — your colours, font and logo',                   optionsPerRound: 2, credits: 0, tasks: 0 },
-    stock_video: { label: 'Stock videos', cost: BASIC_ROUND_COST ?? 'Free (Pexels)',                                         optionsPerRound: 2, credits: 0, tasks: 0 },
+export const SOURCE_SPECS: Record<BriefSource, { label: string; optionsPerRound: number; credits: number }> = {
+    stock:      { label: 'Stock photos',  optionsPerRound: 4, credits: 0 },
+    // `credits` stays the internal hold amount that ai-credits.ts converts (tasksForCredits).
+    ai_image:   { label: 'AI images',     optionsPerRound: 4, credits: IMAGE_CREDIT_COST },
+    brand_card: { label: 'Branded cards', optionsPerRound: 2, credits: 0 },
+    stock_video: { label: 'Stock videos', optionsPerRound: 2, credits: 0 },
     // One clip per round: four clips would be 80 tasks for one brief. Busywork Buster (and Digital Employee) only
     // (tierCanGenerateVideo) — the same lock as AI video everywhere else.
-    ai_video:   { label: 'AI video',      cost: `${aiVideoTasks(billedSecondsFor(6))} tasks for one 6-second clip (Busywork Buster plan)`, optionsPerRound: 1, credits: VIDEO_CREDIT_COST, tasks: aiVideoTasks(billedSecondsFor(6)) },
+    ai_video:   { label: 'AI video',      optionsPerRound: 1, credits: VIDEO_CREDIT_COST },
 };
+
+/**
+ * What each source costs today (`cost` is what the form prints; `tasks` is what one round takes from the
+ * monthly allowance), for the Briefs tab and the chat to quote. The costs come from getTaskCosts.
+ */
+export function sourceCosts(costs: TaskCosts): Record<BriefSource, { cost: string; tasks: number }> {
+    // Once free rounds cost a task (docs/basic-work-charging.md): one for the round, however many of these it uses.
+    const basicRound = basicWorkCharged() ? `${formatCost('design_round', costs.weights.design_round)} for the round` : null;
+    const videoTasks = aiVideoTasks(billedSecondsFor(6), costs);
+    return {
+        stock:      { cost: basicRound ?? 'Free (Pexels)', tasks: 0 },
+        ai_image:   { cost: `${formatCost('ai_image', costs.weights.ai_image)} for 4 images`, tasks: costs.weights.ai_image },
+        brand_card: { cost: basicRound ?? 'Free — your colours, font and logo', tasks: 0 },
+        stock_video: { cost: basicRound ?? 'Free (Pexels)', tasks: 0 },
+        ai_video:   { cost: `${formatCost('ai_video', videoTasks)} for one 6-second clip (Busywork Buster plan)`, tasks: videoTasks },
+    };
+}
 
 /** The sources whose options are VIDEOS. */
 export const VIDEO_SOURCES: readonly BriefSource[] = ['stock_video', 'ai_video'];
@@ -202,11 +213,12 @@ export function normaliseBrief(raw: Record<string, unknown>): { ok: true; brief:
 }
 
 /** Everything the browser needs to draw the form and the grid — sent with `list`, never hand-copied. */
-export function briefVocabForClient() {
+export function briefVocabForClient(costs: TaskCosts) {
+    const priced = sourceCosts(costs);
     return {
         purposes: BRIEF_PURPOSES.map((k) => ({ key: k, ...PURPOSE_SPECS[k] })),
         aspectRatios: BRIEF_ASPECT_RATIOS.map((k) => ({ key: k, label: ASPECT_LABELS[k] })),
-        sources: BRIEF_SOURCES.map((k) => ({ key: k, ...SOURCE_SPECS[k], video: VIDEO_SOURCES.includes(k) })),
+        sources: BRIEF_SOURCES.map((k) => ({ key: k, ...SOURCE_SPECS[k], ...priced[k], video: VIDEO_SOURCES.includes(k) })),
         ownLabel: OWN_SOURCE_LABEL,
         rejectReasons: REJECT_REASONS.map((k) => ({ key: k, label: REJECT_REASON_LABELS[k] })),
         maxRounds: MAX_ROUNDS,

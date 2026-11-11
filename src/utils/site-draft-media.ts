@@ -9,7 +9,6 @@
 //   · the owner's own library pictures are never replaced;
 //   · a template's layout stays: only its hotlinked sample pictures are swapped.
 
-import { TASK_WEIGHTS } from '../config/task-weights';
 import { applySiteOperation, type Section, type SiteDefinition } from './site-definition';
 
 export const DRAFT_MEDIA_SOURCES = ['stock', 'ai', 'none'] as const;
@@ -69,7 +68,7 @@ export function draftMediaPromptLine(o: DraftMediaOptions): string {
     ].join(' ');
 }
 
-export const AI_IMAGE_TASKS = TASK_WEIGHTS.ai_image;
+// What an AI picture costs is not a constant here: draftMediaOptions() quotes the live cost (Admin → Money → Task costs).
 
 // ── The notes the draft leaves on the site row ───────────────────────────────────────────────────
 // sites.draft_note has always meant "the draft failed". These two don't, and every reader must ask

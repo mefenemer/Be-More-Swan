@@ -73,6 +73,7 @@
     <script src="/src/i18n.js"></script>
   <script src="/waitlist-mode.js" defer></script>
   <script src="/visit-count.js" defer></script>
+  <script src="/task-costs.js" defer></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
 
@@ -191,7 +192,7 @@
                         <li class="flex gap-3" title="Every post, article and email waits for your OK, unless you choose to let it go out on its own."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>You approve</strong> before anything goes out</span></li>
                         <li class="flex gap-3" title="Plans the work ahead and keeps a calendar of what is scheduled and published, even while you are offline."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Plans and schedules</strong> the work for you</span></li>
                         <li class="flex gap-3" title="Set a target such as 20 new leads this month and see whether you are on track, updated automatically."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>SMART goals</strong> with progress tracking</span></li>
-                        <li class="flex gap-3" title="Generate on-brand AI images and music from the same monthly allowance. An AI image counts as 1 task and an AI music track as 20."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>AI images &amp; music</strong> from your tasks</span></li>
+                        <li class="flex gap-3" title="Generate on-brand AI images and music from the same monthly allowance. See what counts as a task below."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>AI images &amp; music</strong> from your tasks</span></li>
                         <li class="flex gap-3" title="See what your assistants finished this month and the hours it saved you."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Hours-saved</strong> report</span></li>
                         <li class="flex gap-3" title="Brand-safety rules sit at the top of every assistant&#x27;s instructions and cannot be switched off."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Built-in <strong>brand-safety rules</strong></span></li>
                     </ul>
@@ -243,7 +244,7 @@
                     <ul class="feat-list space-y-2.5 text-sm text-gray-700 flex-grow">
                         <li class="flex gap-3" title="Run social media, blog, email marketing and lead generation side by side. New assistants are included as they launch."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Every assistant</strong>, all at once</span></li>
                         <li class="flex gap-3" title="When a goal slips, your assistants change their own plan to get it back on track. Every change is logged and you are told."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Goals</strong> that correct themselves</span></li>
-                        <li class="flex gap-3" title="Adds AI video to AI images and music, all from the same monthly allowance. An AI video counts as 20 tasks."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>AI video</strong> from your tasks</span></li>
+                        <li class="flex gap-3" title="Adds AI video to AI images and music, all from the same monthly allowance. See what counts as a task below."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>AI video</strong> from your tasks</span></li>
                         <li class="flex gap-3" title="A quality review runs on every social post before it reaches you, with suggested fixes."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>The Quality Reviewer</strong> checks every social post before it reaches you</span></li>
                         <li class="flex gap-3" title="Your questions go to the front of the queue."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Priority email</strong> support</span></li>
                     </ul>
@@ -379,8 +380,8 @@
         <!-- ── Common questions ─────────────────────────────────────
              The first two answers are the task allowance (they were two fixed cards until 2026-10-20 —
              one FAQ list now, all collapsible). One allowance since 17 October 2026: no separate AI
-             media or X credits. The weights MUST match src/config/task-weights.ts (image set 1, video 20,
-             music 20 or 12 shared, X link post 10 on top of the post's own 1, X text post 0); chat and editing helpers are free under
+             media or X credits. The figures here are filled in live by /task-costs.js from Admin → Money → Task costs; the text in the
+             page is only what shows without it. X text post 0; chat and editing helpers are free under
              a daily fair-use limit (src/utils/fair-use.ts); at the cap work is refused — no metered
              billing anywhere. Keep in step with faq.html, terms_of_service.html §5 and the "What Counts
              as a Task" help article.
@@ -403,10 +404,10 @@
                         <p class="mb-3">A task is <strong>one finished piece of work</strong>: a social post (once, however many platforms it goes to), a blog article, a lead search, an email or email flow, an outreach email, a website audit or draft, a rewrite of a website page's words, the words for a printable flyer, an AI voiceover, removing a picture's background, or a Business Mentor research answer, drafted plan or weekly review. Every plan has one monthly allowance that covers all of it — there are no separate credits to keep track of.</p>
                         <p class="mb-3">A few things cost far more to make, so they count as more than one task:</p>
                         <ul class="mb-3 space-y-1">
-                            <li>• A set of AI images — <strong>1 task</strong> (the editors give you up to 4 options to choose from)</li>
-                            <li>• An AI video — <strong>20 tasks</strong> (Busywork Buster)</li>
-                            <li>• An AI music track — <strong>20 tasks</strong>, or 12 if you share it with the community</li>
-                            <li>• A post to X with a link — <strong>10 extra tasks</strong> on top of the post's own task (a text-only X post costs nothing extra)</li>
+                            <li>• A set of AI images — <strong><span data-task-cost="ai_image">1 task</span></strong> (the editors give you up to 4 options to choose from)</li>
+                            <li>• An AI video — <strong><span data-task-cost="ai_video">20 tasks</span></strong> (Busywork Buster)</li>
+                            <li>• An AI music track — <strong><span data-task-cost="ai_music">20 tasks</span></strong>, or <span data-task-cost="ai_music_shared">12 tasks</span> if you share it with the community</li>
+                            <li>• A post to X with a link — <strong><span data-task-cost="x_link_post">10 tasks</span> extra</strong> on top of the post's own task (a text-only X post costs nothing extra)</li>
                         </ul>
                         <p><strong>Chatting with your assistants and the editing helpers are free</strong> — rewrites, suggested hooks, quality reviews and compliance checks don't use tasks. They have a generous daily fair-use limit to protect the service. Stock photos, your own uploads, branded cards and a flyer's pages and print files never use tasks, and nothing is counted until the work is delivered.</p>
                     </div>
@@ -530,13 +531,13 @@
                             <td colspan="4" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">AI Media Generation</td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
-                            <td class="px-6 py-3.5 text-gray-700 font-medium">AI Image Generation<br><span class="text-xs text-gray-400 font-normal">Generate on-brand images from a prompt — 1 task per set</span></td>
+                            <td class="px-6 py-3.5 text-gray-700 font-medium">AI Image Generation<br><span class="text-xs text-gray-400 font-normal">Generate on-brand images from a prompt — <span data-task-cost="ai_image">1 task</span> per set</span></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                         </tr>
                         <tr class="border-t border-gray-100 hover:bg-gray-50/40">
-                            <td class="px-6 py-3.5 text-gray-700 font-medium">AI Video Generation<br><span class="text-xs text-gray-400 font-normal">Generate short-form videos from a prompt — 20 tasks each</span></td>
+                            <td class="px-6 py-3.5 text-gray-700 font-medium">AI Video Generation<br><span class="text-xs text-gray-400 font-normal">Generate short-form videos from a prompt — <span data-task-cost="ai_video">20 tasks</span></span></td>
                             <td class="px-4 py-3.5 text-center text-gray-300">—</td>
                             <td class="px-4 py-3.5 text-center pk-col-tint"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>
                             <td class="px-4 py-3.5 text-center"><svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg></td>

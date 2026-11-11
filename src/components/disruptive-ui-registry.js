@@ -1,3 +1,5 @@
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/disruptive-ui-registry.js
  *
@@ -1999,7 +2001,7 @@
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Website check</p>
       <p class="text-sm text-gray-800 mt-2">Read your website again now and re-score it.</p>
-      <p class="text-xs text-gray-600 mt-2">If nothing on your site or your competitors' sites has changed, the last score stands and nothing is used. A check that re-scores uses 1 task from your monthly allowance.</p>
+      <p class="text-xs text-gray-600 mt-2">If nothing on your site or your competitors' sites has changed, the last score stands and nothing is used. A check that re-scores uses ${window.taskCost('site_audit')} from your monthly allowance.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-sac-run class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Check my site now</button>
         <button type="button" data-sac-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2053,7 +2055,7 @@
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Website check settings · Approval needed</p>
       ${any ? rows : '<p class="text-xs text-amber-700 mt-2">Nothing to change was given.</p>'}
-      <p class="text-xs text-gray-600 mt-2">Saved to the Website tab. If this is the first time your website is saved, its first check starts straight away (1 task).</p>
+      <p class="text-xs text-gray-600 mt-2">Saved to the Website tab. If this is the first time your website is saved, its first check starts straight away (${window.taskCost('site_audit')}).</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-sas-save ${any ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save</button>
         <button type="button" data-sas-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2191,7 +2193,7 @@
         : '<p class="text-xs text-amber-700 mt-2">Nothing was named.</p>'}
       <p class="text-xs text-gray-600 mt-2">${asking
         ? 'Opens its chat with this typed in. Nothing is sent or changed until you say so, and when you publish the change the check runs again.'
-        : 'A check that re-scores uses 1 task. If nothing has changed, it\'s free.'}</p>
+        : 'A check that re-scores uses ' + window.taskCost('site_audit') + '. If nothing has changed, it\'s free.'}</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-saic-confirm ${items.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${asking ? 'Open its chat' : 'Check now'}</button>
         <button type="button" data-saic-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2369,7 +2371,7 @@
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Draft your whole site</p>
       ${request ? `<p class="text-xs text-gray-700 mt-2"><span class="font-bold">Your wishes:</span> ${esc(request)}</p>` : ''}
-      <p class="text-xs text-gray-600 mt-2">Writes every page again, replacing your current draft. Nothing is live. Uses 1 task from your monthly allowance.</p>
+      <p class="text-xs text-gray-600 mt-2">Writes every page again, replacing your current draft. Nothing is live. Uses ${window.taskCost('site_draft')} from your monthly allowance.</p>
       <div class="grid gap-2 mt-3">
         <label class="block text-xs font-bold text-gray-700">Placeholder pictures
           <select data-sd-images class="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal bg-white"></select></label>
@@ -2612,7 +2614,7 @@
         <label class="flex items-start gap-2 text-xs text-gray-700 mt-1"><input type="radio" name="${name}" value="skip"> <span>Leave them out</span></label>
       </fieldset>
       <label class="flex items-start gap-2 text-xs text-gray-700 mt-2"><input type="checkbox" data-si-own> <span>This website belongs to my business, and I have the right to use its words and pictures.</span></label>
-      <p class="text-xs text-gray-600 mt-2">Your own words are laid out unchanged; prices aren't copied (they belong in Business Information). You'll see the result before it replaces anything. Uses 1 task, only if a draft is made.</p>
+      <p class="text-xs text-gray-600 mt-2">Your own words are laid out unchanged; prices aren't copied (they belong in Business Information). You'll see the result before it replaces anything. Uses ${window.taskCost('site_words')}, only if a draft is made.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-si-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Read my site</button>
         <button type="button" data-si-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2767,7 +2769,7 @@
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Your own words on your website</p>
       ${note ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(note)}</p>` : ''}
       ${sourceUrl ? `<p class="text-xs text-gray-700 mt-2">From your website: <span class="font-semibold break-all">${esc(sourceLabel)}</span></p>` : ''}
-      <p class="text-xs text-gray-600 mt-2">${sourceUrl ? 'The words on that page go on this one exactly as they are on your website' : 'Your words go on the page exactly as you wrote them'} — split into headings and paragraphs, never reworded. You'll see where everything goes before anything changes. Uses 1 task.</p>
+      <p class="text-xs text-gray-600 mt-2">${sourceUrl ? 'The words on that page go on this one exactly as they are on your website' : 'Your words go on the page exactly as you wrote them'} — split into headings and paragraphs, never reworded. You'll see where everything goes before anything changes. Uses ${window.taskCost('site_words')}.</p>
       <div data-sw-preview></div>
       <div class="flex flex-wrap items-center gap-2 mt-3" data-sw-actions>
         <button type="button" data-sw-go ${pageId && (attachmentId || quote || sourceUrl) ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Place my words</button>
@@ -3420,8 +3422,8 @@
     if (ui.op === 'draft') {
       return mentorCard(esc, {
         eyebrow: `Draft your ${lower}`, summary: ui.summary, why: null,
-        bodyHtml: '<p class="mt-2 text-xs text-gray-700">Uses 1 task. Ready in about a minute — it’s posted into this chat and on the Plan tab, and you’ll get a notification. Nothing is saved until you choose “Use this draft”.</p>',
-        goLabel: 'Draft it · 1 task', eventName: 'mentor:strategyDraft', detail: { kind: ui.kind },
+        bodyHtml: '<p class="mt-2 text-xs text-gray-700">Uses ' + window.taskCost('mentor_strategy') + '. Ready in about a minute — it’s posted into this chat and on the Plan tab, and you’ll get a notification. Nothing is saved until you choose “Use this draft”.</p>',
+        goLabel: 'Draft it · ' + window.taskCost('mentor_strategy') + '', eventName: 'mentor:strategyDraft', detail: { kind: ui.kind },
         doneText: 'Drafting — I’ll post it here when it’s ready (about a minute). Reopen this chat or check the Plan tab.',
       });
     }
@@ -3450,9 +3452,9 @@
     el.innerHTML = `<p class="text-xs font-bold text-pink-700 tracking-wider uppercase">Look this up</p>
       ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
       <p class="mt-2 text-xs rounded-lg bg-gray-50 border border-dashed border-gray-300 px-3 py-2 text-gray-800 break-words">${esc(String(ui.question || ''))}</p>
-      <p class="text-xs text-gray-600 mt-2">Searches the web and answers with its sources: about two minutes, 1 task. If it can’t find a source, it says so rather than guess.</p>
+      <p class="text-xs text-gray-600 mt-2">Searches the web and answers with its sources: about two minutes, ${window.taskCost('mentor_research')}. If it can’t find a source, it says so rather than guess.</p>
       <div class="flex flex-wrap gap-2 mt-3">
-        <button type="button" data-mr-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Look it up · 1 task</button>
+        <button type="button" data-mr-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Look it up · ${window.taskCost('mentor_research')}</button>
         <button type="button" data-mr-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
       </div>
       <p class="hidden mt-2 text-xs font-semibold text-pink-700" data-mc-status role="status" aria-live="polite"></p>
@@ -5213,7 +5215,7 @@
     if (!instruction) return null;
     return emailStudioCard(ui, esc, {
       head: 'Rewrite this email', go: 'Write the new version', event: 'email:refineAsk', detail: { instruction },
-      body: `<p class="text-sm text-gray-700 mt-2">${esc(instruction)}</p><p class="text-xs text-gray-600 mt-2">Uses 1 task. You read the new version before anything changes.</p>`,
+      body: `<p class="text-sm text-gray-700 mt-2">${esc(instruction)}</p><p class="text-xs text-gray-600 mt-2">Uses ${window.taskCost('email_issue')}. You read the new version before anything changes.</p>`,
     });
   });
 
@@ -5290,7 +5292,7 @@
           ${window.VoicePicker && ui.voice ? '<button type="button" data-pap-listen class="text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer" aria-pressed="false">&#9654; Listen</button>' : ''}</div>
         <p class="text-sm text-gray-700 mt-1"><span class="font-bold">Captions:</span> ${ui.captions === false ? 'off' : esc(`on — ${window.CaptionStyle ? window.CaptionStyle.describe(ui.captionStyle).toLowerCase() : 'following the voice'}`)}</p>
         ${ui.timeText ? '<p class="text-sm text-gray-700 mt-1"><span class="font-bold">Text:</span> each text box is timed to when its words are said</p>' : ''}
-        <p class="text-xs text-gray-600 mt-2">Uses 1 task${ids.length > 1 ? `, for all ${ids.length} platforms` : ''}. Any music on the post is turned down under the voice. Open the post to change any of it.</p>` : ''}
+        <p class="text-xs text-gray-600 mt-2">Uses ${window.taskCost('ai_voiceover')}${ids.length > 1 ? `, for all ${ids.length} platforms` : ''}. Any music on the post is turned down under the voice. Open the post to change any of it.</p>` : ''}
       ${!blocked && ui.action === 'captions' ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Captions:</span> ${ui.captions === false ? 'off' : esc(`on${ui.captionStyle && window.CaptionStyle ? ` — ${window.CaptionStyle.describe(ui.captionStyle).toLowerCase()}` : ''}`)}</p>
         ${ui.timeText ? '<p class="text-sm text-gray-700 mt-1"><span class="font-bold">Text:</span> each text box is timed to when its words are said</p>' : ''}
         <p class="text-xs text-gray-600 mt-2">Free. Captions are added when the video is made.</p>` : ''}

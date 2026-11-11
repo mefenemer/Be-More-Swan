@@ -18,7 +18,7 @@ import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { getOrgMediaCapabilities } from '../../src/utils/assistant-capabilities';
 import { getBalance, monthlyAllowance, tierCanGenerateVideo, IMAGE_CREDIT_COST, MUSIC_CREDIT_COST, MUSIC_SHARED_CREDIT_COST, VIDEO_CREDIT_COST } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { TASK_WEIGHTS } from '../../src/config/task-weights';
+import { getTaskCosts } from '../../src/utils/task-costs';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -32,6 +32,7 @@ export default withLambda(async (event) => {
     const tierKey = await getActiveTierKeyByOrg(db, ctx.organisationId);
     const { canImage, assistantCanVideo, canMusic } = await getOrgMediaCapabilities(db, ctx.organisationId);
     const monthlyCredits = tasks ? 0 : await monthlyAllowance(db, ctx.organisationId);
+    const costs = await getTaskCosts();
     return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -39,7 +40,7 @@ export default withLambda(async (event) => {
             balance, held, unit,
             monthlyCredits,
             ...(tasks
-                ? { imageCost: TASK_WEIGHTS.ai_image, videoCost: TASK_WEIGHTS.ai_video, musicCost: TASK_WEIGHTS.ai_music, musicSharedCost: TASK_WEIGHTS.ai_music_shared }
+                ? { imageCost: costs.weights.ai_image, videoCost: costs.weights.ai_video, musicCost: costs.weights.ai_music, musicSharedCost: costs.weights.ai_music_shared }
                 : { imageCost: IMAGE_CREDIT_COST, videoCost: VIDEO_CREDIT_COST, musicCost: MUSIC_CREDIT_COST, musicSharedCost: MUSIC_SHARED_CREDIT_COST }),
             canImage,
             assistantCanVideo,

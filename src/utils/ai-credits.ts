@@ -24,7 +24,8 @@ import { getDb } from '../../db/client';
 import { sql } from 'drizzle-orm';
 import { getPeriodStart } from './atomic-cap-check';
 import { featureTierKey } from '../config/beta-plan';
-import { MEDIA_KINDS, TASK_WEIGHTS, type WorkKind } from '../config/task-weights';
+import { MEDIA_KINDS, type TaskCosts, type WorkKind } from '../config/task-weights';
+import { getTaskCosts } from './task-costs';
 import { getTaskUsage, hasTaskCapacity, recordCompletedWork, grantBonusTasks } from './work-metering';
 import { isUnifiedTaskMetering } from './task-metering-flag';
 
@@ -87,10 +88,10 @@ export function workKindForMedia(mediaType: MediaKind, amount: number): WorkKind
  * Convert a credit amount to tasks. Images are 1:1; video and music are ×4 (5 credits → 20 tasks,
  * a shared 3-credit track → 12). A combined hold (Brand Designer: image + video) passes the split.
  */
-export function tasksForCredits(mediaType: MediaKind, amount: number): number {
+export function tasksForCredits(mediaType: MediaKind, amount: number, costs: TaskCosts): number {
     if (amount <= 0) return 0;
     const kind = workKindForMedia(mediaType, amount);
-    const perCredit = TASK_WEIGHTS[kind] / (mediaType === 'audio' ? (kind === 'ai_music_shared' ? MUSIC_SHARED_CREDIT_COST : MUSIC_CREDIT_COST) : creditCostFor(mediaType));
+    const perCredit = costs.weights[kind] / (mediaType === 'audio' ? (kind === 'ai_music_shared' ? MUSIC_SHARED_CREDIT_COST : MUSIC_CREDIT_COST) : creditCostFor(mediaType));
     return Math.round(amount * perCredit);
 }
 
@@ -207,7 +208,7 @@ export async function holdCredits(db: Db, params: {
     tasks?: number;
 }): Promise<{ ok: boolean; balance: number; unit: 'credits' | 'tasks'; cost: number }> {
     if (await isUnifiedTaskMetering(params.orgId)) {
-        const units = params.tasks ?? tasksForCredits(params.mediaType ?? 'image', params.amount);
+        const units = params.tasks ?? tasksForCredits(params.mediaType ?? 'image', params.amount, await getTaskCosts());
         const ok = await hasTaskCapacity(db, params.orgId, units);
         const cur = await getBalance(db, params.orgId);
         return { ok, balance: ok ? Math.max(cur.balance - units, 0) : cur.balance, unit: 'tasks', cost: units };
@@ -288,7 +289,7 @@ export async function settleHold(db: Db, params: {
         // A hold reserved nothing, so a failure has nothing to give back; success records the work.
         if (params.success && params.amount > 0) {
             await recordCompletedWork(db, params.orgId, workKindForMedia(params.mediaType, params.amount), {
-                units: params.tasks ?? tasksForCredits(params.mediaType, params.amount),
+                units: params.tasks ?? tasksForCredits(params.mediaType, params.amount, await getTaskCosts()),
                 ref: params.jobId ?? undefined,
                 assistantId: params.assistantId ?? null,
             });
@@ -409,10 +410,10 @@ export async function getXUsage(db: Db, orgId: number): Promise<XUsage> {
 export async function holdXCredits(db: Db, params: { orgId: number; amount: number }): Promise<{ ok: boolean; used: number; allowance: number; tasks?: boolean }> {
     if (await isUnifiedTaskMetering(params.orgId)) {
         // Single task allowance: a text post is part of the post's own task; a link post costs
-        // TASK_WEIGHTS.x_link_post. Nothing is reserved — settleXHold records it on success.
+        // the x_link_post cost. Nothing is reserved — settleXHold records it on success.
         // `tasks: true` tells the publisher a refusal is the task allowance, not an X allowance.
         if (params.amount !== X_LINK_COST) return { ok: true, used: 0, allowance: 0, tasks: true };
-        const ok = await hasTaskCapacity(db, params.orgId, TASK_WEIGHTS.x_link_post);
+        const ok = await hasTaskCapacity(db, params.orgId, (await getTaskCosts()).weights.x_link_post);
         return { ok, used: 0, allowance: 0, tasks: true };
     }
     const allowance = await monthlyXAllowance(db, params.orgId);

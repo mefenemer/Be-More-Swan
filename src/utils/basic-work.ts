@@ -10,7 +10,8 @@
 
 import { sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { TASK_WEIGHTS, basicWorkCharged, CHAT_MESSAGES_PER_TASK } from '../config/task-weights';
+import { basicWorkCharged } from '../config/task-weights';
+import { getTaskCosts } from './task-costs';
 import { getPeriodStart } from './atomic-cap-check';
 import { hasTaskCapacity, recordCompletedWork } from './work-metering';
 
@@ -18,7 +19,7 @@ type Db = ReturnType<typeof getDb>;
 
 /** Can this org use an editing helper that is not already asked through meterInteraction? */
 export async function helperCapacity(db: Db, organisationId: number): Promise<boolean> {
-    return !basicWorkCharged() || hasTaskCapacity(db, organisationId, TASK_WEIGHTS.editing_helper);
+    return !basicWorkCharged() || hasTaskCapacity(db, organisationId, (await getTaskCosts()).weights.editing_helper);
 }
 
 /** One delivered editing-helper action. Call only after it succeeded. Never throws. */
@@ -28,7 +29,7 @@ export async function chargeHelper(db: Db, organisationId: number, assistantId: 
 }
 
 /**
- * One delivered chat reply. Every CHAT_MESSAGES_PER_TASK-th in the month records a task, counted in one
+ * One delivered chat reply. Every chatMessagesPerTask-th in the month records a task, counted in one
  * statement so two replies at once cannot both miss the boundary. Never throws: without
  * db/z-chat-task-tally.sql applied, chat carries on uncharged and the log says why.
  */
@@ -42,7 +43,7 @@ export async function chargeChatMessage(db: Db, organisationId: number, assistan
             DO UPDATE SET messages = chat_task_tally.messages + 1, updated_at = now()
             RETURNING messages`);
         const messages = Number((rows as unknown as Array<{ messages: number }>)[0]?.messages ?? 0);
-        if (messages > 0 && messages % CHAT_MESSAGES_PER_TASK === 0) {
+        if (messages > 0 && messages % (await getTaskCosts()).chatMessagesPerTask === 0) {
             await recordCompletedWork(db, organisationId, 'chat_messages', { ref: `chat-messages-${messages}`, assistantId: assistantId ?? null });
         }
     } catch (err) {
@@ -67,10 +68,10 @@ async function designAlreadyCharged(db: Db, organisationId: number, optionId: nu
 /** May this design be downloaded? A design that has paid is always yours to download again. */
 export async function finishedDesignCapacity(db: Db, organisationId: number, optionId: number): Promise<boolean> {
     if (!basicWorkCharged() || await designAlreadyCharged(db, organisationId, optionId)) return true;
-    return hasTaskCapacity(db, organisationId, TASK_WEIGHTS.finished_design);
+    return hasTaskCapacity(db, organisationId, (await getTaskCosts()).weights.finished_design);
 }
 
-/** A design's first download: 1 task, once per design, print files included. Call after the file exists. Never throws. */
+/** A design's first download: its cost in tasks, once per design, print files included. Call after the file exists. Never throws. */
 export async function chargeFinishedDesign(db: Db, organisationId: number, optionId: number): Promise<void> {
     if (!basicWorkCharged() || await designAlreadyCharged(db, organisationId, optionId)) return;
     // A failed lookup must not lose the charge: it is then just unattributed.

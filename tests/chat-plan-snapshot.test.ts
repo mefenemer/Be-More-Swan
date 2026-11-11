@@ -1,3 +1,4 @@
+import { DEFAULT_TASK_COSTS } from '../src/config/task-weights';
 // tests/chat-plan-snapshot.test.ts
 // Every assistant chat knows the workspace's plan and this month's task balance — the same figures as
 // the usage bar — so "how many tasks do I have left?" gets the real number, not a guess.
@@ -26,7 +27,7 @@ const ROOT = path.resolve(import.meta.dirname, '..');
 const read = (p: string) => readFileSync(path.join(ROOT, p), 'utf8');
 
 const NOW = new Date('2026-10-22T12:00:00Z');
-const base = { planName: 'Growth', status: 'active' as const, gracePeriodEndsAt: null, monthlyTaskLimit: 300, taskCount: 120, bonusTasks: 0, tasksInFlight: 0, unified: true, now: NOW };
+const base = { planName: 'Growth', status: 'active' as const, gracePeriodEndsAt: null, monthlyTaskLimit: 300, taskCount: 120, bonusTasks: 0, tasksInFlight: 0, unified: true, now: NOW, costs: DEFAULT_TASK_COSTS };
 
 async function main() {
     await check('the balance: allowance left + bonus − held, never below zero; null when uncapped', () => {
