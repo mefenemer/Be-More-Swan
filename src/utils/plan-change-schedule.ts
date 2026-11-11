@@ -1,7 +1,7 @@
 // src/utils/plan-change-schedule.ts
 //
 // The ONE way a subscription is moved to another plan at renewal. Used by a customer's own
-// downgrade (billing-downgrade.ts) and by Admin → Revenue → Plan moves (admin-plan-moves.ts).
+// downgrade (billing-downgrade.ts) and by Admin → Customers → Plan moves (admin-plan-moves.ts).
 //
 // A Stripe subscription schedule does the switch: phase 0 is the current price until the change,
 // phase 1 the new price from then on. When phase 1 starts, its metadata lands on the subscription

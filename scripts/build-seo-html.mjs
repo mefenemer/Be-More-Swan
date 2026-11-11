@@ -691,7 +691,7 @@ async function buildLlmsTxt({ assistants, pages, showcases }) {
 
 // ── Job 9: reviews ─────────────────────────────────────────────────────────────
 //
-// Reviews an admin published (Admin → Customers → Reviews), whose authors agreed to be quoted. Unlike
+// Reviews an admin published (Admin → Growth → Reviews), whose authors agreed to be quoted. Unlike
 // Jobs 3–8, a fetch failure here is a WARNING, never a failed build: an empty section is a correct
 // page (it is empty until three reviews are published anyway), and get-reviews may not be deployed
 // on bemoreswan.com yet when staging builds. Publishing or hiding a review fires SITE_REBUILD_HOOK.

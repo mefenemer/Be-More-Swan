@@ -1,5 +1,5 @@
 // src/utils/coupon-rules.ts
-// What a coupon created on Admin → Revenue → Coupons may be, and how it maps onto Stripe.
+// What a coupon created on Admin → Money → Coupons may be, and how it maps onto Stripe.
 // Pure — no DB, no Stripe — so the rules are tested directly (tests/admin-coupons.test.ts).
 //
 // Stripe's own constraints, enforced here so the admin gets a plain message instead of a Stripe

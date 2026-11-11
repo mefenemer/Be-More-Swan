@@ -1,5 +1,5 @@
 // netlify/functions/get-reviews.ts
-// Public: the reviews of Be More Swan an admin has published (Admin → Customers → Reviews), for the
+// Public: the reviews of Be More Swan an admin has published (Admin → Growth → Reviews), for the
 // site build to bake into the home and pricing pages (scripts/build-seo-html.mjs, Job 9).
 //
 //   GET → { reviews: [{ name, detail, rating, body, incentiveNote, date }], summary: { count, average } }

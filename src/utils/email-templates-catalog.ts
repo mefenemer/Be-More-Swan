@@ -593,7 +593,7 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
     },
     {
         // The 30 days' notice for AI video priced by the second (terms 5.2 / 20.2). Sent once to
-        // every customer by Comms → Broadcast (src/utils/broadcast.ts); the in-app twin shares the
+        // every customer by Growth → Broadcast (src/utils/broadcast.ts); the in-app twin shares the
         // key. Transactional: a notice of a change to the terms is not marketing.
         triggerKey: 'ai_video_per_second_notice',
         name: 'Notice: AI video counts by length',

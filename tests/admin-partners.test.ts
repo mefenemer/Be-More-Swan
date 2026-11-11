@@ -1,5 +1,5 @@
 // tests/admin-partners.test.ts
-// Affiliate Partner Programme, step 3 — Admin → Revenue → Partners (docs/affiliate-partner-programme-plan.md §4.5).
+// Affiliate Partner Programme, step 3 — Admin → Money → Partners (docs/affiliate-partner-programme-plan.md §4.5).
 //
 // WHY THIS EXISTS (2026-10-18): this screen sets what people outside the company are paid. Pins:
 //   1. who may use it (manage_partners, never during impersonation) and that every write is audited;

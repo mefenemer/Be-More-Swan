@@ -1,5 +1,5 @@
 // src/utils/ai-visibility.ts
-// Admin → Platform → AI Visibility: the rules shared by the admin function, the background fetcher
+// Admin → Growth → AI visibility: the rules shared by the admin function, the background fetcher
 // and the tests. Pure — no database, no network.
 //
 // The question the page answers: when a prospect asks an AI assistant for help, does Be More Swan

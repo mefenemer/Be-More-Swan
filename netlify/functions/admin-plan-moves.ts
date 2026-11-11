@@ -1,6 +1,6 @@
 // netlify/functions/admin-plan-moves.ts
 //
-// Admin → Revenue → Plan moves: move customers between plans in bulk (src/utils/plan-moves.ts).
+// Admin → Customers → Plan moves: move customers between plans in bulk (src/utils/plan-moves.ts).
 //
 //   GET                                   → { moves: [...], plans: [...], livemode }
 //   POST { action: 'preview', fromMasterPlanId?, organisationIds?, toMasterPlanId }

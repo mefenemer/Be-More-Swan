@@ -1,5 +1,5 @@
 // tests/ai-visibility.test.ts
-// Admin → Platform → AI Visibility (admin-ai-visibility.ts, ai-visibility-fetch-background.ts,
+// Admin → Growth → AI visibility (admin-ai-visibility.ts, ai-visibility-fetch-background.ts,
 // src/utils/ai-visibility.ts, db/z-ai-visibility.sql).
 //
 // The numbers on that page decide where marketing effort goes, and every way they can be wrong is

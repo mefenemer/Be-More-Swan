@@ -1,5 +1,5 @@
 // tests/broadcast.test.ts
-// Comms → Broadcast: a reviewed notice to every customer, once each (src/utils/broadcast.ts).
+// Growth → Broadcast: a reviewed notice to every customer, once each (src/utils/broadcast.ts).
 // What goes wrong silently if these drift:
 //   · staging emailing real people (its database holds real addresses)
 //   · a second press, or a retried worker, emailing everyone twice

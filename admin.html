@@ -1096,7 +1096,7 @@
         </div>
       </section>
 
-      <!-- ── Coupons — Admin → Revenue → Coupons (admin-coupons.ts) ───────────────────────
+      <!-- ── Coupons — Admin → Money → Coupons (admin-coupons.ts) ───────────────────────
            Every coupon here is a real Stripe coupon + promotion code; checkout validates codes
            against Stripe (validate-promo.ts). The create/edit modal lives OUTSIDE this section —
            a fixed modal inside .admin-view is trapped by its overflow container. -->
@@ -1134,7 +1134,7 @@
         <div id="coupons-stripe-panel" class="hidden mt-6 space-y-4"></div>
       </section>
 
-      <!-- ── AI Visibility — Admin → Platform → Insights (admin-ai-visibility.ts) ──────────────
+      <!-- ── AI Visibility — Admin → Growth → Reputation (admin-ai-visibility.ts) ──────────────
            When a prospect asks an AI assistant for help, does Be More Swan come up? The same
            questions, asked of each assistant, monthly. The answer form (#aiv-modal) lives OUTSIDE
            this section — a fixed modal inside .admin-view is trapped by its overflow container. -->
@@ -1240,7 +1240,7 @@
         </div>
       </section>
 
-      <!-- ── Plan moves — Admin → Revenue → Plan moves (admin-plan-moves.ts, src/utils/plan-moves.ts) ──
+      <!-- ── Plan moves — Admin → Customers → Plan moves (admin-plan-moves.ts, src/utils/plan-moves.ts) ──
            Move customers between plans in bulk. Every move starts at the customer's next renewal; a
            price rise at the first renewal 30+ days away; every customer is emailed, coupon included. -->
       <section id="view-plan-moves" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
@@ -1284,7 +1284,7 @@
         </div>
       </section>
 
-      <!-- ── Partners — Admin → Revenue → Partners (admin-partners.ts) ─────────────────────
+      <!-- ── Partners — Admin → Money → Partners (admin-partners.ts) ─────────────────────
            Affiliate partners earn CASH commission (docs/affiliate-partner-programme-plan.md).
            Customers who refer a friend earn tokens instead and never appear here. The rate and
            add-partner modals live OUTSIDE this section — a fixed modal inside .admin-view is trapped
@@ -1436,7 +1436,7 @@
               <p class="text-xs text-gray-500 mt-0.5" id="ba-due-line">Check each active assistant's prompt against the list below, then record what you found.</p>
             </div>
             <button type="button" onclick="adminGoTo('assistant-versions');"
-              class="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer">Open the prompts (Master Data → Versions)</button>
+              class="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer">Open the prompts (Assistants → Versions)</button>
           </div>
           <ul class="text-xs text-gray-600 list-disc pl-5 space-y-1 mb-4">
             <li>Demographic proxy language (e.g. gendered terms, nationality assumptions)</li>
@@ -9585,7 +9585,7 @@ function _ctIssuesSection(issues, client) {
   );
 }
 
-// In App Messages — the ad-hoc admin → user notifications sent from Comms → Send a Message
+// In App Messages — the ad-hoc admin → user notifications sent from Growth → Message one person
 // (notifications.type = 'admin_message'), newest first, with whether the user has read each one.
 // Read-only: there is no reply channel on an in-app message, and no delivery receipt beyond
 // `isRead`. Same visibility rule as Support requests / Issues reported — shown for any contact
@@ -10105,7 +10105,7 @@ async function prSaveDestinations() {
 }
 
 // ── Coupons (admin-coupons.ts) ───────────────────────────────────────────────
-// ── Plan moves (Admin → Revenue → Plan moves) ─────────────────────────────────────────────────
+// ── Plan moves (Admin → Customers → Plan moves) ─────────────────────────────────────────────────
 // Bulk move customers between plans (admin-plan-moves.ts). Preview first; the run schedules each
 // move in Stripe for the customer's next renewal and emails them. Prices shown are what Stripe
 // charges them today and what the new plan costs on THEIR interval (monthly or annual).

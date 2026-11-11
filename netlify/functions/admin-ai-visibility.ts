@@ -1,5 +1,5 @@
 // netlify/functions/admin-ai-visibility.ts
-// Admin → Platform → AI Visibility: when a prospect asks an AI assistant for help, does Be More Swan
+// Admin → Growth → AI visibility: when a prospect asks an AI assistant for help, does Be More Swan
 // come up, where, and is what it says true? The same questions, asked of each assistant, monthly.
 //
 //   GET                → { setUp, questions, runs (with headline numbers), trend, assistants,

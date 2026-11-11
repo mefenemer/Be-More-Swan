@@ -68,7 +68,7 @@ A test existing does **not** mean the feature is offered to customers. Some cove
 | --- | --- | --- |
 | `admin-bias-audit.test.ts` | The quarterly bias reminder links to admin.html?section=bias-audit — and admin.html had no Bias Audit section at all, so the link landed on the dashboard (reported 2026-10-03). | test:all |
 | `admin-cascade-deletes.test.ts` | Every Delete button in the admin portal either works end to end or says why it can't. | test:all |
-| `admin-coupons.test.ts` | Admin → Revenue → Coupons: coupons made in Be More Swan are real Stripe coupons, and nothing an admin can type reaches Stripe in a shape it would reject halfway through. | test:all |
+| `admin-coupons.test.ts` | Admin → Money → Coupons: coupons made in Be More Swan are real Stripe coupons, and nothing an admin can type reaches Stripe in a shape it would reject halfway through. | test:all |
 | `admin-deep-link-submenu.test.ts` | A direct link — admin.html?view=send-notification, ?view=product-updates, every reminder email — opened the category's sub-menu (title "COMMS") over an EMPTY list. Clicking the rail icon twice filled it. bootAdmin() runs synchronously at the end of the… | test:all |
 | `admin-delete-record-method.test.ts` | Admin "Delete" sheet → the function that actually deletes. | test:all |
 | `admin-impersonation.test.ts` | US-ADM-1.2.1: admin impersonation, end to end. | test:all |
@@ -77,7 +77,7 @@ A test existing does **not** mean the feature is offered to customers. Some cove
 | `admin-modal-scope.test.ts` | admin.html is one document holding ~35 `.admin-view` sections. adminNav() shows one by putting `hidden` (display:none) on all the others — and a display:none ancestor hides its whole subtree no matter what the descendant's own classes say. So a dialog that… | test:all |
 | `admin-music-bulk-delete.test.ts` | Admin → Music Library can delete tracks in bulk (2026-10-06). The library promised that removing a track never silences a post that already uses it. Delete keeps that promise only if: · the AUDIO FILE is kept whenever any content_assets row still carries… | test:all |
 | `admin-music-library.test.ts` | Admin → Music Library: the screen that can take a track out of what every workspace is offered. | test:all |
-| `admin-partners.test.ts` | Affiliate Partner Programme, step 3 — Admin → Revenue → Partners (docs/affiliate-partner-programme-plan.md §4.5). | test:all |
+| `admin-partners.test.ts` | Affiliate Partner Programme, step 3 — Admin → Money → Partners (docs/affiliate-partner-programme-plan.md §4.5). | test:all |
 
 ## ai
 
@@ -86,7 +86,7 @@ A test existing does **not** mean the feature is offered to customers. Some cove
 | `ai-music-generation.test.ts` | "✨ Generate music" — Stable Audio 3.0, called direct, paid from the plan's AI credits. | test:all |
 | `ai-readability.test.ts` | The build-time copy that lets crawlers and AI assistants read prices and assistant pages without running JavaScript (scripts/seo/ai-readability.mjs, Jobs 5–8 of scripts/build-seo-html.mjs). | test:all |
 | `ai-usage-coverage.test.ts` | Every AI call the product makes must land in ai_usage_log, priced, exactly once. | test:all |
-| `ai-visibility.test.ts` | Admin → Platform → AI Visibility (admin-ai-visibility.ts, ai-visibility-fetch-background.ts, src/utils/ai-visibility.ts, db/z-ai-visibility.sql). | test:all |
+| `ai-visibility.test.ts` | Admin → Growth → AI visibility (admin-ai-visibility.ts, ai-visibility-fetch-background.ts, src/utils/ai-visibility.ts, db/z-ai-visibility.sql). | test:all |
 
 ## assistant
 
@@ -508,7 +508,7 @@ A test existing does **not** mean the feature is offered to customers. Some cove
 | `partner-ledger-db.test.ts` | The partner commission ledger on REAL Postgres — src/utils/partner-ledger.ts (docs/affiliate-partner-programme-plan.md §4.3). | CI Postgres |
 | `partner-ledger.test.ts` | Affiliate Partner Programme, step 2 — the commission ledger's wiring (docs/affiliate-partner-programme-plan.md §4.3). The money SQL itself is proven on real Postgres in tests/partner-ledger-db.test.ts (CI rls job). | test:all |
 | `partner-legal-data.test.ts` | Affiliate Partner Programme, step 9 — Partner Terms, the Terms and privacy updates, data export, erasure and partner notifications (docs/affiliate-partner-programme-plan.md §4.8). | test:all |
-| `partner-ops-chat.test.ts` | Affiliate Partner Programme, step 3b — the Partner Ops chat on Admin → Revenue → Partners. | test:all |
+| `partner-ops-chat.test.ts` | Affiliate Partner Programme, step 3b — the Partner Ops chat on Admin → Money → Partners. | test:all |
 | `partner-ops-db.test.ts` | The Partner Ops read queries on REAL Postgres — src/utils/partner-ops.ts (the Partners screen's list, and the chat's top referrers / pre-payout audit / recruitment). | CI Postgres |
 | `partner-payout-runs-db.test.ts` | The ledger actions and a monthly payout run — on REAL Postgres, with the real vault (src/utils/partner-payout-batches.ts). | CI Postgres |
 | `partner-payout-runs.test.ts` | Affiliate Partner Programme, step 6 — the admin ledger and monthly payout runs (docs/affiliate-partner-programme-plan.md §4.4–4.5). | test:all |
@@ -520,7 +520,7 @@ A test existing does **not** mean the feature is offered to customers. Some cove
 | Test file | What it protects | Runs in |
 | --- | --- | --- |
 | `plan-limit-coercion.test.ts` | plans.featureOverrides is jsonb, so its declared TypeScript shape is a description of intent, not a runtime guarantee. effectiveLimit used to assert that shape (`as number \| null`) rather than check it, and a string limit went straight into… | test:all |
-| `plan-moves.test.ts` | Admin → Revenue → Plan moves, and the shared scheduler behind every plan change at renewal. | test:all |
+| `plan-moves.test.ts` | Admin → Customers → Plan moves, and the shared scheduler behind every plan change at renewal. | test:all |
 | `plan-products.test.ts` | Be More Swan's own plans in its own Products & Services read as the plan settings say (owner, 2026-10-27): blog drafts said the Busywork Buster gave "three distinct assistants" — a July row, never updated — and the Business Mentor is included on both… | test:all |
 | `plan-stripe-refs-backfill.test.ts` | A first subscription is written by two racers — confirm-payment.ts (the browser landing on workspace.html?payment=success) and stripe-webhook.ts (payment_intent.succeeded) — and exactly one of them wins the plans_one_active_per_org_unique index. The loser… | test:all |
 

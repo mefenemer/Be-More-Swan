@@ -1148,7 +1148,7 @@ node_bundler = "esbuild"
 [functions.quarterly-bias-reminder]
   schedule = "0 8 1 1,4,7,10 *"
 
-# Monthly reminder to run the AI Visibility check (Admin → Insights → AI Visibility) — 1st at 08:00 UTC
+# Monthly reminder to run the AI Visibility check (Admin → Growth → AI visibility) — 1st at 08:00 UTC
 [functions.ai-visibility-reminder]
   schedule = "0 8 1 * *"
 
@@ -1233,7 +1233,7 @@ node_bundler = "esbuild"
 [functions.video-projects]
   timeout = 26
 
-# Admin → Revenue → Partners ▸ Partner Ops chat: a Claude tool loop (read tools + action cards).
+# Admin → Money → Partners ▸ Partner Ops chat: a Claude tool loop (read tools + action cards).
 # Synchronous max, and the function keeps its own 21s budget under it (admin-partners-chat.ts).
 [functions.admin-partners-chat]
   timeout = 26

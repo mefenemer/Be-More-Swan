@@ -897,7 +897,7 @@ export const masterPlans = pgTable("master_plans", {
   id: serial().primaryKey(),
   tierKey: text("tier_key").notNull().unique(),
   name: text("name").notNull(),
-  // Pricing-card marketing copy — DB-driven so the Super Admin (Master Data → Plans) controls
+  // Pricing-card marketing copy — DB-driven so the Super Admin (Money → Plans) controls
   // every visible plan-card field, and pricing.html / the comparison table render from here.
   // tierDescription = the eyebrow line ("Tier 2 · Best for Scaling Founders").
   // description = the italic sub-heading blurb. isMostPopular = the "Most Popular" pill (at most
@@ -942,7 +942,7 @@ export const planPrices = pgTable("plan_prices", {
 // (SQL: db/plan-features.sql; seed: db/seed-plan-features.ts). This is a metadata + rendering layer:
 // the VALUES live in master_plans (capacity as typed columns, everything else in the features jsonb);
 // each row here records WHERE a feature's value is stored (storageTarget/columnName) and HOW to render it
-// (valueType, unlimitedLabel). Admins edit these via Admin → Master Data → Plan Features, and pricing.html
+// (valueType, unlimitedLabel). Admins edit these via Admin → Money → Plan features, and pricing.html
 // renders the comparison table dynamically from this catalog.
 export const planFeatures = pgTable("plan_features", {
   id: serial("id").primaryKey(),
@@ -1043,7 +1043,7 @@ export const masterAssistants = pgTable("master_assistants", {
   // Detail-page marketing copy (SQL: db/assistant-content.sql; seed: db/seed-assistant-content.ts).
   // These replaced src/config/assistant-role-content.js, which used to re-declare name/description/
   // icons here AND own these four — two sources of truth that had already drifted apart. Admin-edited
-  // via Master Data → Assistants; served publicly by netlify/functions/master-assistants.ts.
+  // via Assistants → Assistants; served publicly by netlify/functions/master-assistants.ts.
   tagline: text("tagline"),                                        // one-line hook under the name
   keyFeatures: jsonb("key_features").notNull().default([]),        // string[] — the bullet list
   integrations: jsonb("integrations").notNull().default([]),       // string[] — the external tools this role connects to ("Connects with")
@@ -2803,7 +2803,7 @@ export const billingOverrides = pgTable("billing_overrides", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// ── Billing coupons — Admin → Revenue → Coupons, mirrored to Stripe ─────────────
+// ── Billing coupons — Admin → Money → Coupons, mirrored to Stripe ─────────────
 // See db/z-billing-coupons.sql. Discount and duration are immutable in Stripe, so they are written
 // once; name / notes / isActive are the editable fields. Deleted rows keep deletedAt, not removed.
 export const billingCoupons = pgTable("billing_coupons", {
@@ -2828,7 +2828,7 @@ export const billingCoupons = pgTable("billing_coupons", {
   deletedAt: timestamp("deleted_at"),
 });
 
-// ── Plan moves — Admin → Revenue → Plan moves ──────────────────────────────────────
+// ── Plan moves — Admin → Customers → Plan moves ──────────────────────────────────────
 // See db/z-plan-moves.sql. One row per customer per bulk move; the Stripe subscription schedule does
 // the switch at renewal and stripe-webhook.ts marks the row applied. One 'scheduled' row per org.
 export const planMoves = pgTable("plan_moves", {
@@ -5340,7 +5340,7 @@ export const musicTracks = pgTable("music_tracks", {
 
 // ── What's new at Be More Swan — the weekly product-update email ─────────────
 // A weekly Claude task uploads a draft (copy + screenshots); an admin approves it in
-// Comms → What's New Emails before anything is sent. Requires db/product-update-emails.sql.
+// Growth → What's New emails before anything is sent. Requires db/product-update-emails.sql.
 // See docs/weekly-product-update.md and src/utils/product-update-email.ts.
 export interface ProductUpdateItem {
   heading: string;
@@ -6735,7 +6735,7 @@ export const mentorOutcomes = pgTable("mentor_outcomes", {
   index("mentor_outcomes_org_idx").on(t.organisationId, t.acceptedAt),
 ]);
 
-// Admin → Platform → AI Visibility (db/z-ai-visibility.sql). Does Be More Swan come up when a
+// Admin → Growth → AI visibility (db/z-ai-visibility.sql). Does Be More Swan come up when a
 // prospect asks an AI assistant? The same questions, asked of each assistant, once a month.
 export const aiVisibilityQuestions = pgTable("ai_visibility_questions", {
   id: serial("id").primaryKey(),
