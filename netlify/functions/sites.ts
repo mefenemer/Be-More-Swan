@@ -87,7 +87,7 @@ import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookin
 import { cleanKeep, settleDamageDeposit, stayMoneyView } from '../../src/utils/stay-charges';
 import { damageEmail, whoFor } from '../../src/utils/stay-jobs';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
-import { bookableKinds, bookingsSwitchedOff } from '../../src/utils/site-booking-page';
+import { bookableKinds, bookingQrSvg, bookingsSwitchedOff } from '../../src/utils/site-booking-page';
 import { sectionForKind } from '../../src/utils/site-booking';
 import { cleanMeetingLocation, meetingLocationOf, ownerMeetingLine, refreshMeetingLinks } from '../../src/utils/booking-meeting';
 import { purgeCache } from '@netlify/functions';
@@ -231,12 +231,15 @@ export default withLambda(async (event) => {
                 // The booking link (site-booking-page.ts): this site's address + /book, once there's something to book.
                 const kinds = await bookableKinds(db, orgId, new Date(), b);
                 const origin = ownDomain?.status === 'live' ? `https://${ownDomain.domain}` : s.slug ? siteOrigin(s.slug) : null;
+                const bookLinkUrl = origin && kinds.length && s.status !== 'suspended' && !bookingsSwitchedOff(definition) ? `${origin}${BOOKING_PAGE_PATH}` : null;
                 return {
                     ready: Object.keys(b.settings.weeklyHours).length > 0, hours: describeHours(b.settings.weeklyHours), mode: b.settings.mode,
                     visitAddress: b.settings.visitAddress, whatsapp: b.settings.whatsapp,
                     services: b.services.map((x) => ({ id: x.id, name: x.name, durationMinutes: x.durationMinutes, price: x.price, meetingLocation: meetingLocationOf(x.meetingLocation) })),
                     resources: b.resources.map((r) => ({ id: r.id, name: r.name, kind: r.kind, hasMeetingUrl: !!r.meetingUrl })), waiting: Number(n),
-                    link: origin && kinds.length && s.status !== 'suspended' && !bookingsSwitchedOff(definition) ? `${origin}${BOOKING_PAGE_PATH}` : null,
+                    link: bookLinkUrl,
+                    // The same link as a QR code to print (site-booking-page.ts).
+                    qrSvg: bookLinkUrl ? await bookingQrSvg(bookLinkUrl) : null,
                     kinds, needsAddress: !s.slug, meetingUrl: b.settings.meetingUrl,
                 };
             })(),

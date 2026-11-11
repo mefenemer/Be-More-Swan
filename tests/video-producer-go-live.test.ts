@@ -17,7 +17,7 @@ import assert from 'node:assert';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { TASK_WEIGHTS } from '../src/config/task-weights';
+import { DEFAULT_TASK_COSTS, DEFAULT_TASK_WEIGHTS } from '../src/config/task-weights';
 import { MAX_AI_CLIPS, MAX_SCENES, MIN_SCENES, VIDEO_LENGTHS } from '../src/lib/storyboard';
 import { spacingDays, MAX_WAITING, MAX_PER_WEEK } from '../src/utils/video-autopilot';
 import { ORDER_ACTION_SPECS } from '../src/config/campaign-vocab';
@@ -54,9 +54,9 @@ check('inserted unpublished, and a re-run never touches is_published', () => {
 });
 
 check('the figures match the code', () => {
-    assert.match(helpText, new RegExp(`Each AI clip \\(at most ${MAX_AI_CLIPS} in a video\\) \\| ${TASK_WEIGHTS.ai_video} \\|`));
-    assert.match(helpText, new RegExp(`Each AI picture \\| ${TASK_WEIGHTS.ai_image} \\|`));
-    assert.match(helpText, new RegExp(`The voiceover \\| ${TASK_WEIGHTS.ai_voiceover} \\|`));
+    assert.match(helpText, new RegExp(`Each AI clip \\(at most ${MAX_AI_CLIPS} in a video\\) \\| ${DEFAULT_TASK_WEIGHTS.ai_video} \\|`));
+    assert.match(helpText, new RegExp(`Each AI picture \\| ${DEFAULT_TASK_WEIGHTS.ai_image} \\|`));
+    assert.match(helpText, new RegExp(`The voiceover \\| ${DEFAULT_TASK_WEIGHTS.ai_voiceover} \\|`));
     assert.match(helpText, new RegExp(`${MIN_SCENES} to ${MAX_SCENES} scenes`));
     assert.match(helpText, new RegExp(VIDEO_LENGTHS.join(', ').replace(/, (\d+)$/, ' or $1') + ' seconds'));
     assert.deepStrictEqual([1, 2, 3].map(spacingDays), [7, 3, 2]);
@@ -101,9 +101,9 @@ console.log('\n──── costs are shown in tasks ────');
 check('the Videos tab shows the figure the hold takes, in the workspace\'s unit', () => {
     const vp = read('src/utils/video-producer.ts');
     assert.match(vp, /export async function buildEstimate\(/);
-    // Both count only what is still to be made (a re-build or a new version keeps the rest).
-    assert.match(vp, /\? \{ estimate: buildTasks\(storyboard, brief, made\), unit: 'tasks' \}/);
-    assert.match(vp, /holdCredits\(db, \{ orgId, amount: credits, tasks: buildTasks\(storyboard, brief, made\)/, 'the hold takes buildTasks under task metering');
+    // Both count only what is still to be made (a re-build or a new version keeps the rest), at the live costs.
+    assert.match(vp, /\? \{ estimate: buildTasks\(storyboard, brief, await getTaskCosts\(\), made\), unit: 'tasks' \}/);
+    assert.match(vp, /holdCredits\(db, \{ orgId, amount: credits, tasks: buildTasks\(storyboard, brief, await getTaskCosts\(\), made\)/, 'the hold takes buildTasks under task metering');
     assert.match(read('src/components/assistant-videos.js'), /const unit = v\.unit === 'credits' \? 'credit' : 'task';/);
 });
 
@@ -111,10 +111,10 @@ check('no Video Producer surface quotes credits any more', () => {
     const schema = read('src/public/assistant-onboarding-schemas.js');
     const vpSchema = schema.slice(schema.indexOf('video_producer: ['), schema.indexOf('lead_qualifier: ['));
     assert.doesNotMatch(vpSchema, /credit/i);
-    assert.match(vpSchema, new RegExp(`an AI clip ${TASK_WEIGHTS.ai_video}`));
+    assert.match(vpSchema, new RegExp(`an AI clip ${DEFAULT_TASK_WEIGHTS.ai_video}`));
     const chat = read('netlify/functions/chat-orchestrator.ts');
     const route = chat.slice(chat.indexOf('    video_producer: {'), chat.indexOf('    website_assistant: {'));
-    assert.match(route, /AI clips \(\$\{aiVideoPriceText\(\)\}, at most/, 'the price line follows per-second pricing');
+    assert.match(route, /AI clips \(\$\{aiVideoPriceText\(rc\.taskCosts\)\}, at most/, 'the price line follows per-second pricing');
     assert.doesNotMatch(route.replace(/\/\/.*$/gm, ''), /\bcredits?\b/i);
     assert.doesNotMatch(read('src/config/campaign-vocab.ts').match(/commission_video: \{[\s\S]*?\n    \},/)![0], /credit/i);
     assert.doesNotMatch(read('src/utils/team-messages.ts').match(/case 'commission_video':[\s\S]*?label: 'Open the video'/)![0], /credit/i);
@@ -126,7 +126,7 @@ check('the website page exists, and only renders for a Live role', () => {
     const show = JSON.parse(read('db/assistant-showcases.json'));
     assert.ok(show.video_producer, 'showcase entry');
     const text = JSON.stringify(show.video_producer);
-    assert.match(text, new RegExp(`${TASK_WEIGHTS.ai_video} tasks for an AI clip`));
+    assert.match(text, new RegExp(`${DEFAULT_TASK_WEIGHTS.ai_video} tasks for an AI clip`));
     assert.doesNotMatch(text, /credit/i);
     assert.ok(read('db/z-assistant-showcases.sql').includes("'video_producer'"), 'node scripts/build-showcase-sql.mjs');
     assert.match(read('netlify/functions/master-assistants.ts'), /\.where\(eq\(masterAssistants\.isActive, true\)\)/);
@@ -142,7 +142,8 @@ check('the pricing row (live 2026-10-31) is in the migrations and the seed, on t
     assert.match(seed, /key: 'video_producer'[\s\S]{0,400}values: \{ saver: DASH, buster: CHECK, employee: CHECK \}/);
     const faq = read('faq.html');
     assert.ok(faq.includes('What does the Video Producer make?') && faq.includes('Does making a video use my tasks?'));
-    assert.match(faq, new RegExp(`${TASK_WEIGHTS.ai_video} tasks for an AI clip \\(at most ${MAX_AI_CLIPS} in a video\\)`));
+    // Today's flat price (filled in live by /task-costs.js), and the per-second price from the date in the 30 days' notice.
+    assert.match(faq, new RegExp(`${DEFAULT_TASK_WEIGHTS.ai_video} tasks</span> for an AI clip \\(at most ${MAX_AI_CLIPS} in a video; from 3 December 2026, ${DEFAULT_TASK_COSTS.videoTasksPerSecond} tasks for each second of clip\\)`));
 });
 
 check('the Mentor recommends it only when Live, on a plan with video, with someone posting', () => {

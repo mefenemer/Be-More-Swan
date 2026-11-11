@@ -62,7 +62,7 @@ import {
     OUTCOMES, LOSS_REASONS, EVENT_FOR_OUTCOME, OUTCOMES_REQUIRING_LOSS_REASON,
     isOutcome, isLossReason, type LossReason,
 } from '../../src/config/revenue-events';
-import { EDIT_REASONS, isEditReason } from '../../src/config/template-feedback';
+import { EDIT_NOTE_MAX, EDIT_REASONS, isEditReason } from '../../src/config/template-feedback';
 import { isEnrichEligible } from '../../src/config/lead-contact-state';
 import { appendOutreachFooter, buildOutreachFooter, isUsablePostalAddress } from '../../src/config/outreach-footer';
 import { appendSignature, signatureFromContext } from '../../src/utils/outreach-signature';
@@ -195,7 +195,7 @@ export default withLambda(async (event) => {
         action?: string; assistantId?: number; ideaId?: number; recordId?: number;
         lead?: Record<string, unknown>; confirmPersonal?: boolean; reason?: string; expectDraftHash?: string; checkOnly?: boolean; instruction?: string;
         outcome?: string; lossReason?: string; valueGbp?: number | string | null; confirmChange?: boolean;
-        editReason?: string; provider?: string; note?: string;
+        editReason?: string; editNote?: string; provider?: string; note?: string;
         email?: string; confirmErase?: boolean; eraseScope?: string;
         // set_outcome on a win: the owner ticked "Add to my Audience" (soft opt-in — see won-customer-audience.ts).
         addToAudience?: boolean;
@@ -1142,6 +1142,9 @@ Return STRICT JSON only: { "subject": "<subject>", "body": "<email body, UNDER 7
             if (!isEditReason(editReason)) {
                 return json(400, { error: `editReason must be one of: ${EDIT_REASONS.join(', ')}.` });
             }
+            // "Something else" can say what (Fix pipeline #37). Only for that reason: the named reasons
+            // already say why, and a note beside them would be a second, unclustered answer.
+            const editNote = editReason === 'other' ? (str(body.editNote, EDIT_NOTE_MAX) ?? '').trim() : '';
 
             const [rec] = await db
                 .select({ id: assistantRecords.id, data: assistantRecords.data })
@@ -1179,6 +1182,7 @@ Return STRICT JSON only: { "subject": "<subject>", "body": "<email body, UNDER 7
                 aiAssistantId: assistant.id,
                 templateVersion: await blueprintVersion(),
                 editReason,
+                editNote: editNote || null,
                 before: { subject: (original.subject as string) ?? null, body: original.body },
                 after: { subject: (current.subject as string) ?? null, body: current.body },
             });

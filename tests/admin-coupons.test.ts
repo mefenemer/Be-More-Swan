@@ -1,5 +1,5 @@
 // tests/admin-coupons.test.ts
-// Admin → Revenue → Coupons: coupons made in Be More Swan are real Stripe coupons, and nothing an
+// Admin → Money → Coupons: coupons made in Be More Swan are real Stripe coupons, and nothing an
 // admin can type reaches Stripe in a shape it would reject halfway through.
 //
 // No database, no Stripe: the pure rules in src/utils/coupon-rules.ts, plus source checks on the
@@ -119,8 +119,8 @@ console.log('\nThe screen, checkout and the promo preview');
 
 const admin = read('admin.html');
 
-check('Coupons sits under Revenue and loads its view', () => {
-    assert.ok(/\{ view: 'coupons',[^}]*perm: 'manage_coupons' \}/.test(admin));
+check('Coupons sits under Money and loads its view', () => {
+    assert.ok(/\{ view: 'coupons',[^}]*perm: 'manage_coupons',\s+group: 'Pricing' \}/.test(admin));
     assert.ok(/if \(view === 'coupons'\)\s+loadCoupons\(\);/.test(admin));
     assert.ok(admin.includes('id="view-coupons"'));
 });

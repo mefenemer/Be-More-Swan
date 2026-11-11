@@ -22,7 +22,7 @@ const admin = read('admin.html');
 const ws = read('workspace.html');
 
 check('admin: ?view= beats a stale ?section=, then the remembered page, then the Dashboard', () => {
-    assert.match(admin, /const initialView = params\.get\('view'\) \|\| params\.get\('section'\) \|\| remembered \|\| 'dashboard';/);
+    assert.match(admin, /const initialView = _resolveView\(params\.get\('view'\) \|\| params\.get\('section'\) \|\| remembered \|\| 'dashboard'\);/);
 });
 
 check('admin: every navigation drops ?section= and remembers the page', () => {

@@ -22,11 +22,35 @@ import { masterPlans, plans } from '../../db/schema';
 import { effectiveLimit, type FeatureOverrides } from './plan-features';
 import { isUnifiedTaskMetering } from './task-metering-flag';
 import { nextResetAt, readTaskUsage, tasksRemaining } from './task-balance';
-import { TASK_WEIGHTS, aiVideoPriceText, basicWorkCharged, CHAT_MESSAGES_PER_TASK } from '../config/task-weights';
+import { aiVideoPriceText, basicWorkCharged, type TaskCosts, type WorkKind } from '../config/task-weights';
+import { getTaskCosts } from './task-costs';
+import { changeSummary, longDate, upcomingChange, type ChangeRow } from './task-cost-changes';
 
 type Db = ReturnType<typeof getDb>;
 
 const fmtDate = (d: Date) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+
+/** Everyday work, in the order chat lists it. */
+const EVERYDAY_WORK: ReadonlyArray<[WorkKind, string]> = [
+    ['social_post', 'post'], ['blog_article', 'article'], ['email_issue', 'email'], ['email_campaign', 'email flow'],
+    ['lead_search', 'lead search'], ['outreach_email', 'outreach email'], ['site_audit', 'website check that re-scores'],
+    ['site_draft', 'website draft'], ['site_words', 'website copy rewrite'], ['flyer_words', 'flyer words'],
+    ['ai_voiceover', 'AI voiceover'], ['background_removal', 'background removal'], ['mentor_research', 'Business Mentor research'],
+    ['mentor_strategy', 'drafted plan'], ['mentor_review', 'weekly review'],
+];
+
+/** "each post, article or email is 1; each lead search is 2", from today's costs. */
+function everydayCosts(costs: TaskCosts): string {
+    const byCost = new Map<number, string[]>();
+    for (const [kind, words] of EVERYDAY_WORK) {
+        const n = costs.weights[kind];
+        byCost.set(n, [...(byCost.get(n) ?? []), words]);
+    }
+    return [...byCost.entries()].map(([n, words]) => {
+        const last = words.pop();
+        return `each ${words.length ? `${words.join(', ')} or ${last}` : last} is ${n}`;
+    }).join('; ');
+}
 
 /** Pure: the block from already-read facts. Exported for tests. */
 export function formatPlanBlock(f: {
@@ -39,6 +63,8 @@ export function formatPlanBlock(f: {
     tasksInFlight: number;
     unified: boolean;
     now: Date;
+    costs: TaskCosts;
+    upcoming?: ChangeRow | null;
 }): string {
     const head = 'YOUR WORKSPACE’S PLAN AND TASKS (read this turn — the same figures as the usage bar and the Billing page; never estimate a number that is not here). Plans are changed on the Billing page, never in this chat:';
     if (!f.status) {
@@ -54,7 +80,7 @@ export function formatPlanBlock(f: {
             : `- Tasks this month: ${f.taskCount} used of ${f.monthlyTaskLimit}${f.bonusTasks ? `, plus ${f.bonusTasks} bonus task${f.bonusTasks === 1 ? '' : 's'} that never expire` : ''}${f.tasksInFlight ? ` (${f.tasksInFlight} held for AI media still being made)` : ''}. ${left} left.`,
         `- The allowance resets on ${fmtDate(nextResetAt(f.now))}. When it runs out, work stops until then — nothing is ever charged extra, and there is no top-up to buy.`,
         f.unified
-            ? `- What costs a task: each post, article, email, email flow, lead search, outreach email, website check that re-scores, website draft, website copy rewrite, flyer words, AI voiceover, background removal or Business Mentor research, drafted plan or weekly review is 1; a set of AI images is ${TASK_WEIGHTS.ai_image} (up to 4 options), an AI video ${aiVideoPriceText()}, AI music ${TASK_WEIGHTS.ai_music}; an X post with a link ${TASK_WEIGHTS.x_link_post} on top of the post's own task. ${basicWorkCharged() ? `Chatting with you is 1 task per ${CHAT_MESSAGES_PER_TASK} messages, each editing helper is 1, a Brand Designer round using stock, branded cards or flyer pages is ${TASK_WEIGHTS.design_round}, and a design's first download is ${TASK_WEIGHTS.finished_design} (there is also a fair daily limit on chat and helpers).` : 'Chatting with you costs none (there is a fair daily limit).'}`
+            ? `- What costs a task: ${everydayCosts(f.costs)}; a set of AI images is ${f.costs.weights.ai_image} (up to 4 options), an AI video ${aiVideoPriceText(f.costs)}, AI music ${f.costs.weights.ai_music}; an X post with a link ${f.costs.weights.x_link_post} on top of the post's own task. ${basicWorkCharged() ? `Chatting with you is ${f.costs.weights.chat_messages} task per ${f.costs.chatMessagesPerTask} messages, each editing helper is ${f.costs.weights.editing_helper}, a Brand Designer round using stock, branded cards or flyer pages is ${f.costs.weights.design_round}, and a design's first download is ${f.costs.weights.finished_design} (there is also a fair daily limit on chat and helpers).` : 'Chatting with you costs none (there is a fair daily limit).'} These are today's figures: where anything else you know states a cost, this wins.${f.upcoming ? `\n- A change to these starts on ${longDate(f.upcoming.effectiveDate)}: ${changeSummary(f.upcoming.items)} The workspace owner reviews and accepts it when they open the workspace. You cannot accept it for them.` : ''}`
             : '- Each chat message, and each piece of work an assistant does, uses 1 task.',
     ];
     return `${head}\n${lines.join('\n')}`;
@@ -76,6 +102,7 @@ export async function buildPlanSnapshot(db: Db, organisationId: number, now: Dat
         const [usage, unified] = plan
             ? await Promise.all([readTaskUsage(db, organisationId), isUnifiedTaskMetering(organisationId)])
             : [{ taskCount: 0, tokenCount: 0, bonusTasks: 0, tasksInFlight: 0 }, false];
+        const [costs, upcoming] = await Promise.all([getTaskCosts(now), upcomingChange(db)]);
         return formatPlanBlock({
             planName: plan?.planName ?? null,
             status: plan ? (plan.status === 'past_due' ? 'past_due' : 'active') : null,
@@ -86,6 +113,8 @@ export async function buildPlanSnapshot(db: Db, organisationId: number, now: Dat
             ...usage,
             unified,
             now,
+            costs,
+            upcoming,
         });
     } catch (err) {
         console.error('[chat-plan-snapshot] read failed (non-fatal)', err);

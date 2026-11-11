@@ -23,7 +23,8 @@ export const MAX_FRAMES = 40;
 export const FRAME_EVERY_S = 2;
 /** One frame as base64 JPEG — the browser sends ~512 px frames, ~20–40 KB each. */
 export const MAX_FRAME_B64 = 220_000;
-/** What one review costs (owner decision D-F1, 2026-11-09), charged only when a video is newly analysed. */
+/** What one review costs by default (owner decision D-F1, 2026-11-09), charged only when a video is newly analysed.
+ *  The fallback only: the live figure is footage_review in Admin → Money → Task costs (getTaskCosts). */
 export const FOOTAGE_REVIEW_TASKS = 2;
 export const MAX_SUGGESTIONS = 12;
 export const MAX_SHOTS = 30;

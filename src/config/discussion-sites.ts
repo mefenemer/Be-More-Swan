@@ -15,16 +15,17 @@
 // has no public API; LinkedIn has no post search. One `site:` search through the provider the Lead
 // Generator already pays for covers all of them, and reads only what Google already shows.
 
-// ── PAUSED (owner, 2026-11-10) ───────────────────────────────────────────────────────────────────
-// Hidden on staging and prod: copying a drafted reply into a forum by hand is a step backwards from
-// assistants that do the work, and anonymous forum posters rarely become leads. With this false:
-// the tab is gone (the registry has no `discussionsTab`), no scan starts (daily or "Scan now"), the
-// endpoint answers 410, chat neither describes the tab nor shows its cards, and the Business Mentor
-// isn't told it exists. The tables, rows and code stay, so turning it back on is this line plus the
-// registry entry (src/components/assistant-dashboard-registry.js) and re-publishing the help article.
-export const DISCUSSIONS_ENABLED = false;
+// ── ON, Reddit and LinkedIn only (owner, 2026-11-11) ─────────────────────────────────────────────
+// Paused 2026-11-10 (2246fb49), back on 2026-11-11 after a customer found it a "game changer" for
+// finding a LinkedIn post to comment on each day. Owner: "limit it to linkedin and reddit only" — so
+// UK Business Forums, Quora and the user's own forums are gone. A saved watch that named only those
+// falls back to DEFAULT_DISCUSSION_SITES (normaliseSites), and threads already found on them are no
+// longer listed (src/utils/discussions.ts listDiscussions). False hides the tab again everywhere:
+// no scan, endpoint 410, no chat block or cards, Mentor not told — plus comment out the registry
+// entry (src/components/assistant-dashboard-registry.js) and unpublish the help article.
+export const DISCUSSIONS_ENABLED = true;
 
-export const DISCUSSION_SITE_KEYS = ['reddit', 'ukbf', 'quora', 'linkedin'] as const;
+export const DISCUSSION_SITE_KEYS = ['reddit', 'linkedin'] as const;
 export type DiscussionSiteKey = typeof DISCUSSION_SITE_KEYS[number];
 
 export interface DiscussionSite {
@@ -43,14 +44,6 @@ export const DISCUSSION_SITES: Record<DiscussionSiteKey, DiscussionSite> = {
         key: 'reddit', label: 'Reddit', siteFilter: 'site:reddit.com', hosts: ['reddit.com'],
         promotionNote: 'Most subreddits ban self-promotion or limit it to a small share of what you post. Read the subreddit’s rules (sidebar or “About”) before replying, and lead with the help, not the link.',
     },
-    ukbf: {
-        key: 'ukbf', label: 'UK Business Forums', siteFilter: 'site:ukbusinessforums.co.uk', hosts: ['ukbusinessforums.co.uk'],
-        promotionNote: 'Advertising in replies is not allowed outside the forum’s promotion sections. Answer the question; your business can be named in your profile signature.',
-    },
-    quora: {
-        key: 'quora', label: 'Quora', siteFilter: 'site:quora.com', hosts: ['quora.com'],
-        promotionNote: 'Quora asks you to disclose any connection to a product you mention. Keep the disclosure line in.',
-    },
     linkedin: {
         key: 'linkedin', label: 'LinkedIn', siteFilter: 'site:linkedin.com/posts', hosts: ['linkedin.com'],
         promotionNote: 'A comment from your own profile already shows who you are. A short, useful answer works better than a pitch.',
@@ -58,24 +51,21 @@ export const DISCUSSION_SITES: Record<DiscussionSiteKey, DiscussionSite> = {
 };
 
 // ── Your own forums ──────────────────────────────────────────────────────────────────────────────
-// Beyond the four built-ins, a watch can name up to MAX_OWN_FORUMS forums of its own — a trade forum,
-// a US community, a wedding forum. They live in the SAME `sites` array as `forum:<host[/path]>`
+// ⏸ OFF since 2026-11-11 (MAX_OWN_FORUMS = 0, no suggestions): the owner limited Discussions to
+// Reddit and LinkedIn. The parsing below stays so old `forum:` entries are recognised and dropped,
+// and so raising the cap brings the feature back. When on, a watch can name up to MAX_OWN_FORUMS
+// forums of its own — a trade forum, a US community, a wedding forum. They live in the SAME `sites` array as `forum:<host[/path]>`
 // entries (no schema change), are searched the same way (`site:<host[/path]>`), and are judged the
 // same way. The thread check is generic, so a stray listing page costs one triage slot at most.
 
-export const MAX_OWN_FORUMS = 5;
+export const MAX_OWN_FORUMS = 0;
 export type OwnForum = `forum:${string}`;
 /** Anything a watch can search: a built-in site key or one of the user's own forums. */
 export type DiscussionSource = DiscussionSiteKey | OwnForum;
 
 /** Starter suggestions, one click each. Each was probed (2026-10-30) and returned threads from the last week. */
-export const SUGGESTED_FORUMS: Array<{ address: string; label: string; about: string }> = [
-    { address: 'indiehackers.com', label: 'Indie Hackers', about: 'founders and online businesses, mostly US' },
-    { address: 'community.shopify.com', label: 'Shopify Community', about: 'online shop owners' },
-    { address: 'warriorforum.com', label: 'Warrior Forum', about: 'internet marketing, mostly US' },
-    { address: 'biggerpockets.com/forums', label: 'BiggerPockets', about: 'US property investors' },
-    { address: 'contractortalk.com', label: 'ContractorTalk', about: 'US builders and trades' },
-];
+/** One-click suggestions, shown only while own forums are on. Empty while MAX_OWN_FORUMS is 0. */
+export const SUGGESTED_FORUMS: Array<{ address: string; label: string; about: string }> = [];
 
 const OWN_FORUM_NOTE = 'Check this forum’s rules before replying — many only allow a business to be named in a signature or a promotions section. Lead with the help.';
 
@@ -122,10 +112,10 @@ export function sourceInfo(source: DiscussionSource): { label: string; siteFilte
     };
 }
 
-/** What a new watch starts with. LinkedIn is off by default — its posts are mostly people selling. */
-export const DEFAULT_DISCUSSION_SITES: DiscussionSiteKey[] = ['reddit', 'ukbf', 'quora'];
+/** What a new watch starts with — both sites (LinkedIn is where the 2026-11-11 customer found it useful). */
+export const DEFAULT_DISCUSSION_SITES: DiscussionSiteKey[] = ['reddit', 'linkedin'];
 
-/** Bounds on one scan: MAX_TOPICS × sites searches, so at most 5 × 4 = 20 Serper calls. */
+/** Bounds on one scan: MAX_TOPICS × sites searches, so at most 5 × 2 = 10 Serper calls. */
 export const MAX_TOPICS = 5;
 export const TOPIC_MAX_CHARS = 120;
 /** Results asked for per search. */
@@ -172,17 +162,27 @@ export const TOPIC_WORDING_RULES = `HOW A DISCUSSIONS TOPIC IS WORDED — each t
 - Never widen a topic beyond its subject ("website" must not become "marketing"), and never invent a service.
 - No quotes, no "site:", no OR/AND, no hashtags.`;
 
-/** Built-in sites in their fixed order, then up to MAX_OWN_FORUMS own forums (`forum:<address>`, cleaned and deduped). */
+/** A site a watch may have saved before 2026-11-11 that is no longer searched. */
+const RETIRED_SITE_KEYS = ['ukbf', 'quora'];
+
+/**
+ * Built-in sites in their fixed order, then up to MAX_OWN_FORUMS own forums (`forum:<address>`,
+ * cleaned and deduped). A list that named only retired sites (UK Business Forums, Quora, own forums
+ * while they are off) becomes DEFAULT_DISCUSSION_SITES, so a daily scan set up before 2026-11-11
+ * keeps running instead of stopping silently. An empty list stays empty — the user unticked both.
+ */
 export function normaliseSites(raw: unknown): DiscussionSource[] {
     const list = Array.isArray(raw) ? raw : [];
     const own: OwnForum[] = [];
     for (const v of list) {
+        if (own.length >= MAX_OWN_FORUMS) break;
         if (typeof v !== 'string' || !v.startsWith('forum:')) continue;
         const a = normaliseForumAddress(v);
         if (a && !own.includes(`forum:${a}`)) own.push(`forum:${a}`);
-        if (own.length >= MAX_OWN_FORUMS) break;
     }
-    return [...DISCUSSION_SITE_KEYS.filter((k) => list.includes(k)), ...own];
+    const out: DiscussionSource[] = [...DISCUSSION_SITE_KEYS.filter((k) => list.includes(k)), ...own];
+    const hadRetired = list.some((v) => typeof v === 'string' && (RETIRED_SITE_KEYS.includes(v) || v.startsWith('forum:')));
+    return !out.length && hadRetired ? [...DEFAULT_DISCUSSION_SITES] : out;
 }
 
 /**
@@ -203,11 +203,14 @@ export function sitesFromChat(raw: readonly unknown[]): { sites: DiscussionSourc
             || DISCUSSION_SITES[k].hosts.some((h) => host === h || host.endsWith(`.${h}`)));
         if (builtIn) { picked.push(builtIn); continue; }
         const address = SUGGESTED_FORUMS.find((f) => f.label.toLowerCase() === low)?.address ?? normaliseForumAddress(bare);
-        if (address) picked.push(`forum:${address}`);
+        if (address && MAX_OWN_FORUMS > 0) picked.push(`forum:${address}`);
         else rejected.push(bare.slice(0, 80));
     }
     const own = new Set(picked.filter((s) => s.startsWith('forum:')));
-    return { sites: normaliseSites(picked), rejected, tooMany: own.size > MAX_OWN_FORUMS };
+    // normaliseSites' retired-site fallback is for SAVED watches; here a request for only retired
+    // sites is reported, not swapped for the defaults.
+    const sites = picked.length ? normaliseSites(picked) : [];
+    return { sites, rejected, tooMany: MAX_OWN_FORUMS > 0 && own.size > MAX_OWN_FORUMS };
 }
 
 /** The Google query for one topic on one source. */
@@ -264,9 +267,7 @@ export function looksLikeThread(url: string, site: DiscussionSource): boolean {
         return !/\/(attachments?|members?|users?|profile|profiles|u|tags?|search|login|register|signup|account|help|about|learning-center|directory)(\/|$)/i.test(path);
     }
     if (site === 'reddit') return /\/r\/[^/]+\/comments\/[a-z0-9]+/i.test(path);
-    if (site === 'ukbf') return /\/threads\//i.test(path);
     if (site === 'linkedin') return /^\/posts\//i.test(path);
-    if (site === 'quora') return !/^\/(profile|topic|search|spaces?)\b/i.test(path) && path.length > 1;
     return true;
 }
 
@@ -310,7 +311,7 @@ export function withDisclosure(reply: string, businessName: string | null | unde
 }
 
 /**
- * Reddit renders markdown. Quora, UK Business Forums and LinkedIn don't — `*this*` pastes as literal
+ * Reddit renders markdown. LinkedIn (and most own forums) don't — `*this*` pastes as literal
  * asterisks — so off Reddit the emphasis markers come out (the words stay).
  */
 export function plainForSite(reply: string, site: DiscussionSource): string {

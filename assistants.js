@@ -2494,13 +2494,39 @@ function _rqShowEditReasonStrip() {
         ${RC.editReasons.map((r) => `<button type="button" class="${chip}" data-edit-reason="${_rqEsc(r)}">${_rqEsc(RC.editReasonLabel(r))}</button>`).join('')}
         <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-edit-reason-skip>Skip</button>
       </div>
+      <div class="hidden mt-2" data-edit-reason-other>
+        <label class="block text-[11px] font-bold text-gray-700 mb-1" for="rq-edit-note-${_rqEsc(String(pending.recordId))}">What was the reason?</label>
+        <textarea id="rq-edit-note-${_rqEsc(String(pending.recordId))}" rows="2" maxlength="${Number(RC.editNoteMax) || 500}" data-edit-reason-note
+          class="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs text-gray-800 focus:border-emerald-600 focus:ring-emerald-600"
+          placeholder="For example: it mentioned an event they didn’t run"></textarea>
+        <div class="flex gap-2 mt-1.5">
+          <button type="button" class="btn-primary px-3 py-1 text-[11px] font-bold rounded-lg cursor-pointer" data-edit-reason-note-save>Save</button>
+          <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-edit-reason-note-cancel>Back</button>
+        </div>
+      </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-edit-reason-status></p>`;
 
     const status = strip.querySelector('[data-edit-reason-status]');
     strip.querySelector('[data-edit-reason-skip]').addEventListener('click', () => strip.remove());
-    strip.addEventListener('click', async (e) => {
+    // "Something else" asks what (Fix pipeline #37, prod 2026-11-10): picking it used to save at once
+    // with no way to say the reason. It now opens a box; Save sends the words with it, and an empty
+    // box still saves plain "Something else".
+    const otherBox = strip.querySelector('[data-edit-reason-other]');
+    const noteEl = strip.querySelector('[data-edit-reason-note]');
+    strip.querySelector('[data-edit-reason-note-cancel]').addEventListener('click', () => otherBox.classList.add('hidden'));
+    strip.querySelector('[data-edit-reason-note-save]').addEventListener('click', () => save('other', noteEl.value.trim()));
+    strip.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-edit-reason]');
         if (!btn) return;
+        const reason = btn.getAttribute('data-edit-reason');
+        if (reason === 'other') {
+            otherBox.classList.remove('hidden');
+            noteEl.focus();
+            return;
+        }
+        save(reason, '');
+    });
+    async function save(reason, note) {
         strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
         status.textContent = 'Saving…';
         status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
@@ -2512,22 +2538,27 @@ function _rqShowEditReasonStrip() {
                     action: 'record_edit_feedback',
                     assistantId: window._currentAssistantId,
                     recordId: pending.recordId,
-                    editReason: btn.getAttribute('data-edit-reason'),
+                    editReason: reason,
+                    ...(note ? { editNote: note } : {}),
                 }),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || 'Could not save that.');
             // The server returns 200 with recorded:false when the write itself failed — the edit
             // succeeded either way, so say what actually happened rather than claiming a save.
+            // "Something else" is never grouped into a suggested change (template-feedback.ts), so it
+            // must not promise one.
             strip.innerHTML = data.recorded
-                ? '<p class="text-[11px] font-semibold text-gray-600">Noted — thanks. Repeated edits like this become a suggested template change.</p>'
+                ? (reason === 'other'
+                    ? '<p class="text-[11px] font-semibold text-gray-600">Noted — thanks.</p>'
+                    : '<p class="text-[11px] font-semibold text-gray-600">Noted — thanks. Repeated edits like this become a suggested template change.</p>')
                 : '<p class="text-[11px] font-semibold text-gray-500">Your edit is saved. The note couldn’t be recorded.</p>';
         } catch (err) {
             strip.querySelectorAll('button').forEach((b) => { b.disabled = false; });
             status.textContent = err.message || 'Could not save that.';
             status.className = 'text-[11px] font-semibold text-red-600 mt-1.5';
         }
-    });
+    }
 
     // Under the draft preview, where the reviewer's attention already is.
     const preview = card.querySelector('details');
@@ -5548,10 +5579,14 @@ window._renderNeedsYou = function() {
     const boards = source === 'videos' ? (window._detailNeedsYouOverride || 0) : 0;
     const own = source === 'module' ? window._detailNeedsYouModule : null;
     const n = source === 'briefs' || own ? (window._detailNeedsYouOverride || 0) : source === 'videos' ? boards + reviewN : reviewN;
-    const where = own ? own.where : source === 'briefs' ? 'Briefs'
+    // A module role names what is actually waiting (Website: "Bookings", "Enquiries and Orders"), not
+    // a fixed tab — a booking waiting used to read "waiting in Enquiries" (2026-11-11).
+    const ownItems = own ? (window._detailNeedsYouItems || []).filter((x) => x && x.label && x.count) : [];
+    const ownWhere = ownItems.length ? ownItems.map((x) => x.label).reduce((acc, l, i, all) => acc + (i === 0 ? l : i === all.length - 1 ? ` and ${l}` : `, ${l}`), '') : null;
+    const where = own ? (ownWhere || own.where) : source === 'briefs' ? 'Briefs'
         : source === 'videos' ? (boards && reviewN ? `Videos and ${reviewLabel}` : boards ? 'Videos' : reviewLabel)
         : reviewLabel;
-    const targetTab = own ? own.tab : source === 'briefs' ? 'briefs' : (source === 'videos' && boards) ? 'videos' : 'review-queue';
+    const targetTab = own ? (ownItems.length === 1 && ownItems[0].tab ? ownItems[0].tab : own.tab) : source === 'briefs' ? 'briefs' : (source === 'videos' && boards) ? 'videos' : 'review-queue';
     const text = document.getElementById('needs-you-text');
     const go = document.getElementById('needs-you-go');
     const next = document.getElementById('next-up-text');
@@ -9500,6 +9535,8 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         .finally(() => { if (_skelAutopilot) _endCardLoading('autopilot-status-card'); }));
     // Not awaited: the hero is complete without it, and the strip reveals itself when it lands.
     _renderAssistantTaskShare(assistantId);
+    // Results ▸ Autopilot: posts per content pillar (src/components/pillar-list.js). Social Media only.
+    if (currentData.roleKey === 'social_media_manager') window.PillarList?.renderUsage(assistantId);
     // Audience counts hit the platform APIs, so they're deliberately not awaited — the Autopilot
     // card is already complete without them and the block reveals itself when they land.
     // Registry-driven, like metricsSource: a role whose audience isn't social gets its own renderer

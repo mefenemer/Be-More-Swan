@@ -23,10 +23,11 @@ import { putR2Object } from '../lib/media-persist';
 import { presignR2Get } from './social-publish';
 import { languageLabel, transcribeAudio } from '../lib/tts';
 import { recordCompletedWork, hasTaskCapacity } from './work-metering';
+import { getTaskCosts } from './task-costs';
 import { recordPlatformIncident } from './platform-incident';
 import {
     enforceReview, enforceShotList, parseJsonObject, reviewSystemPrompt, reviewUserPrompt, shotListSystemPrompt, transcriptText,
-    FOOTAGE_REVIEW_TASKS, MAX_FOOTAGE_BYTES, MAX_FOOTAGE_S, MAX_FRAMES, MAX_FRAME_B64,
+    MAX_FOOTAGE_BYTES, MAX_FOOTAGE_S, MAX_FRAMES, MAX_FRAME_B64,
     type FootageReview, type FootageVideo, type ShotList, type SpokenWord,
 } from '../lib/footage';
 import type { OwnVideo, VideoBrief } from '../lib/storyboard';
@@ -269,7 +270,7 @@ export async function reviewProject(db: Db, projectId: number): Promise<void> {
             usage: { workspaceId: orgId, assistantId: p.aiAssistantId ?? null },
             ...model,
         });
-        const charged = fresh ? FOOTAGE_REVIEW_TASKS : 0;
+        const charged = fresh ? (await getTaskCosts()).weights.footage_review : 0;
         const review: FootageReview = enforceReview(parseJsonObject(res.text), videos, charged);
         await db.update(videoProjects).set({ status: 'reviewed', footageReview: review, note: null, updatedAt: new Date() })
             .where(and(eq(videoProjects.id, projectId), eq(videoProjects.status, 'reviewing')));
@@ -290,5 +291,5 @@ export async function reviewProject(db: Db, projectId: number): Promise<void> {
 export async function canAffordReview(db: Db, orgId: number, ids: number[]): Promise<boolean> {
     const status = await footageStatus(db, orgId, ids);
     if (status.every((s) => s.reviewedBefore)) return true;
-    return hasTaskCapacity(db, orgId, FOOTAGE_REVIEW_TASKS);
+    return hasTaskCapacity(db, orgId, (await getTaskCosts()).weights.footage_review);
 }

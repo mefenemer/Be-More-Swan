@@ -46,8 +46,15 @@ export type AdminAction =
     | 'notification_template_edit'
     | 'notification_template_restore'
     | 'notification_sent'
-    // Comms → Broadcast: a test copy to the admin, the send started, and the worker's final counts.
+    // Growth → Broadcast: a test copy to the admin, the send started, and the worker's final counts.
     | 'broadcast_test'
+    | 'task_cost_draft_saved'
+    | 'task_cost_draft_discarded'
+    | 'task_cost_test'
+    | 'task_cost_announced'
+    | 'task_cost_resent'
+    | 'task_cost_cancelled'
+    | 'task_cost_set_unused'
     | 'broadcast_started'
     | 'broadcast_finished'
     | 'session_timeout_config_update'
@@ -74,7 +81,7 @@ export type AdminAction =
     | 'product_update_edit'
     | 'product_update_approve'
     | 'product_update_discard'
-    // Coupons (Admin → Revenue → Coupons): each one changes what customers pay, in Stripe.
+    // Coupons (Admin → Money → Coupons): each one changes what customers pay, in Stripe.
     | 'coupon_create'
     | 'coupon_update'
     | 'coupon_delete'
@@ -88,10 +95,10 @@ export type AdminAction =
     | 'platform_review_hidden'
     | 'platform_review_pending'
     | 'review_destinations_update'
-    // Hosted sites (Admin → Trust → Hosted Sites): taking a customer's public website offline, or
+    // Hosted sites (Admin → Customers → Hosted sites): taking a customer's public website offline, or
     // putting it back, and closing the reports that led there — "who took it down, and why".
     | 'hosted_site_moderation'
-    // Affiliate partners (Admin → Revenue → Partners): commission rates and who may earn cash —
+    // Affiliate partners (Admin → Money → Partners): commission rates and who may earn cash —
     // money owed to people outside the company, so every change needs a name against it.
     | 'partner_rates_change'
     | 'partner_settings_update'
@@ -100,7 +107,7 @@ export type AdminAction =
     | 'partner_ledger_change'     // a commission cancelled, or a bonus added
     | 'partner_payout'            // a payout run created / exported (decrypts bank details) / paid / cancelled
     | 'partner_code_change'       // a partner's memorable partner code turned on, changed or off
-    // Plan moves (Admin → Revenue → Plan moves): changes what many customers pay, in Stripe.
+    // Plan moves (Admin → Customers → Plan moves): changes what many customers pay, in Stripe.
     | 'plan_move_run'
     | 'plan_move_cancel';
 

@@ -7,7 +7,7 @@
 // pricing page sells measured almost none of the work. This module meters that work.
 //
 // One allowance (from the 2026-12 cutover, flag 'unified_task_metering'): a task is one finished
-// piece of work, weighted by src/config/task-weights.ts — an AI video is 20, an X link post 10.
+// piece of work, weighted by the costs in Admin → Money → Task costs (src/utils/task-costs.ts).
 // Chat and editing helpers cost no tasks (src/utils/fair-use.ts). AI media credits and X credits
 // are retired; their balances became bonus tasks (task_bonus), which never expire and are spent
 // only once the monthly allowance is used up.
@@ -31,7 +31,8 @@
 
 import { sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { TASK_WEIGHTS, AI_VIDEO_TASKS_PER_SECOND, videoPricedBySecond, type WorkKind } from '../config/task-weights';
+import { videoPricedBySecond, type TaskCosts, type WorkKind } from '../config/task-weights';
+import { getTaskCosts } from './task-costs';
 import { getPeriodStart } from './atomic-cap-check';
 import { resolveTaskLimit } from './task-credit';
 
@@ -45,13 +46,13 @@ export const TASK_LIMIT_MESSAGE = 'Your monthly task allowance is used up, so th
 /** Tasks a running media job will cost once it finishes, by media_generation_jobs.media_type.
  *  ⚠️ Every weight is CAST: a bound parameter inside SUM(CASE …) has no type of its own, Postgres
  *  reads it as text, and SUM(text) does not exist (42883) — which made every capacity read throw. */
-export const inFlightWeightSql = () => sql`CASE media_type WHEN 'video' THEN ${inFlightVideoSql()} WHEN 'audio' THEN ${TASK_WEIGHTS.ai_music}::int ELSE ${TASK_WEIGHTS.ai_image}::int END`;
+export const inFlightWeightSql = (costs: TaskCosts) => sql`CASE media_type WHEN 'video' THEN ${inFlightVideoSql(costs)} WHEN 'audio' THEN ${costs.weights.ai_music}::int ELSE ${costs.weights.ai_image}::int END`;
 
 /** A running clip's tasks: by its billed length when AI video is priced by the second (aiVideoTasks). */
-function inFlightVideoSql() {
+function inFlightVideoSql(costs: TaskCosts) {
     return videoPricedBySecond()
-        ? sql`(CEIL(COALESCE(duration_seconds, 6))::int * ${AI_VIDEO_TASKS_PER_SECOND}::int)`
-        : sql`${TASK_WEIGHTS.ai_video}::int`;
+        ? sql`(CEIL(COALESCE(duration_seconds, 6))::int * ${costs.videoTasksPerSecond}::int)`
+        : sql`${costs.weights.ai_video}::int`;
 }
 
 export interface TaskUsage {
@@ -74,13 +75,14 @@ export interface TaskUsage {
  */
 export async function getTaskUsage(db: Db, organisationId: number): Promise<TaskUsage> {
     const plan = await resolveTaskLimit(db, organisationId);
+    const costs = await getTaskCosts();
     const period = getPeriodStart().toISOString();
     const rows = await db.execute<{ used: number; bonus: number; in_flight: number }>(sql`
         SELECT
           COALESCE((SELECT task_count FROM usage_counters
                      WHERE organisation_id = ${organisationId} AND period_start = ${period} LIMIT 1), 0) AS used,
           COALESCE((SELECT bonus_tasks FROM task_bonus WHERE organisation_id = ${organisationId}), 0) AS bonus,
-          COALESCE((SELECT SUM(${inFlightWeightSql()}) FROM media_generation_jobs
+          COALESCE((SELECT SUM(${inFlightWeightSql(costs)}) FROM media_generation_jobs
                      WHERE organisation_id = ${organisationId}
                        AND status IN ('queued', 'processing')
                        -- A job stuck for hours is dead, not in flight; don't let it block the org.
@@ -97,7 +99,7 @@ export async function getTaskUsage(db: Db, organisationId: number): Promise<Task
 
 /**
  * Can this org start work costing `units` tasks? Never throws; fails open.
- * Pass the work's weight for anything heavier than 1 (taskWeight('ai_video')).
+ * Pass the work's weight (from getTaskCosts) for anything heavier than 1.
  */
 export async function hasTaskCapacity(db: Db, organisationId: number, units = 1): Promise<boolean> {
     try {
@@ -125,7 +127,7 @@ export function capacityMemo(db: Db): (organisationId: number) => Promise<boolea
 }
 
 export interface RecordWorkOptions {
-    /** Override the weight (e.g. several items in one charge). Defaults to TASK_WEIGHTS[kind]. */
+    /** Override the weight (e.g. several items in one charge). Defaults to the kind's cost today. */
     units?: number;
     ref?: string | number;
     assistantId?: number | null;
@@ -149,7 +151,7 @@ export async function recordCompletedWork(
     const opts: RecordWorkOptions = typeof unitsOrOpts === 'object' && unitsOrOpts !== null
         ? unitsOrOpts
         : { units: unitsOrOpts, ref };
-    const units = opts.units ?? TASK_WEIGHTS[kind];
+    const units = opts.units ?? (await getTaskCosts()).weights[kind];
     if (!Number.isInteger(units) || units <= 0) return;
 
     let limit: number | null = null;

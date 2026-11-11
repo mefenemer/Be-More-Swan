@@ -52,45 +52,45 @@
       </button>
       <button data-cat="customers" onclick="adminCatNav('customers')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Customers" title="Customers — users, workspaces, contacts and support">
+        aria-label="Customers" title="Customers — accounts, workspaces, hosted sites, plan moves and support">
         <span class="text-xl">👥</span>
         <span class="admin-cat-label group-hover:text-white">Customers</span>
       </button>
-      <button data-cat="revenue" onclick="adminCatNav('revenue')"
+      <button data-cat="money" onclick="adminCatNav('money')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Revenue" title="Revenue — billing, dunning, disputes and COGS">
+        aria-label="Money" title="Money — dunning, disputes, reconciliation, plans, coupons and partners">
         <span class="text-xl">💳</span>
-        <span class="admin-cat-label group-hover:text-white">Revenue</span>
+        <span class="admin-cat-label group-hover:text-white">Money</span>
       </button>
       <button data-cat="assistants" onclick="adminCatNav('assistants')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Assistants" title="Assistants — catalog, blueprints, models, publishing and music">
+        aria-label="Assistants" title="Assistants — set-up, versions, AI models, publishing and music">
         <span class="text-xl">🤖</span>
         <span class="admin-cat-label group-hover:text-white">Assistants</span>
       </button>
-      <button data-cat="swan-index" onclick="adminCatNav('swan-index')"
+      <button data-cat="growth" onclick="adminCatNav('growth')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Swan Index" title="The Swan Index — review queue, front page, contributors and opt-outs">
-        <span class="text-xl">🦢</span>
-        <span class="admin-cat-label group-hover:text-white">Swan Index</span>
+        aria-label="Growth" title="Growth — emails and messages, help articles, reputation and the Swan Index">
+        <span class="text-xl">📣</span>
+        <span class="admin-cat-label group-hover:text-white">Growth</span>
       </button>
-      <button data-cat="platform" onclick="adminCatNav('platform')"
+      <button data-cat="reports" onclick="adminCatNav('reports')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Platform" title="Platform — configuration, insights and operations">
+        aria-label="Reports" title="Reports — analytics, costs and reward audits">
+        <span class="text-xl">📈</span>
+        <span class="admin-cat-label group-hover:text-white">Reports</span>
+      </button>
+      <button data-cat="system" onclick="adminCatNav('system')"
+        class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
+        aria-label="System" title="System — settings, health and emergency controls">
         <span class="text-xl">🔧</span>
-        <span class="admin-cat-label group-hover:text-white">Platform</span>
+        <span class="admin-cat-label group-hover:text-white">System</span>
       </button>
-      <button data-cat="comms" onclick="adminCatNav('comms')"
+      <button data-cat="security" onclick="adminCatNav('security')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Comms" title="Comms — email and notification templates">
-        <span class="text-xl">✉️</span>
-        <span class="admin-cat-label group-hover:text-white">Comms</span>
-      </button>
-      <button data-cat="trust" onclick="adminCatNav('trust')"
-        class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Trust" title="Trust — admin access, audit trails, abuse and breach response">
+        aria-label="Security" title="Security — admin access, audit log, threats and compliance">
         <span class="text-xl">🛡️</span>
-        <span class="admin-cat-label group-hover:text-white">Trust</span>
+        <span class="admin-cat-label group-hover:text-white">Security</span>
       </button>
     </nav>
     <div class="pb-4 flex flex-col items-center gap-1">
@@ -537,7 +537,7 @@
         </details>
 
         <!-- Flag table -->
-        <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+        <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
           <table class="w-full text-sm">
             <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
               <tr>
@@ -597,16 +597,7 @@
 
       <!-- ── US-ADM-1.7.1: Master Data Management ─────────────────────── -->
       <section id="view-master-data" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
-        <!-- Tab bar -->
-        <div class="flex gap-1 overflow-x-auto mb-5 border-b border-gray-200 pb-0" id="md-tab-bar">
-          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plans" onclick="mdSwitchTab('plans')">Plans</button>
-          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plan-features" onclick="mdSwitchTab('plan-features')">Plan Features</button>
-          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistant-versions" onclick="mdSwitchTab('assistant-versions')">Versions</button>
-          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="feature-flags-md" onclick="mdSwitchTab('feature-flags-md')">Flag Definitions</button>
-          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="languages" onclick="mdSwitchTab('languages')">Languages</button>
-          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="system-config" onclick="mdSwitchTab('system-config')">System Config</button>
-          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="help-articles" onclick="mdSwitchTab('help-articles')">Help Articles</button>
-        </div>
+        <!-- No tab bar: each tab is its own menu entry (MD_TAB_VIEWS), opened through adminNav(). -->
 
         <!-- Plans tab -->
         <div id="md-pane-plans" class="md-pane hidden">
@@ -652,22 +643,6 @@
                 <tr><th class="px-4 py-3 text-left">Assistant</th><th class="px-4 py-3 text-center">Version</th><th class="px-4 py-3 text-left">Change Note</th><th class="px-4 py-3 text-left">Created</th></tr>
               </thead>
               <tbody id="md-assistant-versions-tbody"><tr><td colspan="4" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Feature Flags tab (master-data-api view) -->
-        <div id="md-pane-feature-flags-md" class="md-pane hidden">
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="text-sm font-bold text-gray-700">Flag Definitions</h2>
-            <button onclick="mdOpenAdd('feature-flags-md')" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg transition">+ Add Flag</button>
-          </div>
-          <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
-            <table class="w-full text-sm admin-responsive-table">
-              <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
-                <tr><th class="px-4 py-3 text-left">Key</th><th class="px-4 py-3 text-left">Description</th><th class="px-4 py-3 text-center">Active</th><th class="px-4 py-3 text-center">Rollout %</th><th class="px-4 py-3 text-left">Actions</th></tr>
-              </thead>
-              <tbody id="md-feature-flags-md-tbody"><tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -1121,7 +1096,7 @@
         </div>
       </section>
 
-      <!-- ── Coupons — Admin → Revenue → Coupons (admin-coupons.ts) ───────────────────────
+      <!-- ── Coupons — Admin → Money → Coupons (admin-coupons.ts) ───────────────────────
            Every coupon here is a real Stripe coupon + promotion code; checkout validates codes
            against Stripe (validate-promo.ts). The create/edit modal lives OUTSIDE this section —
            a fixed modal inside .admin-view is trapped by its overflow container. -->
@@ -1159,7 +1134,7 @@
         <div id="coupons-stripe-panel" class="hidden mt-6 space-y-4"></div>
       </section>
 
-      <!-- ── AI Visibility — Admin → Platform → Insights (admin-ai-visibility.ts) ──────────────
+      <!-- ── AI Visibility — Admin → Growth → Reputation (admin-ai-visibility.ts) ──────────────
            When a prospect asks an AI assistant for help, does Be More Swan come up? The same
            questions, asked of each assistant, monthly. The answer form (#aiv-modal) lives OUTSIDE
            this section — a fixed modal inside .admin-view is trapped by its overflow container. -->
@@ -1265,7 +1240,21 @@
         </div>
       </section>
 
-      <!-- ── Plan moves — Admin → Revenue → Plan moves (admin-plan-moves.ts, src/utils/plan-moves.ts) ──
+      <!-- ── Task costs — Admin → Money → Task costs (admin-task-costs.ts, src/utils/task-cost-changes.ts) ──
+           What each piece of work costs customers. A change is a draft until announced; announcing
+           broadcasts it and asks workspace owners to accept; it starts by itself on its date. -->
+      <section id="view-task-costs" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="mb-5">
+          <p class="text-sm text-gray-500 max-w-3xl">What each piece of work uses from a customer's monthly task allowance. Set a new cost below: it stays a draft until you announce it. Announcing sends every customer an in-app notice and an email, and asks each workspace owner to accept. The new cost then starts by itself on its date. A cost going up needs at least 30 days' notice (terms 5.2).</p>
+        </div>
+        <div id="tc-status" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
+        <div id="tc-mode" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
+        <div id="tc-open" class="mb-6"></div>
+        <div id="tc-costs" class="mb-6"><p class="text-sm text-gray-400">Loading&hellip;</p></div>
+        <div id="tc-history"></div>
+      </section>
+
+      <!-- ── Plan moves — Admin → Customers → Plan moves (admin-plan-moves.ts, src/utils/plan-moves.ts) ──
            Move customers between plans in bulk. Every move starts at the customer's next renewal; a
            price rise at the first renewal 30+ days away; every customer is emailed, coupon included. -->
       <section id="view-plan-moves" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
@@ -1309,7 +1298,7 @@
         </div>
       </section>
 
-      <!-- ── Partners — Admin → Revenue → Partners (admin-partners.ts) ─────────────────────
+      <!-- ── Partners — Admin → Money → Partners (admin-partners.ts) ─────────────────────
            Affiliate partners earn CASH commission (docs/affiliate-partner-programme-plan.md).
            Customers who refer a friend earn tokens instead and never appear here. The rate and
            add-partner modals live OUTSIDE this section — a fixed modal inside .admin-view is trapped
@@ -1460,8 +1449,8 @@
               <h3 class="text-sm font-bold text-gray-800">Record a quarterly review</h3>
               <p class="text-xs text-gray-500 mt-0.5" id="ba-due-line">Check each active assistant's prompt against the list below, then record what you found.</p>
             </div>
-            <button type="button" onclick="adminGoTo('master-data'); setTimeout(() => mdSwitchTab('assistant-versions'), 0);"
-              class="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer">Open the prompts (Master Data → Versions)</button>
+            <button type="button" onclick="adminGoTo('assistant-versions');"
+              class="px-3 py-1.5 text-xs font-bold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 cursor-pointer">Open the prompts (Assistants → Versions)</button>
           </div>
           <ul class="text-xs text-gray-600 list-disc pl-5 space-y-1 mb-4">
             <li>Demographic proxy language (e.g. gendered terms, nationality assumptions)</li>
@@ -2242,7 +2231,7 @@
       <!-- ── Send a Message (ad-hoc admin → user notification) ───────────── -->
       <section id="view-send-notification" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
         <div class="mb-6">
-          <h2 class="text-lg font-extrabold text-gray-900">Send a Message</h2>
+          <h2 class="text-lg font-extrabold text-gray-900">Message one person</h2>
           <p class="text-sm text-gray-500 mt-0.5">Send a one-off in-app notification to a single user. It appears in their notification inbox immediately, under &#34;Be More Swan&#34;. This is not email &mdash; nothing is sent to their inbox.</p>
         </div>
 
@@ -3352,30 +3341,32 @@ function debounce(fn, ms) {
 
 // ── Navigation — US-ADM-1.4.1 Two-tier nav ───────────────────────────────────
 const VIEW_LABELS = {
-  dashboard: 'Dashboard', users: 'All Users', tickets: 'Support Tickets', inbox: 'Inbox',
-  catalog: 'Assistants', analytics: 'Analytics', 'model-config': 'AI Model Config',
-  logs: 'System Logs', 'audit-log': 'Audit Log', 'security-abuse': 'Security & Abuse', cogs: 'COGS Dashboard',
-  reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue', disputes: 'Disputes',
-  coupons: 'Coupons', 'plan-moves': 'Plan moves', partners: 'Partners',
-  'publish-pipeline': 'Publishing Pipeline',
-  'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
-  gamification: 'Gamification Settings', 'session-timeout': 'Session Timeout', 'reward-audits': 'Reward Audits',
-  'feature-flags': 'Feature Flags', contacts: 'Contacts',
-  'breach-response': 'Breach Response', 'bias-audit': 'Bias Audit', 'master-data': 'Master Data',
-  workspaces: 'Workspaces', 'workspace-detail': 'Workspace Detail',
-  'blueprint-inspector': 'Blueprint Inspector', sandbox: 'Sandbox Environment',
-  'email-templates': 'Manage Emails', 'notification-templates': 'Notification Templates',
-  'send-notification': 'Send a Message',
+  dashboard: 'Dashboard', users: 'Users', tickets: 'Support tickets', inbox: 'Inbox',
+  catalog: 'Assistants', analytics: 'Analytics', 'model-config': 'AI models',
+  logs: 'System logs', 'audit-log': 'Audit log', 'security-abuse': 'Security & abuse', cogs: 'Costs (COGS)',
+  reconciliation: 'Stripe reconciliation', dunning: 'Dunning queue', disputes: 'Disputes',
+  coupons: 'Coupons', 'plan-moves': 'Plan moves', 'task-costs': 'Task costs', partners: 'Partners',
+  'publish-pipeline': 'Publishing pipeline',
+  'manage-admins': 'Admin accounts', 'kill-switches': 'Emergency controls',
+  gamification: 'Gamification', 'session-timeout': 'Session timeout', 'reward-audits': 'Reward audits',
+  'feature-flags': 'Feature flags', contacts: 'Contacts', 'beta-testers': 'Beta testers',
+  'breach-response': 'Breach response', 'bias-audit': 'Bias audit',
+  plans: 'Plans', 'plan-features': 'Plan features', 'assistant-versions': 'Assistant versions',
+  languages: 'Languages', 'system-config': 'System config', 'help-articles': 'Help articles',
+  workspaces: 'Workspaces', 'workspace-detail': 'Workspace detail',
+  'blueprint-inspector': 'Blueprint inspector', sandbox: 'Sandbox',
+  'email-templates': 'Email templates', 'notification-templates': 'Notification templates',
+  'send-notification': 'Message one person',
   broadcast: 'Broadcast',
-  'product-updates': "What's New Emails",
-  systems: 'Systems & Connections',
-  'issue-reports': 'Fix pipeline', 'feature-roadmap': 'Feature Requests',
-  'swan-queue': 'Swan Index — Review Queue', 'swan-front-page': 'Swan Index — Front Page',
+  'product-updates': "What's New emails",
+  systems: 'Systems & connections',
+  'issue-reports': 'Fix pipeline', 'feature-roadmap': 'Feature requests',
+  'swan-queue': 'Swan Index — Review queue', 'swan-front-page': 'Swan Index — Front page',
   'swan-contributors': 'Swan Index — Contributors', 'swan-optouts': 'Swan Index — Opt-outs',
-  'music-library': 'Music Library',
-  'site-styles': 'Site Styles',
-  'hosted-sites': 'Hosted Sites',
-  'ai-visibility': 'AI Visibility',
+  'music-library': 'Music library',
+  'site-styles': 'Site styles',
+  'hosted-sites': 'Hosted sites',
+  'ai-visibility': 'AI visibility',
   'platform-reviews': 'Reviews',
 };
 
@@ -3390,100 +3381,115 @@ const VIEW_LABELS = {
 //
 // A category is shown when at least one of its children is — no separate cat gate.
 //
-// Eight top-level categories, down from ten. The rail is the scarcest space in the
-// portal — it has to stay readable at a glance without truncating labels or
-// scrolling — so anything that could sit one level deeper does. Children may carry
-// an optional `group`, which renders as a heading inside the sub-menu; that keeps
-// the three big sections (Customers, Platform, Trust) scannable without paying for
-// them in the rail. Groups are only drawn when a section has more than one visible,
-// so a permission-trimmed sub-menu never shows a lone heading.
+// Eight top-level categories, organised by the job an admin came to do (2026-11-11):
+// a customer's problem → Customers; anything about money → Money; building assistants →
+// Assistants; talking to people and how we look → Growth; numbers → Reports; is it working →
+// System; is it safe → Security. The rail is the scarcest space in the portal, so anything
+// that could sit one level deeper does. Children may carry an optional `group`, drawn as a
+// heading inside the sub-menu; groups are only drawn when a section has more than one
+// visible, so a permission-trimmed sub-menu never shows a lone heading.
+//
+// Labels are sentence case and every icon is used once. Master Data is no longer a page in the
+// menu: each of its tabs is its own entry in the section it belongs to (MD_TAB_VIEWS below).
 const ADMIN_CATS = {
   dashboard: { label: 'Dashboard', children: [
     { view: 'dashboard', icon: '📊', label: 'Dashboard', perm: null }, // always visible to any admin
   ]},
-  // Everything about the people and organisations paying us: who they are, and what
-  // they have told us. Workspaces used to be its own rail entry for a single page.
+  // The people and organisations using us, and what they are waiting on us for.
   customers: { label: 'Customers', children: [
-    { view: 'users',          icon: '👥', label: 'All Users',        perm: 'view_users',      group: 'Accounts' },
-    { view: 'workspaces',     icon: '🏢', label: 'Workspaces',       perm: 'view_workspaces', group: 'Accounts' },
-    { view: 'contacts',       icon: '👤', label: 'Contacts',         perm: 'view_users',      group: 'Accounts' },
-    { view: 'beta-testers',   icon: '🧪', label: 'Beta testers',     perm: 'manage_beta',     group: 'Accounts' },
-    // One Inbox for everything people are waiting on us for (2026-10-18). Support Tickets left the
-    // menu; Issue Reports stays as the Fix pipeline — the developer's hand-off / merge tooling.
-    { view: 'inbox',          icon: '📥', label: 'Inbox',            perm: 'view_tickets',            group: 'Inbound' },
-    { view: 'issue-reports',  icon: '🐞', label: 'Fix pipeline',     perm: 'view_issue_reports',      group: 'Inbound' },
-    { view: 'feature-roadmap',icon: '💡', label: 'Feature Requests', perm: 'manage_feature_requests', group: 'Inbound' },
-    // Reviews OF Be More Swan (admin-platform-reviews.ts). platform_config: no role data has to change.
-    { view: 'platform-reviews', icon: '⭐', label: 'Reviews',        perm: 'platform_config',         group: 'Inbound' },
+    { view: 'users',          icon: '👥', label: 'Users',            perm: 'view_users',            group: 'Accounts' },
+    { view: 'workspaces',     icon: '🏢', label: 'Workspaces',       perm: 'view_workspaces',       group: 'Accounts' },
+    { view: 'contacts',       icon: '📇', label: 'Contacts',         perm: 'view_users',            group: 'Accounts' },
+    // Customers' own websites — a customer's thing, not a security monitor.
+    { view: 'hosted-sites',   icon: '🌐', label: 'Hosted sites',     perm: 'platform_config',       group: 'Accounts' },
+    { view: 'plan-moves',     icon: '🔀', label: 'Plan moves',       perm: 'override_subscription', group: 'Accounts' },
+    { view: 'beta-testers',   icon: '🧪', label: 'Beta testers',     perm: 'manage_beta',           group: 'Accounts' },
+    // One Inbox for everything people are waiting on us for (2026-10-18). Fix pipeline sits beside it
+    // because tickets flow into it — the developer's hand-off / merge tooling.
+    { view: 'inbox',          icon: '📥', label: 'Inbox',            perm: 'view_tickets',            group: 'Support' },
+    { view: 'issue-reports',  icon: '🐞', label: 'Fix pipeline',     perm: 'view_issue_reports',      group: 'Support' },
+    { view: 'feature-roadmap',icon: '💡', label: 'Feature requests', perm: 'manage_feature_requests', group: 'Support' },
   ]},
-  revenue: { label: 'Revenue', children: [
-    { view: 'reconciliation', icon: '🔄', label: 'Stripe Reconciliation', perm: 'view_reconciliation' },
-    { view: 'dunning',        icon: '⏰', label: 'Dunning Queue',         perm: 'dunning_override' },
-    { view: 'disputes',       icon: '⚠️', label: 'Disputes',              perm: 'view_reconciliation' },
-    { view: 'cogs',           icon: '💰', label: 'COGS Dashboard',        perm: 'view_cogs' },
-    { view: 'coupons',        icon: '🏷️', label: 'Coupons',               perm: 'manage_coupons' },
-    { view: 'plan-moves',     icon: '🔀', label: 'Plan moves',            perm: 'override_subscription' },
-    { view: 'partners',       icon: '🤝', label: 'Partners',              perm: 'manage_partners' },
+  // The queues that need action today first, then what we charge.
+  money: { label: 'Money', children: [
+    { view: 'dunning',        icon: '⏰', label: 'Dunning queue',         perm: 'dunning_override',    group: 'Needs action' },
+    { view: 'disputes',       icon: '⚠️', label: 'Disputes',              perm: 'view_reconciliation', group: 'Needs action' },
+    { view: 'reconciliation', icon: '🔄', label: 'Stripe reconciliation', perm: 'view_reconciliation', group: 'Needs action' },
+    { view: 'plans',          icon: '📦', label: 'Plans',                 perm: 'platform_config',     group: 'Pricing' },
+    { view: 'plan-features',  icon: '✅', label: 'Plan features',         perm: 'platform_config',     group: 'Pricing' },
+    { view: 'coupons',        icon: '🏷️', label: 'Coupons',               perm: 'manage_coupons',      group: 'Pricing' },
+    { view: 'task-costs',     icon: '🧮', label: 'Task costs',            perm: 'manage_task_costs',   group: 'Pricing' },
+    { view: 'partners',       icon: '🤝', label: 'Partners',              perm: 'manage_partners',     group: 'Partners' },
   ]},
   assistants: { label: 'Assistants', children: [
-    { view: 'catalog',              icon: '🤖', label: 'Assistants',          perm: 'assistant_catalog', group: 'Configuration' },
     // Assistant capabilities live on this page: platform-wide switches above the list, per-role
     // grants on each role's Capabilities tab.
-    { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint Inspector', perm: 'assistant_catalog', group: 'Configuration' },
-    { view: 'model-config',         icon: '⚙️', label: 'AI Model Config',     perm: 'platform_config',   group: 'Configuration' },
-    // Publishing is what the content assistants actually do, so its pipeline reads
-    // better next to them than buried in a ten-deep Platform list.
-    { view: 'publish-pipeline',     icon: '📡', label: 'Publishing Pipeline', perm: 'platform_config',   group: 'Configuration' },
+    { view: 'catalog',              icon: '🤖', label: 'Assistants',          perm: 'assistant_catalog', group: 'Set-up' },
+    { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint inspector', perm: 'assistant_catalog', group: 'Set-up' },
+    { view: 'assistant-versions',   icon: '🗃️', label: 'Versions',            perm: 'platform_config',   group: 'Set-up' },
+    { view: 'model-config',         icon: '🧠', label: 'AI models',           perm: 'platform_config',   group: 'Set-up' },
+    // Publishing is what the content assistants actually do, so its pipeline sits next to them.
+    { view: 'publish-pipeline',     icon: '📡', label: 'Publishing pipeline', perm: 'platform_config',   group: 'Set-up' },
     // What the post editor offers as music — and the only place a community-shared track that
-    // should not be in the library can be taken out. platform_config: an existing permission, so no
-    // role data has to change before it works.
-    { view: 'music-library',     icon: '🎵', label: 'Music Library', perm: 'platform_config',   group: 'Content Library' },
+    // should not be in the library can be taken out.
+    { view: 'music-library',        icon: '🎵', label: 'Music library',       perm: 'platform_config',   group: 'Library' },
   ]},
-  // The Swan Index — the editorial desk for theswanindex.com. Curation is a different job from
-  // configuring an assistant, so it has its own rail entry rather than a group inside Assistants.
-  'swan-index': { label: 'The Swan Index', children: [
-    { view: 'swan-queue',        icon: '📥', label: 'Review Queue',  perm: 'curate_swan_index' },
-    { view: 'swan-front-page',   icon: '🗞️', label: 'Front Page',    perm: 'curate_swan_index' },
-    { view: 'swan-contributors', icon: '✍️', label: 'Contributors',  perm: 'curate_swan_index' },
+  // Talking to people, and how Be More Swan looks from outside. The Swan Index (the editorial desk
+  // for theswanindex.com) is a group here; a curator holding only curate_swan_index sees just that
+  // group, because a category shows whatever its children allow.
+  growth: { label: 'Growth', children: [
+    { view: 'email-templates',        icon: '✉️', label: 'Email templates',        perm: 'manage_comms_templates', group: 'Messages' },
+    { view: 'notification-templates', icon: '🔔', label: 'Notification templates', perm: 'manage_comms_templates', group: 'Messages' },
+    { view: 'send-notification',      icon: '📨', label: 'Message one person',     perm: 'manage_comms_templates', group: 'Messages' },
+    { view: 'broadcast',              icon: '📣', label: 'Broadcast',              perm: 'manage_comms_templates', group: 'Messages' },
+    { view: 'product-updates',        icon: '🆕', label: "What's New emails",      perm: 'manage_comms_templates', group: 'Messages' },
+    { view: 'help-articles',          icon: '📚', label: 'Help articles',          perm: 'platform_config',        group: 'Content' },
+    // Reviews OF Be More Swan (admin-platform-reviews.ts), and whether AI assistants name us.
+    { view: 'platform-reviews',       icon: '⭐', label: 'Reviews',                perm: 'platform_config',        group: 'Reputation' },
+    { view: 'ai-visibility',          icon: '🔎', label: 'AI visibility',          perm: 'platform_config',        group: 'Reputation' },
+    { view: 'swan-queue',        icon: '📝', label: 'Review queue',  perm: 'curate_swan_index', group: 'Swan Index' },
+    { view: 'swan-front-page',   icon: '🗞️', label: 'Front page',    perm: 'curate_swan_index', group: 'Swan Index' },
+    { view: 'swan-contributors', icon: '✍️', label: 'Contributors',  perm: 'curate_swan_index', group: 'Swan Index' },
     // Customers opt out by email (Terms); this is where an editor records it.
-    { view: 'swan-optouts',      icon: '🚫', label: 'Opt-outs',      perm: 'curate_swan_index' },
+    { view: 'swan-optouts',      icon: '🚫', label: 'Opt-outs',      perm: 'curate_swan_index', group: 'Swan Index' },
   ]},
-  platform: { label: 'Platform', children: [
-    { view: 'master-data',          icon: '🗂️', label: 'Master Data',           perm: 'platform_config',         group: 'Configuration' },
-    { view: 'feature-flags',        icon: '🚩', label: 'Feature Flags',         perm: 'feature_flags',           group: 'Configuration' },
-    { view: 'session-timeout',      icon: '⏱️', label: 'Session Timeout',       perm: 'manage_session_timeout',  group: 'Configuration' },
-    { view: 'gamification',         icon: '🎮', label: 'Gamification Settings', perm: 'platform_config',         group: 'Configuration' },
-    // Fonts, text, labels, buttons and borders for the whole product — website, workspace and this
-    // portal. platform_config: an existing permission, so no role data changes before it works.
-    { view: 'site-styles',          icon: '🎨', label: 'Site Styles',           perm: 'platform_config',         group: 'Configuration' },
-    { view: 'analytics',            icon: '📈', label: 'Analytics',             perm: 'view_analytics',          group: 'Insights' },
-    { view: 'reward-audits',        icon: '🏆', label: 'Reward Audits',         perm: 'platform_config',         group: 'Insights' },
-    // Does Be More Swan come up when a prospect asks ChatGPT, Claude, Gemini or Copilot? Monthly runs
-    // of the same questions (admin-ai-visibility.ts). platform_config: no role data has to change.
-    { view: 'ai-visibility',        icon: '🔎', label: 'AI Visibility',         perm: 'platform_config',         group: 'Insights' },
-    { view: 'systems',              icon: '🛠️', label: 'Systems & Connections', perm: 'view_system_status',      group: 'Operations' },
-    { view: 'sandbox',              icon: '🧪', label: 'Sandbox Environment',   perm: 'sandbox_access',          group: 'Operations' },
-    { view: 'kill-switches',        icon: '🚨', label: 'Emergency Controls',    perm: 'kill_switch',             group: 'Operations' },
+  reports: { label: 'Reports', children: [
+    { view: 'analytics',     icon: '📈', label: 'Analytics',     perm: 'view_analytics' },
+    { view: 'cogs',          icon: '💰', label: 'Costs (COGS)',  perm: 'view_cogs' },
+    { view: 'reward-audits', icon: '🏆', label: 'Reward audits', perm: 'platform_config' },
   ]},
-  comms: { label: 'Comms', children: [
-    { view: 'email-templates',        icon: '✉️', label: 'Manage Emails',          perm: 'manage_comms_templates' },
-    { view: 'notification-templates', icon: '🔔', label: 'Notification Templates', perm: 'manage_comms_templates' },
-    { view: 'send-notification',      icon: '📨', label: 'Send a Message',         perm: 'manage_comms_templates' },
-    { view: 'broadcast',              icon: '📣', label: 'Broadcast',              perm: 'manage_comms_templates' },
-    { view: 'product-updates',        icon: '🆕', label: "What's New Emails",      perm: 'manage_comms_templates' },
+  // Is it set up, is it working, and the big red buttons.
+  system: { label: 'System', children: [
+    // Fonts, text, labels, buttons and borders for the whole product — website, workspace and this portal.
+    { view: 'site-styles',     icon: '🎨', label: 'Site styles',           perm: 'platform_config',        group: 'Settings' },
+    { view: 'languages',       icon: '🌍', label: 'Languages',             perm: 'platform_config',        group: 'Settings' },
+    { view: 'system-config',   icon: '🗂️', label: 'System config',         perm: 'platform_config',        group: 'Settings' },
+    { view: 'session-timeout', icon: '⏱️', label: 'Session timeout',       perm: 'manage_session_timeout', group: 'Settings' },
+    // Master Data's "Flag Definitions" tab edited the same table; its Delete now lives here.
+    { view: 'feature-flags',   icon: '🚩', label: 'Feature flags',         perm: 'feature_flags',          group: 'Settings' },
+    { view: 'gamification',    icon: '🎮', label: 'Gamification',          perm: 'platform_config',        group: 'Settings' },
+    { view: 'systems',         icon: '🛠️', label: 'Systems & connections', perm: 'view_system_status',     group: 'Health' },
+    { view: 'logs',            icon: '📋', label: 'System logs',           perm: 'view_audit_log',         group: 'Health' },
+    { view: 'sandbox',         icon: '🧫', label: 'Sandbox',               perm: 'sandbox_access',         group: 'Health' },
+    { view: 'kill-switches',   icon: '🚨', label: 'Emergency controls',    perm: 'kill_switch',            group: 'Emergency' },
   ]},
-  // Security and Compliance were two rail entries holding five pages between them,
-  // and an admin chasing an incident had to guess which one owned the trail.
-  trust: { label: 'Trust', children: [
-    { view: 'manage-admins',   icon: '🛡️', label: 'Admin Accounts',   perm: 'manage_admin_roles',  group: 'Access' },
-    { view: 'audit-log',       icon: '🔐', label: 'Audit Log',        perm: 'view_audit_log',      group: 'Monitoring' },
-    { view: 'logs',            icon: '📋', label: 'System Logs',      perm: 'view_audit_log',      group: 'Monitoring' },
-    { view: 'security-abuse',  icon: '🚩', label: 'Security & Abuse', perm: 'view_security_abuse', group: 'Monitoring' },
-    { view: 'hosted-sites',    icon: '🌐', label: 'Hosted Sites',     perm: 'platform_config',     group: 'Monitoring' },
-    { view: 'breach-response', icon: '🚨', label: 'Breach Response',  perm: 'breach_response',     group: 'Incidents' },
-    { view: 'bias-audit',      icon: '⚖️', label: 'Bias Audit',       perm: 'breach_response',     group: 'Incidents' },
+  security: { label: 'Security', children: [
+    { view: 'manage-admins',   icon: '🛡️', label: 'Admin accounts',   perm: 'manage_admin_roles',  group: 'Access' },
+    { view: 'audit-log',       icon: '🔐', label: 'Audit log',        perm: 'view_audit_log',      group: 'Access' },
+    { view: 'security-abuse',  icon: '🕵️', label: 'Security & abuse', perm: 'view_security_abuse', group: 'Threats' },
+    { view: 'breach-response', icon: '🔥', label: 'Breach response',  perm: 'breach_response',     group: 'Threats' },
+    // A scheduled compliance check, not an incident.
+    { view: 'bias-audit',      icon: '⚖️', label: 'Bias audit',       perm: 'breach_response',     group: 'Compliance' },
   ]},
 };
+
+// Master Data's tabs, each now its own menu entry. They all render inside the one
+// #view-master-data section (one editing screen), opened on that tab — the view key IS the tab key.
+const MD_TAB_VIEWS = ['plans', 'plan-features', 'assistant-versions', 'languages', 'system-config', 'help-articles'];
+
+// Old view keys still arriving from bookmarks, the last-view memory and older links.
+const VIEW_ALIASES = { 'master-data': 'plans', 'feature-flags-md': 'feature-flags' };
+function _resolveView(view) { return VIEW_ALIASES[view] || view; }
 
 // ── RBAC: decode admin role from JWT cookie ──────────────────────────────────
 function _getAdminRole() {
@@ -3728,6 +3734,7 @@ function _catOwning(view) {
 // sub-menu reflects where you landed. Cross-links used to call adminCatNav()
 // with a *view* key, which matched no category and silently did nothing.
 function adminGoTo(view) {
+  view = _resolveView(view);
   const cat = _catOwning(view);
   // Dashboard is standalone; adminCatNav handles closing the panel and navigating.
   if (cat === 'dashboard') { adminCatNav('dashboard'); return; }
@@ -3749,10 +3756,13 @@ document.addEventListener('keydown', e => {
 });
 
 function adminNav(view) {
+  view = _resolveView(view);
   _activeView = view;
   document.getElementById('bp-payload-panel')?.remove();
   document.querySelectorAll('.admin-view').forEach(el => el.classList.add('hidden'));
-  document.getElementById('view-' + view)?.classList.remove('hidden');
+  // Master Data's tabs share one section; every other view has its own.
+  const sectionKey = MD_TAB_VIEWS.includes(view) ? 'master-data' : view;
+  document.getElementById('view-' + sectionKey)?.classList.remove('hidden');
   document.getElementById('admin-page-title').textContent = VIEW_LABELS[view] || view;
 
   // Update URL without triggering a full navigation. `section` is DROPPED: it is the legacy alias an
@@ -3789,6 +3799,7 @@ function adminNav(view) {
   if (view === 'cogs')            loadCogsDashboard();
   if (view === 'coupons')         loadCoupons();
   if (view === 'plan-moves')      loadPlanMoves();
+  if (view === 'task-costs')      loadTaskCostsAdmin();
   if (view === 'partners')        loadPartners();
   if (view === 'beta-testers')    loadBetaTesters();
   if (view === 'platform-reviews') loadPlatformReviews();
@@ -3805,7 +3816,7 @@ function adminNav(view) {
   if (view === 'breach-response') loadBreachResponse();
   if (view === 'bias-audit')      loadBiasAudit();
   if (view === 'product-updates') loadProductUpdates();
-  if (view === 'master-data')     { if (!_mdActiveTab) mdSwitchTab('plans'); else mdLoadTab(_mdActiveTab); }
+  if (MD_TAB_VIEWS.includes(view)) mdSwitchTab(view);
   if (view === 'workspaces')          loadWorkspaces();
   if (view === 'blueprint-inspector') initBlueprintInspector();
   if (view === 'publish-pipeline')    loadPublishPipeline();
@@ -4408,6 +4419,209 @@ async function runBroadcast(btn, resource, payload) {
     setTimeout(loadBroadcasts, 4000);
   } catch (err) {
     showBcStatus('error', err.message || 'That didn\'t work.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── Task costs (what each piece of work costs customers) ─────────────────────
+// admin-task-costs.ts does the checking, as Broadcast does: this page shows the notice as customers
+// will read it, a test send to yourself, and an announce that only fires when you type the number of
+// people it goes to (the server re-checks it).
+const TC_API = '/.netlify/functions/admin-task-costs';
+let tcState = null;
+
+function showTcStatus(kind, msg) {
+  const el = document.getElementById('tc-status');
+  el.textContent = msg;
+  el.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' + (kind === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700');
+  el.style.display = 'block';
+}
+
+async function tcCall(resource, payload) {
+  const res = await fetch(`${TC_API}?resource=${resource}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(d.error || `That didn't work (HTTP ${res.status}).`), { status: res.status });
+  return d;
+}
+
+const tcLongDate = (iso) => new Date(`${iso}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
+const tcItemText = (c, i) => {
+  const row = (tcState.costs || []).find((x) => x.key === i.key);
+  return `${bcEsc(row ? row.label : i.key)}: ${i.oldUnits === null ? '' : `${i.oldUnits} → `}${i.newUnits}`;
+};
+
+async function loadTaskCostsAdmin() {
+  const box = document.getElementById('tc-costs');
+  if (!box) return;
+  box.innerHTML = '<p class="text-sm text-gray-400">Loading&hellip;</p>';
+  try {
+    const res = await fetch(`${TC_API}?resource=state`);
+    const d = await res.json();
+    if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+    tcState = d;
+  } catch (err) {
+    box.innerHTML = `<p class="text-sm text-rose-600">${bcEsc(err.message || 'Could not load the costs.')}</p>`;
+    return;
+  }
+  const mode = document.getElementById('tc-mode');
+  mode.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' + (tcState.emailsGoToCustomers ? 'bg-amber-50 text-amber-800' : 'bg-sky-50 text-sky-800');
+  mode.textContent = tcState.emailsGoToCustomers
+    ? 'This is the live site: announcing emails every customer, and the new cost applies to them on its date.'
+    : `This is not the live site: in-app notices are written to this database, but no customer is emailed. A test emails ${tcState.you} only.`;
+  mode.style.display = 'block';
+  tcPaintOpen();
+  tcPaintCosts();
+  tcPaintHistory();
+}
+
+function tcPaintCosts() {
+  const announced = (tcState.changes || []).find((c) => c.id === tcState.openChangeId && c.status === 'announced');
+  const draft = (tcState.changes || []).find((c) => c.id === tcState.openChangeId && c.status === 'draft');
+  const draftValue = (key) => { const i = draft && draft.items.find((x) => x.key === key); return i ? i.newUnits : null; };
+  const rows = tcState.costs.map((c) => {
+    const set = draftValue(c.key);
+    const input = `<input type="number" min="${c.min}" max="${c.max}" step="1" value="${set ?? c.value}" data-tc-key="${bcEsc(c.key)}" data-tc-now="${c.value}" aria-label="New value for ${bcEsc(c.label)}" class="w-24 border border-gray-300 rounded-lg px-2 py-1.5 text-sm" ${announced ? 'disabled' : ''}>`;
+    return `<tr class="border-t border-gray-100">
+      <td class="px-4 py-2.5 text-gray-800">${bcEsc(c.label)}</td>
+      <td class="px-4 py-2.5 text-gray-600">${bcEsc(c.text)}</td>
+      <td class="px-4 py-2.5">${input}</td>
+      <td class="px-4 py-2.5">${c.inUse ? '' : `<button type="button" data-tc-unused="${bcEsc(c.key)}" class="btn-secondary px-3 py-1.5 text-xs font-semibold border rounded-lg" ${announced ? 'disabled' : ''}>Save</button> <span class="text-xs text-gray-500">Nobody is charged this yet, so no notice is needed.</span>`}</td>
+    </tr>`;
+  }).join('');
+  document.getElementById('tc-costs').innerHTML = `
+    <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead><tr class="text-left text-xs font-bold text-gray-500 uppercase tracking-wide"><th class="px-4 py-3">Work</th><th class="px-4 py-3">Costs today</th><th class="px-4 py-3">New value</th><th class="px-4 py-3"></th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    ${announced ? `<p class="text-sm text-gray-500 mt-3">A change is already announced. Wait for it to start, or cancel it, before setting another.</p>` : `
+    <div class="bg-white rounded-2xl border border-gray-200 p-5 mt-4 space-y-3">
+      <label class="block text-sm font-semibold text-gray-700">Starts on
+        <input type="date" id="tc-date" value="${bcEsc(draft ? draft.effectiveDate : tcState.earliest.rise)}" min="${bcEsc(tcState.earliest.reduction)}" class="block mt-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal">
+        <span class="block text-xs font-normal text-gray-500 mt-1">A cost going up can start from ${bcEsc(tcLongDate(tcState.earliest.rise))}. A reduction can start from ${bcEsc(tcLongDate(tcState.earliest.reduction))}.</span>
+      </label>
+      <label class="block text-sm font-semibold text-gray-700">Why it's changing (customers read this)
+        <textarea id="tc-reason" rows="2" maxlength="600" class="block w-full mt-1 border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal">${bcEsc(draft ? draft.reason : '')}</textarea>
+      </label>
+      <button type="button" id="tc-save" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">${draft ? 'Update the draft' : 'Save as a draft'}</button>
+      <p class="text-xs text-gray-500">A draft changes nothing and tells nobody.</p>
+    </div>`}`;
+  document.querySelectorAll('[data-tc-unused]').forEach((b) => b.addEventListener('click', () => tcSaveUnused(b)));
+  document.getElementById('tc-save')?.addEventListener('click', tcSaveDraft);
+}
+
+async function tcSaveDraft(e) {
+  const btn = e.currentTarget;
+  const items = {};
+  document.querySelectorAll('[data-tc-key]').forEach((i) => { if (i.value !== i.dataset.tcNow) items[i.dataset.tcKey] = Number(i.value); });
+  btn.disabled = true;
+  try {
+    await tcCall('save', { items, effectiveDate: document.getElementById('tc-date').value, reason: document.getElementById('tc-reason').value });
+    showTcStatus('success', 'Saved as a draft. Read the notice below, then announce it when you are ready.');
+    await loadTaskCostsAdmin();
+  } catch (err) {
+    showTcStatus('error', err.message);
+    btn.disabled = false;
+  }
+}
+
+async function tcSaveUnused(btn) {
+  const key = btn.dataset.tcUnused;
+  const input = document.querySelector(`[data-tc-key="${CSS.escape(key)}"]`);
+  btn.disabled = true;
+  try {
+    await tcCall('set_unused', { key, value: Number(input.value) });
+    showTcStatus('success', 'Saved. Nobody is charged this yet, so no notice went out.');
+    await loadTaskCostsAdmin();
+  } catch (err) {
+    showTcStatus('error', err.message);
+    btn.disabled = false;
+  }
+}
+
+function tcPaintOpen() {
+  const box = document.getElementById('tc-open');
+  const c = (tcState.changes || []).find((x) => x.id === tcState.openChangeId);
+  if (!c) { box.innerHTML = ''; return; }
+  const items = c.items.map((i) => `<li>${tcItemText(c, i)}</li>`).join('');
+  if (c.status === 'draft') {
+    box.innerHTML = `
+      <div class="border border-amber-200 rounded-2xl p-5 bg-white">
+        <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+          <div><p class="font-extrabold text-gray-900">Draft: starts ${bcEsc(tcLongDate(c.effectiveDate))}</p><ul class="text-sm text-gray-600 mt-1 list-disc list-inside">${items}</ul></div>
+          <p class="text-sm shrink-0"><strong>${c.waiting}</strong> ${c.waiting === 1 ? 'person' : 'people'} will get this</p>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div><p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">In-app</p>
+            ${c.inApp ? `<div class="bg-gray-50 border border-gray-200 rounded-lg p-3"><p class="text-sm font-bold text-gray-900">${bcEsc(c.inApp.title)}</p><p class="text-sm text-gray-600 mt-1">${bcEsc(c.inApp.message)}</p></div>` : '<p class="text-sm text-rose-600">No in-app template.</p>'}</div>
+          <div><p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Email${c.email ? ': ' + bcEsc(c.email.subject) : ''}</p>
+            ${c.email ? '<iframe id="tc-email" class="w-full h-80 border border-gray-200 rounded-lg bg-white" title="Email preview"></iframe>' : '<p class="text-sm text-rose-600">No email template.</p>'}</div>
+        </div>
+        <p class="text-xs text-gray-500 mt-3">Before you announce: if the "What Counts as a Task" help article or the figures in terms clause 5.2 quote this cost, update them for the same date. Pricing, the FAQ and the app follow by themselves.</p>
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+          <button type="button" id="tc-test" class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Send a test to me</button>
+          <button type="button" id="tc-discard" class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Discard the draft</button>
+          <input type="text" inputmode="numeric" id="tc-confirm" class="w-28 border border-gray-300 rounded-lg px-2 py-2 text-sm" placeholder="Type ${c.waiting}" aria-label="Type the number of people to confirm">
+          <button type="button" id="tc-announce" class="btn-golive px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled>Announce to ${c.waiting} ${c.waiting === 1 ? 'person' : 'people'}</button>
+        </div>
+      </div>`;
+    const frame = document.getElementById('tc-email');
+    if (frame && c.email) frame.srcdoc = c.email.html;
+    document.getElementById('tc-confirm').addEventListener('input', (e) => { document.getElementById('tc-announce').disabled = e.target.value.trim() !== String(c.waiting); });
+    document.getElementById('tc-test').addEventListener('click', (e) => tcRun(e.currentTarget, 'test', { id: c.id }, (d) => `Test sent to you: in-app ${d.inApp ? 'added' : 'not added'}, email ${d.emailed ? 'sent to ' + d.to : 'not sent'}.`));
+    document.getElementById('tc-discard').addEventListener('click', (e) => tcRun(e.currentTarget, 'discard', { id: c.id }, () => 'Draft discarded.'));
+    document.getElementById('tc-announce').addEventListener('click', (e) => tcRun(e.currentTarget, 'announce', { id: c.id, expected: c.waiting }, (d) => d.emailsGoToCustomers ? `Announced. Sending to ${d.waiting} people in the background.` : `Announced on this database. In-app notices are going to ${d.waiting} people; no customer is emailed from here.`));
+    return;
+  }
+  const a = c.acceptance || { workspaces: 0, accepted: 0, waiting: [] };
+  box.innerHTML = `
+    <div class="border border-emerald-200 rounded-2xl p-5 bg-white">
+      <p class="font-extrabold text-gray-900">Announced: starts ${bcEsc(tcLongDate(c.effectiveDate))}</p>
+      <ul class="text-sm text-gray-600 mt-1 list-disc list-inside">${items}</ul>
+      ${tcStatsHtml(c, a)}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        ${c.waiting ? `<button type="button" id="tc-resend" class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Send to the ${c.waiting} still waiting</button>` : ''}
+        <button type="button" id="tc-cancel" class="btn-secondary px-3 py-2 text-sm font-semibold border rounded-lg">Cancel this change</button>
+      </div>
+    </div>`;
+  document.getElementById('tc-resend')?.addEventListener('click', (e) => tcRun(e.currentTarget, 'resend', { id: c.id, expected: c.waiting }, (d) => `Sending to ${d.waiting} people in the background.`));
+  document.getElementById('tc-cancel').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    if (!(await window.confirmModal('The costs stay as they are, and everyone who had the notice is told it is not going ahead.', { title: 'Cancel this change?', confirmLabel: 'Cancel the change', cancelLabel: 'Keep it' }))) return;
+    tcRun(btn, 'cancel', { id: c.id }, (d) => d.noticeError ? `Cancelled, but the notice could not start: ${d.noticeError}` : 'Cancelled. Telling everyone who had the notice.');
+  });
+}
+
+function tcStatsHtml(c, a) {
+  const waitingList = a.waiting.length
+    ? `<details class="mt-2 text-sm"><summary class="cursor-pointer text-gray-600">${a.waiting.length} workspace${a.waiting.length === 1 ? '' : 's'} still to accept</summary><ul class="mt-1 text-gray-600 space-y-0.5">${a.waiting.map((w) => `<li>${bcEsc(w.name || 'Workspace ' + w.id)}${w.ownerEmail ? ' · ' + bcEsc(w.ownerEmail) : ''}</li>`).join('')}</ul></details>`
+    : '';
+  return `<p class="text-sm text-gray-600 mt-2"><strong>${c.sent ?? 0}</strong> people have the notice, <strong>${c.waiting ?? 0}</strong> waiting. <strong>${a.accepted}</strong> of ${a.workspaces} workspaces accepted.</p>${waitingList}`;
+}
+
+function tcPaintHistory() {
+  const past = (tcState.changes || []).filter((c) => c.id !== tcState.openChangeId);
+  document.getElementById('tc-history').innerHTML = past.length ? `
+    <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Past changes</p>
+    <div class="space-y-3">${past.map((c) => `
+      <div class="bg-white rounded-2xl border border-gray-200 p-4 text-sm">
+        <p class="font-bold text-gray-900">${c.status === 'cancelled' ? 'Cancelled: was to start' : 'Started'} ${bcEsc(tcLongDate(c.effectiveDate))}</p>
+        <ul class="text-gray-600 mt-1 list-disc list-inside">${c.items.map((i) => `<li>${tcItemText(c, i)}</li>`).join('')}</ul>
+        ${c.acceptance ? tcStatsHtml(c, c.acceptance) : ''}
+      </div>`).join('')}</div>` : '';
+}
+
+async function tcRun(btn, resource, payload, say) {
+  btn.disabled = true;
+  try {
+    const d = await tcCall(resource, payload);
+    showTcStatus('success', say(d));
+    setTimeout(loadTaskCostsAdmin, resource === 'test' ? 0 : 3000);
+  } catch (err) {
+    showTcStatus('error', err.message);
+    if (err.status === 409) loadTaskCostsAdmin();
   } finally {
     btn.disabled = false;
   }
@@ -8769,6 +8983,9 @@ async function loadFeatureFlags() {
     document.getElementById('ff-workspace-count').textContent =
       `${_ffTotalWorkspaces} active workspaces in rollout pool`;
 
+    // Delete came over from Master Data's "Flag Definitions" tab, which edited this same table. The
+    // delete sheet's preview (cascade-preview) is super-admin only, so only they see the button.
+    const canDelete = _adminRole === 'super_admin';
     document.getElementById('ff-tbody').innerHTML = (d.flags || []).map(f => {
       const vipCount = f.allowedWorkspaceIds?.length || 0;
       const tiers = f.allowedTiers?.join(', ') || '<span class="text-gray-400">all</span>';
@@ -8794,6 +9011,8 @@ async function loadFeatureFlags() {
         <td class="px-4 py-3">
           <button onclick="openFlagEditor('${f.key}', ${f.enabled}, ${f.rolloutPercentage}, ${JSON.stringify(JSON.stringify(f.allowedTiers||[]))}, ${JSON.stringify(JSON.stringify(f.allowedWorkspaceIds||[]))})"
             class="text-xs text-indigo-600 hover:underline font-semibold">Edit</button>
+          ${canDelete ? `<button onclick='openCascadeDeleteSheet("feature_flags",${JSON.stringify(f.key)},${JSON.stringify(f.key)},loadFeatureFlags)'
+            class="ml-2 text-xs text-red-500 hover:underline font-semibold">Delete</button>` : ''}
         </td>
       </tr>`;
     }).join('') || '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">No feature flags defined yet.</td></tr>';
@@ -9585,7 +9804,7 @@ function _ctIssuesSection(issues, client) {
   );
 }
 
-// In App Messages — the ad-hoc admin → user notifications sent from Comms → Send a Message
+// In App Messages — the ad-hoc admin → user notifications sent from Growth → Message one person
 // (notifications.type = 'admin_message'), newest first, with whether the user has read each one.
 // Read-only: there is no reply channel on an in-app message, and no delivery receipt beyond
 // `isRead`. Same visibility rule as Support requests / Issues reported — shown for any contact
@@ -10105,7 +10324,7 @@ async function prSaveDestinations() {
 }
 
 // ── Coupons (admin-coupons.ts) ───────────────────────────────────────────────
-// ── Plan moves (Admin → Revenue → Plan moves) ─────────────────────────────────────────────────
+// ── Plan moves (Admin → Customers → Plan moves) ─────────────────────────────────────────────────
 // Bulk move customers between plans (admin-plan-moves.ts). Preview first; the run schedules each
 // move in Stripe for the customer's next renewal and emails them. Prices shown are what Stripe
 // charges them today and what the new plan costs on THEIR interval (monthly or annual).
@@ -12813,13 +13032,6 @@ let _mdCache = {};
 
 function mdSwitchTab(tab) {
   _mdActiveTab = tab;
-  document.querySelectorAll('.md-tab').forEach(b => {
-    const active = b.dataset.tab === tab;
-    b.classList.toggle('border-indigo-600', active);
-    b.classList.toggle('text-indigo-600', active);
-    b.classList.toggle('border-transparent', !active);
-    b.classList.toggle('text-gray-500', !active);
-  });
   document.querySelectorAll('.md-pane').forEach(p => p.classList.add('hidden'));
   const pane = document.getElementById('md-pane-' + tab);
   if (pane) pane.classList.remove('hidden');
@@ -13130,7 +13342,7 @@ function mdRenderForm(tab, record) {
   const resource = MD_TAB_RESOURCE[tab];
   const fields = MD_FIELDS[resource] || [];
   const isEdit = _mdEditId != null;
-  document.getElementById('md-form-title').textContent = (isEdit ? 'Edit' : 'Add') + ' — ' + (document.querySelector('.md-tab[data-tab="' + tab + '"]')?.textContent || tab);
+  document.getElementById('md-form-title').textContent = (isEdit ? 'Edit' : 'Add') + ' — ' + (VIEW_LABELS[tab] || tab);
   const isPlan = tab === 'plans' && isEdit;
   document.getElementById('md-plan-warning').classList.toggle('hidden', !isPlan);
   const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -14191,30 +14403,30 @@ async function swanToggleSuspend(id, next, handle, livePieces) {
   // ⚠️ view BEFORE section: the other way round, a stale ?section= beat every later navigation.
   let remembered = null;
   try { remembered = localStorage.getItem(ADMIN_LAST_VIEW_KEY); } catch { /* private mode */ }
-  const initialView = params.get('view') || params.get('section') || remembered || 'dashboard';
+  const initialView = _resolveView(params.get('view') || params.get('section') || remembered || 'dashboard');
   if (_catOwning(initialView) && initialView !== 'dashboard') adminGoTo(initialView);
   else adminCatNav('dashboard');
 })();
 </script>
 
-<!-- US-ADM-1.5.1: Bottom tab bar (mobile <768px) — 4 tabs + More -->
+<!-- US-ADM-1.5.1: Bottom tab bar (mobile <768px) — 4 tabs + More, in the same order as the rail -->
 <div id="admin-bottom-tabs" role="navigation" aria-label="Admin mobile navigation">
   <nav>
     <button class="admin-bottom-tab-btn" data-cat="customers" onclick="adminCatNav('customers')" aria-label="Customers">
       <span class="tab-icon">👥</span>
       <span>Customers</span>
     </button>
-    <button class="admin-bottom-tab-btn" data-cat="revenue" onclick="adminCatNav('revenue')" aria-label="Revenue">
+    <button class="admin-bottom-tab-btn" data-cat="money" onclick="adminCatNav('money')" aria-label="Money">
       <span class="tab-icon">💳</span>
-      <span>Revenue</span>
+      <span>Money</span>
     </button>
     <button class="admin-bottom-tab-btn" data-cat="assistants" onclick="adminCatNav('assistants')" aria-label="Assistants">
       <span class="tab-icon">🤖</span>
       <span>Assistants</span>
     </button>
-    <button class="admin-bottom-tab-btn" data-cat="platform" onclick="adminCatNav('platform')" aria-label="Platform">
-      <span class="tab-icon">🔧</span>
-      <span>Platform</span>
+    <button class="admin-bottom-tab-btn" data-cat="growth" onclick="adminCatNav('growth')" aria-label="Growth">
+      <span class="tab-icon">📣</span>
+      <span>Growth</span>
     </button>
     <button class="admin-bottom-tab-btn" id="admin-more-btn" onclick="toggleMoreDrawer()" aria-label="More" aria-expanded="false">
       <span class="tab-icon">•••</span>
@@ -14230,14 +14442,14 @@ async function swanToggleSuspend(id, next, handle, livePieces) {
     <button class="admin-more-item" data-cat="dashboard" onclick="adminCatNav('dashboard');closeMoreDrawer()">
       <span class="more-icon">📊</span>Dashboard
     </button>
-    <button class="admin-more-item" data-cat="swan-index" onclick="adminCatNav('swan-index');closeMoreDrawer()">
-      <span class="more-icon">🦢</span>Swan Index
+    <button class="admin-more-item" data-cat="reports" onclick="adminCatNav('reports');closeMoreDrawer()">
+      <span class="more-icon">📈</span>Reports
     </button>
-    <button class="admin-more-item" data-cat="comms" onclick="adminCatNav('comms');closeMoreDrawer()">
-      <span class="more-icon">✉️</span>Comms
+    <button class="admin-more-item" data-cat="system" onclick="adminCatNav('system');closeMoreDrawer()">
+      <span class="more-icon">🔧</span>System
     </button>
-    <button class="admin-more-item" data-cat="trust" onclick="adminCatNav('trust');closeMoreDrawer()">
-      <span class="more-icon">🛡️</span>Trust
+    <button class="admin-more-item" data-cat="security" onclick="adminCatNav('security');closeMoreDrawer()">
+      <span class="more-icon">🛡️</span>Security
     </button>
   </div>
 </div>

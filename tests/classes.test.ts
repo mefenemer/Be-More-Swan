@@ -27,7 +27,7 @@ console.log('\nAdding dates');
 check('a session needs a class, a date not past, a start before its end, and 1–500 places', () => {
     const ok = cleanNewSessions({ serviceId: '4', date: '2026-10-20', start: '18:00', end: '19:15', capacity: '12', resourceId: '', repeatWeeks: '7', notes: ' Bring a mat ' }, '2026-10-15');
     assert.ok(ok.ok);
-    if (ok.ok) assert.deepStrictEqual(ok.value, { serviceId: 4, date: '2026-10-20', start: '18:00', end: '19:15', capacity: 12, resourceId: null, repeatWeeks: 7, notes: 'Bring a mat' });
+    if (ok.ok) assert.deepStrictEqual(ok.value, { serviceId: 4, date: '2026-10-20', start: '18:00', end: '19:15', capacity: 12, resourceId: null, repeatWeeks: 7, notes: 'Bring a mat', meetingUrl: null });
     const today = '2026-10-15';
     assert.ok(!cleanNewSessions({ date: '2026-10-20', start: '18:00', end: '19:00', capacity: 5 }, today).ok, 'no class');
     assert.ok(!cleanNewSessions({ serviceId: 1, date: '2026-10-14', start: '18:00', end: '19:00', capacity: 5 }, today).ok, 'in the past');
@@ -80,7 +80,7 @@ check('a class place is never "moved" to a time computed from opening hours', ()
 
 console.log('\nOn the site');
 
-const sv = (over: Partial<SessionView>): SessionView => ({ id: 1, title: 'Vinyasa', serviceId: 4, resourceName: 'Sarah', startsAt: '', endsAt: '', date: '2026-10-20', dateText: 'Tuesday 20 October', timeText: '6pm–7pm', capacity: 12, taken: 8, left: 4, status: 'scheduled', seriesKey: null, price: '£12', ...over });
+const sv = (over: Partial<SessionView>): SessionView => ({ id: 1, title: 'Vinyasa', serviceId: 4, resourceName: 'Sarah', startsAt: '', endsAt: '', date: '2026-10-20', dateText: 'Tuesday 20 October', timeText: '6pm–7pm', capacity: 12, taken: 8, left: 4, status: 'scheduled', seriesKey: null, price: '£12', online: false, ...over });
 
 check('places left in words', () => {
     assert.deepStrictEqual([0, 1, 4].map(placesText), ['Full', '1 place left', '4 places left']);

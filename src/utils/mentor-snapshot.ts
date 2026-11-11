@@ -30,6 +30,7 @@ import { loadCustomers, renderCustomersForMentor } from './mentor-customers';
 import { TEAM_FEATURES } from '../config/team-features';
 import { DISCUSSIONS_ENABLED, isDiscussionSource, sourceInfo } from '../config/discussion-sites';
 import { loadSiteDirectoryGaps } from './site-directory-store';
+import { listedSitesFilter } from './discussions';
 import { normalizeBrandKit } from './brand-kit';
 import { guidelinesPromptLines, hasGuidelines, normaliseGuidelines } from './brand-guidelines';
 
@@ -449,7 +450,7 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
             db.select({ assistantId: discussionWatches.aiAssistantId, topics: discussionWatches.topics, sites: discussionWatches.sites, enabled: discussionWatches.enabled, lastScannedAt: discussionWatches.lastScannedAt })
                 .from(discussionWatches).where(and(eq(discussionWatches.organisationId, orgId), inArray(discussionWatches.aiAssistantId, leadIds))),
             db.select({ assistantId: discussions.aiAssistantId, status: discussions.status, n: count() }).from(discussions)
-                .where(and(eq(discussions.organisationId, orgId), inArray(discussions.aiAssistantId, leadIds)))
+                .where(and(eq(discussions.organisationId, orgId), inArray(discussions.aiAssistantId, leadIds), listedSitesFilter()))
                 .groupBy(discussions.aiAssistantId, discussions.status),
         ]);
         const n = (id: number, status: string) => Number((counts as any[]).find((c) => c.assistantId === id && c.status === status)?.n ?? 0);

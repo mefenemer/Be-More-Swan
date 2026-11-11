@@ -1,3 +1,5 @@
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/assistant-mentor-overview.js
  * The Business Mentor's first tab, Suggestions: what it produces, as one list with a pill per stage, the way
@@ -146,7 +148,7 @@
           <h2 class="text-base font-bold text-gray-900">Reviews</h2>
           <p class="text-xs text-gray-500 mt-0.5">${esc(when)} Change the day or switch it off on my profile, under “How should your Mentor work?”.</p>
         </div>
-        ${r.canRun ? `<button type="button" data-mentor-review-now class="btn-secondary self-start shrink-0 px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${state.reviewBusy ? 'disabled' : ''}>${state.reviewBusy ? 'Starting…' : 'Review my week now · 1 task'}</button>` : ''}
+        ${r.canRun ? `<button type="button" data-mentor-review-now class="btn-secondary self-start shrink-0 px-3 py-1.5 border text-xs font-bold rounded-lg transition disabled:opacity-50" ${state.reviewBusy ? 'disabled' : ''}>${state.reviewBusy ? 'Starting…' : `Review my week now · ${window.taskCost('mentor_review')}`}</button>` : ''}
       </div>
       ${state.reviewNote ? `<p class="mt-2 text-xs font-semibold ${state.reviewNote.error ? 'text-red-600' : 'text-pink-700'}" role="status">${esc(state.reviewNote.text)}</p>` : ''}
       ${items ? `<ul class="mt-2">${items}</ul>` : '<p class="text-sm text-gray-500 mt-2">No reviews yet. Your first arrives in your chat with me on your review day.</p>'}`, 'data-mentor-panel="reviews"');

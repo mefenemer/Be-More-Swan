@@ -8,6 +8,7 @@
 import type { getDb } from '../../db/client';
 import { mediaGenerationJobs } from '../../db/schema';
 import { aiVideoTasks } from '../config/task-weights';
+import { getTaskCosts } from './task-costs';
 import {
     submitVideo, submitFramedVideo, imageToVideoEnabled, imageToVideoInput, billedSecondsFor, i2vModel, falConfigured,
     FalContentPolicyError, FalError, type AspectRatio, type VideoDurationSeconds,
@@ -59,7 +60,7 @@ export async function startAiVideoJob(db: Db, params: {
     const startImageUrl = params.startImageUrl ?? null;
 
     // Hold the clip's tasks; not enough → the caller says so.
-    const hold = await holdCredits(db, { orgId, amount: VIDEO_CREDIT_COST, mediaType: 'video', tasks: aiVideoTasks(billedSecondsFor(durationSeconds)) });
+    const hold = await holdCredits(db, { orgId, amount: VIDEO_CREDIT_COST, mediaType: 'video', tasks: aiVideoTasks(billedSecondsFor(durationSeconds), await getTaskCosts()) });
     if (!hold.ok) return { ok: false, reason: 'no_tasks', cost: hold.cost, balance: hold.balance, unit: hold.unit };
 
     // Submit to Fal. A synchronous content-policy rejection refunds immediately.

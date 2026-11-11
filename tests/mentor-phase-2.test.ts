@@ -27,7 +27,7 @@ import { buildBreakEvenCard, buildStrategyCard, cleanQuestion } from '../src/uti
 import { cardTheUserAskedFor, mentorCardFromUiElement, proposalKind } from '../src/utils/mentor-cards';
 import { PLAYBOOKS, isUsablePlaybook, playbookFor, renderPlaybookForMentor, type Playbook } from '../src/config/mentor-playbooks';
 import { ROLE_MODEL_PATHS, promptLayersFor } from '../src/config/assistant-prompt-layers';
-import { TASK_WEIGHTS } from '../src/config/task-weights';
+import { DEFAULT_TASK_WEIGHTS } from '../src/config/task-weights';
 
 let passed = 0, total = 0;
 function test(name: string, fn: () => void) {
@@ -182,8 +182,8 @@ test('research keeps only links the search returned; no search or no source mean
 });
 
 test('research and drafting are background jobs, metered at 1 task on delivery, on the Mentor’s model', () => {
-    assert.strictEqual(TASK_WEIGHTS.mentor_research, 1);
-    assert.strictEqual(TASK_WEIGHTS.mentor_strategy, 1);
+    assert.strictEqual(DEFAULT_TASK_WEIGHTS.mentor_research, 1);
+    assert.strictEqual(DEFAULT_TASK_WEIGHTS.mentor_strategy, 1);
     const jobs = read('src/utils/mentor-jobs.ts');
     assert.match(jobs, /if \(charge\) await recordCompletedWork\(db, job\.organisationId, 'mentor_research'/);
     assert.match(jobs, /if \(charge\) await recordCompletedWork\(db, job\.organisationId, 'mentor_strategy'/);

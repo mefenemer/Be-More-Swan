@@ -15,7 +15,11 @@ import { lowerThirdOverlays, readNameCaption } from '../src/lib/lower-third';
 import { sceneTimes, sceneAt, addNote, readNotes, notesByScene, mergeNotedScenes, mergeScript } from '../src/lib/video-notes';
 import { videoResults, turnaroundText } from '../src/lib/video-results';
 import { enforceStoryboard, storyboardUserPrompt, storyboardSystemPrompt, type Storyboard, type VideoBrief } from '../src/lib/storyboard';
-import { musicFromBrief, readBrief, withSetupDefaults, loopToLength, assetsForShape, shapeRoot, sceneOverlays, sceneClips, timesOf, sceneLooks, buildTasks } from '../src/utils/video-producer';
+import { musicFromBrief, readBrief, withSetupDefaults, loopToLength, assetsForShape, shapeRoot, sceneOverlays, sceneClips, timesOf, sceneLooks, buildTasks as buildTasksAt } from '../src/utils/video-producer';
+import { DEFAULT_TASK_COSTS } from '../src/config/task-weights';
+// buildTasks takes the live costs since task costs moved to the database; these checks use the defaults.
+const buildTasks = (sb: Parameters<typeof buildTasksAt>[0], b: Parameters<typeof buildTasksAt>[1], made?: Parameters<typeof buildTasksAt>[3]) =>
+    buildTasksAt(sb, b, DEFAULT_TASK_COSTS, made);
 import { videoSceneRequestFromUiElement, videoSceneCard } from '../src/utils/chat-video-scene';
 import { renderFailureNote } from '../src/utils/video-render';
 import { integratedLufs, levelTo, samplePeakDb, wavBytes, readWav } from '../src/lib/loudness-measure';
@@ -381,7 +385,7 @@ check('chat cards exist for each new action, and the chat can only send those ac
         assert.ok(read('netlify/functions/chat-orchestrator.ts').includes(`"type": "${t}"`), `the prompt teaches ${t}`);
     }
     const cs = read('src/components/chat-session.js');
-    assert.ok(cs.includes("const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete'];"));
+    assert.ok(cs.includes("const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete', 'clip_create'];"));
     assert.ok(!cs.slice(cs.indexOf('VIDEO_CARD_ACTIONS')).slice(0, 300).includes("'build'"), 'no card can make (spend on) a video');
     const snap = read('src/utils/video-producer.ts');
     assert.ok(snap.includes("' · script APPROVED'") && snap.includes('their note at ${mmss(n.atS)}'));

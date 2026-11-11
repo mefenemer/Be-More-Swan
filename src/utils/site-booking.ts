@@ -30,7 +30,7 @@ import { checkRateLimit } from './rate-limit';
 import { looksLikeEmail, normaliseEmail } from './audience-contacts';
 import { cleanText } from './site-definition';
 import type { SiteRow } from './site-store';
-import { customerMeetingHtml, MEETING_LOCATION_LABEL, meetingLocationOf } from './booking-meeting';
+import { customerMeetingHtml, ensureMeetingLink, MEETING_LOCATION_LABEL, meetingLocationOf } from './booking-meeting';
 
 type Db = ReturnType<typeof getDb>;
 export const BOOK_LIMITS = { perIp: { maxAttempts: 10, windowSecs: 3600 }, perEmail: { maxAttempts: 5, windowSecs: 86_400 } };
@@ -397,6 +397,8 @@ async function moveSubmit(b: BookCtx, body: URLSearchParams): Promise<BookPage> 
         return bookStep(b, q, made.message);
     }
     const ctx = noticeCtx(b, setup);
+    // A move confirmed at once: the new booking gets its own Teams / Meet link before the email.
+    if (made.booking.status === 'confirmed') made.booking = await ensureMeetingLink(b.db, made.booking);
     await emailCustomer(made.booking, made.booking.status === 'confirmed' ? 'confirmed' : 'received', ctx, null);
     await announceCustomerChange(b.db, 'moved', made.booking, ctx, old).catch((err) => console.error('[site-booking] move notice failed', err));
     return { status: 303, location: `${FORM_SENT_PATH}?k=booking&st=${made.booking.status === 'confirmed' ? 'moved' : 'pending'}&b=${encodeURIComponent(found.pagePath)}` };

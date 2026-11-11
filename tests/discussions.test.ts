@@ -18,6 +18,7 @@ import {
     DISCUSSION_SITE_KEYS, MAX_TOPICS, discussionDisclosure, discussionQuery, hasDisclosure, looksLikeThread,
     normaliseSites, normaliseThreadUrl, normaliseTopics, plainForSite, postedAgeDays, siteForUrl, withDisclosure,
     MAX_OWN_FORUMS, normaliseForumAddress, sitesFromChat, sourceInfo, DISCUSSIONS_ENABLED,
+    DEFAULT_DISCUSSION_SITES, SUGGESTED_FORUMS,
 } from '../src/config/discussion-sites';
 import { buildDiscussionsChatBlock, dispatchDueScans, startScan } from '../src/utils/discussions';
 import { TEAM_FEATURES } from '../src/config/team-features';
@@ -58,45 +59,66 @@ check('the triage prompt tells the model NOT to write a disclosure (code adds it
 check('markdown emphasis is kept on Reddit and stripped elsewhere', () => {
     const r = 'Try **Letterboxd** lists, or *Searching for Sugar Man*. Use `site:` search. 2 * 3 stays.';
     assert.strictEqual(plainForSite(r, 'reddit'), r);
-    assert.strictEqual(plainForSite(r, 'quora'), 'Try Letterboxd lists, or Searching for Sugar Man. Use site: search. 2 * 3 stays.');
+    assert.strictEqual(plainForSite(r, 'linkedin'), 'Try Letterboxd lists, or Searching for Sugar Man. Use site: search. 2 * 3 stays.');
     assert.match(read('src/utils/discussions.ts'), /withDisclosure\(plainForSite\(reply, site\), sender\.businessName\)/);
 });
 
-console.log('\n──── your own forums ────');
+console.log('\n──── Reddit and LinkedIn only (2026-11-11) ────');
 
-check('a forum address is cleaned to host[/path]; built-ins and junk are refused', () => {
+check('only Reddit and LinkedIn are searched, both ticked for a new watch', () => {
+    assert.deepStrictEqual([...DISCUSSION_SITE_KEYS], ['reddit', 'linkedin']);
+    assert.deepStrictEqual(DEFAULT_DISCUSSION_SITES, ['reddit', 'linkedin']);
+    assert.strictEqual(MAX_OWN_FORUMS, 0, 'own forums are off');
+    assert.deepStrictEqual(SUGGESTED_FORUMS, []);
+});
+check('a saved watch that named only retired sites keeps scanning Reddit and LinkedIn', () => {
+    assert.deepStrictEqual(normaliseSites(['ukbf', 'quora']), ['reddit', 'linkedin']);
+    assert.deepStrictEqual(normaliseSites(['forum:indiehackers.com']), ['reddit', 'linkedin']);
+    assert.deepStrictEqual(normaliseSites(['quora', 'linkedin', 'forum:indiehackers.com']), ['linkedin'], 'a surviving site is kept as chosen');
+    assert.deepStrictEqual(normaliseSites([]), [], 'unticking both stays unticked');
+    assert.deepStrictEqual(normaliseSites(['facebook']), [], 'junk is not a retired site');
+});
+check('chat asking for any other site or forum is refused out loud, not swapped', () => {
+    const r = sitesFromChat(['Reddit', 'ukbf', 'https://www.quora.com/', 'contractortalk.com', 'LinkedIn']);
+    assert.deepStrictEqual(r.sites, ['reddit', 'linkedin']);
+    assert.deepStrictEqual(r.rejected, ['ukbf', 'https://www.quora.com/', 'contractortalk.com']);
+    assert.strictEqual(r.tooMany, false);
+    assert.deepStrictEqual(sitesFromChat(['quora']).sites, [], 'no fallback for a chat request');
+    assert.match(read('src/utils/chat-discussion-action.ts'), /I can only watch Reddit and LinkedIn, so I can’t add “\$\{bad\}”\. If you’d like it added, ask me here in chat and I’ll send the request to the Be More Swan team\./);
+    assert.match(read('netlify/functions/discussions.ts'), /Discussions watches Reddit and LinkedIn only\. To ask for another site, ask your Lead Generator in chat\./);
+});
+check('asking for another site points the user to a request in chat, sent by the support card', () => {
+    for (const f of ['src/utils/discussions.ts', 'netlify/functions/chat-orchestrator.ts']) {
+        const src = read(f);
+        assert.match(src, /request (it|more sites) right here in chat/, `${f} must offer the request`);
+        assert.match(src, /mentor_support_request card/, `${f} must name the card that sends it`);
+    }
+    assert.match(read('src/constants/assistant-shared-prompts.ts'), /"type":"mentor_support_request"/, 'the card every route keeps');
+    assert.match(read('db/help-articles-2026-12zzzzzzzzzzzzzzzzzzzzzzzzzzz-discussions-back-reddit-linkedin.sql'), /Want another site\? Ask your Lead Generator in chat/);
+});
+check('threads already found on retired sites are not listed or counted', () => {
+    const s = read('src/utils/discussions.ts');
+    assert.match(s, /inArray\(discussions\.site, \[\.\.\.DISCUSSION_SITE_KEYS\]\)/);
+    const list = s.slice(s.indexOf('export async function listDiscussions'), s.indexOf('export async function listDiscussions') + 700);
+    assert.strictEqual((list.match(/\.where\(scope\)/g) ?? []).length, 2, 'rows and counts both filtered');
+    assert.match(read('src/utils/mentor-snapshot.ts'), /inArray\(discussions\.aiAssistantId, leadIds\), listedSitesFilter\(\)\)/);
+});
+check('the tab hides "Your own forums" while the cap is 0, and nothing names the retired sites', () => {
+    const js = read('src/components/assistant-discussions.js');
+    assert.match(js, /if \(!state\.maxOwnForums\) return '';/);
+    assert.match(js, /state\.maxOwnForums = Number\.isInteger\(data\.maxOwnForums\) \? data\.maxOwnForums : 0;/);
+    for (const f of ['src/utils/discussions.ts', 'src/config/team-features.ts', 'netlify/functions/chat-orchestrator.ts', 'src/lib/discussion-triage.ts']) {
+        assert.doesNotMatch(read(f), /Reddit, UK Business Forums, Quora|"ukbf" \| "quora"|indiehackers\.com \(founders/, `${f} still offers a retired site`);
+    }
+});
+check('the own-forum parsing still works for when the cap goes back up', () => {
     assert.strictEqual(normaliseForumAddress('https://www.ContractorTalk.com/forums/?x=1#top'), 'contractortalk.com/forums');
-    assert.strictEqual(normaliseForumAddress('biggerpockets.com/forums/'), 'biggerpockets.com/forums');
     assert.strictEqual(normaliseForumAddress('reddit.com/r/smallbusiness'), null, 'tick Reddit instead');
-    assert.strictEqual(normaliseForumAddress('old.reddit.com'), null);
     assert.strictEqual(normaliseForumAddress('localhost'), null);
-    assert.strictEqual(normaliseForumAddress('192.168.0.1'), null);
-    assert.strictEqual(normaliseForumAddress('not a domain'), null);
-});
-check('own forums ride in the sites list after the built-ins, deduped and capped', () => {
-    const many = Array.from({ length: 8 }, (_, i) => `forum:forum${i}.com`);
-    const s = normaliseSites(['forum:WWW.indiehackers.com/', 'quora', 'forum:indiehackers.com', 'reddit', 'forum:reddit.com', ...many]);
-    assert.deepStrictEqual(s.slice(0, 3), ['reddit', 'quora', 'forum:indiehackers.com']);
-    assert.strictEqual(s.filter((x) => x.startsWith('forum:')).length, MAX_OWN_FORUMS);
-});
-check('an own forum is searched with site:, kept to its host and path, and labelled', () => {
     assert.strictEqual(discussionQuery('need a roofer', 'forum:contractortalk.com'), 'site:contractortalk.com need a roofer');
-    assert.strictEqual(siteForUrl('https://www.biggerpockets.com/forums/899/topics/1-x', ['forum:biggerpockets.com/forums']), 'forum:biggerpockets.com/forums');
-    assert.strictEqual(siteForUrl('https://biggerpockets.com/blog/x', ['forum:biggerpockets.com/forums']), null);
-    assert.strictEqual(sourceInfo('forum:indiehackers.com').label, 'Indie Hackers');
     assert.strictEqual(sourceInfo('forum:example-forum.org').label, 'example-forum.org');
-});
-check('the generic thread check drops home, file, member and search pages', () => {
-    const f = 'forum:forum.wordreference.com' as const;
-    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/threads/a-question.123/', f), true);
-    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/', f), false);
-    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/attachments/x-pdf.1/', f), false);
-    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/doc.pdf', f), false);
-    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/members/jane.12/', f), false);
-});
-check('own-forum replies are plain text; a bad address is refused out loud', () => {
-    assert.strictEqual(plainForSite('use **this**', 'forum:indiehackers.com'), 'use this');
-    assert.match(read('netlify/functions/discussions.ts'), /isn’t a forum address we can watch/);
+    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/threads/a-question.123/', 'forum:forum.wordreference.com'), true);
+    assert.strictEqual(looksLikeThread('https://forum.wordreference.com/members/jane.12/', 'forum:forum.wordreference.com'), false);
 });
 
 console.log('\n──── searching ────');
@@ -111,8 +133,7 @@ check('topics are cleaned, deduped and capped — a user cannot rewrite the site
     assert.deepStrictEqual(t.slice(0, 2), ['best CRM', 'quoted thing']);
 });
 check('unknown sites are dropped', () => {
-    assert.deepStrictEqual(normaliseSites(['reddit', 'facebook', 'quora']), ['reddit', 'quora']);
-    assert.deepStrictEqual([...DISCUSSION_SITE_KEYS], ['reddit', 'ukbf', 'quora', 'linkedin']);
+    assert.deepStrictEqual(normaliseSites(['reddit', 'facebook', 'linkedin']), ['reddit', 'linkedin']);
 });
 check('results off the watched site are dropped', () => {
     assert.strictEqual(siteForUrl('https://old.reddit.com/r/smallbusiness/comments/abc/x', ['reddit']), 'reddit');
@@ -122,8 +143,7 @@ check('results off the watched site are dropped', () => {
 check('only threads, not listing or profile pages', () => {
     assert.strictEqual(looksLikeThread('https://reddit.com/r/smallbusiness/comments/1abc2/need_help', 'reddit'), true);
     assert.strictEqual(looksLikeThread('https://reddit.com/r/smallbusiness', 'reddit'), false);
-    assert.strictEqual(looksLikeThread('https://ukbusinessforums.co.uk/threads/best-epos.123/', 'ukbf'), true);
-    assert.strictEqual(looksLikeThread('https://quora.com/profile/Jane', 'quora'), false);
+    assert.strictEqual(looksLikeThread('https://linkedin.com/posts/jane_need-a-bookkeeper-activity-1', 'linkedin'), true);
     assert.strictEqual(looksLikeThread('https://linkedin.com/in/jane', 'linkedin'), false);
 });
 check('one thread is one URL however it was reached', () => {
@@ -183,8 +203,8 @@ check('a proposal is shape-checked; ids accept "#12"', () => {
 check('the chat card is rebuilt server-side and the prompt names the tab', () => {
     const o = read('netlify/functions/chat-orchestrator.ts');
     assert.match(o, /resolveDiscussionActionProposal\(db, orgId, session\.aiAssistantId, discussionReq\)/);
-    // Paused 2026-11-10: the prompt no longer describes the tab (see DISCUSSIONS_ENABLED).
-    if (DISCUSSIONS_ENABLED) assert.match(o, /"Discussions" tab — public forum threads/);
+    // Paused 2026-11-10, back 2026-11-11 for Reddit and LinkedIn only (see DISCUSSIONS_ENABLED).
+    if (DISCUSSIONS_ENABLED) assert.match(o, /"Discussions" tab — public Reddit threads and LinkedIn posts/);
     else assert.doesNotMatch(o, /"Discussions" tab — /);
     assert.match(o, /buildDiscussionsChatBlock\(db, orgId, session\.aiAssistantId\)/);
 });
@@ -199,22 +219,14 @@ check('GUI and chat call the same endpoint', () => {
     assert.match(read('src/components/disruptive-ui-registry.js'), /register\('discussion_action_proposal', renderDiscussionActionProposalCard\);/);
 });
 
-console.log('\n──── chat: own forums ────');
+console.log('\n──── chat: other sites ────');
 
-check('chat sites accept keys, labels, addresses and bare forum addresses', () => {
-    const r = sitesFromChat(['Reddit', 'ukbf', 'https://www.quora.com/', 'contractortalk.com', 'forum:BiggerPockets.com/forums/', 'Indie Hackers']);
-    assert.deepStrictEqual(r.sites, ['reddit', 'ukbf', 'quora', 'forum:contractortalk.com', 'forum:biggerpockets.com/forums', 'forum:indiehackers.com']);
-    assert.deepStrictEqual(r.rejected, []);
-    assert.strictEqual(r.tooMany, false);
-});
-check('a forum the chat can’t watch, or a sixth own forum, reaches the card — never dropped quietly', () => {
+check('a site the chat can’t watch reaches the card — never dropped quietly', () => {
     const bad = discussionActionFromUiElement({ type: 'discussion_action_proposal', action: 'set_watch', sites: ['reddit', 'my local forum'] });
     assert.deepStrictEqual(bad?.rejectedSites, ['my local forum']);
-    const many = discussionActionFromUiElement({ type: 'discussion_action_proposal', action: 'set_watch', sites: ['a.com', 'b.com', 'c.com', 'd.com', 'e.com', 'f.com'] });
-    assert.strictEqual(many?.tooManyForums, true);
-    const src = read('src/utils/chat-discussion-action.ts');
-    assert.match(src, /isn’t a forum address I can watch/);
-    assert.match(src, /You can watch up to \$\{MAX_OWN_FORUMS\} forums of your own/);
+    const forums = discussionActionFromUiElement({ type: 'discussion_action_proposal', action: 'set_watch', sites: ['a.com', 'b.com', 'c.com', 'd.com', 'e.com', 'f.com'] });
+    assert.strictEqual(forums?.tooManyForums, false);
+    assert.strictEqual(forums?.rejectedSites?.length, 6);
 });
 
 console.log('\n──── "Ask … to improve" topic wording ────');
@@ -336,8 +348,8 @@ check('the Mentor is told about the Discussions tab and where it stands, as coun
     assert.match(off, /Lena — Discussions tab \(new 2026-10-30\)/);
     assert.match(off, /the USER posts it/);
     assert.match(off, /Lena's Discussions: not set up yet/);
-    const on = renderTeamFeatures({ ...base, discussions: [{ assistantId: 7, topics: ['need a bookkeeper'], sites: ['Reddit', 'contractortalk.com'], enabled: true, newCount: 3, repliedCount: 1, lastScannedAt: new Date('2026-10-30T07:00:00Z') }] }).join('\n');
-    assert.match(on, /watching "need a bookkeeper" on Reddit, contractortalk\.com; daily scan on; last scan 2026-10-30; 3 new threads waiting for a reply, 1 replied/);
+    const on = renderTeamFeatures({ ...base, discussions: [{ assistantId: 7, topics: ['need a bookkeeper'], sites: ['Reddit', 'LinkedIn'], enabled: true, newCount: 3, repliedCount: 1, lastScannedAt: new Date('2026-10-30T07:00:00Z') }] }).join('\n');
+    assert.match(on, /watching "need a bookkeeper" on Reddit, LinkedIn; daily scan on; last scan 2026-10-30; 3 new threads waiting for a reply, 1 replied/);
     assert.match(renderTeamFeatures({ ...base, discussions: null }).join('\n'), /never assume it isn't set up/);
     assert.deepStrictEqual(renderTeamFeatures({ ...base, team: [{ ...base.team[0], roleKey: 'social_media_manager' }] }), []);
     assert.match(renderMentorSnapshot({ ...base, discussions: [] }), /WHAT YOUR TEAM CAN DO/);

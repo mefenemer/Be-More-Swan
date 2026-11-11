@@ -910,13 +910,14 @@
     }
     // The Video Producer's other cards (2026-11-10): script, options, notes, other shapes — each the same
     // video-projects.ts action as its button on the Videos tab. Only these actions; none spends.
-    const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete'];
+    const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete', 'clip_create'];
     function onVideoAction(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
       const body = d.body && typeof d.body === 'object' ? d.body : null;
       if (!body || !VIDEO_CARD_ACTIONS.includes(body.action)) { respond({ ok: false, error: 'That isn\u2019t something this card can do.' }); return; }
-      videoProjectsCall(body).then(() => respond({ ok: true })).catch((err) => respond({ ok: false, error: err.message }));
+      // A new AI clip belongs to this chat's Video Producer.
+      videoProjectsCall(body.action === 'clip_create' ? { ...body, assistantId } : body).then(() => respond({ ok: true })).catch((err) => respond({ ok: false, error: err.message }));
     }
     function onVideoCreate(e) {
       const d = e.detail || {};

@@ -10,7 +10,7 @@
 // A field we do not have stays empty for the user to fill. An invented phone number on 500 printed
 // copies is the failure this file exists to prevent.
 //
-// Metered: one task per draft (TASK_WEIGHTS.flyer_words) — hasTaskCapacity before the model call,
+// Metered: the flyer_words cost per draft (src/utils/task-costs.ts) — hasTaskCapacity before the model call,
 // recordCompletedWork after it succeeds (work-metering.ts; the order is pinned by its tests).
 
 import { and, desc, eq, isNotNull } from 'drizzle-orm';

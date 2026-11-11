@@ -36,6 +36,7 @@
     <script src="/src/i18n.js"></script>
   <script src="/waitlist-mode.js" defer></script>
   <script src="/visit-count.js" defer></script>
+  <script src="/task-costs.js" defer></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
 
@@ -143,7 +144,7 @@
                         <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
                     <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
-                        It's included on every plan at no extra cost. Chatting with it doesn't use tasks, under the same fair use as every chat. Three things use 1 task each, and only when they deliver: a researched answer with sources, a plan it drafts for you in the background, and its weekly review. You can switch the weekly review off, or put the Mentor in Quiet mode so it only answers when you ask.
+                        It's included on every plan at no extra cost. Chatting with it doesn't use tasks, under the same fair use as every chat. Three things use tasks, and only when they deliver: a researched answer with sources (<span data-task-cost="mentor_research">1 task</span>), a plan it drafts for you in the background (<span data-task-cost="mentor_strategy">1 task</span>), and its weekly review (<span data-task-cost="mentor_review">1 task</span>). You can switch the weekly review off, or put the Mentor in Quiet mode so it only answers when you ask.
                     </div>
                 </details>
                 <details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
@@ -162,7 +163,7 @@
                         <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
                     <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
-                        Short videos, 15, 30 or 60 seconds, vertical, square or wide. It writes the script from your business details and products, builds each scene from stock footage, your own pictures or clips, branded cards or AI, and adds a voiceover and captions. It can also review your own footage, suggest edits and cut out pauses and "um"s. You check the storyboard before anything is made, and the finished video is saved to My Content to download or use with any of your assistants. It never posts anything itself, and it doesn't make long YouTube videos.
+                        Short videos, 15, 30 or 60 seconds, vertical, square or wide. It writes the script from your business details and products, builds each scene from stock footage, your own pictures or clips, branded cards or AI, and adds a voiceover and captions. You can read the voiceover yourself instead of an AI voice, choose where the words on each scene sit, and set how loud the music is. It can also review your own footage, or video you film on the Videos tab, suggest edits and cut out pauses and "um"s, and make single 5 or 10 second AI clips. You check the storyboard before anything is made, and the finished video is saved to My Content to download or use with any of your assistants. It never posts anything itself, and it doesn't make long YouTube videos.
                     </div>
                 </details>
                 <details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
@@ -171,7 +172,7 @@
                         <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
                     <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
-                        Planning a storyboard is free. Making the video uses tasks only for AI scenes and the voiceover: 20 tasks for an AI clip (at most 3 in a video), 1 for an AI picture and 1 for the voiceover. Stock footage, stock photos, your own pictures and branded cards use none, and the exact number is on the "Make the video" button before you press it. Making videos is on the Busywork Buster plan.
+                        Planning a storyboard is free. Making the video uses tasks only for what is made with AI: <span data-task-cost="ai_video">20 tasks</span> for an AI clip (at most 3 in a video; from 3 December 2026, 4 tasks for each second of clip), <span data-task-cost="ai_image">1 task</span> for an AI picture, <span data-task-cost="ai_voiceover">1 task</span> for an AI voiceover and <span data-task-cost="ai_music">20 tasks</span> for a music track made for the video. Reviewing your own footage uses <span data-task-cost="footage_review">2 tasks</span> the first time it watches a video. Stock footage, stock photos, your own pictures, branded cards, your own music and a voiceover you record yourself use none, and the exact number is on the "Make the video" button before you press it. Making videos is on the Busywork Buster plan.
                     </div>
                 </details>
                 <details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">
@@ -366,7 +367,7 @@
                         <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0 ml-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
                     </summary>
                     <div class="px-6 pb-5 text-gray-500 text-sm leading-relaxed border-t border-gray-100 pt-4">
-                        A few outputs cost far more to make than words, so they count as several tasks out of the same allowance: a <strong class="text-gray-700">set of AI images is 1 task</strong> (the editors give you up to 4 options to choose from), an <strong class="text-gray-700">AI video is 20</strong> (on the Busywork Buster plan), an <strong class="text-gray-700">AI music track is 20</strong> (12 if you share the track with the Be More Swan community), and a <strong class="text-gray-700">post to X with a link is 10 extra</strong>, on top of the post's own task. A text-only X post costs nothing beyond the post's own task. Your billing page breaks down what your tasks were used on.
+                        A few outputs cost far more to make than words, so they count as several tasks out of the same allowance: a <strong class="text-gray-700">set of AI images is <span data-task-cost="ai_image">1 task</span></strong> (the editors give you up to 4 options to choose from), an <strong class="text-gray-700">AI video is <span data-task-cost="ai_video">20 tasks</span></strong> (on the Busywork Buster plan), an <strong class="text-gray-700">AI music track is <span data-task-cost="ai_music">20 tasks</span></strong> (<span data-task-cost="ai_music_shared">12 tasks</span> if you share the track with the Be More Swan community), and a <strong class="text-gray-700">post to X with a link is <span data-task-cost="x_link_post">10 tasks</span> extra</strong>, on top of the post's own task. A text-only X post costs nothing beyond the post's own task. Your billing page breaks down what your tasks were used on.
                     </div>
                 </details>
                 <details class="bg-white border border-gray-200 rounded-xl shadow-sm group open:border-emerald-200 transition-all">

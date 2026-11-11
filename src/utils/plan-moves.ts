@@ -1,6 +1,6 @@
 // src/utils/plan-moves.ts
 //
-// Admin → Revenue → Plan moves: move customers between plans in bulk (owner, 2026-10-19).
+// Admin → Customers → Plan moves: move customers between plans in bulk (owner, 2026-10-19).
 //   · every move starts at the customer's next renewal — no mid-month charge or refund;
 //   · a price RISE starts at the first renewal at least 30 days away (Terms 6.6);
 //   · every customer is emailed (plan_move_scheduled): old plan, new plan, new price, start date and

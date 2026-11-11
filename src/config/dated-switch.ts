@@ -10,6 +10,12 @@
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Is the switch set at all, whether its date has come or not? */
+export function switchScheduled(value: string | undefined): boolean {
+    const v = (value ?? '').trim();
+    return v === 'on' || (DATE_ONLY.test(v) && Number.isFinite(Date.parse(`${v}T00:00:00Z`)));
+}
+
 export function switchedOn(value: string | undefined, now: Date = new Date()): boolean {
     const v = (value ?? '').trim();
     if (v === 'on') return true;

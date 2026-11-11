@@ -283,7 +283,7 @@ check('the chat never publishes (step 3a: a click on the Website tab), and nothi
     assert.ok(!/action: 'publish'/.test(read('src/components/chat-session.js')));
     assert.match(chat, /You cannot publish, take the site offline or choose its address/);
     assert.match(editor, /uses 1 task/);
-    assert.match(cards, /Uses 1 task from your monthly allowance/);
+    assert.match(cards, /Uses \$\{window\.taskCost\('site_draft'\)\} from your monthly allowance/);
 });
 
 check('the editor uses the house dialogs and binds handlers once', () => {

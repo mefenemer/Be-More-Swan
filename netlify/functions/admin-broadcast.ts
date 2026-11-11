@@ -1,4 +1,4 @@
-// admin-broadcast.ts — send a reviewed notice to every customer, once each (Comms → Broadcast).
+// admin-broadcast.ts — send a reviewed notice to every customer, once each (Growth → Broadcast).
 //
 //   GET  ?resource=list                     → each notice in BROADCASTS: its in-app and email copy,
 //                                              how many are waiting for it, how many have it, and

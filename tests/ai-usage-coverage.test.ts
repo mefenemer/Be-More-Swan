@@ -1,7 +1,7 @@
 // tests/ai-usage-coverage.test.ts
 // Every AI call the product makes must land in ai_usage_log, priced, exactly once.
 //
-// WHY THIS EXISTS. ai_usage_log feeds the COGS dashboard (Admin → Revenue → COGS), the only place
+// WHY THIS EXISTS. ai_usage_log feeds the COGS dashboard (Admin → Reports → Costs (COGS)), the only place
 // the real cost of a £29 workspace can be read. On 2026-10-13 it was missing:
 //   • 14 callers of the AI gateway — its logging was opt-in, on the belief that callers logged for
 //     themselves, and none of the gateway's callers did;

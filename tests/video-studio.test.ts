@@ -7,7 +7,11 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { VIDEO_SHAPES, isVideoShape, shapeFrame, shapeOrientation, storyboardUserPrompt, type VideoBrief } from '../src/lib/storyboard';
-import { readBrief, withSetupDefaults, buildTasks, stillToMake } from '../src/utils/video-producer';
+import { readBrief, withSetupDefaults, buildTasks as buildTasksAt, stillToMake } from '../src/utils/video-producer';
+import { DEFAULT_TASK_COSTS } from '../src/config/task-weights';
+// buildTasks takes the live costs since task costs moved to the database; these checks use the defaults.
+const buildTasks = (sb: Parameters<typeof buildTasksAt>[0], b: Parameters<typeof buildTasksAt>[1], made?: Parameters<typeof buildTasksAt>[3]) =>
+    buildTasksAt(sb, b, DEFAULT_TASK_COSTS, made);
 import { outputName, containsAi } from '../src/utils/video-render';
 import { judgeVideoProject } from '../src/utils/campaign-video-order';
 import { videoFormatFor } from '../src/utils/video-post-media';

@@ -20,6 +20,7 @@ import {
 import { logMediaCost } from '../../src/utils/ai-usage';
 import { settleHold } from '../../src/utils/ai-credits';
 import { aiVideoTasks } from '../../src/config/task-weights';
+import { getTaskCosts } from '../../src/utils/task-costs';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { recordPlatformIncident } from '../../src/utils/platform-incident';
@@ -125,7 +126,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
         // Settle the hold as a successful debit, mark job complete.
         // job.durationSeconds is the BILLED length (generate-ai-video stores sub.billedSeconds).
-        await settleHold(db, { orgId, amount: cost, success: true, mediaType: 'video', userId: ownerId, jobId: job.id, isAutonomous: job.isAutonomous, assistantId: job.assistantId ?? null, tasks: aiVideoTasks(job.durationSeconds) });
+        await settleHold(db, { orgId, amount: cost, success: true, mediaType: 'video', userId: ownerId, jobId: job.id, isAutonomous: job.isAutonomous, assistantId: job.assistantId ?? null, tasks: aiVideoTasks(job.durationSeconds, await getTaskCosts()) });
         await db.update(mediaGenerationJobs)
             .set({ status: 'completed', resultAssetIds: [asset.id], updatedAt: new Date() })
             .where(eq(mediaGenerationJobs.id, jobId));

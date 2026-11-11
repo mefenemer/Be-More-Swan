@@ -1,3 +1,5 @@
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/design-studio.js — the Brand Designer's editor (owner, 2026-11-05): the design on the left, the chat on
  * the right, and everything on it can be clicked and changed, "very much like in Canva". Tabs track where a brief is;
@@ -436,7 +438,7 @@
       return `
         <button type="button" class="ds-btn" data-ds-crop>Crop</button>
         ${replace}
-        <button type="button" class="ds-btn" data-ds-cutout title="Uses 1 task from your monthly allowance, only once the background is removed">Remove background (1 task)</button>
+        <button type="button" class="ds-btn" data-ds-cutout title="Uses ${window.taskCost('background_removal')} from your monthly allowance, only once the background is removed">Remove background (${window.taskCost('background_removal')})</button>
         <label class="ds-tool">Transparency <input type="range" ${isMain ? 'data-ds-photoop' : 'data-ds-picop'} min="0" max="100" value="${pct(target.opacity)}"></label>
         ${isMain ? '<button type="button" class="ds-btn" data-ds-unbg>Make a normal picture</button>' : '<button type="button" class="ds-btn" data-ds-bg>Set as background</button>'}
         ${isMain ? '' : orderTool()}${duplicateButton()}${isMain ? '' : ungroupButton(target)}
@@ -1028,7 +1030,7 @@
         showSaved('');
         showError(err.message || 'The background could not be removed. Please try again.');
         btn.disabled = false;
-        btn.textContent = 'Remove background (1 task)';
+        btn.textContent = 'Remove background (' + window.taskCost('background_removal') + ')';
       }
     }
     async function downloadFile(choice, select) {

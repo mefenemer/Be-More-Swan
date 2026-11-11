@@ -204,6 +204,9 @@
       return EDIT_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
     },
 
+    /** The longest note after "Something else" (Fix pipeline #37), from src/config/template-feedback.ts. */
+    editNoteMax: 500,
+
     /** Why a reviewer rejected a lead, from src/config/lead-reject-reasons.ts. */
     leadRejectReasons: LEAD_REJECT_REASONS,
 

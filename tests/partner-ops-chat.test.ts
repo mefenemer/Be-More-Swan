@@ -1,5 +1,5 @@
 // tests/partner-ops-chat.test.ts
-// Affiliate Partner Programme, step 3b — the Partner Ops chat on Admin → Revenue → Partners.
+// Affiliate Partner Programme, step 3b — the Partner Ops chat on Admin → Money → Partners.
 //
 // WHY THIS EXISTS (2026-10-18): step 3 shipped the Partners screen without its chat path, though the
 // brief asked for an admin "Partner Ops" assistant and the standing rule is GUI AND chat (memory

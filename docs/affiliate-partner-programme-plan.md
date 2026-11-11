@@ -10,7 +10,7 @@ nightly release (`partner-commission-sweep.ts`, staging poke `run-partner-sweep.
 qualify as `user_referrals.status = 'partner'` (no token). Tests: `partner-ledger.test.ts`,
 `partner-ledger-db.test.ts` (real Postgres, CI rls job). ⚠️ **Enable `charge.refunded` on the Stripe
 webhook endpoint in BOTH environments** before relying on refunds.
-**Step 3 built 2026-10-18** (same branch, no new SQL): Admin → Revenue → Partners (`admin.html` view `partners`,
+**Step 3 built 2026-10-18** (same branch, no new SQL): Admin → Money → Partners (`admin.html` view `partners`,
 API `admin-partners.ts`, permission `manage_partners` = billing_admin+): programme rate timeline (schedule /
 edit / delete upcoming), payout rules, partner list with approve / reject / suspend / reinstate, per-partner
 special rates, "Add partner" for an existing account. Every write audited. Tests: `admin-partners.test.ts`.
@@ -41,7 +41,7 @@ it (their code earns cash, not tokens). Payout details: PayPal / Wise / UK bank,
 signed-in Partner page where they press Confirm (24 h, once, own row only), then a "changed" email. Customers
 are shown as "Customer N", never named. SQL `db/z-affiliate-partner-payouts.sql` applied to staging + prod 2026-10-18 (verified on prod). Not done: partner assistant/chat (step 8); GDPR export/erase of partner rows
 and vault secrets (step 9). Tests: `partner-hub.test.ts`, `partner-payouts-db.test.ts` (CI).
-**Step 6 built 2026-10-18** (no new SQL) — Admin → Revenue → Partners gains **Payouts** (who is due and why
+**Step 6 built 2026-10-18** (no new SQL) — Admin → Money → Partners gains **Payouts** (who is due and why
 others aren't; "Create payout run" locks the rows under an advisory lock; per-method files: Wise bank, Wise
 email, PayPal; Mark paid / Cancel run) and **Commission ledger** (filters, Cancel with a reason the partner
 sees, Add bonus). Logic in `src/utils/partner-payout-batches.ts`; every write and every file download
@@ -162,7 +162,7 @@ someone who was already a BMS customer**, no commission on refunded payments.
   partner loses month one.
 - ✅ `charge.dispute.created` handler exists. ⚠️ There is **no `charge.refunded` handler** — needs
   adding, and the event enabling on the Stripe webhook endpoint in **both** environments.
-- ✅ Admin → Revenue → Coupons (`admin-coupons.ts`) — real Stripe coupons + promotion codes. Partner
+- ✅ Admin → Money → Coupons (`admin-coupons.ts`) — real Stripe coupons + promotion codes. Partner
   promo codes reuse this.
 - ✅ Chat handoffs: `HandoffProposalCard` in `chat-orchestrator.ts` (user approves; payload capped).
 - ✅ Work metering (`work-metering.ts`) for any background drafting.
@@ -250,7 +250,7 @@ Start manual: admin creates a batch of partners with payable ≥ minimum → **E
 it. UK: partners invoice us (or we self-bill); record VAT registration. Accountant to confirm
 before the first payout.
 
-### 4.5 Admin — Admin → Revenue → Partners (next to Coupons)
+### 4.5 Admin — Admin → Money → Partners (next to Coupons)
 
 1. **Rates** — a timeline of programme-wide periods (past, current, upcoming): add a period, end
    the current one, edit or delete upcoming ones. Started periods show their rate as read-only with

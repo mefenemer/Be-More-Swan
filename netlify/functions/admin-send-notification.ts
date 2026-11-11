@@ -4,7 +4,7 @@
 //
 // The gap this fills: every other notification in the product is an event-driven side effect
 // (a ticket reply, a failed payment, a draft going live). There was no way for an admin to
-// simply tell one user something. The Comms → Notification Templates section next door edits
+// simply tell one user something. The Growth → Notification templates section next door edits
 // the COPY of automated notifications and deliberately never inserts — its `preview` renders
 // against dummy data.
 //

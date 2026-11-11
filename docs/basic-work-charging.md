@@ -3,6 +3,8 @@
 Decided by the owner on 2026-11-06, after a usage check showed customers far below their limits.
 The code is built and stays off until `BASIC_WORK_CHARGED_FROM` takes effect.
 
+Figures below are the starting costs. They are set in Admin → Money → Task costs.
+
 | Work | Tasks | Charged when |
 |---|---|---|
 | Chat | 1 per 10 messages | Every 10th delivered reply in the month |

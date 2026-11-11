@@ -155,7 +155,7 @@ check('the score card lives in the Results tab; Checks keeps Check my site now a
     // No card round them any more (owner, 2026-10-21): no site name, score line, last-scored line or task note.
     const top = checks.slice(checks.indexOf('return `'), checks.indexOf('${goalBlock(audit)}'));
     assert.ok(!top.includes('card(') && !top.includes('Visitors should') && !top.includes('Score: '), 'the card is gone');
-    assert.match(top, /data-sa-run[^>]*title="A check that re-scores uses 1 task/, 'the spend button still says what it costs');
+    assert.match(top, /data-sa-run[^>]*title="A check that re-scores uses \$\{window\.taskCost\('site_audit'\)\}/, 'the spend button still says what it costs');
     assert.match(top, /data-sa-past-checks[^>]*>\$\{state\.pastOpen \? 'Hide past checks' : 'View past checks'\}/, 'past checks behind a button beside Settings');
     assert.match(checks, /What the last check said<\/h3>\$\{lastAt \? `<span class="text-xs text-gray-500">\$\{esc\(when\(lastAt\)\)\}/, 'the summary is dated');
     assert.match(tab, /<details data-sa-why \$\{state\.whyOpen \? 'open' : ''\}>/, 'the score list folds');

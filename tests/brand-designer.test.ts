@@ -1,3 +1,4 @@
+import { DEFAULT_TASK_COSTS } from '../src/config/task-weights';
 // tests/brand-designer.test.ts
 // The Brand Designer, Phase 1 — docs/brand-designer-plan.md §4. Briefs → rounds of options from
 // stock, AI and branded cards → the user approves into the library. GUI and chat, one server path.
@@ -21,7 +22,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-    BRIEF_ASPECT_RATIOS, BRIEF_PURPOSES, BRIEF_SOURCES, OPTION_SOURCES, REJECT_REASONS, SOURCE_SPECS, normaliseBrief, roundCreditCost,
+    BRIEF_ASPECT_RATIOS, BRIEF_PURPOSES, BRIEF_SOURCES, OPTION_SOURCES, REJECT_REASONS, SOURCE_SPECS, sourceCosts, normaliseBrief, roundCreditCost,
 } from '../src/config/visual-brief-vocab';
 import { defaultSourcesFor, fallbackArtDirection, parseArtDirection, setupAnswer } from '../src/utils/visual-briefs';
 import { DEFAULT_BRAND_KIT } from '../src/utils/brand-kit';
@@ -80,9 +81,9 @@ check('only AI costs, and it costs what generate-ai-image charges for a grid', (
     assert.strictEqual(roundCreditCost(['stock', 'ai_image', 'brand_card']), IMAGE_CREDIT_COST);
     assert.strictEqual(SOURCE_SPECS.ai_image.credits, IMAGE_CREDIT_COST);
     // Shown in tasks since the single task allowance; tasksForCredits is what the hold actually takes.
-    assert.match(SOURCE_SPECS.ai_image.cost, new RegExp(`^${tasksForCredits('image', IMAGE_CREDIT_COST)} task for ${SOURCE_SPECS.ai_image.optionsPerRound} images$`),
+    assert.match(sourceCosts(DEFAULT_TASK_COSTS).ai_image.cost, new RegExp(`^${tasksForCredits('image', IMAGE_CREDIT_COST, DEFAULT_TASK_COSTS)} task for ${SOURCE_SPECS.ai_image.optionsPerRound} images$`),
         'the cost line printed before the click must match what a round makes');
-    assert.match(SOURCE_SPECS.ai_video.cost, new RegExp(`^${tasksForCredits('video', VIDEO_CREDIT_COST)} tasks for one`));
+    assert.match(sourceCosts(DEFAULT_TASK_COSTS).ai_video.cost, new RegExp(`^${tasksForCredits('video', VIDEO_CREDIT_COST, DEFAULT_TASK_COSTS)} tasks for one`));
 });
 
 check('the migration\'s CHECKs accept exactly the vocabulary', () => {

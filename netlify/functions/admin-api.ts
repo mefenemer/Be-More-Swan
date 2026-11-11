@@ -2149,7 +2149,7 @@ export default withLambda(async (event) => {
                       .orderBy(desc(issueReports.createdAt)).limit(50);
 
                     // In App Messages — ad-hoc admin → user notifications sent from
-                    // Comms → Send a Message (notifications.type = 'admin_message'), newest
+                    // Growth → Message one person (notifications.type = 'admin_message'), newest
                     // first. title/message are stored ALREADY HTML-escaped by
                     // createAdminMessage (newlines promoted to <br>), so the client must
                     // render them as-is rather than escaping a second time.

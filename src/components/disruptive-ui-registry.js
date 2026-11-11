@@ -1,3 +1,5 @@
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/disruptive-ui-registry.js
  *
@@ -1964,6 +1966,25 @@
     });
   }
   register('video_tidy_proposal', renderVideoTidyProposalCard);
+
+  // { type: 'video_clip_proposal', description, style, lengthS, shape }
+  // An AI clip on its own (src/lib/ai-clip.ts): saving it is free. The first frame (1 task) and the clip
+  // itself are buttons on the Videos tab, which say what they use — a chat card never spends.
+  const CLIP_STYLE_NAMES = { realistic: 'Realistic', cinematic: 'Cinematic', animated3d: '3D animated', cartoon2d: '2D cartoon', product: 'Product close-up' };
+  function renderVideoClipProposalCard(ui, esc) {
+    const description = typeof ui.description === 'string' ? ui.description.replace(/\s+/g, ' ').trim().slice(0, 400) : '';
+    const style = CLIP_STYLE_NAMES[ui.style] ? ui.style : 'realistic';
+    const lengthS = Number(ui.lengthS) === 10 ? 10 : 5;
+    const shape = VIDEO_SHAPE_NAMES[ui.shape] ? ui.shape : '9:16';
+    return videoActionCard(esc, {
+      kicker: 'New AI clip',
+      rows: [['Shows', description || '(nothing yet)'], ['Style', CLIP_STYLE_NAMES[style]], ['Length', `${lengthS} seconds`], ['Shape', VIDEO_SHAPE_NAMES[shape]]],
+      note: 'Free to save. On the Videos tab you see its first frame (1 task) before the clip is made, and “Make the clip” says what it uses. Made-up people only.',
+      button: 'Save the clip', body: description.length >= 8 ? { action: 'clip_create', description, style, lengthS, shape } : null,
+      done: 'Saved. Press “See the first frame” on the Videos tab.',
+    });
+  }
+  register('video_clip_proposal', renderVideoClipProposalCard);
   register('video_note_proposal', renderVideoNoteProposalCard);
   register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
   register('video_reshape_proposal', renderVideoReshapeProposalCard);
@@ -1980,7 +2001,7 @@
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Website check</p>
       <p class="text-sm text-gray-800 mt-2">Read your website again now and re-score it.</p>
-      <p class="text-xs text-gray-600 mt-2">If nothing on your site or your competitors' sites has changed, the last score stands and nothing is used. A check that re-scores uses 1 task from your monthly allowance.</p>
+      <p class="text-xs text-gray-600 mt-2">If nothing on your site or your competitors' sites has changed, the last score stands and nothing is used. A check that re-scores uses ${window.taskCost('site_audit')} from your monthly allowance.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-sac-run class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Check my site now</button>
         <button type="button" data-sac-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2034,7 +2055,7 @@
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Website check settings · Approval needed</p>
       ${any ? rows : '<p class="text-xs text-amber-700 mt-2">Nothing to change was given.</p>'}
-      <p class="text-xs text-gray-600 mt-2">Saved to the Website tab. If this is the first time your website is saved, its first check starts straight away (1 task).</p>
+      <p class="text-xs text-gray-600 mt-2">Saved to the Website tab. If this is the first time your website is saved, its first check starts straight away (${window.taskCost('site_audit')}).</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-sas-save ${any ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Save</button>
         <button type="button" data-sas-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2172,7 +2193,7 @@
         : '<p class="text-xs text-amber-700 mt-2">Nothing was named.</p>'}
       <p class="text-xs text-gray-600 mt-2">${asking
         ? 'Opens its chat with this typed in. Nothing is sent or changed until you say so, and when you publish the change the check runs again.'
-        : 'A check that re-scores uses 1 task. If nothing has changed, it\'s free.'}</p>
+        : 'A check that re-scores uses ' + window.taskCost('site_audit') + '. If nothing has changed, it\'s free.'}</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-saic-confirm ${items.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${asking ? 'Open its chat' : 'Check now'}</button>
         <button type="button" data-saic-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2350,7 +2371,7 @@
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Draft your whole site</p>
       ${request ? `<p class="text-xs text-gray-700 mt-2"><span class="font-bold">Your wishes:</span> ${esc(request)}</p>` : ''}
-      <p class="text-xs text-gray-600 mt-2">Writes every page again, replacing your current draft. Nothing is live. Uses 1 task from your monthly allowance.</p>
+      <p class="text-xs text-gray-600 mt-2">Writes every page again, replacing your current draft. Nothing is live. Uses ${window.taskCost('site_draft')} from your monthly allowance.</p>
       <div class="grid gap-2 mt-3">
         <label class="block text-xs font-bold text-gray-700">Placeholder pictures
           <select data-sd-images class="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal bg-white"></select></label>
@@ -2593,7 +2614,7 @@
         <label class="flex items-start gap-2 text-xs text-gray-700 mt-1"><input type="radio" name="${name}" value="skip"> <span>Leave them out</span></label>
       </fieldset>
       <label class="flex items-start gap-2 text-xs text-gray-700 mt-2"><input type="checkbox" data-si-own> <span>This website belongs to my business, and I have the right to use its words and pictures.</span></label>
-      <p class="text-xs text-gray-600 mt-2">Your own words are laid out unchanged; prices aren't copied (they belong in Business Information). You'll see the result before it replaces anything. Uses 1 task, only if a draft is made.</p>
+      <p class="text-xs text-gray-600 mt-2">Your own words are laid out unchanged; prices aren't copied (they belong in Business Information). You'll see the result before it replaces anything. Uses ${window.taskCost('site_words')}, only if a draft is made.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-si-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Read my site</button>
         <button type="button" data-si-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2748,7 +2769,7 @@
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Your own words on your website</p>
       ${note ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(note)}</p>` : ''}
       ${sourceUrl ? `<p class="text-xs text-gray-700 mt-2">From your website: <span class="font-semibold break-all">${esc(sourceLabel)}</span></p>` : ''}
-      <p class="text-xs text-gray-600 mt-2">${sourceUrl ? 'The words on that page go on this one exactly as they are on your website' : 'Your words go on the page exactly as you wrote them'} — split into headings and paragraphs, never reworded. You'll see where everything goes before anything changes. Uses 1 task.</p>
+      <p class="text-xs text-gray-600 mt-2">${sourceUrl ? 'The words on that page go on this one exactly as they are on your website' : 'Your words go on the page exactly as you wrote them'} — split into headings and paragraphs, never reworded. You'll see where everything goes before anything changes. Uses ${window.taskCost('site_words')}.</p>
       <div data-sw-preview></div>
       <div class="flex flex-wrap items-center gap-2 mt-3" data-sw-actions>
         <button type="button" data-sw-go ${pageId && (attachmentId || quote || sourceUrl) ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Place my words</button>
@@ -3401,8 +3422,8 @@
     if (ui.op === 'draft') {
       return mentorCard(esc, {
         eyebrow: `Draft your ${lower}`, summary: ui.summary, why: null,
-        bodyHtml: '<p class="mt-2 text-xs text-gray-700">Uses 1 task. Ready in about a minute — it’s posted into this chat and on the Plan tab, and you’ll get a notification. Nothing is saved until you choose “Use this draft”.</p>',
-        goLabel: 'Draft it · 1 task', eventName: 'mentor:strategyDraft', detail: { kind: ui.kind },
+        bodyHtml: '<p class="mt-2 text-xs text-gray-700">Uses ' + window.taskCost('mentor_strategy') + '. Ready in about a minute — it’s posted into this chat and on the Plan tab, and you’ll get a notification. Nothing is saved until you choose “Use this draft”.</p>',
+        goLabel: 'Draft it · ' + window.taskCost('mentor_strategy') + '', eventName: 'mentor:strategyDraft', detail: { kind: ui.kind },
         doneText: 'Drafting — I’ll post it here when it’s ready (about a minute). Reopen this chat or check the Plan tab.',
       });
     }
@@ -3431,9 +3452,9 @@
     el.innerHTML = `<p class="text-xs font-bold text-pink-700 tracking-wider uppercase">Look this up</p>
       ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
       <p class="mt-2 text-xs rounded-lg bg-gray-50 border border-dashed border-gray-300 px-3 py-2 text-gray-800 break-words">${esc(String(ui.question || ''))}</p>
-      <p class="text-xs text-gray-600 mt-2">Searches the web and answers with its sources: about two minutes, 1 task. If it can’t find a source, it says so rather than guess.</p>
+      <p class="text-xs text-gray-600 mt-2">Searches the web and answers with its sources: about two minutes, ${window.taskCost('mentor_research')}. If it can’t find a source, it says so rather than guess.</p>
       <div class="flex flex-wrap gap-2 mt-3">
-        <button type="button" data-mr-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Look it up · 1 task</button>
+        <button type="button" data-mr-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Look it up · ${window.taskCost('mentor_research')}</button>
         <button type="button" data-mr-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
       </div>
       <p class="hidden mt-2 text-xs font-semibold text-pink-700" data-mc-status role="status" aria-live="polite"></p>
@@ -5194,7 +5215,7 @@
     if (!instruction) return null;
     return emailStudioCard(ui, esc, {
       head: 'Rewrite this email', go: 'Write the new version', event: 'email:refineAsk', detail: { instruction },
-      body: `<p class="text-sm text-gray-700 mt-2">${esc(instruction)}</p><p class="text-xs text-gray-600 mt-2">Uses 1 task. You read the new version before anything changes.</p>`,
+      body: `<p class="text-sm text-gray-700 mt-2">${esc(instruction)}</p><p class="text-xs text-gray-600 mt-2">Uses ${window.taskCost('email_issue')}. You read the new version before anything changes.</p>`,
     });
   });
 
@@ -5271,7 +5292,7 @@
           ${window.VoicePicker && ui.voice ? '<button type="button" data-pap-listen class="text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer" aria-pressed="false">&#9654; Listen</button>' : ''}</div>
         <p class="text-sm text-gray-700 mt-1"><span class="font-bold">Captions:</span> ${ui.captions === false ? 'off' : esc(`on — ${window.CaptionStyle ? window.CaptionStyle.describe(ui.captionStyle).toLowerCase() : 'following the voice'}`)}</p>
         ${ui.timeText ? '<p class="text-sm text-gray-700 mt-1"><span class="font-bold">Text:</span> each text box is timed to when its words are said</p>' : ''}
-        <p class="text-xs text-gray-600 mt-2">Uses 1 task${ids.length > 1 ? `, for all ${ids.length} platforms` : ''}. Any music on the post is turned down under the voice. Open the post to change any of it.</p>` : ''}
+        <p class="text-xs text-gray-600 mt-2">Uses ${window.taskCost('ai_voiceover')}${ids.length > 1 ? `, for all ${ids.length} platforms` : ''}. Any music on the post is turned down under the voice. Open the post to change any of it.</p>` : ''}
       ${!blocked && ui.action === 'captions' ? `<p class="text-sm text-gray-700 mt-3"><span class="font-bold">Captions:</span> ${ui.captions === false ? 'off' : esc(`on${ui.captionStyle && window.CaptionStyle ? ` — ${window.CaptionStyle.describe(ui.captionStyle).toLowerCase()}` : ''}`)}</p>
         ${ui.timeText ? '<p class="text-sm text-gray-700 mt-1"><span class="font-bold">Text:</span> each text box is timed to when its words are said</p>' : ''}
         <p class="text-xs text-gray-600 mt-2">Free. Captions are added when the video is made.</p>` : ''}
@@ -5332,6 +5353,68 @@
       <button type="button" data-redraft-preview class="btn-primary mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">See which posts would be redrafted</button>
       <p class="text-[11px] text-gray-500 mt-2">Nothing changes until you press Redraft.</p>`;
     el.querySelector('[data-redraft-preview]').addEventListener('click', () => window.offerRedraftUpcoming?.(ui.assistantId, { now: true }));
+    return el;
+  });
+
+  // One content pillar (src/utils/chat-pillar-card.ts) — the Social Media chat's card. The orchestrator
+  // rebuilt it from the rows; the click applies it through netlify/functions/content-pillars.ts, the same
+  // path as the profile's pillar list (src/components/pillar-list.js), which then reloads if it is open.
+  register('pillar_proposal', (ui, esc) => {
+    const action = String(ui.action || '');
+    if (!['add', 'update', 'archive', 'restore'].includes(action)) return null;
+    const before = ui.before || null;
+    const change = ui.change || {};
+    const onOff = (v) => (v ? 'switched on' : 'switched off');
+    const eyebrow = { add: 'New content pillar', update: 'Change a content pillar', archive: 'Archive a content pillar', restore: 'Bring back a content pillar' }[action];
+    const goLabel = { add: 'Add this pillar', update: 'Save this change', archive: 'Archive it', restore: 'Bring it back' }[action];
+    const row = (label, value) => `<div class="break-words"><dt class="inline text-gray-500">${label}</dt> <dd class="inline">${value}</dd></div>`;
+    let body = '';
+    if (action === 'add') {
+      body = row('Name:', `<span class="font-semibold text-gray-900">${esc(change.name || '')}</span>`)
+        + (change.description ? row('What goes under it:', esc(change.description)) : '')
+        + (change.isActive === false ? row('Starts:', 'switched off') : '');
+    } else if (before) {
+      body = row('Now:', `<span class="font-semibold">${esc(before.name)}</span>${before.description ? ` — ${esc(before.description)}` : ''} (${action === 'restore' ? 'archived' : onOff(before.isActive)})`);
+      if (action === 'update') {
+        if (change.name !== undefined) body += row('New name:', `<span class="font-semibold text-gray-900">${esc(change.name)}</span>`);
+        if (change.description !== undefined) body += row('What goes under it:', change.description ? esc(change.description) : '<em>no description</em>');
+        if (change.isActive !== undefined) body += row('After:', onOff(change.isActive));
+      }
+    }
+    const note = action === 'archive' ? 'New posts stop using it. Posts already written under it keep it, and you can bring it back.'
+      : action === 'restore' ? (ui.landsOff ? 'Five pillars are already on, so it comes back switched off.' : 'It comes back with its description and post history.')
+      : 'Only this pillar changes. It’s also on “What I post about” in my settings.';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-200 rounded-xl shadow-sm p-4 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${eyebrow}</p>
+      ${ui.summary ? `<p class="text-sm text-gray-800 mt-1">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <dl class="mt-2 text-xs text-gray-700 space-y-1">${body}</dl>
+      <button type="button" data-pillar-go class="btn-primary mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">${goLabel}</button>
+      <p data-pillar-status class="text-[11px] text-gray-500 mt-2">${note}</p>`;
+    const go = el.querySelector('[data-pillar-go]');
+    const status = el.querySelector('[data-pillar-status]');
+    go.addEventListener('click', async () => {
+      go.disabled = true; go.textContent = 'Saving…';
+      const body = { action, assistantId: ui.assistantId };
+      if (ui.pillarId) body.pillarId = ui.pillarId;
+      if (action === 'add' || action === 'update') Object.assign(body, change);
+      try {
+        const res = await fetch('/.netlify/functions/content-pillars', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That didn’t save (HTTP ${res.status}).`);
+        go.remove();
+        status.className = 'text-xs font-semibold text-emerald-800 mt-2';
+        status.textContent = { add: 'Added.', update: 'Saved.', archive: 'Archived.', restore: data.switchedOff ? 'Brought back, switched off.' : 'Brought back.' }[action];
+        window.PillarList?.reload();
+        // What the posts are about changed: offer to redraft the upcoming drafts (redraft-upcoming.js).
+        if (action !== 'restore' || !data.switchedOff) window.offerRedraftUpcoming?.(Number(ui.assistantId));
+      } catch (err) {
+        go.disabled = false; go.textContent = goLabel;
+        status.className = 'text-xs text-red-700 mt-2';
+        status.textContent = err.message;
+      }
+    });
     return el;
   });
 

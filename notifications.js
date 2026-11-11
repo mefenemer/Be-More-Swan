@@ -244,6 +244,10 @@ window.NotifKit = (function () {
             if (meta.seatLimitReached) return { label: 'Upgrade plan', run: routeToBilling };
             return { label: 'Invite User', run: () => window._inviteFromAccessRequest?.(meta.requestingEmail, notif.id) };
         }
+        // A change to task costs: opens the review prompt (workspace.html). Owners accept there.
+        if (/^task_cost_change_\d+$/.test(notif.type || '')) {
+            return { label: 'Review', run: () => window.openTaskCostReview?.() };
+        }
         // AI media ready — deep-link straight to the generated asset in My Content.
         // Files due to be deleted — opens My Content on just those files, to Keep any of them.
         if (notif.type === 'library_files_expiring') {

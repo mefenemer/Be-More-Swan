@@ -8,7 +8,8 @@ import { billedSecondsFor, type VideoDurationSeconds } from '../lib/fal-gateway'
 import { tierCanGenerateVideo } from './ai-credits';
 import { getOrgMediaCapabilities } from './assistant-capabilities';
 import { getActiveTierKeyByOrg } from './plan-features';
-import { AI_IMAGE_TASKS, cleanDraftMediaSource, DRAFT_MEDIA_CAPS, type DraftMediaOptions } from './site-draft-media';
+import { getTaskCosts } from './task-costs';
+import { cleanDraftMediaSource, DRAFT_MEDIA_CAPS, type DraftMediaOptions } from './site-draft-media';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -17,6 +18,7 @@ export const DRAFT_VIDEO_SECONDS: VideoDurationSeconds = 6;
 
 /** What this workspace may choose, and the live cost of each. Used by the Website tab, the chat card and the chat prompt. */
 export async function draftMediaOptions(db: Db, orgId: number, onboardingContext: unknown): Promise<DraftMediaOptions> {
+    const costs = await getTaskCosts(); // what Admin → Money → Task costs says today
     const ctx = (onboardingContext && typeof onboardingContext === 'object' ? onboardingContext : {}) as Record<string, unknown>;
     let canImage = false; let canVideo = false; let tierVideo = false;
     try {
@@ -29,12 +31,12 @@ export async function draftMediaOptions(db: Db, orgId: number, onboardingContext
     return {
         images: {
             aiAllowed: canImage, aiWhyNot: canImage ? null : 'None of your assistants can generate AI images.',
-            aiTasksEach: AI_IMAGE_TASKS, aiMax: DRAFT_MEDIA_CAPS.aiImages, stockMax: DRAFT_MEDIA_CAPS.stockImages,
+            aiTasksEach: costs.weights.ai_image, aiMax: DRAFT_MEDIA_CAPS.aiImages, stockMax: DRAFT_MEDIA_CAPS.stockImages,
         },
         videos: {
             aiAllowed: canVideo && tierVideo,
             aiWhyNot: !tierVideo ? 'AI video is on the Busywork Buster and Digital Employee plans.' : canVideo ? null : 'None of your assistants can generate AI videos.',
-            aiTasksEach: aiVideoTasks(billedSecondsFor(DRAFT_VIDEO_SECONDS)), aiMax: DRAFT_MEDIA_CAPS.aiVideos, stockMax: DRAFT_MEDIA_CAPS.stockVideos,
+            aiTasksEach: aiVideoTasks(billedSecondsFor(DRAFT_VIDEO_SECONDS), costs), aiMax: DRAFT_MEDIA_CAPS.aiVideos, stockMax: DRAFT_MEDIA_CAPS.stockVideos,
         },
         answers: { images: cleanDraftMediaSource(ctx.sitePictures), videos: cleanDraftMediaSource(ctx.siteVideos) },
     };

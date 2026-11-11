@@ -70,6 +70,12 @@ export const EDIT_REASONS_FED_TO_MODEL: readonly EditReason[] =
     EDIT_REASONS.filter((r) => r !== 'other');
 
 /**
+ * The longest note a reviewer can type after "Something else" (Fix pipeline #37). Free text is for
+ * people to read, never a grouping key, so it lives in its own column beside the closed reason.
+ */
+export const EDIT_NOTE_MAX = 500;
+
+/**
  * How many similar edits the edit-pattern proposer needs before it may propose a template change
  * (docs/strategy-agent-plan.md §4.1).
  *

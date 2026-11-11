@@ -54,14 +54,51 @@ const POINTS_AT_CARD = new RegExp([
 
 export const NO_CARD_NOTE = '(No card came with this reply. Ask me again and I’ll add it.)';
 
+/**
+ * An OFFER of a card, not a claim of one (Fix pipeline #33/#36, prod 2026-11-10): "tell me which one
+ * and I'll put it on a card that shows every word", "just tell me … and I'll put a card here". The
+ * note was added to those, so a correct reply read as a fault. A match counts as an offer when, in
+ * the same sentence and BEFORE it, the reply says what it will/can do. "I can't see #118's text, so
+ * the card below asks…" is still a claim, and so is "Approve the card below and I'll do the rest".
+ */
+const OFFER_BEFORE = /\b(?:I(?:'|’)ll|I will|I can(?!(?:'|’)t|not)|I could|I(?:'|’)d|I would|shall I|want me to|like me to)\b/i;
+const POINTS_AT_CARD_ALL = new RegExp(POINTS_AT_CARD.source, 'gi');
+
 export function replyPointsAtCard(content: string): boolean {
-    return POINTS_AT_CARD.test(content);
+    for (const m of content.matchAll(POINTS_AT_CARD_ALL)) {
+        const upTo = content.slice(0, m.index);
+        const sentenceStart = Math.max(upTo.lastIndexOf('.'), upTo.lastIndexOf('!'), upTo.lastIndexOf('?'), upTo.lastIndexOf('\n')) + 1;
+        if (!OFFER_BEFORE.test(upTo.slice(sentenceStart))) return true;
+    }
+    return false;
 }
 
 /** The reply, with NO_CARD_NOTE added when it points at a card that isn't there. */
 export function missingCardReply(content: string, hasCard: boolean): string {
     if (hasCard || !replyPointsAtCard(content) || content.includes(NO_CARD_NOTE)) return content;
     return `${content}\n\n${NO_CARD_NOTE}`;
+}
+
+/**
+ * What to keep when a reply points at a card that was not drawn (Fix pipeline #33, prod 2026-11-10).
+ * Three Blog Writer replies said "the card below…" over nothing, and the card the model sent (if any)
+ * was only console.warn'd, gone by the time anyone looked. This is stored as a hidden role 'system'
+ * chat message beside the reply, like the [suppressed:…] row, so the cause can be read afterwards:
+ * no card sent, a card the server refused (sentType set), or a reply that was prose, not JSON.
+ * Capped so one bad turn can't write a huge row. Pure.
+ */
+export const DROPPED_CARD_TAG = '[card-dropped]';
+export function droppedCardRecord(input: { route: string; roleKey: string | null; sentUiElement: unknown; raw: string }): { content: string; uiElementJson: Record<string, unknown> } {
+    const sent = input.sentUiElement && typeof input.sentUiElement === 'object' ? input.sentUiElement as Record<string, unknown> : null;
+    const sentType = typeof sent?.type === 'string' ? sent.type : null;
+    let sentJson: string | null = null;
+    if (sent) { try { sentJson = JSON.stringify(sent).slice(0, 4000); } catch { sentJson = null; } }
+    const replyWasJson = input.raw.trimStart().startsWith('{');
+    const why = sentType ? `sent ${sentType}, not drawn` : replyWasJson ? 'no card in the reply' : 'reply was prose, not JSON';
+    return {
+        content: `${DROPPED_CARD_TAG} ${input.route} / ${input.roleKey ?? '?'}: ${why}`,
+        uiElementJson: { route: input.route, roleKey: input.roleKey, sentType, sentCard: sentJson, replyWasJson, rawLength: input.raw.length, rawEnd: input.raw.slice(-1500) },
+    };
 }
 
 /**

@@ -34,7 +34,8 @@ import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { loadOrgProducts, renderProductFacts } from './org-products';
 import { normalizeBrandKit } from './brand-kit';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, MUSIC_CREDIT_COST, type MediaKind } from './ai-credits';
-import { TASK_WEIGHTS, aiVideoTasks } from '../config/task-weights';
+import { aiVideoTasks, type TaskCosts } from '../config/task-weights';
+import { getTaskCosts } from './task-costs';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
 import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, i2vModel } from '../lib/fal-gateway';
@@ -63,7 +64,7 @@ import { LIMIT_CEILING_DB } from '../lib/loudness-measure';
 import { levelledVoiceover, measureAsset } from './audio-levelling';
 import { isVideoLook, lookStyle, type LookStyle } from '../lib/video-look';
 import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
-import { defaultTextPos, textFont, textLook, textWindow, textY } from '../lib/scene-text';
+import { defaultTextPos, plannedClearOfCaptions, textFont, textLook, textWindow, textY } from '../lib/scene-text';
 import { isOwnVoice, keepRecordings, linesToRecord, recordedDurations } from './own-voice';
 import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
 import { makeVideoTrack, ownMusicTrack, ownMusicTracks, storedFileExists } from './video-music-asset';
@@ -364,7 +365,10 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
             if (current.music) storyboard = { ...storyboard, music: current.music };
         }
         // The owner's recordings stay on lines whose words didn't change; ids the model wrote are dropped.
+        // Words the planner placed on the captions fall back to the default place (scene-text.ts).
+        // (Only a fresh plan: a words-only rewrite keeps the owner's own placements as they set them.)
         storyboard = keepRecordings(current, storyboard);
+        if (!mode) storyboard = plannedClearOfCaptions(storyboard, brief);
         await db.update(videoProjects).set({
             status: 'planned', storyboard, changes, title: storyboard.title, note: null, updatedAt: new Date(), ...kept,
         }).where(eq(videoProjects.id, projectId));
@@ -420,15 +424,16 @@ export function musicToMake(storyboard: Storyboard, brief: VideoBrief): boolean 
     return !(storyboard.music?.assetId && storyboard.music.mood === mood);
 }
 
-export function buildTasks(storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar): number {
+/** Tasks for what is still to be made, at the live costs (getTaskCosts). Pure. */
+export function buildTasks(storyboard: Storyboard, brief: VideoBrief, costs: TaskCosts, made?: MadeSoFar): number {
     const todo = stillToMake(storyboard, made);
-    let n = musicToMake(storyboard, brief) ? TASK_WEIGHTS.ai_music : 0;
+    let n = musicToMake(storyboard, brief) ? costs.weights.ai_music : 0;
     for (const s of todo.scenes) {
-        if (s.source === 'ai_image') n += TASK_WEIGHTS.ai_image;
-        if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)));
+        if (s.source === 'ai_image') n += costs.weights.ai_image;
+        if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)), costs);
     }
     // The owner's own voice is never made, so never charged (own-voice.ts).
-    if (brief.voiceover && !isOwnVoice(brief) && scriptOf(storyboard) && todo.voiceover) n += TASK_WEIGHTS.ai_voiceover;
+    if (brief.voiceover && !isOwnVoice(brief) && scriptOf(storyboard) && todo.voiceover) n += costs.weights.ai_voiceover;
     return n;
 }
 
@@ -695,7 +700,13 @@ async function sourceScene(db: Db, args: {
             };
         case 'ai_video': {
             if (!falConfigured()) return null;
+            // A first frame the owner already saw and kept (an AI clip on its own, ai-clip.ts): animate THAT picture.
             let frameUrl: string | null = null;
+            if (scene.assetId) {
+                const [f] = await db.select({ storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl }).from(contentAssets)
+                    .where(and(eq(contentAssets.id, scene.assetId), eq(contentAssets.organisationId, orgId), eq(contentAssets.assetType, 'image'), isNull(contentAssets.purgedAt))).limit(1);
+                frameUrl = f?.storageKey ? await presignR2Get(f.storageKey, 3600).catch(() => null) : (f?.externalUrl ?? null);
+            }
             let sub: Awaited<ReturnType<typeof submitFramedVideo>> | null = null;
             for (let attempt = 1; attempt <= AI_CLIP_ATTEMPTS && !sub; attempt++) {
                 const tried = await submitFramedVideo({
@@ -726,7 +737,7 @@ async function sourceScene(db: Db, args: {
                 assetType: 'video', mimeType: 'video/mp4', fileSize: stored.fileSize, storageKey: stored.storageKey,
                 durationS: sub.billedSeconds, provider: 'fal', prompt: scene.prompt || context, aspectRatio: shape, status: 'pending',
             }).returning({ id: contentAssets.id });
-            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: aiVideoTasks(sub.billedSeconds) };
+            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: aiVideoTasks(sub.billedSeconds, await getTaskCosts()) };
         }
     }
     return null;
@@ -1091,7 +1102,7 @@ export async function makeOtherShapes(db: Db, row: typeof videoProjects.$inferSe
         if (have.has(shape)) { skipped.push(shape); continue; }
         const nb = { ...brief, shape, shapeOf: root };
         const sceneAssets = assetsForShape(sb, row.sceneAssets);
-        const free = buildTasks(sb, nb, { sceneAssets, voiceoverAssetId: row.voiceoverAssetId }) === 0;
+        const free = buildTasks(sb, nb, await getTaskCosts(), { sceneAssets, voiceoverAssetId: row.voiceoverAssetId }) === 0;
         const [v] = await db.insert(videoProjects).values({
             organisationId: row.organisationId, aiAssistantId: row.aiAssistantId, createdBy: row.createdBy ?? args.userId,
             title: row.title, status: free ? 'building' : 'planned', brief: nb, storyboard: sb, changes: [],
@@ -1154,7 +1165,7 @@ export async function sweepStuckProjects(db: Db, orgId: number, now = new Date()
 export async function holdBuild(db: Db, orgId: number, storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar) {
     const credits = buildCredits(storyboard, brief, made);
     if (credits === 0) return { ok: true as const, credits: 0 };
-    const hold = await holdCredits(db, { orgId, amount: credits, tasks: buildTasks(storyboard, brief, made), mediaType: 'video' });
+    const hold = await holdCredits(db, { orgId, amount: credits, tasks: buildTasks(storyboard, brief, await getTaskCosts(), made), mediaType: 'video' });
     return hold.ok ? { ok: true as const, credits } : { ok: false as const, credits, balance: hold.balance, unit: hold.unit, cost: hold.cost };
 }
 
@@ -1166,7 +1177,7 @@ export async function holdBuild(db: Db, orgId: number, storyboard: Storyboard, b
  */
 export async function buildEstimate(orgId: number, storyboard: Storyboard, brief: VideoBrief, made?: MadeSoFar): Promise<{ estimate: number; unit: 'tasks' | 'credits' }> {
     return await isUnifiedTaskMetering(orgId)
-        ? { estimate: buildTasks(storyboard, brief, made), unit: 'tasks' }
+        ? { estimate: buildTasks(storyboard, brief, await getTaskCosts(), made), unit: 'tasks' }
         : { estimate: buildCredits(storyboard, brief, made), unit: 'credits' };
 }
 
@@ -1214,12 +1225,35 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         mix: (row.timeline as ProjectTimeline | null)?.mix ?? null,
         editCount: row.editCount,
         sourceFiles: row.status === 'ready' ? await sourceFilesOf(db, orgId, row) : [],
+        // An AI clip on its own: the first frame the owner is shown before the clip is made (ai-clip.ts).
+        clipFrameUrl: (row.brief as VideoBrief).clip ? await clipFrameUrl(db, orgId, sb) : null,
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),
         archivedAt: row.archivedAt ?? null,
         // The owner's own recordings, to play back on the tab (own-voice.ts): scene id → URL, and 'whole'.
         voiceUrls: isOwnVoice(row.brief as VideoBrief) ? await ownVoiceUrls(db, orgId, row) : {},
         createdAt: row.createdAt, updatedAt: row.updatedAt,
     };
+}
+
+/**
+ * An AI clip on its own (ai-clip.ts): saved straight as a planned one-scene project — no planner and no
+ * setup defaults to apply (it has no voice, music or captions). The one other way a project begins,
+ * beside startProject. Free.
+ */
+export async function startClip(db: Db, args: { organisationId: number; assistantId: number; createdBy: number; brief: VideoBrief; storyboard: Storyboard }) {
+    const [row] = await db.insert(videoProjects).values({
+        organisationId: args.organisationId, aiAssistantId: args.assistantId, createdBy: args.createdBy, title: args.storyboard.title.slice(0, 120),
+        status: 'planned', brief: args.brief, storyboard: args.storyboard, changes: [], origin: 'user',
+    }).returning();
+    return row;
+}
+
+async function clipFrameUrl(db: Db, orgId: number, sb: Storyboard | null): Promise<string | null> {
+    const id = sb?.scenes?.[0]?.assetId;
+    if (!id) return null;
+    const [f] = await db.select({ storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl }).from(contentAssets)
+        .where(and(eq(contentAssets.id, id), eq(contentAssets.organisationId, orgId), isNull(contentAssets.purgedAt))).limit(1);
+    return f?.storageKey ? await presignR2Get(f.storageKey, 3600, { stableWindowSec: 1800 }).catch(() => null) : (f?.externalUrl ?? null);
 }
 
 async function ownVoiceUrls(db: Db, orgId: number, row: typeof videoProjects.$inferSelect): Promise<Record<string, string>> {
@@ -1293,11 +1327,20 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         built: 'made (the old way, before 9 Nov) — its post is in the Review Queue for approval',
         failed: 'stopped', cancelled: 'cancelled', draft: 'not started',
     };
+    const costs = await getTaskCosts();
     return ['YOUR VIDEOS (newest first; use only these ids):', ...rows.map((r) => {
         const sb = r.storyboard as Storyboard | null;
         const brief = r.brief as VideoBrief;
+        // An AI clip on its own (ai-clip.ts): no storyboard to talk through — its frame, then the clip.
+        if (brief.clip) {
+            const framed = !!sb?.scenes?.[0]?.assetId;
+            const at = r.status === 'planned' || r.status === 'failed'
+                ? (framed ? 'first frame made — waiting for them to press "Make the clip" (or "Try another frame")' : 'saved — waiting for them to press "See the first frame" (1 task)')
+                : (WAITING[r.status] ?? r.status);
+            return `- id ${r.id}: AI CLIP "${brief.clip.description.slice(0, 100)}" (${brief.clip.style}, ${brief.clip.lengthS}s) — ${at}`;
+        }
         const scenes = sb ? ` · ${sb.scenes.length} scenes` : '';
-        const n = sb ? (tasks ? buildTasks(sb, brief, r) : buildCredits(sb, brief, r)) : 0;
+        const n = sb ? (tasks ? buildTasks(sb, brief, costs, r) : buildCredits(sb, brief, r)) : 0;
         const unit = tasks ? (n === 1 ? 'task' : 'tasks') : (n === 1 ? 'credit' : 'credits');
         const cost = sb && (r.status === 'planned' || r.status === 'failed') ? ` · would use ${n} ${unit} to make` : '';
         const note = r.note ? ` · note: ${r.note.slice(0, 160)}` : '';

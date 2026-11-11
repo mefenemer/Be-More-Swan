@@ -50,7 +50,7 @@ import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/ut
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
-import { holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
+import { startClip, holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
 import { enforceStoryboard, isVideoShape, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
@@ -58,12 +58,16 @@ import { ownMusicTrack, ownMusicTracks } from '../../src/utils/video-music-asset
 import { isVideoLook } from '../../src/lib/video-look';
 import { isLowerThirdStyle, readNameCaption } from '../../src/lib/lower-third';
 import { readSceneText } from '../../src/lib/scene-text';
+import { clipPrompt, clipRefusal, clipTargetS, isClipLength, isClipStyle, type ClipLength } from '../../src/lib/ai-clip';
+import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
+import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { isOwnVoice, keepRecordings, linesToRecord, MAX_LINE_S, MAX_WHOLE_S, prepareOwnRecording } from '../../src/utils/own-voice';
 import { contentAssets } from '../../db/schema';
 import { randomUUID } from 'crypto';
 import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
 import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../src/utils/footage-review';
-import { FOOTAGE_REVIEW_TASKS, tightenStoryboard, type FootageReview } from '../../src/lib/footage';
+import { getTaskCosts } from '../../src/utils/task-costs';
+import { tightenStoryboard, type FootageReview } from '../../src/lib/footage';
 import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -208,13 +212,40 @@ export default withLambda(async (event) => {
             const status = await footageStatus(db, orgId, footage);
             if (status.length !== footage.length) return json(404, { error: 'One of those videos isn’t one of your own uploads.' });
             if (status.some((x) => x.needsReading)) return json(409, { error: 'Some of those videos haven’t been read yet. Press “Review my footage” again.' });
-            if (!await canAffordReview(db, orgId, footage)) return json(402, { error: 'insufficient_credits', unit: 'tasks', cost: FOOTAGE_REVIEW_TASKS, message: TASK_LIMIT_MESSAGE });
+            if (!await canAffordReview(db, orgId, footage)) return json(402, { error: 'insufficient_credits', unit: 'tasks', cost: (await getTaskCosts()).weights.footage_review, message: TASK_LIMIT_MESSAGE });
         }
         const started = await startProject(db, {
             organisationId: orgId, assistantId, createdBy: userId, brief: body.brief, onboardingContext: a.onboardingContext, origin: 'user', headers,
         });
         if (!started.ok) return json(400, { error: started.error });
         return json(202, { project: await projectView(db, orgId, started.row) });
+    }
+
+    // ── An AI clip on its own (ai-clip.ts): describe it → a one-scene project, free. The first frame
+    // (1 task) and the clip itself are separate presses, each saying what it uses. ──
+    if (action === 'clip_create') {
+        const assistantId = Number(body.assistantId);
+        const [a] = Number.isInteger(assistantId) ? await db.select({ id: aiAssistants.id }).from(aiAssistants)
+            .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1) : [];
+        if (!a) return json(404, { error: 'Assistant not found.' });
+        const style = isClipStyle(body.style) ? body.style : 'realistic';
+        const lengthS: ClipLength = isClipLength(body.lengthS) ? (Number(body.lengthS) as ClipLength) : 5;
+        const shape = isVideoShape(body.shape) ? body.shape : '9:16';
+        const description = typeof body.description === 'string' ? body.description.replace(/\s+/g, ' ').trim().slice(0, 400) : '';
+        const refused = clipRefusal(style, description);
+        if (refused) return json(400, { error: refused });
+        const blocked = await enforcePromptModeration({ text: description, userId, organisationId: orgId, source: 'video-projects' });
+        if (blocked) return blocked;
+        const brief = {
+            message: description, lengthS: 15, voiceover: false, allowAi: 'ai_first', musicMood: 'none', captions: false,
+            shape, platforms: ['instagram'], clip: { style, lengthS, description },
+        } as unknown as VideoBrief;
+        const storyboard: Storyboard = {
+            title: `AI clip — ${description.slice(0, 50)}`, caption: '',
+            scenes: [{ id: 's1', beat: 'value', voiceover: '', source: 'ai_video', prompt: clipPrompt(style, description), targetS: clipTargetS(lengthS) }],
+        };
+        const created = await startClip(db, { organisationId: orgId, assistantId: a.id, createdBy: userId, brief, storyboard });
+        return json(201, { project: await projectView(db, orgId, created) });
     }
 
     if (action === 'from_post') {
@@ -231,6 +262,31 @@ export default withLambda(async (event) => {
     const id = Number(body.id);
     let row = Number.isInteger(id) ? await load(id) : null;
     if (!row) return json(404, { error: 'Video not found.' });
+
+    // An AI clip is a description, a style and a frame — not a storyboard. It is changed by a new frame or a
+    // new clip, never re-planned (the planner would turn it into a promo video).
+    const isClip = !!(row.brief as VideoBrief).clip;
+    if (isClip && ['replan', 'edit_scene', 'rewrite_script', 'approve_script', 'plan_from_review', 'notes_to_version', 'reshape', 'set_line_voice', 'set_voice_file'].includes(action)) {
+        return json(409, { error: 'An AI clip can’t be planned again. Try another first frame, or make a new clip.' });
+    }
+    if (action === 'clip_frame') {
+        if (!isClip || !['planned', 'failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This clip can’t take a new frame right now.' });
+        const sb = structuredClone(row.storyboard) as Storyboard;
+        const scene = sb.scenes[0];
+        const hold = await holdCredits(db, { orgId, amount: IMAGE_CREDIT_COST, mediaType: 'image' });
+        if (!hold.ok) return json(402, { error: 'insufficient_credits', cost: hold.cost, balance: hold.balance, unit: hold.unit });
+        try {
+            const assetId = await generateAndPersistImage(db, { orgId, userId, prompt: scene.prompt || (row.brief as VideoBrief).message, aspectRatio: ((row.brief as VideoBrief).shape ?? '9:16') as '9:16', timeoutMs: 18_000 });
+            await settleHold(db, { orgId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId, assistantId: row.aiAssistantId });
+            scene.assetId = assetId;
+            await db.update(videoProjects).set({ storyboard: sb, status: 'planned', note: null, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
+            return json(200, { project: await projectView(db, orgId, (await load(row.id))!) });
+        } catch (err) {
+            await settleHold(db, { orgId, amount: IMAGE_CREDIT_COST, success: false, mediaType: 'image', userId });
+            console.error('[video-projects] clip frame failed:', err);
+            return json(502, { error: 'The first frame couldn’t be made, and no task was used. Try again, or change the words.' });
+        }
+    }
 
     // A finished video is never changed in place (D-S1: every version is kept). "Change it", and a
     // replan or scene edit on a ready video — from the tab or a chat card — first make a new version.
@@ -473,6 +529,8 @@ export default withLambda(async (event) => {
 
     if (action === 'build') {
         if (!['planned', 'failed'].includes(row.status) || !row.storyboard) return json(409, { error: 'This video is not ready to make.' });
+        // An AI clip is made from the first frame the owner saw (ai-clip.ts).
+        if ((row.brief as VideoBrief).clip && !(row.storyboard as Storyboard).scenes[0]?.assetId) return json(409, { error: 'See the first frame first.' });
         // In the owner's own voice, every line is recorded first (or one recording covers the script).
         if (isOwnVoice(row.brief as VideoBrief)) {
             const missing = linesToRecord(row.storyboard as Storyboard, !!row.voiceoverAssetId);

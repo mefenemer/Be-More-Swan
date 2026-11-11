@@ -897,7 +897,7 @@ export const masterPlans = pgTable("master_plans", {
   id: serial().primaryKey(),
   tierKey: text("tier_key").notNull().unique(),
   name: text("name").notNull(),
-  // Pricing-card marketing copy — DB-driven so the Super Admin (Master Data → Plans) controls
+  // Pricing-card marketing copy — DB-driven so the Super Admin (Money → Plans) controls
   // every visible plan-card field, and pricing.html / the comparison table render from here.
   // tierDescription = the eyebrow line ("Tier 2 · Best for Scaling Founders").
   // description = the italic sub-heading blurb. isMostPopular = the "Most Popular" pill (at most
@@ -942,7 +942,7 @@ export const planPrices = pgTable("plan_prices", {
 // (SQL: db/plan-features.sql; seed: db/seed-plan-features.ts). This is a metadata + rendering layer:
 // the VALUES live in master_plans (capacity as typed columns, everything else in the features jsonb);
 // each row here records WHERE a feature's value is stored (storageTarget/columnName) and HOW to render it
-// (valueType, unlimitedLabel). Admins edit these via Admin → Master Data → Plan Features, and pricing.html
+// (valueType, unlimitedLabel). Admins edit these via Admin → Money → Plan features, and pricing.html
 // renders the comparison table dynamically from this catalog.
 export const planFeatures = pgTable("plan_features", {
   id: serial("id").primaryKey(),
@@ -1043,7 +1043,7 @@ export const masterAssistants = pgTable("master_assistants", {
   // Detail-page marketing copy (SQL: db/assistant-content.sql; seed: db/seed-assistant-content.ts).
   // These replaced src/config/assistant-role-content.js, which used to re-declare name/description/
   // icons here AND own these four — two sources of truth that had already drifted apart. Admin-edited
-  // via Master Data → Assistants; served publicly by netlify/functions/master-assistants.ts.
+  // via Assistants → Assistants; served publicly by netlify/functions/master-assistants.ts.
   tagline: text("tagline"),                                        // one-line hook under the name
   keyFeatures: jsonb("key_features").notNull().default([]),        // string[] — the bullet list
   integrations: jsonb("integrations").notNull().default([]),       // string[] — the external tools this role connects to ("Connects with")
@@ -2803,7 +2803,7 @@ export const billingOverrides = pgTable("billing_overrides", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// ── Billing coupons — Admin → Revenue → Coupons, mirrored to Stripe ─────────────
+// ── Billing coupons — Admin → Money → Coupons, mirrored to Stripe ─────────────
 // See db/z-billing-coupons.sql. Discount and duration are immutable in Stripe, so they are written
 // once; name / notes / isActive are the editable fields. Deleted rows keep deletedAt, not removed.
 export const billingCoupons = pgTable("billing_coupons", {
@@ -2828,7 +2828,7 @@ export const billingCoupons = pgTable("billing_coupons", {
   deletedAt: timestamp("deleted_at"),
 });
 
-// ── Plan moves — Admin → Revenue → Plan moves ──────────────────────────────────────
+// ── Plan moves — Admin → Customers → Plan moves ──────────────────────────────────────
 // See db/z-plan-moves.sql. One row per customer per bulk move; the Stripe subscription schedule does
 // the switch at renewal and stripe-webhook.ts marks the row applied. One 'scheduled' row per org.
 export const planMoves = pgTable("plan_moves", {
@@ -3129,6 +3129,41 @@ export const taskLedger = pgTable("task_ledger", {
   index("task_ledger_assistant_idx").on(t.organisationId, t.assistantId, t.periodStart),
   // One conversion row per org — what makes db/ops/task-allowance-cutover.sql safe to re-run.
   uniqueIndex("task_ledger_one_conversion_idx").on(t.organisationId).where(sql`source = 'conversion'`),
+]);
+
+// What work costs in tasks, set in Admin → Money → Task costs (db/z-task-costs.sql, src/utils/task-costs.ts).
+export const taskCostChanges = pgTable("task_cost_changes", {
+  id: serial().primaryKey(),
+  status: text("status").notNull(),                                // baseline | draft | announced | cancelled
+  effectiveFrom: timestamp("effective_from").notNull(),
+  reason: text("reason").notNull().default(''),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  announcedBy: integer("announced_by").references(() => users.id, { onDelete: "set null" }),
+  announcedAt: timestamp("announced_at"),
+  cancelledBy: integer("cancelled_by").references(() => users.id, { onDelete: "set null" }),
+  cancelledAt: timestamp("cancelled_at"),
+});
+
+export const taskCostChangeItems = pgTable("task_cost_change_items", {
+  changeId: integer("change_id").notNull().references(() => taskCostChanges.id, { onDelete: "cascade" }),
+  costKey: text("cost_key").notNull(),                             // CostKey (src/config/task-weights.ts)
+  oldUnits: integer("old_units"),
+  newUnits: integer("new_units").notNull(),
+}, (t) => [primaryKey({ columns: [t.changeId, t.costKey] })]);
+
+// A workspace owner's acceptance of a change, once per workspace.
+export const taskCostAcceptances = pgTable("task_cost_acceptances", {
+  changeId: integer("change_id").notNull().references(() => taskCostChanges.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  acceptedAt: timestamp("accepted_at").defaultNow().notNull(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+}, (t) => [
+  primaryKey({ columns: [t.changeId, t.organisationId] }),
+  index("task_cost_acceptances_org_idx").on(t.organisationId),
 ]);
 
 // The free 14-day trial, one row per workspace (db/z-trial-plan.sql, src/utils/trial.ts).
@@ -3831,6 +3866,9 @@ export const templateFeedback = pgTable("template_feedback", {
   // CLOSED vocabulary — src/config/template-feedback.ts EDIT_REASONS. It is the GROUP BY key for
   // the edit-pattern proposer, and free text cannot be clustered.
   editReason: text("edit_reason"),
+  // The reviewer's own words, typed after "Something else" (Fix pipeline #37). For people only —
+  // never grouped or fed to the proposer. db/z-template-feedback-edit-note.sql.
+  editNote: text("edit_note"),
   diffSummary: text("diff_summary"),                        // one line, computed from the before/after
   appliedToTemplate: boolean("applied_to_template").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -5337,7 +5375,7 @@ export const musicTracks = pgTable("music_tracks", {
 
 // ── What's new at Be More Swan — the weekly product-update email ─────────────
 // A weekly Claude task uploads a draft (copy + screenshots); an admin approves it in
-// Comms → What's New Emails before anything is sent. Requires db/product-update-emails.sql.
+// Growth → What's New emails before anything is sent. Requires db/product-update-emails.sql.
 // See docs/weekly-product-update.md and src/utils/product-update-email.ts.
 export interface ProductUpdateItem {
   heading: string;
@@ -6045,6 +6083,9 @@ export const bookingSettings = pgTable("booking_settings", {
   busyCount: integer("busy_count"),
   // The business's reusable video link for video services (db/z-booking-meeting-links.sql).
   meetingUrl: text("meeting_url"),
+  // How video links are made: 'link' (NULL) | 'teams' | 'meet', and why the last one failed (db/z-booking-meeting-providers.sql).
+  meetingProvider: text("meeting_provider"),
+  meetingProviderError: text("meeting_provider_error"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("booking_settings_org_uq").on(t.organisationId),
@@ -6111,6 +6152,8 @@ export const bookings = pgTable("bookings", {
   // Where it happens and the video link, copied when made (db/z-booking-meeting-links.sql; booking-meeting.ts).
   meetingLocation: text("meeting_location"),
   meetingUrl: text("meeting_url"),
+  // 'link' (NULL, the pasted link) | 'teams' | 'meet' — made for this booking (db/z-booking-meeting-providers.sql).
+  meetingSource: text("meeting_source"),
   // Stays — holiday lets and B&B rooms (db/z-stays.sql, docs/holiday-lets-plan.md). party_size = guests.
   stayTypeId: integer("stay_type_id").references((): any => stayTypes.id, { onDelete: "set null" }),
   checkIn: date("check_in"),
@@ -6179,6 +6222,8 @@ export const classSessions = pgTable("class_sessions", {
   status: text().notNull().default("scheduled"),
   seriesKey: text("series_key"),
   notes: text(),
+  // An online class or event: its video link, copied onto each place booked (db/z-booking-meeting-providers.sql).
+  meetingUrl: text("meeting_url"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
@@ -6732,7 +6777,7 @@ export const mentorOutcomes = pgTable("mentor_outcomes", {
   index("mentor_outcomes_org_idx").on(t.organisationId, t.acceptedAt),
 ]);
 
-// Admin → Platform → AI Visibility (db/z-ai-visibility.sql). Does Be More Swan come up when a
+// Admin → Growth → AI visibility (db/z-ai-visibility.sql). Does Be More Swan come up when a
 // prospect asks an AI assistant? The same questions, asked of each assistant, once a month.
 export const aiVisibilityQuestions = pgTable("ai_visibility_questions", {
   id: serial("id").primaryKey(),

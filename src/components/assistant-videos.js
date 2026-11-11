@@ -28,8 +28,9 @@
     brand_card: 'Branded card', ai_image: 'AI picture', ai_video: 'AI clip', own_video: 'Your video',
   };
   const FOOTAGE_API = '/.netlify/functions/footage';
-  /** What one footage review costs when a video is new to it (src/lib/footage.ts FOOTAGE_REVIEW_TASKS). */
-  const REVIEW_TASKS = 2;
+  /** What one footage review costs when a video is new to it: the live figure from Admin → Money → Task costs
+   *  (/task-costs.js), with the default as the fallback on a page that didn't load it. */
+  const reviewCost = () => (window.taskCost ? window.taskCost('footage_review', '2 tasks') : '2 tasks');
   const MAX_FOOTAGE = 10;
   const KIND = { cut: 'Cut', trim: 'Trim', reorder: 'Order', fill: 'Fill a gap', text: 'Words', sound: 'Sound', frame: 'Frame', other: 'Edit' };
   const mmss = (n) => { const t = Math.max(0, Math.floor(Number(n) || 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
@@ -49,6 +50,8 @@
   const TEXT_ANIM = [['rise', 'Rise'], ['fade', 'Fade'], ['pop', 'Pop'], ['none', 'Cut']];
   const TEXT_Y = { top: 20, middle: 50, bottom: 70 };
   const MOVING = ['stock_video', 'ai_video', 'own_video'];
+  // An AI clip on its own (src/lib/ai-clip.ts — the same keys and labels).
+  const CLIP_STYLES = [['realistic', 'Realistic', 'People, places and everyday scenes — made-up people only'], ['cinematic', 'Cinematic', 'Landscapes, atmosphere, openers'], ['animated3d', '3D animated', 'Friendly explainers and mascots'], ['cartoon2d', '2D cartoon', 'Playful, illustrated brands'], ['product', 'Product close-up', 'Textures, food and materials — never your own product']];
   const labelOf = (list, v) => (list.find((x) => x[0] === v) || list[0])[1];
   const options = (list, v) => list.map(([k, l]) => `<option value="${k}"${k === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
   // Voices come from src/public/voice-catalogue.json through voice-picker.js — the list the server
@@ -96,6 +99,8 @@
     voiceWarn: {},
     // Which line the hidden file input is for (Upload on a line, or the whole script).
     voicePick: null,
+    // The "New AI clip" form is open.
+    clipForm: false,
   };
 
   // Stages as pills, like the Brand Designer's Briefs (owner, 2026-11-06: the Briefs tab's patterns on
@@ -325,7 +330,7 @@
     state.footage = {
       videos: null, error: null, picked: new Set((p.assetIds || []).map(Number).filter(Boolean)), files: new Map(),
       progress: '', busy: false, message: p.message || '', lengthS: p.lengthS ? String(p.lengthS) : null,
-      voiceover: p.voiceover === true, cta: p.cta || '',
+      voiceover: p.voiceover === true || p.ownVoice === true, ownVoice: p.ownVoice === true, cta: p.cta || '',
     };
     render();
     host()?.querySelector('[data-vid-footage-form]')?.scrollIntoView({ block: 'nearest' });
@@ -378,7 +383,7 @@
     const picked = [...f.picked];
     const known = new Map((f.videos || []).map((v) => [v.id, v]));
     const fresh = picked.some((id) => !(known.get(id) && known.get(id).reviewedBefore));
-    btn.textContent = `Review my footage${picked.length ? (fresh ? ` — uses ${REVIEW_TASKS} tasks` : ' — free') : ''}`;
+    btn.textContent = `Review my footage${picked.length ? (fresh ? ` — uses ${reviewCost()}` : ' — free') : ''}`;
     btn.disabled = f.busy || !picked.length;
   }
 
@@ -410,13 +415,15 @@
         <fieldset><legend class="text-xs font-bold text-gray-600 mb-1">Sound</legend>
           <label class="flex items-start gap-1.5 text-sm text-gray-700"><input type="radio" name="sound" value="own" ${f.voiceover ? '' : 'checked'} class="mt-1"> Keep the sound in my videos <span class="text-xs text-gray-500 mt-0.5">— what people say is captioned</span></label>
           <label class="flex items-start gap-1.5 text-sm text-gray-700 ml-5 mt-1"><input type="checkbox" name="tighten" checked class="mt-1"> Tighten my clips <span class="text-xs text-gray-500 mt-0.5">— cut pauses, “um”s and repeated takes. You can keep any scene as filmed.</span></label>
-          <label class="flex items-start gap-1.5 text-sm text-gray-700 mt-1"><input type="radio" name="sound" value="voice" ${f.voiceover ? 'checked' : ''} class="mt-1"> Add a voiceover instead</label>
+          <label class="flex items-start gap-1.5 text-sm text-gray-700 mt-1"><input type="radio" name="sound" value="voice" ${f.voiceover && !f.ownVoice ? 'checked' : ''} class="mt-1"> Add a voiceover instead</label>
           <div class="flex items-center gap-2 border border-gray-300 rounded-lg px-2 py-2 mt-1 ml-5">
             <input type="hidden" name="voice" value="${esc(d.voice)}">
             <span data-vid-voice-name class="flex-1 min-w-0 text-sm text-gray-800 truncate">${esc(window.VoicePicker?.describe(d.voice) || d.voice)}</span>
             <button type="button" data-vid-act="voice-listen" class="shrink-0 text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer">&#9654; Listen</button>
             <button type="button" data-vid-act="voice-choose" class="shrink-0 text-xs font-bold text-indigo-700 hover:underline cursor-pointer">Change</button>
           </div>
+          ${/* Your own voice over your footage (own-voice.ts): recorded line by line once the script is approved. */ ''}
+          <label class="flex items-start gap-1.5 text-sm text-gray-700 mt-1"><input type="radio" name="sound" value="myvoice" ${f.ownVoice ? 'checked' : ''} class="mt-1"> Add a voiceover in my own voice <span class="text-xs text-gray-500 mt-0.5">— you record each line once the script is approved; no voiceover is charged</span></label>
         </fieldset>
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
           <label class="inline-flex items-center gap-1.5 text-sm text-gray-700"><input type="checkbox" name="captions"${d.captions ? ' checked' : ''}> Captions</label>
@@ -429,7 +436,7 @@
         ${briefExtrasHtml(d, f)}
         ${shapeHtml()}
         <label class="flex items-start gap-1.5 text-sm text-gray-700"><input type="checkbox" name="consent" required class="mt-1"> I have permission to use the people and music in these videos.</label>
-        <p class="text-xs text-gray-500">Reviewing a video ${who()} hasn’t seen before uses ${REVIEW_TASKS} tasks; videos it has already reviewed are free. Your videos are never changed — edits only go into the new video.</p>
+        <p class="text-xs text-gray-500">Reviewing a video ${who()} hasn’t seen before uses ${reviewCost()}; videos it has already reviewed are free. Your videos are never changed — edits only go into the new video.</p>
         <p data-vid-footage-progress class="text-xs font-semibold text-gray-700" role="status">${esc(f.progress)}</p>
         <div class="flex flex-wrap gap-2">
           <button type="submit" data-vid-footage-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Review my footage</button>
@@ -484,12 +491,15 @@
         await window.FootageReader.prepare(id, f.files.get(id) || (v && v.url), { onProgress: (t) => { f.progress = label + t; paintProgress(); } });
       }
       f.progress = 'Sending it to be reviewed…'; paintProgress();
-      const voice = fd.get('sound') === 'voice' ? String(fd.get('voice') || '') : '';
+      // 'myvoice': a voiceover in the owner's own voice. The chosen voice still sets the script's language.
+      const ownVoice = fd.get('sound') === 'myvoice';
+      const voice = fd.get('sound') === 'voice' || ownVoice ? String(fd.get('voice') || '') : '';
       let captionStyle;
       try { captionStyle = JSON.parse(String(fd.get('captionStyle') || 'null')) || undefined; } catch { captionStyle = undefined; }
       const brief = {
         message: String(fd.get('message') || ''), lengthS: Number(fd.get('lengthS')), cta: String(fd.get('cta') || ''),
         voiceover: !!voice, voice: voice || undefined, allowAi: String(fd.get('allowAi') || 'stock_only'),
+        ...(ownVoice && voice ? { ownVoice: true } : {}),
         captions: !!fd.get('captions'), ...(captionStyle ? { captionStyle } : {}),
         shape: String(fd.get('shape') || '9:16'), footageAssetIds: ids, footageConsent: true,
         tighten: !!fd.get('tighten'), ...briefExtras(fd),
@@ -707,6 +717,63 @@
    * "Make the video" sources a single picture. "Rewrite the words" changes words only; every scene
    * keeps its picture (video-projects 'rewrite_script').
    */
+  // ── An AI clip on its own (src/lib/ai-clip.ts; plan §5.1) ─────────────────────────────────────────
+  function clipFormHtml() {
+    if (!state.clipForm) return '';
+    return `
+      <form data-vid-clip-form class="tab-card p-4 mb-3 space-y-3">
+        <div class="flex items-center justify-between"><p class="text-sm font-bold text-gray-900">New AI clip</p>
+          <button type="button" data-vid-act="clip-close" class="text-xs font-bold text-gray-500 hover:text-gray-800">Close</button></div>
+        <p class="text-xs text-gray-600">A short clip made with AI, saved to My Content. You see its first frame (1 task) before the clip is made, and the button says what the clip uses. Made-up people only.</p>
+        <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">What should it show?</span>
+          <textarea name="description" rows="3" maxlength="400" required class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Steam rising from a fresh cup of coffee on a sunny café table, slow push in"></textarea></label>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Style</span>
+            <select name="style" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2">${CLIP_STYLES.map(([k, l, h]) => `<option value="${k}" title="${esc(h)}">${esc(l)}</option>`).join('')}</select></label>
+          <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Length</span>
+            <select name="lengthS" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="5">5 seconds</option><option value="10">10 seconds</option></select></label>
+          <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Shape</span>
+            <select name="shape" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="9:16">Vertical 9:16</option><option value="1:1">Square 1:1</option><option value="16:9">Wide 16:9</option></select></label>
+        </div>
+        <p data-vid-clip-msg class="hidden text-xs font-semibold text-red-600"></p>
+        <button type="submit" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Save the clip — free</button>
+      </form>`;
+  }
+
+  /** What a clip is waiting for, in its own words (a clip has no storyboard or script to approve). */
+  function clipStatus(v) {
+    if (v.status === 'planned' || v.status === 'failed') return v.clipFrameUrl ? 'First frame ready — make the clip from it, or try another.' : 'Saved. See its first frame before the clip is made.';
+    if (v.status === 'building') return 'Making the clip — a few minutes. You can leave this page.';
+    return WAITING[v.status] || v.status;
+  }
+
+  /** The clip's card: what it shows, its first frame, and the two presses that spend (each says what it uses). */
+  function clipHtml(v) {
+    const c = v.brief.clip;
+    const busy = state.busy.has(v.id) ? 'disabled' : '';
+    const style = (CLIP_STYLES.find((x) => x[0] === c.style) || CLIP_STYLES[0])[1];
+    const unit = v.unit === 'credits' ? 'credit' : 'task';
+    const cost = v.estimate == null ? '' : ` — uses ${v.estimate} ${unit}${v.estimate === 1 ? '' : 's'}`;
+    const ratio = (v.brief.shape || '9:16') === '16:9' ? '16 / 9' : v.brief.shape === '1:1' ? '1 / 1' : '9 / 16';
+    const open = v.status === 'planned' || v.status === 'failed';
+    return `
+      <div class="mt-3 flex flex-col sm:flex-row gap-3">
+        <div class="shrink-0 rounded-md overflow-hidden bg-gray-100 flex items-center justify-center text-[11px] text-gray-500 text-center" style="width:${ratio === '16 / 9' ? 224 : ratio === '1 / 1' ? 144 : 112}px;aspect-ratio:${ratio}">
+          ${v.clipFrameUrl ? `<img src="${esc(v.clipFrameUrl)}" alt="The clip’s first frame" class="w-full h-full object-cover">` : 'No first frame yet'}
+        </div>
+        <div class="min-w-0 space-y-1.5">
+          <p class="text-sm text-gray-900 break-words">“${esc(c.description)}”</p>
+          <p class="text-xs text-gray-600">${esc(style)} · ${esc(c.lengthS)} seconds · AI clip</p>
+          ${open ? `<div class="flex flex-wrap gap-2 pt-1">
+            <button type="button" data-vid-act="clip-frame" data-id="${v.id}" ${busy} class="${v.clipFrameUrl ? 'btn-secondary border' : 'btn-primary'} px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">${v.clipFrameUrl ? 'Try another frame — 1 task' : 'See the first frame — 1 task'}</button>
+            ${v.clipFrameUrl ? `<button type="button" data-vid-act="build" data-id="${v.id}" ${busy} class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Make the clip${esc(cost)}</button>` : ''}
+            <button type="button" data-vid-act="cancel" data-id="${v.id}" ${busy} class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Cancel</button>
+          </div>
+          <p class="text-[11px] text-gray-500">${v.clipFrameUrl ? 'The clip starts from this picture and moves from there. Not right? Try another frame first.' : 'See the first frame before paying for the clip — if it looks wrong, try again or make a new clip with other words.'}</p>` : ''}
+        </div>
+      </div>`;
+  }
+
   function scriptStepHtml(v) {
     const sb = v.storyboard;
     if (!sb || !(v.status === 'planned' || v.status === 'failed') || !(v.brief && v.brief.voiceover)) return '';
@@ -1013,7 +1080,8 @@
               class="flex items-start gap-1.5 text-left text-sm font-bold text-gray-900 break-words cursor-pointer hover:text-gray-700">
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
               <span>${esc(v.title)}</span></button>
-            <p class="text-xs text-gray-600 mt-0.5">${v.version > 1 ? `Version ${esc(v.version)} · ` : ''}${v.brief && v.brief.shapeOf ? `${esc((SHAPES.find((x) => x[0] === v.brief.shape) || ['', ''])[1])} copy · ` : ''}${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
+            ${v.brief && v.brief.clip ? `<p class="text-xs text-gray-600 mt-0.5">AI clip · ${esc(v.brief.clip.lengthS)}s · ${esc(clipStatus(v))}</p>` : ''}
+            <p class="text-xs text-gray-600 mt-0.5${v.brief && v.brief.clip ? ' hidden' : ''}">${v.version > 1 ? `Version ${esc(v.version)} · ` : ''}${v.brief && v.brief.shapeOf ? `${esc((SHAPES.find((x) => x[0] === v.brief.shape) || ['', ''])[1])} copy · ` : ''}${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
             ${v.note ? `<p class="text-xs ${v.status === 'ready' ? 'text-emerald-800 bg-emerald-50 border-emerald-200' : 'text-amber-800 bg-amber-50 border-amber-200'} border rounded-md px-2 py-1 mt-1.5 break-words" style="overflow-wrap:anywhere">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
@@ -1021,7 +1089,7 @@
             chatPaneAvailable() ? `<button type="button" data-vid-act="talk" data-id="${v.id}" title="Ask ${who()} about this video" class="text-xs font-bold text-indigo-700 hover:underline shrink-0 whitespace-nowrap">🎯 Select</button>` : ''}
           ${v.status === 'built' ? `<button type="button" data-vid-act="open-review" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg shrink-0">Open Review</button>` : ''}
         </div>
-        ${folded ? '' : `<div data-vid-body>
+        ${folded ? '' : v.brief && v.brief.clip ? `<div data-vid-body>${clipHtml(v)}${readyHtml(v)}</div>` : `<div data-vid-body>
         ${Array.isArray(v.changes) && v.changes.length && (v.status === 'planned' || v.status === 'failed')
           ? `<details class="mt-2"><summary class="text-xs text-gray-500 cursor-pointer">What ${who()} adjusted (${v.changes.length})</summary><ul class="list-disc ml-5 mt-1 text-xs text-gray-600">${v.changes.map((c) => `<li>${esc(c)}</li>`).join('')}</ul></details>` : ''}
         ${readyHtml(v)}
@@ -1125,8 +1193,9 @@
     // it (e2e/full-screen-buttons.spec.ts), then "Use my own footage".
     const full = `<button type="button" data-vid-act="full" aria-pressed="${state.full ? 'true' : 'false'}" title="${state.full ? 'Back to the page (Esc)' : 'Use the whole screen for your videos and the chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg whitespace-nowrap">${state.full ? 'Exit full screen' : 'Full screen'}</button>`;
     el.innerHTML = `
-      ${window._tabHead({ title: 'Videos', explain: 'video-videos', right: `${full}${state.form ? '' : window._tabNewBtn('New video', 'data-vid-act="new"')}${state.footage ? '' : `<button type="button" data-vid-act="footage" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg whitespace-nowrap">Use my own footage</button>`}` })}
+      ${window._tabHead({ title: 'Videos', explain: 'video-videos', right: `${full}${state.form ? '' : window._tabNewBtn('New video', 'data-vid-act="new"')}${state.footage ? '' : `<button type="button" data-vid-act="footage" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg whitespace-nowrap">Use my own footage</button>`}${state.clipForm ? '' : `<button type="button" data-vid-act="clip-new" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg whitespace-nowrap">New AI clip</button>`}` })}
       ${formHtml()}
+      ${clipFormHtml()}
       ${footageFormHtml()}
       <div class="tab-card">
         <div class="tab-pillbar">
@@ -1313,6 +1382,9 @@
         break;
       }
       case 'pick-none': state.selected.clear(); state.bulkNote = null; render(); break;
+      case 'clip-new': state.clipForm = true; state.form = false; state.footage = null; render(); host()?.querySelector('[data-vid-clip-form] textarea')?.focus(); break;
+      case 'clip-close': state.clipForm = false; render(); break;
+      case 'clip-frame': state.opened.add(id); saveFolded(); act(id, { action: 'clip_frame', id }, 'Here’s the first frame. Make the clip from it, or try another.'); break;
       case 'record-video': {
         if (!window.VideoRecorder) break;
         const shape = host()?.querySelector('[data-vid-footage-form] [name="shape"]:checked, [data-vid-footage-form] select[name="shape"]')?.value || '9:16';
@@ -1494,6 +1566,21 @@
         await load();
       } catch (err) {
         msg.textContent = err.message; msg.classList.remove('hidden');
+        f.querySelectorAll('button').forEach((x) => { x.disabled = false; });
+      }
+    } else if (f.matches('[data-vid-clip-form]')) {
+      e.preventDefault();
+      const fd = new FormData(f);
+      const msg = f.querySelector('[data-vid-clip-msg]');
+      f.querySelectorAll('button').forEach((x) => { x.disabled = true; });
+      try {
+        const data = await call('POST', { action: 'clip_create', assistantId: state.assistantId, description: String(fd.get('description') || ''), style: String(fd.get('style')), lengthS: Number(fd.get('lengthS')), shape: String(fd.get('shape')) });
+        state.clipForm = false;
+        if (data.project && data.project.id) { state.opened.add(data.project.id); saveFolded(); }
+        state.stage = 'check'; state.userStage = true;
+        await load();
+      } catch (err) {
+        if (msg) { msg.textContent = err.message; msg.classList.remove('hidden'); }
         f.querySelectorAll('button').forEach((x) => { x.disabled = false; });
       }
     } else if (f.matches('[data-vid-scene-form]')) {

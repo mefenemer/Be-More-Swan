@@ -1,3 +1,5 @@
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/assistant-briefs.js
  * The Brand Designer's Briefs tab — docs/brand-designer-plan.md §4.2–4.4.
@@ -608,7 +610,7 @@
       </label>`;
     const input = (name, val, ph, max, extra = '') => `<input type="text" data-keep="${k(name)}" name="${name}" value="${esc(val || '')}" maxlength="${max || 200}" placeholder="${esc(ph)}" ${extra} class="w-full mt-1 px-3 py-2 border border-gray-200 rounded-lg text-sm">`;
     const words = !!(c.headline);
-    const draftCost = state.unit === 'tasks' ? ' (1 task)' : '';
+    const draftCost = state.unit === 'tasks' ? ` (${window.taskCost('flyer_words')})` : '';
     return `
       <form data-flyer-form class="bg-white rounded-2xl border-2 border-emerald-200 shadow-sm p-5 mb-4 space-y-3">
         <p class="text-sm font-bold text-gray-900">${state.form.fork ? 'Change this flyer' : editing ? 'Edit brief' : 'New printed flyer'}</p>
