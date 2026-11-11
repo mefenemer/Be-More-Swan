@@ -155,7 +155,8 @@ async function main() {
 
     await check('the orchestrator lists the rules and resolves the card on structured routes', () => {
         const o = read('netlify/functions/chat-orchestrator.ts');
-        assert.ok(o.includes('offersOwnCards ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null'));
+        // FR#10: the Business Mentor gets the workspace-wide list instead (tests/workspace-rules.test.ts).
+        assert.ok(o.includes('offersOwnCards ? await buildRulesListBlock(db, orgId, session.aiAssistantId)\n        : route === ROUTES.business_mentor ? await buildRulesListBlock(db, orgId, session.aiAssistantId, { workspaceOnly: true }) : null'));
         assert.ok(o.includes('route !== defaultRoute && !settingsReq ? ruleProposalFromUiElement(uiElement) : null'));
         assert.ok(o.includes('const profileCard = (settingsCard ?? ruleCard ??'), 'the rule card counts as a card');
         assert.ok(read('src/utils/chat-card-refresh.ts').includes('refreshRuleCards(db, organisationId, aiAssistantId, roleKey, out)'));

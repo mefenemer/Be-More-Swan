@@ -94,7 +94,7 @@ import {
     assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
 } from '../../src/utils/chat-assistant-settings';
 import { canManageWorkspaceRules } from '../../src/utils/workspace-rules';
-import { RULE_TEXT_MAX, buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, shortenRuleText, type RuleCard } from '../../src/utils/chat-rules';
+import { RULE_TEXT_MAX, buildRulesListBlock, mentorRulesPromptBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, shortenRuleText, type RuleCard } from '../../src/utils/chat-rules';
 import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, resolveTeamGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
@@ -3463,8 +3463,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // (src/utils/chat-rules.ts) — the rules block above is what it FOLLOWS; this is what it can CHANGE.
     // Plus the workspace's plan and this month's task balance (src/utils/chat-plan-snapshot.ts), the
     // same figures as the usage bar. Both every turn, every role; both never throw.
-    const rulesListBlock = offersOwnCards ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null;
-    const rulesCardBlock = offersOwnCards ? rulesPromptBlock(assistantRow.roleKey) : null;
+    // The Business Mentor offers none of its own cards, but it IS where a rule for every assistant is set
+    // (FR#10): it sees and changes only the workspace-wide rules.
+    const rulesListBlock = offersOwnCards ? await buildRulesListBlock(db, orgId, session.aiAssistantId)
+        : route === ROUTES.business_mentor ? await buildRulesListBlock(db, orgId, session.aiAssistantId, { workspaceOnly: true }) : null;
+    const rulesCardBlock = offersOwnCards ? rulesPromptBlock(assistantRow.roleKey)
+        : route === ROUTES.business_mentor ? mentorRulesPromptBlock() : null;
     const planBlock = await buildPlanSnapshot(db, orgId);
     // Its goals by id with the metrics on offer (src/utils/chat-goals.ts) — every role reads them;
     // structured routes can propose a goal card. And, for the roles with a Posting Schedule card, the
@@ -3991,7 +3995,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         }
         if (ruleReq) {
             // A rule for every assistant (FR#10) is owners' and admins' only; the card says so before the click.
-            ruleCard = await resolveRuleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, ruleReq, { canManageWorkspaceRules: canManageWorkspaceRules(ctx.role) });
+            ruleCard = await resolveRuleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, ruleReq, { canManageWorkspaceRules: canManageWorkspaceRules(ctx.role), workspaceOnly: route === ROUTES.business_mentor });
             uiElement = ruleCard;
             if (!ruleCard) {
                 content = 'I couldn’t read your Do’s and don’ts just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Settings.';
