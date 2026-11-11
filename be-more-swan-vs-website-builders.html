@@ -52,8 +52,16 @@
              Buster), and still waits on the owner's approve card and Publish click — never say it
              changes the site unattended.
 
+         Updated 2026-11-11 (owner): import from 34 platforms incl. Lovable/Webflow/Shopify/GoDaddy with words,
+         pictures, menu, colours and fonts, old addresses forwarded (src/utils/site-builders/,
+         docs/site-import-platforms/SUMMARY.md — login pages, carts and script widgets can't come across);
+         bookings by phone/video with a pasted Zoom/Meet/Teams link (booking-meeting.ts), /book link
+         (site-booking-page.ts), holiday-let stays (stays.ts); first-draft starter pictures, stock or AI
+         (site-draft-media-options.ts — AI ones use tasks). Google Calendar SIGN-IN is off until GCP keys:
+         "sync with Google" rests on the iCal feed — never promise sign-in here.
          Competitor prices are the cheapest paid plan and the usual small-business plan, per month on
-         ANNUAL billing, and they change often. Re-check every figure when you touch the copy:
+         ANNUAL billing, and they change often. Re-check every figure when you touch the copy (Squarespace and Wix
+         re-checked 11 Nov 2026 against UK guides: unchanged):
            · Squarespace UK: Basic £12, Core £17 (annual), monthly billing costs more. ExpertSure UK
              pricing guide, prices checked against Squarespace's UK page July 2026.
            · Wix UK: free plan; Light £9, Core £16 (annual). ExpertSure UK pricing guide, July 2026.
@@ -152,14 +160,14 @@
       "@type": "FAQPage",
       "mainEntity": [
         { "@type": "Question", "name": "Is the Website Assistant a website builder?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, but it works the other way round. Instead of handing you a template to fill, it writes every page from your business details, products and brand kit, shows you a live preview, and publishes the site when you are happy." } },
-        { "@type": "Question", "name": "Can I move my site over from Squarespace, Wix or another builder?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, if it is your own. Give the Website Assistant the address of your current site, whether it is on Wix, Squarespace, WordPress or built for you, and it reads your home page and the pages in its menu into a draft. Your own words are kept as they are, and you choose whether to use the imported draft." } },
+        { "@type": "Question", "name": "Can I move my site over from Squarespace, Wix or another builder?", "acceptedAnswer": { "@type": "Answer", "text": "Yes, if it is your own. Give the Website Assistant the address of your current site, whether it is on Wix, Squarespace, WordPress, Webflow, Shopify, GoDaddy or another builder, made with an AI tool like Lovable, or built for you. It brings your home page and the pages in its menu into a draft: your words exactly as they are, your pictures, your menu, and your colours and fonts. If you move your domain over, your old page addresses lead to the new pages. You choose whether to use the imported draft. Pages behind a login, a working cart and add-on widgets such as chat boxes can't come across; your shop is rebuilt with checkout on your own Stripe account." } },
         { "@type": "Question", "name": "Can I use my own domain?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. When you publish, your site goes live on its own free address, yourname.bemoreswan.site, or on a domain you own." } },
         { "@type": "Question", "name": "How many pages can I have?", "acceptedAnswer": { "@type": "Answer", "text": "As many as your site needs. No plan limits how many pages your website has." } },
-        { "@type": "Question", "name": "Can I sell online and take bookings?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Your Website Assistant can add a shop, with checkout on your own Stripe account and no cut taken by us (Stripe's card fees apply), and bookings for appointments, classes and events, with deposits, reminders and sync with your Google or Outlook calendar. Prices and services come from your Business Information, so they are never made up." } },
+        { "@type": "Question", "name": "Can I sell online and take bookings?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Your Website Assistant can add a shop, with checkout on your own Stripe account and no cut taken by us (Stripe's card fees apply), and bookings for appointments, classes, events and holiday-let stays, with deposits, reminders and sync with your Google or Outlook calendar. Appointments can be in person, by phone or on a video call with your own Zoom, Google Meet or Teams link, and you get a booking link of your own to share. Prices and services come from your Business Information, so they are never made up." } },
         { "@type": "Question", "name": "How do the Mystery Shopper and Website Assistant work together?", "acceptedAnswer": { "@type": "Answer", "text": "Every week the Mystery Shopper scores your site against up to three competitors and suggests changes, with the wording written. Choose to hand a change to your Website Assistant and it shows you exactly what it will change; nothing is saved until you approve it. After you publish, the Mystery Shopper checks the change is live. This works for sites hosted with Be More Swan, on a plan with both assistants." } },
         { "@type": "Question", "name": "Which plan do I need?", "acceptedAnswer": { "@type": "Answer", "text": "The Workflow Saver includes one assistant plus your Business Mentor. Choose the Website Assistant and you get your website, shop, bookings, forms and reviews. For the Mystery Shopper, your blog at /blog and the rest of the team working together, choose The Busywork Buster." } },
-        { "@type": "Question", "name": "How is this different from Lovable?", "acceptedAnswer": { "@type": "Answer", "text": "Lovable is an AI tool for building web apps from prompts, and each change you ask for uses credits. The Website Assistant is made for small business websites: it already knows your business, never makes up facts, and editing your pages yourself or approving changes it suggests costs nothing." } },
-        { "@type": "Question", "name": "Does it use tasks?", "acceptedAnswer": { "@type": "Answer", "text": "Drafting your whole site, importing your current site, or having it place your own words on a page each uses {{tasks.site_draft}} from your monthly allowance. Editing pages yourself, and approving changes it suggests in chat, costs nothing." } }
+        { "@type": "Question", "name": "How is this different from Lovable?", "acceptedAnswer": { "@type": "Answer", "text": "Lovable is an AI tool for building web apps from prompts, and each change you ask for uses credits. The Website Assistant is made for small business websites: it already knows your business, never makes up facts, and editing your pages yourself or approving changes it suggests costs nothing. If you have already built your business site with Lovable, the Website Assistant can import it." } },
+        { "@type": "Question", "name": "Does it use tasks?", "acceptedAnswer": { "@type": "Answer", "text": "Drafting your whole site, importing your current site, or having it place your own words on a page each uses {{tasks.site_draft}} from your monthly allowance. Editing pages yourself, and approving changes it suggests in chat, costs nothing. Starter pictures made by AI use tasks too; stock photos do not." } }
       ]
     }
     </script>
@@ -217,7 +225,7 @@
                         </tr>
                         <tr>
                             <th scope="row">Where you start</th>
-                            <td class="vs-us">Your business details, products and brand kit</td>
+                            <td class="vs-us">Your business details, products and brand kit, or your current site brought over from almost any builder</td>
                             <td>A template, or a starter site from its AI tools</td>
                             <td>A template, or a starter site from its AI tools</td>
                             <td>A first draft from one sentence, or a design</td>
@@ -241,7 +249,7 @@
                         </tr>
                         <tr>
                             <th scope="row">Design</th>
-                            <td class="vs-us">Your colours and logo; the layout is handled for you</td>
+                            <td class="vs-us">Your colours, fonts and logo; the layout is handled for you, and a first draft has starter pictures until you add your own</td>
                             <td>Polished templates and fine design control</td>
                             <td>Lots of templates and full layout freedom</td>
                             <td>A smaller set of designs you can switch</td>
@@ -273,7 +281,7 @@
                         </tr>
                         <tr>
                             <th scope="row">Bookings</th>
-                            <td class="vs-us">Appointments, classes and events, with deposits, day-before reminders, a change-or-cancel link for customers and sync with your Google or Outlook calendar</td>
+                            <td class="vs-us">Appointments, classes, events and holiday-let stays, with deposits, day-before reminders, a change-or-cancel link for customers and sync with your Google or Outlook calendar. In person, by phone or by video call, and a booking link of your own to share</td>
                             <td>Squarespace Scheduling, a separate subscription</td>
                             <td>Wix Bookings, from the Core plan</td>
                             <td>Not listed as a feature; usually a third-party widget</td>
@@ -398,11 +406,11 @@
                 </div>
                 <div class="vs-card">
                     <h3>Bring your current site with you</h3>
-                    <p>Already on Squarespace, Wix or WordPress? Give the Website Assistant the address and it reads your home page and menu pages into a draft, keeping your own words as they are. You compare it with your current site and choose whether to use it.</p>
+                    <p>Already on Squarespace, Wix, WordPress, Webflow, Shopify or almost any other builder, or built your site with Lovable? Give the Website Assistant the address and it brings your home page and menu pages into a draft, with your own words as they are, your pictures, and your colours and fonts. You compare it with your current site and choose whether to use it.</p>
                 </div>
                 <div class="vs-card">
                     <h3>Shop, bookings, forms and reviews, without add-ons</h3>
-                    <p>Sell your products with checkout on your own Stripe account, and we take no cut. Take bookings for appointments, classes and events, with deposits, reminders and calendar sync. Collect enquiries and sign-ups, and ask happy customers for a review. All part of your Website Assistant, with no extra apps to buy.</p>
+                    <p>Sell your products with checkout on your own Stripe account, and we take no cut. Take bookings for appointments, classes, events and holiday-let stays, with deposits, reminders and calendar sync. Collect enquiries and sign-ups, and ask happy customers for a review. All part of your Website Assistant, with no extra apps to buy.</p>
                 </div>
                 <div class="vs-card">
                     <h3>A Mystery Shopper that gets things fixed</h3>
@@ -455,7 +463,7 @@
                     </details>
                     <details>
                         <summary>Can I move my site over from Squarespace, Wix or another builder?</summary>
-                        <p>Yes, if it is your own. Give the Website Assistant the address of your current site, whether it is on Wix, Squarespace, WordPress or built for you, and it reads your home page and the pages in its menu into a draft. Your own words are kept as they are, and you choose whether to use the imported draft.</p>
+                        <p>Yes, if it is your own. Give the Website Assistant the address of your current site, whether it is on Wix, Squarespace, WordPress, Webflow, Shopify, GoDaddy or another builder, made with an AI tool like Lovable, or built for you. It brings your home page and the pages in its menu into a draft: your words exactly as they are, your pictures, your menu, and your colours and fonts. If you move your domain over, your old page addresses lead to the new pages. You choose whether to use the imported draft. Pages behind a login, a working cart and add-on widgets such as chat boxes can't come across; your shop is rebuilt with checkout on your own Stripe account.</p>
                     </details>
                     <details>
                         <summary>Can I use my own domain?</summary>
@@ -467,7 +475,7 @@
                     </details>
                     <details>
                         <summary>Can I sell online and take bookings?</summary>
-                        <p>Yes. Your Website Assistant can add a shop, with checkout on your own Stripe account and no cut taken by us (Stripe&rsquo;s card fees apply), and bookings for appointments, classes and events, with deposits, reminders and sync with your Google or Outlook calendar. Prices and services come from your Business Information, so they are never made up.</p>
+                        <p>Yes. Your Website Assistant can add a shop, with checkout on your own Stripe account and no cut taken by us (Stripe&rsquo;s card fees apply), and bookings for appointments, classes, events and holiday-let stays, with deposits, reminders and sync with your Google or Outlook calendar. Appointments can be in person, by phone or on a video call with your own Zoom, Google Meet or Teams link, and you get a booking link of your own to share. Prices and services come from your Business Information, so they are never made up.</p>
                     </details>
                     <details>
                         <summary>How do the Mystery Shopper and Website Assistant work together?</summary>
@@ -479,11 +487,11 @@
                     </details>
                     <details>
                         <summary>How is this different from Lovable?</summary>
-                        <p>Lovable is an AI tool for building web apps from prompts, and each change you ask for uses credits. The Website Assistant is made for small business websites: it already knows your business, never makes up facts, and editing your pages yourself or approving changes it suggests costs nothing.</p>
+                        <p>Lovable is an AI tool for building web apps from prompts, and each change you ask for uses credits. The Website Assistant is made for small business websites: it already knows your business, never makes up facts, and editing your pages yourself or approving changes it suggests costs nothing. If you have already built your business site with Lovable, the Website Assistant can import it.</p>
                     </details>
                     <details>
                         <summary>Does it use tasks?</summary>
-                        <p>Drafting your whole site, importing your current site, or having it place your own words on a page each uses <span data-task-cost="site_draft">1 task</span> from your monthly allowance. Editing pages yourself, and approving changes it suggests in chat, costs nothing.</p>
+                        <p>Drafting your whole site, importing your current site, or having it place your own words on a page each uses <span data-task-cost="site_draft">1 task</span> from your monthly allowance. Editing pages yourself, and approving changes it suggests in chat, costs nothing. Starter pictures made by AI use tasks too; stock photos don&rsquo;t.</p>
                     </details>
                 </div>
             </div>
@@ -505,10 +513,10 @@
                 Other builders&rsquo; prices are typical figures for a month on annual billing, not quotations, and they change often; check each provider before you buy.
                 Squarespace and Wix: UK prices from ExpertSure&rsquo;s
                 <a href="https://www.expertsure.com/uk/web-design/squarespace-pricing-uk/" rel="noopener" target="_blank">Squarespace</a> and
-                <a href="https://www.expertsure.com/uk/web-design/wix-pricing-uk/" rel="noopener" target="_blank">Wix</a> pricing guides (checked against each UK site, July 2026).
+                <a href="https://www.expertsure.com/uk/web-design/wix-pricing-uk/" rel="noopener" target="_blank">Wix</a> pricing guides (checked against each UK site July 2026; unchanged when re-checked November 2026).
                 Webador: <a href="https://www.webador.co.uk/pricing" rel="noopener" target="_blank">webador.co.uk/pricing</a>, standard prices excluding VAT, checked November 2026.
                 Lovable: <a href="https://docs.lovable.dev/introduction/subscription-plans" rel="noopener" target="_blank">Lovable subscription plans</a>, US dollars, checked November 2026.
-                Squarespace, Wix, Webador and Lovable are trademarks of their owners; Be More Swan is not connected with them.
+                Squarespace, Wix, Webador, Lovable and the other builders named are trademarks of their owners; Be More Swan is not connected with them.
             </p>
             <p class="vs-small vs-center">Also compare: <a href="be-more-swan-vs-marketing-agency.html" class="underline">Be More Swan vs a marketing agency or freelancer</a></p>
         </div>
