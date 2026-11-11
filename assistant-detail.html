@@ -520,6 +520,15 @@
         <p id="audience-refresh-note" class="text-[10px] text-gray-500 mt-2 leading-relaxed hidden"></p>
       </div>
       </div>
+      <!-- Posts by pillar — Social Media assistants only (src/components/pillar-list.js renderUsage →
+           content-pillars.ts ?usage=1). Shown once the assistant has pillar records. -->
+      <div id="autopilot-pillars" class="mt-4 pt-4 border-t border-gray-100 hidden">
+        <div class="flex items-center justify-between gap-3 mb-2">
+          <h4 class="text-[11px] font-bold text-gray-500 uppercase tracking-wide shrink-0">Posts by pillar</h4>
+          <p class="text-[11px] text-gray-500 shrink-0" id="pillar-usage-note">Last 60 days</p>
+        </div>
+        <div id="pillar-usage-bars"></div>
+      </div>
     </div>
   </div>
 

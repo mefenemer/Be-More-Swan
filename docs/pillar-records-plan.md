@@ -1,6 +1,8 @@
 # Content pillars as records: plan
 
-Status: phase 1 built 2026-11-08 to the §2 recommendations (branch feat/pillar-records). db/z-content-pillars.sql applied on staging only; backfill not yet applied. Phases 2 and 3 not started.
+Status: phase 1 LIVE (on main by 2026-11-11; db/z-content-pillars.sql and the backfill applied on both DBs). Phase 2 built 2026-11-11: the Social chat's one-pillar card (`pillar_proposal`, src/utils/chat-pillar-card.ts), "Bring back" for archived pillars (profile + chat), Results ▸ Posts by pillar, and the help article db/z-content-pillars-help-2026-11-11.sql (not yet applied). Phase 3 (Blog/Email topics) not started.
+
+Phase 2 choice: the Business Mentor keeps changing pillars through its set-up answer card (the whole list as text). The server reconciles that text to the records (keeping rows, descriptions and history, reviving archived names), so no Mentor pillar card was built. The Social chat's own set-up answers leave content_pillars out and refuse it.
 
 ⚠️ Learned on staging: the profile autosave must NOT send `content_pillars` (only when the AI wand or strategy fix wrote text into the hidden `#edit_pillars`). Sending the page's copy let a stale save reconcile the records back to an old list. Text answers now revive an archived pillar of the same name rather than creating a new one.
 

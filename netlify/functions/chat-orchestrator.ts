@@ -133,6 +133,7 @@ import { asksForACall, callbackOfferElement } from '../../src/utils/callback-req
 import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
+import { buildPillarChatBlock, pillarRequestFromUiElement, resolvePillarProposal } from '../../src/utils/chat-pillar-card';
 import { buildTakeMeThereCard } from '../../src/config/take-me-there';
 import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal, resolveProductRemoval, resolveProductUpdate } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields, supersedeSetupFieldProposals } from '../../src/utils/mentor-proposals';
@@ -3431,7 +3432,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     const scheduleBlock = offersOwnCards ? schedulePromptBlock(assistantRow.roleKey, assistantRow.onboardingContext) : null;
     // Its own set-up answers and the card that changes one (src/utils/chat-setup-field.ts, §3.4 of
     // docs/business-mentor-plan.md). The Mentor gets every active assistant's in its <workspace> block.
-    const setupFieldBlock = offersOwnCards ? assistantSetupFieldBlock(assistantRow.roleKey, session.aiAssistantId, assistantRow.onboardingContext) : null;
+    // A Social Media assistant's content pillars are RECORDS with their own card (src/utils/chat-pillar-card.ts),
+    // so its set-up answers leave content_pillars out: retyping the whole list is what that card replaces.
+    const pillarsBlock = offersOwnCards && assistantRow.roleKey === 'social_media_manager'
+        ? await buildPillarChatBlock(db, orgId, session.aiAssistantId) : null;
+    const setupFieldBlock = offersOwnCards
+        ? assistantSetupFieldBlock(assistantRow.roleKey, session.aiAssistantId, assistantRow.onboardingContext, pillarsBlock ? { omitKeys: ['content_pillars'] } : undefined)
+        : null;
     // The "Use for this assistant" switches, for the roles whose Connections card shows them
     // (src/utils/chat-platforms.ts). Null for every other role; never throws.
     const platformsBlock = offersOwnCards ? await buildPlatformsBlock(db, orgId, userId, session.aiAssistantId) : null;
@@ -3468,7 +3475,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             help.text ? `<help_centre>\n${help.text}\n</help_centre>` : 'The Help Centre could not be read just now: say so, and offer the mentor_support_request card.',
         ].join('\n\n');
     })() : '';
-    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
+    const promptWithRules = [rolePrompt, rulesBlock, productsBlock, knowledgeBlock, siteDirectoryBlock, siteDirectoryCardBlock, teamBlock, teamThreadBlock, settingsBlock, settingsCardBlock, rulesListBlock, rulesCardBlock, planBlock, goalsBlock, goalsCardBlock, introOfferCardBlock, ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock, libraryBlock, myContentBlock, reviewsBlock, myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards ? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT].filter(Boolean).join('\n\n');
 
     const builtSystem = buildSystemPrompt(
         // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
@@ -3706,6 +3713,18 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 : null;
             if (!card) content = `${content}\n\n(I didn’t include a share card, because I couldn’t find that post in your list.)`;
         }
+        // One content pillar (src/utils/chat-pillar-card.ts): the Social Media route's own card, rebuilt from the
+        // rows so it only offers what the pillar rules allow. The click applies it via content-pillars.ts.
+        const pillarReq = pillarRequestFromUiElement(uiElement);
+        if (pillarReq) {
+            const card = route === ROUTES.social_media_manager
+                ? await resolvePillarProposal(db, orgId, session.aiAssistantId, pillarReq)
+                : { error: 'Only a Social Media assistant has content pillars.' };
+            if ('error' in card) {
+                uiElement = null;
+                content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can change pillars on “What I post about” in my settings.)`;
+            } else uiElement = card;
+        }
         if ((uiElement as { type?: unknown } | null)?.type === 'redraft_upcoming_proposal') {
             uiElement = route === ROUTES.social_media_manager
                 ? { type: 'redraft_upcoming_proposal', summary: String((uiElement as { summary?: unknown }).summary ?? '').slice(0, 300), assistantId: session.aiAssistantId }
@@ -3719,7 +3738,10 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         let setupFieldCard: SetupFieldCard | null = null;
         if (setupReq) {
             const isMentor = route === ROUTES.business_mentor;
-            const card = await resolveSetupFieldProposal(db, orgId, session.aiAssistantId, setupReq, { allowOthers: isMentor });
+            // The Social chat changes pillars one at a time with pillar_proposal, never by retyping the list.
+            const card = !isMentor && pillarsBlock && setupReq.key === 'content_pillars'
+                ? { error: 'Pillars are changed one at a time with the pillar card.' }
+                : await resolveSetupFieldProposal(db, orgId, session.aiAssistantId, setupReq, { allowOthers: isMentor });
             if ('error' in card) {
                 uiElement = null;
                 content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can change it on the assistant’s own page instead.)`;

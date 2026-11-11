@@ -138,8 +138,11 @@ ${CARD_SHAPE}`;
 }
 
 /** Every other structured route: its own set-up answers and the card. Null when it has none to change. */
-export function assistantSetupFieldBlock(roleKey: string | null | undefined, assistantId: number, ctx: unknown): string | null {
-    const lines = renderSetupFields(roleKey ?? '', (ctx as Record<string, unknown> | null) ?? null);
+export function assistantSetupFieldBlock(roleKey: string | null | undefined, assistantId: number, ctx: unknown, opts?: { omitKeys?: string[] }): string | null {
+    // `omitKeys`: answers this route changes with a card of its own (a Social assistant's content pillars).
+    const omit = new Set(opts?.omitKeys ?? []);
+    const lines = renderSetupFields(roleKey ?? '', (ctx as Record<string, unknown> | null) ?? null)
+        .filter((l) => !omit.has(l.trim().replace(/^- /, '').split(' ')[0]));
     if (!lines.length) return null;
     return `YOUR SET-UP ANSWERS (what the user told you when they set you up; also on your Assistant Settings):
 ${lines.join('\n')}

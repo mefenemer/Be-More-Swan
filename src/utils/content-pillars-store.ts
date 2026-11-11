@@ -182,7 +182,7 @@ export async function listPillars(db: PillarDb, orgId: number, assistantId: numb
 }
 
 /** The assistant's archived rows, most recently archived first. */
-async function listArchivedPillars(db: PillarDb, orgId: number, assistantId: number): Promise<Pillar[]> {
+export async function listArchivedPillars(db: PillarDb, orgId: number, assistantId: number): Promise<Pillar[]> {
     return db.select({
         id: contentPillars.id, name: contentPillars.name, description: contentPillars.description,
         sortOrder: contentPillars.sortOrder, isActive: contentPillars.isActive,
@@ -323,6 +323,102 @@ export async function archivePillar(db: PillarDb, orgId: number, assistantId: nu
     const after = (await listPillars(db, orgId, assistantId)) ?? [];
     await writeDerivedPillars(db, orgId, assistantId, after);
     return { ok: true, value: after };
+}
+
+export const PILLAR_USAGE_DAYS = 60;
+
+export interface PillarUsageRow { pillarId: number | null; name: string; isActive: boolean; archived: boolean; posts: number }
+
+/**
+ * Pure: posts per pillar for the Results tab. Every live pillar gets a row (0 included), then any
+ * archived or renamed-away name that still has posts. `counts` come from the DB grouped by
+ * (pillar_id, pillar name); a post with a pillar_id counts for that row whatever its name now is.
+ */
+export function pillarUsageRows(live: Pillar[], archived: Pillar[], counts: { pillarId: number | null; pillar: string | null; n: number }[]): PillarUsageRow[] {
+    const byId = new Map<number, PillarUsageRow>();
+    const out: PillarUsageRow[] = [];
+    for (const p of sortPillars(live)) {
+        const r = { pillarId: p.id, name: p.name, isActive: p.isActive, archived: false, posts: 0 };
+        byId.set(p.id, r); out.push(r);
+    }
+    const archivedById = new Map(archived.map((a) => [a.id, a]));
+    const byName = new Map<string, PillarUsageRow>();
+    for (const r of out) byName.set(r.name.toLowerCase(), r);
+    for (const c of counts) {
+        let r = c.pillarId !== null ? byId.get(c.pillarId) : undefined;
+        if (!r && c.pillarId !== null && archivedById.has(c.pillarId)) {
+            const a = archivedById.get(c.pillarId)!;
+            r = { pillarId: a.id, name: a.name, isActive: false, archived: true, posts: 0 };
+            byId.set(a.id, r); out.push(r);
+        }
+        if (!r) {
+            const name = (c.pillar ?? '').trim();
+            if (!name) continue;
+            r = byName.get(name.toLowerCase());
+            if (!r) { r = { pillarId: null, name, isActive: false, archived: true, posts: 0 }; byName.set(name.toLowerCase(), r); out.push(r); }
+        }
+        r.posts += c.n;
+    }
+    return out;
+}
+
+/** Posts per pillar over the last PILLAR_USAGE_DAYS days, each cross-post once. Null before the SQL. */
+export async function pillarUsage(db: PillarDb, orgId: number, assistantId: number): Promise<PillarUsageRow[] | null> {
+    const live = await listPillars(db, orgId, assistantId);
+    if (live === null) return null;
+    const res = await db.execute(sql`
+        SELECT pillar_id AS "pillarId", pillar, count(DISTINCT coalesce(crosspost_group_id, 'post:' || id::text))::int AS n
+          FROM scheduled_posts
+         WHERE assistant_id = ${assistantId} AND organisation_id = ${orgId}
+           AND pillar IS NOT NULL
+           AND status NOT IN ('rejected', 'cancelled', 'admin_test')
+           AND created_at > now() - make_interval(days => ${PILLAR_USAGE_DAYS})
+         GROUP BY pillar_id, pillar`);
+    const rows = (Array.isArray(res) ? res : (res as { rows?: unknown[] }).rows ?? []) as { pillarId: number | null; pillar: string | null; n: number }[];
+    return pillarUsageRows(live, await listArchivedPillars(db, orgId, assistantId), rows.map((r) => ({ pillarId: r.pillarId === null ? null : Number(r.pillarId), pillar: r.pillar, n: Number(r.n) })));
+}
+
+/** Archived names, one per name (the most recently archived), for "bring back". [] before the SQL. */
+export async function listRestorablePillars(db: PillarDb, orgId: number, assistantId: number): Promise<Pillar[]> {
+    if (!(await pillarsTableExists(db))) return [];
+    const live = new Set(((await listPillars(db, orgId, assistantId)) ?? []).map((r) => r.name.toLowerCase()));
+    const seen = new Set<string>();
+    return (await listArchivedPillars(db, orgId, assistantId)).filter((r) => {
+        const k = r.name.toLowerCase();
+        if (live.has(k) || seen.has(k)) return false;
+        seen.add(k);
+        return true;
+    });
+}
+
+/**
+ * Brings an archived pillar back, with its description and post history, at the end of the list.
+ * Switched on when there is room among the five, otherwise switched off (and said so).
+ */
+export async function restorePillar(db: PillarDb, orgId: number, assistantId: number, pillarId: number)
+    : Promise<PillarResult<Pillar[]> & { switchedOff?: boolean }> {
+    const rows = await listPillars(db, orgId, assistantId);
+    if (rows === null) return tableMissing();
+    const restorable = await listRestorablePillars(db, orgId, assistantId);
+    const row = restorable.find((r) => r.id === pillarId);
+    if (!row) {
+        const archived = (await listArchivedPillars(db, orgId, assistantId)).find((r) => r.id === pillarId);
+        return archived
+            ? { ok: false, status: 409, error: `You already have a pillar called "${archived.name}".` }
+            : { ok: false, status: 404, error: 'That archived pillar was not found.' };
+    }
+    const room = rows.filter((r) => r.isActive).length < MAX_ACTIVE_PILLARS;
+    const sortOrder = rows.reduce((m, r) => Math.max(m, r.sortOrder), -1) + 1;
+    try {
+        await db.update(contentPillars).set({ archivedAt: null, isActive: room, sortOrder, updatedAt: new Date() })
+            .where(and(eq(contentPillars.id, pillarId), eq(contentPillars.organisationId, orgId), eq(contentPillars.assistantId, assistantId)));
+    } catch (err) {
+        if (isUniqueViolation(err)) return { ok: false, status: 409, error: `You already have a pillar called "${row.name}".` };
+        throw err;
+    }
+    const after = (await listPillars(db, orgId, assistantId)) ?? [];
+    await writeDerivedPillars(db, orgId, assistantId, after);
+    return { ok: true, value: after, switchedOff: !room };
 }
 
 /** Puts the live pillars in the order given. Every live pillar must be listed once. */

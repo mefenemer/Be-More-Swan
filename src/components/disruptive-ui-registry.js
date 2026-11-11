@@ -5354,6 +5354,68 @@
     return el;
   });
 
+  // One content pillar (src/utils/chat-pillar-card.ts) — the Social Media chat's card. The orchestrator
+  // rebuilt it from the rows; the click applies it through netlify/functions/content-pillars.ts, the same
+  // path as the profile's pillar list (src/components/pillar-list.js), which then reloads if it is open.
+  register('pillar_proposal', (ui, esc) => {
+    const action = String(ui.action || '');
+    if (!['add', 'update', 'archive', 'restore'].includes(action)) return null;
+    const before = ui.before || null;
+    const change = ui.change || {};
+    const onOff = (v) => (v ? 'switched on' : 'switched off');
+    const eyebrow = { add: 'New content pillar', update: 'Change a content pillar', archive: 'Archive a content pillar', restore: 'Bring back a content pillar' }[action];
+    const goLabel = { add: 'Add this pillar', update: 'Save this change', archive: 'Archive it', restore: 'Bring it back' }[action];
+    const row = (label, value) => `<div class="break-words"><dt class="inline text-gray-500">${label}</dt> <dd class="inline">${value}</dd></div>`;
+    let body = '';
+    if (action === 'add') {
+      body = row('Name:', `<span class="font-semibold text-gray-900">${esc(change.name || '')}</span>`)
+        + (change.description ? row('What goes under it:', esc(change.description)) : '')
+        + (change.isActive === false ? row('Starts:', 'switched off') : '');
+    } else if (before) {
+      body = row('Now:', `<span class="font-semibold">${esc(before.name)}</span>${before.description ? ` — ${esc(before.description)}` : ''} (${action === 'restore' ? 'archived' : onOff(before.isActive)})`);
+      if (action === 'update') {
+        if (change.name !== undefined) body += row('New name:', `<span class="font-semibold text-gray-900">${esc(change.name)}</span>`);
+        if (change.description !== undefined) body += row('What goes under it:', change.description ? esc(change.description) : '<em>no description</em>');
+        if (change.isActive !== undefined) body += row('After:', onOff(change.isActive));
+      }
+    }
+    const note = action === 'archive' ? 'New posts stop using it. Posts already written under it keep it, and you can bring it back.'
+      : action === 'restore' ? (ui.landsOff ? 'Five pillars are already on, so it comes back switched off.' : 'It comes back with its description and post history.')
+      : 'Only this pillar changes. It’s also on “What I post about” in my settings.';
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-200 rounded-xl shadow-sm p-4 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${eyebrow}</p>
+      ${ui.summary ? `<p class="text-sm text-gray-800 mt-1">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <dl class="mt-2 text-xs text-gray-700 space-y-1">${body}</dl>
+      <button type="button" data-pillar-go class="btn-primary mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">${goLabel}</button>
+      <p data-pillar-status class="text-[11px] text-gray-500 mt-2">${note}</p>`;
+    const go = el.querySelector('[data-pillar-go]');
+    const status = el.querySelector('[data-pillar-status]');
+    go.addEventListener('click', async () => {
+      go.disabled = true; go.textContent = 'Saving…';
+      const body = { action, assistantId: ui.assistantId };
+      if (ui.pillarId) body.pillarId = ui.pillarId;
+      if (action === 'add' || action === 'update') Object.assign(body, change);
+      try {
+        const res = await fetch('/.netlify/functions/content-pillars', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That didn’t save (HTTP ${res.status}).`);
+        go.remove();
+        status.className = 'text-xs font-semibold text-emerald-800 mt-2';
+        status.textContent = { add: 'Added.', update: 'Saved.', archive: 'Archived.', restore: data.switchedOff ? 'Brought back, switched off.' : 'Brought back.' }[action];
+        window.PillarList?.reload();
+        // What the posts are about changed: offer to redraft the upcoming drafts (redraft-upcoming.js).
+        if (action !== 'restore' || !data.switchedOff) window.offerRedraftUpcoming?.(Number(ui.assistantId));
+      } catch (err) {
+        go.disabled = false; go.textContent = goLabel;
+        status.className = 'text-xs text-red-700 mt-2';
+        status.textContent = err.message;
+      }
+    });
+    return el;
+  });
+
   // ── Built-in: Share for review (Social Media Assistant chat) ──────────────
   // { type: 'share_for_review_proposal', summary, postId, postLabel }. The orchestrator checked the
   // post is this assistant's. Nothing is made or sent until the click (src/components/review-links.js).

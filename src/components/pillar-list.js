@@ -11,10 +11,12 @@
 // autosave then sends it and the server reconciles the records (syncPillarsFromNames), and
 // assistants.js calls PillarList.reload() after that save.
 //
+// Archived pillars are listed under "Archived pillars" with "Bring back" (description and posts kept).
+//
 // window.PillarList.mount(host, { assistantId, initialText })  ·  .reload()
 (function () {
   const API = '/.netlify/functions/content-pillars';
-  let state = { host: null, assistantId: null, pillars: null, limits: { maxActive: 5, maxName: 60, maxDescription: 300 }, busy: false, error: '', fallback: [] };
+  let state = { host: null, assistantId: null, pillars: null, archived: [], limits: { maxActive: 5, maxName: 60, maxDescription: 300 }, busy: false, error: '', fallback: [] };
 
   const esc = (v) => String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -53,7 +55,10 @@
       const data = await call('POST', body);
       if (!Array.isArray(data.pillars)) throw new Error('That didn\'t save. Try again.');
       state.pillars = data.pillars;
-      publish(state.pillars, opts || { offerRedraft: true });
+      if (Array.isArray(data.archived)) state.archived = data.archived;
+      // A restore with five already on comes back switched off: say so, and there is nothing to redraft.
+      if (data.switchedOff) state.error = 'Five pillars are already switched on, so it came back switched off.';
+      publish(state.pillars, data.switchedOff ? { offerRedraft: false } : (opts || { offerRedraft: true }));
     } catch (err) {
       state.error = err.message;
     } finally {
@@ -120,6 +125,15 @@
         <button type="submit" ${full || state.busy ? 'disabled' : ''}
           class="shrink-0 px-3 py-2 rounded-lg bg-emerald-800 text-white text-sm font-bold hover:bg-emerald-700 disabled:opacity-40">+ Add pillar</button>
       </form>
+      ${state.archived.length ? `
+      <details class="mt-3" data-pillar-archived>
+        <summary class="text-xs font-semibold text-gray-600 cursor-pointer">Archived pillars (${state.archived.length})</summary>
+        <ul class="mt-2 space-y-1">${state.archived.map((a) => `
+          <li class="flex items-center justify-between gap-2 text-sm text-gray-600" data-archived-id="${a.id}">
+            <span class="min-w-0 truncate" title="${esc(a.description || '')}">${esc(a.name)}</span>
+            <button type="button" data-act="restore" ${state.busy ? 'disabled' : ''} class="shrink-0 text-xs font-semibold text-emerald-800 hover:text-emerald-700 disabled:opacity-40">Bring back</button>
+          </li>`).join('')}</ul>
+      </details>` : ''}
       ${state.error ? `<p class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 mt-2" role="alert">${esc(state.error)}</p>` : ''}`;
   }
 
@@ -141,6 +155,11 @@
     host.addEventListener('click', (e) => {
       const btn = e.target.closest('button[data-act]');
       if (!btn) return;
+      if (btn.dataset.act === 'restore') {
+        const id = Number(btn.closest('[data-archived-id]')?.dataset.archivedId);
+        if (id) run({ action: 'restore', pillarId: id });
+        return;
+      }
       const p = pillarOf(btn);
       if (!p) return;
       if (btn.dataset.act === 'up' || btn.dataset.act === 'down') {
@@ -194,6 +213,7 @@
         maxDescription: Number(data.maxDescription) || state.limits.maxDescription,
       };
       state.pillars = Array.isArray(data.pillars) ? data.pillars : null;
+      state.archived = Array.isArray(data.archived) ? data.archived : [];
       state.error = '';
       if (state.pillars) publish(state.pillars, { offerRedraft: false });
     } catch (err) {
@@ -211,6 +231,7 @@
       host,
       assistantId: opts.assistantId,
       pillars: [],
+      archived: [],
       error: '',
       fallback: window.ContentPillars ? window.ContentPillars.parsePillars(opts.initialText || '') : [],
     };
@@ -220,5 +241,41 @@
     reload();
   }
 
-  window.PillarList = { mount, reload };
+  // Results tab: "Posts by pillar" bars in the Autopilot card (#autopilot-pillars). Drawn like "Content by
+  // platform" beside it. Each cross-post counts once; switched-off and archived pillars are labelled.
+  async function renderUsage(assistantId) {
+    const box = document.getElementById('autopilot-pillars');
+    const bars = document.getElementById('pillar-usage-bars');
+    if (!box || !bars) return;
+    try {
+      const res = await fetch(`${API}?assistantId=${encodeURIComponent(assistantId)}&usage=1`, { credentials: 'same-origin' });
+      const data = await res.json().catch(() => ({}));
+      const rows = Array.isArray(data.usage) ? data.usage : [];
+      if (!res.ok || !rows.length) { box.classList.add('hidden'); return; }
+      const note = document.getElementById('pillar-usage-note');
+      if (note) {
+        note.textContent = `Last ${Number(data.days) || 60} days`;
+        note.title = 'Posts drafted under each pillar, each cross-post counted once. Your assistant gives the next posts to the pillars used least.';
+      }
+      const max = Math.max(1, ...rows.map((r) => r.posts));
+      bars.innerHTML = `<div class="space-y-2.5">${rows.map((r) => {
+        const tag = r.archived ? ' <span class="font-normal text-gray-400">(archived)</span>' : (!r.isActive ? ' <span class="font-normal text-gray-400">(off)</span>' : '');
+        const pct = Math.round((r.posts / max) * 100);
+        return `<div title="${esc(r.name)}: ${r.posts} post${r.posts === 1 ? '' : 's'}">
+            <div class="flex items-center justify-between text-xs font-semibold mb-1">
+              <span class="text-gray-700 min-w-0 truncate">${esc(r.name)}${tag}</span>
+              <span class="text-gray-500 shrink-0" style="font-variant-numeric:tabular-nums">${r.posts}</span>
+            </div>
+            <div class="rounded-full overflow-hidden" style="height:8px;background:#f3f4f6;">
+              <div class="bg-emerald-500 h-full rounded-full" style="width:${pct}%"></div>
+            </div>
+          </div>`;
+      }).join('')}</div>`;
+      box.classList.remove('hidden');
+    } catch {
+      box.classList.add('hidden'); // supplementary, like the other Results bars
+    }
+  }
+
+  window.PillarList = { mount, reload, renderUsage };
 }());
