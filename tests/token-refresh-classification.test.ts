@@ -22,7 +22,7 @@
 
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { TransientRefreshError, TokenLostError, requestGrant } from '../netlify/functions/refresh-social-tokens';
+import { TransientRefreshError, TokenLostError, requestGrant, rotatedElsewhere, CLAIM_WINDOW_MS } from '../netlify/functions/refresh-social-tokens';
 import { landmark } from './landmark';
 
 let passed = 0;
@@ -186,6 +186,52 @@ await test('the failure handler logs before it writes, and guards every step', (
         'the CONDEMNING log must be emitted before any database write, so it survives a DB outage');
     assert.ok(/const step = async/.test(handler),
         'each side-effect must be individually guarded so one dead step does not cancel the rest');
+});
+
+// ── Overlapping runs (2026-11-11) ───────────────────────────────────────────────────────────────
+// Two invocations in the same minute: one renewed X at 07:07:21, the other sent the retired token
+// and condemned the connection at 07:07:42. Guarded twice: a claim before the vault read, and a
+// re-read of the vault before condemning.
+
+await test('a rejection after someone else rotated the token is not a failure', async () => {
+    assert.strictEqual(await rotatedElsewhere(async () => ({ refreshToken: 'new' }), 'old'), true);
+});
+
+await test('a rejection with our own token still on file IS a failure', async () => {
+    assert.strictEqual(await rotatedElsewhere(async () => ({ refreshToken: 'old' }), 'old'), false);
+    assert.strictEqual(await rotatedElsewhere(async () => ({}), 'old'), false, 'an empty secret is not a rotation');
+    assert.strictEqual(await rotatedElsewhere(async () => null, 'old'), false);
+});
+
+await test('a vault re-read failure is transient, never a condemn', async () => {
+    await assert.rejects(rotatedElsewhere(async () => { throw new Error('CONNECT_TIMEOUT'); }, 'old'),
+        (err: Error) => err instanceof TransientRefreshError);
+});
+
+await test('a run claims the connection before it reads the vault', () => {
+    const text = src('netlify/functions/refresh-social-tokens.ts');
+    const body = text.slice(landmark(text, 'async function refreshConnection'));
+    const claim = landmark(body, 'await claimConnection(db, conn)');
+    const read = landmark(body, 'await getSecret(db, conn.vaultRefKey)');
+    assert.ok(claim < read, 'claim must come first — the loser has to skip before it reads the soon-to-be-retired token');
+    assert.ok(CLAIM_WINDOW_MS >= 60_000 && CLAIM_WINDOW_MS < 30 * 60_000,
+        `claim window ${CLAIM_WINDOW_MS}ms must outlast one run but not block the next scheduled one`);
+});
+
+await test('the condemn path checks for a rotation elsewhere first', () => {
+    const text = src('netlify/functions/refresh-social-tokens.ts');
+    const body = text.slice(landmark(text, 'async function refreshConnection'));
+    const recheck = landmark(body, 'await rotatedElsewhere(');
+    const condemn = landmark(body, 'await handleRefreshFailure(');
+    assert.ok(recheck < condemn, 'rotatedElsewhere must run before handleRefreshFailure');
+});
+
+await test('the publish-path X refresh falls back to a token rotated elsewhere', () => {
+    const text = src('src/utils/social-publish.ts');
+    const fn = text.slice(landmark(text, 'export async function refreshXToken'));
+    const failBranch = fn.slice(landmark(fn, 'if (!res.ok || !data.access_token)'), landmark(fn, 'await storeSecret('));
+    assert.ok(/now\.refreshToken !== refreshToken/.test(failBranch) && /return now\.token/.test(failBranch),
+        'refreshXToken must re-read the vault and use the fresh token when the cron rotated first');
 });
 
 console.log(`\n${passed} passed\n`);

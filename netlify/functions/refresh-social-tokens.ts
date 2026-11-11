@@ -12,7 +12,7 @@
 // warm. Mirrors refresh-meta-tokens.ts for failure side-effects (pause posts + notify).
 
 import { Handler } from '@netlify/functions';
-import { and, eq, gte, inArray } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { systemConnections, scheduledPosts, users, auditLogs, userOrganisations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
@@ -142,10 +142,75 @@ function describeError(err: unknown): string {
     return code ? `${err.message} (${code})` : err.message;
 }
 
+// ── Overlapping runs ─────────────────────────────────────────────────────────────
+// 2026-11-11, prod, 07:07: two invocations of this function ran in the same minute. One renewed
+// the only X connection at 07:07:21; the other had read the vault before that write landed, sent
+// the refresh token X had just retired, and at 07:07:42 condemned a perfectly healthy connection —
+// posts paused, assistants halted, "reconnect your X account" email. X rotates its refresh token
+// on every use, so two renewals of one connection can never both succeed.
+//
+// Two guards, either of which alone would have saved it:
+//   1. claimConnection — a run stamps updated_at before it reads the vault, and only if nobody
+//      else has stamped it within CLAIM_WINDOW_MS. The loser of that race skips the row.
+//   2. rotatedElsewhere — before condemning on a rejection, re-read the vault. If the stored
+//      refresh token is no longer the one we sent, someone else (another run, or the publish
+//      path's 401 retry in social-publish.ts) already renewed it, and the connection is fine.
+
+// Long enough to cover the slowest run (provider call + PERSIST_DEADLINE_MS + bookkeeping),
+// far shorter than the 30-minute schedule, so a genuine next run is never blocked.
+export const CLAIM_WINDOW_MS = 2 * 60 * 1000;
+
+/** True when this run won the row. Any write that touches updated_at counts as a claim. */
+async function claimConnection(db: ReturnType<typeof getDb>, conn: Conn): Promise<boolean> {
+    const now = new Date();
+    const rows = await db.update(systemConnections)
+        .set({ updatedAt: now })
+        .where(and(
+            eq(systemConnections.id, conn.id),
+            eq(systemConnections.status, 'active'),
+            lt(systemConnections.updatedAt, new Date(now.getTime() - CLAIM_WINDOW_MS)),
+        ))
+        .returning({ id: systemConnections.id });
+    return rows.length > 0;
+}
+
+/**
+ * After a provider rejection: has the stored refresh token moved on since we read it?
+ * A read failure is treated as "can't tell" → transient, so the next run decides with a working
+ * database rather than condemning blind.
+ */
+export async function rotatedElsewhere(
+    readStored: () => Promise<{ refreshToken?: unknown } | null | undefined>,
+    sentRefreshToken: string,
+): Promise<boolean> {
+    let stored;
+    try {
+        stored = await readStored();
+    } catch (err) {
+        throw new TransientRefreshError(`vault re-read after rejection failed: ${describeError(err)}`);
+    }
+    const current = stored?.refreshToken;
+    return typeof current === 'string' && current.length > 0 && current !== sentRefreshToken;
+}
+
 async function refreshConnection(db: ReturnType<typeof getDb>, conn: Conn) {
     if (!conn.vaultRefKey) return;
 
+    // The refresh token this run actually presented — what rotatedElsewhere compares against.
+    let sentRefreshToken: string | undefined;
+
     try {
+        let claimed: boolean;
+        try {
+            claimed = await claimConnection(db, conn);
+        } catch (err) {
+            throw new TransientRefreshError(`claim failed: ${describeError(err)}`);
+        }
+        if (!claimed) {
+            console.warn(`[refresh-social-tokens] conn ${conn.id} (${conn.serviceName}) claimed by another run in the last ${CLAIM_WINDOW_MS / 1000}s — skipping`);
+            return;
+        }
+
         let stored;
         try {
             stored = await getSecret(db, conn.vaultRefKey);
@@ -173,6 +238,7 @@ async function refreshConnection(db: ReturnType<typeof getDb>, conn: Conn) {
 
         // ⚠️ The point of no return. Once this resolves, the provider has retired the refresh
         // token we just sent and the only copy of its replacement is in `refreshed`.
+        sentRefreshToken = refreshToken;
         const refreshed = conn.serviceName === 'x'
             ? await refreshX(refreshToken)
             : await refreshLinkedIn(refreshToken, conn.externalUserId);
@@ -216,6 +282,20 @@ async function refreshConnection(db: ReturnType<typeof getDb>, conn: Conn) {
             // blip into a dead connection and a "reconnect your account" email.
             console.warn(`[refresh-social-tokens] conn ${conn.id} (${conn.serviceName}) transient, will retry: ${err.message}`);
             return;
+        }
+        if (!(err instanceof TokenLostError) && sentRefreshToken) {
+            try {
+                if (await rotatedElsewhere(() => getSecret(db, conn.vaultRefKey!), sentRefreshToken)) {
+                    console.warn(
+                        `[refresh-social-tokens] conn ${conn.id} (${conn.serviceName}) rejected, but the stored refresh token ` +
+                        `has already been rotated by someone else — connection is fine, not condemning: ${describeError(err)}`,
+                    );
+                    return;
+                }
+            } catch (recheckErr) {
+                console.warn(`[refresh-social-tokens] conn ${conn.id} (${conn.serviceName}) transient, will retry: ${describeError(recheckErr)}`);
+                return;
+            }
         }
         console.error(`[refresh-social-tokens] conn ${conn.id} (${conn.serviceName}) failed:`, describeError(err));
         await handleRefreshFailure(db, conn, describeError(err), err instanceof TokenLostError ? 'token_lost' : 'rejected');

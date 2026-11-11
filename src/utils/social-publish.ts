@@ -246,7 +246,14 @@ export async function refreshXToken(db: any, vaultRefKey: string): Promise<strin
         body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: clientId }),
     });
     const data: any = await res.json().catch(() => ({}));
-    if (!res.ok || !data.access_token) return null;
+    if (!res.ok || !data.access_token) {
+        // X rotates the refresh token on every use, and refresh-social-tokens renews on its own
+        // schedule. If it got there first, our copy is retired — but the vault already holds a
+        // fresh access token, so use that instead of failing the post.
+        const now = await getSecret(db, vaultRefKey).catch(() => null) as { token?: string; refreshToken?: string } | null;
+        if (now?.token && now.refreshToken && now.refreshToken !== refreshToken) return now.token;
+        return null;
+    }
     // X rotates refresh tokens — persist the new one (fall back to the old if absent).
     await storeSecret(db, vaultRefKey, { token: data.access_token, refreshToken: data.refresh_token ?? refreshToken });
     return data.access_token as string;
