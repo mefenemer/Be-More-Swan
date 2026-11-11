@@ -95,6 +95,8 @@
     selected: new Set(), bulkBusy: false, bulkNote: null,
     // The brand colour and render font for the scene text preview (GET returns it with the videos).
     brand: { accent: null, font: 'Impact' },
+    // Which clip styles can have sound with today's model (GET returns it with the videos).
+    clipSound: {},
     // "Your recording says something different from this line" — `${videoId}:${sceneId|'whole'}` → true.
     voiceWarn: {},
     // Which line the hidden file input is for (Upload on a line, or the whole script).
@@ -174,6 +176,7 @@
       const data = await call('GET', null, `?assistantId=${encodeURIComponent(state.assistantId)}`);
       state.videos = (data.projects || []).filter((p) => p.aiAssistantId == null || p.aiAssistantId === state.assistantId);
       if (data.brand) state.brand = data.brand;
+      if (data.clipSound) state.clipSound = data.clipSound;
       state.loadError = null;
       // A note about work in progress ("Making the video…") is stale once the video has finished,
       // one way or the other; errors stay until the next action.
@@ -735,6 +738,8 @@
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Shape</span>
             <select name="shape" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="9:16">Vertical 9:16</option><option value="1:1">Square 1:1</option><option value="16:9">Wide 16:9</option></select></label>
         </div>
+        ${/* Ambient sound made with the picture, where the model can (ai-clip.ts CLIP_SOUND_PRICE). Shown per style. */ ''}
+        <label data-vid-clip-sound class="${state.clipSound.realistic ? 'flex' : 'hidden'} items-start gap-1.5 text-sm text-gray-700"><input type="checkbox" name="sound" class="mt-1"> <span>With sound <span class="text-xs text-gray-500">— natural background sound, no speech or music. Uses 1.5× the clip’s tasks. Leave it off if a voiceover or music will go over it.</span></span></label>
         <p data-vid-clip-msg class="hidden text-xs font-semibold text-red-600"></p>
         <button type="submit" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Save the clip — free</button>
       </form>`;
@@ -763,7 +768,7 @@
         </div>
         <div class="min-w-0 space-y-1.5">
           <p class="text-sm text-gray-900 break-words">“${esc(c.description)}”</p>
-          <p class="text-xs text-gray-600">${esc(style)} · ${esc(c.lengthS)} seconds · AI clip</p>
+          <p class="text-xs text-gray-600">${esc(style)} · ${esc(c.lengthS)} seconds · ${c.sound ? 'with sound' : 'no sound'} · AI clip</p>
           ${open ? `<div class="flex flex-wrap gap-2 pt-1">
             <button type="button" data-vid-act="clip-frame" data-id="${v.id}" ${busy} class="${v.clipFrameUrl ? 'btn-secondary border' : 'btn-primary'} px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">${v.clipFrameUrl ? 'Try another frame — 1 task' : 'See the first frame — 1 task'}</button>
             ${v.clipFrameUrl ? `<button type="button" data-vid-act="build" data-id="${v.id}" ${busy} class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Make the clip${esc(cost)}</button>` : ''}
@@ -1490,6 +1495,13 @@
 
   document.addEventListener('change', (e) => {
     const t = e.target;
+    // The clip form: "With sound" only for styles whose model can make it.
+    if (host() && host().contains(t) && t.matches('[data-vid-clip-form] select[name="style"]')) {
+      const row = t.form.querySelector('[data-vid-clip-sound]');
+      const can = !!state.clipSound[t.value];
+      if (row) { row.classList.toggle('hidden', !can); row.classList.toggle('flex', can); if (!can) row.querySelector('input').checked = false; }
+      return;
+    }
     if (host() && host().contains(t) && t.matches('[data-vid-voice-file]')) {
       const file = t.files && t.files[0];
       const pick = state.voicePick;
@@ -1574,7 +1586,7 @@
       const msg = f.querySelector('[data-vid-clip-msg]');
       f.querySelectorAll('button').forEach((x) => { x.disabled = true; });
       try {
-        const data = await call('POST', { action: 'clip_create', assistantId: state.assistantId, description: String(fd.get('description') || ''), style: String(fd.get('style')), lengthS: Number(fd.get('lengthS')), shape: String(fd.get('shape')) });
+        const data = await call('POST', { action: 'clip_create', assistantId: state.assistantId, description: String(fd.get('description') || ''), style: String(fd.get('style')), lengthS: Number(fd.get('lengthS')), shape: String(fd.get('shape')), sound: !!fd.get('sound') && !!state.clipSound[String(fd.get('style'))] });
         state.clipForm = false;
         if (data.project && data.project.id) { state.opened.add(data.project.id); saveFolded(); }
         state.stage = 'check'; state.userStage = true;

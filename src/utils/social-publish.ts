@@ -1062,6 +1062,11 @@ export interface YouTubePublishOpts {
     deadlineMs?: number;
     /** Continue a session opened by an earlier invocation (from a previous `incomplete`). */
     resume?: YouTubeResumeState;
+    /**
+     * The video contains AI-made footage (src/utils/ai-disclosure.ts): YouTube's "altered or synthetic
+     * content" disclosure, status.containsSyntheticMedia. Plan §6 / Phase 7, 2026-11-11.
+     */
+    containsSyntheticMedia?: boolean;
 }
 
 // What the source URL can support. A presigned R2 GET honours Range and reports a length, which is
@@ -1188,7 +1193,7 @@ export async function publishYouTubeResumable(
                 tags: meta.tags.slice(0, 30),
                 categoryId: '22', // People & Blogs (safe default)
             },
-            status: { privacyStatus: opts.privacyStatus ?? YOUTUBE_DEFAULT_PRIVACY, selfDeclaredMadeForKids: false },
+            status: { privacyStatus: opts.privacyStatus ?? YOUTUBE_DEFAULT_PRIVACY, selfDeclaredMadeForKids: false, ...(opts.containsSyntheticMedia ? { containsSyntheticMedia: true } : {}) },
         }),
     }));
     const uploadUrl = initRes.headers.get('location');

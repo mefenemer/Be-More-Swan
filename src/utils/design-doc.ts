@@ -42,8 +42,11 @@ export interface TextLayer {
     italic?: boolean; underline?: boolean; lineHeight?: number; group?: string;
 }
 export interface ShapeLayer { id: string; kind: 'shape'; role: string; x: number; y: number; w: number; h: number; color: string; round: boolean; opacity: number; group?: string }
-/** A QR code or logo: `src` is set by the server when the design is made, and never taken from a browser. */
-export interface ImageLayer { id: string; kind: 'qr' | 'logo'; role: string; x: number; y: number; w: number; h: number; src: string; group?: string }
+/**
+ * A QR code or logo: `src` is set by the server when the design is made, and never taken from a browser. A QR code's
+ * `url` is the link it opens (qr-link.ts), set with it — the editor shows it so the user can change it.
+ */
+export interface ImageLayer { id: string; kind: 'qr' | 'logo'; role: string; x: number; y: number; w: number; h: number; src: string; url?: string; group?: string }
 /** A picture added on top of the page. `ref` is set by the server from the workspace's own library, like the main picture's. */
 export interface PictureLayer { id: string; kind: 'picture'; role: string; x: number; y: number; w: number; h: number; opacity: number; ref: DesignPhotoRef; crop?: DesignCrop; group?: string }
 export type DesignLayer = TextLayer | ShapeLayer | ImageLayer | PictureLayer;
@@ -303,6 +306,8 @@ export interface DesignEditCard {
     findPicture?: { target: string; shows: string };
     /** A copy of the design at another size, as a new option: a paper size for a flyer, or a picture's shape. */
     resizeCopy?: string;
+    /** The link this design's QR code opens — one the user gave, or "suggested" for the business's own (qr-link.ts). Adds one if there is none. */
+    qrUrl?: string;
     changes: DesignLayerChange[];
     add: Array<{ text: string; x?: number; y?: number; w?: number; color?: string; fontSizePct?: number; bold?: boolean; boxFill?: string | null; boxOpacity?: number }>;
 }
@@ -325,6 +330,7 @@ export function designEditFromUiElement(uiElement: unknown): DesignEditCard | nu
     }
     const page = normalizeHex(ui.pageColor);
     if (page) card.pageColor = page;
+    if (typeof ui.qrUrl === 'string' && ui.qrUrl.trim()) card.qrUrl = ui.qrUrl.trim().slice(0, 500);
     if (ui.pageOpacity != null && Number.isFinite(Number(ui.pageOpacity))) card.pageOpacity = num(ui.pageOpacity, 0, 1, 1);
     if (ui.photoOpacity !== undefined && Number.isFinite(Number(ui.photoOpacity))) card.photoOpacity = num(ui.photoOpacity, 0, 1, 1);
     if (ui.photoCrop !== undefined) card.photoCrop = cleanCrop(ui.photoCrop) ?? null;
@@ -402,7 +408,7 @@ export function designEditFromUiElement(uiElement: unknown): DesignEditCard | nu
             ...(o.boxOpacity != null && Number.isFinite(Number(o.boxOpacity)) ? { boxOpacity: num(o.boxOpacity, 0, 1, 1) } : {}),
         });
     }
-    const any = card.pageColor || card.pageOpacity !== undefined || card.photoOpacity !== undefined || card.photoCrop !== undefined || card.putBack || card.shapes || card.group || card.ungroup || card.setBackground || card.detachBackground || card.saveTemplate || card.useTemplate || card.addBack || card.removeBack || card.removeBackground || card.resizeCopy || card.font || card.changes.length || card.add.length;
+    const any = card.pageColor || card.pageOpacity !== undefined || card.photoOpacity !== undefined || card.photoCrop !== undefined || card.putBack || card.shapes || card.group || card.ungroup || card.setBackground || card.detachBackground || card.saveTemplate || card.useTemplate || card.addBack || card.removeBack || card.removeBackground || card.resizeCopy || card.qrUrl || card.font || card.changes.length || card.add.length;
     return any ? card : null;
 }
 

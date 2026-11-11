@@ -99,9 +99,10 @@ check('the length charged is the length the model bills', () => {
 check('every place an AI clip is charged passes its length', () => {
     assert.match(read('src/utils/ai-credits.ts'), /units: params\.tasks \?\? tasksForCredits\(params\.mediaType, params\.amount, await getTaskCosts\(\)\),/);
     const vp = read('src/utils/video-producer.ts');
-    assert.match(vp, /tasks: aiVideoTasks\(sub\.billedSeconds, await getTaskCosts\(\)\) \};/);
+    // A single AI clip with sound is 1.5× (ai-clip.ts) — still from the length the model billed.
+    assert.match(vp, /tasks: clipTasksWithSound\(aiVideoTasks\(sub\.billedSeconds, await getTaskCosts\(\)\), sub\.withSound === true\) \};/);
     assert.match(vp, /await settle\(scene\.source === 'ai_video' \? 'video' : 'image', paid, !!made, made\?\.tasks\);/);
-    assert.match(vp, /n \+= aiVideoTasks\(billedSecondsFor\(aiClipSeconds\(s\.targetS\)\), costs\);/, 'the estimate and hold use the same rule');
+    assert.match(vp, /n \+= clipTasksWithSound\(aiVideoTasks\(billedSecondsFor\(aiClipSeconds\(s\.targetS, model\), model\), costs\),/, 'the estimate and hold use the same rule');
     const vb = read('src/utils/visual-briefs.ts');
     assert.strictEqual((vb.match(/aiVideoTasks\(billedSecondsFor\(BRIEF_CLIP_SECONDS\), /g) || []).length, 2, 'Brand Designer hold and settle');
     assert.match(read('src/utils/ai-video-job.ts'), /tasks: aiVideoTasks\(billedSecondsFor\(durationSeconds\), await getTaskCosts\(\)\)/);

@@ -19,6 +19,7 @@
 //   calendar     { assistantId, from, to }          → brief due dates, for the Calendar tab
 //   draft_flyer_words { briefId }                   → a flyer's words drafted and saved (1 task; flyers plan §3.2)
 
+import { suggestedQrLink } from '../../src/utils/qr-link';
 import { and, eq, sql, desc } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
@@ -305,7 +306,8 @@ export default withLambda(async (event) => {
             if (action !== 'apply_design_edit' && (!Number.isInteger(optionId) || optionId <= 0)) return json(400, { error: 'Option not found.' });
             if (action === 'open_design') {
                 const r = await openDesign(db, orgId, optionId);
-                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls }) : json(r.status, { error: r.error });
+                // The link a QR code would open unless they change it (qr-link.ts) — for the editor's "QR code" button.
+                return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls, qrSuggestion: await suggestedQrLink(db, orgId) }) : json(r.status, { error: r.error });
             }
             if (action === 'save_template') {
                 const r = await saveAsTemplate(db, { orgId, userId, optionId, design: body.design, name: body.name });
@@ -346,6 +348,7 @@ export default withLambda(async (event) => {
                 const r = await saveDesign(db, {
                     orgId, optionId, design: body.design, finish: body.finish === true, usePhotoFromOption: positive(body.usePhotoFromOption),
                     addPicture: positive(body.addPicture), side: body.side === 'back' ? 'back' : null,
+                    qrUrl: typeof body.qrUrl === 'string' && body.qrUrl.trim() ? body.qrUrl.trim().slice(0, 500) : null,
                     replacePicture: replaceAsset && typeof replace?.target === 'string' ? { assetId: replaceAsset, target: replace.target } : null,
                 });
                 return r.ok ? json(200, { ok: true, design: r.design, photoUrl: r.photoUrl, pictureUrls: r.pictureUrls, addedId: r.addedId }) : json(r.status, { error: r.error });

@@ -38,7 +38,7 @@ test('save a clip, see its first frame, then make it', async ({ page, api, pageE
     await expect.poll(() => posts.find((p) => p.action === 'clip_create')).toMatchObject({ assistantId: 6, style: 'cinematic', lengthS: 5, shape: '9:16' });
 
     const card = page.locator('[data-video="50"]');
-    await expect(card).toContainText('Cinematic · 5 seconds · AI clip');
+    await expect(card).toContainText('Cinematic · 5 seconds · no sound · AI clip');
     await expect(card.locator('[data-vid-act="build"]')).toHaveCount(0);
     await card.getByRole('button', { name: 'See the first frame — 1 task' }).click();
     await expect.poll(() => posts.some((p) => p.action === 'clip_frame')).toBe(true);

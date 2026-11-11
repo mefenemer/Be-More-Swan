@@ -141,7 +141,7 @@ check('online classes: a checked link on the session, copied onto each place, "o
 check('the booking link as a QR code', async () => {
     const svg = await bookingQrSvg('https://willow.bemoreswan.site/book');
     assert.ok(svg && svg.startsWith('<svg') && svg.includes('viewBox'));
-    assert.ok(read('src/components/assistant-site-editor.js').includes('download="booking-link-qr.svg"'));
+    assert.ok(read('src/components/assistant-site-editor.js').includes('download="qr-code.svg"'));
 });
 
 check('the Website banner names what is waiting, not always "Enquiries"', () => {
