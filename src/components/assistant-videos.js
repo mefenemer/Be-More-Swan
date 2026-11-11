@@ -86,7 +86,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   const state = {
     assistantId: null, assistantName: null, setup: {}, videos: [], loaded: false, loadError: null,
-    rendered: false, form: false, editing: null, replanning: null, rewriting: null, noting: null, renamingChapter: null, yt: {}, captionLanguages: {}, reviews: {}, sharing: null, notes: {}, busy: new Set(), pollTimer: null,
+    rendered: false, form: false, editing: null, replanning: null, rewriting: null, noting: null, renamingChapter: null, yt: {}, captionLanguages: {}, reviews: {}, sharing: null, wordEdit: null, notes: {}, busy: new Set(), pollTimer: null,
     stage: null, userStage: false, opened: new Set(), full: false,
     // "Use my own footage": the form, the library's own videos, what is ticked, and files just added.
     footage: null,
@@ -1028,7 +1028,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           ${chaptersHtml(v)}
           ${captionsHtml(v)}
           ${youtubeHtml(v)}
-          ${reviewHtml(v)}
+          ${guestReviewHtml(v)}
           ${notes.length ? `<div class="border border-amber-200 bg-amber-50 rounded-lg p-2">
               <p class="text-xs font-bold text-amber-900">Your notes (${notes.length})</p>
               <ul class="mt-1 space-y-0.5">${notes.map((n) => `<li class="text-xs text-amber-900 flex items-start gap-1"><button type="button" data-vid-act="seek" data-id="${v.id}" data-at="${esc(n.atS)}" class="font-bold hover:underline shrink-0">${mmss(n.atS)}</button><span class="min-w-0 break-words">${n.sceneId ? `scene ${esc(n.sceneId.slice(1))}: ` : ''}${esc(n.text)}</span><button type="button" data-vid-act="delete-note" data-id="${v.id}" data-note="${esc(n.id)}" aria-label="Delete this note" class="ml-auto shrink-0 text-amber-700 hover:text-red-700">×</button></li>`).join('')}</ul>
@@ -1050,12 +1050,39 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   /** "✂ 2 pauses, 1 “um” cut — 3.1 s shorter" and the switch back (own footage in its own sound). */
   function tightenHtml(v, s, editable) {
     const b = v.brief || {};
-    if (s.source !== 'own_video' || b.voiceover || b.tighten === false) return '';
+    if (s.source !== 'own_video' || b.voiceover) return '';
+    return autoTightenHtml(v, s, editable) + wordEditHtml(v, s, editable);
+  }
+
+  /**
+   * "Edit the words": the words said in this scene's part of the owner's video, as a row of words to
+   * click — a struck-out word is cut from the video, like deleting it from a transcript (footage.ts
+   * tightenSegment cutWords). Saved with the scene; nothing is charged.
+   */
+  function wordEditHtml(v, s, editable) {
+    if (!editable) return '';
+    const we = state.wordEdit && state.wordEdit.id === v.id && state.wordEdit.sceneId === s.id ? state.wordEdit : null;
+    if (!we) return `<button type="button" data-vid-act="edit-words" data-id="${v.id}" data-scene="${esc(s.id)}" class="mt-0.5 text-xs font-bold text-indigo-700 hover:underline">✎ Edit the words${s.cutWords && s.cutWords.length ? ` (${s.cutWords.length} cut)` : ''}</button>`;
+    if (we.loading) return '<p class="text-xs text-gray-500 mt-1">Reading what was said…</p>';
+    if (we.error) return `<p class="text-xs text-red-700 mt-1">${esc(we.error)}</p>`;
+    if (!we.words.length) return '<p class="text-xs text-gray-500 mt-1">Nothing is said in this part of your video, so there are no words to cut.</p>';
+    return `<div class="mt-1 border border-gray-200 rounded-lg p-2 bg-white" data-vid-words="${v.id}">
+        <p class="text-[11px] text-gray-600">Click a word to cut it from the video. Click it again to keep it.</p>
+        <p class="mt-1 leading-7">${we.words.map((w, i) => `<button type="button" data-vid-act="toggle-word" data-i="${i}" aria-pressed="${w.cut ? 'true' : 'false'}" class="text-sm px-0.5 rounded ${w.cut ? 'line-through text-red-700 bg-red-50' : 'text-gray-900 hover:bg-indigo-50'}">${esc(w.word)}</button>`).join(' ')}</p>
+        <div class="flex gap-2 mt-1"><button type="button" data-vid-act="save-words" data-id="${v.id}" data-scene="${esc(s.id)}" class="btn-primary px-3 py-1 text-xs font-bold rounded-lg">Save</button>
+          <button type="button" data-vid-act="cancel-words" class="btn-secondary border px-3 py-1 text-xs font-bold rounded-lg">Cancel</button>
+          <span class="ml-auto text-[11px] text-gray-500 self-center">${we.words.filter((w) => w.cut).length} cut</span></div>
+      </div>`;
+  }
+
+  function autoTightenHtml(v, s, editable) {
+    const b = v.brief || {};
     const t = s.tightened;
+    if (b.tighten === false && !(t && t.removed)) return '';
     if (t) {
-      const parts = [t.pauses ? `${t.pauses} pause${t.pauses === 1 ? '' : 's'}` : '', t.fillers ? `${t.fillers} “um”${t.fillers === 1 ? '' : 's'}` : '', t.retakes ? `${t.retakes} repeated take${t.retakes === 1 ? '' : 's'}` : ''].filter(Boolean);
+      const parts = [t.removed ? `${t.removed} word${t.removed === 1 ? '' : 's'} you removed` : '', t.pauses ? `${t.pauses} pause${t.pauses === 1 ? '' : 's'}` : '', t.fillers ? `${t.fillers} “um”${t.fillers === 1 ? '' : 's'}` : '', t.retakes ? `${t.retakes} repeated take${t.retakes === 1 ? '' : 's'}` : ''].filter(Boolean);
       return `<p class="text-xs text-gray-600 mt-0.5">✂ ${esc(parts.length ? parts.join(', ') : 'Dead air')} cut — ${esc(Number(t.savedS).toFixed(1))} s shorter
-        ${editable ? `<button type="button" data-vid-act="tighten" data-id="${v.id}" data-scene="${esc(s.id)}" data-on="0" class="ml-1 font-bold text-indigo-700 hover:underline cursor-pointer">Keep as filmed</button>` : ''}</p>`;
+        ${editable && b.tighten !== false ? `<button type="button" data-vid-act="tighten" data-id="${v.id}" data-scene="${esc(s.id)}" data-on="0" class="ml-1 font-bold text-indigo-700 hover:underline cursor-pointer">Keep as filmed</button>` : ''}</p>`;
     }
     if (s.tighten === false) {
       return `<p class="text-xs text-gray-600 mt-0.5">Kept as filmed
@@ -1395,7 +1422,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
    * on moments and approve it or ask for changes. Their comments appear here with their times; "Add to my
    * notes" turns one into a note on that moment, which "Make a new version from my notes" acts on.
    */
-  function reviewHtml(v) {
+  function guestReviewHtml(v) {
     const st = state.reviews[v.id];
     if (!st) { setTimeout(() => loadReviews(v.id), 0); return ''; }
     const sharing = state.sharing && state.sharing.id === v.id ? state.sharing : null;
@@ -1618,6 +1645,30 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         break;
       }
       case 'edit-scene': state.editing = { id, sceneId: b.dataset.scene }; render(); break;
+      case 'edit-words': {
+        const sceneId = b.dataset.scene;
+        state.wordEdit = { id, sceneId, loading: true, words: [] };
+        render();
+        call('GET', null, `?id=${encodeURIComponent(id)}&sceneWords=${encodeURIComponent(sceneId)}`)
+          .then((d) => { if (state.wordEdit && state.wordEdit.sceneId === sceneId) state.wordEdit = { id, sceneId, words: d.words || [] }; })
+          .catch((err) => { if (state.wordEdit) state.wordEdit = { id, sceneId, error: err.message, words: [] }; })
+          .finally(() => render());
+        break;
+      }
+      case 'toggle-word': {
+        const w = state.wordEdit && state.wordEdit.words[Number(b.dataset.i)];
+        if (w) { w.cut = !w.cut; b.setAttribute('aria-pressed', w.cut ? 'true' : 'false'); b.className = `text-sm px-0.5 rounded ${w.cut ? 'line-through text-red-700 bg-red-50' : 'text-gray-900 hover:bg-indigo-50'}`; const n = b.closest('[data-vid-words]')?.querySelector('span.ml-auto'); if (n) n.textContent = `${state.wordEdit.words.filter((x) => x.cut).length} cut`; }
+        break;
+      }
+      case 'cancel-words': state.wordEdit = null; render(); break;
+      case 'save-words': {
+        const we = state.wordEdit;
+        if (!we) break;
+        const cutWords = we.words.filter((w) => w.cut).map((w) => ({ start: w.start, end: w.end }));
+        state.wordEdit = null;
+        act(id, { action: 'edit_scene', id, sceneId: b.dataset.scene, patch: { cutWords } }, cutWords.length ? `${cutWords.length} word${cutWords.length === 1 ? '' : 's'} will be cut when you make the video.` : 'Every word kept.');
+        break;
+      }
       case 'tighten': {
         const on = b.dataset.on === '1';
         act(id, { action: 'edit_scene', id, sceneId: b.dataset.scene, patch: { tighten: on } }, on ? 'Scene tightened.' : 'Scene kept as filmed.');

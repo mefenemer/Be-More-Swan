@@ -27,11 +27,13 @@ export interface VideoSceneRequest {
     nameCaption?: NameCaption | null;
     /** Where, when, how the words look and appear (scene-text.ts). Only valid values travel. */
     text?: SceneTextFields;
+    /** Words to cut from one of the owner's own clips, exactly as said ("Edit the words"); matched on the server. */
+    cutPhrase?: string;
 }
 export interface VideoSceneCard {
     type: typeof VIDEO_SCENE_EDIT_TYPE; projectId: number; scene: number; sceneId: string; summary: string | null;
     /** What edit_scene is sent. */
-    patch: { voiceover?: string; onScreenText?: string; source?: CardSource; keywords?: string; prompt?: string; nameCaption?: NameCaption | null } & SceneTextFields;
+    patch: { voiceover?: string; onScreenText?: string; source?: CardSource; keywords?: string; prompt?: string; nameCaption?: NameCaption | null; cutPhrase?: string } & SceneTextFields;
     now: { voiceover: string; onScreenText: string };
 }
 
@@ -56,7 +58,9 @@ export function videoSceneRequestFromUiElement(uiElement: unknown): VideoSceneRe
     else if (ui.nameCaption) { const nc = readNameCaption(ui.nameCaption); if (nc) req.nameCaption = nc; }
     const text = readSceneText(ui);
     if (Object.keys(text).length) req.text = text;
-    return req.voiceover != null || req.onScreenText != null || req.source != null || req.picture != null || req.nameCaption !== undefined || req.text ? req : null;
+    const cutPhrase = str(ui.cutPhrase, 200);
+    if (cutPhrase) req.cutPhrase = cutPhrase;
+    return req.voiceover != null || req.onScreenText != null || req.source != null || req.picture != null || req.nameCaption !== undefined || req.text || req.cutPhrase ? req : null;
 }
 
 /** The card for this scene of this storyboard. Null when there is no such scene, or nothing would change. */
@@ -73,6 +77,7 @@ export function videoSceneCard(req: VideoSceneRequest, storyboard: Storyboard | 
         else patch.keywords = req.picture;
     }
     if (req.nameCaption !== undefined && JSON.stringify(req.nameCaption) !== JSON.stringify(scene.nameCaption ?? null)) patch.nameCaption = req.nameCaption;
+    if (req.cutPhrase && scene.source === 'own_video') patch.cutPhrase = req.cutPhrase;
     // Text placement only means something on words over a picture (a branded card draws its own).
     if (req.text && scene.source !== 'brand_card' && (req.onScreenText ?? scene.onScreenText)) {
         for (const k of ['textPos', 'textWhen', 'textStyle', 'textAnim'] as const) {

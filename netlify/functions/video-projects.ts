@@ -55,7 +55,7 @@ import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { startClip, holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
-import { enforceStoryboard, isVideoShape, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
+import { enforceStoryboard, isVideoShape, readCutWords, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
 import { CAPTION_LANGUAGES, toSrt, toVtt, YT_EXTENDED_SCOPES_FLAG } from '../../src/lib/youtube-extras';
@@ -77,7 +77,7 @@ import { randomUUID } from 'crypto';
 import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
 import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../src/utils/footage-review';
 import { getTaskCosts } from '../../src/utils/task-costs';
-import { tightenStoryboard, type FootageReview } from '../../src/lib/footage';
+import { findPhrase, tightenStoryboard, type FootageReview } from '../../src/lib/footage';
 import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -147,6 +147,19 @@ export default withLambda(async (event) => {
             // Whether a reconnect would now ask for the drop-off permission (the switch is on for this workspace).
             const canAsk = await isFeatureEnabled(orgId, YT_EXTENDED_SCOPES_FLAG).catch(() => false);
             return json(200, { youtube: await youtubeResultsFor(db, orgId, row, { fresh: qs.fresh === '1' }), canAskPermission: canAsk });
+        }
+        // "Edit the words" on one of the owner's own clips: the words said in that scene's part of their
+        // video, each with its times and whether it's struck out (footage review words; nothing is charged).
+        if (Number.isInteger(id) && id > 0 && qs.sceneWords) {
+            const row = await load(id);
+            const scene = (row?.storyboard as Storyboard | null)?.scenes?.find((s) => s.id === qs.sceneWords);
+            if (!row || !scene || scene.source !== 'own_video' || !scene.assetId || scene.inS == null || scene.outS == null) return json(404, { error: 'That scene isn’t one of your own clips.' });
+            const [video] = await loadFootage(db, orgId, [scene.assetId]);
+            const struck = scene.cutWords ?? [];
+            const words = (video?.words ?? []).filter((w) => w.start >= scene.inS! - 0.02 && w.end <= scene.outS! + 0.02 && w.end > w.start)
+                .slice(0, 600)
+                .map((w) => ({ word: w.word, start: w.start, end: w.end, cut: struck.some((c) => Math.abs(c.start - w.start) < 0.03 && Math.abs(c.end - w.end) < 0.03) }));
+            return json(200, { words, inS: scene.inS, outS: scene.outS });
         }
         // A caption file: ?captions=en (as spoken) or a translation's code, &format=srt|vtt.
         if (Number.isInteger(id) && id > 0 && qs.captions) {
@@ -553,6 +566,11 @@ export default withLambda(async (event) => {
         if (typeof patch.tighten === 'boolean') { if (patch.tighten) delete scene.tighten; else scene.tighten = false; }
         if (patch.inS != null) scene.inS = Number(patch.inS);
         if (patch.outS != null) scene.outS = Number(patch.outS);
+        // "Edit the words": the words the owner struck out, by their times in the source ([] puts them all back).
+        if (Array.isArray(patch.cutWords) && scene.source === 'own_video' && scene.inS != null && scene.outS != null) {
+            const cw = readCutWords(patch.cutWords, scene.inS, scene.outS);
+            if (cw.length) scene.cutWords = cw; else delete scene.cutWords;
+        }
         // A name caption on the scene ({ name, role }), or null / an empty name to take it off.
         // The words' place, timing, look and entrance (scene-text.ts). null clears one back to the default.
         for (const k of ['textPos', 'textWhen', 'textStyle', 'textAnim'] as const) {
@@ -570,6 +588,13 @@ export default withLambda(async (event) => {
         }
         const brief = row.brief as VideoBrief;
         const footage = await loadFootage(db, orgId, brief.footageAssetIds ?? []);
+        // A chat card names words to cut as they were said: found in the scene's part of the video, then struck out.
+        if (typeof patch.cutPhrase === 'string' && patch.cutPhrase.trim() && scene.source === 'own_video' && scene.assetId && scene.inS != null && scene.outS != null) {
+            const words = footage.find((f) => f.id === scene.assetId)?.words ?? [];
+            const hit = findPhrase(words.filter((w) => w.start >= scene.inS! - 0.02 && w.end <= scene.outS! + 0.02), patch.cutPhrase);
+            if (!hit.length) return json(400, { error: 'Those words aren’t said in that scene. Use “Edit the words” on the Videos tab to pick them.' });
+            scene.cutWords = readCutWords([...(scene.cutWords ?? []), ...hit.map((w) => ({ start: w.start, end: w.end }))], scene.inS, scene.outS);
+        }
         const enforced = enforceStoryboard(sb, brief, await libraryPictures(db, orgId), asOwnVideos(footage));
         // A changed cut, or "Keep as filmed", is tightened again from the review's words.
         const tightened = footage.length ? tightenStoryboard(enforced.storyboard, brief, footage) : { storyboard: enforced.storyboard, changes: [] };

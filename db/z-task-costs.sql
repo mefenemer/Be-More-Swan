@@ -87,6 +87,7 @@ INSERT INTO task_cost_change_items (change_id, cost_key, new_units) VALUES
     (1, 'flyer_words', 1),
     (1, 'background_removal', 1),
     (1, 'footage_review', 2),
+    (1, 'caption_translation', 1),   -- added 2026-11-11 (translated caption files); a re-run adds just this row
     (1, 'chat_messages', 1),
     (1, 'editing_helper', 1),
     (1, 'design_round', 1),

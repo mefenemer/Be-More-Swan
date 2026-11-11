@@ -5211,6 +5211,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ${words != null ? change('What to show', '', words) : ''}
       ${Object.entries(VIDEO_TEXT_LABELS).filter(([k]) => patch[k] && VIDEO_TEXT_LABELS[k][1][patch[k]]).map(([k, [label, names]]) => change(label, '', names[patch[k]])).join('')}
       ${'nameCaption' in patch ? change('Name caption', '', patch.nameCaption ? `${patch.nameCaption.name}${patch.nameCaption.role ? ` · ${patch.nameCaption.role}` : ''}` : '(none)') : ''}
+      ${typeof patch.cutPhrase === 'string' && patch.cutPhrase ? change('Cut from your clip', patch.cutPhrase, '(cut)') : ''}
       <p class="text-xs text-gray-600 mt-2">This only changes the plan. Nothing is made until you press “Make the video”, which says what it uses.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-vse-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Change the scene</button>

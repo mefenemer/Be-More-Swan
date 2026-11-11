@@ -166,6 +166,7 @@ export function biggestDrop(points: RetentionPoint[], durationS: number): { atS:
     for (let i = 0; i < points.length; i++) {
         const j = points.findIndex((p) => p.at >= points[i].at + 0.05);
         if (j === -1) break;
+        if (points[j].at - points[i].at > 0.12) continue;   // a gap in the curve, not a fall over ~5%
         const from = points[i].watching, to = points[j].watching;
         if (from <= 0) continue;
         const lost = (from - to) / from;
