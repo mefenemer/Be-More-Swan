@@ -18,8 +18,8 @@ function check(name: string, fn: () => void) {
 
 check('the section exists, is in the nav, and loads its data', () => {
     assert.match(A, /<section id="view-bias-audit" class="admin-view hidden/);
-    assert.match(A, /\{ view: 'bias-audit',\s+icon: '⚖️', label: 'Bias Audit'/);
-    assert.match(A, /'bias-audit': 'Bias Audit'/);
+    assert.match(A, /\{ view: 'bias-audit',\s+icon: '⚖️', label: 'Bias audit'/);
+    assert.match(A, /'bias-audit': 'Bias audit'/);
     assert.match(A, /if \(view === 'bias-audit'\)\s+loadBiasAudit\(\);/);
 });
 
@@ -34,7 +34,7 @@ check('?section= lands on the view, so links already sent still work', () => {
     // The email link carries ONLY ?section=, so it still lands here. ?view= is read first because a
     // stale ?section= used to outlive every navigation and reopen Bias Audit on each refresh
     // (2026-10-06) — see tests/refresh-lands-on-last-view.test.ts.
-    assert.match(A, /const initialView = params\.get\('view'\) \|\| params\.get\('section'\) \|\| remembered \|\| 'dashboard';/);
+    assert.match(A, /const initialView = _resolveView\(params\.get\('view'\) \|\| params\.get\('section'\) \|\| remembered \|\| 'dashboard'\);/);
 });
 
 check('the reminder email now links with ?view=', () => {
