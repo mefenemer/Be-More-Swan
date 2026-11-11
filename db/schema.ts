@@ -3463,6 +3463,9 @@ export const blogPosts = pgTable("blog_posts", {
   publishedAt: timestamp("published_at"),
   isAutonomous: boolean("is_autonomous").notNull().default(false),
   generationReason: text("generation_reason"),
+  // The topic it was written under (db/z-content-topics.sql): a content_pillars row on this assistant.
+  pillarId: integer("pillar_id").references(() => contentPillars.id, { onDelete: "set null" }),
+  pillar: text("pillar"),
   // Why the last scheduled publish failed, for the owner (publish-blog-posts.ts); cleared when the
   // article is booked again or published. db/blog-failure-reason.sql — ⚠️ apply before deploying.
   failureReason: text("failure_reason"),
@@ -4931,6 +4934,9 @@ export const newsletterIssues = pgTable("newsletter_issues", {
   sentAt: timestamp("sent_at"),
   isAutonomous: boolean("is_autonomous").notNull().default(false),
   generationReason: text("generation_reason"),
+  // The topic it was written under (db/z-content-topics.sql): a content_pillars row on this assistant.
+  pillarId: integer("pillar_id").references(() => contentPillars.id, { onDelete: "set null" }),
+  pillar: text("pillar"),
   provenanceContentId: text("provenance_content_id"),
   confidenceScore: text("confidence_score"),
   factualClaims: jsonb("factual_claims"),

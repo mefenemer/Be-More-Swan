@@ -375,6 +375,9 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
                 isAutonomous: true,
                 generationReason: 'autopilot_schedule',
                 jobId: job.job_id,
+                // The topic it was written under (src/utils/topic-balance.ts), so the next one balances.
+                pillarId: idea.pillarId ?? null,
+                pillar: idea.pillar ?? null,
             }).returning({ id: blogPosts.id });
             createdPostId = post.id;
 

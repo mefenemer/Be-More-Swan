@@ -1,6 +1,8 @@
 // src/utils/content-pillars-store.ts
-// A Social Media assistant's content pillars as RECORDS (db/z-content-pillars.sql,
-// docs/pillar-records-plan.md). One row per pillar: name, an optional description, order, on/off.
+// A Social Media assistant's content pillars, and a Blog or Email assistant's topics, as RECORDS
+// (db/z-content-pillars.sql, docs/pillar-records-plan.md). One row each: name, an optional description,
+// order, on/off. The assistant's role (src/utils/pillar-profiles.ts) decides the onboarding_context key
+// the names are derived to, its shape, the cap, and the word customers read ("pillar" / "topic").
 //
 // ⚠️ The table is the TRUTH. ai_assistants.onboarding_context.content_pillars is DERIVED from it (the
 // names of the active pillars, in order), rewritten by writeDerivedPillars() after every change, so
@@ -15,8 +17,9 @@
 
 import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, contentPillars } from '../../db/schema';
-import { parsePillars, MAX_PILLARS, MAX_PILLAR_CHARS } from '../public/content-pillars.js';
+import { aiAssistants, contentPillars, masterAssistants } from '../../db/schema';
+import { parsePillarsUpTo, MAX_PILLARS, MAX_PILLAR_CHARS } from '../public/content-pillars.js';
+import { derivedContextValue, pillarProfileFor, SOCIAL_PILLAR_PROFILE, type PillarProfile } from './pillar-profiles';
 
 type Db = ReturnType<typeof getDb>;
 /** The client or a transaction: only what this module uses. */
@@ -52,14 +55,14 @@ export function cleanPillarText(v: unknown): string {
 }
 
 /** Validates the fields that were sent. An absent field stays absent; a blank description clears it. */
-export function validatePillarFields(input: { name?: unknown; description?: unknown })
+export function validatePillarFields(input: { name?: unknown; description?: unknown }, prof: PillarProfile = SOCIAL_PILLAR_PROFILE)
     : { ok: true; name?: string; description?: string | null } | { ok: false; error: string } {
     const out: { ok: true; name?: string; description?: string | null } = { ok: true };
     if (input.name !== undefined) {
         const name = cleanPillarText(input.name);
-        if (!name) return { ok: false, error: 'Give the pillar a name.' };
+        if (!name) return { ok: false, error: `Give the ${prof.noun} a name.` };
         if (name.length > MAX_PILLAR_NAME) {
-            return { ok: false, error: `A pillar name is a short theme, at most ${MAX_PILLAR_NAME} characters. Put the detail in the description.` };
+            return { ok: false, error: `A ${prof.noun} name is a short theme, at most ${MAX_PILLAR_NAME} characters. Put the detail in the description.` };
         }
         out.name = name;
     }
@@ -102,8 +105,8 @@ export interface NameSyncPlan {
  * history; a new name creates a row; an active row the text dropped is archived; a switched-off row
  * (never in the text) is left alone, after the active ones.
  */
-export function planNameSync(rows: Pillar[], raw: unknown, archived: Pillar[] = []): NameSyncPlan {
-    const names = parsePillars(raw);
+export function planNameSync(rows: Pillar[], raw: unknown, archived: Pillar[] = [], max = MAX_ACTIVE_PILLARS): NameSyncPlan {
+    const names = parsePillarsUpTo(raw, max);
     const byKey = new Map(rows.map((r) => [r.name.toLowerCase(), r]));
     // The most recently archived row of each name (callers pass newest first).
     const archivedByKey = new Map<string, Pillar>();
@@ -198,12 +201,33 @@ async function hasAnyRow(db: PillarDb, orgId: number, assistantId: number): Prom
     return !!r;
 }
 
-/** Rewrites onboarding_context.content_pillars from the rows. Returns the names written. */
+const profileCache = new Map<number, PillarProfile>();
+/**
+ * The assistant's pillar profile, from its role. An assistant's role never changes, so it is cached.
+ * An unknown role reads as Social (what every row meant before Blog and Email had topics).
+ */
+export async function pillarProfileForAssistant(db: PillarDb, orgId: number, assistantId: number): Promise<PillarProfile> {
+    const hit = profileCache.get(assistantId);
+    if (hit) return hit;
+    const [r] = await db.select({ roleKey: masterAssistants.roleKey }).from(aiAssistants)
+        .leftJoin(masterAssistants, eq(masterAssistants.id, aiAssistants.masterAssistantId))
+        .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1);
+    const prof = pillarProfileFor(r?.roleKey) ?? SOCIAL_PILLAR_PROFILE;
+    if (r) profileCache.set(assistantId, prof);
+    return prof;
+}
+
+/**
+ * Rewrites onboarding_context[<the role's key>] from the rows: an array of names for Social, "A, B, C"
+ * text for Blog and Email. Returns the names written.
+ */
 export async function writeDerivedPillars(db: PillarDb, orgId: number, assistantId: number, rows?: Pillar[]): Promise<string[]> {
+    const prof = await pillarProfileForAssistant(db, orgId, assistantId);
     const live = rows ?? (await listPillars(db, orgId, assistantId)) ?? [];
     const names = derivedPillarNames(live);
+    const value = derivedContextValue(prof, names);
     await db.update(aiAssistants)
-        .set({ onboardingContext: sql`jsonb_set(coalesce(${aiAssistants.onboardingContext}, '{}'::jsonb), '{content_pillars}', ${JSON.stringify(names)}::jsonb)` })
+        .set({ onboardingContext: sql`jsonb_set(coalesce(${aiAssistants.onboardingContext}, '{}'::jsonb), ARRAY[${prof.contextKey}]::text[], ${JSON.stringify(value)}::jsonb)` })
         .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)));
     return names;
 }
@@ -216,7 +240,8 @@ export async function ensurePillarRecords(db: PillarDb, orgId: number, assistant
     const rows = await listPillars(db, orgId, assistantId);
     if (rows === null || rows.length) return rows;
     if (await hasAnyRow(db, orgId, assistantId)) return rows; // every pillar archived: that is the answer
-    const names = parsePillars((onboardingContext as Record<string, unknown> | null)?.content_pillars);
+    const prof = await pillarProfileForAssistant(db, orgId, assistantId);
+    const names = parsePillarsUpTo((onboardingContext as Record<string, unknown> | null)?.[prof.contextKey], prof.maxActive);
     if (!names.length) return rows;
     try {
         await db.insert(contentPillars).values(names.map((name, i) => ({
@@ -233,10 +258,12 @@ export async function ensurePillarRecords(db: PillarDb, orgId: number, assistant
  * missing or the assistant has never had rows. Never writes, so it is safe in any worker.
  */
 export async function loadDraftPillars(db: PillarDb, orgId: number, assistantId: number, onboardingContext: unknown): Promise<DraftPillar[]> {
-    const fromText = (): DraftPillar[] => parsePillars((onboardingContext as Record<string, unknown> | null)?.content_pillars)
+    let prof: PillarProfile = SOCIAL_PILLAR_PROFILE;
+    const fromText = (): DraftPillar[] => parsePillarsUpTo((onboardingContext as Record<string, unknown> | null)?.[prof.contextKey], prof.maxActive)
         .map((name) => ({ id: null, name, description: null }));
     let rows: Pillar[] | null;
     try {
+        prof = await pillarProfileForAssistant(db, orgId, assistantId);
         rows = await listPillars(db, orgId, assistantId);
     } catch (err) {
         console.warn('[content-pillars] read failed, using the profile text:', (err as Error)?.message);
@@ -244,7 +271,7 @@ export async function loadDraftPillars(db: PillarDb, orgId: number, assistantId:
     }
     if (rows === null) return fromText();
     if (!rows.length && !(await hasAnyRow(db, orgId, assistantId).catch(() => true))) return fromText();
-    return rows.filter((r) => r.isActive).slice(0, MAX_ACTIVE_PILLARS)
+    return rows.filter((r) => r.isActive).slice(0, prof.maxActive)
         .map((r) => ({ id: r.id, name: r.name, description: r.description }));
 }
 
@@ -255,16 +282,17 @@ function tableMissing<T>(): PillarResult<T> {
 /** Adds a pillar at the end. Switched on unless that would make more than five. */
 export async function addPillar(db: PillarDb, orgId: number, assistantId: number, input: { name?: unknown; description?: unknown; isActive?: unknown })
     : Promise<PillarResult<Pillar[]>> {
-    const v = validatePillarFields({ name: input.name ?? '', description: input.description });
+    const prof = await pillarProfileForAssistant(db, orgId, assistantId);
+    const v = validatePillarFields({ name: input.name ?? '', description: input.description }, prof);
     if (!v.ok) return { ok: false, status: 400, error: v.error };
     const rows = await listPillars(db, orgId, assistantId);
     if (rows === null) return tableMissing();
     const wantActive = input.isActive !== false;
-    if (wantActive && rows.filter((r) => r.isActive).length >= MAX_ACTIVE_PILLARS) {
-        return { ok: false, status: 409, error: `You can have ${MAX_ACTIVE_PILLARS} pillars switched on. Switch one off or archive it first.` };
+    if (wantActive && rows.filter((r) => r.isActive).length >= prof.maxActive) {
+        return { ok: false, status: 409, error: `You can have ${prof.maxActive} ${prof.nounPlural} switched on. Switch one off or archive it first.` };
     }
     if (rows.some((r) => r.name.toLowerCase() === v.name!.toLowerCase())) {
-        return { ok: false, status: 409, error: `You already have a pillar called "${v.name}".` };
+        return { ok: false, status: 409, error: `You already have a ${prof.noun} called "${v.name}".` };
     }
     const sortOrder = rows.reduce((m, r) => Math.max(m, r.sortOrder), -1) + 1;
     try {
@@ -272,7 +300,7 @@ export async function addPillar(db: PillarDb, orgId: number, assistantId: number
             organisationId: orgId, assistantId, name: v.name!, description: v.description ?? null, sortOrder, isActive: wantActive,
         });
     } catch (err) {
-        if (isUniqueViolation(err)) return { ok: false, status: 409, error: `You already have a pillar called "${v.name}".` };
+        if (isUniqueViolation(err)) return { ok: false, status: 409, error: `You already have a ${prof.noun} called "${v.name}".` };
         throw err;
     }
     const after = (await listPillars(db, orgId, assistantId)) ?? [];
@@ -283,21 +311,22 @@ export async function addPillar(db: PillarDb, orgId: number, assistantId: number
 /** Renames, re-describes or switches a pillar on/off. */
 export async function updatePillar(db: PillarDb, orgId: number, assistantId: number, pillarId: number,
     input: { name?: unknown; description?: unknown; isActive?: unknown }): Promise<PillarResult<Pillar[]>> {
-    const v = validatePillarFields({ name: input.name, description: input.description });
+    const prof = await pillarProfileForAssistant(db, orgId, assistantId);
+    const v = validatePillarFields({ name: input.name, description: input.description }, prof);
     if (!v.ok) return { ok: false, status: 400, error: v.error };
     const rows = await listPillars(db, orgId, assistantId);
     if (rows === null) return tableMissing();
     const row = rows.find((r) => r.id === pillarId);
-    if (!row) return { ok: false, status: 404, error: 'That pillar was not found. It may have been archived.' };
+    if (!row) return { ok: false, status: 404, error: `That ${prof.noun} was not found. It may have been archived.` };
     if (v.name && rows.some((r) => r.id !== pillarId && r.name.toLowerCase() === v.name!.toLowerCase())) {
-        return { ok: false, status: 409, error: `You already have a pillar called "${v.name}".` };
+        return { ok: false, status: 409, error: `You already have a ${prof.noun} called "${v.name}".` };
     }
     const set: Partial<typeof contentPillars.$inferInsert> = { updatedAt: new Date() };
     if (v.name !== undefined) set.name = v.name;
     if (v.description !== undefined) set.description = v.description;
     if (typeof input.isActive === 'boolean' && input.isActive !== row.isActive) {
-        if (input.isActive && rows.filter((r) => r.isActive).length >= MAX_ACTIVE_PILLARS) {
-            return { ok: false, status: 409, error: `You can have ${MAX_ACTIVE_PILLARS} pillars switched on. Switch another one off first.` };
+        if (input.isActive && rows.filter((r) => r.isActive).length >= prof.maxActive) {
+            return { ok: false, status: 409, error: `You can have ${prof.maxActive} ${prof.nounPlural} switched on. Switch another one off first.` };
         }
         set.isActive = input.isActive;
     }
@@ -305,7 +334,7 @@ export async function updatePillar(db: PillarDb, orgId: number, assistantId: num
         await db.update(contentPillars).set(set)
             .where(and(eq(contentPillars.id, pillarId), eq(contentPillars.organisationId, orgId), eq(contentPillars.assistantId, assistantId)));
     } catch (err) {
-        if (isUniqueViolation(err)) return { ok: false, status: 409, error: `You already have a pillar called "${v.name}".` };
+        if (isUniqueViolation(err)) return { ok: false, status: 409, error: `You already have a ${prof.noun} called "${v.name}".` };
         throw err;
     }
     const after = (await listPillars(db, orgId, assistantId)) ?? [];
@@ -317,7 +346,10 @@ export async function updatePillar(db: PillarDb, orgId: number, assistantId: num
 export async function archivePillar(db: PillarDb, orgId: number, assistantId: number, pillarId: number): Promise<PillarResult<Pillar[]>> {
     const rows = await listPillars(db, orgId, assistantId);
     if (rows === null) return tableMissing();
-    if (!rows.some((r) => r.id === pillarId)) return { ok: false, status: 404, error: 'That pillar was not found. It may already be archived.' };
+    if (!rows.some((r) => r.id === pillarId)) {
+        const prof = await pillarProfileForAssistant(db, orgId, assistantId);
+        return { ok: false, status: 404, error: `That ${prof.noun} was not found. It may already be archived.` };
+    }
     await db.update(contentPillars).set({ archivedAt: new Date(), isActive: false, updatedAt: new Date() })
         .where(and(eq(contentPillars.id, pillarId), eq(contentPillars.organisationId, orgId), eq(contentPillars.assistantId, assistantId)));
     const after = (await listPillars(db, orgId, assistantId)) ?? [];
@@ -399,21 +431,22 @@ export async function restorePillar(db: PillarDb, orgId: number, assistantId: nu
     : Promise<PillarResult<Pillar[]> & { switchedOff?: boolean }> {
     const rows = await listPillars(db, orgId, assistantId);
     if (rows === null) return tableMissing();
+    const prof = await pillarProfileForAssistant(db, orgId, assistantId);
     const restorable = await listRestorablePillars(db, orgId, assistantId);
     const row = restorable.find((r) => r.id === pillarId);
     if (!row) {
         const archived = (await listArchivedPillars(db, orgId, assistantId)).find((r) => r.id === pillarId);
         return archived
-            ? { ok: false, status: 409, error: `You already have a pillar called "${archived.name}".` }
-            : { ok: false, status: 404, error: 'That archived pillar was not found.' };
+            ? { ok: false, status: 409, error: `You already have a ${prof.noun} called "${archived.name}".` }
+            : { ok: false, status: 404, error: `That archived ${prof.noun} was not found.` };
     }
-    const room = rows.filter((r) => r.isActive).length < MAX_ACTIVE_PILLARS;
+    const room = rows.filter((r) => r.isActive).length < prof.maxActive;
     const sortOrder = rows.reduce((m, r) => Math.max(m, r.sortOrder), -1) + 1;
     try {
         await db.update(contentPillars).set({ archivedAt: null, isActive: room, sortOrder, updatedAt: new Date() })
             .where(and(eq(contentPillars.id, pillarId), eq(contentPillars.organisationId, orgId), eq(contentPillars.assistantId, assistantId)));
     } catch (err) {
-        if (isUniqueViolation(err)) return { ok: false, status: 409, error: `You already have a pillar called "${row.name}".` };
+        if (isUniqueViolation(err)) return { ok: false, status: 409, error: `You already have a ${prof.noun} called "${row.name}".` };
         throw err;
     }
     const after = (await listPillars(db, orgId, assistantId)) ?? [];
@@ -428,7 +461,7 @@ export async function reorderPillars(db: PillarDb, orgId: number, assistantId: n
     const list = Array.isArray(ids) ? ids.map(Number) : [];
     const liveIds = new Set(rows.map((r) => r.id));
     if (list.length !== rows.length || new Set(list).size !== list.length || !list.every((id) => liveIds.has(id))) {
-        return { ok: false, status: 400, error: 'The order must list every pillar once. Reload the page and try again.' };
+        return { ok: false, status: 400, error: 'The order must list every one once. Reload the page and try again.' };
     }
     for (let i = 0; i < list.length; i++) {
         const row = rows.find((r) => r.id === list[i])!;
@@ -443,14 +476,17 @@ export async function reorderPillars(db: PillarDb, orgId: number, assistantId: n
 
 /**
  * Makes the rows match a text answer (the chat set-up card, the wizard, an older page's autosave),
- * keeping each matching pillar's row and history (planNameSync). Returns the derived names, or null
- * when the table does not exist yet (the caller then keeps the text as it is).
- * Does NOT write onboarding_context: the caller is mid-save and writes the returned names itself.
+ * keeping each matching row and its history (planNameSync). Returns the role's context key and the
+ * derived value to write there (an array for Social, text for Blog/Email), or null when the table does
+ * not exist yet (the caller then keeps the text as it is).
+ * Does NOT write onboarding_context: the caller is mid-save and writes the returned value itself.
  */
-export async function syncPillarsFromNames(db: PillarDb, orgId: number, assistantId: number, raw: unknown): Promise<string[] | null> {
+export async function syncPillarsFromNames(db: PillarDb, orgId: number, assistantId: number, raw: unknown)
+    : Promise<{ key: PillarProfile['contextKey']; value: string[] | string } | null> {
     const rows = await listPillars(db, orgId, assistantId);
     if (rows === null) return null;
-    const plan = planNameSync(rows, raw, await listArchivedPillars(db, orgId, assistantId));
+    const prof = await pillarProfileForAssistant(db, orgId, assistantId);
+    const plan = planNameSync(rows, raw, await listArchivedPillars(db, orgId, assistantId), prof.maxActive);
     const now = new Date();
     for (const u of plan.updates) {
         await db.update(contentPillars).set({ name: u.name, sortOrder: u.sortOrder, isActive: true, updatedAt: now })
@@ -473,5 +509,6 @@ export async function syncPillarsFromNames(db: PillarDb, orgId: number, assistan
             organisationId: orgId, assistantId, name: c.name, sortOrder: c.sortOrder, isActive: true,
         })));
     }
-    return derivedPillarNames((await listPillars(db, orgId, assistantId)) ?? []);
+    const names = derivedPillarNames((await listPillars(db, orgId, assistantId)) ?? []);
+    return { key: prof.contextKey, value: derivedContextValue(prof, names) };
 }

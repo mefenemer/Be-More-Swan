@@ -1,6 +1,7 @@
 // scripts/backfill-content-pillars.ts
-// Turns every Social Media assistant's pillar text (onboarding_context.content_pillars) into
-// content_pillars rows, then links scheduled_posts.pillar_id where the post's pillar name matches
+// Turns every Social Media assistant's pillar text (onboarding_context.content_pillars), and every Blog
+// or Email assistant's topics (blogTopics / newsletterTopics, src/utils/pillar-profiles.ts), into
+// content_pillars rows, then links scheduled_posts.pillar_id (Social only) where the post's pillar name matches
 // exactly (case-insensitive). docs/pillar-records-plan.md, phase 1 step 2. Run AFTER
 // db/z-content-pillars.sql.
 //
@@ -45,11 +46,12 @@ async function main() {
     const { getDb } = await import('../db/client');
     const { aiAssistants, masterAssistants } = await import('../db/schema');
     const { and, eq, inArray, sql } = await import('drizzle-orm');
-    const { SMM_ROLE_KEYS } = await import('../src/constants/roles');
+    const { PILLAR_PROFILES, pillarProfileFor } = await import('../src/utils/pillar-profiles');
     const store = await import('../src/utils/content-pillars-store');
     // UMD module: a dynamic import puts its exports under `default`.
-    const splitter = await import('../src/public/content-pillars.js') as unknown as { parsePillars?: (raw: unknown) => string[]; default?: { parsePillars: (raw: unknown) => string[] } };
-    const parsePillars = splitter.parsePillars ?? splitter.default!.parsePillars;
+    type Split = (raw: unknown, max: number) => string[];
+    const splitter = await import('../src/public/content-pillars.js') as unknown as { parsePillarsUpTo?: Split; default?: { parsePillarsUpTo: Split } };
+    const parsePillarsUpTo = splitter.parsePillarsUpTo ?? splitter.default!.parsePillarsUpTo;
 
     console.log(`\nTarget: ${describeTarget()}`);
     console.log(apply ? 'Mode: APPLY (writes)\n' : 'Mode: DRY RUN (no writes, pass --apply)\n');
@@ -62,17 +64,19 @@ async function main() {
 
     const assistants = await db.select({
         id: aiAssistants.id, orgId: aiAssistants.organisationId, name: aiAssistants.name, ctx: aiAssistants.onboardingContext,
+        roleKey: masterAssistants.roleKey,
     }).from(aiAssistants)
         .innerJoin(masterAssistants, eq(masterAssistants.id, aiAssistants.masterAssistantId))
         .where(and(
-            inArray(masterAssistants.roleKey, SMM_ROLE_KEYS),
+            inArray(masterAssistants.roleKey, Object.keys(PILLAR_PROFILES)),
             onlyAssistant ? eq(aiAssistants.id, onlyAssistant) : sql`true`,
         ));
 
     let seeded = 0, skipped = 0, empty = 0, linkedTotal = 0;
     for (const a of assistants) {
         const existing = await store.listPillars(db, a.orgId, a.id);
-        const names = parsePillars((a.ctx as Record<string, unknown> | null)?.content_pillars);
+        const prof = pillarProfileFor(a.roleKey)!;
+        const names = parsePillarsUpTo((a.ctx as Record<string, unknown> | null)?.[prof.contextKey], prof.maxActive);
         if (existing && existing.length) {
             skipped++;
         } else if (!names.length) {
@@ -85,7 +89,12 @@ async function main() {
             seeded++;
         }
 
-        // Posts that match a pillar name exactly and have no link yet.
+        // Posts that match a pillar name exactly and have no link yet. Blog posts and emails never
+        // recorded a topic before db/z-content-topics.sql, so there is nothing of theirs to link.
+        if (prof.contextKey !== 'content_pillars') {
+            console.log(`#${a.id} ${a.name} (${prof.roleKey}, org ${a.orgId}): ${existing?.length ? `${existing.length} rows already` : `${names.length} ${prof.nounPlural} ${apply ? 'created' : 'to create'}`}  [${names.join(' | ')}]`);
+            continue;
+        }
         const rows = apply ? ((await store.listPillars(db, a.orgId, a.id)) ?? []) : (existing?.length ? existing : names.map((n, i) => ({ id: -1 - i, name: n })));
         let linked = 0;
         for (const p of rows) {
@@ -105,7 +114,7 @@ async function main() {
         linkedTotal += linked;
         console.log(`#${a.id} ${a.name} (org ${a.orgId}): ${existing?.length ? `${existing.length} rows already` : `${names.length} pillars ${apply ? 'created' : 'to create'}`} · ${linked} posts ${apply ? 'linked' : 'to link'}  [${names.join(' | ')}]`);
     }
-    console.log(`\n${assistants.length} Social assistants: ${seeded} ${apply ? 'seeded' : 'to seed'}, ${skipped} already had rows, ${empty} with no pillars. ${linkedTotal} posts ${apply ? 'linked' : 'to link'}.`);
+    console.log(`\n${assistants.length} Social, Blog and Email assistants: ${seeded} ${apply ? 'seeded' : 'to seed'}, ${skipped} already had rows, ${empty} with no pillars. ${linkedTotal} posts ${apply ? 'linked' : 'to link'}.`);
     process.exit(0);
 }
 

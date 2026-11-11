@@ -7684,6 +7684,10 @@ function _applyDashboardRegistry(data) {
     if (mcHost) mcHost.dataset.type = (myContent && myContent.type) || '';
 }
 
+// Blog / Email set-up answers that are RECORDS now (content_pillars rows, src/utils/pillar-profiles.ts):
+// shown as a list in Operational Setup and never sent by the autosave (the server keeps the derived text).
+const _TOPIC_RECORD_KEYS = ['blogTopics', 'newsletterTopics'];
+
 // Steps from the role's schema-driven onboarding definition
 // (src/config/assistant-onboarding-schemas.js) — [] when the role has none
 // (social assistants use the hand-built drawer fields instead).
@@ -7797,14 +7801,29 @@ function _renderOperationSection(data) {
     const ctx = (data.context && typeof data.context === 'object') ? data.context : {};
     const esc = _escapeHtml;
 
-    host.innerHTML = fields.map(f => `
+    host.innerHTML = fields.map(f => _TOPIC_RECORD_KEYS.includes(f.key)
+        // Blog / Email topics are RECORDS (src/components/pillar-list.js, docs/pillar-records-plan.md §7):
+        // a list, saved row by row, with NO data-onboarding-key input, so _detailCollect never writes it.
+        ? `
+        <div>
+          <h4 id="topics-heading" class="block text-sm font-bold text-gray-700 mb-1">${esc(f.label || 'Topics')}</h4>
+          <p class="text-xs text-gray-500 mb-2">Up to 8 topics switched on. Each new draft takes the topic used least lately, so every topic gets its turn. Add a description to say what belongs under a topic.</p>
+          <div id="topics-list" aria-labelledby="topics-heading"></div>
+        </div>`
+        : `
         <div>
           <label for="edit_op_${esc(f.key)}" class="block text-sm font-bold text-gray-700 mb-1">${esc(f.label || f.key)}</label>
           ${f.helpText ? `<p class="text-xs text-gray-500 mb-2">${esc(window.RoleLabels ? window.RoleLabels.fill(f.helpText) : f.helpText)}</p>` : ''}
           ${_onboardingFieldControl(f, ctx, 'edit_op_')}
         </div>`).join('');
 
-    _syncSchemaSelects(fields, ctx, 'edit_op_');
+    _syncSchemaSelects(fields.filter((f) => !_TOPIC_RECORD_KEYS.includes(f.key)), ctx, 'edit_op_');
+    const topicField = fields.find((f) => _TOPIC_RECORD_KEYS.includes(f.key));
+    if (topicField) {
+        window.PillarList?.mount(document.getElementById('topics-list'), {
+            assistantId: data.id, initialText: typeof ctx[topicField.key] === 'string' ? ctx[topicField.key] : '', contextKey: topicField.key,
+        });
+    }
 }
 
 // Human labels for the Operational Setup answers, keyed by the radio value that is actually
@@ -8690,6 +8709,9 @@ function _detailCollect(currentData) {
         primary_platforms: platforms,
     };
     if (!window._pillarsTextDirty) delete newContext.content_pillars;
+    // ⚠️ Same rule for Blog / Email topics (records since docs/pillar-records-plan.md §7): the page's copy
+    // is never sent, or a save built before a topic change could reconcile the rows back to an old list.
+    for (const k of _TOPIC_RECORD_KEYS) delete newContext[k];
 
     // Content mix — only when the card is on the page (Social Media / Blog assistants); otherwise the
     // stored value rides through untouched on the spread above. All ticked is saved as null = "every

@@ -43,6 +43,9 @@
     /** The pillars, at most five, de-duplicated (case-insensitive), in the order typed. */
     function parsePillars(raw) { return allParts(raw).slice(0, MAX_PILLARS); }
 
+    /** The same split with another cap: a Blog or Email assistant's topics (8, src/utils/pillar-profiles.ts). */
+    function parsePillarsUpTo(raw, max) { return allParts(raw).slice(0, Math.max(1, Number(max) || MAX_PILLARS)); }
+
     /** Plain-English problems with what was typed, for the profile to show under the chips. */
     function pillarWarnings(raw) {
         var all = allParts(raw);
@@ -63,5 +66,5 @@
         return out;
     }
 
-    return { parsePillars: parsePillars, pillarWarnings: pillarWarnings, MAX_PILLARS: MAX_PILLARS, MAX_PILLAR_CHARS: MAX_PILLAR_CHARS };
+    return { parsePillars: parsePillars, parsePillarsUpTo: parsePillarsUpTo, pillarWarnings: pillarWarnings, MAX_PILLARS: MAX_PILLARS, MAX_PILLAR_CHARS: MAX_PILLAR_CHARS };
 }));

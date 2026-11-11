@@ -91,8 +91,7 @@ redraft-upcoming, onboarding summary) then keep working untouched. They can move
 10. Help article on pillars (SQL file applied on staging now, prod at release). Update the
    explainer `content-pillars` text.
 
-**Phase 3 (optional, owner's call): Blog and Email topics**
-11. The same table with a `kind` column (`pillar` / `topic`), or a decision to leave topics as text.
+**Phase 3 (optional, owner's call): Blog and Email topics** — planned in §7.
 
 ## 5. Tests
 
@@ -109,3 +108,111 @@ redraft-upcoming, onboarding summary) then keep working untouched. They can move
   `onboarding_context`. Ship the backfill with the deploy, and keep the fallback for one release.
 - **Peer sessions edit `assistants.js`.** Build in a worktree.
 - **Prod help before prod app.** Apply the help SQL to prod only at release.
+
+## 7. Phase 3 plan: Blog and Email topics as records (2026-11-11)
+
+Status: **phase 3a built 2026-11-11** to the §7.2 recommendations (branch feat/topics-3a): profiles in
+src/utils/pillar-profiles.ts, role-aware store, the settings list in Operational Setup, Blog ideation and
+the Email autopilot balancing by topic (src/utils/topic-balance.ts), backfill for Blog/Email,
+db/z-content-topics.sql (BOTH DBs before deploy). Until phase 3b, the Blog/Email chats and the Mentor still
+change topics through the set-up answer card (text, reconciled to the rows server-side); that card's
+200-character limit can refuse a long list. Phase 3b not started.
+
+### 7.1 Where things are today
+
+- **Blog Writing Assistant:** `onboarding_context.blogTopics` is one text box ("Topics & themes",
+  required at set-up, `assistant-onboarding-schemas.js`). After set-up it is edited in the settings'
+  Operational Setup section (schema-driven, `edit_op_blogTopics`, saved by the profile autosave).
+  Autopilot ideation (`src/utils/blog-topic-ideation.ts`) puts the whole text in the brief as "pick one
+  of these". Nothing balances topics, and `blog_posts` records no topic, so one topic can win every time.
+- **Email Marketing Assistant:** `onboarding_context.newsletterTopics`, the same kind of box. The
+  autopilot (`draft-newsletter-issues.ts`) passes the WHOLE text as every issue's `topic`, so each email
+  is about everything on the list. `newsletter_issues` records no topic either.
+- **Chat:** both are ordinary set-up answers, changed by retyping the whole text on the set-up card
+  (their own chats and the Mentor's).
+- ⚠️ **Naming trap:** "pillar article" already means a long-form blog post in the Campaign
+  Orchestrator (`draft_blog_pillar`, campaign-vocab.ts). So Blog and Email must say **Topics**, never
+  "pillars", anywhere the customer reads.
+
+### 7.2 Decisions for the owner
+
+| # | Decision | Recommendation | Why |
+|---|---|---|---|
+| 1 | Store topics in the same table? | **Yes: `content_pillars` rows on the Blog or Email assistant.** No `kind` column: the assistant's role says what the rows are. | One store, one endpoint, one list component, one chat card, all already proven. The table is per assistant, so nothing mixes. |
+| 2 | What do customers call them? | **"Topics"** on Blog and Email; "Content pillars" stays on Social. | "Pillar article" means something else on the Blog (see 7.1). It is also the word they typed at set-up. |
+| 3 | How many switched on? | **8 for Blog and Email** (5 stays for Social). | Blogs and newsletters cover more subjects than a feed, and post far less often, so 8 still rotates within a few months. |
+| 4 | Blog: does each post get ONE topic? | **Yes, the least-used topic over 90 days**, the way Social works. A rejection's reason, a campaign brief or an Inspo subject still outranks it, as today. | Today one topic can win every post. 90 days, not 60, because a blog posts weekly at most. |
+| 5 | Email: one topic per issue? | **A lead topic per issue (least used), with the others listed as "may also mention".** | A newsletter often rounds several things up. A lead topic stops every issue being about everything, without forcing single-subject emails. |
+| 6 | Results per topic? | **Yes: "Posts by topic" / "Emails by topic"** in the same Autopilot card place. | Same reason as Social: the owner sees whether a topic is being skipped. |
+
+### 7.3 Storage
+
+- No new table. `db/z-content-topics.sql`: `blog_posts.pillar_id` and `newsletter_issues.pillar_id`
+  (nullable, `REFERENCES content_pillars(id) ON DELETE SET NULL`), plus `blog_posts.pillar` and
+  `newsletter_issues.pillar` text (the name, like `scheduled_posts.pillar`). Apply on BOTH DBs before
+  deploy (the Drizzle schema lists the columns, so whole-row selects fail without them).
+- The store's derived write becomes role-aware: Social writes `content_pillars` (an array, as now); Blog
+  writes `blogTopics` and Email `newsletterTopics` as **comma-joined text**, because the wizard field and
+  every reader treat them as text. One function decides the key and shape from the role:
+  `derivedKeyFor(roleKey)`.
+- The cap becomes role-aware: `maxActiveFor(roleKey)` (5 Social, 8 Blog/Email). The 60-character name
+  limit stays.
+
+### 7.4 Build steps
+
+**Phase 3a: records, settings and drafting**
+1. SQL above. Store: `derivedKeyFor`, `maxActiveFor`, used by add / update / restore / sync and the
+   derived write. `content-pillars.ts` accepts `blog_writer` and `newsletter_editor` as well as Social.
+2. Backfill script: the same, for Blog and Email assistants (their text through the shared splitter,
+   capped at 8). Dry run first. No posts to link (nothing recorded a topic before).
+3. Wizard finish (`onboarding.ts`, and whatever finishes the schema-driven wizards for Blog and Email)
+   creates rows from the answer, as Social does.
+4. Settings: the Operational Setup field for `blogTopics` / `newsletterTopics` is replaced by the same
+   list component (`pillar-list.js`, with labels from the role: "Topics", "+ Add topic", "Archived
+   topics"). ⚠️ **The phase 1 lesson applies:** the autosave must NOT send `blogTopics` /
+   `newsletterTopics` from the page. The schema-driven collect writes every `data-onboarding-key` field
+   back, so those two keys need the same "send only when the wand wrote text" rule, and
+   `update-assistant-context.ts` must carry them across and reconcile a sent text answer to the rows
+   (generalise the `content_pillars` branch to the role's derived key).
+5. Blog drafting: `blog-topic-ideation.ts` picks the least-used active topic over 90 days (by
+   `pillar_id`, then by name) for an undirected slot and writes "Write about this topic: … (what goes
+   under it: …)". The chosen topic's id and name are saved on the `blog_posts` row.
+6. Email drafting: `draft-newsletter-issues.ts` picks a lead topic the same way, passes it as `topic`
+   with the other active topics as notes ("may also mention"), and saves it on the issue.
+
+**Phase 3b: chat, Results, help**
+7. Chat: the Blog and Email routes get the pillar card (`chat-pillar-card.ts`, worded "topic", their own
+   cap). Their set-up answers leave `blogTopics` / `newsletterTopics` out and refuse them. ⚠️ The
+   Email route REBUILDS its uiElement (unknown types become null), so `pillar_proposal` must be added
+   to what it keeps, or the card never reaches the user. The Mentor keeps the set-up card (text,
+   reconciled server-side).
+8. Results: "Posts by topic" (Blog, `blog_posts`) and "Emails by topic" (Email, `newsletter_issues`),
+   reusing `pillarUsageRows` with the table chosen by role, over 90 days.
+9. Help: add a Blog/Email section to the pillars article, or a short "Topics" article. SQL on staging
+   with the code, prod at release.
+
+### 7.5 Tests
+
+- Store: the derived key and shape per role (array for Social, text for Blog/Email); caps 5 vs 8.
+- Autosave: the settings page leaves `blogTopics` / `newsletterTopics` out unless the wand wrote text.
+- Blog ideation: one topic per undirected slot, least used first; guidance and Inspo still win; the
+  topic is saved on the post.
+- Email: a lead topic per issue, the others as notes; saved on the issue.
+- Chat: Blog and Email routes draw the card ("topic" wording), the Email route keeps it, set-up
+  answers omit the keys.
+- Source scan: no "pillar" in customer-facing Blog/Email copy.
+
+### 7.6 Risks
+
+- **The clobber again.** The schema-driven autosave writes every answer field back. Missing step 4's
+  rule would let a stale save archive topics, as happened on staging on 2026-11-08.
+- **Email route drops unknown cards** (step 7).
+- **Required at set-up.** `blogTopics` and `newsletterTopics` are required wizard fields; the wizard
+  keeps its single box (fast set-up) and the rows are made at finish.
+- **Peer sessions** edit `assistants.js` and `chat-orchestrator.ts`: build in a worktree.
+
+### 7.7 Size
+
+Phase 3a is about the size of phase 1 (SQL, store changes, settings list, two drafting paths, backfill).
+Phase 3b is smaller than phase 2, because the card, the list and the usage rows already exist.
+
