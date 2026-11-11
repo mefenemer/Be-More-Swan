@@ -52,6 +52,17 @@ export function defaultTextPos(captionPosition: 'bottom' | 'middle' | 'top'): Te
     return captionPosition === 'top' ? 'bottom' : 'top';
 }
 
+/**
+ * The planner's placements, kept clear of the captions: a textPos where the captions sit is dropped, so
+ * the words fall back to the default (clear of them). Only for what the PLANNER wrote — an owner's own
+ * choice is theirs, and the Change form warns them instead. Pure.
+ */
+export function plannedClearOfCaptions<T extends { scenes: Array<{ textPos?: TextPos }> }>(storyboard: T, brief: { captions?: boolean; captionStyle?: { position?: string } | null }): T {
+    if (brief.captions === false) return storyboard;
+    const cap = brief.captionStyle?.position ?? 'bottom';
+    return { ...storyboard, scenes: storyboard.scenes.map((s) => (s.textPos && s.textPos === cap ? (({ textPos: _p, ...rest }) => rest)(s) : s)) };
+}
+
 /** The centre Y (0..1) of each position — the same upper/lower thirds the build always used. */
 export function textY(pos: TextPos): number {
     return pos === 'top' ? 0.2 : pos === 'middle' ? 0.5 : 0.7;

@@ -92,6 +92,11 @@ export interface VideoBrief {
     goal?: string | null;
     /** A colour look over every scene (src/lib/video-look.ts). Absent = natural. */
     look?: VideoLook | null;
+    /**
+     * An AI clip on its own (src/lib/ai-clip.ts): one ai_video scene, no voiceover, music or captions. The
+     * owner sees its first frame (the scene's assetId, an AI picture) before the clip is made from it.
+     */
+    clip?: { style: string; lengthS: number; description: string } | null;
     /** The voiceover is the owner's own recordings, not an AI voice (src/utils/own-voice.ts). Never both. */
     ownVoice?: boolean | null;
     /** How loud the music sits: 'quiet' | 'normal' | 'loud' (src/lib/video-music.ts). Absent = normal. */
@@ -174,8 +179,8 @@ export interface OwnVideo { id: number; name: string; durationS: number }
  * a video from the owner's own footage is often ONE take plus a closing card, and the three-scene
  * rule failed the first real talking-head plan on staging (2026-11-09). Pure.
  */
-export function minScenesFor(brief: Pick<VideoBrief, 'footageAssetIds'>): number {
-    return brief.footageAssetIds?.length ? 1 : MIN_SCENES;
+export function minScenesFor(brief: Pick<VideoBrief, 'footageAssetIds' | 'clip'>): number {
+    return brief.footageAssetIds?.length || brief.clip ? 1 : MIN_SCENES;
 }
 
 /** A cut shorter than this is a flash, not a scene. */
@@ -442,6 +447,7 @@ Rules:
 - One idea per video. Open with a hook that lands in under 3 seconds. End with the call to action.
 - Write the voiceover to be SPOKEN: short sentences, about ${WORDS_PER_SECOND} words per second of scene. No URLs, no hashtags, no emoji.
 - On-screen text is optional and short (under 8 words). The voiceover is captioned automatically, so do not repeat it on screen.
+- Where on-screen text goes (optional; leave all four out and it sits clear of the captions for the whole scene): "textPos" top | middle | bottom — never where the captions are (the brief says where); "textWhen" scene | first | last | words (the whole scene, its first or last 3 seconds, or only while that scene's line is spoken — good for a key phrase or the call to action); "textStyle" dark | plain | brand (a brand-colour box suits the call to action); "textAnim" rise | fade | pop | none. Use them sparingly: most scenes need none.
 - Visual sources, in order of preference: stock_video, stock_photo, product_photo (ONLY with an id from the library list), brand_card (a branded text card — good for the call to action), ai_image, ai_video.
 - AI prompts describe a scene with NO words, letters, logos or signs in it. Never use AI to picture the business's own product — use product_photo or stock.
 - Stock keywords are 2–4 plain words a stock library would match.
@@ -451,7 +457,7 @@ Rules:
 - When the owner's own footage is listed, build the video mainly FROM it: own_video scenes, each a segment {assetId, inS, outS} in seconds inside that video's length, taken from its usable moments. Fill only real gaps with stock, a branded card or AI. Never use a moment the shot list marks as a problem.
 
 Return STRICT JSON only:
-{"title": "...", "caption": "a post caption, 1–3 sentences", "scenes": [{"beat": "hook|problem|value|proof|cta", "voiceover": "...", "onScreenText": "...", "source": "own_video|stock_video|stock_photo|product_photo|brand_card|ai_image|ai_video", "keywords": "...", "prompt": "...", "assetId": 123, "inS": 0, "outS": 4.5, "motion": "push_in|pull_out|pan_left|pan_right", "nameCaption": {"name": "...", "role": "..."}, "targetS": 4}]}`;
+{"title": "...", "caption": "a post caption, 1–3 sentences", "scenes": [{"beat": "hook|problem|value|proof|cta", "voiceover": "...", "onScreenText": "...", "textPos": "top|middle|bottom", "textWhen": "scene|first|last|words", "textStyle": "dark|plain|brand", "textAnim": "rise|fade|pop|none", "source": "own_video|stock_video|stock_photo|product_photo|brand_card|ai_image|ai_video", "keywords": "...", "prompt": "...", "assetId": 123, "inS": 0, "outS": 4.5, "motion": "push_in|pull_out|pan_left|pan_right", "nameCaption": {"name": "...", "role": "..."}, "targetS": 4}]}`;
 }
 
 export function storyboardUserPrompt(args: {
@@ -489,6 +495,8 @@ export function storyboardUserPrompt(args: {
         brief.audience ? `WHO IT'S FOR: ${clip(brief.audience, 200)} — pick words, examples and pace for them.` : '',
         brief.goal ? `WHAT THEY SHOULD DO AFTER WATCHING: ${clip(brief.goal, 200)} — build towards it, and end on it.` : '',
         brief.cta ? `CALL TO ACTION (use these words in the last scene): ${clip(brief.cta, 200)}` : '',
+        // Where the captions sit, so the words placed on screen keep clear of them (scene-text.ts).
+        brief.captions === false ? 'CAPTIONS: off — on-screen text may sit anywhere.' : `CAPTIONS: at the ${brief.captionStyle?.position ?? 'bottom'} of the frame — never put textPos there.`,
         keepsOwnSound(brief)
             ? 'No voiceover — the video keeps the footage\'s OWN sound. Leave voiceover empty. An own_video scene plays exactly its segment, so cut segments at natural pauses, never mid-sentence. Its targetS is ignored. Pauses, "um"s and repeated takes inside a segment are taken out automatically afterwards, so choose whole sentences and do not chop a segment up to remove them yourself. Use onScreenText where the footage needs words.'
             : brief.voiceover ? 'It has a voiceover — every scene needs a voiceover line.' : 'No voiceover — leave voiceover empty and use onScreenText to carry the message.',

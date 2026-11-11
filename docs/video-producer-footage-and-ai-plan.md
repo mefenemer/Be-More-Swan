@@ -5,7 +5,12 @@ role, the storyboard, sourcing, the build worker, all LIVE on prod 2026-11-01) a
 [video-editing-plan.md](./video-editing-plan.md) (the `video_edit` model and the post editor).
 
 Status: **Phases 0–4 BUILT on staging branch 2026-11-09, not yet deployed or tried end to end.**
-Phases 5–8 (AI clips on their own, styles, labelling, go-live copy) not started. Owner decisions
+Phases 0–4 are LIVE on prod (2026-11-09). **Phase 5 built 2026-11-11** (an AI clip on its own: New AI clip
+on the Videos tab and the video_clip_proposal chat card → first frame for 1 task → Make the clip, priced by
+src/config/task-weights.ts aiVideoTasks; src/lib/ai-clip.ts). As built, differently from §5.2: a style is a
+prompt preset only, and every style uses the configured image-to-video model (Kling 3.0 Pro won four styles
+of five in the bake-off); FAL_I2V_MODEL_<STYLE> waits for bake-off round 2. Phases 6–8 (sound, labelling
+on publish, go-live samples strip) not started; the FAQ and help already describe the clip. Owner decisions
 2026-11-09: D-F1 2 tasks per review, D-F3 every plan with the Video Producer, D-F5 5 min / 500 MB / 10.
 ⚠️ `db/z-video-producer-footage.sql` on BOTH databases before the code deploys (every project read
 selects `video_projects.footage_review`). See §11 for how it was built and what differs from this plan.
