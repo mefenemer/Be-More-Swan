@@ -54,8 +54,23 @@ const POINTS_AT_CARD = new RegExp([
 
 export const NO_CARD_NOTE = '(No card came with this reply. Ask me again and I’ll add it.)';
 
+/**
+ * An OFFER of a card, not a claim of one (Fix pipeline #33/#36, prod 2026-11-10): "tell me which one
+ * and I'll put it on a card that shows every word", "just tell me … and I'll put a card here". The
+ * note was added to those, so a correct reply read as a fault. A match counts as an offer when, in
+ * the same sentence and BEFORE it, the reply says what it will/can do. "I can't see #118's text, so
+ * the card below asks…" is still a claim, and so is "Approve the card below and I'll do the rest".
+ */
+const OFFER_BEFORE = /\b(?:I(?:'|’)ll|I will|I can(?!(?:'|’)t|not)|I could|I(?:'|’)d|I would|shall I|want me to|like me to)\b/i;
+const POINTS_AT_CARD_ALL = new RegExp(POINTS_AT_CARD.source, 'gi');
+
 export function replyPointsAtCard(content: string): boolean {
-    return POINTS_AT_CARD.test(content);
+    for (const m of content.matchAll(POINTS_AT_CARD_ALL)) {
+        const upTo = content.slice(0, m.index);
+        const sentenceStart = Math.max(upTo.lastIndexOf('.'), upTo.lastIndexOf('!'), upTo.lastIndexOf('?'), upTo.lastIndexOf('\n')) + 1;
+        if (!OFFER_BEFORE.test(upTo.slice(sentenceStart))) return true;
+    }
+    return false;
 }
 
 /** The reply, with NO_CARD_NOTE added when it points at a card that isn't there. */

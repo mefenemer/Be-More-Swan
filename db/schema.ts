@@ -3831,6 +3831,9 @@ export const templateFeedback = pgTable("template_feedback", {
   // CLOSED vocabulary — src/config/template-feedback.ts EDIT_REASONS. It is the GROUP BY key for
   // the edit-pattern proposer, and free text cannot be clustered.
   editReason: text("edit_reason"),
+  // The reviewer's own words, typed after "Something else" (Fix pipeline #37). For people only —
+  // never grouped or fed to the proposer. db/z-template-feedback-edit-note.sql.
+  editNote: text("edit_note"),
   diffSummary: text("diff_summary"),                        // one line, computed from the before/after
   appliedToTemplate: boolean("applied_to_template").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
