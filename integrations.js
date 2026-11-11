@@ -1552,12 +1552,19 @@ function _queueConnectPermissionPrompts(platforms) {
     });
     if (!queue.length || typeof window.showConfirmModal !== 'function') return;
 
+    // "Not now" means not now for all of them this session: it used to open the next platform's
+    // pop-up straight away, so a page with two handles asked twice in a row (staging, 2026-11-11).
+    const notNowForAll = () => {
+        for (const p of queue) { try { sessionStorage.setItem(_connectPromptKey(p), '1'); } catch { /* ignore */ } }
+        queue.length = 0;
+    };
     const askNext = () => {
         const platform = queue.shift();
         if (!platform) return;
         try { sessionStorage.setItem(_connectPromptKey(platform), '1'); } catch { /* ignore */ }
+        const article = /^[aeiou]/i.test(platform.label) ? 'an' : 'a';
         window.showConfirmModal(
-            `You added a ${platform.label} handle in Business Information. Be More Swan needs your permission to connect to ${platform.label} so it can post on your behalf. Connect now?`,
+            `You added ${article} ${platform.label} handle in Business Information. Be More Swan needs your permission to connect to ${platform.label} so it can post on your behalf. Connect now?`,
             async () => {
                 if (platform.oauthPlatform) window._intStartOAuth(platform.id);
                 else window._intOpenModal(platform.id);
@@ -1567,7 +1574,7 @@ function _queueConnectPermissionPrompts(platforms) {
                 confirmLabel: `Connect ${platform.label}`,
                 cancelLabel: 'Not now',
                 confirmColor: '#059669',
-                onCancel: askNext,
+                onCancel: notNowForAll,
             }
         );
     };

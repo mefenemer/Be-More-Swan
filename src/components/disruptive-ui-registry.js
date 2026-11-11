@@ -3188,6 +3188,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     });
   });
 
+  // Both chat windows a card can sit in: workspace.html's #chat-modal and assistant-chat-modal.js.
+  function closeChatWindows() {
+    window.closeAssistantChatModal?.();
+    window.closeAssistantChat?.();
+  }
+
   // "Take Me There" (src/config/take-me-there.ts): where the user asked about, one click away. The
   // server built the destination from a closed list; this only follows it. Changes nothing.
   register('mentor_take_me_there', (ui, esc) => {
@@ -3198,8 +3204,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ${ui.summary ? `<p class="text-sm text-gray-800 mt-1">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
       <button type="button" data-take-me-there class="btn-primary mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">Take Me There</button>`;
     el.querySelector('[data-take-me-there]').addEventListener('click', () => {
-      // A chat opened over the page (the pop-up) is closed first, so the page is what they see.
-      window.closeAssistantChatModal?.();
+      // A chat opened over the page is closed first, so the page is what they see — either chat window:
+      // the older #chat-modal or the newer one (assistant-chat-modal.js), which stayed open over the
+      // destination (staging, 2026-11-11).
+      closeChatWindows();
       if (ui.assistantId && typeof window.routeToAssistantDetail === 'function') {
         if (ui.assistantTab) window._assistantDetailInitialTab = ui.assistantTab;
         window.routeToAssistantDetail(ui.assistantId);
@@ -3400,7 +3408,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   // Overview tab and the catalogue's "Recommended" badge). Hires nothing: each pick opens the catalogue.
   function openCatalogue(roleKey) {
     try { sessionStorage.setItem('intended_role', roleKey); } catch (e) { /* the badge still marks it */ }
-    window.closeAssistantChatModal?.();
+    closeChatWindows();
     if (typeof window.loadView === 'function') window.loadView('catalog');
     else window.location.href = '/workspace.html';
   }
@@ -6311,6 +6319,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     delete: { head: 'Delete a rule', button: 'Delete rule', busy: 'Deleting…', danger: true },
   };
 
+  // What the user did with a rule or goal card, saved on its chat message (chat-session.js → mentor.ts
+  // card_outcome), so a later turn knows the card is settled (mentor-card-outcome.ts). Without it the
+  // Business Mentor read a saved rule card as unanswered and said "you don't need to confirm the
+  // earlier card" after it had been saved (staging, 2026-11-11). Fire-and-forget.
+  const sendCardOutcome = (el, status, note) => el.dispatchEvent(new CustomEvent('mentor:cardOutcome', { bubbles: true, detail: { outcome: status, note: note || null } }));
+
   function renderRuleProposalCard(ui, esc) {
     const copy = RULE_COPY[ui.action];
     const assistantId = Number(ui.assistantId);
@@ -6343,7 +6357,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
     const setBusy = (b) => el.querySelectorAll('[data-rp-go], [data-rp-cancel]').forEach((x) => { x.disabled = b; });
     el.addEventListener('click', (e) => {
-      if (e.target.closest('[data-rp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (e.target.closest('[data-rp-cancel]')) { setBusy(true); say('Left as it is.'); sendCardOutcome(el, 'not_now'); return; }
       if (!e.target.closest('[data-rp-go]')) return;
       setBusy(true);
       say(copy.busy);
@@ -6353,9 +6367,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           action: ui.action, assistantId, ruleId: ui.ruleId ?? null, ruleText: ui.ruleText ?? null, platform: ui.platform ?? null,
           scope: everyone ? 'workspace' : 'assistant',
           respond({ ok, message, error }) {
-            if (ok) { say(message || 'Done.'); return; }
+            if (ok) { say(message || 'Done.'); sendCardOutcome(el, 'applied', message); return; }
             setBusy(false);
             say(error || 'That didn’t work — please try again.', 'error');
+            sendCardOutcome(el, 'failed', error);
           },
         },
       }));
@@ -6402,7 +6417,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
     const setBusy = (b) => el.querySelectorAll('[data-gp-go], [data-gp-cancel]').forEach((x) => { x.disabled = b; });
     el.addEventListener('click', (e) => {
-      if (e.target.closest('[data-gp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (e.target.closest('[data-gp-cancel]')) { setBusy(true); say('Left as it is.'); sendCardOutcome(el, 'not_now'); return; }
       if (!e.target.closest('[data-gp-go]')) return;
       setBusy(true);
       say(copy.busy);
@@ -6415,9 +6430,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           title: Object.prototype.hasOwnProperty.call(ui, 'title') ? ui.title : undefined,
           isPrimary: typeof ui.isPrimary === 'boolean' ? ui.isPrimary : undefined,
           respond({ ok, message, error }) {
-            if (ok) { say(message || 'Done.'); return; }
+            if (ok) { say(message || 'Done.'); sendCardOutcome(el, 'applied', message); return; }
             setBusy(false);
             say(error || 'That didn’t work — please try again.', 'error');
+            sendCardOutcome(el, 'failed', error);
           },
         },
       }));

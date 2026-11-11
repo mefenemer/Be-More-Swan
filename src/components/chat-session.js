@@ -401,12 +401,13 @@
     // A Mentor card answered before this chat was opened: its buttons go, its result stays.
     const SAVED_OUTCOME_TEXT = { applied: 'Done.', failed: 'This didn’t save last time — nothing was changed.', not_now: 'Not changed.', dismissed: 'Dismissed.' };
     function showSavedCardOutcome(card, outcome) {
-      const status = card.querySelector && card.querySelector('[data-mc-status]');
+      // Mentor cards (data-mc-*), and rule and goal cards (data-rp-* / data-gp-*), which record theirs too.
+      const status = card.querySelector && card.querySelector('[data-mc-status], [data-rp-status], [data-gp-status]');
       if (!status || !outcome || !SAVED_OUTCOME_TEXT[outcome.status]) return;
       if (outcome.status === 'failed') return; // they can try again
-      card.querySelectorAll('[data-mc-go], [data-mc-cancel], [data-mc-dismiss], [data-mc-reasons]').forEach((b) => b.remove());
+      card.querySelectorAll('[data-mc-go], [data-mc-cancel], [data-mc-dismiss], [data-mc-reasons], [data-rp-go], [data-rp-cancel], [data-gp-go], [data-gp-cancel]').forEach((b) => b.remove());
       status.textContent = outcome.status === 'applied' && outcome.note ? outcome.note : SAVED_OUTCOME_TEXT[outcome.status];
-      status.className = 'mt-2 text-xs font-semibold text-pink-700';
+      status.className = `mt-2 text-xs font-semibold ${status.matches('[data-mc-status]') ? 'text-pink-700' : 'text-emerald-800'}`;
     }
 
     /** "View in Review Queue" style jump-off link — see appendMessage's hubLink handling. */
