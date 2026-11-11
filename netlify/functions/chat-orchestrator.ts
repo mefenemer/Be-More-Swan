@@ -110,6 +110,7 @@ import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal
 import { buildMyContentBlock } from '../../src/utils/chat-my-content';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
+import { LEAD_EMAIL_WORDING_BUDGET, LEAD_EMAIL_WORDING_RULE, LEAD_SENT_EMAILS_SHOWN, quoteLeadEmails, type LeadEmailLine } from '../../src/utils/lead-email-wording';
 import { confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { normaliseSitePictureCard, SITE_PICTURE_TYPE, MAX_PICTURE_SECTIONS } from '../../src/utils/site-picture-card';
@@ -708,13 +709,50 @@ async function buildLeadsSnapshot(
             .filter((r) => leadOutreachState(r.data) !== 'sent'
                 && (r.approvalStatus === 'approved' || isInOutreachReview(r.data)))
             .slice(0, LEAD_SNAPSHOT_OUTREACH);
+        // Each email's WORDING is quoted, not just its subject (lead-email-wording.ts): asked what its
+        // emails ask, the chat used to describe its settings and invent example lines (prod 2026-11-10).
+        let wordingBudget = LEAD_EMAIL_WORDING_BUDGET;
+        const waitingLines: LeadEmailLine[] = [];
+        const unwritten: string[] = [];
+        for (const r of waiting) {
+            const draft = sendableDraft(r.data, r.title);
+            const where = r.approvalStatus === 'approved' ? 'To approve › Approved — send it yourself' : 'To approve › Waiting for your approval';
+            if (draft) waitingLines.push({ id: r.id, title: r.title ?? `Lead #${r.id}`, where, to: draft.to, subject: draft.subject, body: draft.body });
+            else unwritten.push(`- #${r.id} ${r.title} (${where}, no email written yet)`);
+        }
+        const waitingQuoted = quoteLeadEmails(waitingLines, wordingBudget);
+        wordingBudget = waitingQuoted.left;
         const outreachList = waiting.length
-            ? `\nIN OUTREACH, NOT YET EMAILED (newest ${waiting.length}${waiting.length === LEAD_SNAPSHOT_OUTREACH ? ', there may be more' : ''}):\n${waiting.map((r) => {
-                const draft = sendableDraft(r.data, r.title);
-                const where = r.approvalStatus === 'approved' ? 'To approve › Approved — send it yourself' : 'To approve › Waiting for your approval';
-                return `- #${r.id} ${r.title} (${where}${draft ? `, email to ${draft.to ?? 'no address'}: "${draft.subject}"` : ', no email written yet'})`;
-            }).join('\n')}`
+            ? `\nIN OUTREACH, NOT YET EMAILED (newest ${waiting.length}${waiting.length === LEAD_SNAPSHOT_OUTREACH ? ', there may be more' : ''}):\n${[waitingQuoted.text, ...unwritten].filter(Boolean).join('\n')}`
             : '\nIN OUTREACH, NOT YET EMAILED: none.';
+
+        // The first emails that have GONE, newest first, exactly as sent (send_outreach keeps the sent
+        // words on the lead as outreachDraft). Follow-ups are in lead_messages and are not here.
+        const sentRows = await db
+            .select({ id: assistantRecords.id, title: assistantRecords.title, data: assistantRecords.data })
+            .from(assistantRecords)
+            .where(and(
+                eq(assistantRecords.organisationId, organisationId),
+                eq(assistantRecords.aiAssistantId, aiAssistantId),
+                eq(assistantRecords.recordType, 'lead'),
+                eq(assistantRecords.approvalStatus, 'scheduled'),
+            ))
+            .orderBy(desc(assistantRecords.updatedAt))
+            .limit(LEAD_SNAPSHOT_OUTREACH_SCAN);
+        const sentLines: LeadEmailLine[] = sentRows
+            .map((r) => {
+                const d = (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) ? r.data as Record<string, unknown> : {};
+                const od = (d.outreachDraft && typeof d.outreachDraft === 'object') ? d.outreachDraft as Record<string, unknown> : null;
+                const sentAt = typeof d.outreachSentAt === 'string' ? d.outreachSentAt : null;
+                if (!sentAt || typeof od?.body !== 'string' || !od.body.trim()) return null;
+                return { id: r.id, title: r.title ?? `Lead #${r.id}`, where: 'Following up', to: typeof od.to === 'string' ? od.to : null, subject: typeof od.subject === 'string' && od.subject.trim() ? od.subject : '(no subject)', body: od.body, sentAt };
+            })
+            .filter((x): x is NonNullable<typeof x> => x !== null)
+            .sort((a, b) => String(b.sentAt).localeCompare(String(a.sentAt)))
+            .slice(0, LEAD_SENT_EMAILS_SHOWN);
+        const sentList = sentLines.length
+            ? `\nFIRST EMAILS ALREADY SENT (newest ${sentLines.length}, exactly as sent):\n${quoteLeadEmails(sentLines, wordingBudget).text}`
+            : '\nFIRST EMAILS ALREADY SENT: none with their wording on record.';
 
         const truncated = c.total > names.length
             ? `\nThese are the ${names.length} most recent of ${c.total}. The counts above cover all ${c.total}; this list does not. If the user wants the full list, or wants to filter, sort or group it, send them to the All leads tab — it does all three.`
@@ -727,6 +765,9 @@ Contactable: ${c.withEmail} of ${c.total} have an email address on file — the 
 Closed: ${c.won} won, ${c.lost} lost.
 ${list}${truncated}
 ${outreachList}
+${sentList}
+
+${LEAD_EMAIL_WORDING_RULE}
 
 ⚠️ These records belong to this business and this assistant alone. They are the ONLY leads you know anything about — do not describe, name or count any other organisation's records, and if a question needs a lead that is not listed above, say so and point at the All leads tab rather than inventing one.`;
     } catch (err) {
