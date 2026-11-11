@@ -1,4 +1,4 @@
-// admin-task-costs.ts — Admin → Revenue → Task costs. What each piece of work costs, set by a super admin.
+// admin-task-costs.ts — Admin → Money → Task costs. What each piece of work costs, set by a super admin.
 //
 //   GET  ?resource=state                     → every cost today, the change in the works, past changes
 //   POST ?resource=save    { items, effectiveDate, reason } → create or replace the draft

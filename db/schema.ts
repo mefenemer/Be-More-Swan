@@ -136,6 +136,9 @@ export const userOrganisations = pgTable("user_organisations", {
       .notNull()
       .references(() => organisations.id, { onDelete: "cascade" }),
   role: text("role").notNull().default("member"),
+  // Which assistants this person can use. NULL = all of them (owners and admins always). A list =
+  // only those ai_assistants ids. src/utils/assistant-access.ts; db/z-member-assistant-access.sql.
+  assistantIds: integer("assistant_ids").array(),
   joinedAt: timestamp("joined_at").defaultNow().notNull(),
 }, (t) => [
   // US-DB-1.3.1: unique membership — prevents duplicate invite rows
@@ -894,7 +897,7 @@ export const masterPlans = pgTable("master_plans", {
   id: serial().primaryKey(),
   tierKey: text("tier_key").notNull().unique(),
   name: text("name").notNull(),
-  // Pricing-card marketing copy — DB-driven so the Super Admin (Master Data → Plans) controls
+  // Pricing-card marketing copy — DB-driven so the Super Admin (Money → Plans) controls
   // every visible plan-card field, and pricing.html / the comparison table render from here.
   // tierDescription = the eyebrow line ("Tier 2 · Best for Scaling Founders").
   // description = the italic sub-heading blurb. isMostPopular = the "Most Popular" pill (at most
@@ -939,7 +942,7 @@ export const planPrices = pgTable("plan_prices", {
 // (SQL: db/plan-features.sql; seed: db/seed-plan-features.ts). This is a metadata + rendering layer:
 // the VALUES live in master_plans (capacity as typed columns, everything else in the features jsonb);
 // each row here records WHERE a feature's value is stored (storageTarget/columnName) and HOW to render it
-// (valueType, unlimitedLabel). Admins edit these via Admin → Master Data → Plan Features, and pricing.html
+// (valueType, unlimitedLabel). Admins edit these via Admin → Money → Plan features, and pricing.html
 // renders the comparison table dynamically from this catalog.
 export const planFeatures = pgTable("plan_features", {
   id: serial("id").primaryKey(),
@@ -1040,7 +1043,7 @@ export const masterAssistants = pgTable("master_assistants", {
   // Detail-page marketing copy (SQL: db/assistant-content.sql; seed: db/seed-assistant-content.ts).
   // These replaced src/config/assistant-role-content.js, which used to re-declare name/description/
   // icons here AND own these four — two sources of truth that had already drifted apart. Admin-edited
-  // via Master Data → Assistants; served publicly by netlify/functions/master-assistants.ts.
+  // via Assistants → Assistants; served publicly by netlify/functions/master-assistants.ts.
   tagline: text("tagline"),                                        // one-line hook under the name
   keyFeatures: jsonb("key_features").notNull().default([]),        // string[] — the bullet list
   integrations: jsonb("integrations").notNull().default([]),       // string[] — the external tools this role connects to ("Connects with")
@@ -1779,6 +1782,10 @@ export const contentAssets = pgTable("content_assets", {
   // other kind of asset NULL means nothing at all, because nothing else expires this way.
   // Apply db/brand-card-lifecycle.sql by hand BEFORE deploying the code that reads this.
   libraryKeptAt: timestamp("library_kept_at"),
+  // When its owner was told it is due to be deleted (src/utils/library-retention.ts). The purge
+  // only takes a file told about at least 7 days earlier, and kept files never. NULL = not told.
+  // Apply db/z-content-deletion-warning.sql by hand BEFORE deploying the code that reads this.
+  deletionWarnedAt: timestamp("deletion_warned_at"),
 
   // Epic 1 (AI Media Generation): provider 'fal' rows are AI-generated. These columns power
   // the "My AI Uploads" library (US3) — prompt memory + the originating generation job.
@@ -1949,6 +1956,8 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   isAutonomous: boolean("is_autonomous").default(false).notNull(),
   campaign: text("campaign"),
   pillar: text("pillar"),
+  // The pillar record this post was drafted under (db/z-content-pillars.sql). `pillar` keeps the name.
+  pillarId: integer("pillar_id").references(() => contentPillars.id, { onDelete: "set null" }),
 
   rejectedAt: timestamp("rejected_at"),
   rejectionReason: text("rejection_reason"),
@@ -2794,7 +2803,7 @@ export const billingOverrides = pgTable("billing_overrides", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// ── Billing coupons — Admin → Revenue → Coupons, mirrored to Stripe ─────────────
+// ── Billing coupons — Admin → Money → Coupons, mirrored to Stripe ─────────────
 // See db/z-billing-coupons.sql. Discount and duration are immutable in Stripe, so they are written
 // once; name / notes / isActive are the editable fields. Deleted rows keep deletedAt, not removed.
 export const billingCoupons = pgTable("billing_coupons", {
@@ -2819,7 +2828,7 @@ export const billingCoupons = pgTable("billing_coupons", {
   deletedAt: timestamp("deleted_at"),
 });
 
-// ── Plan moves — Admin → Revenue → Plan moves ──────────────────────────────────────
+// ── Plan moves — Admin → Customers → Plan moves ──────────────────────────────────────
 // See db/z-plan-moves.sql. One row per customer per bulk move; the Stripe subscription schedule does
 // the switch at renewal and stripe-webhook.ts marks the row applied. One 'scheduled' row per org.
 export const planMoves = pgTable("plan_moves", {
@@ -3122,7 +3131,7 @@ export const taskLedger = pgTable("task_ledger", {
   uniqueIndex("task_ledger_one_conversion_idx").on(t.organisationId).where(sql`source = 'conversion'`),
 ]);
 
-// What work costs in tasks, set in Admin → Revenue → Task costs (db/z-task-costs.sql, src/utils/task-costs.ts).
+// What work costs in tasks, set in Admin → Money → Task costs (db/z-task-costs.sql, src/utils/task-costs.ts).
 export const taskCostChanges = pgTable("task_cost_changes", {
   id: serial().primaryKey(),
   status: text("status").notNull(),                                // baseline | draft | announced | cancelled
@@ -3857,6 +3866,9 @@ export const templateFeedback = pgTable("template_feedback", {
   // CLOSED vocabulary — src/config/template-feedback.ts EDIT_REASONS. It is the GROUP BY key for
   // the edit-pattern proposer, and free text cannot be clustered.
   editReason: text("edit_reason"),
+  // The reviewer's own words, typed after "Something else" (Fix pipeline #37). For people only —
+  // never grouped or fed to the proposer. db/z-template-feedback-edit-note.sql.
+  editNote: text("edit_note"),
   diffSummary: text("diff_summary"),                        // one line, computed from the before/after
   appliedToTemplate: boolean("applied_to_template").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -5363,7 +5375,7 @@ export const musicTracks = pgTable("music_tracks", {
 
 // ── What's new at Be More Swan — the weekly product-update email ─────────────
 // A weekly Claude task uploads a draft (copy + screenshots); an admin approves it in
-// Comms → What's New Emails before anything is sent. Requires db/product-update-emails.sql.
+// Growth → What's New emails before anything is sent. Requires db/product-update-emails.sql.
 // See docs/weekly-product-update.md and src/utils/product-update-email.ts.
 export interface ProductUpdateItem {
   heading: string;
@@ -5446,7 +5458,44 @@ export const videoProjects = pgTable("video_projects", {
   sourcePostId: integer("source_post_id").references(() => scheduledPosts.id, { onDelete: "set null" }),
   campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "set null" }),
   campaignOrderId: integer("campaign_order_id").references(() => campaignOrders.id, { onDelete: "set null" }),
+  // db/z-video-producer-footage.sql — a video from the owner's own footage: what was seen, the
+  // suggested edits and the owner's ticks (src/lib/footage.ts FootageReview). NULL for other videos.
+  footageReview: jsonb("footage_review"),
+  // db/z-video-producer-studio.sql — the video as a studio makes it (docs/video-producer-studio-plan.md):
+  // the timeline the build assembled, rendered to `outputAssetId` in My Content. No post is made.
+  timeline: jsonb(),
+  outputAssetId: integer("output_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  version: integer().notNull().default(1),
+  parentProjectId: integer("parent_project_id"),
+  renderId: text("render_id"),
+  renderBucket: text("render_bucket"),
+  renderRegion: text("render_region"),
+  // db/z-video-producer-seven.sql — notes on moments of a Ready video, and storyboard edits before it was made.
+  momentNotes: jsonb("moment_notes").notNull().default([]),
+  editCount: integer("edit_count").notNull().default(0),
+  // db/z-video-archive.sql — when the owner archived it (Videos tab "Archived" pill). NULL = not archived.
+  archivedAt: timestamp("archived_at"),
   startedAt: timestamp("started_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// What the Video Producer understood of one of the workspace's own videos — made once per video
+// (db/z-video-producer-footage.sql, src/utils/footage-review.ts). Frames and sound live in R2.
+export const footageAnalyses = pgTable("footage_analyses", {
+  assetId: integer("asset_id").primaryKey().references(() => contentAssets.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  status: text().notNull().default("prepared"),
+  durationS: real("duration_s").notNull(),
+  width: integer(),
+  height: integer(),
+  framesKey: text("frames_key").notNull(),
+  frameCount: integer("frame_count").notNull().default(0),
+  audioKey: text("audio_key"),
+  analysis: jsonb(),
+  words: jsonb().notNull().default([]),
+  error: text(),
+  version: integer().notNull().default(1),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -5561,6 +5610,7 @@ export const orgProducts = pgTable("org_products", {
   // the server from these (product-price.ts). Only 'fixed' can be bought online.
   priceType: text("price_type"),          // 'fixed' | 'from' | 'on_request' | 'text' | null
   priceAmount: integer("price_amount"),   // pence
+  priceCurrency: text("price_currency").notNull().default("GBP"),  // db/z-product-price-currency.sql: GBP | USD | EUR | AUD | CAD
   priceUnit: text("price_unit"),
   durationMinutes: integer("duration_minutes"),
   // Deposit when booked from the website (db/z-booking-deposits.sql): 'fixed' pence | 'percent' of a fixed price.
@@ -5569,6 +5619,8 @@ export const orgProducts = pgTable("org_products", {
   allergens: text(),
   depositType: text("deposit_type"),
   depositAmount: integer("deposit_amount"),
+  // Where a booked service happens (db/z-booking-meeting-links.sql): 'in_person' | 'phone' | 'video'; NULL = in person.
+  meetingLocation: text("meeting_location"),
   imageAssetId: integer("image_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
   status: text().notNull().default("active"),
   sortOrder: integer("sort_order").notNull().default(0),
@@ -6029,6 +6081,8 @@ export const bookingSettings = pgTable("booking_settings", {
   busySyncedAt: timestamp("busy_synced_at"),
   busySyncError: text("busy_sync_error"),
   busyCount: integer("busy_count"),
+  // The business's reusable video link for video services (db/z-booking-meeting-links.sql).
+  meetingUrl: text("meeting_url"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("booking_settings_org_uq").on(t.organisationId),
@@ -6049,6 +6103,8 @@ export const bookableResources = pgTable("bookable_resources", {
   busySyncedAt: timestamp("busy_synced_at"),
   busySyncError: text("busy_sync_error"),
   busyCount: integer("busy_count"),
+  // This person's own video link — wins over the business's (db/z-booking-meeting-links.sql).
+  meetingUrl: text("meeting_url"),
   status: text().notNull().default("active"),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -6090,9 +6146,39 @@ export const bookings = pgTable("bookings", {
   checkoutSessionId: text("checkout_session_id"),
   paymentIntentId: text("payment_intent_id"),
   holdExpiresAt: timestamp("hold_expires_at", { withTimezone: true }),
+  // Where it happens and the video link, copied when made (db/z-booking-meeting-links.sql; booking-meeting.ts).
+  meetingLocation: text("meeting_location"),
+  meetingUrl: text("meeting_url"),
+  // Stays — holiday lets and B&B rooms (db/z-stays.sql, docs/holiday-lets-plan.md). party_size = guests.
+  stayTypeId: integer("stay_type_id").references((): any => stayTypes.id, { onDelete: "set null" }),
+  checkIn: date("check_in"),
+  checkOut: date("check_out"),
+  rooms: integer(),
+  quote: jsonb(),
+  currency: text(),
+  balancePence: integer("balance_pence"),
+  balanceStatus: text("balance_status"),
+  balanceDueOn: date("balance_due_on"),
+  balanceCollection: text("balance_collection"),
+  stripeCustomerId: text("stripe_customer_id"),
+  paymentMethodId: text("payment_method_id"),
+  damageDepositPence: integer("damage_deposit_pence"),
+  damageDepositStatus: text("damage_deposit_status"),
+  damageDepositKeptPence: integer("damage_deposit_kept_pence"),
+  damageDepositKeptReason: text("damage_deposit_kept_reason"),
+  damageDepositReturnOn: date("damage_deposit_return_on"),
+  // Collecting the balance and returning the damage deposit (stay-jobs.ts).
+  balancePaymentIntentId: text("balance_payment_intent_id"),
+  balanceCheckoutSessionId: text("balance_checkout_session_id"),
+  balanceRequestedAt: timestamp("balance_requested_at", { withTimezone: true }),
+  balanceRemindedAt: timestamp("balance_reminded_at", { withTimezone: true }),
+  balanceOwnerToldAt: timestamp("balance_owner_told_at", { withTimezone: true }),
+  damagePaymentIntentId: text("damage_payment_intent_id"),
+  damageRemindedAt: timestamp("damage_reminded_at", { withTimezone: true }),
+  damageDecidedAt: timestamp("damage_decided_at", { withTimezone: true }),
 }, (t) => [
   index("bookings_org_time_idx").on(t.organisationId, t.startsAt),
-  check("bookings_kind_check", sql`${t.kind} IN ('appointment','consultation','table','class')`),
+  check("bookings_kind_check", sql`${t.kind} IN ('appointment','consultation','table','class','stay')`),
   check("bookings_status_check", sql`${t.status} IN ('pending','confirmed','declined','cancelled','awaiting_payment')`),
 ]);
 
@@ -6148,6 +6234,113 @@ export const classWaitlist = pgTable("class_waitlist", {
   offeredAt: timestamp("offered_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+// Stays — holiday lets and B&B rooms (db/z-stays.sql, docs/holiday-lets-plan.md). Kept apart from
+// bookable_resources: appointment readers treat every non-table resource as staff.
+export const stayTypes = pgTable("stay_types", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  stayType: text("stay_type").notNull().default("whole"),
+  name: text().notNull(),
+  slug: text().notNull(),
+  summary: text(),
+  description: text(),
+  maxGuests: integer("max_guests").notNull().default(2),
+  bedrooms: integer(),
+  bathrooms: integer(),
+  beds: text(),
+  amenities: jsonb().notNull().default([]),
+  houseRules: text("house_rules"),
+  address: text(),
+  licenceNumber: text("licence_number"),
+  images: jsonb().notNull().default([]),
+  checkInTime: text("check_in_time").notNull().default("16:00"),
+  checkOutTime: text("check_out_time").notNull().default("10:00"),
+  mode: text().notNull().default("request"),
+  /** Door code, Wi-Fi, directions — NEVER on the site; emailed arrival_details_days before check-in. */
+  arrivalDetails: text("arrival_details"),
+  arrivalDetailsDays: integer("arrival_details_days").notNull().default(3),
+  breakfast: text().notNull().default("none"),
+  singleDiscount: integer("single_discount"),
+  currency: text().notNull().default("GBP"),
+  depositPercent: integer("deposit_percent").notNull().default(0),
+  balanceDays: integer("balance_days").notNull().default(28),
+  balanceCollection: text("balance_collection").notNull().default("link"),
+  damageDeposit: integer("damage_deposit"),
+  damageDepositReturnDays: integer("damage_deposit_return_days").notNull().default(7),
+  cancellation: jsonb().notNull().default([]),
+  minNoticeDays: integer("min_notice_days").notNull().default(1),
+  maxAdvanceDays: integer("max_advance_days").notNull().default(540),
+  gapNights: integer("gap_nights").notNull().default(0),
+  status: text().notNull().default("active"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("stay_types_org_slug_uq").on(t.organisationId, t.slug),
+  index("stay_types_org_idx").on(t.organisationId, t.status, t.sortOrder),
+]);
+
+export const stayRates = pgTable("stay_rates", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  stayTypeId: integer("stay_type_id").notNull().references(() => stayTypes.id, { onDelete: "cascade" }),
+  name: text().notNull().default("Standard"),
+  startsOn: date("starts_on"),
+  endsOn: date("ends_on"),
+  nightly: integer().notNull(),
+  weekendNightly: integer("weekend_nightly"),
+  weeklyNightly: integer("weekly_nightly"),
+  minNights: integer("min_nights").notNull().default(1),
+  changeoverDays: jsonb("changeover_days"),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (t) => [index("stay_rates_type_idx").on(t.stayTypeId)]);
+
+export const stayFees = pgTable("stay_fees", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  stayTypeId: integer("stay_type_id").notNull().references(() => stayTypes.id, { onDelete: "cascade" }),
+  kind: text().notNull(),
+  label: text().notNull(),
+  amount: integer().notNull(),
+  per: text().notNull().default("stay"),
+  afterGuests: integer("after_guests"),
+  optional: boolean().notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+}, (t) => [index("stay_fees_type_idx").on(t.stayTypeId)]);
+
+export const stayUnits = pgTable("stay_units", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  stayTypeId: integer("stay_type_id").notNull().references(() => stayTypes.id, { onDelete: "cascade" }),
+  name: text().notNull(),
+  status: text().notNull().default("active"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("stay_units_type_idx").on(t.stayTypeId, t.status, t.sortOrder)]);
+
+export const stayBlocks = pgTable("stay_blocks", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  unitId: integer("unit_id").notNull().references(() => stayUnits.id, { onDelete: "cascade" }),
+  startsOn: date("starts_on").notNull(),
+  endsOn: date("ends_on").notNull(),
+  note: text(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("stay_blocks_unit_idx").on(t.unitId, t.startsOn)]);
+
+// Which unit (house or room) a stay booking holds, for the whole stay. check_out exclusive.
+export const bookingUnits = pgTable("booking_units", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  bookingId: integer("booking_id").notNull().references(() => bookings.id, { onDelete: "cascade" }),
+  unitId: integer("unit_id").notNull().references(() => stayUnits.id, { onDelete: "cascade" }),
+  checkIn: date("check_in").notNull(),
+  checkOut: date("check_out").notNull(),
+}, (t) => [
+  index("booking_units_unit_idx").on(t.unitId, t.checkIn),
+  index("booking_units_booking_idx").on(t.bookingId),
+]);
 
 // A workspace's Stripe STANDARD account for selling on its site (db/z-website-shop.sql). We take no
 // fee (decision D5); the business is the merchant of record.
@@ -6577,7 +6770,7 @@ export const mentorOutcomes = pgTable("mentor_outcomes", {
   index("mentor_outcomes_org_idx").on(t.organisationId, t.acceptedAt),
 ]);
 
-// Admin → Platform → AI Visibility (db/z-ai-visibility.sql). Does Be More Swan come up when a
+// Admin → Growth → AI visibility (db/z-ai-visibility.sql). Does Be More Swan come up when a
 // prospect asks an AI assistant? The same questions, asked of each assistant, once a month.
 export const aiVisibilityQuestions = pgTable("ai_visibility_questions", {
   id: serial("id").primaryKey(),
@@ -6772,6 +6965,44 @@ export const siteVisitCounts = pgTable("site_visit_counts", {
   index("site_visit_counts_day_idx").on(t.day),
 ]);
 
+// Free guest review links (db/review-links.sql, docs/review-link-plan.md). One link opens one item.
+// The token is never stored, and neither is a guest's email or IP address.
+export const reviewLinks = pgTable("review_links", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  itemKind: text("item_kind").notNull(), // 'social_post' | 'design_brief'
+  itemId: integer("item_id").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  label: text("label"),
+  expiresAt: timestamp("expires_at").notNull(),
+  revokedAt: timestamp("revoked_at"),
+  viewCount: integer("view_count").notNull().default(0),
+  firstViewedAt: timestamp("first_viewed_at"),
+  trialClicks: integer("trial_clicks").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("review_links_item").on(t.organisationId, t.itemKind, t.itemId),
+]);
+
+export const reviewLinkResponses = pgTable("review_link_responses", {
+  id: serial("id").primaryKey(),
+  linkId: integer("link_id").notNull().references(() => reviewLinks.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  guestName: text("guest_name").notNull(),
+  decision: text("decision").notNull(), // 'approved' | 'changes' | 'comment'
+  optionId: integer("option_id"),
+  body: text("body"),
+  contentHash: text("content_hash").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  // The subscriber's own call on a comment: 'done' | 'ignored' | null (db/review-link-response-resolved.sql).
+  resolution: text("resolution"),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: integer("resolved_by").references(() => users.id, { onDelete: "set null" }),
+}, (t) => [
+  index("review_link_responses_link").on(t.linkId, t.createdAt),
+]);
+
 // The source a new account arrived with (src/utils/visit-source.ts cleanSignupSource), when known.
 export const signupSources = pgTable("signup_sources", {
   userId: integer("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
@@ -6779,3 +7010,21 @@ export const signupSources = pgTable("signup_sources", {
   campaign: text("campaign").notNull().default(""),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// A Social Media assistant's content pillars, one row each (db/z-content-pillars.sql,
+// src/utils/content-pillars-store.ts). The TRUTH: onboarding_context.content_pillars is derived from
+// the active rows. Archived, never deleted, so posts keep their pillar_id.
+export const contentPillars = pgTable("content_pillars", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  archivedAt: timestamp("archived_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("content_pillars_assistant_idx").on(t.assistantId, t.sortOrder),
+]);

@@ -597,6 +597,13 @@
         if (startedUi && startedUi.type === 'design_started') {
           document.dispatchEvent(new CustomEvent('brief:openStudio', { detail: { assistantId, briefId: startedUi.briefId } }));
         }
+        // This reply saved a post or a record (its link says where): the list may be right beside a docked chat.
+        if (startedUi && startedUi.hubLink) {
+          window.detailRqRefresh?.();
+          window._detailRqRefreshColumnCounts?.();
+          window.AssistantDataHub?.refresh?.();
+          document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId } }));
+        }
       } catch (err) {
         console.error('[ChatSession] send failed:', err);
         showError('Connection problem — please check your internet and try again.');
@@ -901,6 +908,16 @@
         .then(() => respond({ ok: true }))
         .catch((err) => respond({ ok: false, error: err.message }));
     }
+    // The Video Producer's other cards (2026-11-10): script, options, notes, other shapes — each the same
+    // video-projects.ts action as its button on the Videos tab. Only these actions; none spends.
+    const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete'];
+    function onVideoAction(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const body = d.body && typeof d.body === 'object' ? d.body : null;
+      if (!body || !VIDEO_CARD_ACTIONS.includes(body.action)) { respond({ ok: false, error: 'That isn\u2019t something this card can do.' }); return; }
+      videoProjectsCall(body).then(() => respond({ ok: true })).catch((err) => respond({ ok: false, error: err.message }));
+    }
     function onVideoCreate(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -984,6 +1001,12 @@
           if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
           if (!(data.cancelledIds || []).length) throw new Error('It had already gone out or been removed.');
           message = 'Removed — it’s in the "Archived" column.';
+        } else if (d.action === 'restore') {
+          // The post editor's "Bring back" — restore-post.ts brings the whole cross-post back.
+          const r = await postActionCall('restore-post', { postId: d.postId });
+          message = r.mediaGone
+            ? 'Brought back to "Review". Its picture had already been deleted, so open the post and add a new one before approving.'
+            : 'Brought back — it’s in the "Review" column, waiting for you to approve it.';
         } else if (d.action === 'shorter' || d.action === 'longer') {
           // The post editor's two buttons, per platform: rewrite-post-text writes the new caption,
           // the editor's own PATCH saves it. A rewrite over a platform's limit is NOT saved — the
@@ -1042,7 +1065,9 @@
       } catch (err) {
         respond({ ok: false, error: err.message });
       }
-      if (editor.open) document.dispatchEvent(new CustomEvent('post:actionFinished', { detail: { postIds: ids, action: d.action, ok: done, message: doneMessage } }));
+      // Whether or not it was open when this started: with the list beside a docked chat, the post can be opened
+      // while the action runs. The editor decides whether it is showing this post, and reloads so it can't save the old words back.
+      document.dispatchEvent(new CustomEvent('post:actionFinished', { detail: { postIds: ids, action: d.action, ok: done, message: doneMessage } }));
       // Whatever happened, a row may have changed (a group can half-succeed): repaint the tab behind
       // the chat so it shows the truth.
       window.detailRqRefresh?.();
@@ -1098,7 +1123,7 @@
             const q = await postActionCall('generate-blog', d.action === 'revise'
               ? { blogPostId: d.postId, revise: d.instruction }
               : d.action === 'pictures'
-                ? { blogPostId: d.postId, addImages: { source: d.source === 'ai' ? 'ai' : 'stock', instruction: d.instruction || undefined } }
+                ? { blogPostId: d.postId, addImages: { source: d.source === 'ai' ? 'ai' : 'stock', instruction: d.instruction || undefined, replaceAsset: d.replaceAsset || undefined } }
                 : { blogPostId: d.postId, resize: d.action });
             const started = Date.now();
             let job = null;
@@ -1114,17 +1139,17 @@
               message = rewrite.open
                 ? 'Still working — close this article and reopen it in a minute to see the new version.'
                 : d.action === 'pictures'
-                  ? 'Still finding pictures — open the article in Blog Studio in a minute to see them.'
+                  ? d.replaceAsset ? 'Still finding the new picture — open the article in Blog Studio in a minute to see it.' : 'Still finding pictures — open the article in Blog Studio in a minute to see them.'
                   : 'Still rewriting — open the article in Blog Studio in a minute to read the new version.';
             } else if (job.status === 'failed') {
               throw new Error(job.errorMessage || 'That didn’t work. Your article is unchanged.');
             } else {
               outcome = 'done';
-              const what = d.action === 'pictures' ? 'Pictures added' : `${d.action === 'shorter' ? 'Shorter' : d.action === 'longer' ? 'Longer' : 'Rewritten'} — saved`;
+              const what = d.action === 'pictures' ? (d.replaceAsset ? 'Picture replaced' : 'Pictures added') : `${d.action === 'shorter' ? 'Shorter' : d.action === 'longer' ? 'Longer' : 'Rewritten'} — saved`;
               message = rewrite.open
                 ? `${what}. It’s in the article beside this chat.${d.action === 'pictures' && job.errorMessage ? ' ' + job.errorMessage : ''}`
                 : d.action === 'pictures'
-                  ? `Pictures added — open it in Blog Studio to see them.${job.errorMessage ? ' ' + job.errorMessage : ''}`
+                  ? `${what} — open it in Blog Studio to see ${d.replaceAsset ? 'it' : 'them'}.${job.errorMessage ? ' ' + job.errorMessage : ''}`
                   : `${what}. Open it in Blog Studio to read it.`;
             }
           } finally {
@@ -1769,8 +1794,8 @@
     function onSiteWords(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      sitePost({ action: 'words', assistantId, pageId: d.pageId, attachmentId: d.attachmentId, quote: d.quote, chatSessionId, note: d.note || '' })
-        .then((data) => respond({ ok: true, proposal: data.proposal }))
+      sitePost({ action: 'words', assistantId, pageId: d.pageId, attachmentId: d.attachmentId, quote: d.quote, sourceUrl: d.sourceUrl || null, chatSessionId, note: d.note || '' })
+        .then((data) => respond({ ok: true, proposal: data.proposal, note: data.note || null }))
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
@@ -1778,7 +1803,7 @@
     function onBookingSetup(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      sitePost({ action: 'booking_setup', assistantId, settings: d.settings || {}, section: d.section || null })
+      sitePost({ action: 'booking_setup', assistantId, settings: d.settings || {}, section: d.section || null, serviceLocations: Array.isArray(d.serviceLocations) ? d.serviceLocations : [] })
         .then(() => { respond({ ok: true }); siteChanged(); })
         .catch((err) => respond({ ok: false, error: err.message }));
     }
@@ -2109,6 +2134,44 @@
         .then(() => { respond({ ok: true }); siteChanged(); })
         .catch((err) => respond({ ok: false, error: err.message }));
     }
+    // Holiday lets and B&B rooms (docs/holiday-lets-plan.md): the same calls as Business Information ▸ Stays
+    // (stays.ts) and the Website tab ▸ Bookings (sites.ts damage_return / damage_keep).
+    async function staysCall(method, body) {
+      const r = await fetch('/.netlify/functions/stays', { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || 'That couldn\'t be saved.');
+      return j;
+    }
+    // "Add it" / "Save the change" on a stay_setup card — a change names only what changes (PUT partial).
+    function onStaySetup(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      const stay = d.stay && typeof d.stay === 'object' ? d.stay : {};
+      (d.stayId ? staysCall('PUT', { ...stay, id: d.stayId, partial: true }) : staysCall('POST', stay))
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+    // "Close these dates" on a stay_block card — one block at a time; stops at the first refusal.
+    async function onStayBlock(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      let done = 0;
+      try {
+        for (const b of (Array.isArray(d.blocks) ? d.blocks : [])) { await staysCall('POST', { block: b }); done++; }
+        respond({ ok: true, done });
+        siteChanged();
+      } catch (err) { respond({ ok: false, error: `${done ? `${done} closed, then: ` : ''}${err.message}` }); }
+    }
+    // "Return it now" / "Keep it and return the rest" on a stay_damage card.
+    function onStayDamage(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost(d.decision === 'keep'
+        ? { action: 'damage_keep', assistantId, id: d.bookingId, keep: d.keep, reason: d.reason }
+        : { action: 'damage_return', assistantId, id: d.bookingId })
+        .then(() => { respond({ ok: true }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
     // "Do it" on a listing_decisions card → site-listings.ts PATCH { id, decision }, one at a time.
     async function onListingDecisions(e) {
       const d = e.detail || {};
@@ -2144,12 +2207,26 @@
         .catch((err) => respond({ ok: false, error: err.message }));
     }
 
+    // A site_import_products card — sites.ts import_products, the Website tab's same button (all products).
+    function onSiteImportProducts(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      sitePost({ action: 'import_products', assistantId })
+        .then((r) => { respond({ ok: true, message: ((r && r.warnings) || []).join(' ') }); siteChanged(); })
+        .catch((err) => respond({ ok: false, error: err.message }));
+    }
+
     function onSiteDraft(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
-      sitePost({ action: 'draft', assistantId, request: d.request || '' })
+      sitePost({ action: 'draft', assistantId, request: d.request || '', media: d.media })
         .then(() => { respond({ ok: true }); siteChanged(); })
         .catch((err) => respond({ ok: false, error: err.message }));
+    }
+    // What the draft card may offer, and the live cost of AI media (sites.ts draft_options).
+    function onSiteDraftOptions(e) {
+      const respond = (e.detail && e.detail.respond) || (() => {});
+      sitePost({ action: 'draft_options', assistantId }).then(respond).catch(() => respond(null));
     }
 
     // "Save guidelines" on a brand_guideline_proposal card — brand-kit.ts `save_guidelines`, the same
@@ -2490,6 +2567,9 @@
     container.addEventListener('site:picturePlace', onSitePicturePlace);
     container.addEventListener('blog:blockEdit', onBlogBlockEdit);
     container.addEventListener('site:listingDecisions', onListingDecisions);
+    container.addEventListener('site:staySetup', onStaySetup);
+    container.addEventListener('site:stayBlock', onStayBlock);
+    container.addEventListener('site:stayDamage', onStayDamage);
     if (refEl) refEl.addEventListener('click', onRefClick);
     container.addEventListener('campaign:proposePlan', onCampaignProposePlan);
     container.addEventListener('campaign:edit', onCampaignEdit);
@@ -2499,6 +2579,7 @@
     container.addEventListener('brief:create', onBriefCreate);
     container.addEventListener('video:create', onVideoCreate);
     container.addEventListener('video:replan', onVideoReplan);
+    container.addEventListener('video:action', onVideoAction);
     container.addEventListener('video:sceneEdit', onVideoSceneEdit);
     container.addEventListener('post:action', onPostAction);
     container.addEventListener('blog:action', onBlogAction);
@@ -2526,8 +2607,10 @@
     container.addEventListener('siteaudit:handoff', onSiteAuditHandoff);
     container.addEventListener('site:apply', onSiteApply);
     container.addEventListener('site:draft', onSiteDraft);
+    container.addEventListener('site:draftOptions', onSiteDraftOptions);
     container.addEventListener('site:import', onSiteImport);
     container.addEventListener('site:importDecision', onSiteImportDecision);
+    container.addEventListener('site:importProducts', onSiteImportProducts);
     container.addEventListener('site:words', onSiteWords);
     container.addEventListener('site:bookingSetup', onBookingSetup);
     container.addEventListener('site:reviewsAdd', onReviewsAdd);
@@ -2611,6 +2694,9 @@
         container.removeEventListener('site:picturePlace', onSitePicturePlace);
         container.removeEventListener('blog:blockEdit', onBlogBlockEdit);
         container.removeEventListener('site:listingDecisions', onListingDecisions);
+        container.removeEventListener('site:staySetup', onStaySetup);
+        container.removeEventListener('site:stayBlock', onStayBlock);
+        container.removeEventListener('site:stayDamage', onStayDamage);
         if (refEl) refEl.removeEventListener('click', onRefClick);
         container.removeEventListener('campaign:proposePlan', onCampaignProposePlan);
         container.removeEventListener('campaign:edit', onCampaignEdit);
@@ -2620,6 +2706,7 @@
         container.removeEventListener('brief:create', onBriefCreate);
         container.removeEventListener('video:create', onVideoCreate);
         container.removeEventListener('video:replan', onVideoReplan);
+        container.removeEventListener('video:action', onVideoAction);
         container.removeEventListener('video:sceneEdit', onVideoSceneEdit);
         container.removeEventListener('post:action', onPostAction);
         container.removeEventListener('blog:action', onBlogAction);
@@ -2647,8 +2734,10 @@
         container.removeEventListener('siteaudit:handoff', onSiteAuditHandoff);
         container.removeEventListener('site:apply', onSiteApply);
         container.removeEventListener('site:draft', onSiteDraft);
+        container.removeEventListener('site:draftOptions', onSiteDraftOptions);
         container.removeEventListener('site:import', onSiteImport);
         container.removeEventListener('site:importDecision', onSiteImportDecision);
+        container.removeEventListener('site:importProducts', onSiteImportProducts);
         container.removeEventListener('site:words', onSiteWords);
         container.removeEventListener('site:bookingSetup', onBookingSetup);
         container.removeEventListener('site:reviewsAdd', onReviewsAdd);

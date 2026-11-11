@@ -38,9 +38,13 @@ export function confirmCardReply(content: string, card: { blocked?: unknown; set
 const POINTS_AT_CARD = new RegExp([
     /\b(?:I(?:'|’)?ve|I have)\s+(?:added|included|attached|drafted|put)\b[^.\n]{0,40}\bcard\b/.source,
     /\bcard\s+(?:below|above|here)\b/.source,
+    // "The card is below this time", "this time the card really is below" (prod 2026-11-07, org 40).
+    /\bcard\s+(?:is|really is|should be|will be)\s+(?:below|above|here)\b/.source,
     /\b(?:the|a|this)\s+card\s+(?:that|which)\b/.source,
     /\bbelow is a card\b/.source,
     /\btap (?:the|an?) (?:button|answer) below\b/.source,
+    // "Here it is now, and nothing is saved until you confirm on it" over no card (prod 2026-11-07, org 40).
+    /\bhere it is now\b[^\n]{0,80}\bconfirm\b/.source,
     // Without the word "card" (prod 2026-10-26: "I've put that change below for you to approve" over no card).
     /\b(?:I(?:'|’)?ve|I have)\s+(?:put|placed|attached|left|queued)\b[^.\n]{0,40}\b(?:below|above)\b/.source,
     /\b(?:below|above) for you to (?:approve|confirm|save|accept|review)\b/.source,
@@ -50,8 +54,23 @@ const POINTS_AT_CARD = new RegExp([
 
 export const NO_CARD_NOTE = '(No card came with this reply. Ask me again and I’ll add it.)';
 
+/**
+ * An OFFER of a card, not a claim of one (Fix pipeline #33/#36, prod 2026-11-10): "tell me which one
+ * and I'll put it on a card that shows every word", "just tell me … and I'll put a card here". The
+ * note was added to those, so a correct reply read as a fault. A match counts as an offer when, in
+ * the same sentence and BEFORE it, the reply says what it will/can do. "I can't see #118's text, so
+ * the card below asks…" is still a claim, and so is "Approve the card below and I'll do the rest".
+ */
+const OFFER_BEFORE = /\b(?:I(?:'|’)ll|I will|I can(?!(?:'|’)t|not)|I could|I(?:'|’)d|I would|shall I|want me to|like me to)\b/i;
+const POINTS_AT_CARD_ALL = new RegExp(POINTS_AT_CARD.source, 'gi');
+
 export function replyPointsAtCard(content: string): boolean {
-    return POINTS_AT_CARD.test(content);
+    for (const m of content.matchAll(POINTS_AT_CARD_ALL)) {
+        const upTo = content.slice(0, m.index);
+        const sentenceStart = Math.max(upTo.lastIndexOf('.'), upTo.lastIndexOf('!'), upTo.lastIndexOf('?'), upTo.lastIndexOf('\n')) + 1;
+        if (!OFFER_BEFORE.test(upTo.slice(sentenceStart))) return true;
+    }
+    return false;
 }
 
 /** The reply, with NO_CARD_NOTE added when it points at a card that isn't there. */
@@ -85,6 +104,54 @@ export function replyClaimsPicture(content: string): boolean {
 export function pictureReply(content: string, hasPictureCard: boolean): string {
     if (!replyClaimsPicture(content)) return content;
     return hasPictureCard
-        ? 'Here it is — choose “Create with AI” or “Find stock photos” on the card below, then pick the one you like. Nothing is made or added until you do.'
+        ? 'Here it is — choose “Choose from My Content”, “Create with AI” or “Find stock photos” on the card below, then pick the one you like. Nothing is made or added until you do.'
         : 'I can’t make or add a picture from a message — ask me for a picture for a section and I’ll put a card here with options to choose from. Nothing has been made or added.';
+}
+
+/**
+ * The Website Assistant's reply with NO card (prod 2026-11-07, Restorative Futures, org 41): asked to
+ * "fill in the content on the blank pages", it answered "I've filled in all five blank pages…" and
+ * described each — with no card at all. Nothing changed; the pages stayed blank, and the next morning
+ * it had to admit it. Only a card's click changes the site, so a reply that says it already changed
+ * the site, beside no card, is replaced. Narrow on purpose: "Your home page has a hero" (describing
+ * the draft) and "I can add that" (an offer) are kept.
+ */
+const SITE_CHANGE_CLAIM = new RegExp([
+    /\b(?:I(?:'|’)?ve|I have)\s+(?:now\s+|just\s+|also\s+)?(?:filled(?: in)?|added|updated|changed|written|rewritten|wrote|removed|deleted|moved|replaced|created|built|made|put|placed|switched|turned|renamed|reworded|fixed|copied|imported|applied|set up)\b(?![^.\n]{0,40}\bcard\b)/.source,
+    /\b(?:is|are) now (?:on|in) your (?:site|website|draft|page|home page)\b/.source,
+    /\b(?:all|it(?:'|’)?s|that(?:'|’)?s) done\b/.source,
+].join('|'), 'i');
+
+export const SITE_NO_CARD_REPLY = 'I haven’t changed your website — no change card came with this reply, so nothing was applied. Ask me again and I’ll put the change on a card for you to approve.';
+
+export function replyClaimsSiteChange(content: string): boolean {
+    return SITE_CHANGE_CLAIM.test(content);
+}
+
+/** The Website Assistant's reply when no card came with it: never "I've filled in the pages". */
+export function siteNoCardReply(content: string, hasCard: boolean): string {
+    if (hasCard || !replyClaimsSiteChange(content)) return content;
+    return SITE_NO_CARD_REPLY;
+}
+
+/**
+ * The one card in a reply, however the model shaped it. Every route draws ONE card, and every card
+ * check downstream reads a single object — so a LIST of cards, or cards under "uiElements" / "cards",
+ * matched no card type and was dropped without a word. Prod 2026-11-07 (org 40, Business Mentor):
+ * asked to make three changes, it sent them together, turn after turn; the user saw "the card is
+ * below" and no card six times, and even the ticket she asked for about it vanished the same way.
+ * The token counts showed the cards were written. Now the first card is kept and the rest are said.
+ */
+export const MORE_CARDS_NOTE = '(I can show one card at a time. Ask me for the next one when you’ve dealt with this.)';
+export function firstCard(parsed: Record<string, unknown>): { card: unknown | null; extra: number } {
+    const isCard = (v: unknown) => !!v && typeof v === 'object' && !Array.isArray(v);
+    for (const key of ['uiElement', 'uiElements', 'cards', 'ui_element']) {
+        const v = parsed[key];
+        if (isCard(v)) return { card: v, extra: 0 };
+        if (Array.isArray(v)) {
+            const cards = v.filter(isCard);
+            if (cards.length) return { card: cards[0], extra: cards.length - 1 };
+        }
+    }
+    return { card: null, extra: 0 };
 }

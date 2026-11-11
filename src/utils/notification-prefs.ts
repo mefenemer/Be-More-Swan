@@ -249,6 +249,9 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // A report, not a request — nothing waits on the user — so it sits with the other
             // summaries. ⚠️ scope:'assistant': the call site passes metadata.assistantId, same as above.
             'site_audit_ready',
+            // A guest responded to a review link (review-links.ts). ⚠️ scope:'assistant': the call site
+            // passes metadata.assistantId.
+            'review_link_response',
             // Its other two reports: a competitor changed its headline/prices/proof/offer, and the
             // site reached its target score. Both summaries — nothing waits on the user.
             'site_audit_competitor_change', 'site_audit_goal_met',
@@ -285,6 +288,8 @@ export const PREF_CATEGORIES: PrefCategory[] = [
             // is already in PUBLISHING_ROLE_KEYS below, which is what makes this category visible
             // on that assistant in the first place.
             'newsletter_issue_ready', 'newsletter_issue_sent',
+            // My Content files due to be deleted in a week (src/utils/library-retention.ts).
+            'library_files_expiring',
         ],
     },
     {

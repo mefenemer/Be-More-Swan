@@ -64,6 +64,9 @@
  *                //   with hideGoals still gets the tab, with its cards and no goals section.
  *   cfg.resultsTabAfter // → optional tab key (e.g. 'review-queue'); the Results tab is moved to sit
  *                //   straight after that tab instead of its default place before Activity.
+ *   cfg.tabChat // → optional { tabs, placeholder }: the chat panel docked beside these main tabs, one
+ *                //   conversation across them (assistants.js _setupTabChat). A role with its own dock
+ *                //   (Briefs, Videos, Campaigns, Mentor) leaves this out.
  *   cfg.inspoTab // → optional Inspo tab config (assistant-inspo.js); the content roles
  *                //   (social_media_manager, blog_writer) only — { label, description }
  *   cfg.myContentTab // → optional My Content tab config (assistant-my-content.js); the content
@@ -120,11 +123,12 @@
         },
       ],
       modules: { hasPostingSchedule: true, hasSocialStrategy: true },
-      primaryAction: { label: 'Create a Post', kind: 'generate_post' },
+      primaryAction: { label: 'New post', kind: 'generate_post' },
       // The Review Queue IS the social command centre — surfaced as "Posts" and used as the
       // landing tab (defaultMainTab) so users open straight into their content pipeline.
       reviewQueue: { kind: 'posts', label: 'Posts' },
       defaultMainTab: 'review-queue',
+      tabChat: { tabs: ['review-queue'], placeholder: 'Ask for a post or a change…' },
       // The old "Content Library" Data Hub tab is retired for social — the Posts pipeline is the
       // single home for every drafted/scheduled/published post, so the separate library tab is hidden.
       hideDataHub: true,
@@ -240,7 +244,7 @@
       roiSource: 'newsletter',
       // Opens the Email Studio, the same way the Blog Writer opens Blog Studio — special-cased
       // in assistants.js because both are bespoke pipelines rather than a chat intake.
-      primaryAction: { kind: 'newsletter_studio', label: 'Write Email' },
+      primaryAction: { kind: 'newsletter_studio', label: 'New email' },
       defaultMainTab: 'review-queue',
       // "Emails", like the Social Media Assistant's "Posts" and the Blog Writer's "Blogs" — without a
       // label this tab fell back to "Review" and read as a different kind of thing (2026-10-06).
@@ -336,7 +340,7 @@
       },
       // Ignored for blog_writer (assistants.js special-cases the button to open Blog Studio),
       // but kept coherent for any generic reader of the registry.
-      primaryAction: { label: 'Write Blog Post', kind: 'chat' },
+      primaryAction: { label: 'New blog post', kind: 'chat' },
       // The "Blogs" tab is the single home for long-form work — create, edit, review, approve,
       // schedule and delete drafts (blog-posts.ts). It's the landing tab, and the old separate
       // Content Library / Data Hub tab is retired (hideDataHub) since it showed the same posts.
@@ -365,6 +369,9 @@
       // figure on the Social Media Manager and Lead Generator pages.
       roiSource: 'blog',
       defaultMainTab: 'review-queue',
+      // The chat beside the Blogs list, as on the Social Media Assistant's Posts. An article open in Blog Studio
+      // has its own chat beside it, remembered per article (blog-studio-modal.js).
+      tabChat: { tabs: ['review-queue'], placeholder: 'Ask for an article or a change…' },
       hideDataHub: true,
       // hubTab is retained (used by the Calendar's from/to feed + generic registry readers) even
       // though its tab is hidden; its data model still reads blog_posts.
@@ -581,27 +588,35 @@
       briefsTab: {
         label: 'Briefs',
       },
-      // Calendar tab: briefs on their due date (calendar.js _datedItems).
+      // My Content tab (assistant-my-content.js): where every picture and flyer it makes lands once
+      // approved. The chat lists the same files (src/utils/chat-my-content.ts).
+      myContentTab: { label: 'My Content' },
+      // Calendar tab: each brief received, drafted, approved and due (calendar.js _datedItems).
       calendarItems: 'briefs',
       // Rules tab: read by its art direction and its chat (visual-briefs.ts, RULE_READING_ROLES).
       rulesScope: 'designer',
       defaultMainTab: 'briefs',
     },
 
-    // Video Producer (docs/video-producer-plan.md). Its videos are ordinary POSTS (one per platform), so
-    // the Review Queue, Calendar and post insights all work as they do for the Social Media Assistant —
-    // the KPI labels below are the post-insights labels, reworded for video. The Videos tab is where a
-    // video is briefed, its storyboard checked and "Make the video" pressed (assistant-videos.js).
+    // Video Producer (docs/video-producer-studio-plan.md). A STUDIO since 2026-11-09: a finished video
+    // goes to My Content, never to a post of its own, so it has no Review Queue tab (owner, 2026-11-10)
+    // — posting is the Social Media Assistant's, and that post is approved in ITS queue. The Videos tab
+    // is where a video is briefed, its storyboard checked and "Make the video" pressed
+    // (assistant-videos.js); My Content opens on its videos (myContentTab.type).
     video_producer: {
+      // A studio's results, not post engagement — it never posts (owner, 2026-11-10). Fed by
+      // video-projects.ts ?performance=1 (routed by metricsSource in assistants.js, src/lib/video-results.ts).
+      metricsSource: 'video',
       kpis: [
-        { label: 'Engagement Rate by Reach', title: 'Watched and Liked', desc: 'Of everyone who saw your videos, how many stopped to engage with them.' },
-        { label: 'Organic Reach Growth', title: 'New Viewers', desc: 'How far your videos are spreading beyond your existing followers.' },
-        { label: 'Click-Through Rate', title: 'Did What You Asked', desc: 'How many viewers took the action your video asked for.' },
-        { label: 'Meaningful Engagement', title: 'Saves, Shares & DMs', desc: 'The signals that turn a view into a customer — weighed above likes.' },
+        { label: 'Videos Made', title: 'Finished Videos', desc: 'Every video it has finished and saved to My Content, in any shape or version.' },
+        { label: 'Made Without Changes', title: 'Right First Time', desc: 'Of the storyboards it planned and you made, how many you made exactly as planned — no scene changed, nothing re-planned, no new version after.' },
+        { label: 'Average Turnaround', title: 'Brief to Finished Video', desc: 'How long it takes from the brief to the finished file, over the last 90 days — including the time a storyboard waited for you.' },
+        // "Times Used" (in posts & articles) removed 2026-11-10 (owner): nothing about other assistants.
+        // Three KPIs, so the fourth card is hidden (_applyDashboardRegistry).
       ],
-      reviewQueue: { kind: 'posts', label: 'Review Queue' },
+      hideReviewQueue: true,
       hideDataHub: true,
-      // Goals: 'videos_published' (goal-metrics.ts), counted from its published posts.
+      // Goals: 'videos_published' (goal-metrics.ts) — labelled Videos Made, counts its finished videos.
       modules: {
         hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
@@ -611,6 +626,12 @@
       // ⚠️ If you rename this tab, change videoProducerSurfaces() in chat-orchestrator.ts too —
       // tests/video-producer-role.test.ts fails until both agree.
       videosTab: { label: 'Videos' },
+      // My Content tab (assistant-my-content.js): the library its finished videos land in, opened on
+      // Videos so they are found first. The chat lists the same files (src/utils/chat-my-content.ts).
+      myContentTab: { label: 'My Content', type: 'video' },
+      // Calendar tab: each video on the day it was started and the day it was finished (calendar.js
+      // _datedItems, video-projects.ts ?calendar=1). It posts nothing, so there are no posting days.
+      calendarItems: 'videos',
       // Rules tab: read by its storyboard planner and its chat (video-producer.ts, RULE_READING_ROLES).
       rulesScope: 'video',
       defaultMainTab: 'videos',
@@ -994,7 +1015,7 @@
       // proposes lead-generation ideas; on approval it finds, scores and files leads and tags
       // a next-best-action owner (handled here vs handed off). Backed by lead-generation.ts.
       ideasReview: {
-        label: 'Review Lead Ideas',
+        label: 'Review lead ideas',
         title: 'Lead Ideas',
         description: 'Ideas for where to find your next customers. Approve one and the {role:lead_qualifier} finds matching companies, scores them into your All leads tab, and suggests the next best action for each.',
       },
@@ -1015,8 +1036,8 @@
       // tab only projects those same rows. Approving is a decision about OUTREACH, not about
       // becoming a lead, and it belongs to the Leads tab.
       discoveryCampaigns: {
-        label: 'Find New Leads',
-        title: 'Find New Leads',
+        label: 'New search',
+        title: 'New search',
       },
       // "Searches" tab (assistant-signal-inbox.js → signal-inbox.ts). Everything that came IN
       // before it became a lead. Populated from saved searches with ONLY this assistant hired;
@@ -1036,6 +1057,8 @@
       // own account — nothing here posts anywhere (src/config/discussion-sites.ts says why). Sits
       // after Searches: both are where prospects are found, before they are leads.
       // ⚠️ The chat-orchestrator system prompt names this tab and its buttons; rename both together.
+      // Back on 2026-11-11, Reddit and LinkedIn only (paused 2026-11-10). To hide it again, comment
+      // this out AND set DISCUSSIONS_ENABLED false in src/config/discussion-sites.ts.
       discussionsTab: {
         label: 'Discussions',
       },
@@ -1057,6 +1080,8 @@
       // should see first. Stated explicitly rather than relying on _activateDefaultMainTab's
       // "first visible tab" fallback, which gave the right answer only by accident of tab order.
       defaultMainTab: 'signals',
+      // Searches, All leads and Outreach: the Lead Generator's working tabs, with one conversation across them.
+      tabChat: { tabs: ['signals', 'datahub', 'review-queue'], placeholder: 'Ask about your leads…' },
       // ⚠️ There is no `memoryPanel` key any more, and re-adding one wires up nothing — the
       // component is deleted. It declared the "Ask your memory" panel that sat above this tab's
       // table (Phase 3 §5.5): an account picker, a question box and an Ask button, answering from
@@ -1341,11 +1366,13 @@
    * @param {string} baseLabel  the role's label for this tab, from the registry
    * @param {number|null} count null/undefined leaves the bare label (the count is not known yet)
    */
-  function setTabCount(elId, baseLabel, count) {
+  // ⚠️ Owner, 2026-11-07 (one tab header everywhere): main tabs carry NO bracketed total any more. A tab shows only
+  // its amber "needs you" pill; what a tab holds is counted on its own sub-tab pills. Kept as the one writer of a
+  // tab's label so callers need not change, and so the label never keeps an old "(48)".
+  function setTabCount(elId, baseLabel, count) { // eslint-disable-line no-unused-vars
     const el = document.getElementById(elId);
     if (!el || !baseLabel) return;
-    const n = Number(count);
-    el.textContent = Number.isFinite(n) && n > 0 ? `${baseLabel} (${n})` : baseLabel;
+    el.textContent = baseLabel;
   }
 
   window.AssistantDashboardRegistry = { get, REGISTRY, setTabCount };

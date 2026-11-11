@@ -18,7 +18,7 @@
 
 import type { getDb } from '../../db/client';
 import { templateFeedback } from '../../db/schema';
-import { isEditReason, type EditReason } from '../config/template-feedback';
+import { EDIT_NOTE_MAX, isEditReason, type EditReason } from '../config/template-feedback';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -43,6 +43,8 @@ export interface RecordTemplateEditInput {
     /** The blueprint the draft was generated from. The attribution key, same as the ledger's. */
     templateVersion?: string | null;
     editReason: string;
+    /** What the reviewer typed after "Something else" (Fix pipeline #37). Human-only, never grouped. */
+    editNote?: string | null;
     before: DraftSnapshot;
     after: DraftSnapshot;
 }
@@ -142,8 +144,12 @@ export async function recordTemplateEdit(db: Db, input: RecordTemplateEditInput)
         const editReason: EditReason = input.editReason;
 
         const diffSummary = summariseEdit(input.before, input.after);
+        const editNote = typeof input.editNote === 'string' ? input.editNote.trim().slice(0, EDIT_NOTE_MAX) : '';
 
         const [row] = await db.insert(templateFeedback).values({
+            // Only when one was typed, so every other edit keeps saving on a database that has not
+            // had db/z-template-feedback-edit-note.sql yet.
+            ...(editNote ? { editNote } : {}),
             organisationId: input.organisationId,
             leadMessageId: input.leadMessageId ?? null,
             aiAssistantId: input.aiAssistantId ?? null,

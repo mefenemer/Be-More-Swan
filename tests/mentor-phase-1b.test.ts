@@ -191,7 +191,7 @@ test('a route other than the Mentor can only change its own answers', async () =
     assert.match(o, /resolveSetupFieldProposal\(db, orgId, session\.aiAssistantId, setupReq, \{ allowOthers: isMentor \}\)/);
     assert.match(o, /const setupFieldBlock = offersOwnCards \? assistantSetupFieldBlock\(assistantRow\.roleKey, session\.aiAssistantId, assistantRow\.onboardingContext\) : null;/);
     assert.match(o, /ctaCardBlock, scheduleBlock, setupFieldBlock, platformsBlock/);
-    assert.match(o, /\?\? ctaCard \?\? setupFieldCard;/, 'the blog and email routes keep it (profileCard)');
+    assert.match(o, /\?\? ctaCard \?\? setupFieldCard \?\? supportCard\)/, 'the blog and email routes keep it (profileCard)');
     const block = assistantSetupFieldBlock('blog_writer', 7, { tone_of_voice: 'Casual' })!;
     assert.match(block, /"assistantId":7/);
     assert.match(block, /tone_of_voice — "Writing voice": now "Casual"/);

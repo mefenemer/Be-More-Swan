@@ -206,10 +206,24 @@ export async function synthesizeSpeech(text: string, voice: VoiceId, fetchImpl: 
 
 /** Word timings + duration for an mp3. A failure here is NOT fatal to the voiceover — callers keep the audio. */
 export async function transcribeWords(mp3: Buffer, fetchImpl: typeof fetch = fetch): Promise<{ words: SpokenWord[]; durationS: number | null }> {
+    return transcribeAudio(mp3, { filename: 'voiceover.mp3', type: 'audio/mpeg' }, fetchImpl);
+}
+
+/**
+ * Word timings for any audio whisper takes (≤ 25 MB) — the owner's footage arrives as a 16 kHz mono
+ * WAV the browser made (src/components/footage-reader.js), ~10 MB for five minutes, so it gets longer.
+ */
+export async function transcribeAudio(
+    bytes: Buffer, file: { filename: string; type: string; timeoutMs?: number; language?: string; prompt?: string }, fetchImpl: typeof fetch = fetch,
+): Promise<{ words: SpokenWord[]; durationS: number | null }> {
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new TtsError('Voiceovers are not configured.', 'not_configured');
     const form = new FormData();
-    form.append('file', new Blob([new Uint8Array(mp3)], { type: 'audio/mpeg' }), 'voiceover.mp3');
+    form.append('file', new Blob([new Uint8Array(bytes)], { type: file.type }), file.filename);
+    // Said, not guessed: left to detect the language, whisper heard an English speaker as Welsh and
+    // got every word time wrong with it (footage review on staging, 2026-11-09).
+    if (file.language) form.append('language', file.language);
+    if (file.prompt) form.append('prompt', file.prompt.slice(0, 600));
     form.append('model', TRANSCRIBE_MODEL);
     form.append('response_format', 'verbose_json');
     form.append('timestamp_granularities[]', 'word');
@@ -217,7 +231,7 @@ export async function transcribeWords(mp3: Buffer, fetchImpl: typeof fetch = fet
         method: 'POST',
         headers: { Authorization: `Bearer ${key}` },
         body: form,
-        signal: AbortSignal.timeout(8_000),
+        signal: AbortSignal.timeout(file.timeoutMs ?? 8_000),
     });
     if (!res.ok) throw classify(res.status, await res.text().catch(() => ''));
     const payload = await res.json();

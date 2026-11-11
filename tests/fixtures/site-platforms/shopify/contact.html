@@ -1,0 +1,49 @@
+<!doctype html>
+<!-- SYNTHETIC fixture: a Dawn /pages/contact page (main-page + contact-form sections). Made-up shop. -->
+<html class="js" lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Contact – Hollow Oak Candle Co.</title>
+  <script>var Shopify = Shopify || {}; Shopify.shop = "hollow-oak-candles.myshopify.com"; Shopify.theme = {"name":"Dawn","schema_name":"Dawn","role":"main"};</script>
+</head>
+<body class="gradient">
+  <div class="shopify-section section-header">
+    <header class="header page-width">
+      <nav class="header__inline-menu"><ul class="list-menu list-menu--inline" role="list">
+        <li><a href="/" class="header__menu-item list-menu__item link">Home</a></li>
+        <li><a href="/pages/contact" class="header__menu-item list-menu__item link">Contact</a></li>
+      </ul></nav>
+      <div class="header__icons">
+        <a href="/account/login" class="header__icon header__icon--account link"><span class="visually-hidden">Log in</span></a>
+        <a href="/cart" class="header__icon header__icon--cart link" id="cart-icon-bubble"><span class="visually-hidden">Cart</span></a>
+      </div>
+    </header>
+  </div>
+  <main id="MainContent" class="content-for-layout focus-none" role="main" tabindex="-1">
+    <section id="shopify-section-template--400__main" class="shopify-section section">
+      <div class="page-width page-width--narrow">
+        <h1 class="main-page-title page-title h0">Contact</h1>
+        <div class="rte"><p>We reply within two working days. The workshop is open to visitors on Saturdays from 10am.</p></div>
+      </div>
+    </section>
+    <section id="shopify-section-template--400__form" class="shopify-section section">
+      <div class="color-background-1 gradient"><div class="contact page-width page-width--narrow">
+        <h2 class="visually-hidden">Contact form</h2>
+        <form method="post" action="/contact#ContactForm" id="ContactForm" accept-charset="UTF-8" class="isolate">
+          <input type="hidden" name="form_type" value="contact"><input type="hidden" name="utf8" value="✓">
+          <div class="field"><input class="field__input" type="text" id="ContactForm-name" name="contact[Name]" placeholder="Name"><label class="field__label" for="ContactForm-name">Name</label></div>
+          <div class="field"><input type="email" id="ContactForm-email" class="field__input" name="contact[email]" placeholder="Email" required><label class="field__label" for="ContactForm-email">Email</label></div>
+          <div class="field"><input type="tel" id="ContactForm-phone" class="field__input" name="contact[Phone number]" placeholder="Phone number"><label class="field__label" for="ContactForm-phone">Phone number</label></div>
+          <div class="field"><textarea rows="10" id="ContactForm-body" class="text-area field__input" name="contact[Comment]" placeholder="Comment"></textarea><label class="form__label field__label" for="ContactForm-body">Comment</label></div>
+          <div class="contact__button"><button type="submit" class="button">Send</button></div>
+        </form>
+      </div></div>
+    </section>
+  </main>
+  <footer class="footer">
+    <form method="post" action="/contact#ContactFooter" id="ContactFooter" accept-charset="UTF-8" class="footer__newsletter newsletter-form"><input type="hidden" name="form_type" value="customer"><input id="NewsletterForm--footer" type="email" name="contact[email]" placeholder="Email"><label class="field__label" for="NewsletterForm--footer">Email</label></form>
+    <localization-form><form method="post" action="/localization" id="FooterCountryForm" class="localization-form"><input type="hidden" name="form_type" value="localization"><label for="country-filter-input">Search</label><input type="search" id="country-filter-input"></form></localization-form>
+    <a href="tel:+441422000000">01422 000000</a>
+  </footer>
+</body>
+</html>

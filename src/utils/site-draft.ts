@@ -11,6 +11,7 @@
 //     policies either (reply times, free quotes, delivery…: src/constants/site-copy-craft.ts);
 //   · step 3's publish refuses a page that still has a [placeholder] on it.
 
+import { PLACEHOLDER } from './site-rich-text';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../constants/safety-benchmark';
 import { SPECIAL_CATEGORY_RULE } from '../constants/special-category-rule';
 import { SITE_COPY_CRAFT } from '../constants/site-copy-craft';
@@ -43,6 +44,8 @@ export interface DraftBrief {
     /** What they asked for just now, in their words (the button's text box or the chat card). */
     request: string | null;
     maxPages: number;
+    /** Placeholder pictures or videos will be added to this draft afterwards (site-draft-media.ts). */
+    mediaWanted?: boolean;
 }
 
 /** The brand kit as a site theme. A neutral default where the workspace has none. */
@@ -81,7 +84,7 @@ export function placeholdersIn(def: SiteDefinition): Array<{ pageId: string; pag
     const out: Array<{ pageId: string; pageTitle: string; sectionId: string | null; text: string }> = [];
     const scan = (value: unknown, pageId: string, pageTitle: string, sectionId: string | null) => {
         if (typeof value === 'string') {
-            for (const m of value.matchAll(/\[[^\][]{1,60}\]/g)) out.push({ pageId, pageTitle, sectionId, text: m[0] });
+            for (const m of value.matchAll(PLACEHOLDER)) out.push({ pageId, pageTitle, sectionId, text: m[0] });
         } else if (Array.isArray(value)) value.forEach((v) => scan(v, pageId, pageTitle, sectionId));
         else if (value && typeof value === 'object') Object.values(value).forEach((v) => scan(v, pageId, pageTitle, sectionId));
     };
@@ -95,9 +98,9 @@ export function placeholdersIn(def: SiteDefinition): Array<{ pageId: string; pag
 
 const SECTION_SCHEMA = `Section types and their props (use ONLY these; any other type or prop is discarded):
 - "hero": { "layout": "centered" | "split" | "banner", "eyebrow": short label or null, "headline": max ${LIMITS.headline} chars, "subheadline": max ${LIMITS.subheadline} chars, "primaryCta": { "label", "href" } or null, "secondaryCta": { "label", "href" } or null }
-- "features": { "heading", "intro", "items": [ { "title", "body" } ] }  (1–${LIMITS.features} items)
+- "features": { "heading", "intro", "items": [ { "title", "body", "link": { "label", "href" } or null } ] }  (1–${LIMITS.features} items)
 - "steps": { "heading", "intro", "items": [ { "title", "body" } ] }  (${LIMITS.stepsMin}–${LIMITS.steps} steps)
-- "text": { "heading", "body" }  (body: paragraphs separated by a blank line)
+- "text": { "heading", "body" }  (body: paragraphs separated by a blank line; may use **bold** for a few key words and "- " lines for a short bullet list)
 - "faq": { "heading", "items": [ { "q", "a" } ] }  (1–${LIMITS.faqItems})
 - "testimonials": { "heading", "items": [ { "quote", "name", "detail" } ] }
 - "cta": { "heading", "body", "button": { "label", "href" } }
@@ -143,7 +146,7 @@ export function buildDraftPrompt(brief: DraftBrief): { system: string; user: str
 - NEVER invent facts: no testimonials, reviews, customer names, prices, numbers, years, awards, guarantees or results that are not in the business details or products above. Where a page genuinely needs one, write a clear placeholder in square brackets — e.g. "[number] customers since [year]" — for the owner to fill in.
 - Answer the questions buyers ask (price, process, timescale, who it suits) in a "faq" section where you can do so from the facts above.
 - Every page gets an seo.title (max ${LIMITS.seoTitle} chars) and seo.description (max ${LIMITS.seoDescription} chars).
-- Reply with the JSON object only.
+${brief.mediaWanted ? '- Pictures and videos are added to the hero and "text" sections after you write, so never write an image yourself. Give each main page at least one "text" section as well as its hero, so there is somewhere to put one.\n' : ''}- Reply with the JSON object only.
 </rules>`,
         SITE_COPY_CRAFT,
         SECTION_SCHEMA,
@@ -176,7 +179,7 @@ export function siteFromDraftReply(raw: unknown, current: SiteDefinition, maxPag
     // Prices are the owner's alone: a draft never puts things up for sale (step 3c), nor lists them;
     // and the pictures in a gallery, or the reviews quoted, are the owner's choice, never a draft's.
     // A social feed or the latest blog posts are added when they ask (editor or chat), not slipped into a draft.
-    const DRAFT_NEVER = ['products', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts'];
+    const DRAFT_NEVER = ['products', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts', 'stays'];
     const pages = (r.pages as unknown[]).map((pg) => {
         if (!pg || typeof pg !== 'object') return pg;
         const o = pg as { sections?: unknown };

@@ -64,6 +64,7 @@ import { triggerBriefRound } from './trigger-brief-round';
 import { aiVideoTasks, basicWorkCharged } from '../config/task-weights';
 import { getTaskCosts } from './task-costs';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
+import { recordPlatformIncident } from './platform-incident';
 import {
     FLYER_PURPOSE, FLYER_SOURCE, FLYER_SOURCE_LABEL,
     GENERATION_TIMEOUT_MS, MAX_ROUNDS, OWN_SOURCE, OWN_SOURCE_LABEL, PURPOSE_SPECS, REJECT_REASON_LABELS, SOURCE_SPECS,
@@ -503,6 +504,8 @@ export async function runRound(db: Db, briefId: number, userId: number | null): 
         basicsProduced = options.some((o) => o.source === 'stock' || o.source === 'brand_card' || o.source === 'stock_video');
     } catch (err) {
         console.error('[visual-briefs] round failed:', briefId, err instanceof Error ? err.message : err);
+        // A prompt the picture service refused isn't a fault in Be More Swan.
+        if (!(err instanceof FalContentPolicyError)) await recordPlatformIncident(db, { kind: 'design_round', error: err, organisationId: brief.organisationId, assistantId: brief.aiAssistantId, role: 'brand_designer', view: 'visual-briefs', ids: { briefId } });
         notes.push('Something went wrong making options. Nothing was charged for anything that was not made — try again.');
     } finally {
         const ended = await endRound(db, briefId, { chargeAi: aiProduced, chargeVideo: videoProduced, note: notes.length ? notes.join(' ') : null, artDirection, userId });

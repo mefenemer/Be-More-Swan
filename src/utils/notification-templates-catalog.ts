@@ -195,6 +195,19 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        templateKey: 'review_link_response',
+        name: 'Review link response',
+        category: 'Assistants',
+        type: 'review_link_response',
+        title: '{{review.guest}} {{review.outcome}}',
+        message: 'A response to the post you shared for review. Open it to see what they said and decide what happens next.',
+        variables: [
+            ASSISTANT_NAME,
+            v('review.guest', 'Name the guest typed', 'Sarah'),
+            v('review.outcome', 'What they did', 'approved it'),
+        ],
+    },
+    {
         // The Mystery Shopper finished a check (src/utils/site-audit.ts executeAuditRun). Only sent
         // for a check that re-scored — an unchanged week is not news. The score is passed as a
         // string ('—' when the page couldn't be scored) so the merge never prints "null".
@@ -956,6 +969,19 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        // src/utils/library-retention.ts warnExpiringFiles — once per file, a week before deletion.
+        templateKey: 'library_files_expiring',
+        name: 'Files due to be deleted',
+        category: 'Content',
+        type: 'library_files_expiring',
+        title: '{{files.count}} in My Content will be deleted on {{files.date}}',
+        message: 'Review them in My Content and press Keep on any you want to keep for good. Kept files are never deleted.',
+        variables: [
+            { key: 'files.count', label: 'Number of files ("3 files")', sample: '3 files' },
+            { key: 'files.date', label: 'Deletion date', sample: '17 November 2026' },
+        ],
+    },
+    {
         templateKey: 'draft_horizon_expanded',
         name: 'Draft horizon extended',
         category: 'Content',
@@ -1189,7 +1215,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
-        // A change to task costs (Admin → Revenue → Task costs). Each change has its own `type`
+        // A change to task costs (Admin → Money → Task costs). Each change has its own `type`
         // (task_cost_change_<id>), the once-each mark, so this one template serves all of them.
         templateKey: 'task_cost_change',
         name: 'Task costs are changing',
@@ -1696,7 +1722,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         category: 'Compliance',
         type: 'system',
         title: 'Quarterly Bias Review Due',
-        message: 'A quarterly bias review of every active assistant\'s system prompt is due. Complete the checklist and record it in Admin → Trust → Bias Audit.',
+        message: 'A quarterly bias review of every active assistant\'s system prompt is due. Complete the checklist and record it in Admin → Security → Bias audit.',
         variables: [],
     },
     {

@@ -203,7 +203,8 @@ test('the Mentor opens on Suggestions like the other assistants, and each panel 
     const painted = tab.slice(tab.indexOf('function render()'), tab.indexOf('async function accept'));
     assert.match(painted, /results\.innerHTML = [^\n]*reviewsHtml\(\)\}\$\{customersHtml\(\)/);
     assert.match(painted, /sees\.innerHTML = [^\n]*visibilityHtml\(/);
-    assert.match(painted, /el\.innerHTML = `\s*\$\{suggestionsHtml\(d\)\}/);
+    // The standard tab header (owner, 2026-11-07): title + ⓘ, Full screen at its right, then the one list.
+    assert.match(painted, /el\.innerHTML = `\s*\$\{window\._tabHead\(\{ title: 'Suggestions'[^\n]*_tabFullBtn[^\n]*\n\s*\$\{suggestionsHtml\(d\)\}/);
     for (const moved of ['Get feedback', 'Set-up checklist', 'Recommended next', 'Commitments']) assert.ok(!tab.includes(`>${moved}<`), `${moved} isn't painted here`);
     const planTab = read('src/components/assistant-mentor-plan.js');
     assert.ok(planTab.includes('${checklistHtml(state.setup?.checklist || [])}${plansHtml()}${researchHtml()}${feedbackHtml()}'));

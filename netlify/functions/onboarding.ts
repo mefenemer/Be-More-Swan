@@ -33,6 +33,7 @@ import { normalizeMediaSources, type MediaSource } from '../../src/utils/media-s
 import { formatPlatformStrategyBrief } from '../../src/utils/platform-strategy-brief';
 import { mergeSocialHandles } from '../../src/utils/social-handles';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { ensurePillarRecords, writeDerivedPillars } from '../../src/utils/content-pillars-store';
 
 const connectionString = process.env.NETLIFY_DATABASE_URL;
 if (!connectionString) throw new Error('CRITICAL: NETLIFY_DATABASE_URL is missing.');
@@ -398,6 +399,17 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
         };
       }
       throw insertErr; // Re-throw unexpected errors
+    }
+
+    // 6a. CONTENT PILLARS AS RECORDS (src/utils/content-pillars-store.ts). The wizard asks in one box
+    // for speed; the pillars become one row each (the shared splitter), and the context's
+    // content_pillars becomes the derived list of names. Non-fatal: the profile's first load seeds
+    // them the same way if this fails, and drafting reads the text until then.
+    try {
+      const rows = await ensurePillarRecords(db, orgId, newAssistant.id, newAssistant.onboardingContext);
+      if (rows && rows.length) await writeDerivedPillars(db, orgId, newAssistant.id, rows);
+    } catch (pillarErr) {
+      console.warn('[onboarding] pillar records not created:', (pillarErr as Error)?.message);
     }
 
     // 6b. MATERIALISE ONBOARDING GUARDRAILS AS CONTENT RULES

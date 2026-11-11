@@ -1,6 +1,6 @@
 // netlify/functions/admin-partners-chat.ts
 //
-// Admin → Revenue → Partners ▸ Partner Ops chat (docs/affiliate-partner-programme-plan.md §4.5).
+// Admin → Money → Partners ▸ Partner Ops chat (docs/affiliate-partner-programme-plan.md §4.5).
 // The chat path for everything the Partners screen does, plus the questions the screen can't answer
 // at a glance: top referrers, a pre-payout audit, who to invite. GUI and chat are one feature
 // (memory assistant-gui-chat-parity).
@@ -81,7 +81,7 @@ export const PARTNER_OPS_TOOLS: Anthropic.Beta.BetaTool[] = [
     tool('propose_resend_invite', "Offer a card emailing an approved partner who has no account yet a fresh private link to create one (e.g. they lost the first, or it expired).", { partnerId: { type: 'integer' } }),
 ];
 
-const SYSTEM = `You are Partner Ops, the assistant on Be More Swan's admin screen Admin → Revenue → Partners. You help a Be More Swan admin run the affiliate partner programme: people who actively promote Be More Swan and earn CASH commission. (Customers who simply refer a friend earn tokens instead — they are not partners and you have no tools for them.)
+const SYSTEM = `You are Partner Ops, the assistant on Be More Swan's admin screen Admin → Money → Partners. You help a Be More Swan admin run the affiliate partner programme: people who actively promote Be More Swan and earn CASH commission. (Customers who simply refer a friend earn tokens instead — they are not partners and you have no tools for them.)
 
 How the programme works:
 - Commission rates are dated periods. A partner's customer gets the rate in force when they FIRST PAY and keeps it for the period's length (months of their payments, or lifetime).

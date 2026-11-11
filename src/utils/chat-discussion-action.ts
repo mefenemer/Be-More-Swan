@@ -15,7 +15,7 @@
 
 import type { getDb } from '../../db/client';
 import {
-    MAX_OWN_FORUMS, MAX_TOPICS, normaliseTopics, sitesFromChat, sourceInfo, type DiscussionSource,
+    DISCUSSIONS_ENABLED, MAX_OWN_FORUMS, MAX_TOPICS, normaliseTopics, sitesFromChat, sourceInfo, type DiscussionSource,
 } from '../config/discussion-sites';
 import { discussionView, loadDiscussion, loadWatch, watchView } from './discussions';
 
@@ -82,6 +82,9 @@ export interface DiscussionActionCard {
 export async function resolveDiscussionActionProposal(
     db: Db, organisationId: number, assistantId: number, req: DiscussionActionRequest,
 ): Promise<DiscussionActionCard | null> {
+    // Paused (DISCUSSIONS_ENABLED): a stray card is still recognised here so the orchestrator drops it
+    // rather than rendering it raw.
+    if (!DISCUSSIONS_ENABLED) return null;
     try {
         const base = { type: DISCUSSION_ACTION_PROPOSAL_TYPE, action: req.action, assistantId } as const;
 
@@ -106,7 +109,9 @@ export async function resolveDiscussionActionProposal(
             const sites = req.sites ?? w.sites;
             const enabled = req.enabled ?? w.enabled;
             const bad = req.rejectedSites?.[0];
-            const blocked = bad ? `“${bad}” isn’t a forum address I can watch. Ask again with the forum’s web address, like contractortalk.com.`
+            const blocked = bad ? (MAX_OWN_FORUMS > 0
+                    ? `“${bad}” isn’t a forum address I can watch. Ask again with the forum’s web address, like contractortalk.com.`
+                    : `I can only watch Reddit and LinkedIn, so I can’t add “${bad}”. If you’d like it added, ask me here in chat and I’ll send the request to the Be More Swan team.`)
                 : req.tooManyForums ? `You can watch up to ${MAX_OWN_FORUMS} forums of your own — say which to drop.`
                 : !topics.length ? `Give at least one topic (up to ${MAX_TOPICS}).`
                 : !sites.length ? 'Choose at least one site to watch.'

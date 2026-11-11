@@ -7,6 +7,12 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    /* Not left to the Tailwind CDN: these decide which state shows. */
+    .hidden { display: none; }
+    .btn-primary { background: #d6006b; color: #fff; border: 0; border-radius: 8px; padding: 14px 28px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 0.5rem; }
+    .btn-primary:hover { background: #b0005a; }
+    .btn-primary:focus-visible { outline: 2px solid #ff007f; outline-offset: 2px; }
+    .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
   </style>
 </head>
 <body class="min-h-screen bg-gray-50 flex items-center justify-center px-4">
@@ -20,39 +26,116 @@
     <!-- Loading state -->
     <div id="state-loading" class="bg-white rounded-2xl border border-gray-200 p-8 text-center shadow-sm">
       <span class="animate-spin mx-auto mb-4" role="status" aria-label="Loading" style="display:inline-block;box-sizing:border-box;width:32px;height:32px;border-radius:9999px;border:3px solid #eae4d7;border-top-color:#ff007f;flex-shrink:0;"></span>
-      <p class="text-gray-500 text-sm">Accepting your invitation…</p>
+      <p id="loading-text" class="text-gray-500 text-sm">Opening your invitation…</p>
+    </div>
+
+    <!-- Confirm state. Opening this page never accepts: email scanners open links and run this script
+         too, and one that accepted here would join in the person's place and spend their link. Only
+         the click sends the POST. -->
+    <div id="state-confirm" class="hidden bg-white rounded-2xl border border-gray-200 p-8 text-center shadow-sm">
+      <h1 id="confirm-title" class="text-lg font-bold text-gray-900 mb-2">Join your team on Be More Swan</h1>
+      <p id="confirm-detail" class="hidden text-gray-500 text-sm mb-4"></p>
+      <button type="button" id="join-btn" class="btn-primary">Join workspace</button>
+    </div>
+
+    <!-- Opened again after joining, and not logged in -->
+    <div id="state-joined" class="hidden bg-white rounded-2xl border border-gray-200 p-8 text-center shadow-sm">
+      <h1 id="joined-title" class="text-lg font-bold text-gray-900 mb-2">You've already joined this workspace</h1>
+      <p class="text-gray-500 text-sm mb-4">Log in to open it. We'll email you a link.</p>
+      <a href="/login.html" class="btn-primary" style="display:inline-block;text-decoration:none">Log in</a>
     </div>
 
     <!-- Error state -->
     <div id="state-error" class="hidden bg-white rounded-2xl border border-red-200 p-8 text-center shadow-sm">
       <div class="text-4xl mb-4">❌</div>
-      <h1 class="text-lg font-bold text-gray-900 mb-2">Something went wrong</h1>
+      <h1 id="error-title" class="text-lg font-bold text-gray-900 mb-2">Something went wrong</h1>
       <p id="error-message" class="text-gray-500 text-sm">Please ask your admin to resend the invite.</p>
     </div>
   </div>
 
   <script>
-    (async function () {
-      const params   = new URLSearchParams(window.location.search);
-      const token    = params.get('token');
-      const orgId    = params.get('orgId');
-      const role     = params.get('role') || 'member';
+    const FN = '/.netlify/functions/accept-invite';
+    const STATES = ['state-loading', 'state-confirm', 'state-joined', 'state-error'].map((id) => document.getElementById(id));
+    const show = (id) => STATES.forEach((el) => el.classList.toggle('hidden', el.id !== id));
+    const joinBtn = document.getElementById('join-btn');
 
-      if (!token || !orgId) {
+    function showError(msg, expired) {
+      document.getElementById('error-title').textContent = expired ? 'This invite has expired' : 'Something went wrong';
+      document.getElementById('error-message').textContent = msg;
+      show('state-error');
+    }
+
+    function showJoined(invite) {
+      if (invite.orgName) document.getElementById('joined-title').textContent = `You've already joined ${invite.orgName}`;
+      show('state-joined');
+    }
+
+    function showConfirm(invite) {
+      if (invite && invite.orgName) document.getElementById('confirm-title').textContent = `Join ${invite.orgName}`;
+      if (invite && invite.email) {
+        const detail = document.getElementById('confirm-detail');
+        detail.textContent = `You'll join as a ${invite.role}, using ${invite.email}.`;
+        detail.classList.remove('hidden');
+      }
+      show('state-confirm');
+      joinBtn.focus();
+    }
+
+    (async function () {
+      const params = new URLSearchParams(window.location.search);
+      const link = {
+        orgId: params.get('orgId'),
+        role:  params.get('role') || 'member',
+        sig:   params.get('sig') || '',
+      };
+      // A link names its invite and expiry. One emailed before 2026-11-07 names a token.
+      for (const name of ['invite', 'exp', 'token']) {
+        if (params.get(name)) link[name] = params.get(name);
+      }
+
+      if ((!link.invite && !link.token) || !link.orgId) {
         showError('Invalid invite link. Please ask your workspace admin to resend the invite.');
         return;
       }
 
-      // Redirect to the serverless function which sets cookie + redirects to workspace
-      // The function handles the full logic (expiry check, user activation, org join).
-      window.location.href = `/.netlify/functions/accept-invite?token=${encodeURIComponent(token)}&orgId=${encodeURIComponent(orgId)}&role=${encodeURIComponent(role)}`;
-    })();
+      joinBtn.addEventListener('click', async () => {
+        joinBtn.disabled = true;
+        document.getElementById('loading-text').textContent = 'Accepting your invitation…';
+        show('state-loading');
+        try {
+          const response = await fetch(FN, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(link),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (response.ok && data.alreadyJoined && !data.redirect) {
+            showJoined(data);
+          } else if (response.ok) {
+            window.location.href = data.redirect || '/workspace.html';
+          } else {
+            showError(data.error || 'Please ask your admin to resend the invite.', data.expired);
+          }
+        } catch (error) {
+          joinBtn.disabled = false;
+          showConfirm();
+        }
+      });
 
-    function showError(msg) {
-      document.getElementById('state-loading').classList.add('hidden');
-      document.getElementById('state-error').classList.remove('hidden');
-      document.getElementById('error-message').textContent = msg;
-    }
+      // Say what the invite is. This only reads.
+      try {
+        const response = await fetch(`${FN}?${new URLSearchParams(link)}`);
+        const data = await response.json().catch(() => ({}));
+        if (response.ok && data.alreadyJoined) {
+          if (data.redirect) window.location.href = data.redirect;
+          else showJoined(data);
+        } else if (response.ok) showConfirm(data);
+        else showError(data.error || 'Please ask your admin to resend the invite.', data.expired);
+      } catch (error) {
+        // Nothing has been spent, so the button can still work.
+        showConfirm();
+      }
+    })();
   </script>
 </body>
 </html>

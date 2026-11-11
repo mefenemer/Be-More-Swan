@@ -7,7 +7,7 @@
 // pricing page sells measured almost none of the work. This module meters that work.
 //
 // One allowance (from the 2026-12 cutover, flag 'unified_task_metering'): a task is one finished
-// piece of work, weighted by the costs in Admin → Revenue → Task costs (src/utils/task-costs.ts).
+// piece of work, weighted by the costs in Admin → Money → Task costs (src/utils/task-costs.ts).
 // Chat and editing helpers cost no tasks (src/utils/fair-use.ts). AI media credits and X credits
 // are retired; their balances became bonus tasks (task_bonus), which never expire and are spent
 // only once the monthly allowance is used up.

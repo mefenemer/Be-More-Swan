@@ -7,7 +7,7 @@
  * tagline/description/keyFeatures/integrations/video for 7 of the ~20 catalog roles. That file was a
  * second source of truth: master_assistants already held name/description/icons and the catalogue
  * card rendered from it, so the card and the detail page had silently drifted apart. Copy now lives
- * in master_assistants (db/assistant-content.sql) and is admin-edited in Master Data → Assistants.
+ * in master_assistants (db/assistant-content.sql) and is admin-edited in Assistants → Assistants.
  *
  * Source: GET /.netlify/functions/master-assistants (the same call the catalogue pages already make).
  *

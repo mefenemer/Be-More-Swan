@@ -4,6 +4,7 @@ import { notStillGenerating } from '../../src/utils/blog-still-generating';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, assistantRecords, blogPosts, campaignDecisions, campaignOrders, campaigns, contentGenerationJobs, goals, masterAssistants, newsletterIssues, scheduledPosts, siteAuditFixes, siteAuditRuns, siteAudits, userProfiles, visualBriefOptions, visualBriefs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { filterToAccessible } from '../../src/utils/assistant-access';
 import { RETENTION_DELETED_SQL_PATH } from '../../src/config/lead-retention';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { countRoiActivityByAssistant } from '../../src/utils/roi-activity';
@@ -30,7 +31,7 @@ export default withLambda(async (event) => {
 
     try {
         // RLS-enforced: tenant-data queries run under withTenant (app_user + app.current_org).
-        const assistants = await withTenant(orgId, (tx) => tx.select({
+        const allAssistants = await withTenant(orgId, (tx) => tx.select({
             id: aiAssistants.id,
             // The user's chosen name for THEIR assistant (e.g. "Sam") — stable, never follows a rename.
             name: aiAssistants.name,
@@ -55,6 +56,8 @@ export default withLambda(async (event) => {
         }).from(aiAssistants)
             .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
             .where(eq(aiAssistants.organisationId, orgId)));
+        // A teammate given some assistants sees only those (src/utils/assistant-access.ts).
+        const assistants = filterToAccessible(ctx.assistantAccess, allAssistants);
 
         const assistantIds = assistants.map(a => a.id);
 

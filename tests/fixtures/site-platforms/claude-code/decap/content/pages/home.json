@@ -1,0 +1,9 @@
+{
+  "title": "Fresh bread before the town wakes up",
+  "intro": "Bramble Street Bakery bakes sourdough, rye and cardamom buns every morning from four. Order by noon for collection the next day, or come early and take your chances.",
+  "hero_image": "/images/uploads/loaves.jpg",
+  "hours": [
+    { "day": "Tuesday to Friday", "time": "7am to 2pm" },
+    { "day": "Saturday", "time": "7am to 1pm" }
+  ]
+}

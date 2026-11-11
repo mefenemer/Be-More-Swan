@@ -51,7 +51,9 @@ export function briefFromPost(post: { caption: string | null; platform: string }
     return {
         purpose: 'promo',
         message: `Make a short video version of this post, saying the same thing: ${caption}`.slice(0, 1200),
-        platforms: [platform in VIDEO_DESTINATIONS ? platform : 'instagram'],
+        // A shape, not platforms (studio plan D-S2): vertical, which every video-taking platform accepts.
+        // When it's Ready it goes back onto this post (video-post-media.ts attachVideoToSourcePost).
+        shape: '9:16',
     };
 }
 

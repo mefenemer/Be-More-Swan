@@ -1,7 +1,7 @@
 // tests/ai-usage-coverage.test.ts
 // Every AI call the product makes must land in ai_usage_log, priced, exactly once.
 //
-// WHY THIS EXISTS. ai_usage_log feeds the COGS dashboard (Admin → Revenue → COGS), the only place
+// WHY THIS EXISTS. ai_usage_log feeds the COGS dashboard (Admin → Reports → Costs (COGS)), the only place
 // the real cost of a £29 workspace can be read. On 2026-10-13 it was missing:
 //   • 14 callers of the AI gateway — its logging was opt-in, on the belief that callers logged for
 //     themselves, and none of the gateway's callers did;
@@ -92,7 +92,8 @@ check('no file both calls the gateway and logs for itself (that double-counts)',
 
 check('every model the code calls has a list price', () => {
     const models = new Set<string>();
-    for (const f of sources) for (const m of read(f).matchAll(/'(claude-[a-z0-9.-]+)'/g)) models.add(m[1]);
+    // site-builders/ names website platforms ('claude-code' = sites built with Claude Code), not models.
+    for (const f of sources.filter((x) => !x.includes('site-builders/'))) for (const m of read(f).matchAll(/'(claude-[a-z0-9.-]+)'/g)) models.add(m[1]);
     const unpriced = [...models].filter((m) => !LIST_PRICE_PER_1K[m]);
     assert.deepStrictEqual(unpriced, [], `add these to LIST_PRICE_PER_1K in src/utils/ai-usage.ts, or every call to them records $0: ${unpriced.join(', ')}`);
 });

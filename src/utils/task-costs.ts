@@ -1,6 +1,6 @@
 // src/utils/task-costs.ts — what work costs in tasks, read from the database.
 //
-// Super admins set these in Admin → Revenue → Task costs (netlify/functions/admin-task-costs.ts). A
+// Super admins set these in Admin → Money → Task costs (netlify/functions/admin-task-costs.ts). A
 // cost is never overwritten: every change has a date, and the cost now is the newest item in force
 // (db/z-task-costs.sql). So a change announced for next month starts by itself on its date.
 //

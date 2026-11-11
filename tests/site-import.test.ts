@@ -15,9 +15,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fullSizeImageUrl, readImportPage, statesPrice } from '../src/utils/site-extract';
 import {
-    assembleImport, buildImportPrompt, cleanImportUrl, draftWordsAllFromSource, numberBlocks, pickImportPages, picturesInPlan,
-    readImportPlan, runImport, thinMessage, type ImportDeps, type ReadPage,
+    assembleImport, buildImportPrompt, choosePages, cleanImportUrl, draftWordsAllFromSource, importedProducts, numberBlocks, pickImportPages, picturesInPlan,
+    productFieldsFromImport, readImportPlan, runImport, SKIP_PATH, thinMessage, type ImportDeps, type ReadPage,
 } from '../src/utils/site-import';
+import type { SiteLink } from '../src/utils/site-extract';
+import { ADAPTERS } from '../src/utils/site-builders';
 import { starterSite, themeFromBrandKit } from '../src/utils/site-draft';
 import { parseRobots, robotsAllowsPath } from '../src/lib/robots';
 import { normaliseSiteDefinition } from '../src/utils/site-definition';
@@ -303,6 +305,21 @@ async function main() {
         assert.deepStrictEqual(r.report.notImported.map((l) => l.title), ['Services', 'About us']);
     });
 
+    await check('a 13-page menu (Restorative Futures, 2026-11-08) is read in full, nothing left out', async () => {
+        const slugs = ['about-us', 'testimonials', 'faqs', 'our-courses', 'building-relationships', 'conferencing-skills', 'online-reflection',
+            'community-panel', 'why-this-training-matters', 'booking-pricing', 'blogs', 'contact'];
+        const body = (h: string) => `<h1>${h}</h1><p>${`We deliver restorative practice training for schools, councils and youth services across the UK. `.repeat(3)}</p>`;
+        const html = (h: string) => `<html><body><header><nav><a href="/">Home</a>${slugs.map((s) => `<a href="/${s}">${s}</a>`).join('')}</nav></header><main>${body(h)}</main></body></html>`;
+        const site = 'https://rf.example';
+        const pages = Object.fromEntries([[`${site}/`, html('Home')], ...slugs.map((s) => [`${site}/${s}`, html(s)])]);
+        const r = await runImport({ url: `${site}/`, pictures: 'skip', current: current(), maxPages: 100 }, deps({ plan: null, pages }));
+        assert.ok(r.ok, r.ok ? '' : r.message);
+        if (!r.ok) return;
+        assert.strictEqual(r.report.pages.filter((p) => p.read).length, 13);
+        assert.deepStrictEqual(r.report.notImported, []);
+        assert.strictEqual(r.definition.pages.length, 13);
+    });
+
     await check('a JavaScript-only site: told plainly, no model call, no pictures, no draft', async () => {
         const d = deps({ pages: { 'https://spa.example/': read('tests/fixtures/site-pages/spa-shell.html') } });
         const r = await runImport({ url: 'https://spa.example/', pictures: 'copy', current: current(), maxPages: 5 }, d);
@@ -419,6 +436,78 @@ async function main() {
         assert.ok(sql.includes('CREATE TABLE IF NOT EXISTS site_imports') && sql.includes('CREATE UNIQUE INDEX IF NOT EXISTS site_imports_site_uq ON site_imports (site_id)'));
         assert.ok(read('db/schema.ts').includes('export const siteImports = pgTable("site_imports"'));
         assert.ok(read('src/utils/workspace-export.ts').includes('websiteImports: s.siteImports'), 'in their data export');
+    });
+
+    console.log('\nShop products and catalogue pages (any platform)');
+
+    await check('their own pages before catalogue pages within the cap, returned in menu order', () => {
+        const L = (text: string, catalogue = false): SiteLink => (catalogue ? { text, href: `${SITE}/${text}`, catalogue: true } : { text, href: `${SITE}/${text}` });
+        const menu = [L('shop', true), L('mugs', true), L('about'), L('bowls', true), L('contact')];
+        assert.deepStrictEqual(choosePages(menu, 3).map((l) => l.text), ['shop', 'about', 'contact']);
+        assert.deepStrictEqual(choosePages(menu, 10).map((l) => l.text), ['shop', 'mugs', 'about', 'bowls', 'contact']);
+        const plain = [L('a'), L('b'), L('c')];
+        assert.deepStrictEqual(choosePages(plain, 2), plain.slice(0, 2), 'no catalogue marks: the first n, as before');
+    });
+
+    await check('schema.org Product data on any page becomes products, one per name; never words on the page', () => {
+        const html = `<html><head><script type="application/ld+json">{"@context":"https://schema.org","@type":"ItemList","itemListElement":[{"@type":"ListItem","item":{"@type":"Product","name":"Oak chopping board","image":["/img/board.jpg"],"url":"/oak-board","offers":{"@type":"Offer","price":"45.00","priceCurrency":"GBP"}}},{"@type":"ListItem","item":{"@type":"Product","name":"Walnut spoon","offers":{"@type":"AggregateOffer","lowPrice":12,"priceCurrency":"EUR"}}},{"@type":"ListItem","item":{"@type":"Product","name":"Oak chopping board"}}]}</script></head><body><main><h1>Woodwork</h1><p>Turned and carved in our barn.</p></main></body></html>`;
+        const p = readImportPage(html, `${SITE}/shop`);
+        assert.deepStrictEqual(p.products, [
+            { name: 'Oak chopping board', price: '£45.00', href: `${SITE}/oak-board`, image: `${SITE}/img/board.jpg` },
+            { name: 'Walnut spoon', price: 'From €12.00', href: null, image: null },
+        ]);
+        assert.ok(!p.blocks.some((b) => 'text' in b && b.text.includes('£')));
+        assert.strictEqual(readImportPage(fixture('sqsp-home'), `${SITE}/`).products, undefined, 'no products: no field');
+    });
+
+    await check('an imported product as Business Information fields: a plain amount is structured, anything else kept in its words', () => {
+        assert.deepStrictEqual(productFieldsFromImport({ name: 'Oak board', price: '£45.00', href: `${SITE}/oak`, image: null }), { name: 'Oak board', url: `${SITE}/oak`, priceType: 'fixed', priceAmount: 4500, priceCurrency: 'GBP', price: '£45' });
+        const eur = productFieldsFromImport({ name: 'Spoon', price: 'From €1,200.50', href: null, image: null });
+        assert.strictEqual(eur.priceType, 'from');
+        assert.strictEqual(eur.priceAmount, 120050);
+        assert.strictEqual(eur.priceCurrency, 'EUR');
+        assert.deepStrictEqual(productFieldsFromImport({ name: 'Bespoke table', price: 'Ask for a quote', href: 'javascript:x', image: null }), { name: 'Bespoke table', url: null, priceType: 'text', priceAmount: null, priceCurrency: 'GBP', price: 'Ask for a quote' });
+        assert.strictEqual(productFieldsFromImport({ name: 'Gift card', price: null, href: null, image: null }).priceType, null);
+    });
+
+    await check('the report\'s products carry the library picture when the import already copied it', () => {
+        const page = readImportPage('<html><body><main><h1>Shop</h1><img src="https://x.example/a.jpg" alt="A"></main></body></html>', 'https://x.example/');
+        page.products = [{ name: 'A', price: '£1.00', href: null, image: 'https://x.example/a.jpg' }, { name: 'B', price: null, href: null, image: 'https://x.example/b.jpg' }, { name: 'a', price: '£2.00', href: null, image: null }];
+        const pages: ReadPage[] = [{ url: page.url, menuLabel: null, page }];
+        const { blocks } = numberBlocks(pages);
+        const n = blocks.find((b) => b.block.kind === 'image')!.n;
+        assert.deepStrictEqual(importedProducts(pages, blocks, new Map([[n, 55]])).map((x) => [x.name, x.imageAssetId]), [['A', 55], ['B', null]]);
+    });
+
+    await check('Magento\'s shop machinery is never a page to read', () => {
+        for (const path of ['/customer/account/login/', '/wishlist/', '/catalogsearch/advanced/', '/sales/guest/form/', '/search/term/popular/', '/catalog/product_compare/', '/privacy-policy-cookie-restriction-mode']) assert.ok(SKIP_PATH.test(path), path);
+        for (const path of ['/about-us', '/customer-service', '/delivery-returns', '/ceramics.html']) assert.ok(!SKIP_PATH.test(path), path);
+    });
+
+    await check('import_products: one server action for the Website tab and the chat; prices only into Business Information', () => {
+        const fn = sites.slice(sites.indexOf("if (action === 'import_products') {"), sites.indexOf("if (action === 'import_discard') {"));
+        assert.ok(fn.includes('addImportedProducts(db, site, { names: body.names'));
+        const add = store.slice(store.indexOf('export async function addImportedProducts'));
+        assert.ok(add.includes('db.insert(orgProducts)') && add.includes('productFieldsFromImport(p)') && add.includes('taken.has('), 'inserted, never overwriting a product of that name');
+        assert.ok(add.includes("row.pictures === 'copy'") && add.includes('saveImportedPicture('), 'pictures only if they chose to copy them, through the fence');
+        assert.ok(add.includes('inArray(contentAssets.id, ids)') && add.includes('eq(contentAssets.organisationId, orgId)'), 'a picture id is checked as this workspace\'s');
+        assert.ok(editor.includes("action: 'import_products', assistantId: state.assistantId, names") && editor.includes('data-site-import-product='));
+        assert.ok(reg.includes("register('site_import_products', renderSiteImportProductsCard)") && reg.includes("new CustomEvent('site:importProducts'"));
+        assert.ok(chat.includes("container.addEventListener('site:importProducts', onSiteImportProducts)") && chat.includes("container.removeEventListener('site:importProducts', onSiteImportProducts)") && chat.includes("sitePost({ action: 'import_products', assistantId })"));
+        assert.ok(orch.includes('"type": "site_import_products"') && store.includes('a site_import_products card adds them'));
+    });
+
+    await check('an adapter\'s noise drops a stand-alone button too, and its full-size rule applies to the logo', () => {
+        const a = ADAPTERS.find((x) => x.key === 'carrd')! as { detect: unknown; noise?: unknown; fullSizeImage?: unknown };
+        const [d, nz, fs] = [a.detect, a.noise, a.fullSizeImage];
+        a.detect = () => true;
+        a.noise = /^next slide$/i;
+        a.fullSizeImage = (src: string) => src.replace('/small/', '/big/');
+        try {
+            const p = readImportPage('<html><body><header><img class="logo" src="https://x.example/small/logo.png" alt="Logo"></header><main><h1>Hi</h1><button>Next slide</button><a href="/book">Book now</a></main></body></html>', 'https://x.example/');
+            assert.deepStrictEqual(p.blocks.filter((b) => b.kind === 'button').map((b) => ('text' in b ? b.text : '')), ['Book now']);
+            assert.strictEqual(p.logo?.src, 'https://x.example/big/logo.png');
+        } finally { a.detect = d; a.noise = nz; a.fullSizeImage = fs; }
     });
 
     console.log(`\n${passed} of ${total} passed.\n`);

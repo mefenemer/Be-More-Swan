@@ -131,7 +131,10 @@ check('the endpoint gates before planning, moderates, holds before building, and
     const vp = read('src/utils/video-producer.ts');
     assert.ok(vp.includes("if (!p || p.status !== 'planning') return;") && vp.includes("if (!p || p.status !== 'building' || !p.storyboard) return;"), 'a duplicate wake must not plan or build twice');
     assert.ok(vp.includes("creditHold: 0, note: 'This took too long"), 'the sweep zeroes the hold in the claiming update');
-    assert.ok(vp.includes("status: 'pending_approval'"), 'a finished video goes to review, never straight out');
+    // A studio (docs/video-producer-studio-plan.md): a finished video is rendered to My Content, never a post.
+    const buildFn = vp.slice(vp.indexOf('export async function buildProject'), vp.indexOf('export const STUCK_AFTER_MS'));
+    assert.ok(!buildFn.includes('insert(scheduledPosts)'), 'the build never creates a post');
+    assert.ok(buildFn.includes("status: 'rendering'") && buildFn.includes('wakeRenderWorker('), 'it renders the project');
 });
 
 check('the SQL file and the Drizzle mirror agree on the table', () => {
@@ -143,10 +146,11 @@ check('the SQL file and the Drizzle mirror agree on the table', () => {
     assert.ok(sql.includes("CHECK (status IN ('draft', 'planning', 'planned', 'building', 'built', 'failed', 'cancelled'))"));
 });
 
-check('stock is searched portrait first (9:16 video), any shape only when portrait finds nothing', () => {
+check('stock is searched in the video\'s shape first (portrait for 9:16), any shape only when that finds nothing', () => {
     const vp = readFileSync(join(root, 'src/utils/video-producer.ts'), 'utf8');
-    assert.match(vp, /searchUniqueVideos\(db, orgId, context, \{ \.\.\.opts, orientation: 'portrait' \}\)\)\.candidates\)\s*\?\? longEnough\(\(await searchUniqueVideos\(db, orgId, context, opts\)\)\.candidates\)/);
-    assert.match(vp, /searchUniqueImages\(db, orgId, context, \{ \.\.\.opts, orientation: 'portrait' \}\)/);
+    assert.match(vp, /const orientation = shapeOrientation\(shape\);/);
+    assert.match(vp, /searchUniqueVideos\(db, orgId, context, \{ \.\.\.opts, orientation \}\)\)\.candidates\)\s*\?\? longEnough\(\(await searchUniqueVideos\(db, orgId, context, opts\)\)\.candidates\)/);
+    assert.match(vp, /searchUniqueImages\(db, orgId, context, \{ \.\.\.opts, orientation \}\)/);
     const px = readFileSync(join(root, 'src/utils/pexels.ts'), 'utf8');
     assert.match(px, /\.\.\.\(orientation \? \{ orientation \} : \{\}\)/, 'sent to Pexels');
     assert.match(px, /\$\{orientation \? `\|\$\{orientation\}` : ''\}/, 'part of the cache key');
@@ -198,7 +202,9 @@ check('a script more than a fifth over its length is planned once more, told how
     assert.deepStrictEqual(scriptOverBudget(sb(100) as any, b30), { words: 100, budget: 75 });
     assert.strictEqual(scriptOverBudget(sb(100) as any, { ...b30, voiceover: false }), null, 'no voiceover, no budget');
     const vp = readFileSync(join(root, 'src/utils/video-producer.ts'), 'utf8');
+    // Every plan gets the retry, a words-only rewrite included (a rewrite made a 15 s video 26 s, 2026-11-10).
     assert.match(vp, /const over = scriptOverBudget\(storyboard, brief\);\s*if \(over\) \{/);
+    assert.match(vp, /const budgetLine = mode && brief\.voiceover \?/, 'a rewrite is told the word budget up front');
     assert.match(vp, /\(scriptOverBudget\(again\.storyboard, brief\)\?\.words \?\? 0\) < over\.words/, 'only a shorter retry replaces it');
 });
 

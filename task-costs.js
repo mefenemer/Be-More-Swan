@@ -1,4 +1,4 @@
-// task-costs.js — the task costs on the page, live from Admin → Revenue → Task costs.
+// task-costs.js — the task costs on the page, live from Admin → Money → Task costs.
 //
 //   <span data-task-cost="ai_music">20 tasks</span>     filled in when the figures arrive
 //   window.TaskCosts.label('site_audit', '1 task')      for text a script writes

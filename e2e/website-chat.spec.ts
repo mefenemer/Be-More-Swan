@@ -44,7 +44,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewp
   <link rel="stylesheet" href="/style.css"></head><body class="bg-gray-50">
   <div class="page-wide p-4"><div id="site-editor-host" data-site-host="website"></div></div>
   <script src="/src/components/scroll-lock.js"></script><script src="/dialogs.js"></script>
-  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/chat-pane.js"></script>
+  <script src="/src/components/disruptive-ui-registry.js"></script><script src="/src/components/chat-session.js"></script><script src="/src/components/tab-head.js"></script><script src="/src/components/chat-pane.js"></script>
   <script src="/src/components/media-picker.js"></script>
   <script src="/src/components/assistant-site-editor.js"></script>
   <script>AssistantSiteEditor.init({ assistantId: 7, assistantName: 'Wren' }); AssistantSiteEditor.activate('website');</script>
@@ -73,11 +73,33 @@ test('Set up, Design, Pages and Publish are sub tabs of Website, with the chat b
         await expect(input).toBeVisible();
         await expect(page.locator('iframe[data-site-preview]')).toBeHidden();
     }
-    // The same grey track of pills as the Briefs tab.
-    await expect(page.locator('[role="tablist"][aria-label="Your website"]')).toHaveClass(/bg-gray-100/);
+    // The same grey track of pills as every tab, first in the tab's card (owner, 2026-11-07).
+    await expect(page.locator('[role="tablist"][aria-label="Your website"]')).toHaveClass(/stage-pills/);
+    await expect(page.locator('[data-sb-work].tab-card [role="tablist"][aria-label="Your website"]')).toHaveCount(1);
     await page.screenshot({ path: 'test-results/website-subtabs.png' });
     await page.locator('#site-subtab-chat').click();
     await expect(page.locator('iframe[data-site-preview]')).toBeVisible();
+    expect(pageErrors).toEqual([]);
+});
+
+test('the chat lines up with the top of the tab header and the bottom of its card', async ({ page, pageErrors }) => {
+    await page.setViewportSize({ width: 1500, height: 900 });
+    await page.goto('/e2e-website-chat.html');
+    await expect(page.locator('iframe[data-site-preview]')).toBeVisible();
+    const work = (await page.locator('[data-sb-work]').boundingBox())!;
+    const chat = (await page.locator('[data-chatpane]').boundingBox())!;
+    expect(Math.abs(work.y + work.height - (chat.y + chat.height))).toBeLessThanOrEqual(1);
+    // The whole tab fits the window: no scrolling to reach the bottom of the preview or the chat.
+    expect(work.y + work.height).toBeLessThanOrEqual(900);
+    // Full screen is in the tab's header, at the right of the work beside the chat, as on every assistant (2026-11-07).
+    const full = (await page.locator('[data-site-head] [data-site-editor-full]').boundingBox())!;
+    const headRight = (await page.locator('[data-site-head] .tab-head-right').boundingBox())!;
+    expect(full.x + full.width).toBeLessThanOrEqual(chat.x);
+    expect(headRight.x + headRight.width).toBeGreaterThan(chat.x - 40);
+    // …and the chat's top lines up with that header.
+    const head = (await page.locator('[data-site-head] .tab-head').boundingBox())!;
+    expect(Math.abs(head.y - chat.y)).toBeLessThanOrEqual(2);
+    await page.screenshot({ path: 'test-results/website-aligned.png' });
     expect(pageErrors).toEqual([]);
 });
 
@@ -95,10 +117,10 @@ test('preview on the left, the chat docked on the right and open first', async (
     await expect(page.frameLocator('iframe[data-site-preview]').locator('#hero h1')).toBeVisible();
     await expect(page.frameLocator('iframe[data-site-preview]').locator('[data-bms-ask]')).toHaveCount(0);
     await expect(input).toHaveAttribute('rows', '4');
-    // The chat pane ends level with the preview.
-    const previewCard = await page.locator('[data-sb-preview-col] > div').boundingBox();
+    // The chat pane ends level with the tab's card, which holds the preview (owner, 2026-11-07).
+    const workCard = await page.locator('[data-sb-work]').boundingBox();
     const chatBox = await page.locator('[data-sb-chatbox]').boundingBox();
-    expect(Math.abs((previewCard!.y + previewCard!.height) - (chatBox!.y + chatBox!.height))).toBeLessThan(3);
+    expect(Math.abs((workCard!.y + workCard!.height) - (chatBox!.y + chatBox!.height))).toBeLessThan(3);
     const paneWidth = (await page.locator('[data-sb-pane]').boundingBox())!.width;
     // Pages (the page's own tab, owner 2026-11-06): its work replaces the preview, the chat stays where it is.
     await input.fill('kept while I look at Pages');

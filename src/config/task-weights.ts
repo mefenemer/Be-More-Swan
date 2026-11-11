@@ -3,7 +3,7 @@
 // import it (see docs/task-metering.md).
 //
 // ⚠️ The numbers customers are charged live in the DATABASE (db/z-task-costs.sql), and a super admin
-// changes them in Admin → Revenue → Task costs. Read them with getTaskCosts() from src/utils/task-costs.ts.
+// changes them in Admin → Money → Task costs. Read them with getTaskCosts() from src/utils/task-costs.ts.
 // DEFAULT_TASK_COSTS below is only what metering falls back to when the database cannot be read at all:
 // editing it does not change what anyone is charged while the table is there.
 //
@@ -40,6 +40,10 @@ export const DEFAULT_TASK_WEIGHTS = {
     flyer_words: 1,
     // Taking the background out of a picture in the design editor (owner, 2026-11-06): a paid AI call per picture.
     background_removal: 1,
+    // The Video Producer reviewing the owner's own footage (owner decision D-F1, 2026-11-09): frames
+    // read by AI plus the sound transcribed. Charged once per review that analyses a new video;
+    // suggesting again from the same analysis is free (src/utils/footage-review.ts).
+    footage_review: 2,
     // Behind basicWorkCharged below (docs/basic-work-charging.md).
     chat_messages: 1,
     editing_helper: 1,
@@ -124,13 +128,15 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     mentor_review: 'Business Mentor weekly reviews',
     flyer_words: 'Flyer words',
     background_removal: 'Background removals',
+    footage_review: 'Footage reviews',
+    // No "every 10 messages" here: how often chat is charged is now a setting (chat_messages_per_task).
     chat_messages: 'Chat',
     editing_helper: 'Editing helpers',
     design_round: 'Design rounds',
     finished_design: 'Finished designs',
 };
 
-// ── The costs a super admin can change (Admin → Revenue → Task costs) ─────────────────────────────
+// ── The costs a super admin can change (Admin → Money → Task costs) ─────────────────────────────
 
 /** One row per number in the table: every WorkKind, plus the two rates. */
 export type CostKey = WorkKind | 'ai_video_per_second' | 'chat_messages_per_task';

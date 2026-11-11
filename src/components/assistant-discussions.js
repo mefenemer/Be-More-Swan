@@ -2,7 +2,7 @@
  * src/components/assistant-discussions.js
  * Discussions tab — the Lead Generator's forum listening (registry `discussionsTab`).
  *
- * Public threads on Reddit, UK Business Forums, Quora and LinkedIn where someone is asking for what
+ * Public Reddit threads and LinkedIn posts (only those two since 2026-11-11) where someone is asking for what
  * this business sells, found by a daily Google scan of the topics set here, each with a drafted
  * reply. The person posts the reply themselves: "Copy reply & open thread" puts it on the clipboard
  * and opens the thread, and "Mark replied" files it. NOTHING here posts anywhere — see
@@ -37,7 +37,7 @@
     maxTopics: 5,
     // Own forums: one-click suggestions and the cap, both from the server.
     suggestedForums: [],
-    maxOwnForums: 5,
+    maxOwnForums: 0,
     filter: 'new',
     loading: false,
     loaded: false,
@@ -84,7 +84,7 @@
       state.sites = Array.isArray(data.sites) ? data.sites : [];
       state.maxTopics = data.maxTopics || 5;
       state.suggestedForums = Array.isArray(data.suggestedForums) ? data.suggestedForums : [];
-      state.maxOwnForums = data.maxOwnForums || 5;
+      state.maxOwnForums = Number.isInteger(data.maxOwnForums) ? data.maxOwnForums : 0;
       state.notSetUp = false;
       state.error = null;
     } catch (err) {
@@ -210,6 +210,8 @@
 
   /** "Your own forums": any forum by web address, up to maxOwnForums, plus one-click suggestions. */
   function ownForumsHtml(d) {
+    // Off while the server's cap is 0 (Reddit and LinkedIn only, 2026-11-11).
+    if (!state.maxOwnForums) return '';
     const own = ownOf(d.sites);
     const full = own.length >= state.maxOwnForums;
     const chips = own.map((k) => `

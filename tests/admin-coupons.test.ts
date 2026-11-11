@@ -1,5 +1,5 @@
 // tests/admin-coupons.test.ts
-// Admin → Revenue → Coupons: coupons made in Be More Swan are real Stripe coupons, and nothing an
+// Admin → Money → Coupons: coupons made in Be More Swan are real Stripe coupons, and nothing an
 // admin can type reaches Stripe in a shape it would reject halfway through.
 //
 // No database, no Stripe: the pure rules in src/utils/coupon-rules.ts, plus source checks on the

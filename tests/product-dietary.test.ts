@@ -56,7 +56,7 @@ check('a menu shows the marks, the allergen words, a key, and "ask us about alle
 check('saved through Business Information; the SQL adds the columns', () => {
     const api = read('netlify/functions/org-products.ts');
     assert.ok(api.includes("if (!partial || has('dietary')) values.dietary = cleanDietary(body.dietary);"));
-    const ui = read('assets.html');
+    const ui = (read('assets.html') + read('src/components/products-editor.js'));
     assert.ok(ui.includes('data-op-diet') && ui.includes('id="op-allergens"') && ui.includes("dietary: [...f.querySelectorAll('[data-op-diet]:checked')]"));
     assert.ok(read('db/z-product-dietary.sql').includes('ADD COLUMN IF NOT EXISTS dietary   JSONB'));
 });

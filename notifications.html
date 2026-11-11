@@ -1,6 +1,6 @@
 <!-- notifications.html — Notifications: what needs you, your assistants' messages (Team Chat), and
      updates, in one place (owner, 2026-10-23). Controller: notifications.js (window.initNotifications);
-     the Messages tab is src/components/team-feed.js mounted in place. "Inbox" is kept free for email.
+     the Team Chat tab is src/components/team-feed.js mounted in place. "Inbox" is kept free for email.
      Width: .page-wide (input.css), the workspace's one page width. -->
 <div class="page-wide py-10 pb-20">
 
@@ -16,20 +16,20 @@
         </button>
     </div>
 
-    <!-- Needs you: cleared by doing. Messages: Team Chat, read and answered as a conversation.
-         Updates: cleared by reading. Wraps on a phone rather than scrolling sideways. -->
+    <!-- Needs you: cleared by doing. Updates: cleared by reading. Team Chat: read and answered as a
+         conversation (its code and links still say "messages"). Wraps on a phone rather than scrolling sideways. -->
     <div role="tablist" aria-label="Notifications" class="flex flex-wrap gap-1 mb-4">
         <button type="button" role="tab" id="tab-needs" aria-controls="notif-list-panel" aria-selected="true" class="notif-tab flex items-center gap-1.5 px-3 text-sm rounded-lg border" style="min-height:44px">
             Needs you
             <span id="tab-needs-count" class="hidden bg-red-100 text-red-700 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
         </button>
-        <button type="button" role="tab" id="tab-messages" aria-controls="notif-messages-panel" aria-selected="false" class="notif-tab flex items-center gap-1.5 px-3 text-sm rounded-lg border" style="min-height:44px">
-            Messages
-            <span id="tab-messages-count" class="hidden bg-gray-100 text-gray-700 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
-        </button>
         <button type="button" role="tab" id="tab-updates" aria-controls="notif-list-panel" aria-selected="false" class="notif-tab flex items-center gap-1.5 px-3 text-sm rounded-lg border" style="min-height:44px">
             Updates
             <span id="tab-updates-count" class="hidden bg-gray-100 text-gray-700 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
+        </button>
+        <button type="button" role="tab" id="tab-messages" aria-controls="notif-messages-panel" aria-selected="false" class="notif-tab flex items-center gap-1.5 px-3 text-sm rounded-lg border" style="min-height:44px">
+            Team Chat
+            <span id="tab-messages-count" class="hidden bg-gray-100 text-gray-700 text-xs font-bold px-2 py-0.5 rounded-full">0</span>
         </button>
     </div>
 

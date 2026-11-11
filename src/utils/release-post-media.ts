@@ -179,6 +179,8 @@ export async function releaseAssets(db: Db, assetIds: number[], excludePostIds: 
             inArray(contentAssets.id, releasable),
             isNull(contentAssets.purgedAt),
             isNull(contentAssets.retentionDeleteAfter),
+            // A file the user kept is never put back on a clock (src/utils/library-retention.ts).
+            isNull(contentAssets.libraryKeptAt),
         ))
         .returning({ id: contentAssets.id });
 
@@ -289,6 +291,8 @@ export async function markPostMediaPosted(db: Db, postIds: number[]): Promise<nu
         .where(and(
             inArray(contentAssets.id, reclaimable),
             isNull(contentAssets.purgedAt),
+            // A file the user kept is never put back on a clock (src/utils/library-retention.ts).
+            isNull(contentAssets.libraryKeptAt),
             // Never push an existing window back. A rejection's 7-day clock is SHORTER and must
             // win; re-running this on an already-marked asset must not buy it another 30 days.
             isNull(contentAssets.retentionDeleteAfter),

@@ -294,7 +294,7 @@
       .filter((t) => t);
     if (!times.length) return searches.length
       ? 'No search is scheduled to run again — start one on the Searches tab when you want more leads.'
-      : 'No searches yet — press “Find New Leads” to describe who you’re after.';
+      : 'No searches yet — press “New search” to describe who you’re after.';
     const t = Math.min(...times);
     return t <= Date.now() ? 'A scheduled search is due and starts within the hour.' : `The next scheduled search runs ${when(t)}.`;
   }
@@ -474,7 +474,7 @@
     }
     if (s.status === 'paused') {
       return { chip: 'bg-gray-100 text-gray-500 border-gray-200', label: 'Paused',
-        line: `Paused, so it will not run. ${total} Resume it under Find New Leads.` };
+        line: `Paused, so it will not run. ${total} Resume it from its row below.` };
     }
     if (s.status === 'draft') {
       return { chip: 'bg-amber-50 text-amber-800 border-amber-200', label: 'Not started', action: 'start',
@@ -583,10 +583,9 @@
       ? window.ListPager.page(state.savedSearches, state.searchPage, SEARCHES_PER_PAGE)
       : { items: state.savedSearches, pages: 1 };
     return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
-        <div class="p-4 border-b border-gray-100">
-          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Your searches</p>
-          <p class="text-xs text-gray-500 mt-1">Each search looks across the public web, scores what it finds against your profile, and files every company it finds as a lead in your <span class="font-semibold text-gray-700">Leads</span> tab &mdash; hot, warm or cold. Open a search&rsquo;s results to see what it found; decide who to pursue in the Leads tab.</p>
+      <div class="tab-card mb-4">
+        <div class="px-4 pt-3 pb-3 border-b border-gray-100">
+          <p class="text-xs text-gray-600">Each search looks across the public web, scores what it finds against your profile, and files every company it finds as a lead in your <span class="font-semibold text-gray-700">Leads</span> tab &mdash; hot, warm or cold. Open a search&rsquo;s results to see what it found; decide who to pursue in the Leads tab.</p>
         </div>
         ${pg.items.map((s, i) => searchRow(s, i === pg.items.length - 1)).join('')}
         ${window.ListPager ? window.ListPager.controlsHtml(pg, { attr: 'data-si-page', noun: 'searches' }) : ''}
@@ -609,7 +608,7 @@
   function emptyState() {
     return `<div class="p-8 text-center">
       <p class="text-sm font-semibold text-gray-900">No searches yet</p>
-      <p class="text-xs text-gray-500 mt-1">Press “Find New Leads” above to describe who you’re after, and your assistant will start looking for companies that match.</p>
+      <p class="text-xs text-gray-500 mt-1">Press “New search” above to describe who you’re after, and your assistant will start looking for companies that match.</p>
     </div>`;
   }
 
@@ -634,14 +633,12 @@
     }
 
     return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm mb-4">
-        <div class="p-4 flex flex-wrap items-center gap-2">
-          <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mr-auto">Lead searches</p>
-          <button type="button" data-si-lead-ideas
-            class="btn-secondary min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg border transition">Review Lead Ideas</button>
-          <button type="button" data-si-new-search
-            class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">Find New Leads</button>
-        </div>
+      ${window._tabHead({
+        title: 'Searches', explain: 'lead-searches', emoji: '🔎',
+        about: 'Each search describes the companies you are after. Your assistant runs it on a schedule and adds the matches to All leads.',
+        right: `${window._tabSecBtn('Review lead ideas', 'data-si-lead-ideas')}${window._tabFullBtn?.('signals') || ''}${window._tabNewBtn('New search', 'data-si-new-search')}`,
+      })}
+      ${state.savedSearches.length && (state.hasSocialFeed || socialHintDismissed()) ? '' : `<div data-no-fold class="tab-card mb-4">
         ${state.savedSearches.length ? '' : emptyState()}
         ${!state.hasSocialFeed && !socialHintDismissed() ? `
         <div class="p-4 border-t border-gray-100 bg-gray-50 flex flex-wrap items-center gap-3" data-si-social-hint>
@@ -649,7 +646,7 @@
           <button type="button" data-si-social-hire class="btn-swan-link min-h-[44px] sm:min-h-0 px-1 py-1 text-xs font-bold">See the Social Media Assistant</button>
           <button type="button" data-si-social-dismiss class="btn-utility min-h-[44px] sm:min-h-0 px-2 py-1 text-xs font-bold rounded-lg">Hide this</button>
         </div>` : ''}
-      </div>
+      </div>`}
 
       ${searchesPanel()}`;
   }

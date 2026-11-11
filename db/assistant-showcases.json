@@ -126,7 +126,7 @@
       },
       {
         "q": "Can I write some posts myself?",
-        "a": "Yes. Press Write Blog Post, give it a subject, and either write it yourself or ask the assistant to draft it for you."
+        "a": "Yes. Press New blog post, give it a subject, and either write it yourself or ask the assistant to draft it for you."
       },
       {
         "q": "Does it use tasks?",
@@ -384,21 +384,21 @@
     ]
   },
   "video_producer": {
-    "headline": "Say what the video is about. Check the storyboard. Approve the video.",
+    "headline": "Say what the video is about. Check the storyboard. Get a finished video.",
     "overview": [
-      "The Video Producer makes short vertical videos for Instagram Reels, YouTube Shorts and Facebook Reels. It writes the script from your business details and products, picks stock footage, your own pictures, branded cards or AI scenes, and adds a voiceover and captions.",
-      "You check the storyboard scene by scene before anything is made, and approve the finished video in your Review Queue before it goes out. Nothing posts on its own."
+      "The Video Producer makes short videos, vertical, square or wide. It writes the script from your business details and products, picks stock footage, your own pictures or clips, branded cards or AI scenes, and adds a voiceover and captions. Give it your own footage and it says what it sees, suggests edits and cuts out pauses and “um”s.",
+      "You check the storyboard scene by scene before anything is made. The finished video is saved to My Content: download it, or use it with any of your assistants. The Video Producer never posts anything itself."
     ],
     "highlights": [
       "15, 30 or 60 seconds",
-      "Voiceover and captions",
+      "Vertical, square or wide",
       "Storyboard before anything is made",
-      "Nothing posts until you approve"
+      "Saved to My Content"
     ],
     "steps": [
       {
         "title": "Say what it should say",
-        "body": "A sentence or two — an offer, a product, a tip. Pick the length, voice and where it posts."
+        "body": "A sentence or two — an offer, a product, a tip — or your own footage. Pick the length, voice and shape."
       },
       {
         "title": "Check the storyboard",
@@ -409,8 +409,8 @@
         "body": "It shows what it will use before you press it, then voices, captions and edits the video."
       },
       {
-        "title": "Approve it",
-        "body": "The finished video lands in your Review Queue like any post, ready to approve or edit."
+        "title": "Use it",
+        "body": "Play it, download it, or use it from My Content. Change it later and you get a new version."
       }
     ],
     "features": [
@@ -426,7 +426,7 @@
       },
       {
         "title": "Videos from your posts and campaigns",
-        "body": "Turn a post into a video version with one click, have it plan up to three storyboards a week, or let your Campaign Assistant commission one."
+        "body": "Turn a post into a video version with one click and it goes back onto that post, have it plan up to three storyboards a week, or let your Campaign Assistant commission one."
       }
     ],
     "faqs": [
@@ -436,11 +436,11 @@
       },
       {
         "q": "Can it edit my own footage?",
-        "a": "Not yet — it doesn’t watch footage you give it or pick the best moments. It builds videos from stock footage, your own pictures, branded cards and AI scenes, and you can fine-tune the finished video in the post editor."
+        "a": "Yes. Give it videos you filmed (up to 5 minutes each) and it says what it sees, suggests edits you tick or untick, and cuts out pauses, “um”s and repeated takes. Your videos are never changed — the edits go into the new video. Reviewing a video it hasn’t seen before uses 2 tasks."
       },
       {
-        "q": "Which platforms does it post to?",
-        "a": "Instagram Reels, YouTube Shorts and Facebook Reels, up to 60 seconds. Not TikTok yet."
+        "q": "Does it post my videos?",
+        "a": "No. It saves the finished video to My Content. Download it for anywhere, including TikTok, or pick it from My Content in any of your assistants."
       }
     ]
   },
@@ -597,7 +597,7 @@
       },
       {
         "q": "I already have a website. Can I bring it over?",
-        "a": "Yes, if it is your own. Give it the address of your current site, whether it is on Wix, Squarespace, WordPress or built for you, and it reads your home page and the pages in its menu into a draft. Your own words are kept as they are; prices are not copied, because they belong with your products. You see the imported draft beside your current one and choose whether to use it."
+        "a": "Yes, if it is your own. Give it the address of your current site, whether it is on Wix, Squarespace, WordPress, Shopify, Webflow or built for you, and it reads your home page and up to 20 pages from its menu into a draft. Your words are kept exactly as they are, and your links, buttons, menu, pictures and social profiles come across too, with your colours and fonts set as your design. Posts from your old blog arrive as drafts in your Blog Assistant, and products from an old shop can be added to your Products & Services with a tick. Prices are never put on your pages, because they belong with your products. You see the imported draft beside your current one and choose whether to use it, and nothing goes live until you publish."
       },
       {
         "q": "How many pages can I have?",

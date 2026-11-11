@@ -1,7 +1,7 @@
 /**
  * src/public/role-labels.js — assistant ROLE TITLES from master data, for client-side copy.
  *
- * master_assistants.name is the source of truth and is admin-editable (Admin → Master Data). Copy
+ * master_assistants.name is the source of truth and is admin-editable (Admin → Assistants → Assistants). Copy
  * that hardcoded a title ("Your Social Media Manager publishes…") kept saying the old one after
  * every rename. Pages write `{role:<roleKey>}` in their copy and run it through RoleLabels.fill().
  *

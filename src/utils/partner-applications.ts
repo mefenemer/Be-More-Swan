@@ -113,7 +113,7 @@ export async function sendApplicationEmails(v: ApplicationInput, partnerId: numb
     await sendEmail({
         to: FOUNDER_EMAIL,
         subject: `🤝 New partner application: ${v.name}`,
-        html: `<p style="margin:0 0 12px;"><strong>${esc(v.name)}</strong> (${esc(v.email)}) applied to be a Be More Swan partner.</p>${rows}<p style="margin:16px 0 0;"><a href="${baseUrl()}/admin.html?view=partners">Review it in Admin → Revenue → Partners</a> (application #${partnerId}).</p>`,
+        html: `<p style="margin:0 0 12px;"><strong>${esc(v.name)}</strong> (${esc(v.email)}) applied to be a Be More Swan partner.</p>${rows}<p style="margin:16px 0 0;"><a href="${baseUrl()}/admin.html?view=partners">Review it in Admin → Money → Partners</a> (application #${partnerId}).</p>`,
         text: `${v.name} (${v.email}) applied to be a partner.\n${Object.entries(applicationAnswers(v)).map(([k, val]) => `${k}: ${val}`).join('\n')}\nReview: ${baseUrl()}/admin.html?view=partners`,
     }).catch((err) => console.error('[partner-applications] founder alert failed:', err));
 }

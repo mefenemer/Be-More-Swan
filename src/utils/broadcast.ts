@@ -1,4 +1,4 @@
-// src/utils/broadcast.ts — a notice to every customer, once each (admin → Comms → Broadcast).
+// src/utils/broadcast.ts — a notice to every customer, once each (Admin → Growth → Broadcast).
 //
 // The first use is the 30 days' notice for AI video priced by the second (terms 5.2 / 20.2,
 // docs/ai-video-per-second-notice.md). Before this there was no way to reach every customer:

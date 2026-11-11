@@ -87,7 +87,7 @@ console.log('\nthe screen');
 
 check('the view is reachable: nav entry, label, loader and markup', () => {
     assert.ok(admin.includes("{ view: 'music-library',"), 'no nav entry');
-    assert.ok(admin.includes("'music-library': 'Music Library'"), 'no page title');
+    assert.ok(admin.includes("'music-library': 'Music library'"), 'no page title');
     assert.ok(admin.includes("if (view === 'music-library')       loadMusicLibrary();"), 'never loads');
     assert.ok(admin.includes('<section id="view-music-library" class="admin-view hidden'));
 });

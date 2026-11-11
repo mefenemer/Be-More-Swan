@@ -272,17 +272,22 @@ let _leadOutreach = false;
 // Read-only chips: the date belongs to the record, so moving it here would be editing a fact.
 // Shape: { key, kind, title, at: Date, derived, tab }.
 let _datedItems = [];
-let _datedSource = null;   // 'records' | 'briefs' | 'checks' | 'campaigns' | null
+let _datedSource = null;   // 'records' | 'briefs' | 'checks' | 'campaigns' | 'videos' | null
 // The locked assistant's roleKey (opts.roleKey) — only for wording the legend and the empty month.
 let _roleKey = null;
 const DATED_KIND_META = {
     invoice_due: { icon: '💷', label: 'Invoice due' },
     meeting:     { icon: '🗓', label: 'Meeting' },
     notes_taken: { icon: '📝', label: 'Notes taken' },
-    brief_due:   { icon: '🎨', label: 'Brief due' },
+    brief_received: { icon: '📥', label: 'Brief received' },
+    brief_drafted:  { icon: '🎨', label: 'Options drafted' },
+    brief_approved: { icon: '✅', label: 'Approved' },
+    brief_due:   { icon: '📅', label: 'Brief due' },
     site_check:  { icon: '🔍', label: 'Website check' },
     campaign_start: { icon: '🚀', label: 'Campaign starts' },
     campaign_end:   { icon: '🏁', label: 'Campaign ends' },
+    video_started:  { icon: '🎬', label: 'Video started' },
+    video_ready:    { icon: '✅', label: 'Video finished' },
 };
 
 // An assistant's identity colour — the user's own choice where they've made one, otherwise the
@@ -330,7 +335,7 @@ window.initCalendar = async function (opts = {}) {
         _publishesContent = opts.publishesContent !== false;
         _platformFilterOn = _publishesContent && opts.platformFilter !== false;
         _leadOutreach = opts.leadOutreach === true;
-        _datedSource = ['records', 'briefs', 'checks', 'campaigns'].includes(opts.datedItems) ? opts.datedItems : null;
+        _datedSource = ['records', 'briefs', 'checks', 'campaigns', 'videos'].includes(opts.datedItems) ? opts.datedItems : null;
         _roleKey = typeof opts.roleKey === 'string' ? opts.roleKey : null;
     } else {
         _datedSource = null;
@@ -509,7 +514,7 @@ function _globalExtraTargets(list) {
         if (a.lifecycleStatus === 'archived' || a.status === 'cancelled') continue;
         const cfg = reg.get(a.roleKey) || {};
         const mods = cfg.modules || {};
-        const datedSource = ['records', 'briefs', 'checks', 'campaigns'].includes(cfg.calendarItems) ? cfg.calendarItems : null;
+        const datedSource = ['records', 'briefs', 'checks', 'campaigns', 'videos'].includes(cfg.calendarItems) ? cfg.calendarItems : null;
         const leadOutreach = mods.hasLeadOutreach === true;
         const records = mods.hasPostingSchedule === false;   // the records roles, as on their own tab
         if (records || leadOutreach || datedSource) out.push({ id: a.id, records, leadOutreach, datedSource });
@@ -571,11 +576,18 @@ async function _loadDatedItems(t, from, to) {
         const items = cr.ok ? ((await cr.json()).items || []) : [];
         return items.map((i) => ({ key: `c${i.id}`, kind: 'site_check', title: i.title, at: new Date(i.at), derived: false, tab: 'website', done: i.done }));
     }
+    if (t.datedSource === 'videos') {
+        // Video Producer: each video on the day it was started and the day it was finished
+        // (video-projects.ts ?calendar=1). A studio posts nothing, so it has no posting days.
+        const vr = await fetch(`/.netlify/functions/video-projects?calendar=1&assistantId=${t.id}&from=${from.toISOString()}&to=${to.toISOString()}`, { credentials: 'same-origin' });
+        const items = vr.ok ? ((await vr.json()).items || []) : [];
+        return items.map((i) => ({ key: `v${i.id}-${i.kind}`, kind: i.kind, title: i.title, at: new Date(i.at), derived: false, tab: 'videos', done: !!i.done }));
+    }
     if (t.datedSource === 'briefs') {
         const br = await _calPost('brand-briefs', { action: 'calendar', assistantId: t.id, from: _dateKey(from), to: _dateKey(to) });
         const items = br.ok ? ((await br.json()).items || []) : [];
-        // A DATE column: noon local, so it can never slip a day across a timezone.
-        return items.map((i) => ({ key: `b${i.id}`, kind: 'brief_due', title: i.title, at: new Date(`${i.dueDate}T12:00:00`), derived: false, tab: 'briefs', done: i.status === 'approved' }));
+        // brief_due is a DATE column: noon local, so it can never slip a day across a timezone.
+        return items.map((i) => ({ key: `b${i.id}-${i.kind}`, kind: i.kind, title: i.title, at: new Date(i.kind === 'brief_due' ? `${i.at}T12:00:00` : i.at), derived: false, tab: 'briefs', done: i.kind === 'brief_approved' }));
     }
     return [];
 }
@@ -906,10 +918,11 @@ function _renderStatusLegend() {
         `<span class="inline-flex items-center gap-1.5 text-xs text-gray-600"><span aria-hidden="true" class="inline-flex">${marker}</span> ${label}</span>`;
     // The dated kinds this assistant's grid can actually contain — listed only when it has them.
     const datedLegend = () => {
-        const kinds = _datedSource === 'briefs' ? ['brief_due'] : _datedSource === 'campaigns' ? ['campaign_start', 'campaign_end']
+        const kinds = _datedSource === 'briefs' ? ['brief_received', 'brief_drafted', 'brief_approved', 'brief_due'] : _datedSource === 'campaigns' ? ['campaign_start', 'campaign_end']
+            : _datedSource === 'videos' ? ['video_started', 'video_ready']
             : _datedSource === 'records' ? ['invoice_due', 'meeting', 'notes_taken'] : [];
         const role = _roleKey || '';
-        const relevant = kinds.filter((k) => _datedSource === 'briefs' || _datedSource === 'campaigns'
+        const relevant = kinds.filter((k) => _datedSource === 'briefs' || _datedSource === 'campaigns' || _datedSource === 'videos'
             || (role === 'accounts_receivable_clerk' ? k === 'invoice_due' : role === 'meeting_note_taker' ? k !== 'invoice_due' : true));
         return relevant.map((k) => item(`<span>${DATED_KIND_META[k].icon}</span>`, DATED_KIND_META[k].label)).join('');
     };
@@ -930,7 +943,7 @@ function _renderStatusLegend() {
           item('<span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span>', 'Paused — needs you')
         : outreachItem + datedLegend() +
           // The Brand Designer schedules nothing: no records queue, so no yellow chip can ever appear.
-          (_datedSource === 'briefs' || _datedSource === 'campaigns' ? '' : item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', _leadOutreach ? 'Chase reminder' : 'Scheduled')) +
+          (_datedSource === 'briefs' || _datedSource === 'campaigns' || _datedSource === 'videos' ? '' : item('<span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span>', _leadOutreach ? 'Chase reminder' : 'Scheduled')) +
           item('<span class="text-gray-600 font-extrabold">✓</span>', 'Completed');
 }
 
@@ -1664,8 +1677,9 @@ function _emptyUpcomingMessage() {
 }
 function _emptyMonthMessage() {
     if (!_lockedAssistant || _publishesContent) return 'Nothing scheduled this month. Approve a draft in Review to put it on the calendar.';
-    if (_datedSource === 'briefs') return 'Nothing this month. Briefs with a due date appear here on that date.';
+    if (_datedSource === 'briefs') return 'Nothing this month. Each brief appears on the day it was received, drafted and approved, and on its due date.';
     if (_datedSource === 'campaigns') return 'Nothing this month. Each campaign appears on the day it starts and the day it ends.';
+    if (_datedSource === 'videos') return 'Nothing this month. Each video appears on the day it was started and the day it was finished.';
     const role = _roleKey || '';
     if (role === 'accounts_receivable_clerk') return 'Nothing this month. Invoices appear on their due date once your assistant has them.';
     if (role === 'meeting_note_taker') return 'Nothing this month. Meetings appear on their date once your assistant has taken notes.';

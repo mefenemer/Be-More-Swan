@@ -14,6 +14,7 @@ import { randomUUID } from 'crypto';
 import { getDb } from '../../db/client';
 import { aiBlueprints, auditLogs, contentGenerationJobs, scheduledPosts } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
+import { enforcePromptModeration } from '../../src/utils/moderation';
 import { requireTenant } from '../../src/utils/tenant';
 import { triggerContentDrain } from '../../src/utils/trigger-drain';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -40,6 +41,10 @@ export default withLambda(async (event) => {
     if (feedback.length > MAX_FEEDBACK) {
         return { statusCode: 400, body: JSON.stringify({ error: `feedback must be ${MAX_FEEDBACK} characters or fewer.` }) };
     }
+
+    // This box can hold a guest's comments from a review link, once the user chooses to use them.
+    const modBlock = await enforcePromptModeration({ text: feedback, userId, organisationId, source: 'request-post-changes' });
+    if (modBlock) return modBlock;
 
     // Load the post and verify it belongs to the active org.
     const [post] = await db
@@ -80,8 +85,9 @@ export default withLambda(async (event) => {
 
     const now = new Date();
     const jobId = randomUUID();
-    const contextPrompt =
-        `Revise the previous ${post.platform} draft. Keep what worked, but apply this reviewer feedback: ${feedback}`.slice(0, MAX_FEEDBACK);
+    // The feedback is already capped at MAX_FEEDBACK, so the whole of it fits after the lead-in. It
+    // used to be the lead-in PLUS feedback cut to 500, which dropped the end of a long comment.
+    const contextPrompt = `Revise the previous ${post.platform} draft. Keep what worked, but apply this reviewer feedback: ${feedback}`;
 
     // Enqueue the regeneration job targeting the same slot the original draft was aimed at.
     await db.insert(contentGenerationJobs).values({
@@ -97,6 +103,9 @@ export default withLambda(async (event) => {
         triggerType: 'on_demand',
         platform: post.platform,
         targetPublishDate: post.publishDate,
+        // The redraft reads this draft (caption and picture) to change only what the feedback names,
+        // and the review panel follows it so guest comments stay with the new version.
+        revisedFromPostId: postId,
     });
 
     // Remove the superseded draft from the review queue.

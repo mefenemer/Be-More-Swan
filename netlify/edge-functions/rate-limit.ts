@@ -33,6 +33,8 @@ const RULES: Record<string, RuleConfig> = {
     // (one every few seconds while a check runs), so it is set well above that. The real limits —
     // 5 checks/hour per IP, 3/day per email, a daily cap — are enforced in site-audit-public.ts.
     '/.netlify/functions/site-audit-public': { maxAttempts: 40, windowMs: 60_000,      keyType: 'ip' },
+    // Guest review links. Coarse too: the real limits are in review-link-public.ts.
+    '/.netlify/functions/review-link-public': { maxAttempts: 80, windowMs: 60_000,     keyType: 'ip' },
 };
 
 function getUserIdFromCookie(cookieHeader: string | null): string | null {

@@ -21,7 +21,7 @@ import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
     scheduledPosts, plans, masterPlans, assistantRecords, blogPosts,
-    audienceContacts, newsletterIssues, siteAudits, sites, visualBriefOptions, visualBriefs, manualFollowerCounts, mentorProposals } from '../../db/schema';
+    audienceContacts, newsletterIssues, siteAudits, sites, visualBriefOptions, visualBriefs, manualFollowerCounts, mentorProposals, videoProjects } from '../../db/schema';
 import { normaliseSiteDefinition } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { createNotification } from '../../src/utils/notify';
@@ -452,11 +452,14 @@ async function fetchMetric(
             return { value: Number(row?.v ?? 0), disconnected: false };
         }
         case 'videos_published': {
-            // Video Producer — its videos are ordinary posts (one per platform), so count published ones.
+            // Video Producer — a STUDIO since 2026-11-09: it posts nothing, so this counts the videos it
+            // FINISHED (Ready, plus the old-way 'built' ones), the same rule as Videos Made on its
+            // Results tab (src/lib/video-results.ts). Key kept so existing goals carry on; the label
+            // is "Videos Made" (goal-metrics.ts).
             const [row] = await db
                 .select({ v: sql<number>`count(*)::int` })
-                .from(scheduledPosts)
-                .where(and(eq(scheduledPosts.assistantId, goal.assistantId), eq(scheduledPosts.status, 'published'), eq(scheduledPosts.postFormat, 'video')));
+                .from(videoProjects)
+                .where(and(eq(videoProjects.aiAssistantId, goal.assistantId), inArray(videoProjects.status, ['ready', 'built'])));
             return { value: Number(row?.v ?? 0), disconnected: false };
         }
         case 'posts_published': {

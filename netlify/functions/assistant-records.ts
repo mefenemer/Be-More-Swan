@@ -535,7 +535,13 @@ export default withLambda(async (event) => {
                     // for every row — correct, but a jsonb read per row for nothing.
                     ...(retentionWhere && recordType === 'lead' ? [retentionWhere] : []),
                 ))
-                .orderBy(desc(assistantRecords.updatedAt));
+                // The Outreach review list (deliverable=1) keeps a FIXED order: when each lead was
+                // created, newest first. Ordered by updated_at, editing or regenerating an email on
+                // page 5 jumped it to page 1 and the reviewer lost it (Fix pipeline #38, prod
+                // 2026-11-10). Every other list still puts the most recently touched first.
+                .orderBy(...(deliverableOnly
+                    ? [desc(assistantRecords.createdAt), desc(assistantRecords.id)]
+                    : [desc(assistantRecords.updatedAt)]));
 
             // CRM-shaped lead export (Phase 2 item 12). Same rows as the generic CSV below, with
             // the column headers HubSpot's and Salesforce's importers auto-match — see

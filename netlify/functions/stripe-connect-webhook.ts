@@ -21,6 +21,10 @@ import { getDb } from '../../db/client';
 import { STRIPE_API_VERSION } from '../../src/utils/stripe';
 import { recordPaidCheckout, syncConnectAccount } from '../../src/utils/site-shop';
 import { depositPaid, releaseHold } from '../../src/utils/booking-deposits';
+import { balanceCharge, stayBalancePaid, stayModeFor, stayPaymentSettled } from '../../src/utils/stay-charges';
+import { formatMoney } from '../../src/utils/product-price';
+import { describeCancellation } from '../../src/utils/stay-quote';
+import { loadStays, pricingOf } from '../../src/utils/stays';
 import { announceNewBooking, describeBooking, fromLine, loadBookingSetup } from '../../src/utils/bookings';
 import { organisations, sites } from '../../db/schema';
 import { siteOrigin } from '../../src/utils/site-hosting';
@@ -36,9 +40,15 @@ async function depositSettled(db: ReturnType<typeof getDb>, accountId: string, s
     const orgId = Number(session.metadata?.bms_org);
     if (!Number.isInteger(orgId)) return;
     const setup = await loadBookingSetup(db, orgId);
-    const r = await depositPaid(db, accountId, session, setup.settings.mode);
+    // A stay (holiday let / B&B room) confirms by its OWN instant / request setting (stay-charges.ts).
+    const stayId = Number(session.metadata?.bms_stay);
+    const stayMode = Number.isInteger(stayId) && stayId > 0 ? await stayModeFor(db, stayId) : null;
+    const r = await depositPaid(db, accountId, session, stayMode ?? setup.settings.mode);
     if (!r) return;
-    const b = r.booking;
+    const b = r.lateRefund ? r.booking : await stayPaymentSettled(db, r.booking, session);
+    // A stay's cancellation terms are its own, in words (the business's booking policy is for appointments).
+    const [stay] = b.kind === 'stay' && b.stayTypeId ? await loadStays(db, b.organisationId, { ids: [b.stayTypeId] }) : [];
+    const cancellationPolicy = stay ? describeCancellation(pricingOf(stay).cancellation) : setup.settings.cancellationPolicy;
     const [site] = b.siteId ? await db.select({ slug: sites.slug, aiAssistantId: sites.aiAssistantId }).from(sites).where(eq(sites.id, b.siteId)).limit(1) : [];
     const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, b.organisationId)).limit(1);
     const business = org?.name || 'Your booking';
@@ -52,8 +62,23 @@ async function depositSettled(db: ReturnType<typeof getDb>, accountId: string, s
     }
     await announceNewBooking(db, b, {
         business, timezone: setup.settings.timezone, assistantId: site?.aiAssistantId ?? null,
-        cancellationPolicy: setup.settings.cancellationPolicy, siteOrigin: site?.slug ? siteOrigin(site.slug) : null,
+        cancellationPolicy, siteOrigin: site?.slug ? siteOrigin(site.slug) : null,
     });
+}
+
+/** A stay's balance came in from the guest's link: record it, and send them a receipt. */
+async function balanceSettled(db: ReturnType<typeof getDb>, accountId: string, session: Stripe.Checkout.Session): Promise<void> {
+    const b = await stayBalancePaid(db, accountId, session);
+    if (!b) return;
+    const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, b.organisationId)).limit(1);
+    const business = org?.name || 'Your stay';
+    const { what, when } = describeBooking(b, 'UTC');
+    const paid = balanceCharge({ ...b, damageDepositStatus: session.metadata?.bms_damage === '1' ? 'due' : 'none' });
+    const m = (n: number) => formatMoney(n, b.currency || 'GBP');
+    await sendEmail({
+        to: b.customerEmail, from: fromLine(business), subject: `Balance paid — ${business}`,
+        html: `<p>Hi ${esc(b.customerName)},</p><p>Thank you — we've received your balance of <strong>${esc(m(paid.balance))}</strong> for <strong>${esc(what)}</strong>, ${esc(when)}${paid.damage ? `, with the refundable damage deposit of ${esc(m(paid.damage))}` : ''}. You're all paid up.</p>`,
+    }).catch((err: unknown) => console.error('[stripe-connect-webhook] balance receipt failed', err instanceof Error ? err.message : err));
 }
 
 export default withLambda(async (event) => {
@@ -80,6 +105,8 @@ export default withLambda(async (event) => {
         if (evt.type === 'checkout.session.completed' || evt.type === 'checkout.session.async_payment_succeeded') {
             const session = evt.data.object as Stripe.Checkout.Session;
             if (session.metadata?.bms_kind === 'booking_deposit') await depositSettled(db, evt.account, session);
+            // A stay's balance, paid from the guest's link (stay-charges.ts).
+            else if (session.metadata?.bms_kind === 'stay_balance') await balanceSettled(db, evt.account, session);
             else await recordPaidCheckout(db, evt.account, session);
         } else if (evt.type === 'checkout.session.expired') {
             const session = evt.data.object as Stripe.Checkout.Session;

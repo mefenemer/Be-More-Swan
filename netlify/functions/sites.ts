@@ -6,7 +6,10 @@
 //   get    { assistantId }                    → the draft definition, what the gate changed, the page cap,
 //                                               placeholders still to fill, whether an AI draft is running
 //   apply  { assistantId, ops: SiteOperation[] } → all or nothing; refused with the reason and which op
-//   draft  { assistantId, request? }          → start an AI draft of the whole site (1 task, on success)
+//   draft  { assistantId, request?, media? }  → start an AI draft of the whole site (1 task, on success).
+//                                               media { images, videos }: 'stock' | 'ai' | 'none', the
+//                                               placeholder media to add; absent, their set-up answers.
+//   draft_options { assistantId }             → what they may choose there, and what AI media costs
 //   address   { assistantId, slug }           → choose / change <slug>.bemoreswan.site
 //   publish   { assistantId }                 → freeze the draft as the next version and make it live
 //   unpublish { assistantId }                 → take the site offline (versions kept)
@@ -18,7 +21,8 @@
 //                                               account (created the first time). Owner/admin only.
 //   payments_refresh { assistantId }          → re-read the account from Stripe (back from onboarding)
 //   words     { assistantId, pageId, text? | file?: {name, type, data(base64)} | attachmentId? |
-//               quote? + chatSessionId?, note? }   (attachmentId / quote: the chat's site_words card)
+//               sourceUrl? | quote? + chatSessionId?, note? }   (attachmentId / sourceUrl / quote: the chat's
+//               site_words card; sourceUrl = a page of their own current website, read by the server)
 //                                             → "Add your own words": a PROPOSAL placing the owner's
 //                                               text on the page WORD FOR WORD (site-words.ts). Saves
 //                                               nothing — Apply sends its ops through `apply`. 1 task.
@@ -27,7 +31,7 @@
 //   bookings  { assistantId }                 → bookings from the last 30 days on (bookings.ts)
 //   booking_decide { assistantId, id, decision: confirm|decline|cancel } → the owner's decision; the
 //                                               customer is emailed (a calendar invite on confirm)
-//   booking_setup { assistantId, settings, section?: { pageId, kind, serviceIds, askStaff } }
+//   booking_setup { assistantId, settings, section?: { pageId, kind, serviceIds, askStaff }, serviceLocations?: [{ serviceId, location }] }
 //                                             → the chat's "Set up bookings" card: hours & rules saved
 //                                               to Business Information, and a booking section added
 //   orders    { assistantId }                 → paid orders from the site's Buy buttons
@@ -44,6 +48,11 @@
 //   import_accept  { assistantId }            → "Use this as my draft": the imported site replaces the
 //                                               draft (never the live site)
 //   import_discard { assistantId }            → throw the imported draft away (pictures stay in the library)
+//   import_products { assistantId, names? }   → the products the import found on their old shop become
+//                                               Business Information products (prices there, never on
+//                                               the site); names = the ones ticked, all when omitted.
+//                                               The import card's button and the chat's
+//                                               site_import_products card both send this.
 //
 // domain_add { assistantId, domain } · domain_check · domain_remove → their own domain (site-domains.ts),
 // owner or admin only.
@@ -75,7 +84,12 @@ import { connectAccountFor, connectOnboardingLink, markOrderDone, refreshConnect
 import { audienceContacts, bookings, bookingSettings, orgProducts, orgReviews, siteEnquiries, siteOrders, users } from '../../db/schema';
 import { addEnquirerToAudience } from '../../src/utils/enquiry-audience';
 import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookingSetup } from '../../src/utils/bookings';
+import { cleanKeep, settleDamageDeposit, stayMoneyView } from '../../src/utils/stay-charges';
+import { damageEmail, whoFor } from '../../src/utils/stay-jobs';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
+import { bookableKinds, bookingsSwitchedOff } from '../../src/utils/site-booking-page';
+import { sectionForKind } from '../../src/utils/site-booking';
+import { cleanMeetingLocation, meetingLocationOf, ownerMeetingLine, refreshMeetingLinks } from '../../src/utils/booking-meeting';
 import { purgeCache } from '@netlify/functions';
 import { siteCacheTag } from '../../src/utils/site-hosting';
 
@@ -97,15 +111,17 @@ import { depositNote, refundDeposit } from '../../src/utils/booking-deposits';
 import { reconcileSoon } from '../../src/utils/calendar-microsoft';
 import { addSessions, cancelSessions, cleanNewSessions, offerFreedPlaces, ownerTimetable } from '../../src/utils/class-sessions';
 import { utcToZoned } from '../../src/utils/booking-time';
-import { sessionLink } from '../../src/utils/site-render';
-import { buyablePence, priceDisplay } from '../../src/utils/product-price';
+import { BOOKING_PAGE_PATH, sessionLink } from '../../src/utils/site-render';
+import { buyablePence, poundsToPence, priceDisplay } from '../../src/utils/product-price';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
     applySiteOperations, claimDraft, definitionOf, endDraft, hasUnpublishedChanges, listSiteVersions, loadOrCreateSite, maxPagesFor,
     proposeOwnWords, publishBlocker, publishSite, restoreVersionToDraft, setSiteAddress, unpublishSite, DRAFT_TIMEOUT_MS, SITE_SETUP_KEYS, type SiteRow,
 } from '../../src/utils/site-store';
 import { triggerSiteDraft } from '../../src/utils/trigger-site-draft';
-import { acceptImport, discardImport, importView, loadImport, startSiteImport } from '../../src/utils/site-import-store';
+import { DRAFT_NOTE_ADDING_MEDIA, DRAFT_NOTE_MEDIA_STOPPED, draftNoteIsFailure, resolveDraftMedia } from '../../src/utils/site-draft-media';
+import { draftMediaOptions } from '../../src/utils/site-draft-media-options';
+import { acceptImport, addImportedProducts, discardImport, importView, loadImport, readOwnSitePage, startSiteImport } from '../../src/utils/site-import-store';
 import { cleanImportUrl } from '../../src/utils/site-import';
 import { refreshDirectoryAfterAddressChange, refreshDirectoryAfterPublish } from '../../src/utils/site-directory-store';
 import { hasTaskCapacity, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
@@ -115,7 +131,7 @@ function json(statusCode: number, body: unknown) {
 }
 
 const MAX_OPS = 25;
-const OP_NAMES = ['add_page', 'update_page', 'remove_page', 'add_section', 'update_section', 'remove_section', 'move_section', 'set_nav', 'set_theme', 'set_settings', 'set_footer', 'set_structure', 'combine_pages', 'split_pages', 'apply_template'];
+const OP_NAMES = ['add_page', 'update_page', 'remove_page', 'add_section', 'update_section', 'remove_section', 'move_section', 'set_nav', 'set_theme', 'set_settings', 'set_footer', 'set_redirects', 'set_structure', 'combine_pages', 'split_pages', 'apply_template'];
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -154,12 +170,14 @@ export default withLambda(async (event) => {
         // A read whose worker never answered: say so rather than "Reading your site…" for ever.
         if (imp && imp.status === 'reading' && !drafting) Object.assign(imp, { status: 'failed', message: 'The import didn\'t finish. Nothing was charged — try again.' });
         const [orgRow] = await db.select({ websiteUrl: organisations.websiteUrl }).from(organisations).where(eq(organisations.id, orgId)).limit(1);
+        // A worker that stopped while adding media: the words are saved, so that's what they're told.
+        const draftNote = !drafting && s.draftNote === DRAFT_NOTE_ADDING_MEDIA ? DRAFT_NOTE_MEDIA_STOPPED : s.draftNote;
         return {
             // The address to offer for import: their set-up answer "Do you already have a website?",
             // else the website in Business Information.
             import: imp, importSuggestUrl: setupSiteUrl() ?? orgRow?.websiteUrl ?? null,
             site: {
-                id: s.id, status: s.status, credit: s.credit, drafting, draftNote: s.draftNote, updatedAt: s.updatedAt,
+                id: s.id, status: s.status, credit: s.credit, drafting, draftNote, draftNoteIsFailure: draftNoteIsFailure(draftNote), updatedAt: s.updatedAt,
                 // Their own domain once it's live; the bemoreswan.site address redirects there.
                 slug: s.slug, url: ownDomain?.status === 'live' ? `https://${ownDomain.domain}` : s.slug ? siteOrigin(s.slug) : null, domain: sitesDomain(),
                 freeUrl: s.slug ? siteOrigin(s.slug) : null,
@@ -173,6 +191,8 @@ export default withLambda(async (event) => {
                 suspendedReason: s.status === 'suspended' ? (s.suspendedReason || 'Taken offline by Be More Swan.') : null,
                 publishBlocker: publishBlocker(s, definition),
             },
+            // Placeholder pictures and videos for a draft: what they may choose and what it costs.
+            draftMedia: await draftMediaOptions(db, orgId, assistant.onboardingContext),
             definition, warnings: [...new Set([...warnings, ...extraWarnings])], maxPages,
             placeholders: placeholdersIn(definition),
             // Thumbnails for the editor's picture fields: library picture id → its link.
@@ -181,7 +201,7 @@ export default withLambda(async (event) => {
             // Business Information ▸ Products & Services — the ONE place products and prices live.
             catalogue: (await db.select({
                 id: orgProducts.id, name: orgProducts.name, kind: orgProducts.kind, price: orgProducts.price,
-                priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, imageAssetId: orgProducts.imageAssetId,
+                priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceCurrency: orgProducts.priceCurrency, imageAssetId: orgProducts.imageAssetId,
             }).from(orgProducts).where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active')))
                 .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id)))
                 .map((r) => ({ id: r.id, name: r.name, kind: r.kind, price: r.price, buyable: buyablePence(r) !== null,
@@ -208,11 +228,16 @@ export default withLambda(async (event) => {
             booking: await (async () => {
                 const b = await loadBookingSetup(db, orgId);
                 const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(bookings).where(and(eq(bookings.organisationId, orgId), eq(bookings.status, 'pending')));
+                // The booking link (site-booking-page.ts): this site's address + /book, once there's something to book.
+                const kinds = await bookableKinds(db, orgId, new Date(), b);
+                const origin = ownDomain?.status === 'live' ? `https://${ownDomain.domain}` : s.slug ? siteOrigin(s.slug) : null;
                 return {
                     ready: Object.keys(b.settings.weeklyHours).length > 0, hours: describeHours(b.settings.weeklyHours), mode: b.settings.mode,
                     visitAddress: b.settings.visitAddress, whatsapp: b.settings.whatsapp,
-                    services: b.services.map((x) => ({ id: x.id, name: x.name, durationMinutes: x.durationMinutes, price: x.price })),
-                    resources: b.resources.map((r) => ({ id: r.id, name: r.name, kind: r.kind })), waiting: Number(n),
+                    services: b.services.map((x) => ({ id: x.id, name: x.name, durationMinutes: x.durationMinutes, price: x.price, meetingLocation: meetingLocationOf(x.meetingLocation) })),
+                    resources: b.resources.map((r) => ({ id: r.id, name: r.name, kind: r.kind, hasMeetingUrl: !!r.meetingUrl })), waiting: Number(n),
+                    link: origin && kinds.length && s.status !== 'suspended' && !bookingsSwitchedOff(definition) ? `${origin}${BOOKING_PAGE_PATH}` : null,
+                    kinds, needsAddress: !s.slug, meetingUrl: b.settings.meetingUrl,
                 };
             })(),
             newOrders: Number((await db.select({ n: sql<number>`count(*)::int` }).from(siteOrders)
@@ -244,6 +269,8 @@ export default withLambda(async (event) => {
         return json(200, await view(r.site, r.warnings));
     }
 
+    if (action === 'draft_options') return json(200, await draftMediaOptions(db, orgId, assistant.onboardingContext));
+
     if (action === 'draft') {
         const request = typeof body.request === 'string' ? body.request.trim().slice(0, 2000) : '';
         if (request) {
@@ -252,8 +279,10 @@ export default withLambda(async (event) => {
         }
         // Checked here as well as in the worker: out of tasks, say so now — not after "a minute or two".
         if (!(await hasTaskCapacity(db, orgId))) return json(402, { error: TASK_LIMIT_MESSAGE, code: 'task_limit' });
+        const media = resolveDraftMedia(body.media, await draftMediaOptions(db, orgId, assistant.onboardingContext));
+        if ('error' in media) return json(403, { error: media.error });
         if (!(await claimDraft(db, site.id))) return json(409, { error: 'Your site is already being drafted — it will appear here in a minute or two.' });
-        if (!(await triggerSiteDraft(site.id, request || null))) {
+        if (!(await triggerSiteDraft(site.id, request || null, { media: media.choice }))) {
             await endDraft(db, site.id, 'The draft couldn\'t be started. Nothing was charged — try again.');
             return json(503, { error: 'The draft couldn\'t be started. Nothing was charged — try again.' });
         }
@@ -275,9 +304,17 @@ export default withLambda(async (event) => {
     }
 
     if (action === 'import_accept') {
-        const r = await acceptImport(db, site, maxPages);
+        const r = await acceptImport(db, site, maxPages, userId);
         if (!r.ok) return json(r.status, { error: r.error });
         return json(200, await view(r.site, ['Your imported site is now your draft. Nothing is live until you publish.', ...r.warnings]));
+    }
+
+    if (action === 'import_products') {
+        const r = await addImportedProducts(db, site, { names: body.names, userId: userId ?? null });
+        if (!r.ok) return json(r.status, { error: r.error });
+        const said = [`${r.added} product${r.added === 1 ? '' : 's'} added to Business Information ▸ Products & Services, with ${r.added === 1 ? 'its price' : 'their prices'} — change them there from now on.`];
+        if (r.skipped) said.push(`${r.skipped} ${r.skipped === 1 ? 'was' : 'were'} already there by name, so left as ${r.skipped === 1 ? 'it was' : 'they were'}.`);
+        return json(200, await view(site, said));
     }
 
     if (action === 'import_discard') {
@@ -430,10 +467,18 @@ export default withLambda(async (event) => {
         // From the chat's site_words card: an attached document's words, or words the assistant quoted
         // from the owner's own message — accepted only if they really are in it (chat-attachments.ts).
         const attachmentId = Number(body.attachmentId);
+        let pricesLeftOut = 0;
         if (Number.isInteger(attachmentId) && attachmentId > 0) {
             const fromAttachment = await attachmentText(db, orgId, attachmentId);
             if (!fromAttachment) return json(404, { error: 'That attached document isn\'t available any more. Attach it again.' });
             text = text ? `${text}\n\n${fromAttachment}` : fromAttachment;
+        } else if (typeof body.sourceUrl === 'string' && body.sourceUrl.trim()) {
+            // A page of their CURRENT website ("take the wording from my existing site"): read by the
+            // server like an import page, so the words are theirs, never retyped (site-source-page.ts).
+            const fromSite = await readOwnSitePage(db, site, body.sourceUrl);
+            if (!fromSite.ok) return json(fromSite.status, { error: fromSite.error });
+            text = text ? `${text}\n\n${fromSite.text}` : fromSite.text;
+            if (fromSite.prices) pricesLeftOut = fromSite.prices;
         } else if (typeof body.quote === 'string' && body.quote.trim()) {
             const fromChat = await quoteFromChat(db, orgId, Number(body.chatSessionId), body.quote);
             if (!fromChat) return json(400, { error: 'Those words weren\'t found in your messages, so they weren\'t used. Paste them again, or use "Add your own words" on the Website tab.' });
@@ -443,7 +488,8 @@ export default withLambda(async (event) => {
         if (blocked) return blocked;
         const r = await proposeOwnWords(db, site, { pageId, text, note, maxPages });
         if (!r.ok) return json(r.status, { error: r.error });
-        return json(200, { proposal: r.proposal });
+        // Prices on their old page are left out, as the import leaves them out: say so on the card.
+        return json(200, { proposal: r.proposal, ...(pricesLeftOut ? { note: `${pricesLeftOut} line${pricesLeftOut === 1 ? '' : 's'} with a price ${pricesLeftOut === 1 ? 'was' : 'were'} left out — prices belong in Business Information ▸ Products & Services.` } : {}) });
     }
 
     if (action === 'products_import') {
@@ -478,7 +524,9 @@ export default withLambda(async (event) => {
         const rows = await listBookings(db, orgId);
         return json(200, { bookings: rows.map((b) => ({ ...describeBooking(b, setup.settings.timezone), id: b.id, status: b.status, customerName: b.customerName,
             customerEmail: b.customerEmail, customerPhone: b.customerPhone, notes: b.notes, partySize: b.partySize, startsAt: b.startsAt, createdAt: b.createdAt,
-            cancelledBy: b.cancelledBy, moved: b.movedFromId !== null, reminded: b.reminderSentAt !== null, deposit: depositNote(b) }))
+            cancelledBy: b.cancelledBy, moved: b.movedFromId !== null, reminded: b.reminderSentAt !== null, deposit: depositNote(b), meeting: ownerMeetingLine(b) || null,
+            // Holiday lets / B&B rooms: the balance and the damage deposit (stay-jobs.ts), in words, and what the owner may do.
+            ...(b.kind === 'stay' ? { stay: stayMoneyView(b, new Date()) } : {}) }))
             // An unpaid deposit hold that lapsed was never a booking: left out.
             .filter((b, i) => !(rows[i].paymentStatus === 'expired')) });
     }
@@ -514,6 +562,27 @@ export default withLambda(async (event) => {
         return json(200, { cancelled: r.sessions.length, told: r.bookings.length, sessions: await ownerTimetable(db, orgId, new Date()) });
     }
 
+    // ── A stay's damage deposit (stay-charges.ts): give it all back now, or keep part with a reason ──
+    if (action === 'damage_return' || action === 'damage_keep') {
+        const [b] = await db.select().from(bookings).where(and(eq(bookings.id, Number(body.id)), eq(bookings.organisationId, orgId))).limit(1);
+        if (!b || b.kind !== 'stay' || b.damageDepositStatus !== 'held' || !b.damageDepositPence) return json(409, { error: 'There is no damage deposit held for that booking.' });
+        let keep = 0;
+        const reason = String(body.reason ?? '').trim().slice(0, 500);
+        if (action === 'damage_keep') {
+            const today = utcToZoned(new Date(), (await loadBookingSetup(db, orgId)).settings.timezone).date;
+            if (!b.checkIn || b.checkIn > today) return json(409, { error: 'Part of a damage deposit can only be kept once the stay has started.' });
+            keep = poundsToPence(body.keep) ?? -1;
+            const ok = cleanKeep(b.damageDepositPence, keep, reason);
+            if (!ok.ok) return json(400, { error: ok.error });
+        }
+        const r = await settleDamageDeposit(db, b, keep, keep ? reason : null);
+        if (r === 'none') return json(409, { error: 'That damage deposit has already been dealt with.' });
+        const who = await whoFor(db, b);
+        await damageEmail(b, who, r === 'refund_failed' ? null : keep, keep ? reason : null);
+        if (r === 'refund_failed') return json(502, { error: 'Stripe couldn\'t make the refund. Please refund it in your Stripe dashboard — the guest has been told you will.' });
+        return json(200, { ok: true, status: r });
+    }
+
     if (action === 'booking_decide') {
         const decision = body.decision === 'confirm' || body.decision === 'decline' || body.decision === 'cancel' ? body.decision : null;
         if (!decision) return json(400, { error: 'Confirm, decline or cancel?' });
@@ -526,8 +595,9 @@ export default withLambda(async (event) => {
         if (!r.ok) return json(409, { error: r.error });
         // A class place given back (declined or cancelled): offer it to the waitlist.
         if (r.booking.sessionId && r.booking.status !== 'confirmed' && site.slug) {
-            const cls = definition.pages.flatMap((pg) => pg.sections).find((x) => x.type === 'booking' && x.props.kind === 'class');
-            if (cls) await offerFreedPlaces(db, orgId, r.booking.sessionId, { business: definition.settings.siteName, siteOrigin: siteOrigin(site.slug), bookPath: (sid) => sessionLink(cls.id, sid) });
+            // The site's class section, or the booking link's own (site-booking.ts sectionForKind).
+            const cls = sectionForKind(definition, 'class');
+            if (cls) await offerFreedPlaces(db, orgId, r.booking.sessionId, { business: definition.settings.siteName, siteOrigin: siteOrigin(site.slug), bookPath: (sid) => sessionLink(cls, sid) });
         }
         return json(200, { ok: true, status: r.booking.status });
     }
@@ -538,9 +608,27 @@ export default withLambda(async (event) => {
         const raw = body.settings && typeof body.settings === 'object' ? body.settings as Record<string, unknown> : {};
         const cleaned = cleanBookingSettings(raw);
         if (!cleaned.ok) return json(400, { error: cleaned.error });
+        // Where each service happens (in person / phone / video) — the same check as Products & Services.
+        const locs: Array<{ id: number; value: string | null }> = [];
+        for (const x of Array.isArray(body.serviceLocations) ? (body.serviceLocations as unknown[]).slice(0, 100) : []) {
+            const o = (x && typeof x === 'object' ? x : {}) as Record<string, unknown>;
+            const id = Number(o.serviceId);
+            const m = cleanMeetingLocation(o.location);
+            if (!Number.isInteger(id) || id <= 0) return json(400, { error: 'A service in that card isn\'t valid.' });
+            if (!m.ok) return json(400, { error: m.error });
+            locs.push({ id, value: m.value });
+        }
         if (Object.keys(cleaned.value).length) {
             const values = { ...cleaned.value, updatedAt: new Date() };
             await db.insert(bookingSettings).values({ organisationId: orgId, ...values }).onConflictDoUpdate({ target: bookingSettings.organisationId, set: values });
+        }
+        for (const l of locs) {
+            await db.update(orgProducts).set({ meetingLocation: l.value, updatedAt: new Date() }).where(and(eq(orgProducts.id, l.id), eq(orgProducts.organisationId, orgId)));
+        }
+        // A new video link reaches upcoming video bookings (booking-meeting.ts).
+        if ('meetingUrl' in cleaned.value) {
+            try { if (await refreshMeetingLinks(db, orgId, new Date())) await (await import('../../src/utils/calendar-microsoft')).reconcileSoon(db, orgId); }
+            catch (err) { console.error('[sites] meeting links not refreshed', err); }
         }
         const sec = body.section && typeof body.section === 'object' ? body.section as Record<string, unknown> : null;
         if (sec && typeof sec.pageId === 'string') {

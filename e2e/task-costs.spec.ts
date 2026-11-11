@@ -1,4 +1,4 @@
-// Admin → Revenue → Task costs, the owner's review prompt, and live figures on Pricing and in cards.
+// Admin → Money → Task costs, the owner's review prompt, and live figures on Pricing and in cards.
 import { test, expect, openWorkspace } from './fixtures';
 
 const REVIEW = 'task-cost-review';
@@ -126,7 +126,7 @@ async function openAdmin(page: any, api: any) {
     await page.evaluate(() => (window as any).adminNav('task-costs'));
 }
 
-test.describe('Admin → Revenue → Task costs', () => {
+test.describe('Admin → Money → Task costs', () => {
     test('saving a draft sends only what changed, with the date and reason', async ({ page, signedIn, api, pageErrors }) => {
         let saved = false;
         api.set('admin-task-costs', (route: any) => (route.request().method() === 'POST' ? (saved = true, { id: 7 }) : (saved ? STATE([DRAFT], 7) : STATE([], null))));

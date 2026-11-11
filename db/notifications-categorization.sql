@@ -67,6 +67,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'post_missed' THEN 'suggested_action'
     WHEN 'post_generation_failed' THEN 'suggested_action'
     WHEN 'content_library_empty' THEN 'suggested_action'  -- Empty-Library Draft Fallback
+    WHEN 'library_files_expiring' THEN 'suggested_action'  -- My Content files due to be deleted (2026-11-10)
     WHEN 'risk_assessment_submitted' THEN 'suggested_action'
     WHEN 'billing_renewal_due' THEN 'suggested_action'
     WHEN 'billing_alert' THEN 'suggested_action'
@@ -139,6 +140,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'assistant_kickoff_complete' THEN 'state_change'  -- Issue #115 — Kick Off Meeting confirmed
     WHEN 'feature_status_change' THEN 'state_change'  -- Feature Requests US06 — a backed request moved status
     WHEN 'search_signals_published' THEN 'state_change'  -- a saved search finished with companies to review
+    WHEN 'review_link_response' THEN 'state_change'      -- a guest responded to a review link (call site also passes category)
     WHEN 'site_audit_ready' THEN 'state_change'          -- a Mystery Shopper check finished (call site also passes category)
     WHEN 'site_audit_competitor_change' THEN 'state_change'  -- a competitor changed its page (call site passes category)
     WHEN 'site_audit_goal_met' THEN 'state_change'       -- the website reached its target score (call site passes category)

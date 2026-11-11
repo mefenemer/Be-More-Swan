@@ -979,23 +979,6 @@ function _parsePillars(raw) {
     return String(Array.isArray(raw) ? raw.join(',') : raw ?? '').split(/[,;\n·•|]/).map(p => p.trim()).filter(Boolean).slice(0, 5);
 }
 
-// Render a live chip preview of the discrete pillars below the entry field.
-function _renderPillarChips() {
-    const host = document.getElementById('pillars-chips');
-    if (!host) return;
-    const raw = document.getElementById('edit_pillars')?.value;
-    const pillars = _parsePillars(raw);
-    if (!pillars.length) { host.innerHTML = ''; return; }
-    const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    // Warnings in words the owner can act on — one long "pillar" is the shape that made a pillar
-    // never appear (2026-10-06): the assistant had one theme to rotate, not four.
-    const warnings = window.ContentPillars ? window.ContentPillars.pillarWarnings(raw) : [];
-    host.innerHTML = pillars.map(p =>
-        `<span class="inline-flex items-center text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">${esc(p)}</span>`
-    ).join('') + (warnings.length
-        ? `<p class="w-full text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-1">${warnings.map(esc).join(' ')}</p>`
-        : '');
-}
 
 // Brief fields that auto-grow with their content. These can hold a lot of text (especially the
 // AI-wand fields), so they're rendered as textareas that expand to keep everything visible —
@@ -1030,7 +1013,7 @@ function _fetchPrefetched(url) {
     return p.then((r) => r || fetch(url));
 }
 
-const _AUTOGROW_FIELDS = ['edit_problem', 'edit_core_message', 'edit_audience', 'edit_tone', 'edit_pillars', 'edit_objections'];
+const _AUTOGROW_FIELDS = ['edit_problem', 'edit_core_message', 'edit_audience', 'edit_tone', 'edit_objections'];
 
 // The Website Assistant's editor (src/components/assistant-site-editor.js, ~2,000 lines) is loaded the
 // first time a Website Assistant needs it, not on every workspace page. Calls made while it loads run
@@ -1067,12 +1050,13 @@ function _initBriefAutoGrow() {
         el.dataset.autogrow = '1';
         el.addEventListener('input', () => _autoGrowField(el));
     });
-    // Keep the discrete pillar chips in sync as the user types (and on wand-applied changes,
-    // which dispatch an 'input' event on edit_pillars).
+    // Pillars are records (src/components/pillar-list.js). Nobody types in the hidden #edit_pillars:
+    // only the AI wand and the strategy fix write text there. Mark it so the next autosave sends
+    // that text and the server reconciles the records to it; otherwise the save leaves them alone.
     const pillarsEl = document.getElementById('edit_pillars');
-    if (pillarsEl && !pillarsEl.dataset.chipsync) {
-        pillarsEl.dataset.chipsync = '1';
-        pillarsEl.addEventListener('input', _renderPillarChips);
+    if (pillarsEl && !pillarsEl.dataset.textsync) {
+        pillarsEl.dataset.textsync = '1';
+        pillarsEl.addEventListener('input', () => { window._pillarsTextDirty = true; });
     }
 }
 
@@ -1099,6 +1083,43 @@ function _resizeBriefAutoGrow() {
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 // Set up, Design, Pages and Publish are the Website tab's sub tabs (owner, 2026-11-06). An old name opens that sub tab.
 const _SITE_SUBTAB_OF = { sitesetup: 'setup', sitedesign: 'design', sitepages: 'pages', sitepublish: 'publish' };
+// The chat panel beside a role's work tabs (registry: cfg.tabChat; owner, 2026-11-06: the Social Media Assistant
+// and the Lead Generator; 2026-11-07: the Blog Writer). The tabs are moved into ONE box and that box is docked (ChatPane.dock), so switching
+// between them keeps the same conversation on screen, mid-sentence. No draftTarget: nothing is open here, so a
+// post drafted in this chat is saved as a new post, as in the pop-up chat. On any other tab the panel steps aside
+// and the page's Chat button opens the pop-up. The view is re-injected per load, so nothing here needs undoing.
+let _tabChat = null;
+function _setupTabChat(cfg, data) {
+    _tabChat?.dock.destroy();
+    _tabChat = null;
+    const conf = cfg.tabChat;
+    const panels = (conf?.tabs || []).map((t) => document.getElementById(`maintab-${t}`)).filter(Boolean);
+    if (!panels.length || !window.ChatPane?.available?.()) return;
+    const work = document.createElement('div');
+    work.id = 'tabchat-work';
+    panels[0].parentNode.insertBefore(work, panels[0]);
+    panels.forEach((p) => work.appendChild(p));
+    _tabChat = {
+        tabs: conf.tabs,
+        dock: window.ChatPane.dock(work, {
+            prefix: 'tabchat', storageKey: 'bms-tab-chat-on',
+            pane: () => ({
+                assistantId: data.id, assistantName: data.name, roleKey: data.roleKey,
+                rememberKey: `bms-tab-chat:${data.id}`,
+                placeholder: conf.placeholder,
+                draftTarget: () => null,
+            }),
+        }),
+    };
+    _syncTabChat(document.querySelector('.main-tab-btn.active-tab')?.dataset.maintab);
+}
+function _syncTabChat(name) {
+    if (!_tabChat) return;
+    const here = _tabChat.tabs.includes(name);
+    // Inline: the dock's own CSS sets display:grid, which would beat the hidden attribute.
+    _tabChat.dock.layout.style.display = here ? '' : 'none';
+    if (here && !_tabChat.dock.isOn() && _tabChat.dock.wanted()) _tabChat.dock.setOn(true, false);
+}
 window._activateMainTab = function(name) {
     const siteSubtab = _SITE_SUBTAB_OF[name];
     if (siteSubtab) name = 'sitebuilder';
@@ -1110,6 +1131,10 @@ window._activateMainTab = function(name) {
     }
     // The strip belongs to the landing tab only; re-judged after the tab has switched.
     setTimeout(() => window._renderNeedsYou?.(), 0);
+    _syncTabChat(name);
+    // A link from a docked chat can change tab while one is full screen: its panel hides, and the page must scroll again.
+    const fullPanel = document.querySelector('.main-tab-content[data-rq-full]');
+    if (fullPanel && fullPanel.id !== `maintab-${name}`) window._tabSetFull(fullPanel.id.replace('maintab-', ''), false);
     document.querySelectorAll('.main-tab-btn').forEach(b => {
         const on = b.dataset.maintab === name;
         b.classList.toggle('active-tab', on);
@@ -1358,14 +1383,8 @@ window.detailRqOpenStatus = function(statusKey, btn) {
     // Brand pink: emerald-700/800 are remapped to neon / deep pink; emerald-600 is still real green.
     // Deep pink for the text — neon pink on white is 3.8:1, too faint for small text.
     const active = btn || document.querySelector(`.detail-rq-col[data-status="${statusKey}"]`);
-    document.querySelectorAll('.detail-rq-col').forEach(t => {
-        t.classList.remove('border-b-2', 'border-emerald-800', 'text-emerald-800');
-        t.classList.add('text-gray-500');
-        t.setAttribute('aria-selected', t === active ? 'true' : 'false');
-        t.tabIndex = t === active ? 0 : -1;
-    });
-    // border-emerald-800 too: border-b-2 alone draws the default grey, so only the text turned pink.
-    if (active) { active.classList.add('border-b-2', 'border-emerald-800', 'text-emerald-800'); active.classList.remove('text-gray-500'); }
+    _rqMarkCol(active);
+    _rqShowBlogSetup(false);
     const done = _detailRqRenderGroups(statusKey);
     Promise.resolve(done).then(_rqSyncFoldAll, _rqSyncFoldAll);
     return done;
@@ -1392,26 +1411,66 @@ window._rqFoldAll = function() {
     });
     _rqSyncFoldAll();
 };
-window._rqSetFull = function(on) {
-    const panel = document.getElementById('maintab-review-queue');
-    const btn = document.getElementById('detail-rq-full-btn');
+// Full screen for any main tab (owner, 2026-11-07: every live assistant has one, at the right of the tab's header,
+// with its New button beside it). The tab's panel goes over the page; a chat docked beside it stays beside it.
+// Briefs, Videos and the Website tab have their own, because each also repaints what it holds.
+const _TAB_FULL_CLASS = 'btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap';
+window._tabSetFull = function(name, on) {
+    const panel = document.getElementById(`maintab-${name}`);
     if (!panel) return;
     panel.toggleAttribute('data-rq-full', !!on);
     if (window.ScrollLock) { if (on) window.ScrollLock.lock('rq-full', { scoped: true }); else window.ScrollLock.release('rq-full'); }
-    if (btn) {
+    document.querySelectorAll(`[data-tab-full-btn="${name}"]`).forEach((btn) => {
         btn.textContent = on ? 'Exit full screen' : 'Full screen';
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-        btn.title = on ? 'Back to the page (Esc)' : 'Use the whole screen for this list';
+        btn.title = on ? 'Back to the page (Esc)' : 'Use the whole screen for this tab';
         btn.focus({ preventScroll: true });
-    }
+    });
 };
+window._rqSetFull = (on) => window._tabSetFull('review-queue', on);
+/** The button, for a tab that paints its own header. Reads the panel, so a repaint keeps saying the right thing. */
+window._tabFullBtn = function(name) {
+    const on = !!document.getElementById(`maintab-${name}`)?.hasAttribute('data-rq-full');
+    return `<button type="button" data-tab-full-btn="${name}" onclick="window._tabSetFull('${name}', !document.getElementById('maintab-${name}').hasAttribute('data-rq-full'))" aria-pressed="${on}" title="${on ? 'Back to the page (Esc)' : 'Use the whole screen for this tab'}" class="${_TAB_FULL_CLASS}">${on ? 'Exit full screen' : 'Full screen'}</button>`;
+};
+// The standard tab header, its "+ New …" button and pill counts: src/components/tab-head.js (window._tabHead …).
 // Esc leaves it, unless an OPEN dialog (a post, blog or email pop-up) is taking Esc. "Any dialog" is
 // not enough: the settings drawer is always in the page as one, inert while shut.
 document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || !document.getElementById('maintab-review-queue')?.hasAttribute('data-rq-full')) return;
+    if (e.key !== 'Escape') return;
+    const panel = document.querySelector('.main-tab-content[data-rq-full]');
+    if (!panel) return;
     const dialogOpen = [...document.querySelectorAll('[role="dialog"]')].some((d) => !d.inert && !d.hidden && !d.classList.contains('hidden') && d.getClientRects().length && getComputedStyle(d).visibility !== 'hidden');
-    if (!dialogOpen) window._rqSetFull(false);
+    if (!dialogOpen) window._tabSetFull(panel.id.replace('maintab-', ''), false);
 });
+
+// Blog setup: the last sub tab of the Blog Writer's Blogs (owner, 2026-11-07, as on the Website tab). It holds
+// Search Console and the blog widget, which belong to the whole blog; Blog Studio lends them to this panel.
+function _rqMarkCol(active) {
+    document.querySelectorAll('.detail-rq-col').forEach(t => {
+        t.classList.remove('border-b-2', 'border-emerald-800', 'text-emerald-800');
+        t.classList.add('text-gray-500');
+        t.setAttribute('aria-selected', t === active ? 'true' : 'false');
+        t.tabIndex = t === active ? 0 : -1;
+    });
+    // border-emerald-800 too: border-b-2 alone draws the default grey, so only the text turned pink.
+    if (active) { active.classList.add('border-b-2', 'border-emerald-800', 'text-emerald-800'); active.classList.remove('text-gray-500'); }
+}
+function _rqShowBlogSetup(on) {
+    const panel = document.getElementById('detail-rq-blog-setup');
+    const groups = document.getElementById('detail-rq-groups');
+    if (panel) { panel.classList.toggle('hidden', !on); panel.style.display = on ? '' : 'none'; }
+    if (groups) { groups.classList.toggle('hidden', !!on); groups.style.display = on ? 'none' : ''; }
+    if (!on) window.unmountBlogSetup?.();
+}
+window._rqOpenBlogSetup = function(btn) {
+    const pill = btn || document.getElementById('detail-rq-col-setup');
+    const panel = document.getElementById('detail-rq-blog-setup');
+    if (!pill || !panel) return;
+    _rqMarkCol(pill);
+    _rqShowBlogSetup(true);
+    window.mountBlogSetup?.(panel, window._currentAssistantId);
+};
 
 // Re-render whichever column is currently open, e.g. after a new post is added elsewhere
 // (the Create Post sheet) so the list reflects it without the user manually switching tabs.
@@ -1526,11 +1585,14 @@ async function _detailRqColumnCount(statusKey, assistantId) {
     } catch { return 0; }
 }
 
+// One count style on every pill (owner, 2026-11-07): a plain grey number, 0 included, so the pills never
+// shift; amber on Review when something waits, red on Needs attention when something failed.
 function _detailRqSetColumnBadge(statusKey, count) {
     const badge = document.getElementById('detail-rq-col-count-' + statusKey);
     if (!badge) return;
-    badge.textContent = count || '';
-    badge.classList.toggle('hidden', !count);
+    const n = Number(count) || 0;
+    badge.textContent = String(n);
+    badge.className = n > 0 && statusKey === 'review' ? 'pill-wait' : n > 0 && statusKey === 'attention' ? 'pill-alert' : 'pill-n';
 }
 
 // A notification arriving usually MEANS the queue changed — the assistant finished drafting, a
@@ -1728,8 +1790,7 @@ async function _detailRqRenderGroups(statusKey) {
     // paging, not the length of the first page — otherwise a queue of 24 would report "10".
     if (statusKey === 'review') {
         const groupedCount = _detailRqTotal ?? postGroups.length;
-        const colBadge = document.getElementById('detail-rq-col-count-review');
-        if (colBadge) { colBadge.textContent = groupedCount || ''; colBadge.classList.toggle('hidden', !groupedCount); }
+        _detailRqSetColumnBadge('review', groupedCount);
         _setDetailRqTabBadge(groupedCount);
         // Keep the Autopilot card + status pill in sync as the queue changes (e.g. after approving).
         window._setPendingReviewCount?.(groupedCount);
@@ -1825,7 +1886,7 @@ function _detailRqEmptyReviewHtml(emptyMsg) {
         ? next.textContent.trim()
         : (document.getElementById('autopilot-headline')?.textContent.trim() || '');
     const primary = document.getElementById('detail-rq-primary-btn');
-    const label = document.getElementById('detail-rq-primary-label')?.textContent.trim() || 'Create a Post';
+    const label = document.getElementById('detail-rq-primary-label')?.textContent.trim() || 'New post';
     const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     return `<div class="py-8 text-center">
         <p class="text-sm font-semibold text-gray-900">${emptyMsg}</p>
@@ -1984,7 +2045,7 @@ const _RQ_RECORD_STATE = { review: 'pending_approval', approved: 'approved', sch
 // The label is presentation only — renaming one must never touch these keys.
 const _RQ_COLUMN_LABELS = {
     review: 'Review', approved: 'Approved', scheduled: 'Scheduled',
-    posted: 'Posted', attention: 'Needs attention', archived: 'Archived',
+    posted: 'Posted', attention: 'Needs attention', archived: 'Archived', setup: 'Blog setup',
 };
 
 /**
@@ -2433,13 +2494,39 @@ function _rqShowEditReasonStrip() {
         ${RC.editReasons.map((r) => `<button type="button" class="${chip}" data-edit-reason="${_rqEsc(r)}">${_rqEsc(RC.editReasonLabel(r))}</button>`).join('')}
         <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-edit-reason-skip>Skip</button>
       </div>
+      <div class="hidden mt-2" data-edit-reason-other>
+        <label class="block text-[11px] font-bold text-gray-700 mb-1" for="rq-edit-note-${_rqEsc(String(pending.recordId))}">What was the reason?</label>
+        <textarea id="rq-edit-note-${_rqEsc(String(pending.recordId))}" rows="2" maxlength="${Number(RC.editNoteMax) || 500}" data-edit-reason-note
+          class="w-full rounded-lg border border-gray-200 px-2 py-1.5 text-xs text-gray-800 focus:border-emerald-600 focus:ring-emerald-600"
+          placeholder="For example: it mentioned an event they didn’t run"></textarea>
+        <div class="flex gap-2 mt-1.5">
+          <button type="button" class="btn-primary px-3 py-1 text-[11px] font-bold rounded-lg cursor-pointer" data-edit-reason-note-save>Save</button>
+          <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-500 hover:text-gray-600 transition cursor-pointer" data-edit-reason-note-cancel>Back</button>
+        </div>
+      </div>
       <p class="hidden text-[11px] font-semibold mt-1.5" data-edit-reason-status></p>`;
 
     const status = strip.querySelector('[data-edit-reason-status]');
     strip.querySelector('[data-edit-reason-skip]').addEventListener('click', () => strip.remove());
-    strip.addEventListener('click', async (e) => {
+    // "Something else" asks what (Fix pipeline #37, prod 2026-11-10): picking it used to save at once
+    // with no way to say the reason. It now opens a box; Save sends the words with it, and an empty
+    // box still saves plain "Something else".
+    const otherBox = strip.querySelector('[data-edit-reason-other]');
+    const noteEl = strip.querySelector('[data-edit-reason-note]');
+    strip.querySelector('[data-edit-reason-note-cancel]').addEventListener('click', () => otherBox.classList.add('hidden'));
+    strip.querySelector('[data-edit-reason-note-save]').addEventListener('click', () => save('other', noteEl.value.trim()));
+    strip.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-edit-reason]');
         if (!btn) return;
+        const reason = btn.getAttribute('data-edit-reason');
+        if (reason === 'other') {
+            otherBox.classList.remove('hidden');
+            noteEl.focus();
+            return;
+        }
+        save(reason, '');
+    });
+    async function save(reason, note) {
         strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
         status.textContent = 'Saving…';
         status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
@@ -2451,22 +2538,27 @@ function _rqShowEditReasonStrip() {
                     action: 'record_edit_feedback',
                     assistantId: window._currentAssistantId,
                     recordId: pending.recordId,
-                    editReason: btn.getAttribute('data-edit-reason'),
+                    editReason: reason,
+                    ...(note ? { editNote: note } : {}),
                 }),
             });
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || 'Could not save that.');
             // The server returns 200 with recorded:false when the write itself failed — the edit
             // succeeded either way, so say what actually happened rather than claiming a save.
+            // "Something else" is never grouped into a suggested change (template-feedback.ts), so it
+            // must not promise one.
             strip.innerHTML = data.recorded
-                ? '<p class="text-[11px] font-semibold text-gray-600">Noted — thanks. Repeated edits like this become a suggested template change.</p>'
+                ? (reason === 'other'
+                    ? '<p class="text-[11px] font-semibold text-gray-600">Noted — thanks.</p>'
+                    : '<p class="text-[11px] font-semibold text-gray-600">Noted — thanks. Repeated edits like this become a suggested template change.</p>')
                 : '<p class="text-[11px] font-semibold text-gray-500">Your edit is saved. The note couldn’t be recorded.</p>';
         } catch (err) {
             strip.querySelectorAll('button').forEach((b) => { b.disabled = false; });
             status.textContent = err.message || 'Could not save that.';
             status.className = 'text-[11px] font-semibold text-red-600 mt-1.5';
         }
-    });
+    }
 
     // Under the draft preview, where the reviewer's attention already is.
     const preview = card.querySelector('details');
@@ -3214,7 +3306,7 @@ const _RQ_BRIEF_LABELS = [
  * order carried neither, the card listed a bare "Narrow the targeting", and approving changed nothing.
  */
 const _RQ_NARROW_LABELS = [['previousIdea', 'Search now'], ['idea', 'Changes to']];
-const _RQ_NARROW_PAUSE = 'Pauses this search. No narrower description could be worked out from its cold leads, so it stops running until you edit who it looks for on Find New Leads and resume it.';
+const _RQ_NARROW_PAUSE = 'Pauses this search. No narrower description could be worked out from its cold leads, so it stops running until you edit who it looks for on the Searches tab and resume it.';
 const _RQ_EMAIL_TRIGGER_LABELS = {
     form: 'A follow-up for people who sign up through a form — saved switched off',
     custom: 'Emails you send to a group yourself — saved as drafts',
@@ -3242,7 +3334,7 @@ function _rqDecisionDetail(r, statusKey) {
             .map(([k, label]) => line(label, brief[k]));
         if (narrow && !fields.length) {
             fields.push(line('What happens', brief.pauseSearch === true ? _RQ_NARROW_PAUSE
-                : 'Nothing — this was raised before proposals carried a new description, so there is nothing to apply. Edit who the search looks for on Find New Leads instead.'));
+                : 'Nothing — this was raised before proposals carried a new description, so there is nothing to apply. Edit who the search looks for on the Searches tab instead.'));
         }
         return `<li class="rounded-lg border border-gray-200 bg-white px-3 py-2">
             <p class="text-sm font-bold text-gray-900">${_rqEsc(actionLabel(o && o.action))}</p>
@@ -3426,8 +3518,7 @@ async function _detailRqRenderRecords(statusKey) {
     // client-side precisely so these numbers keep describing the column: "10 awaiting review" on a
     // queue of sixty is worse than no badge at all.
     if (statusKey === 'review') {
-        const colBadge = document.getElementById('detail-rq-col-count-review');
-        if (colBadge) { colBadge.textContent = records.length || ''; colBadge.classList.toggle('hidden', !records.length); }
+        _detailRqSetColumnBadge('review', records.length);
         _setDetailRqTabBadge(records.length);
         window._setPendingReviewCount?.(records.length);
         window._updateOpSignals?.({ pendingReview: records.length });
@@ -3435,8 +3526,7 @@ async function _detailRqRenderRecords(statusKey) {
         // The other columns' badges were never populated for records queues at all
         // (_detailRqRefreshColumnCounts returns early for them), so Approved / Scheduled / Archived
         // sat blank however much was in them. The open column can at least state its own count.
-        const colBadge = document.getElementById('detail-rq-col-count-' + statusKey);
-        if (colBadge) { colBadge.textContent = records.length || ''; colBadge.classList.toggle('hidden', !records.length); }
+        _detailRqSetColumnBadge(statusKey, records.length);
     }
 
     // Keep the rendered records addressable by id: PATCH replaces `data` wholesale, so editing
@@ -4843,7 +4933,7 @@ async function _detailRqRenderBlog(statusKey) {
         : (statusKey === 'review'
             ? `<div class="py-10 text-center">
                  <p class="text-sm text-gray-500">No blog drafts waiting for you. Nothing publishes until you approve it.</p>
-                 <button type="button" onclick="window.openBlogStudio && window.openBlogStudio({ assistantId: window._currentAssistantId })" class="btn-primary min-h-[44px] sm:min-h-0 mt-3 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">Write Blog Post</button>
+                 <button type="button" onclick="window.openBlogStudio && window.openBlogStudio({ assistantId: window._currentAssistantId })" class="btn-primary min-h-[44px] sm:min-h-0 mt-3 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer">New blog post</button>
                </div>`
             : '<p class="text-sm text-gray-500 py-10 text-center">Nothing here yet.</p>');
 }
@@ -7016,6 +7106,17 @@ function _applyDashboardRegistry(data) {
         setText(`kpi-${i + 1}-title`, kpi.title);
         setText(`kpi-${i + 1}-desc`, kpi.desc);
     });
+    // A role that declares fewer than four KPIs (the Video Producer has three, 2026-11-10) hides the
+    // cards it doesn't fill, rather than leaving one with no label, and the row closes up.
+    const kpiCount = Math.min(4, (cfg.kpis || []).length) || 4;
+    ['engagement', 'reach', 'ctr', 'value'].forEach((k, i) => {
+        document.getElementById(`kpi-card-${k}`)?.classList.toggle('hidden', i >= kpiCount);
+    });
+    const kpiGrid = document.getElementById('metrics-kpi-grid');
+    if (kpiGrid) {
+        kpiGrid.classList.toggle('lg:grid-cols-4', kpiCount === 4);
+        kpiGrid.classList.toggle('lg:grid-cols-3', kpiCount === 3);
+    }
 
     const mods = cfg.modules || {};
     const toggle = (id, show) => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !show); };
@@ -7050,6 +7151,7 @@ function _applyDashboardRegistry(data) {
     window._detailNeedsYouSource = cfg.videosTab ? 'videos' : !cfg.hideReviewQueue ? 'review' : cfg.briefsTab ? 'briefs' : cfg.needsYou ? 'module' : null;
     window._detailNeedsYouModule = cfg.needsYou || null;
     _applyCompactHeader(cfg);
+    _setupTabChat(cfg, data);
     window._detailNeedsYouOverride = 0;
     window._detailNeedsYouItems = [];
     window._detailNextUp = null;
@@ -7099,10 +7201,8 @@ function _applyDashboardRegistry(data) {
     else if (goalsBtn) document.getElementById('maintab-btn-activity')?.before(goalsBtn);
     // …and the divider that marks Calendar and Activity as supporting views, on the same roles.
     const supportDivider = document.getElementById('maintab-support-divider');
-    if (supportDivider) {
-        supportDivider.classList.toggle('hidden', !goalsAnchor);
-        supportDivider.style.display = goalsAnchor ? '' : 'none';
-    }
+    // Owner, 2026-11-07: no dividers in the tab row on any assistant — kept hidden (the markup stays for old links).
+    if (supportDivider) { supportDivider.classList.add('hidden'); supportDivider.style.display = 'none'; }
     if (window._detailResultsInGoalsTab) {
         const panel = document.getElementById('maintab-goals');
         const goalsList = document.getElementById('tab-goals');
@@ -7227,25 +7327,27 @@ function _applyDashboardRegistry(data) {
     toggle('detail-rq-col-approved', rqIsRecords || rqIsNewsletter);
     // "Sent" for emails and "Published" for blogs (set below); every other role keeps "Posted".
     setText('detail-rq-col-label-posted', 'Posted');
-    const setupBtn = document.getElementById('detail-rq-setup-btn');
-    if (setupBtn) setupBtn.style.display = rqIsBlog ? '' : 'none';
+    const setupBtn = document.getElementById('detail-rq-col-setup');
+    if (setupBtn) { setupBtn.classList.toggle('hidden', !rqIsBlog); setupBtn.style.display = rqIsBlog ? '' : 'none'; }
+    const setupDivider = document.getElementById('detail-rq-setup-divider');
+    if (setupDivider) setupDivider.style.display = rqIsBlog ? '' : 'none';
     // Named after the role's own tab ("Emails", "Outreach"…) — every non-blog role was announced
     // as "Posts by stage" (review, 2026-10-22).
     document.querySelector('#maintab-review-queue [role="tablist"]')?.setAttribute('aria-label',
         `${(window._detailReviewQueue || {}).label || (rqIsBlog ? 'Blogs' : 'Posts')} by stage`);
     if (rqIsBlog) {
-        setText('detail-rq-primary-label', 'Write Blog Post');
+        setText('detail-rq-primary-label', 'New blog post');
         setText('detail-rq-col-label-posted', 'Published');
         const rqBtn = document.getElementById('detail-rq-primary-btn');
         if (rqBtn) rqBtn.onclick = () => { window.openBlogStudio?.({ assistantId: data.id }); };
     } else if (rqIsNewsletter) {
-        setText('detail-rq-primary-label', 'Write Email');
+        setText('detail-rq-primary-label', 'New email');
         setText('detail-rq-col-label-posted', 'Sent');
         const rqBtn = document.getElementById('detail-rq-primary-btn');
         if (rqBtn) rqBtn.onclick = () => { window._newsletterAssistantId = window._currentAssistantId || null; window.loadView?.('newsletter'); };
     } else if (!rqIsRecords) {
         // Posts queues: keep the in-queue CTA in step with the header ("Create a Post" for SMM).
-        setText('detail-rq-primary-label', cfg.primaryAction?.label || 'Create a Post');
+        setText('detail-rq-primary-label', cfg.primaryAction?.label || 'New post');
     }
 
     // The Lead Generator's "Review Lead Ideas" is no longer wired here: like "Find New Leads"
@@ -7349,13 +7451,13 @@ function _applyDashboardRegistry(data) {
     // the next CSS rebuild.
     toggleBtn('detail-action-bar', showPrimaryAction);
     if (data.roleKey === 'blog_writer') {
-        if (paLabel) paLabel.textContent = 'Write Blog Post';
+        if (paLabel) paLabel.textContent = 'New blog post';
         if (paBtn) paBtn.onclick = () => { if (window.openBlogStudio) window.openBlogStudio({ assistantId: data.id }); };
     } else if (data.roleKey === 'newsletter_editor') {
         // The Email Studio is a VIEW rather than a modal (unlike Blog Studio): an issue is
         // edited alongside its list and its audience, which does not fit a dialog. Routed through
         // the workspace router so it is a view swap, not a page reload that drops app state.
-        if (paLabel) paLabel.textContent = 'Write Email';
+        if (paLabel) paLabel.textContent = 'New email';
         // ⚠️ Hand the Studio the assistant on the way in. Without it the Studio has no name to put
         // on its buttons ("the assistant" about somebody the user named themselves) AND every issue
         // it creates has a null assistant_id — invisible on the Issues tab of the very page the
@@ -7568,11 +7670,14 @@ function _applyDashboardRegistry(data) {
         });
     }
 
-    // My Content tab — only the content roles (myContentTab: social_media_manager, blog_writer):
-    // the org-wide content library they draw media from (issue #213).
+    // My Content tab — the roles that make or use media (myContentTab: social_media_manager,
+    // blog_writer, brand_designer, video_producer): the content library (issue #213).
+    // `type` = the media type it opens on (the Video Producer's videos), read by assistant-my-content.js.
     const myContent = cfg.myContentTab;
     toggle('maintab-btn-mycontent', !!myContent);
     if (myContent) setText('mycontent-tab-label', myContent.label);
+    const mcHost = document.getElementById('mycontent-host');
+    if (mcHost) mcHost.dataset.type = (myContent && myContent.type) || '';
 }
 
 // Steps from the role's schema-driven onboarding definition
@@ -7796,8 +7901,13 @@ function _detailHydrate(data) {
     _renderContentMix(data);
     _renderVoiceBuilder(data);
     _syncStrategyCard();
-    _detailSetVal('edit_pillars', Array.isArray(ctx.content_pillars) ? ctx.content_pillars.join(', ') : (ctx.content_pillars || ''));
-    _renderPillarChips();
+    const pillarText = Array.isArray(ctx.content_pillars) ? ctx.content_pillars.join(', ') : (ctx.content_pillars || '');
+    _detailSetVal('edit_pillars', pillarText);
+    window._pillarsTextDirty = false;
+    // One record per pillar, Social Media assistants only (the only role that balances pillars).
+    if (data.roleKey === 'social_media_manager') {
+        window.PillarList?.mount(document.getElementById('pillars-list'), { assistantId: data.id, initialText: pillarText });
+    }
     // Sales context — feeds the auto-responder objection playbook (P4) and DM drafting.
     // Products & Services are SHOWN from Business Information, not edited here (one place).
     _renderOfferingsBox(ctx);
@@ -8547,6 +8657,11 @@ function _detailCollect(currentData) {
         posting_timezone: document.getElementById('edit_timezone')?.value || _POSTING_DEFAULT_TZ,
         target_audience: document.getElementById('edit_audience')?.value || '',
         tone_of_voice: document.getElementById('edit_tone')?.value || '',
+        // ⚠️ The records are the truth (src/utils/content-pillars-store.ts). Pillar text is sent ONLY
+        // when the AI wand or strategy fix wrote some; otherwise the key is left out below and the
+        // server carries the stored list across. Sending the page's copy clobbered the records on
+        // staging (2026-11-08): a save built before a pillar change landed after it, and the server
+        // reconciled the records back to the old list.
         content_pillars: _parsePillars(document.getElementById('edit_pillars')?.value),
         sales_objections: document.getElementById('edit_objections')?.value || '',
         reference_style_url: document.getElementById('edit_reference_url')?.value || '',
@@ -8570,6 +8685,7 @@ function _detailCollect(currentData) {
             || currentData.context?.content_source || null,
         primary_platforms: platforms,
     };
+    if (!window._pillarsTextDirty) delete newContext.content_pillars;
 
     // Content mix — only when the card is on the page (Social Media / Blog assistants); otherwise the
     // stored value rides through untouched on the spread above. All ticked is saved as null = "every
@@ -8752,6 +8868,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // The Creative Brief's old free-text products box, cleared once its notes are moved into (or
     // deleted in favour of) Business Information ▸ Products & Services. Through the normal save.
+    // The pillar list (src/components/pillar-list.js) saves on its own; it hands the derived names
+    // back here so the next autosave sends the same list and leaves the records alone.
+    window._detailSetContextKey = function (key, value) {
+        currentData.context = { ...(currentData.context || {}), [key]: value };
+    };
+
     window._detailClearOfferingNotes = async function () {
         currentData.context = { ...(currentData.context || {}), service_offerings: '' };
         await persistChanges();
@@ -8761,6 +8883,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     async function persistChanges() {
         _detailSetSaveStatus('Saving…', 'text-gray-400');
         const { newContext, newConfiguration } = _detailCollect(currentData);
+        const sentPillarText = window._pillarsTextDirty === true;
         // Also save the name
         const nameInput = document.getElementById('detail-name-input');
         const newName = nameInput ? nameInput.value.trim() : null;
@@ -8788,9 +8911,13 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 // posts drafted after it, weeks out — offer to redraft the upcoming ones
                 // (src/components/redraft-upcoming.js). Compared before currentData is overwritten.
                 const before = currentData.context || {};
-                const topicChanged = (window.REDRAFT_TOPIC_KEYS || []).some((k) => JSON.stringify(before[k] ?? null) !== JSON.stringify(newContext[k] ?? null));
-                currentData.context = newContext;
+                // Pillars not sent = not changed by this save (pillar-list.js offers its own redraft).
+                const topicChanged = (window.REDRAFT_TOPIC_KEYS || []).some((k) => (k !== 'content_pillars' || sentPillarText)
+                    && JSON.stringify(before[k] ?? null) !== JSON.stringify(newContext[k] ?? null));
+                currentData.context = sentPillarText ? newContext : { ...newContext, content_pillars: before.content_pillars };
                 currentData.configuration = newConfiguration;
+                // The server turned wand/strategy pillar text into records: show them.
+                if (sentPillarText) { window._pillarsTextDirty = false; window.PillarList?.reload(); }
                 if (topicChanged) window.offerRedraftUpcoming?.(parseInt(assistantId));
                 // The Outreach tab's send-readiness (mailbox, chasers, signature) is read from these
                 // answers and cached per assistant — drop it so the next paint re-reads what was saved.
@@ -9946,20 +10073,32 @@ window._refreshAssistantMetrics = function() {
     }, 250);
 };
 
+// Work finishes in the background and the page stays open, with a chat beside the list now: the strip used to
+// keep the number from when the page opened. Refreshed, quietly, whenever a post moved or a notification came in.
+let _taskShareTimer = null;
+function _refreshTaskShareSoon() {
+    clearTimeout(_taskShareTimer);
+    _taskShareTimer = setTimeout(() => {
+        const id = window._currentAssistantId;
+        if (id && document.getElementById('detail-task-share')) _renderAssistantTaskShare(id, { fresh: true });
+    }, 1500);
+}
+document.addEventListener('posts:changed', _refreshTaskShareSoon);
+document.addEventListener('bms:notifications-arrived', _refreshTaskShareSoon);
 // This assistant's share of the month's task allowance (#detail-task-share), beside what every other
 // assistant used. Totals are the org's (check-capacity: usage_counters); the split is task_ledger by
 // assistant (get-usage-summary) — the same two numbers the dashboard's "Tasks this month" card uses.
 // Hidden when the plan has no task limit or the workspace is still on the old credits.
-async function _renderAssistantTaskShare(assistantId) {
+async function _renderAssistantTaskShare(assistantId, opts = {}) {
     const strip = document.getElementById('detail-task-share');
     if (!strip) return;
-    strip.classList.add('hidden');
+    if (!opts.fresh) strip.classList.add('hidden');
     // The Campaign Orchestrator's Budget & Control strip already states the month's allowance, with
     // the work committed to campaigns beside it — two counts of one number (review, 2026-10-22).
     const roleKey = (window._detailCurrentData || {}).roleKey;
     if ((window.AssistantDashboardRegistry?.get?.(roleKey) || {}).allowanceInControlStrip) return;
     try {
-        const get = (u) => (window.bmsCachedFetch ? window.bmsCachedFetch(u) : fetch(u)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const get = (u) => (window.bmsCachedFetch ? window.bmsCachedFetch(u, { fresh: !!opts.fresh }) : fetch(u)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         const [cap, us] = await Promise.all([get('/.netlify/functions/check-capacity'), get('/.netlify/functions/get-usage-summary')]);
         // The user may have opened another assistant while this was loading.
         if (Number(window._currentAssistantId) !== Number(assistantId)) return;
@@ -11129,6 +11268,11 @@ function _setMetricsEmptyState(mode, info) {
         if (title) title.textContent = 'No briefs yet';
         if (body)  body.textContent  = 'These fill in as you brief pictures and choose between the options. Press "New brief" on the Briefs tab, or describe what you need in chat.';
         if (note) note.textContent = '';
+    } else if (mode === 'video-no-data') {
+        // The Video Producer is a studio: it never posts, so what is missing is a finished video.
+        if (title) title.textContent = 'No videos made yet';
+        if (body)  body.textContent  = 'These fill in once your first video is made. Press "New video" on the Videos tab, or tell your assistant in chat what you would like a video about.';
+        if (note) note.textContent = '';
     } else if (mode === 'site-no-data') {
         // This assistant publishes nothing; what is missing is the first check of the site.
         if (title) title.textContent = 'No website check yet';
@@ -11634,6 +11778,41 @@ async function _loadBrandMetrics(assistantId) {
     }
 }
 
+// ── Video Producer KPI cards ─────────────────────────────────────────────────
+// Routed here by `metricsSource: 'video'`. A studio never posts, so reach and engagement would read
+// "nothing published" for ever: these come from video-projects.ts ?performance=1 (src/lib/video-results.ts)
+// — videos made, the share made without changes and average turnaround. Three cards: "Times Used" (in
+// posts and articles) was removed 2026-11-10 — the owner wants nothing here about other assistants' work.
+async function _loadVideoMetrics(assistantId) {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+    try {
+        const res = await fetch(`/.netlify/functions/video-projects?performance=1&assistantId=${encodeURIComponent(assistantId)}`, { credentials: 'same-origin', bmsRead: true });
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+        if (!data.hasData) { _setMetricsEmptyState('video-no-data'); return; }
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = 'All time · turnaround over the last 90 days';
+        const m = data.metrics || {};
+        const set = (k, text, empty) => {
+            if (!valEl(k)) return;
+            valEl(k).textContent = text;
+            _setKpiCard(k, { empty });
+            if (trendEl(k)) trendEl(k).textContent = '—';
+        };
+        set('engagement', String(m.made ?? 0), !m.made);
+        const hasRate = m.madeWithoutChanges !== null && m.madeWithoutChanges !== undefined;
+        set('reach', hasRate ? `${Math.round(m.madeWithoutChanges * 100)}%` : '—', !hasRate);
+        const t = m.avgTurnaroundMin;
+        const turn = t == null ? '—' : t < 60 ? `${Math.max(1, Math.round(t))} min` : t < 2880 ? `${Math.floor(t / 60)} h${Math.round(t % 60) ? ` ${Math.round(t % 60)} min` : ''}` : `${Math.round(t / 1440)} days`;
+        set('ctr', turn, t == null);
+    } catch {
+        _setMetricsEmptyState('error');
+    }
+}
+
 // ── Website Assistant KPI cards ──────────────────────────────────────────────
 // Routed here by `metricsSource: 'site'`. From sites.ts `get`: pages built against the plan's cap,
 // the [placeholders] still to fill, sections, and whether the site is live (publishing is step 3).
@@ -11897,6 +12076,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'brand') {
         _setMetricsEmptyState('pending');
         return _loadBrandMetrics(assistantId);
+    }
+    if (source === 'video') {
+        _setMetricsEmptyState('pending');
+        return _loadVideoMetrics(assistantId);
     }
     if (source === 'site') {
         _setMetricsEmptyState('pending');

@@ -28,6 +28,8 @@
       <button type="button" class="bizinfo-tab" data-tab="hours">Hours &amp; Location</button>
       <!-- Shown only for a business that takes bookings ("What does your business offer?"). -->
       <button type="button" class="bizinfo-tab hidden" data-tab="bookings">Bookings</button>
+      <!-- Shown only for a business guests stay with (holiday lets, B&B rooms — offer "stays"). -->
+      <button type="button" class="bizinfo-tab hidden" data-tab="stays">Stays</button>
       <button type="button" class="bizinfo-tab" data-tab="sitepages">Website Pages</button>
       <button type="button" class="bizinfo-tab" data-tab="legal">Legal &amp; Billing</button>
       <button type="button" class="bizinfo-tab" data-tab="team">Team Members</button>
@@ -222,647 +224,27 @@
        prompt; Archive is the reversible way to stop using one. Saved through
        netlify/functions/org-products.ts. Requires db/z-org-products.sql. -->
   <div class="bizinfo-tab-panel hidden" data-panel="products">
-  <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
-    <div class="flex items-start justify-between gap-4 flex-wrap mb-5">
-      <div>
-        <h2 class="text-lg font-extrabold text-gray-900">Products &amp; services</h2>
-        <p class="text-sm text-gray-500 mt-0.5 max-w-2xl">Everything you sell. Every one of your assistants reads this list, so posts, articles, emails and outreach name your products correctly and quote only the prices you give here.</p>
-      </div>
-      <button type="button" id="op-add" class="btn-primary text-sm font-bold flex items-center gap-1 px-3 py-1.5 rounded-md transition-colors shrink-0">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>Add Product or Service</button>
-    </div>
-    <!-- "What does your business offer?" (src/utils/offer-profile.ts) — decides which fields the
-         editor below and the Hours tab show. Saved straight away; also settable from the Website
-         Assistant's chat (offer_profile card), through the same PATCH. -->
-    <div id="op-offer" class="hidden mb-5 border border-gray-200 bg-gray-50 rounded-xl px-4 py-3">
-      <p class="text-sm font-bold text-gray-900">What does your business offer?</p>
-      <p class="text-xs text-gray-500 mt-0.5">Tick all that apply. We only show the fields and tabs that fit, and your assistants work from it.</p>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 mt-2">
-        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="products" class="mt-1"> We sell products (physical or digital)</label>
-        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="services" class="mt-1"> We provide services (consulting, trades, coaching, agencies)</label>
-        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="subscriptions" class="mt-1"> We sell software or subscriptions</label>
-        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="bookings" class="mt-1"> People book time with us (appointments, classes, tables or events)</label>
-        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="visits" class="mt-1"> Customers visit us (a shop, venue or studio)</label>
-        <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="menu" class="mt-1"> We serve food or drink</label>
-      </div>
-      <p id="op-offer-note" class="text-xs mt-1.5"></p>
-    </div>
-    <!-- "Do you offer a free trial or an introductory offer?" (src/utils/intro-offer.ts) — every
-         assistant uses the answer (org-products.ts loadProductsBlock). The question and the order of
-         kinds follow the ticks above. "No" saves at once; "Yes" opens the terms and a Save button.
-         Also settable from any assistant's chat (intro_offer card), through the same PATCH. -->
-    <div id="op-intro" class="hidden mb-5 border border-gray-200 bg-gray-50 rounded-xl px-4 py-3">
-      <p id="op-intro-q" class="text-sm font-bold text-gray-900">Do you offer new customers a free trial or an introductory offer?</p>
-      <p class="text-xs text-gray-500 mt-0.5">Every assistant uses your answer. Outreach, emails, posts and your website mention only this offer, on exactly these terms, and none at all if you say no.</p>
-      <div class="flex flex-wrap gap-x-6 gap-y-1.5 mt-2">
-        <label class="inline-flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="op-intro-has" value="yes"> Yes</label>
-        <label class="inline-flex items-center gap-2 text-sm cursor-pointer"><input type="radio" name="op-intro-has" value="no"> No, we don't</label>
-      </div>
-      <div id="op-intro-form" class="hidden mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
-        <label class="block text-xs font-semibold text-gray-700">What is it?
-          <select id="op-intro-kind" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white font-normal"></select></label>
-        <label id="op-intro-days-row" class="block text-xs font-semibold text-gray-700">How many days?
-          <input id="op-intro-days" type="number" min="1" max="365" step="1" placeholder="e.g. 14" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-normal"></label>
-        <fieldset id="op-intro-card-row" class="text-xs">
-          <legend class="font-semibold text-gray-700">Card details to start?</legend>
-          <div class="flex flex-wrap gap-x-6 gap-y-1.5 mt-1 text-sm">
-            <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-intro-card" value="no"> No card needed</label>
-            <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-intro-card" value="yes"> Card taken at sign-up</label>
-          </div>
-        </fieldset>
-        <fieldset id="op-intro-after-row" class="text-xs">
-          <legend class="font-semibold text-gray-700">When the trial ends</legend>
-          <div class="flex flex-wrap gap-x-6 gap-y-1.5 mt-1 text-sm">
-            <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-intro-after" value="stops"> It just stops</label>
-            <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-intro-after" value="auto_charge"> The paid plan starts</label>
-          </div>
-        </fieldset>
-        <label id="op-intro-terms-row" class="block text-xs font-semibold text-gray-700 sm:col-span-2">The offer in a few words <span id="op-intro-terms-opt" class="font-normal text-gray-400">(optional)</span>
-          <input id="op-intro-terms" type="text" maxlength="300" placeholder="e.g. 20% off your first visit" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-normal"></label>
-        <label class="block text-xs font-semibold text-gray-700">Who can have it <span class="font-normal text-gray-400">(optional)</span>
-          <input id="op-intro-who" type="text" maxlength="200" placeholder="e.g. new customers only" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-normal"></label>
-        <label class="block text-xs font-semibold text-gray-700">Which products or plans <span class="font-normal text-gray-400">(optional)</span>
-          <input id="op-intro-applies" type="text" maxlength="200" placeholder="e.g. every plan" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-normal"></label>
-        <label class="block text-xs font-semibold text-gray-700 sm:col-span-2">Where people start it <span class="font-normal text-gray-400">(optional link)</span>
-          <input id="op-intro-url" type="url" maxlength="500" placeholder="https://" class="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 text-sm font-normal"></label>
-        <div class="sm:col-span-2"><button type="button" id="op-intro-save" class="btn-primary text-sm font-bold px-3 py-1.5 rounded-md transition-colors">Save offer</button></div>
-      </div>
-      <p id="op-intro-note" class="text-xs mt-1.5"></p>
-    </div>
-    <!-- Calls to action (src/config/call-to-action.ts) — what each Social, Blog and Email assistant's
-         work invites people to do: its own words, the offer above, or a sign-up form's free download.
-         Saved per assistant on change; also settable from that assistant's chat (call_to_action card). -->
-    <div id="op-cta" class="hidden mb-5 border border-gray-200 bg-gray-50 rounded-xl px-4 py-3">
-      <p class="text-sm font-bold text-gray-900">Calls to action</p>
-      <p class="text-xs text-gray-500 mt-0.5">What each assistant’s posts, articles and emails invite people to do. Social posts only ask now and then; most of them simply give.</p>
-      <div id="op-cta-list" class="mt-2 space-y-2"></div>
-    </div>
-    <div id="op-error" class="hidden mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3"></div>
-    <div id="op-editor-slot"></div>
-    <div id="op-list" class="space-y-3">
-      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading…</div>
-    </div>
-    <details id="op-archived-wrap" class="mt-6 hidden">
-      <summary class="text-sm font-semibold text-gray-600 cursor-pointer select-none">Archived <span id="op-archived-count"></span> — not used by your assistants</summary>
-      <div id="op-archived" class="space-y-3 mt-3"></div>
-    </details>
-  </section>
-
+  <!-- Products & Services: src/components/products-editor.js (also opened in the Website Assistant's
+       side drawer). The editor is mounted here the first time this tab is shown. -->
+  <div id="products-root"><div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading…</div></div>
   <script>
-  (function () {
-    const API = '/.netlify/functions/org-products';
-    // What the business offers, for any tab that shows fields by it (the Hours tab). get() resolves
-    // once — from this tab's own load when it ran first, else from its own GET of the same endpoint.
-    window.BizOffer = window.BizOffer || (() => {
-      let value = null; let pending = null;
-      return {
-        get() {
-          if (value) return Promise.resolve(value);
-          return pending || (pending = fetch(API).then((r) => r.ok ? r.json() : {}).then((d) => d.offer || null).catch(() => null)
-            .then((o) => { if (o && !value) value = o; return value; }));
-        },
-        set(o) { value = o; document.dispatchEvent(new CustomEvent('bizinfo:offer', { detail: o })); },
-      };
-    })();
-    const listEl = document.getElementById('op-list');
-    if (!listEl) return;
-    const slot = document.getElementById('op-editor-slot');
-    const errEl = document.getElementById('op-error');
-    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    let products = [];
-    // { offers: ['bookings'|'menu'], answered } — null until loaded. Shared with the Hours tab
-    // through window.BizOffer and a 'bizinfo:offer' event.
-    let offer = null;
-
-    const showError = (msg) => { errEl.textContent = msg || ''; errEl.classList.toggle('hidden', !msg); };
-    const offers = (k) => !!offer && offer.offers.includes(k);
-
-    function renderOffer() {
-      const box = document.getElementById('op-offer');
-      if (!box || !offer) return;
-      box.classList.remove('hidden');
-      box.querySelectorAll('[data-op-offer]').forEach((c) => { c.checked = offers(c.value); });
-      const note = document.getElementById('op-offer-note');
-      note.className = `text-xs mt-1.5 ${offer.answered ? 'text-gray-500' : 'text-amber-700'}`;
-      note.textContent = offer.answered ? '' : 'We guessed this from your business details. Tick what\'s true and it\'s saved.';
-      window.BizOffer.set(offer);
-      refreshIntroChoices();
-    }
-
-    // ── Free trial / introductory offer (src/utils/intro-offer.ts) ────────────────────────────
-    // undefined until loaded; null = not answered; { has: false } = no; { has: true, kind, … }.
-    let introOffer;
-    // Same wording and order as intro-offer.ts INTRO_OFFER_LABELS, suggestedIntroKinds and introOfferQuestion.
-    const INTRO_LABELS = {
-      free_trial: 'A free trial',
-      freemium: 'A free plan',
-      free_consultation: 'A free consultation or discovery call',
-      first_visit: 'A first-visit or first-booking offer',
-      intro_discount: 'An introductory discount',
-      free_sample: 'A free sample or taster',
-      money_back: 'A money-back guarantee',
-      other: 'Something else',
+  // What the business offers, for any tab that shows fields by it (the Hours tab). Defined inline, before
+  // the Hours script runs; products-editor.js loads after it (an added external script runs async) and
+  // keeps this one. get() resolves once — from the Products editor's load when it ran first, else from
+  // its own GET of the same endpoint.
+  window.BizOffer = window.BizOffer || (() => {
+    let value = null; let pending = null;
+    return {
+      get() {
+        if (value) return Promise.resolve(value);
+        return pending || (pending = fetch('/.netlify/functions/org-products').then((r) => r.ok ? r.json() : {}).then((d) => d.offer || null).catch(() => null)
+          .then((o) => { if (o && !value) value = o; return value; }));
+      },
+      set(o) { value = o; document.dispatchEvent(new CustomEvent('bizinfo:offer', { detail: o })); },
     };
-    const INTRO_DAYS = ['free_trial', 'money_back'];
-    const INTRO_TERMS = ['freemium', 'first_visit', 'intro_discount', 'other'];
-    const byId = (id) => document.getElementById(id);
-    const radioVal = (name) => (document.querySelector(`input[name="${name}"]:checked`) || {}).value || '';
-    const setRadio = (name, v) => document.querySelectorAll(`input[name="${name}"]`).forEach((r) => { r.checked = r.value === v; });
-    function introKinds() {
-      const first = [];
-      if (offers('subscriptions')) first.push('free_trial', 'freemium', 'money_back');
-      if (offers('services')) first.push('free_consultation', 'intro_discount');
-      if (offers('bookings') || offers('visits')) first.push('first_visit', 'intro_discount');
-      if (offers('products') || offers('menu')) first.push('free_sample', 'intro_discount', 'money_back');
-      return [...new Set([...first, ...Object.keys(INTRO_LABELS)])];
-    }
-    function introQuestion() {
-      if (offers('subscriptions')) return 'Do you offer a free trial?';
-      if (offers('services') || offers('bookings')) return 'Do you offer a free consultation or an introductory offer?';
-      return 'Do you offer new customers a free trial or an introductory offer?';
-    }
-    // The question and the order of kinds follow the ticks above; a kind already chosen is kept.
-    function refreshIntroChoices() {
-      const sel = byId('op-intro-kind');
-      if (!sel || introOffer === undefined) return;
-      byId('op-intro-q').textContent = introQuestion();
-      const keep = sel.value;
-      sel.innerHTML = introKinds().map((k) => `<option value="${k}">${esc(INTRO_LABELS[k])}</option>`).join('');
-      if (keep) sel.value = keep;
-    }
-    function introFields() {
-      const k = byId('op-intro-kind').value;
-      byId('op-intro-days-row').classList.toggle('hidden', !INTRO_DAYS.includes(k));
-      byId('op-intro-card-row').classList.toggle('hidden', k !== 'free_trial');
-      byId('op-intro-after-row').classList.toggle('hidden', k !== 'free_trial');
-      byId('op-intro-terms-opt').classList.toggle('hidden', INTRO_TERMS.includes(k));
-    }
-    function introNote(text, tone) {
-      const n = byId('op-intro-note');
-      n.className = `text-xs mt-1.5 ${tone === 'error' ? 'text-red-600' : tone === 'warn' ? 'text-amber-700' : 'text-gray-500'}`;
-      n.textContent = text || '';
-    }
-    function renderIntro() {
-      const box = byId('op-intro');
-      if (!box || introOffer === undefined) return;
-      box.classList.remove('hidden');
-      refreshIntroChoices();
-      const o = introOffer;
-      const yes = !!(o && o.has);
-      setRadio('op-intro-has', o ? (yes ? 'yes' : 'no') : '');
-      byId('op-intro-form').classList.toggle('hidden', !yes);
-      byId('op-intro-kind').value = yes ? o.kind : introKinds()[0];
-      byId('op-intro-days').value = yes && o.days ? o.days : '';
-      setRadio('op-intro-card', yes && o.cardUpFront != null ? (o.cardUpFront ? 'yes' : 'no') : '');
-      setRadio('op-intro-after', yes && o.afterwards ? o.afterwards : '');
-      byId('op-intro-terms').value = yes ? o.terms || '' : '';
-      byId('op-intro-who').value = yes ? o.whoFor || '' : '';
-      byId('op-intro-applies').value = yes ? o.appliesTo || '' : '';
-      byId('op-intro-url').value = yes ? o.url || '' : '';
-      introFields();
-      if (!o) introNote('Not answered yet. Until you answer, your assistants won\'t mention any free trial or offer.', 'warn');
-      else introNote(yes ? 'Saved. Every assistant uses this offer, on exactly these terms.' : 'Saved. Your assistants won\'t offer a free trial or discount.');
-    }
-    async function saveIntro(payload) {
-      introNote('Saving…');
-      try {
-        introOffer = (await call('PATCH', { introOffer: payload })).introOffer;
-        renderIntro();
-        refreshCtas();
-      } catch (err) {
-        introNote(err.message, 'error');
-      }
-    }
-    function introFromForm() {
-      const card = radioVal('op-intro-card');
-      const days = byId('op-intro-days').value;
-      return {
-        has: true, kind: byId('op-intro-kind').value,
-        days: days ? Number(days) : null,
-        cardUpFront: card ? card === 'yes' : null,
-        afterwards: radioVal('op-intro-after') || null,
-        terms: byId('op-intro-terms').value, whoFor: byId('op-intro-who').value,
-        appliesTo: byId('op-intro-applies').value, url: byId('op-intro-url').value,
-      };
-    }
-    // The chat's intro_offer card saves through the same PATCH, then tells this tab (chat-session.js).
-    document.addEventListener('bizinfo:introOffer', (e) => { introOffer = e.detail ?? null; renderIntro(); refreshCtas(); });
-
-    // ── Calls to action (src/config/call-to-action.ts) ────────────────────────────────────────
-    // { assistants: [{ id, name, roleKey, choice, resolved }], giftForms } — null until loaded.
-    let ctas = null;
-    const ctaNotes = {};
-    // Same wording as src/config/call-to-action.ts CTA_LABELS.
-    const CTA_LABELS = {
-      own: 'Its own call to action',
-      intro_offer: 'Your free trial or introductory offer',
-      gift: 'A free download from a sign-up form',
-    };
-    const CTA_ROLE_NAMES = { social_media_manager: 'Social posts', blog_writer: 'Blog articles', newsletter_editor: 'Emails' };
-    function ctaDescribe(r) {
-      if (r.kind === 'intro_offer') return `Invites people to your offer${r.url ? '' : ' (no link — add one to your offer above)'}.`;
-      if (r.kind === 'gift') return `Invites people to get the free “${r.giftLabel}”${r.url ? '' : ' (that form has no page of its own yet, so there’s no link)'}.`;
-      return r.unusable ? `${r.unusable} Until then it uses its own.` : 'Uses the call to action in its own brief.';
-    }
-    function renderCtas() {
-      const box = byId('op-cta');
-      if (!box || !ctas) return;
-      const list = ctas.assistants || [];
-      box.classList.toggle('hidden', !list.length);
-      const forms = ctas.giftForms || [];
-      byId('op-cta-list').innerHTML = list.map((a) => {
-        const kind = a.choice.kind;
-        const formId = a.resolved.kind === 'gift' ? a.resolved.formId : a.choice.formId;
-        const note = ctaNotes[a.id];
-        return `<div class="bg-white border border-gray-200 rounded-lg px-3 py-2" data-cta-row="${a.id}">
-          <div class="flex flex-col sm:flex-row sm:items-center gap-2">
-            <p class="text-sm font-semibold text-gray-800 sm:w-64 min-w-0 truncate">${esc(a.name)} <span class="text-xs font-normal text-gray-500">· ${esc(CTA_ROLE_NAMES[a.roleKey] || '')}</span></p>
-            <select data-cta-kind class="w-full sm:w-64 px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white">
-              ${Object.keys(CTA_LABELS).map((k) => `<option value="${k}" ${k === kind ? 'selected' : ''}>${esc(CTA_LABELS[k])}</option>`).join('')}
-            </select>
-            <select data-cta-form class="w-full sm:w-64 px-2 py-1.5 rounded-lg border border-gray-300 text-sm bg-white ${kind === 'gift' ? '' : 'hidden'}">
-              ${forms.length ? forms.map((f) => `<option value="${f.id}" ${f.id === formId ? 'selected' : ''}>${esc(f.name)} — ${esc(f.giftLabel)}</option>`).join('') : '<option value="">No form sends a free download yet</option>'}
-            </select>
-          </div>
-          <p class="text-xs mt-1 ${note && note.error ? 'text-red-600' : 'text-gray-500'}">${esc(note ? note.text : ctaDescribe(a.resolved))}</p>
-        </div>`;
-      }).join('');
-    }
-    async function saveCtaRow(row) {
-      const id = Number(row.dataset.ctaRow);
-      const kind = row.querySelector('[data-cta-kind]').value;
-      const formId = kind === 'gift' ? Number(row.querySelector('[data-cta-form]').value) || null : null;
-      ctaNotes[id] = { text: 'Saving…' };
-      renderCtas();
-      try {
-        const { assistant } = await call('PATCH', { callToAction: { assistantId: id, kind, formId } });
-        ctas.assistants = ctas.assistants.map((a) => (a.id === id ? assistant : a));
-        ctaNotes[id] = { text: `Saved. ${ctaDescribe(assistant.resolved)}` };
-      } catch (err) {
-        ctaNotes[id] = { text: err.message, error: true };
-      }
-      renderCtas();
-    }
-    // After the offer above changes, what each call to action resolves to may change too.
-    async function refreshCtas() {
-      try { const d = await call('GET'); ctas = d.callsToAction || null; renderCtas(); } catch { /* keep what is shown */ }
-    }
-    // The chat's call_to_action card saved (chat-session.js).
-    document.addEventListener('bizinfo:callToAction', () => refreshCtas());
-
-    /**
-     * Which optional groups of fields this product shows. A group the business doesn't use stays in
-     * the form, only hidden — so saving never clears a value — and a product that already HAS a
-     * value in it (an allergen, a deposit) shows the group anyway, so nothing typed in disappears.
-     */
-    function applyGroups(f) {
-      if (!f) return;
-      const kind = (f.querySelector('input[name="op-kind"]:checked') || {}).value;
-      const val = (id) => (f.querySelector('#' + id) || {}).value || '';
-      const bookings = offers('bookings') || !!val('op-duration') || !!val('op-deposit-type');
-      const menu = offers('menu') || !!val('op-allergens') || !!f.querySelector('[data-op-diet]:checked');
-      f.querySelector('#op-duration-row').classList.toggle('hidden', !(bookings && kind === 'service'));
-      f.querySelector('[data-op-group="bookings"]').classList.toggle('hidden', !bookings);
-      f.querySelector('[data-op-group="menu"]').classList.toggle('hidden', !menu);
-    }
-    async function call(method, body, query) {
-      const res = await fetch(API + (query || ''), {
-        method, headers: body ? { 'Content-Type': 'application/json' } : undefined,
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'Something went wrong. Please try again.');
-      return data;
-    }
-
-    function card(p, i, active) {
-      const meta = [p.price ? `<span class="font-semibold text-gray-800">${esc(p.price)}</span>` : '',
-        p.durationMinutes ? `${esc(p.durationMinutes)} min` : '',
-        Array.isArray(p.dietary) && p.dietary.length ? esc(p.dietary.map(d => ({ vegetarian: 'V', vegan: 'VG', gluten_free: 'GF', dairy_free: 'DF', contains_nuts: 'N', spicy: '🌶' }[d] || '')).filter(Boolean).join(' · ')) : '',
-        p.depositType === 'fixed' && p.depositAmount ? `£${esc((p.depositAmount / 100).toFixed(2).replace(/\.00$/, ''))} deposit` : p.depositType === 'percent' && p.depositAmount ? `${esc(p.depositAmount)}% deposit` : '',
-        p.audience ? `For ${esc(p.audience)}` : ''].filter(Boolean).join(' · ');
-      return `<div class="op-card border border-gray-200 rounded-xl p-4" data-id="${p.id}">
-        <div class="flex items-start justify-between gap-3">
-          ${p.imageUrl ? `<img src="${esc(p.imageUrl)}" alt="" class="shrink-0" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">` : ''}
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2 flex-wrap">
-              <h3 class="text-sm font-bold text-gray-900">${esc(p.name)}</h3>
-              <span class="text-[11px] font-semibold uppercase tracking-wide text-gray-500 bg-gray-100 rounded px-1.5 py-0.5">${p.kind === 'service' ? 'Service' : 'Product'}</span>
-            </div>
-            ${meta ? `<p class="text-xs text-gray-500 mt-1">${meta}</p>` : ''}
-            ${p.description ? `<p class="text-sm text-gray-600 mt-2 whitespace-pre-line">${esc(p.description)}</p>` : ''}
-            ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer" class="link text-xs mt-1 inline-block break-all">${esc(p.url)}</a>` : ''}
-          </div>
-          <div class="flex items-center gap-1 shrink-0">
-            ${active ? `<button type="button" class="op-up btn-utility text-xs px-2 py-1 rounded" title="Move up" aria-label="Move up" ${i === 0 ? 'disabled' : ''}>↑</button>
-            <button type="button" class="op-down btn-utility text-xs px-2 py-1 rounded" title="Move down" aria-label="Move down">↓</button>
-            <button type="button" class="op-edit btn-utility text-xs font-bold px-2.5 py-1 rounded">Edit</button>
-            <button type="button" class="op-archive btn-utility text-xs font-bold px-2.5 py-1 rounded">Archive</button>`
-            : `<button type="button" class="op-restore btn-utility text-xs font-bold px-2.5 py-1 rounded">Restore</button>
-            <button type="button" class="op-delete btn-destructive text-xs font-bold px-2.5 py-1 rounded">Delete</button>`}
-          </div>
-        </div>
-      </div>`;
-    }
-
-    function render() {
-      const active = products.filter(p => p.status === 'active');
-      const archived = products.filter(p => p.status !== 'active');
-      listEl.innerHTML = active.length
-        ? active.map((p, i) => card(p, i, true)).join('')
-        : `<div class="text-sm text-gray-500 bg-gray-50 border border-dashed border-gray-200 rounded-xl px-4 py-6 text-center">No products or services yet — click “Add Product or Service” to add your first. Until you do, your assistants only know what the Business Profile says you do.</div>`;
-      const lastDown = listEl.querySelectorAll('.op-down');
-      if (lastDown.length) lastDown[lastDown.length - 1].disabled = true;
-      const wrap = document.getElementById('op-archived-wrap');
-      wrap.classList.toggle('hidden', !archived.length);
-      document.getElementById('op-archived-count').textContent = archived.length ? `(${archived.length})` : '';
-      document.getElementById('op-archived').innerHTML = archived.map((p, i) => card(p, i, false)).join('');
-    }
-
-    async function load() {
-      try {
-        const data = await call('GET');
-        products = data.products || [];
-        offer = data.offer || null;
-        introOffer = data.introOffer ?? null;
-        ctas = data.callsToAction || null;
-        showError('');
-        render();
-        renderOffer();
-        renderIntro();
-        renderCtas();
-      } catch (e) {
-        listEl.innerHTML = '';
-        showError('Your products could not be loaded right now. Please refresh and try again.');
-      }
-    }
-
-    // One editor at a time: a new product opens at the top, an edit replaces that card in place.
-    function openEditor(p) {
-      closeEditor();
-      // Looked up AFTER closeEditor(): it re-renders the list, so a card found before it is detached.
-      const anchor = p ? listEl.querySelector(`.op-card[data-id="${p.id}"]`) : null;
-      const f = document.createElement('div');
-      f.id = 'op-editor';
-      f.className = 'border-2 border-emerald-200 bg-emerald-50/30 rounded-xl p-4 mb-3';
-      // A new item starts as what this business mostly sells: a service when it ticked services but
-      // not products, and priced "a month" when it sells subscriptions (offer-profile.ts).
-      const v = p || { kind: offers('services') && !offers('products') ? 'service' : 'product',
-        ...(offers('subscriptions') ? { priceType: 'fixed', priceUnit: 'a month' } : {}) };
-      const field = (id, label, value, opts) => `<div class="${opts && opts.wide ? 'sm:col-span-2' : ''}">
-          <label for="${id}"${opts && opts.explain ? ` data-explain="${opts.explain}"` : ''} class="block text-sm font-semibold text-gray-700 mb-1">${label}</label>
-          ${opts && opts.area
-            ? `<textarea id="${id}" rows="${opts.rows || 3}" maxlength="${opts.max}" placeholder="${esc(opts.ph || '')}" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-emerald-600 outline-none">${esc(value || '')}</textarea>`
-            : `<input id="${id}" type="text" maxlength="${opts.max}" value="${esc(value || '')}" placeholder="${esc(opts.ph || '')}" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-emerald-600 outline-none">`}
-        </div>`;
-      f.innerHTML = `
-        <div class="flex items-center gap-4 mb-3 text-sm">
-          <span class="font-semibold text-gray-700" data-explain="acct-product-kind">Type</span>
-          <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-kind" value="product" ${v.kind !== 'service' ? 'checked' : ''}> Product</label>
-          <label class="inline-flex items-center gap-1.5 cursor-pointer"><input type="radio" name="op-kind" value="service" ${v.kind === 'service' ? 'checked' : ''}> Service</label>
-        </div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          ${field('op-name', 'Name <span class="text-red-500">*</span>', v.name, { max: 120, ph: 'e.g. Sourdough Starter Kit', explain: 'acct-product-name' })}
-          ${priceFieldsHtml(v)}
-          ${field('op-description', 'What it is', v.description, { area: true, max: 1200, wide: true, ph: 'What the customer gets, in a sentence or two.', explain: 'acct-product-description' })}
-          ${field('op-benefits', 'Key benefits', v.benefits, { area: true, rows: 2, max: 1200, wide: true, ph: 'Why people buy it — the results or features you want mentioned.', explain: 'acct-product-benefits' })}
-          ${field('op-audience', 'Who it’s for', v.audience, { max: 400, ph: 'e.g. home bakers starting out', explain: 'acct-product-audience' })}
-          ${field('op-url', 'Link', v.url, { max: 500, ph: 'https://yourbusiness.com/product', explain: 'acct-product-url' })}
-        </div>
-        <div class="mt-3">
-          <p class="block text-sm font-semibold text-gray-700 mb-1">Picture</p>
-          <div class="flex flex-wrap items-center gap-3">
-            <span data-op-thumb>${v.imageUrl ? `<img src="${esc(v.imageUrl)}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">` : '<span class="inline-flex items-center justify-center text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg" style="width:72px;height:72px">None</span>'}</span>
-            <input type="hidden" id="op-image" value="${esc(v.imageAssetId || '')}">
-            <button type="button" id="op-pick" class="btn-secondary text-sm font-bold px-3 py-1.5 rounded-md border">${v.imageAssetId ? 'Change picture' : 'Choose picture'}</button>
-            <button type="button" id="op-pick-clear" class="btn-utility text-xs font-bold px-2.5 py-1 rounded ${v.imageAssetId ? '' : 'hidden'}">Remove</button>
-          </div>
-          <p class="text-xs text-gray-500 mt-1">Shown with it on your website and at checkout.</p>
-        </div>
-        <p class="text-xs text-gray-500 mt-3">This is the one place prices live. Your assistants, your website and checkout all use the price exactly as set here — and never state one you leave off.</p>
-        <div class="flex items-center justify-end gap-2 mt-3">
-          <button type="button" id="op-cancel" class="btn-secondary text-sm font-bold px-3 py-1.5 rounded-md border">Cancel</button>
-          <button type="button" id="op-save" class="btn-primary text-sm font-bold px-3 py-1.5 rounded-md">${p ? 'Save Changes' : 'Add'}</button>
-        </div>`;
-      if (anchor) anchor.replaceWith(f); else slot.appendChild(f);
-      f.dataset.id = p ? String(p.id) : '';
-      applyGroups(f);
-      f.querySelector('#op-name').focus();
-    }
-    // The price, structured (src/utils/product-price.ts): how it is shown, the amount, an optional unit.
-    // Only a fixed price can be bought online from your website. Services also get how long they take.
-    function priceFieldsHtml(v) {
-      const t = v.priceType || '';
-      const pounds = v.priceAmount != null ? (v.priceAmount / 100).toFixed(2).replace(/\.00$/, '') : '';
-      const opt = (val, label) => `<option value="${val}" ${t === val ? 'selected' : ''}>${label}</option>`;
-      return `<div data-explain="acct-product-price">
-          <label for="op-price-type" class="block text-sm font-semibold text-gray-700 mb-1">Price</label>
-          <select id="op-price-type" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
-            ${opt('', 'No price shown')}${opt('fixed', 'A fixed price')}${opt('from', 'From a price')}${opt('on_request', 'Price on request')}${opt('text', 'I\'ll write it myself')}
-          </select>
-          <div id="op-price-amount-row" class="grid grid-cols-2 gap-2 mt-2 ${t === 'fixed' || t === 'from' ? '' : 'hidden'}">
-            <div class="flex items-center gap-1"><span class="text-sm font-semibold text-gray-600">£</span>
-              <input id="op-price-amount" type="text" inputmode="decimal" value="${esc(pounds)}" placeholder="24.50" aria-label="Price in pounds" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
-            <input id="op-price-unit" type="text" maxlength="30" value="${esc(v.priceUnit || '')}" placeholder="per hour (optional)" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
-          </div>
-          <input id="op-price-text" type="text" maxlength="120" value="${esc(t === 'text' ? (v.price || '') : '')}" placeholder="e.g. £15 a month, first month free" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mt-2 ${t === 'text' ? '' : 'hidden'}">
-          ${offers('products') || !offer ? '<p class="text-xs text-gray-500 mt-1">Only a fixed price can be bought online from your website.</p>' : ''}
-        </div>
-        <div id="op-duration-row" class="${v.kind === 'service' ? '' : 'hidden'}">
-          <label for="op-duration" class="block text-sm font-semibold text-gray-700 mb-1">How long it takes (minutes)</label>
-          <input id="op-duration" type="number" min="5" max="1440" step="5" value="${esc(v.durationMinutes || '')}" placeholder="e.g. 45" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
-          <p class="text-xs text-gray-500 mt-1">Used when people book it.</p>
-        </div>
-        <div class="sm:col-span-2" data-op-group="menu">
-          <p class="block text-sm font-semibold text-gray-700 mb-1">Dietary (for food — optional)</p>
-          <div class="flex flex-wrap gap-x-4 gap-y-1">${[['vegetarian', 'Vegetarian (V)'], ['vegan', 'Vegan (VG)'], ['gluten_free', 'Gluten-free (GF)'], ['dairy_free', 'Dairy-free (DF)'], ['contains_nuts', 'Contains nuts (N)'], ['spicy', 'Spicy (🌶)']].map(([k, l]) => `<label class="inline-flex items-center gap-1.5 text-sm"><input type="checkbox" data-op-diet value="${k}" ${Array.isArray(v.dietary) && v.dietary.includes(k) ? 'checked' : ''}> ${l}</label>`).join('')}</div>
-          <input id="op-allergens" type="text" maxlength="200" value="${esc(v.allergens || '')}" placeholder="Allergens, in your words — e.g. Contains: milk, egg, sesame" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm mt-2">
-          <p class="text-xs text-gray-500 mt-1">Shown on your website's menus with a key, and "ask us about allergens". Only tick what's true — your assistants repeat it as you state it.</p>
-        </div>
-        <div data-op-group="bookings">
-          <label for="op-deposit-type" class="block text-sm font-semibold text-gray-700 mb-1">Deposit when booked online (optional)</label>
-          <select id="op-deposit-type" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm bg-white">
-            <option value="" ${!v.depositType ? 'selected' : ''}>No deposit</option>
-            <option value="fixed" ${v.depositType === 'fixed' ? 'selected' : ''}>A fixed amount</option>
-            <option value="percent" ${v.depositType === 'percent' ? 'selected' : ''}>A percentage of the price</option>
-          </select>
-          <div id="op-deposit-amount-row" class="flex items-center gap-1 mt-2 ${v.depositType ? '' : 'hidden'}">
-            <span id="op-deposit-pound" class="text-sm font-semibold text-gray-600 ${v.depositType === 'percent' ? 'hidden' : ''}">£</span>
-            <input id="op-deposit-amount" type="text" inputmode="decimal" value="${esc(v.depositType === 'fixed' && v.depositAmount != null ? (v.depositAmount / 100).toFixed(2).replace(/\.00$/, '') : v.depositType === 'percent' ? String(v.depositAmount || '') : '')}" placeholder="${v.depositType === 'percent' ? '20' : '10'}" aria-label="Deposit amount" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
-            <span id="op-deposit-pct" class="text-sm font-semibold text-gray-600 ${v.depositType === 'percent' ? '' : 'hidden'}">%</span>
-          </div>
-          <p class="text-xs text-gray-500 mt-1">Paid to your own Stripe account when someone books it from your website (per place for a class). Refunded automatically if they cancel online in time, or if you cancel or decline. Needs Stripe connected on the Website tab's Orders.</p>
-        </div>`;
-    }
-
-    function closeEditor() {
-      const open = document.getElementById('op-editor');
-      if (!open) return;
-      open.remove();
-      render(); // puts back the card an in-place edit replaced
-    }
-
-    // A tick saves at once — there's no Save button for one question.
-    async function saveOffer() {
-      const ticked = [...document.querySelectorAll('[data-op-offer]:checked')].map((c) => c.value);
-      try {
-        offer = (await call('PATCH', { offer: ticked })).offer;
-        showError('');
-      } catch (err) {
-        showError(err.message);
-      }
-      renderOffer();
-      applyGroups(document.getElementById('op-editor'));
-    }
-
-    async function save() {
-      const f = document.getElementById('op-editor');
-      if (!f) return;
-      const get = id => f.querySelector('#' + id).value;
-      const body = {
-        kind: (f.querySelector('input[name="op-kind"]:checked') || {}).value || 'product',
-        name: get('op-name'), description: get('op-description'),
-        benefits: get('op-benefits'), audience: get('op-audience'), url: get('op-url'),
-        priceType: get('op-price-type') || null, priceAmount: get('op-price-amount'), priceUnit: get('op-price-unit'),
-        price: get('op-price-text'),
-        durationMinutes: get('op-duration') ? Number(get('op-duration')) : null,
-        depositType: get('op-deposit-type') || null, depositAmount: get('op-deposit-amount'),
-        dietary: [...f.querySelectorAll('[data-op-diet]:checked')].map(x => x.value), allergens: get('op-allergens'),
-        imageAssetId: get('op-image') ? Number(get('op-image')) : null,
-      };
-      if (!body.name.trim()) { showError('Give the product or service a name.'); f.querySelector('#op-name').focus(); return; }
-      const btn = f.querySelector('#op-save');
-      btn.disabled = true;
-      try {
-        if (f.dataset.id) {
-          const { product } = await call('PATCH', { id: Number(f.dataset.id), ...body });
-          products = products.map(x => x.id === product.id ? product : x);
-        } else {
-          const { product } = await call('POST', body);
-          products.push(product);
-          // The setup wizard's "Products & services" step ticks on the first active product.
-          window.SetupWizard?.refresh?.();
-        }
-        showError('');
-        f.remove();
-        render();
-      } catch (e) { showError(e.message); btn.disabled = false; }
-    }
-
-    async function setStatus(id, status) {
-      try {
-        const { product } = await call('PATCH', { id, status });
-        products = products.map(x => x.id === product.id ? product : x);
-        showError(''); render();
-      } catch (e) { showError(e.message); }
-    }
-
-    async function move(id, dir) {
-      const active = products.filter(p => p.status === 'active');
-      const i = active.findIndex(p => p.id === id), j = i + dir;
-      if (i < 0 || j < 0 || j >= active.length) return;
-      [active[i], active[j]] = [active[j], active[i]];
-      active.forEach((p, n) => { p.sortOrder = n; });
-      products = [...active, ...products.filter(p => p.status !== 'active')];
-      render();
-      try {
-        await Promise.all([active[i], active[j]].map(p => call('PATCH', { id: p.id, sortOrder: p.sortOrder })));
-      } catch (e) { showError(e.message); load(); }
-    }
-
-    // Bound on the section, which this script owns for the life of the page (never re-rendered).
-    const section = listEl.closest('section');
-    // Show the price boxes that fit the choice; services also ask how long they take.
-    section.addEventListener('change', async (e) => {
-      if (e.target.matches('[data-op-offer]')) return saveOffer();
-      // "No" is the whole answer, so it saves at once; "Yes" opens the terms and waits for Save.
-      if (e.target.name === 'op-intro-has') {
-        if (e.target.value === 'no') return saveIntro({ has: false });
-        byId('op-intro-form').classList.remove('hidden');
-        introFields();
-        return introNote('Fill in the terms, then Save offer.');
-      }
-      if (e.target.id === 'op-intro-kind') return introFields();
-      // A call to action saves on change; choosing "free download" shows the form picker first
-      // and saves with the form it shows.
-      const ctaRow = e.target.closest('[data-cta-row]');
-      if (ctaRow) {
-        if (e.target.matches('[data-cta-kind]')) ctaRow.querySelector('[data-cta-form]').classList.toggle('hidden', e.target.value !== 'gift');
-        return saveCtaRow(ctaRow);
-      }
-      const f = document.getElementById('op-editor');
-      if (!f) return;
-      if (e.target.id === 'op-price-type') {
-        const t = e.target.value;
-        f.querySelector('#op-price-amount-row').classList.toggle('hidden', !(t === 'fixed' || t === 'from'));
-        f.querySelector('#op-price-text').classList.toggle('hidden', t !== 'text');
-      }
-      if (e.target.name === 'op-kind') applyGroups(f);
-      if (e.target.id === 'op-deposit-type') {
-        const t = e.target.value;
-        f.querySelector('#op-deposit-amount-row').classList.toggle('hidden', !t);
-        f.querySelector('#op-deposit-pound').classList.toggle('hidden', t !== 'fixed');
-        f.querySelector('#op-deposit-pct').classList.toggle('hidden', t !== 'percent');
-      }
-    });
-    section.addEventListener('click', async (e) => {
-      const t = e.target.closest('button');
-      if (!t) return;
-      const id = Number(t.closest('.op-card')?.dataset.id);
-      if (t.id === 'op-add') return openEditor(null);
-      if (t.id === 'op-intro-save') return saveIntro(introFromForm());
-      if (t.id === 'op-cancel') return closeEditor();
-      if (t.id === 'op-save') return save();
-      if (t.id === 'op-pick' && window.MediaPicker) {
-        return window.MediaPicker.open({ title: 'Choose a picture', onPick: (asset) => {
-          const f = document.getElementById('op-editor');
-          if (!f) return;
-          f.querySelector('#op-image').value = String(asset.id);
-          f.querySelector('[data-op-thumb]').innerHTML = `<img src="${esc(asset.url)}" alt="" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">`;
-          f.querySelector('#op-pick').textContent = 'Change picture';
-          f.querySelector('#op-pick-clear').classList.remove('hidden');
-        } });
-      }
-      if (t.id === 'op-pick-clear') {
-        const f = document.getElementById('op-editor');
-        f.querySelector('#op-image').value = '';
-        f.querySelector('[data-op-thumb]').innerHTML = '<span class="inline-flex items-center justify-center text-xs text-gray-400 border border-dashed border-gray-300 rounded-lg" style="width:72px;height:72px">None</span>';
-        f.querySelector('#op-pick').textContent = 'Choose picture';
-        t.classList.add('hidden');
-        return;
-      }
-      if (t.classList.contains('op-edit')) return openEditor(products.find(p => p.id === id));
-      if (t.classList.contains('op-archive')) return setStatus(id, 'archived');
-      if (t.classList.contains('op-restore')) return setStatus(id, 'active');
-      if (t.classList.contains('op-up')) return move(id, -1);
-      if (t.classList.contains('op-down')) return move(id, 1);
-      if (t.classList.contains('op-delete')) {
-        const p = products.find(x => x.id === id);
-        const ok = window.confirmModal
-          ? await window.confirmModal(`“${p ? p.name : 'This product'}” will be removed for good. Archive keeps it without your assistants using it.`, { title: 'Delete this product?', confirmLabel: 'Yes, delete', cancelLabel: 'Keep it' })
-          : false;
-        if (!ok) return;
-        try { await call('DELETE', null, '?id=' + id); products = products.filter(x => x.id !== id); showError(''); render(); }
-        catch (err) { showError(err.message); }
-      }
-    });
-    section.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && e.target.matches('#op-editor input[type="text"]')) { e.preventDefault(); save(); }
-      if (e.key === 'Escape' && e.target.closest('#op-editor')) closeEditor();
-    });
-
-    // Load on first reveal, like Brand Assets: most visits never open this tab.
-    const panel = document.querySelector('.bizinfo-tab-panel[data-panel="products"]');
-    let loaded = false;
-    const maybeLoad = () => {
-      if (loaded || !panel || panel.classList.contains('hidden')) return;
-      loaded = true;
-      load();
-    };
-    new MutationObserver(maybeLoad).observe(panel, { attributes: true, attributeFilter: ['class'] });
-    maybeLoad();
   })();
   </script>
+  <script src="/src/components/products-editor.js?v=20261109"></script>
   </div><!-- /panel: products -->
 
   <!-- ══ Opening hours (Hours & Location) and Bookings (docs/booking-plan.md) ═══════════════════
@@ -917,6 +299,9 @@
         <div><label for="bh-buffer" class="block text-sm font-semibold text-gray-700 mb-1">Gap between bookings (minutes)</label><input id="bh-buffer" type="number" min="0" max="240" step="5" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
         <div><label for="bh-table" class="block text-sm font-semibold text-gray-700 mb-1">A table is held for (minutes)</label><input id="bh-table" type="number" min="15" max="480" step="15" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
         <div><label for="bh-party" class="block text-sm font-semibold text-gray-700 mb-1">Largest party that can book online</label><input id="bh-party" type="number" min="1" max="100" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></div>
+        <div class="sm:col-span-2"><label for="bh-meeting" class="block text-sm font-semibold text-gray-700 mb-1">Your video call link (for video services)</label>
+          <input id="bh-meeting" type="url" maxlength="500" placeholder="https://zoom.us/j/… or https://meet.google.com/…" class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm">
+          <p class="text-xs text-gray-500 mt-1">A link you use for every call — your Zoom personal room, a Google Meet or Teams link. Customers get it once a booking is confirmed. A person below can have their own. Set a service to "Video call" in Products &amp; Services.</p></div>
         <div class="sm:col-span-2"><label for="bh-policy" class="block text-sm font-semibold text-gray-700 mb-1">Cancellation policy (optional)</label>
           <textarea id="bh-policy" rows="2" maxlength="500" placeholder="e.g. Please give us 24 hours' notice if you can't make it." class="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm"></textarea></div>
       </div>
@@ -1033,6 +418,7 @@
       $('bh-table').value = st.tableMinutes ?? 90;
       $('bh-party').value = st.maxPartySize ?? 8;
       $('bh-policy').value = st.cancellationPolicy || '';
+      $('bh-meeting').value = st.meetingUrl || '';
       $('bh-address').value = st.visitAddress || '';
       $('bh-whatsapp').value = st.whatsapp || '';
     }
@@ -1088,6 +474,8 @@
           </div>
           ${svc.length && r.kind !== 'table' ? `<details class="mt-2"><summary class="text-xs text-gray-600 cursor-pointer">Services they do: ${ids ? esc(ids.length) + ' chosen' : 'all'}</summary>
             <div class="flex flex-wrap gap-2 mt-1">${svc.map(x => `<label class="inline-flex items-center gap-1 text-xs"><input type="checkbox" data-rsvc value="${x.id}" ${!ids || ids.includes(x.id) ? 'checked' : ''}> ${esc(x.name)}</label>`).join('')}</div></details>` : ''}
+          ${r.kind !== 'table' ? `<label class="block text-xs text-gray-600 mt-2">Their video call link (optional — instead of yours)
+            <input data-rmeet type="url" maxlength="500" value="${esc(r.meetingUrl || '')}" placeholder="https://zoom.us/j/…" class="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-xs"></label>` : ''}
           ${r.kind !== 'table' && r.status === 'active' ? `<details class="mt-2" ${r.busyCalendarHost ? '' : ''}><summary class="text-xs text-gray-600 cursor-pointer">Their calendar: ${r.busyCalendarHost ? esc(busyLine(r)) : 'not linked'}</summary>
             <input data-rcal type="url" placeholder="${r.busyCalendarHost ? 'Paste a new private iCal address to replace it' : 'Their private iCal address'}" class="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-xs">
             <div class="flex flex-wrap items-center gap-2 mt-1">
@@ -1135,7 +523,7 @@
           minNoticeMinutes: Math.round(Number($('bh-notice').value || 0) * 60), maxAdvanceDays: Number($('bh-advance').value || 60),
           slotIntervalMinutes: Number($('bh-interval').value), bufferMinutes: Number($('bh-buffer').value || 0),
           tableMinutes: Number($('bh-table').value || 90), maxPartySize: Number($('bh-party').value || 8),
-          cancellationPolicy: $('bh-policy').value,
+          cancellationPolicy: $('bh-policy').value, meetingUrl: $('bh-meeting').value.trim(),
           visitAddress: $('bh-address').value, whatsapp: $('bh-whatsapp').value,
         };
         const { settings } = await call('PUT', body);
@@ -1153,6 +541,8 @@
       const chosen = ticks.filter(t => t.checked).map(t => Number(t.value));
       const body = { id, name: row.querySelector('[data-rname]').value, kind: row.querySelector('[data-rkind]').value, capacity: Number(row.querySelector('[data-rcap]').value || 1),
         serviceIds: ticks.length && chosen.length < ticks.length ? chosen : null };
+      const meet = row.querySelector('[data-rmeet]');
+      if (meet) body.meetingUrl = meet.value.trim();
       try { const { resource } = await call('PATCH', body); data.resources = data.resources.map(r => r.id === id ? resource : r); renderResources(); $('bh-res-error').classList.add('hidden'); }
       catch (e) { $('bh-res-error').textContent = e.message; $('bh-res-error').classList.remove('hidden'); }
     }
@@ -1239,6 +629,8 @@
       const hours = books || o.offers.includes('visits');
       const tab = (name) => document.querySelector(`.bizinfo-tab[data-tab="${name}"]`);
       tab('bookings')?.classList.toggle('hidden', !books);
+      // Holiday lets and B&B rooms (stays-editor.js): their own tab.
+      tab('stays')?.classList.toggle('hidden', !o.offers.includes('stays'));
       tab('hours')?.classList.toggle('hidden', !hours);
       // Never leave someone looking at a tab that just went away.
       const open = document.querySelector('.bizinfo-tab.active');
@@ -1259,6 +651,15 @@
   })();
   </script>
   </div><!-- /panel: bookings -->
+
+  <!-- ══ Stays (docs/holiday-lets-plan.md) ═════════════════════════════════════════════════════
+       Holiday lets and B&B room types: details, photos, nightly prices and seasons, extra charges,
+       deposit / balance / damage deposit, cancellation, rules, rooms, closed dates. The website's
+       "Stays" section and each stay's page read these. stays-editor.js ↔ netlify/functions/stays.ts. -->
+  <div class="bizinfo-tab-panel hidden max-w-4xl" data-panel="stays">
+    <section id="stays-root" class="mb-8"></section>
+    <script src="/src/components/stays-editor.js?v=20261109"></script>
+  </div><!-- /panel: stays -->
 
 
   <!-- ══ Legal & Billing ════════════════════════════════════════════════════ -->
@@ -1360,17 +761,18 @@
     <!-- Member table (SC2). Scrolls sideways on a phone — overflow-hidden used to clip the Actions
          column off-screen, leaving no way to change a role or remove someone. -->
     <div class="border border-gray-200 rounded-xl overflow-x-auto">
-      <table class="w-full text-sm" style="min-width:520px">
+      <table class="w-full text-sm" style="min-width:640px">
         <thead class="bg-gray-50 border-b border-gray-200">
           <tr>
             <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Member</th>
             <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Role</th>
+            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Assistants</th>
             <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Joined</th>
             <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wide">Actions</th>
           </tr>
         </thead>
         <tbody id="member-list-body" class="divide-y divide-gray-100">
-          <tr><td colspan="4" class="px-4 py-8 text-center text-gray-400 text-sm">Loading…</td></tr>
+          <tr><td colspan="5" class="px-4 py-8 text-center text-gray-400 text-sm">Loading…</td></tr>
         </tbody>
       </table>
     </div>
@@ -1416,6 +818,15 @@
             <option value="admin">Admin — full workspace management</option>
           </select>
         </div>
+        <div id="invite-assistants-wrap">
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-semibold text-gray-600">Assistants they can use</label>
+            <button type="button" id="invite-assistants-all" class="link text-xs font-medium">Select all</button>
+          </div>
+          <div id="invite-assistants" class="border border-gray-200 rounded-xl px-3 py-2 max-h-48 overflow-y-auto space-y-1.5"></div>
+          <p class="text-xs text-gray-500 mt-1">They won't see or be able to open any other assistant.</p>
+        </div>
+        <p id="invite-assistants-admin" class="hidden text-xs text-gray-500">Admins can use every assistant.</p>
         <div id="invite-error" class="hidden text-xs text-red-600 font-medium"></div>
       </div>
       <div class="px-6 pb-5 flex justify-end gap-3">
@@ -1433,7 +844,7 @@
   <div id="role-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
     <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4">
       <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-        <h2 class="text-base font-bold text-gray-900">Change Role</h2>
+        <h2 class="text-base font-bold text-gray-900">Change role and access</h2>
         <button onclick="document.getElementById('role-modal').classList.add('hidden')"
                 class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
       </div>
@@ -1448,6 +859,15 @@
             <option value="viewer">Viewer</option>
           </select>
         </div>
+        <div id="role-assistants-wrap">
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-semibold text-gray-600">Assistants they can use</label>
+            <button type="button" id="role-assistants-all" class="link text-xs font-medium">Select all</button>
+          </div>
+          <div id="role-assistants" class="border border-gray-200 rounded-xl px-3 py-2 max-h-48 overflow-y-auto space-y-1.5"></div>
+          <p class="text-xs text-gray-500 mt-1">They won't see or be able to open any other assistant.</p>
+        </div>
+        <p id="role-assistants-admin" class="hidden text-xs text-gray-500">Admins can use every assistant.</p>
         <div id="role-error" class="hidden text-xs text-red-600 font-medium"></div>
       </div>
       <div class="px-6 pb-5 flex justify-end gap-3">
@@ -1476,6 +896,52 @@
     let _members   = [];
     let _seatLimit = null;
     let _roleTarget = null;
+    let _assistants = [];   // the workspace's assistants, for the "Assistants they can use" lists
+
+    const esc = (v) => (window.escapeHtml ? window.escapeHtml(String(v ?? '')) : String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
+
+    // ── "Assistants they can use" (src/utils/assistant-access.ts) ───────
+    // selected: array of ids, or null = every assistant (ticks them all).
+    function renderAssistantPicker(prefix, selected) {
+      const box = document.getElementById(prefix + '-assistants');
+      if (!box) return;
+      if (!_assistants.length) {
+        box.innerHTML = '<p class="text-xs text-gray-400 py-1">This workspace has no assistants yet.</p>';
+        return;
+      }
+      box.innerHTML = _assistants.map((a) => `
+        <label class="flex items-center gap-2 text-sm text-gray-800 cursor-pointer">
+          <input type="checkbox" value="${a.id}" ${selected === null || (selected || []).includes(a.id) ? 'checked' : ''}
+                 class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
+          <span>${esc(a.name)}</span>
+        </label>`).join('');
+    }
+    function pickedAssistants(prefix) {
+      return [...document.querySelectorAll(`#${prefix}-assistants input[type=checkbox]:checked`)].map((c) => Number(c.value));
+    }
+    function syncPickerToRole(prefix, role) {
+      const isAdmin = role === 'admin';
+      document.getElementById(prefix + '-assistants-wrap')?.classList.toggle('hidden', isAdmin);
+      document.getElementById(prefix + '-assistants-admin')?.classList.toggle('hidden', !isAdmin);
+    }
+    ['invite', 'role'].forEach((prefix) => {
+      const sel = document.getElementById(prefix === 'invite' ? 'invite-role' : 'role-modal-select');
+      sel?.addEventListener('change', () => syncPickerToRole(prefix, sel.value));
+      document.getElementById(prefix + '-assistants')?.addEventListener('change', () => {
+        document.getElementById(prefix === 'invite' ? 'invite-error' : 'role-error')?.classList.add('hidden');
+      });
+      document.getElementById(prefix + '-assistants-all')?.addEventListener('click', () => {
+        const boxes = [...document.querySelectorAll(`#${prefix}-assistants input[type=checkbox]`)];
+        const allOn = boxes.every((c) => c.checked);
+        boxes.forEach((c) => { c.checked = !allOn; });
+      });
+    });
+    function accessLabel(m) {
+      const role = m.role || 'member';
+      if (role === 'owner' || role === 'admin' || m.assistantIds == null) return 'All';
+      const names = _assistants.filter((a) => m.assistantIds.includes(a.id)).map((a) => a.name);
+      return names.length ? names.map(esc).join(', ') : '<span class="text-gray-400">None</span>';
+    }
 
     // ── Load ────────────────────────────────────────────────────────────
     async function load() {
@@ -1490,6 +956,7 @@
         const data = await res.json();
         _members   = data.members || [];
         _seatLimit = data.seatLimit;
+        _assistants = data.assistants || [];
         render(data);
       } catch (e) {
         if (!root || !root.isConnected) return; // don't touch DOM that navigation removed
@@ -1556,7 +1023,7 @@
       // SC2: Member list
       const tbody = document.getElementById('member-list-body');
       if (!data.members || data.members.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-gray-400 text-sm">No members yet. Click "Invite Member" to get started.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="px-4 py-8 text-center text-gray-400 text-sm">No members yet. Click "Invite Member" to get started.</td></tr>`;
         return;
       }
 
@@ -1579,7 +1046,7 @@
                         <span class="text-gray-300">·</span>`;
           } else {
             actions += `<button onclick="window._openRoleModal(${m.userId}, '${displayName.replace(/'/g,"\\'")}', '${role}')"
-                                 class="link text-xs font-medium">Change Role</button>
+                                 class="link text-xs font-medium">Role and access</button>
                         <span class="text-gray-300">·</span>`;
           }
           actions += `<button onclick="window._removeMember(${m.userId}, '${displayName.replace(/'/g,"\\'")}')"
@@ -1597,6 +1064,7 @@
                 ${ROLE_LABELS[role] || role}
               </span>
             </td>
+            <td class="px-4 py-3 text-gray-600 text-xs">${accessLabel(m)}</td>
             <td class="px-4 py-3 text-gray-500 text-xs">${joined}</td>
             <td class="px-4 py-3">${actions}</td>
           </tr>`;
@@ -1608,6 +1076,8 @@
       document.getElementById('invite-email').value  = '';
       document.getElementById('invite-role').value   = 'member';
       document.getElementById('invite-error').classList.add('hidden');
+      renderAssistantPicker('invite', []);   // nothing ticked: the owner chooses
+      syncPickerToRole('invite', 'member');
       document.getElementById('invite-modal').classList.remove('hidden');
       setTimeout(() => document.getElementById('invite-email').focus(), 50);
     };
@@ -1620,6 +1090,12 @@
 
       errEl.classList.add('hidden');
       if (!email) { errEl.textContent = 'Please enter an email address.'; errEl.classList.remove('hidden'); return; }
+      const assistantIds = role === 'admin' ? undefined : pickedAssistants('invite');
+      if (assistantIds && !assistantIds.length) {
+        errEl.textContent = 'Choose at least one assistant for them to use.';
+        errEl.classList.remove('hidden');
+        return;
+      }
 
       btn.disabled = true;
       btn.textContent = 'Sending…';
@@ -1627,7 +1103,7 @@
         const res  = await fetch('/.netlify/functions/invite-member', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, role }),
+          body: JSON.stringify({ email, role, assistantIds }),
         });
         const data = await res.json();
         if (!res.ok || data.error) {
@@ -1663,9 +1139,13 @@
     // ── SC3: Change Role Modal ──────────────────────────────────────────
     window._openRoleModal = function (userId, name, currentRole) {
       _roleTarget = { userId, name, currentRole };
-      document.getElementById('role-modal-name').textContent = `Changing role for: ${name}`;
+      document.getElementById('role-modal-name').textContent = name;
       document.getElementById('role-modal-select').value = currentRole;
       document.getElementById('role-error').classList.add('hidden');
+      const member = _members.find((m) => m.userId === userId);
+      _roleTarget.assistantIds = member ? (member.assistantIds ?? null) : null;
+      renderAssistantPicker('role', _roleTarget.assistantIds);
+      syncPickerToRole('role', currentRole);
       document.getElementById('role-modal').classList.remove('hidden');
     };
 
@@ -1676,7 +1156,16 @@
       const btn     = document.getElementById('role-submit-btn');
       errEl.classList.add('hidden');
 
-      if (newRole === _roleTarget.currentRole) {
+      const assistantIds = newRole === 'admin' ? undefined : pickedAssistants('role');
+      if (assistantIds && !assistantIds.length) {
+        errEl.textContent = 'Choose at least one assistant for them to use.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      const sameIds = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+      const before = _roleTarget.assistantIds === null ? _assistants.map((a) => a.id) : _roleTarget.assistantIds;
+      const accessUnchanged = !assistantIds || sameIds([...assistantIds].sort((x, y) => x - y), [...before].sort((x, y) => x - y));
+      if (newRole === _roleTarget.currentRole && accessUnchanged) {
         document.getElementById('role-modal').classList.add('hidden');
         return;
       }
@@ -1686,7 +1175,7 @@
         const res  = await fetch(`/.netlify/functions/manage-members?id=${_roleTarget.userId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: newRole }),
+          body: JSON.stringify({ role: newRole, ...(accessUnchanged ? {} : { assistantIds }) }),
         });
         const data = await res.json();
         if (!res.ok || data.error) {
@@ -1775,7 +1264,15 @@
       });
     }
 
-    load();
+    // A one-shot hint from an access-request notification's "Invite User": open the invite form for
+    // that email once the assistants are loaded, so the owner still chooses what they can use.
+    const pendingInviteEmail = window._teamInviteEmail;
+    window._teamInviteEmail = null;
+    load().then(() => {
+      if (!pendingInviteEmail || !document.getElementById('invite-modal')?.isConnected) return;
+      window._openInviteModal();
+      document.getElementById('invite-email').value = pendingInviteEmail;
+    });
     initDomainJoin();
   })();
   </script>

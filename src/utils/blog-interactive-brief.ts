@@ -34,17 +34,23 @@ export type InteractiveBlogBrief = {
      *  instruction ("improve it", "bring it up to date"). Needs no topic. */
     revise?: string;
     /** "Add pictures" (src/utils/blog-add-images.ts): place pictures in the EXISTING body. Needs no topic.
-     *  `instruction` is optional — blank means the assistant decides. */
-    addImages?: { source: 'stock' | 'ai'; instruction?: string };
+     *  `instruction` is optional — blank means the assistant decides. `replaceAsset`: swap that one
+     *  picture (the one the owner selected) instead of adding new ones. */
+    addImages?: { source: 'stock' | 'ai'; instruction?: string; replaceAsset?: number };
 };
 
-const asAddImages = (v: unknown): { source: 'stock' | 'ai'; instruction?: string } | undefined => {
+const asAddImages = (v: unknown): { source: 'stock' | 'ai'; instruction?: string; replaceAsset?: number } | undefined => {
     if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined;
     const o = v as Record<string, unknown>;
     const source = o.source === 'ai' ? 'ai' : o.source === 'stock' ? 'stock' : undefined;
     if (!source) return undefined;
     const instruction = typeof o.instruction === 'string' ? o.instruction.trim().slice(0, MAX_FIELD) : '';
-    return instruction ? { source, instruction } : { source };
+    const replaceAsset = Number(o.replaceAsset);
+    return {
+        source,
+        ...(instruction ? { instruction } : {}),
+        ...(Number.isInteger(replaceAsset) && replaceAsset > 0 ? { replaceAsset } : {}),
+    };
 };
 
 const RESIZE = ['shorter', 'longer'] as const;

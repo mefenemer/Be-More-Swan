@@ -1,8 +1,8 @@
 /**
  * src/components/assistant-my-content.js
  *
- * The "My Content" tab on assistant-detail.html — content-role only
- * (social_media_manager, blog_writer; registry.myContentTab). Surfaces the
+ * The "My Content" tab on assistant-detail.html — the roles that make or use media
+ * (social_media_manager, blog_writer, brand_designer, video_producer; registry.myContentTab). Surfaces the
  * org-wide content library (uploads/links/AI-generated media, content-assets.ts)
  * as a tab on the two assistants that actually consume it, instead of only being
  * reachable inline from the Create Post sheet / Blog Studio modal (issue #184).
@@ -45,6 +45,13 @@
     return (document.getElementById('detail-name-input')?.value || '').trim();
   }
 
+  // The type the tab opens on (registry myContentTab.type — the Video Producer opens on Videos).
+  // First mount only: once the user changes the filter, a refresh must not change it back.
+  // assistants.js writes it on the host (data-type) when it applies the registry.
+  function hostType() {
+    return document.getElementById(HOST_ID)?.dataset.type || '';
+  }
+
   async function show() {
     const host = document.getElementById(HOST_ID);
     if (!host) return;
@@ -61,7 +68,7 @@
       host.innerHTML = await res.text();
       embedTweaks(host);
       host.dataset.ready = '1';
-      if (typeof window.initMyContent === 'function') await window.initMyContent({ assistantName: hostAssistantName() });
+      if (typeof window.initMyContent === 'function') await window.initMyContent({ assistantName: hostAssistantName(), type: hostType() });
     } catch (err) {
       host.dataset.ready = '';
       host.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-2xl p-6 text-sm font-semibold text-red-700">${

@@ -380,7 +380,7 @@
         <!-- ── Common questions ─────────────────────────────────────
              The first two answers are the task allowance (they were two fixed cards until 2026-10-20 —
              one FAQ list now, all collapsible). One allowance since 17 October 2026: no separate AI
-             media or X credits. The figures here are filled in live by /task-costs.js from Admin → Revenue → Task costs; the text in the
+             media or X credits. The figures here are filled in live by /task-costs.js from Admin → Money → Task costs; the text in the
              page is only what shows without it. X text post 0; chat and editing helpers are free under
              a daily fair-use limit (src/utils/fair-use.ts); at the cap work is refused — no metered
              billing anywhere. Keep in step with faq.html, terms_of_service.html §5 and the "What Counts
@@ -713,7 +713,7 @@
     </section>
 
     <!-- ══ REVIEWS — filled at build time by scripts/build-seo-html.mjs Job 9 (empty until three
-         reviews are published in Admin → Customers → Reviews). Keep the markers. -->
+         reviews are published in Admin → Growth → Reviews). Keep the markers. -->
     <!-- BUILD:TESTIMONIALS -->
     <!-- /BUILD:TESTIMONIALS -->
 
@@ -931,7 +931,7 @@
 
     // ── Plan Features: DB-driven comparison table ────────────────────────────
     // Builds the whole comparison tbody from the catalog returned by get-plans, so an admin edit
-    // in the Portal (Master Data → Plan Features) shows here with no code change. Columns are the
+    // in the Portal (Money → Plan features) shows here with no code change. Columns are the
     // 2 purchasable tiers (saver/buster) + the contact-sales "Bespoke Assistant" column
     // (feature.enterpriseValue). If the catalog is missing (pre-seed), the static fallback stays.
     const CMP_CHECK = '<svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
@@ -1016,7 +1016,7 @@
     // ── Plan cards: DB-driven tier line / name / description / Most-Popular pill ──────────────
     // Card slot ↔ master_plans.tierKey. Fixed by product identity (NOT price order): t1 = saver,
     // t2 = buster, t4 = enterprise (contact-sales; the t3 slot was the retired Digital Employee). An admin edit in the Portal
-    // (Master Data → Plans) shows here with no code change; missing DB values keep the static copy.
+    // (Money → Plans) shows here with no code change; missing DB values keep the static copy.
     const CARD_SLOT_BY_TIER = { saver: 't1', buster: 't2', enterprise: 't4' };
     // "Best Value", not "Most Popular" (2026-10-20): with a handful of customers "most popular" was a
     // claim we could not stand behind, while Tier 2 really is the cheaper plan per task. If a price
@@ -1074,7 +1074,7 @@
                 setCardText('final-cta-name', plan.name);
             }
             // Capacity stat boxes — straight from the master_plans capacity columns, so an admin
-            // edit in Master Data → Plan Features moves the pink boxes with no code change.
+            // edit in Money → Plan features moves the pink boxes with no code change.
             // Contact-sales (Enterprise) has no numeric limits, so they read "∞".
             // No assistant cap = every role in the library ("All"), the £69 plan's headline.
             setStatBox('stat-asst-' + slot, plan.assistantLimit, plan.isContactSales ? '∞' : 'All', false);

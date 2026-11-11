@@ -133,9 +133,13 @@ check('a new site is set up one numbered step at a time, with one main button, a
 
 check('narrow screens: a Preview button in reach opens it full screen; no device switch on a phone; the frame fits the screen', () => {
     const ed = read('src/components/assistant-site-editor.js');
-    assert.ok(ed.includes("'Preview my site'") && ed.includes("{ attrs: { 'data-sb-narrow-only': '', style: 'position:sticky;bottom:12px;"), 'sticky on the block wrapper, so it stays in reach');
+    // In the tab header, left of Full screen (owner, 2026-11-10); on the Preview tab only on a phone.
+    assert.ok(ed.includes(">Preview my site</button>`") && ed.includes("right: `${preview}${full}${newPage}`"), 'Preview my site sits left of Full screen');
+    assert.ok(ed.includes("${state.panel === 'chat' ? 'data-sb-narrow-only ' : ''}"), 'beside the preview on a wide screen, no second way to it');
+    assert.ok(!ed.includes("['preview-open',") && !ed.includes("['preview-jump',"), 'no button at the bottom of the column any more');
     assert.ok(ed.includes("slot.toggleAttribute('data-sb-full', !!state.previewFull)") && ed.includes("btn('data-site-preview-close', 'Close preview', true)"));
-    assert.ok(/<span class="flex gap-1" data-sb-wide-only>/.test(ed));
+    // Desktop / Phone: a grey two-way toggle, wide screens only (owner, 2026-11-07).
+    assert.ok(/<span class="inline-flex gap-1 p-1 rounded-lg bg-gray-100" data-sb-wide-only role="group" aria-label="Preview size">/.test(ed));
     assert.ok(ed.includes('height:min(720px, 70vh)'));
     assert.ok(/activate\(surface, panel\) \{[\s\S]{0,300}setPreviewFull\(false\);/.test(ed), 'leaving the tab never leaves the preview covering the page');
 });
@@ -185,6 +189,45 @@ check('the editor loads only for a Website Assistant, when first needed', () => 
     assert.ok(/function siteEditor\(fn\) \{\s*if \(window\.AssistantSiteEditor\) \{ fn\(window\.AssistantSiteEditor\); return; \}/.test(a));
     assert.ok(!/window\.AssistantSiteEditor\?\./.test(a), 'every call goes through siteEditor()');
     assert.ok(a.includes('siteEditor((ed) => ed.init({ assistantId: data.id, assistantName: data.name }));'));
+});
+
+check('owner 2026-11-10: delete the page you are on, from beside its sections; never the home page', () => {
+    const ed = read('src/components/assistant-site-editor.js');
+    const panel = ed.slice(ed.indexOf('function pagesPanel()'), ed.indexOf('function menuPlaceHtml('));
+    assert.ok(panel.includes("btn(`data-site-remove-page aria-label=\"Delete the page ${esc(p.title)}\"`, 'Delete this page')"));
+    assert.ok(panel.indexOf('Delete this page') < panel.indexOf('Sections on') + 400, 'beside the heading, not at the bottom of Page details');
+    assert.ok(panel.includes("The home page can\\'t be deleted"));
+});
+
+check('owner 2026-11-10: What your website does is questions in order, follow-ups shown when relevant', () => {
+    const ed = read('src/components/assistant-site-editor.js');
+    assert.ok(/const FEATURE_STEPS = \[[\s\S]{0,200}How do customers buy from you or book\?/.test(ed));
+    assert.ok(ed.includes("keys: [['hours', ['visit', 'bookings']], ['menu', ['visit']]]"), 'hours when people visit or book; a menu when they visit');
+    assert.ok(ed.includes('data-site-visit') && ed.includes('function syncFeatureReveal(form)'));
+    assert.ok(ed.includes("if (!show) { const cb = row.querySelector('input'); if (cb) cb.checked = false; }"), 'a hidden choice is never saved as on');
+    // Every feature is still offered somewhere: the steps and the "More" fallback.
+    const keys = ['shop', 'bookings', 'menu', 'hours', 'gallery', 'reviews', 'signup', 'faq', 'listings', 'stays'];
+    const steps = ed.slice(ed.indexOf('const FEATURE_STEPS'), ed.indexOf('function featuresCard('));
+    for (const k of keys) assert.ok(steps.includes(`'${k}'`), `${k} is in a step`);
+});
+
+check('owner 2026-11-10: Add a section shows the kinds in groups; every kind has a group', () => {
+    const ed = read('src/components/assistant-site-editor.js');
+    const g = ed.slice(ed.indexOf('const SECTION_GROUPS'), ed.indexOf('function addPickerHtml('));
+    const types = ['hero', 'features', 'steps', 'text', 'faq', 'testimonials', 'cta', 'contact', 'signup', 'products', 'booking', 'hours', 'menu', 'gallery', 'reviews', 'social_feed', 'blog_posts', 'listings', 'stays'];
+    for (const t of types) assert.ok(g.includes(`'${t}'`), `${t} is grouped`);
+    assert.ok(ed.includes("['More', types.filter((t) => !grouped.has(t))]"), 'a new kind still shows');
+});
+
+check('owner 2026-11-10: the chat picture cards open My Content', () => {
+    const reg = read('src/components/disruptive-ui-registry.js');
+    assert.ok(reg.includes('data-sp-go="library"') && reg.includes('function fromLibrary()') && reg.includes('window.MediaPicker.open({'));
+    assert.ok(reg.includes("ui.source === 'library' ? 'library' : 'ai'"));
+    assert.ok(reg.includes('data-pp-go="library"'));
+    assert.ok(read('workspace.html').includes("if (d.source === 'library') {\n        gpAiUseOwn();"));
+    const orch = read('netlify/functions/chat-orchestrator.ts');
+    assert.ok(orch.includes('"source":"library"|"ai"|"stock"') && orch.includes('add "source": "library" when they want one of their own from My Content'));
+    assert.ok(!orch.includes('point them to the paperclip in this chat, or "Choose picture or video" on the section'));
 });
 
 console.log(`\n${passed}/${total} passed\n`);

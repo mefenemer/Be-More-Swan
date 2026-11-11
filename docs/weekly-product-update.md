@@ -13,7 +13,7 @@ Your Mac (weekly Claude task)                 bemoreswan.com
 5. upload-draft.ts --upload  ───────────────▶ product-updates.ts?resource=ingest
                                               → saved as "Waiting for review"
                                               → reminder email to hello@bemoreswan.com
-                                              Admin → Comms → What's New Emails
+                                              Admin → Growth → What's New emails
                                               → edit, preview, "Send me a test"
                                               → Approve & send  (the ONLY way anything is sent)
                                               → send-product-update-background.ts emails every
@@ -29,7 +29,7 @@ Your Mac (weekly Claude task)                 bemoreswan.com
 | Sender | `netlify/functions/send-product-update-background.ts` |
 | Screenshot route (public, signed) | `netlify/functions/product-update-image.ts` → `/api/product-updates/image` |
 | Unsubscribe (public, signed per user) | `netlify/functions/product-update-unsubscribe.ts` → `/api/product-updates/unsubscribe` |
-| Admin page | `admin.html` → Comms → What's New Emails (`?view=product-updates`) |
+| Admin page | `admin.html` → Growth → What's New emails (`?view=product-updates`) |
 | Upload / local preview | `scripts/product-updates/upload-draft.ts` |
 | Tests | `tests/product-update-email.test.ts` |
 

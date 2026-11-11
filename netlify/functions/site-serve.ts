@@ -21,13 +21,15 @@ import { eq } from 'drizzle-orm';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { sites } from '../../db/schema';
-import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH, LISTING_POST_PATH, renderSiteListing } from '../../src/utils/site-render';
+import { renderRobots, renderSiteBlogIndex, renderSiteBlogPost, renderSitemap, renderSiteNotice, renderSitePage, esc, BOOK_PATH, BOOKING_PAGE_PATH, BUY_ACTION, FORM_ACTION, FORM_SENT_PATH, REVIEW_PATH, LISTING_POST_PATH, renderSiteListing, renderSiteStay } from '../../src/utils/site-render';
+import { siteHasStays, stayRoute } from '../../src/utils/site-stays';
+import { loadSiteStays, loadStayPage, staySlugs } from '../../src/utils/site-stays-load';
 import { reviewPage, reviewSubmit } from '../../src/utils/site-review';
 import { bookStep, bookSubmit } from '../../src/utils/site-booking';
 import { loadSiteReviews } from '../../src/utils/reviews';
 import { loadSiteSocialFeed } from '../../src/utils/site-social-feed';
 import { loadSiteBlogIndex, loadSiteBlogLatest, loadSiteBlogPost, siteBlogRoute, siteBlogSlugs } from '../../src/utils/site-blog';
-import { BLOG_PATH, blogOn } from '../../src/utils/site-definition';
+import { BLOG_PATH, blogOn, redirectFor } from '../../src/utils/site-definition';
 import { listingIcs, listingRoute, listingSlugs, loadListingBySlug, loadSiteListings } from '../../src/utils/site-listings';
 import { listingPostPage, listingPostSubmit } from '../../src/utils/site-listing-post';
 import { bookableSessions } from '../../src/utils/class-sessions';
@@ -39,6 +41,7 @@ import audiencePublic from './audience-public';
 import { siteAssetUrl, siteOrigin, sitesDomain, slugFromHost, siteCacheTag } from '../../src/utils/site-hosting';
 import { DOMAIN_CHECK_PATH, domainCheckBody, resolveSiteHost } from '../../src/utils/site-domains';
 import { maxPagesFor, publishedDefinition } from '../../src/utils/site-store';
+import { bookingOnlySite, bookingPage } from '../../src/utils/site-booking-page';
 
 // form-action: the site's own forms post to its own /_form and /_buy (steps 3b, 3c), and nowhere
 // else — a script-free page cannot be made to post a visitor's details to another site. Stripe
@@ -102,6 +105,9 @@ async function subscribeInProcess(payload: Record<string, unknown>, meta: { orig
  * on the first published site, 2026-10-16. And without the header one site's page showed at another's
  * address. Netlify-Vary splits on both; plain Vary covers any other cache on the way.
  */
+/** What a booking-only address (bookings set up, site not published) answers; everything else is "no website here yet". */
+const BOOKING_ONLY_PATHS = new Set(['/', BOOKING_PAGE_PATH, BOOK_PATH, FORM_SENT_PATH, '/robots.txt']);
+
 export const SITE_VARY = { 'Netlify-Vary': 'query, header=X-Site-Host', Vary: 'X-Site-Host' } as const;
 
 type ServeResult = { statusCode: number; headers?: Record<string, string>; body?: string; isBase64Encoded?: boolean };
@@ -154,7 +160,12 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
     if (site?.status === 'suspended') {
         return notice(410, 'This site is unavailable', 'This website has been taken offline.', app);
     }
-    const definition = site?.status === 'published' ? await publishedDefinition(db, site, await maxPagesFor(db, site.organisationId)) : null;
+    const published = site?.status === 'published' ? await publishedDefinition(db, site, await maxPagesFor(db, site.organisationId)) : null;
+    // Not published yet, but bookings are set up: the address still takes bookings — the booking
+    // pages only, in the site's look (site-booking-page.ts; docs/booking-calendly-gaps-plan.md A).
+    const bookingDef = !published && site && site.status === 'draft' && BOOKING_ONLY_PATHS.has(path) ? await bookingOnlySite(db, site, new Date()) : null;
+    const bookingOnly = !!bookingDef;
+    const definition = published ?? bookingDef;
     if (!site || !definition) {
         if (path === '/robots.txt') return { statusCode: 200, headers: headers('text/plain; charset=utf-8', 'public, max-age=300'), body: renderRobots('', true) };
         return notice(404, 'There\'s no website here yet', `Nothing has been published at ${esc(`${slug}.${sitesDomain()}`)} yet. <a href="${esc(app)}/assistant.html?role=website_assistant">Build your own website with Be More Swan</a>.`, app);
@@ -164,9 +175,24 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
     const ctx = {
         origin, preview: false,
         reportUrl: `${app}/report-site.html?site=${encodeURIComponent(slug)}`,
-        creditUrl: site.credit ? `${app}/assistant.html?role=website_assistant` : null,
+        // The booking-only pages always carry the credit, on every plan (owner, 2026-11-08).
+        creditUrl: site.credit || bookingOnly ? `${app}/assistant.html?role=website_assistant` : null,
         assetUrl: (id: number) => siteAssetUrl(app, id),
     };
+
+    if (bookingOnly) {
+        // The home page of a booking-only address is the booking link; nothing else of the draft is served.
+        if (path === '/') return { statusCode: 302, headers: { Location: BOOKING_PAGE_PATH, 'Cache-Control': 'no-store' } as Record<string, string>, body: '' };
+        if (path === '/robots.txt') return { statusCode: 200, headers: headers('text/plain; charset=utf-8', 'public, max-age=300'), body: renderRobots('', true) };
+        if (isPost && path !== BOOK_PATH) return { statusCode: 405, headers: { Allow: 'GET, HEAD' } as Record<string, string>, body: 'Method Not Allowed' };
+    }
+    // The booking link (site-booking-page.ts) — unless the site has a page of its own at /book.
+    if (path === BOOKING_PAGE_PATH && !isPost && !definition.pages.some((p) => p.slug === 'book')) {
+        const r = await bookingPage({ db, site, def: definition, ctx, now: new Date() }, new URLSearchParams(String(event.queryStringParameters?.q || '')), !!published);
+        const noIndex = bookingOnly ? { 'X-Robots-Tag': 'noindex' } : {};
+        if ('location' in r) return { statusCode: 303, headers: { Location: r.location, 'Cache-Control': 'no-store', ...noIndex } as Record<string, string>, body: '' };
+        return { statusCode: r.status, headers: { ...headers('text/html; charset=utf-8', 'no-store'), ...noIndex }, body: r.html };
+    }
 
     // ── Forms (step 3b) and Buy buttons (step 3c) ──
     if (isPost) {
@@ -233,7 +259,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
     if (path === '/sitemap.xml') {
         const blog = blogOn(definition) ? await siteBlogSlugs(db, site.organisationId, origin, origins) : [];
         const hasListings = definition.pages.some((p) => p.sections.some((x) => x.type === 'listings'));
-        return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin, blog, hasListings ? await listingSlugs(db, site.organisationId) : []) };
+        return { statusCode: 200, headers: headers('application/xml; charset=utf-8', 'public, max-age=300'), body: renderSitemap(definition, origin, blog, hasListings ? await listingSlugs(db, site.organisationId) : [], siteHasStays(definition) ? await staySlugs(db, site.organisationId) : []) };
     }
 
     // ── The Blog Assistant's posts (site-blog.ts): /blog and /blog/<slug>, while the blog is on ──
@@ -253,6 +279,9 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
             return { statusCode: 200, headers: headers('text/html; charset=utf-8', cache), body: event.httpMethod === 'HEAD' ? '' : renderSiteBlogIndex(definition, blogCtx, data) };
         }
         const post = await loadSiteBlogPost(db, site.organisationId, blogRoute.slug, origin, origins);
+        // An imported post's old /blog/<old-slug> that now lives at another /blog/<slug> (site-import-blog.ts).
+        const movedPost = post ? null : redirectFor(definition, path);
+        if (movedPost && movedPost !== path) return { statusCode: 301, headers: { Location: movedPost, 'Cache-Control': 'public, max-age=3600' } as Record<string, string>, body: '' };
         if (!post) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
         return { statusCode: 200, headers: headers('text/html; charset=utf-8', cache), body: event.httpMethod === 'HEAD' ? '' : renderSiteBlogPost(definition, blogCtx, post) };
     }
@@ -271,6 +300,20 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : renderSiteListing(definition, ctx, l) };
     }
 
+    // ── A holiday let / B&B room type's own page, with its calendar: /stays/<slug> (site-stays.ts) ──
+    const sr = stayRoute(path);
+    if (sr && siteHasStays(definition)) {
+        const month = new URLSearchParams(String(event.queryStringParameters?.q || '')).get('month');
+        const v = await loadStayPage(db, site.organisationId, sr.slug, month, new Date());
+        if (!v) return { statusCode: 404, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: renderSitePage(definition, '/__none', ctx).html };
+        // The calendar changes with every booking: kept a minute, like other pages.
+        return { statusCode: 200, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : renderSiteStay(definition, ctx, v, BOOK_PATH) };
+    }
+
+    // An old address that moved (an imported page's former path — site-definition.ts redirects).
+    const moved = redirectFor(definition, path);
+    if (moved) return { statusCode: 301, headers: { Location: moved, 'Cache-Control': 'public, max-age=3600' } as Record<string, string>, body: '' };
+
     const hasShop = definition.pages.some((p) => p.sections.some((s) => s.type === 'products'));
     const hasBooking = definition.pages.some((p) => p.sections.some((s) => s.type === 'booking'));
     const hasClasses = definition.pages.some((p) => p.sections.some((s) => s.type === 'booking' && s.props.kind === 'class'));
@@ -284,6 +327,7 @@ async function serve(event: Parameters<Parameters<typeof withLambda>[0]>[0], res
         socialFeed: await loadSiteSocialFeed(db, site.organisationId, definition),
         blog: await loadSiteBlogLatest(db, site.organisationId, definition),
         listings: await loadSiteListings(db, site.organisationId, definition),
+        stays: await loadSiteStays(db, site.organisationId, definition),
         query: String(event.queryStringParameters?.q || ''),
     });
     return { statusCode: page.status, headers: headers('text/html; charset=utf-8', 'public, max-age=60'), body: event.httpMethod === 'HEAD' ? '' : page.html };

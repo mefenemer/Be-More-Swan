@@ -8,6 +8,7 @@ import { sendMagicLinkEmail } from '../../src/utils/email';
 import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { getEmailStrings } from '../../src/utils/email-i18n';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { loginBrowserCookie, loginLinkParams, readLoginRef } from '../../src/utils/login-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -32,11 +33,21 @@ export default withLambda(async (event) => {
             // US-ONB-2.1.2 AC9: post-login redirect destination (e.g. /workspace.html?action=select-plan)
             const postLoginRedirect: string | undefined = typeof body.redirect === 'string' && body.redirect.startsWith('/') ? body.redirect : undefined;
 
-            if (!email) return { statusCode: 400, body: JSON.stringify({ error: 'Email is required.' }) };
+            // "Email me a new link" on a used or expired link: the link's signed reference stands in
+            // for the address. It can only send to that account's own inbox. An account that never
+            // finished verifying can use it too, because the old link was its way in.
+            const refUserId = readLoginRef(body.ref);
+            // Only for a signup's link: its chosen plan survives the new link.
+            const tier = typeof body.tier === 'string' && /^[a-z_]{1,32}$/.test(body.tier) ? body.tier : undefined;
 
-            const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
+            if (!email && refUserId === null) return { statusCode: 400, body: JSON.stringify({ error: 'Email is required.' }) };
 
-            if (user && user.status === 'active') {
+            const [user] = await db.select().from(users)
+                .where(refUserId !== null ? eq(users.id, refUserId) : eq(users.email, email)).limit(1);
+            const browser = loginBrowserCookie(event.headers.cookie);
+            const answered: Record<string, string> = { 'Set-Cookie': browser.setCookie };
+
+            if (user && (user.status === 'active' || (refUserId !== null && user.status === 'pending_verification'))) {
                 // ── Race-safe rate limit (SCENARIO 5) ──────────────────────
                 // A naive read-then-write check has a TOCTOU race: two concurrent
                 // requests both pass the check before either writes the fence.
@@ -72,14 +83,14 @@ export default withLambda(async (event) => {
 
                 if (updated.length === 0) {
                     // Rate-limited (or concurrent request won the race) — return 200 to prevent enumeration
-                    console.log(`[Rate Limit] Magic link blocked for: ${email}`);
-                    return { statusCode: 200, body: JSON.stringify({ message: 'If an account exists, a link was sent.' }) };
+                    console.log(`[Rate Limit] Magic link blocked for: ${user.email}`);
+                    return { statusCode: 200, headers: answered, body: JSON.stringify({ message: 'If an account exists, a link was sent.' }) };
                 }
 
                 // Prefer BASE_URL; fall back to DEPLOY_PRIME_URL / request host for deploy previews.
                 const baseUrl = resolveBaseUrl(event.headers);
                 if (!baseUrl) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
-                const magicLink = `${baseUrl}/verify-account.html?token=${plainToken}${postLoginRedirect ? `&redirect=${encodeURIComponent(postLoginRedirect)}` : ''}`;
+                const magicLink = `${baseUrl}/verify-account.html?token=${plainToken}${postLoginRedirect ? `&redirect=${encodeURIComponent(postLoginRedirect)}` : ''}${tier ? `&tier=${encodeURIComponent(tier)}` : ''}${loginLinkParams({ plainToken, userId: user.id, browser: browser.value })}`;
 
                 // US-I18N-1.2 SC4: use user's preferred language for email subject/greeting
                 const [profile] = await db.select({ language: userProfiles.language })
@@ -88,7 +99,7 @@ export default withLambda(async (event) => {
                 const greeting = emailStr.magic_link_greeting(user.firstName || 'there');
 
                 await sendMagicLinkEmail({
-                    to: email,
+                    to: user.email,
                     subject: emailStr.magic_link_subject,
                     html: `
                         <div style="font-family: sans-serif; text-align: center; padding: 40px 20px; background-color: #fdfcf9;">
@@ -118,7 +129,7 @@ export default withLambda(async (event) => {
             }
 
             // Always return 200 OK (Enumeration Protection)
-            return { statusCode: 200, body: JSON.stringify({ message: 'If an account exists, a link was sent.' }) };
+            return { statusCode: 200, headers: answered, body: JSON.stringify({ message: 'If an account exists, a link was sent.' }) };
         } catch (error) {
             console.error('Login Request Error:', error);
             return { statusCode: 500, body: JSON.stringify({ error: 'Internal server error.' }) };

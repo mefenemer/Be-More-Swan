@@ -254,7 +254,8 @@ check('the chat can do the same: shapes, order, duplicate, crop, styles and put 
     assert.ok(h && h.kind === 'text' && h.italic === true && h.underline === true && h.lineHeight === 1.6);
     assert.ok(!('order' in (h as object)) && !('duplicate' in (h as object)), 'no stray fields on a text layer');
     assert.ok(designForChat(design).includes('picture (layer "p1")'));
-    assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"+ Add picture"'), 'the chat says where a new picture is added');
+    assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"new" to add one'), 'the chat can add a new picture itself, through findPicture');
+    assert.strictEqual(designEditFromUiElement({ type: 'design_edit', briefId: 4, optionId: 9, findPicture: { target: 'new', shows: 'tea' } })?.findPicture?.target, 'new');
     assert.ok(read('src/components/disruptive-ui-registry.js').includes('Array.isArray(ui.shapes)'));
 });
 

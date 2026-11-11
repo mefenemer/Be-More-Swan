@@ -34,6 +34,10 @@ check('the guess follows what the business already did, then its industry', () =
     assert.deepStrictEqual(inferOffers({ industry: 'Health & Wellbeing' }), ['services', 'bookings']);
     // "bar" must be a word, not "barrister"
     assert.deepStrictEqual(inferOffers({ industry: 'Barristers' }), []);
+    assert.deepStrictEqual(inferOffers({ industry: 'Holiday lets' }), ['stays']);
+    assert.deepStrictEqual(inferOffers({ industry: 'B&B' }), ['stays']);
+    assert.deepStrictEqual(inferOffers({ siteFeatures: ['stays'] }), ['stays']);
+    assert.deepStrictEqual(inferOffers({ hasStays: true }), ['stays']);
 });
 
 check('only known kinds are saved; anything else is refused', () => {
@@ -44,9 +48,11 @@ check('only known kinds are saved; anything else is refused', () => {
 
 check('an answer to the OLD two-box question is not read as "sells nothing"', () => {
     const src = read('src/utils/offer-profile.ts');
-    assert.ok(src.includes("const ASKED_ALL = 'asked:6'") && src.includes('const stored = [...offers, ASKED_ALL]'));
+    assert.ok(src.includes("const ASKED_ALL = 'asked:7'") && src.includes('const stored = [...offers, ASKED_ALL]'));
+    // A six-option answer (before stays, 2026-11-09) is still complete — nobody is asked again.
+    assert.ok(src.includes("const ASKED_SIX = 'asked:6'") && src.includes('offers.includes(ASKED_ALL) || six'));
     // Only a complete answer reaches every assistant.
-    assert.ok(src.includes('return r.complete ? { offers: r.offers, answered: true } : null;'));
+    assert.ok(src.includes('return r.complete ? { offers: await withStays(db, organisationId, r), answered: true } : null;'));
 });
 
 check('assistants are told what is NOT ticked — firmly only when it is the owner\'s answer', () => {
@@ -57,12 +63,13 @@ check('assistants are told what is NOT ticked — firmly only when it is the own
 });
 
 check('every tick changes something real', () => {
-    const html = read('assets.html');
+    const html = (read('assets.html') + read('src/components/products-editor.js'));
     for (const k of OFFER_KINDS) assert.ok(html.includes(`data-op-offer value="${k}"`), k);
     assert.ok(html.includes("kind: offers('services') && !offers('products') ? 'service' : 'product'"));
     assert.ok(html.includes("offers('subscriptions') ? { priceType: 'fixed', priceUnit: 'a month' }"));
     assert.ok(html.includes("tab('bookings')?.classList.toggle('hidden', !books)"));
     assert.ok(html.includes("const hours = books || o.offers.includes('visits')"));
+    assert.ok(html.includes("tab('stays')?.classList.toggle('hidden', !o.offers.includes('stays'))"));
     // The chat card and the prompt name the same six.
     const card = read('src/components/disruptive-ui-registry.js');
     for (const k of OFFER_KINDS) assert.ok(card.includes(`${k}: '`), `card ${k}`);
@@ -74,7 +81,7 @@ check('every assistant gets the line, but only the owner\'s answer — never a g
 });
 
 check('the form HIDES a group, never removes it — so saving cannot clear a value', () => {
-    const html = read('assets.html');
+    const html = (read('assets.html') + read('src/components/products-editor.js'));
     assert.ok(html.includes('data-op-group="menu"') && html.includes('data-op-group="bookings"'));
     assert.ok(html.includes("f.querySelector('[data-op-group=\"menu\"]').classList.toggle('hidden', !menu)"));
     // A value already there keeps its group visible.
@@ -84,7 +91,7 @@ check('the form HIDES a group, never removes it — so saving cannot clear a val
 
 check('GUI and chat save through ONE path', () => {
     assert.ok(read('netlify/functions/org-products.ts').includes('saveOfferProfile(db, orgId, offers'));
-    assert.ok(read('assets.html').includes("call('PATCH', { offer: ticked })"));
+    assert.ok((read('assets.html') + read('src/components/products-editor.js')).includes("call('PATCH', { offer: ticked })"));
     const chat = read('src/components/chat-session.js');
     assert.ok(chat.includes("addEventListener('site:offerProfile', onOfferProfile)") && chat.includes("body: JSON.stringify({ offer:"));
     assert.ok(read('src/components/disruptive-ui-registry.js').includes("register('offer_profile', renderOfferProfileCard)"));

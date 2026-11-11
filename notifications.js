@@ -249,6 +249,10 @@ window.NotifKit = (function () {
             return { label: 'Review', run: () => window.openTaskCostReview?.() };
         }
         // AI media ready — deep-link straight to the generated asset in My Content.
+        // Files due to be deleted — opens My Content on just those files, to Keep any of them.
+        if (notif.type === 'library_files_expiring') {
+            return { label: 'Review files', run: () => window.loadView?.('my-content', { expiring: true }) };
+        }
         if (notif.type === 'media_ready') {
             return { label: 'View content', run: () => window.loadView?.('my-content', meta.assetId ? { assetId: meta.assetId } : null) };
         }
@@ -389,6 +393,13 @@ window.NotifKit = (function () {
         // post_revised: the redraft of a post the user sent back — the same review, of the new version.
         if ((notif.type === 'post_draft_ready' || notif.type === 'post_revised' || notif.type === 'ai_review') && meta.postId) {
             return { label: 'Review draft', run: () => {
+                if (typeof window.openPostReview === 'function') return window.openPostReview(meta.postId);
+                return window.loadView?.('review-queue', { postId: meta.postId });
+            } };
+        }
+        // A guest responded to a review link: straight to the post, where the response is shown.
+        if (notif.type === 'review_link_response' && meta.postId) {
+            return { label: 'See their response', run: () => {
                 if (typeof window.openPostReview === 'function') return window.openPostReview(meta.postId);
                 return window.loadView?.('review-queue', { postId: meta.postId });
             } };
@@ -657,7 +668,7 @@ window.initNotifications = async function(param) {
         dismissBtnHTML, kindOf, fmtDate, typeLabel, avatarHTML, actorEyebrowHTML, sanitizeText,
         actorColor, escHtml,
     } = window.NotifKit;
-    const TABS = ['needs', 'messages', 'updates'];
+    const TABS = ['needs', 'updates', 'messages'];
     // null until the first load picks the tab that has something waiting.
     let activeTab = param && TABS.includes(param.tab) ? param.tab : null;
     let teamThread = param && param.thread ? param.thread : null;
@@ -1406,7 +1417,7 @@ window.NotificationPopover = (function () {
         markAllBtn.addEventListener('click', markAllRead);
         tabActionBtn.addEventListener('click', () => { activeTab = 'action'; render(); });
         tabUpdatesBtn.addEventListener('click', () => { activeTab = 'updates'; render(); });
-        // Team Chat is a conversation, not a list — a link to Notifications → Messages, not a popover tab.
+        // Team Chat is a conversation, not a list — a link to the Team Chat tab of Notifications, not a popover tab.
         teamChatBtn = panel.querySelector('#notif-pop-team-chat');
         teamChatBtn.addEventListener('click', () => {
             close();

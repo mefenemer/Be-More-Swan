@@ -17,9 +17,9 @@
 //                                                      GET returns callsToAction { assistants, giftForms }
 //
 // Prices are STRUCTURED (db/z-product-pricing.sql, src/utils/product-price.ts): priceType + priceAmount
-// (pence) + priceUnit, or the owner's own words (priceType 'text' + price). `price` is then written by
+// (minor units) + priceUnit + priceCurrency (GBP | USD | EUR | AUD | CAD — db/z-product-price-currency.sql), or the owner's own words (priceType 'text' + price). `price` is then written by
 // the server as the displayed wording, which every assistant's prompt reads. A body that sends only
-// `price` (an older client) is read with priceFromText. Also: durationMinutes (services, for bookings)
+// `price` (an older client) is read with priceFromText. Also: durationMinutes and meetingLocation (services, for bookings)
 // and imageAssetId (a picture from this workspace's library — checked).
 // POST   { kind, name, ... }  → { product }           add one (appended to the end of the list)
 // PATCH  { id, ...fields }    → { product }           edit, archive / restore (status), or reorder (sortOrder)
@@ -36,6 +36,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { PRODUCT_LIMITS } from '../../src/utils/org-products';
 import { cleanDeposit, cleanPrice, priceFromText } from '../../src/utils/product-price';
 import { cleanAllergens, cleanDietary } from '../../src/utils/product-dietary';
+import { cleanMeetingLocation } from '../../src/utils/booking-meeting';
 import { siteAssetUrl } from '../../src/utils/site-hosting';
 import { cleanOffers, loadOfferProfile, saveOfferProfile } from '../../src/utils/offer-profile';
 import { cleanIntroOffer, loadIntroOffer, saveIntroOffer } from '../../src/utils/intro-offer';
@@ -70,7 +71,7 @@ export function cleanProductUrl(v: unknown): string | null | 'invalid' {
 }
 
 /** The editable fields of a request body, validated. `partial` = only what was sent (PATCH). */
-export function productFields(body: Record<string, unknown>, partial: boolean, currentPrice?: { priceType: string | null; priceAmount: number | null }): { error: string } | { values: Record<string, unknown> } {
+export function productFields(body: Record<string, unknown>, partial: boolean, currentPrice?: { priceType: string | null; priceAmount: number | null; priceCurrency?: string | null }): { error: string } | { values: Record<string, unknown> } {
     const values: Record<string, unknown> = {};
     const has = (k: string) => Object.prototype.hasOwnProperty.call(body, k);
     if (!partial || has('name')) {
@@ -88,22 +89,26 @@ export function productFields(body: Record<string, unknown>, partial: boolean, c
     }
     // The price: structured when priceType is sent; an older body with only `price` is read from its text.
     if (has('priceType') || (!partial && !has('price'))) {
-        const pr = cleanPrice({ priceType: body.priceType, priceAmount: body.priceAmount, priceUnit: body.priceUnit, price: body.price });
+        const pr = cleanPrice({ priceType: body.priceType, priceAmount: body.priceAmount, priceUnit: body.priceUnit, priceCurrency: body.priceCurrency, price: body.price });
         if ('error' in pr) return pr;
         Object.assign(values, pr);
     } else if (has('price')) {
         const t = priceFromText(clip(body.price, PRODUCT_LIMITS.price));
-        const pr = cleanPrice({ priceType: t.priceType, priceAmount: t.priceAmount != null ? t.priceAmount / 100 : null, priceUnit: t.priceUnit, price: t.priceText ?? null });
+        const pr = cleanPrice({ priceType: t.priceType, priceAmount: t.priceAmount != null ? t.priceAmount / 100 : null, priceUnit: t.priceUnit, priceCurrency: t.priceCurrency, price: t.priceText ?? null });
         if ('error' in pr) return pr;
         Object.assign(values, pr);
     }
     // The deposit is checked against the price being saved (or, for an edit that leaves the price
     // alone, the stored one — the handler passes it as `currentPrice`).
     if (has('depositType')) {
-        const price = { priceType: (values.priceType as string | null | undefined) ?? currentPrice?.priceType ?? null, priceAmount: (values.priceAmount as number | null | undefined) ?? currentPrice?.priceAmount ?? null };
+        const price = { priceType: (values.priceType as string | null | undefined) ?? currentPrice?.priceType ?? null, priceAmount: (values.priceAmount as number | null | undefined) ?? currentPrice?.priceAmount ?? null,
+            priceCurrency: (values.priceCurrency as string | undefined) ?? currentPrice?.priceCurrency ?? 'GBP' };
         const dep = cleanDeposit({ depositType: body.depositType, depositAmount: body.depositAmount }, price);
         if ('error' in dep) return dep;
         Object.assign(values, dep);
+    } else if (values.priceCurrency && values.priceCurrency !== 'GBP') {
+        // A price moved out of pounds can't keep a deposit (deposits are sterling only).
+        Object.assign(values, { depositType: null, depositAmount: null });
     }
     // Dietary markers (a closed set) and the owner's allergen words — for menus (product-dietary.ts).
     if (!partial || has('dietary')) values.dietary = cleanDietary(body.dietary);
@@ -112,6 +117,12 @@ export function productFields(body: Record<string, unknown>, partial: boolean, c
         const d = body.durationMinutes === null || body.durationMinutes === '' || body.durationMinutes === undefined ? null : Number(body.durationMinutes);
         if (d !== null && (!Number.isInteger(d) || d <= 0 || d > 1440)) return { error: 'The length must be in whole minutes, up to 24 hours.' };
         values.durationMinutes = d;
+    }
+    // Where a booked service happens: in person (null), a phone call or a video call (booking-meeting.ts).
+    if (has('meetingLocation')) {
+        const m = cleanMeetingLocation(body.meetingLocation);
+        if (!m.ok) return { error: m.error };
+        values.meetingLocation = m.value;
     }
     if (!partial || has('imageAssetId')) {
         const a = body.imageAssetId === null || body.imageAssetId === '' || body.imageAssetId === undefined ? null : Number(body.imageAssetId);
@@ -138,9 +149,9 @@ export function productFields(body: Record<string, unknown>, partial: boolean, c
 const COLUMNS = {
     id: orgProducts.id, kind: orgProducts.kind, name: orgProducts.name, description: orgProducts.description,
     benefits: orgProducts.benefits, price: orgProducts.price, audience: orgProducts.audience, url: orgProducts.url,
-    priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceUnit: orgProducts.priceUnit,
+    priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceUnit: orgProducts.priceUnit, priceCurrency: orgProducts.priceCurrency,
     durationMinutes: orgProducts.durationMinutes, imageAssetId: orgProducts.imageAssetId,
-    depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount,
+    depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount, meetingLocation: orgProducts.meetingLocation,
     dietary: orgProducts.dietary, allergens: orgProducts.allergens,
     status: orgProducts.status, sortOrder: orgProducts.sortOrder, updatedAt: orgProducts.updatedAt,
 };
@@ -239,7 +250,7 @@ export default withLambda(async (event) => {
             if (!Number.isInteger(id)) return json(400, { error: 'id is required.' });
             // A deposit is checked against the price — the stored one, when this edit leaves it alone.
             const [current] = Object.prototype.hasOwnProperty.call(body, 'depositType')
-                ? await db.select({ priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount }).from(orgProducts).where(and(eq(orgProducts.id, id), eq(orgProducts.organisationId, orgId))).limit(1)
+                ? await db.select({ priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceCurrency: orgProducts.priceCurrency }).from(orgProducts).where(and(eq(orgProducts.id, id), eq(orgProducts.organisationId, orgId))).limit(1)
                 : [];
             const parsed = productFields(body, true, current);
             if ('error' in parsed) return json(400, parsed);

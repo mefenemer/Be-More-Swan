@@ -1,4 +1,4 @@
-// What work costs comes from Admin → Revenue → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
 window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/disruptive-ui-registry.js
@@ -1649,7 +1649,131 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   register('visual_brief_proposal', renderVisualBriefProposalCard);
 
   // ── Built-ins: Video Producer cards (docs/video-producer-plan.md §5.10) ─────────────────────
-  // { type: 'video_brief_proposal', message, purpose?, lengthS?, cta?, voiceover?, allowAi?, platforms? }
+  // The choices the server reads (src/lib/video-music.ts, video-look.ts, lower-third.ts).
+  const VIDEO_MUSIC = { auto: 'Made to suit the video', upbeat: 'Upbeat', chill: 'Chilled', inspiring: 'Inspiring', ambient: 'Calm, in the background', none: 'No music' };
+  const VIDEO_LOOKS = { natural: 'Natural (no grade)', brand: 'Your brand colours', warm: 'Warm', cool: 'Cool', punchy: 'Bright and punchy', mono: 'Black and white' };
+  const VIDEO_LOWER_THIRDS = { bar: 'Brand-colour bar, left', clean: 'Plain white words, left', boxed: 'White box, centred' };
+  const VIDEO_MUSIC_LEVELS = { quiet: 'Quiet', normal: 'Normal', loud: 'Loud' };
+  const VIDEO_SHAPE_NAMES = { '9:16': 'Vertical 9:16', '1:1': 'Square 1:1', '16:9': 'Wide 16:9' };
+
+  /**
+   * One Video Producer action on a card (2026-11-10): the chat twin of a button on the Videos tab.
+   * The click sends `body` to video-projects.ts through chat-session.js (`video:action`), the same action
+   * as the button. None of these can spend: approving or rewriting the script, notes and options are free,
+   * and other shapes start making only when nothing paid needs making.
+   */
+  function videoActionCard(esc, { kicker, rows, note, button, body, done }) {
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${esc(kicker)} · Approval needed</p>
+      ${rows.filter(Boolean).map(([l, v]) => `<p class="text-xs text-gray-700 mt-1.5"><span class="font-bold">${esc(l)}:</span> ${esc(v)}</p>`).join('')}
+      <p class="text-xs text-gray-600 mt-2">${esc(note)}</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-vac-go ${body ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(button)}</button>
+        <button type="button" data-vac-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-vac-status></p>`;
+    const status = el.querySelector('[data-vac-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-vac-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-vac-go]') || !body) return;
+      setBusy(true);
+      say('Working…');
+      el.dispatchEvent(new CustomEvent('video:action', {
+        bubbles: true,
+        detail: { body, respond({ ok, error }) {
+          if (!ok) { setBusy(false); say(error || 'That didn’t work — try the button on the Videos tab.', 'error'); return; }
+          say(done);
+        } },
+      }));
+    });
+    return el;
+  }
+  const videoId = (ui) => (Number.isInteger(Number(ui.projectId)) && Number(ui.projectId) > 0 ? Number(ui.projectId) : null);
+
+  // { type: 'video_script_proposal', projectId, action: 'approve' | 'rewrite', feedback? }
+  function renderVideoScriptProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const rewrite = ui.action === 'rewrite';
+    const feedback = typeof ui.feedback === 'string' ? ui.feedback.replace(/\s+/g, ' ').trim().slice(0, 600) : '';
+    return videoActionCard(esc, rewrite ? {
+      kicker: 'Rewrite the words', rows: [feedback ? ['Your notes', feedback] : null],
+      note: 'Free. Only the words change — every scene keeps its picture. The new script appears on the Videos tab in about a minute for you to approve.',
+      button: 'Rewrite the words', body: id ? { action: 'rewrite_script', id, feedback } : null, done: 'Rewriting. The new words appear on the Videos tab in about a minute.',
+    } : {
+      kicker: 'Approve the script', rows: [],
+      note: 'Free, and nothing is made yet. Next you check the pictures beside each line on the Videos tab and press “Make the video”, which shows what it uses.',
+      button: 'Approve the script', body: id ? { action: 'approve_script', id } : null, done: 'Approved. Check the pictures on the Videos tab, then press “Make the video”.',
+    });
+  }
+  // { type: 'video_options_proposal', projectId, musicMood?, musicAssetId?, musicTitle?, anotherTrack?, musicLevel?, voiceMode?, look?, lowerThird?, summary? }
+  // musicAssetId: a track of the owner's own from My Content; the server checks it is theirs.
+  function renderVideoOptionsProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const body = { action: 'set_options', id };
+    const trackId = Number(ui.musicAssetId);
+    if (Number.isInteger(trackId) && trackId > 0) body.musicAssetId = trackId;
+    else if (VIDEO_MUSIC[ui.musicMood]) body.musicMood = ui.musicMood;
+    if (ui.anotherTrack === true) body.anotherTrack = true;
+    if (VIDEO_MUSIC_LEVELS[ui.musicLevel]) body.musicLevel = ui.musicLevel;
+    if (ui.voiceMode === 'own' || ui.voiceMode === 'ai') body.voiceMode = ui.voiceMode;
+    if (VIDEO_LOOKS[ui.look]) body.look = ui.look;
+    if (VIDEO_LOWER_THIRDS[ui.lowerThird]) body.lowerThird = ui.lowerThird;
+    const any = Object.keys(body).length > 2;
+    return videoActionCard(esc, {
+      kicker: 'Change the music and look',
+      rows: [
+        ui.summary ? ['What changes', String(ui.summary).slice(0, 200)] : null,
+        body.musicAssetId ? ['Music', ui.musicTitle ? `“${String(ui.musicTitle).slice(0, 80)}” from My Content` : `Your track #${body.musicAssetId} from My Content`] : null,
+        body.musicMood ? ['Music', VIDEO_MUSIC[body.musicMood]] : null,
+        body.anotherTrack ? ['Music', 'A new track, same mood (made when you press “Make the video”)'] : null,
+        body.voiceMode ? ['Voice', body.voiceMode === 'own' ? 'Your own — you record each line on the Videos tab (no voiceover charged)' : 'An AI voice (made when you press “Make the video”)'] : null,
+        body.musicLevel ? ['Music volume', `${VIDEO_MUSIC_LEVELS[body.musicLevel]} (it still goes quiet when someone speaks)`] : null,
+        body.look ? ['Colour look', VIDEO_LOOKS[body.look]] : null,
+        body.lowerThird ? ['Name captions', VIDEO_LOWER_THIRDS[body.lowerThird]] : null,
+      ],
+      note: 'Free. Used when the video is made; nothing is planned again. A finished video gets a new version — the finished one stays in My Content.',
+      button: 'Change it', body: id && any ? body : null, done: 'Changed. It’s used when you press “Make the video” on the Videos tab.',
+    });
+  }
+  // { type: 'video_note_proposal', projectId, atS? | scene?, note }
+  function renderVideoNoteProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const note = typeof ui.note === 'string' ? ui.note.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
+    const scene = Number.isInteger(Number(ui.scene)) && Number(ui.scene) > 0 ? Number(ui.scene) : null;
+    const atS = Number.isFinite(Number(ui.atS)) && ui.atS != null ? Math.max(0, Number(ui.atS)) : null;
+    const where = atS != null ? `${Math.floor(atS / 60)}:${String(Math.floor(atS % 60)).padStart(2, '0')}` : scene ? `Scene ${scene}` : '';
+    return videoActionCard(esc, {
+      kicker: 'Note on the video', rows: [where ? ['At', where] : null, note ? ['Note', note] : null],
+      note: 'Free. It’s added to your notes on the finished video. When you’re done, “Make a new version from my notes” changes only those scenes.',
+      button: 'Add the note', body: id && note && (atS != null || scene) ? { action: 'add_note', id, text: note, ...(atS != null ? { atS } : { sceneNumber: scene }) } : null,
+      done: 'Noted. It’s on the video on the Videos tab.',
+    });
+  }
+  // { type: 'video_notes_version_proposal', projectId }
+  function renderVideoNotesVersionProposalCard(ui, esc) {
+    const id = videoId(ui);
+    return videoActionCard(esc, {
+      kicker: 'New version from your notes', rows: [],
+      note: 'Free. Only the scenes you left notes on change; everything else, and everything already made for it, is kept. You check it before it’s made.',
+      button: 'Make the new version', body: id ? { action: 'notes_to_version', id } : null, done: 'Started. The new version appears on the Videos tab in about a minute.',
+    });
+  }
+  // { type: 'video_reshape_proposal', projectId, shapes? }
+  function renderVideoReshapeProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const shapes = (Array.isArray(ui.shapes) ? ui.shapes : []).filter((x) => VIDEO_SHAPE_NAMES[x]);
+    return videoActionCard(esc, {
+      kicker: 'Make it in other shapes', rows: [['Shapes', shapes.length ? shapes.map((x) => VIDEO_SHAPE_NAMES[x]).join(', ') : 'Every shape it isn’t in yet']],
+      note: 'Free: the voiceover and every clip and picture are kept, cropped to each shape; branded cards are drawn again. Each one is saved to My Content when it’s done.',
+      button: 'Make them', body: id ? { action: 'reshape', id, ...(shapes.length ? { shapes } : {}) } : null, done: 'Making them. They appear under “Being made” on the Videos tab.',
+    });
+  }
+
+  // { type: 'video_brief_proposal', message, purpose?, lengthS?, cta?, voiceover?, allowAi?, shape? }
   // { type: 'video_replan_proposal', projectId, feedback? }
   //
   // The chat twins of "New video" and "Plan it again" on the Videos tab — the same video-projects.ts
@@ -1657,7 +1781,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   // can do it: that is "Make the video" on the Videos tab, which states the cost first.
   function renderVideoBriefProposalCard(ui, esc) {
     const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
-    const PLATFORMS = { instagram: 'Instagram Reel', youtube: 'YouTube Short', facebook: 'Facebook Reel' };
+    // A shape, not platforms: the Video Producer saves the finished video to My Content (studio plan D-S2).
+    const SHAPES = { '9:16': 'Vertical 9:16', '1:1': 'Square 1:1', '16:9': 'Wide 16:9' };
     const ALLOW = { stock_and_ai: 'Stock first, AI where it fits', stock_only: 'Stock and your own pictures only', ai_first: 'Leans on AI' };
     const brief = {
       message: clean(ui.message, 1200),
@@ -1671,9 +1796,15 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       captions: ui.captions !== false,
       ...(ui.captionStyle && typeof ui.captionStyle === 'object' ? { captionStyle: ui.captionStyle } : {}),
       allowAi: ALLOW[ui.allowAi] ? ui.allowAi : 'stock_and_ai',
-      platforms: (Array.isArray(ui.platforms) ? ui.platforms : ['instagram']).filter((p) => PLATFORMS[p]),
+      shape: SHAPES[ui.shape] ? ui.shape : '9:16',
+      // Who it's for and what they should do (fed to the planner); music, look and name captions are
+      // left out unless asked for, so the set-up answers fill them (video-producer.ts withSetupDefaults).
+      ...(clean(ui.audience, 200) ? { audience: clean(ui.audience, 200) } : {}),
+      ...(clean(ui.goal, 200) ? { goal: clean(ui.goal, 200) } : {}),
+      ...(VIDEO_MUSIC[ui.musicMood] ? { musicMood: ui.musicMood } : {}),
+      ...(VIDEO_LOOKS[ui.look] ? { look: ui.look } : {}),
+      ...(VIDEO_LOWER_THIRDS[ui.lowerThird] ? { lowerThird: ui.lowerThird } : {}),
     };
-    if (!brief.platforms.length) brief.platforms = ['instagram'];
     const row = (label, v) => (v ? `<p class="text-xs text-gray-700 mt-1"><span class="font-bold">${label}:</span> ${esc(v)}</p>` : '');
     const runnable = brief.message.length >= 10;
     const el = document.createElement('div');
@@ -1688,7 +1819,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ${brief.voiceover && brief.voice && window.VoicePicker ? '<button type="button" data-vdp-listen class="text-xs font-bold text-gray-600 hover:text-gray-900 cursor-pointer mt-1" aria-pressed="false">&#9654; Listen to the voice</button>' : ''}
       ${brief.voiceover ? row('Captions', brief.captions ? `On${brief.captionStyle && window.CaptionStyle ? ` — ${window.CaptionStyle.describe(brief.captionStyle).toLowerCase()}` : ''}` : 'Off') : ''}
       ${row('Pictures from', ALLOW[brief.allowAi])}
-      ${row('For', brief.platforms.map((p) => PLATFORMS[p]).join(', '))}
+      ${row('Shape', SHAPES[brief.shape])}
+      ${row('Who it’s for', brief.audience)}
+      ${row('What they should do', brief.goal)}
+      ${row('Music', brief.musicMood ? VIDEO_MUSIC[brief.musicMood] : 'Your usual')}
+      ${brief.look ? row('Colour look', VIDEO_LOOKS[brief.look]) : ''}
+      ${brief.lowerThird ? row('Name captions', VIDEO_LOWER_THIRDS[brief.lowerThird]) : ''}
       <p class="text-xs text-gray-600 mt-2">Planning the storyboard is free. You check it on the Videos tab before anything is made — the cost of making it is shown there first.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-vdp-save ${runnable ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Plan this video</button>
@@ -1756,8 +1892,83 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     return el;
   }
 
+  // { type: 'footage_review_proposal', assetIds, message, lengthS?, voiceover?, cta? }
+  //
+  // The chat twin of "Use my own footage" (docs/video-producer-footage-and-ai-plan.md §4.3). It cannot
+  // review from here: only the browser can read a video (footage-reader.js), and the review can use
+  // tasks. So the card opens the Videos tab's footage form filled in, where the owner ticks the
+  // permission box and presses "Review my footage", which states the cost. On a page without the
+  // Videos tab (the standalone chat), the form is filled in the next time that tab opens.
+  function renderFootageReviewProposalCard(ui, esc) {
+    const clean = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    const prefill = {
+      assetIds: (Array.isArray(ui.assetIds) ? ui.assetIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 10),
+      message: clean(ui.message, 1200),
+      lengthS: [15, 30, 60].includes(Number(ui.lengthS)) ? Number(ui.lengthS) : null,
+      voiceover: ui.voiceover === true,
+      cta: clean(ui.cta, 200),
+    };
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Review your footage</p>
+      ${prefill.message ? `<p class="text-sm text-gray-900 mt-2">${esc(prefill.message)}</p>` : ''}
+      <p class="text-xs text-gray-700 mt-2">${prefill.assetIds.length ? `${prefill.assetIds.length} of your video${prefill.assetIds.length === 1 ? '' : 's'}` : 'Choose your videos'}${prefill.lengthS ? ` · ${prefill.lengthS} seconds` : ''} · ${prefill.voiceover ? 'with a voiceover' : 'keeping your own sound'}</p>
+      <p class="text-xs text-gray-600 mt-2">Opens “Use my own footage” on the Videos tab, filled in. You check it there and press “Review my footage”, which shows what it uses first.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-frp-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Open it</button>
+        <button type="button" data-frp-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-frp-status></p>`;
+    const status = el.querySelector('[data-frp-status]');
+    const say = (t) => { status.textContent = t; status.className = 'mt-2 text-xs font-semibold text-indigo-700'; };
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-frp-cancel]')) { el.querySelectorAll('button').forEach((x) => { x.disabled = true; }); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-frp-go]')) return;
+      const tab = document.querySelector('.main-tab-btn[data-maintab="videos"]:not(.hidden)');
+      if (tab && window.AssistantVideos && typeof window.AssistantVideos.openFootage === 'function') {
+        tab.click();
+        window.AssistantVideos.openFootage(prefill);
+        say('Opened on the Videos tab.');
+      } else {
+        try { sessionStorage.setItem('bms-footage-prefill', JSON.stringify(prefill)); } catch { /* private window */ }
+        say('Open your Video Producer’s Videos tab — it’s filled in for you there.');
+      }
+    });
+    return el;
+  }
+
+  register('footage_review_proposal', renderFootageReviewProposalCard);
+
   register('video_brief_proposal', renderVideoBriefProposalCard);
   register('video_replan_proposal', renderVideoReplanProposalCard);
+  register('video_script_proposal', renderVideoScriptProposalCard);
+  register('video_options_proposal', renderVideoOptionsProposalCard);
+
+  // { type: 'video_tidy_proposal', action: 'archive' | 'restore' | 'delete', projectIds: [...], titles?: [...] }
+  // The chat twin of the Videos tab's bulk bar (video-projects.ts archive / restore / delete). Free.
+  function renderVideoTidyProposalCard(ui, esc) {
+    const ids = [...new Set((Array.isArray(ui.projectIds) ? ui.projectIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 100);
+    const action = ['archive', 'restore', 'delete'].includes(ui.action) ? ui.action : null;
+    const titles = (Array.isArray(ui.titles) ? ui.titles : []).filter((t) => typeof t === 'string').map((t) => t.slice(0, 80)).slice(0, 8);
+    const n = ids.length;
+    const word = n === 1 ? 'video' : 'videos';
+    const COPY = {
+      archive: { kicker: `Archive ${n} ${word}`, note: 'They move to the Archived pill on the Videos tab, and Restore brings them back. Finished files stay in My Content.', button: `Archive ${n}`, done: 'Archived. They’re on the Archived pill of the Videos tab.' },
+      restore: { kicker: `Restore ${n} ${word}`, note: 'They go back to their stage on the Videos tab.', button: `Restore ${n}`, done: 'Restored to the Videos tab.' },
+      delete: { kicker: `Delete ${n} ${word}`, note: 'Removed from the Videos tab for good, with their storyboards and notes. This can’t be undone. Finished files stay in My Content until you delete them there.', button: `Delete ${n}`, done: 'Deleted.' },
+    };
+    const c = COPY[action] || { kicker: 'Tidy videos', note: 'Nothing to do.', button: 'Go', done: '' };
+    return videoActionCard(esc, {
+      ...c,
+      rows: [titles.length ? ['Videos', titles.join(', ') + (n > titles.length ? ` and ${n - titles.length} more` : '')] : null],
+      body: action && n ? { action, ids } : null,
+    });
+  }
+  register('video_tidy_proposal', renderVideoTidyProposalCard);
+  register('video_note_proposal', renderVideoNoteProposalCard);
+  register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
+  register('video_reshape_proposal', renderVideoReshapeProposalCard);
 
   // ── Built-ins: Mystery Shopper cards (docs/mystery-shopper-plan.md §4.6) ──────────────────────
   // The chat twins of the Website tab's buttons — same server actions (site-audits.ts), handled in
@@ -2048,7 +2259,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     platforms: 'platforms shown', count: 'number of posts', enabled: 'on/off' };
   const SITE_OP_WORDS = {
     add_page: (o) => `Add a page: “${o.title || ''}”`,
-    update_page: (o) => (o.title ? `Rename a page to “${o.title}”` : o.hideFromMenu === true ? 'Hide a page from the menu' : o.hideFromMenu === false ? 'Show a page in the menu' : o.seo ? 'Update a page\'s search title and description' : 'Update a page'),
+    update_page: (o) => (o.title ? `Rename a page to “${o.title}”` : typeof o.menuParent === 'string' && o.menuParent ? 'Put a page in a drop-down in the menu' : o.menuParent === null ? 'Give a page its own place in the menu' : o.hideFromMenu === true ? 'Hide a page from the menu' : o.hideFromMenu === false ? 'Show a page in the menu' : o.seo ? 'Update a page\'s search title and description' : 'Update a page'),
     remove_page: () => 'Remove a page',
     add_section: (o) => `Add a ${SITE_SECTION_WORDS[(o.section || {}).type] || 'new'} section`,
     update_section: (o) => {
@@ -2083,17 +2294,28 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   // { type: 'site_changes', summary, ops: SiteOperation[] }
   function renderSiteChangesCard(ui, esc) {
-    const ops = (Array.isArray(ui.ops) ? ui.ops : []).filter((o) => o && typeof o === 'object' && SITE_OP_WORDS[o.op]).slice(0, 25);
+    // Never apply part of a card: the changes land together or not at all. A card with more than the
+    // server takes (25), or a change this card can't read, is refused here in words instead of quietly
+    // dropping the rest — dropped add_page / add_section ops were pages that "never appeared" (issue #31).
+    const given = Array.isArray(ui.ops) ? ui.ops : [];
+    const ops = given.filter((o) => o && typeof o === 'object' && SITE_OP_WORDS[o.op]);
+    const MAX_SITE_OPS = 25;
+    const blocked = ops.length !== given.length
+      ? 'This card has a change it can’t make. Ask the assistant to send it again — nothing was changed.'
+      : ops.length > MAX_SITE_OPS
+        ? `This card has ${ops.length} changes — up to ${MAX_SITE_OPS} can be applied at once. Ask the assistant to split it into two cards — nothing was changed.`
+        : '';
     const summary = typeof ui.summary === 'string' ? ui.summary.slice(0, 300) : '';
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Changes to your website · Approval needed</p>
       ${summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(summary)}</p>` : ''}
-      ${ops.length ? `<ul class="mt-2 space-y-1 list-disc pl-5">${ops.map((o) => `<li class="text-xs text-gray-700">${esc(SITE_OP_WORDS[o.op](o))}</li>`).join('')}</ul>` : '<p class="text-xs text-amber-700 mt-2">No changes were given.</p>'}
+      ${ops.length ? `<ul class="mt-2 space-y-1 list-disc pl-5">${ops.slice(0, MAX_SITE_OPS).map((o) => `<li class="text-xs text-gray-700">${esc(SITE_OP_WORDS[o.op](o))}</li>`).join('')}</ul>` : '<p class="text-xs text-amber-700 mt-2">No changes were given.</p>'}
+      ${blocked ? `<p class="text-xs font-semibold text-amber-700 mt-2" data-sc-blocked>${esc(blocked)}</p>` : ''}
       <p class="text-xs text-gray-600 mt-2">Changes your draft only — nothing is live. The preview on the Website tab updates straight away.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        <button type="button" data-sc-apply ${ops.length ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Apply changes</button>
+        <button type="button" data-sc-apply ${ops.length && !blocked ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Apply changes</button>
         <button type="button" data-sc-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
       </div>
       <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sc-status></p>`;
@@ -2102,7 +2324,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-sc-cancel]')) { setBusy(true); say('Not applied.'); return; }
-      if (!e.target.closest('[data-sc-apply]')) return;
+      if (!e.target.closest('[data-sc-apply]') || blocked) return;
       setBusy(true);
       say('Applying…');
       el.dispatchEvent(new CustomEvent('site:apply', {
@@ -2120,7 +2342,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('site_changes', renderSiteChangesCard);
 
-  // { type: 'site_draft_request', request }
+  // { type: 'site_draft_request', request, images?, videos? } — images and videos: 'stock' | 'ai' | 'none',
+  // the placeholder media they chose. What AI costs and who may have it comes from the server
+  // (site:draftOptions → sites.ts draft_options), so a card reopened later still states the true price.
   function renderSiteDraftRequestCard(ui, esc) {
     const request = typeof ui.request === 'string' ? ui.request.replace(/\s+/g, ' ').trim().slice(0, 2000) : '';
     const el = document.createElement('div');
@@ -2129,6 +2353,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Draft your whole site</p>
       ${request ? `<p class="text-xs text-gray-700 mt-2"><span class="font-bold">Your wishes:</span> ${esc(request)}</p>` : ''}
       <p class="text-xs text-gray-600 mt-2">Writes every page again, replacing your current draft. Nothing is live. Uses ${window.taskCost('site_draft')} from your monthly allowance.</p>
+      <div class="grid gap-2 mt-3">
+        <label class="block text-xs font-bold text-gray-700">Placeholder pictures
+          <select data-sd-images class="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal bg-white"></select></label>
+        <label class="block text-xs font-bold text-gray-700">Placeholder videos
+          <select data-sd-videos class="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal bg-white"></select></label>
+      </div>
+      <p class="hidden mt-1 text-xs text-gray-500" data-sd-why></p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-sd-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Draft my whole site</button>
         <button type="button" data-sd-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
@@ -2136,19 +2367,42 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sd-status></p>`;
     const status = el.querySelector('[data-sd-status]');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
-    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    const setBusy = (b) => el.querySelectorAll('button, select').forEach((x) => { x.disabled = b; });
+    const words = (n) => `${n} task${n === 1 ? '' : 's'}`;
+    const fillChoices = (o) => {
+      const fill = (select, kind, given, fallback, stock, none, aiText) => {
+        const allowed = !!(o && o[kind] && o[kind].aiAllowed);
+        const answer = o && o.answers && o.answers[kind];
+        const want = given || answer || fallback;
+        select.innerHTML = `<option value="stock">${stock}</option>${allowed ? `<option value="ai">${esc(aiText(o[kind]))}</option>` : ''}<option value="none">${none}</option>`;
+        select.value = want === 'ai' && !allowed ? fallback : want;
+      };
+      fill(el.querySelector('[data-sd-images]'), 'images', ui.images, 'stock', 'Stock photos (free)', 'No pictures', (x) => `AI-made: ${words(x.aiTasksEach)} each, up to ${words(x.aiTasksEach * x.aiMax)}`);
+      fill(el.querySelector('[data-sd-videos]'), 'videos', ui.videos, 'none', 'Stock videos (free)', 'No videos', (x) => `AI-made: ${words(x.aiTasksEach * x.aiMax)} for one clip`);
+      const why = o ? [o.images.aiAllowed ? '' : o.images.aiWhyNot, o.videos.aiAllowed ? '' : o.videos.aiWhyNot].filter(Boolean).join(' ') : '';
+      const whyEl = el.querySelector('[data-sd-why]');
+      whyEl.textContent = why;
+      whyEl.classList.toggle('hidden', !why);
+    };
+    fillChoices(null);
+    // The card is rendered before it is in the page, so ask once it has been added.
+    setTimeout(() => {
+      el.dispatchEvent(new CustomEvent('site:draftOptions', { bubbles: true, detail: { respond: (o) => { if (o) fillChoices(o); } } }));
+    }, 0);
     el.addEventListener('click', (e) => {
       if (e.target.closest('[data-sd-cancel]')) { setBusy(true); say('Not started.'); return; }
       if (!e.target.closest('[data-sd-go]')) return;
+      const media = { images: el.querySelector('[data-sd-images]').value, videos: el.querySelector('[data-sd-videos]').value };
       setBusy(true);
       say('Starting…');
       el.dispatchEvent(new CustomEvent('site:draft', {
         bubbles: true,
         detail: {
           request,
+          media,
           respond({ ok, error }) {
             if (!ok) { setBusy(false); say(error || 'Could not start the draft.', 'error'); return; }
-            say('Drafting your site — it appears on the Website tab in a minute or two, and you\'ll be notified.');
+            say('Drafting your site — it appears on the Website tab in a few minutes, and you\'ll be notified.');
             // Moving dots while it works (the preview says when it's done).
             if (!document.getElementById('cq-dots-style')) {
               const st = document.createElement('style');
@@ -2160,7 +2414,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
             // The Website tab says when the draft has landed (site:drafted); stop the dots then.
             document.addEventListener('site:drafted', (ev) => {
               const ok = !(ev.detail && ev.detail.error);
-              say(ok ? 'Done — your new draft is in the preview.' : (ev.detail.error || 'The draft didn\'t finish.'), ok ? '' : 'error');
+              say(ok ? (ev.detail && ev.detail.note) || 'Done — your new draft is in the preview.' : (ev.detail.error || 'The draft didn\'t finish.'), ok ? '' : 'error');
             }, { once: true });
           },
         },
@@ -2442,7 +2696,43 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('site_import_decision', renderSiteImportDecisionCard);
 
-  // { type: 'site_words', pageId, attachmentId?, quote?, note? } — the owner's OWN words onto a page,
+  // { type: 'site_import_products' } — the products the import found on their old shop into Business
+  // Information ▸ Products & Services (sites.ts import_products, the import card's same button). All of
+  // them; the Website tab's list lets them untick some. Prices go there, never onto the site.
+  function renderSiteImportProductsCard() {
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Products from your old shop</p>
+      <p class="text-xs text-gray-700 mt-2">Add the products we found on your old shop to Business Information ▸ Products & Services, with their prices and a link to each one's page. Any already there by name stay as they are. Prices never go on your website. To leave some out, untick them on the Website tab instead.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sip-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Add them</button>
+        <button type="button" data-sip-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sip-status></p>`;
+    const status = el.querySelector('[data-sip-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-sip-cancel]')) { setBusy(true); say('Nothing added.'); return; }
+      if (!e.target.closest('[data-sip-go]')) return;
+      setBusy(true);
+      say('Adding…');
+      el.dispatchEvent(new CustomEvent('site:importProducts', {
+        bubbles: true,
+        detail: {
+          respond({ ok, error, message }) {
+            if (!ok) { setBusy(false); say(error || 'That didn\'t work — nothing was added.', 'error'); return; }
+            say(message || 'Added to Business Information ▸ Products & Services.');
+          },
+        },
+      }));
+    });
+    return el;
+  }
+  register('site_import_products', renderSiteImportProductsCard);
+
+  // { type: 'site_words', pageId, attachmentId?, quote?, sourceUrl?, note? } — the owner's OWN words onto a page,
   // word for word (sites.ts `words` → site-words.ts). The card never carries their words for the
   // model to retype: it names an attached document, or quotes their own message (checked server-side).
   // Two clicks: "Place my words" shows exactly where everything goes; "Apply" saves it (site:apply).
@@ -2450,16 +2740,20 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const pageId = typeof ui.pageId === 'string' ? ui.pageId.slice(0, 40) : '';
     const attachmentId = Number.isInteger(Number(ui.attachmentId)) && Number(ui.attachmentId) > 0 ? Number(ui.attachmentId) : null;
     const quote = typeof ui.quote === 'string' && ui.quote.trim() ? ui.quote.slice(0, 20000) : null;
+    // A page of their current website: the server reads its words (sites.ts words → site-source-page.ts).
+    const sourceUrl = !attachmentId && !quote && typeof ui.sourceUrl === 'string' && /^https?:\/\/[^\s]+$/i.test(ui.sourceUrl.trim()) ? ui.sourceUrl.trim().slice(0, 500) : null;
+    const sourceLabel = (() => { if (!sourceUrl) return ''; try { const u = new URL(sourceUrl); return (u.host.replace(/^www\./, '') + u.pathname).replace(/\/$/, ''); } catch { return sourceUrl; } })();
     const note = typeof ui.note === 'string' ? ui.note.replace(/\s+/g, ' ').trim().slice(0, 300) : '';
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
       <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Your own words on your website</p>
       ${note ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(note)}</p>` : ''}
-      <p class="text-xs text-gray-600 mt-2">Your words go on the page exactly as you wrote them — split into headings and paragraphs, never reworded. You'll see where everything goes before anything changes. Uses ${window.taskCost('site_words')}.</p>
+      ${sourceUrl ? `<p class="text-xs text-gray-700 mt-2">From your website: <span class="font-semibold break-all">${esc(sourceLabel)}</span></p>` : ''}
+      <p class="text-xs text-gray-600 mt-2">${sourceUrl ? 'The words on that page go on this one exactly as they are on your website' : 'Your words go on the page exactly as you wrote them'} — split into headings and paragraphs, never reworded. You'll see where everything goes before anything changes. Uses ${window.taskCost('site_words')}.</p>
       <div data-sw-preview></div>
       <div class="flex flex-wrap items-center gap-2 mt-3" data-sw-actions>
-        <button type="button" data-sw-go ${pageId && (attachmentId || quote) ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Place my words</button>
+        <button type="button" data-sw-go ${pageId && (attachmentId || quote || sourceUrl) ? '' : 'disabled'} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">Place my words</button>
         <button type="button" data-sw-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
       </div>
       <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-sw-status></p>`;
@@ -2477,8 +2771,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         el.dispatchEvent(new CustomEvent('site:words', {
           bubbles: true,
           detail: {
-            pageId, attachmentId, quote, note,
-            respond({ ok, error, proposal: p }) {
+            pageId, attachmentId, quote, sourceUrl, note,
+            respond({ ok, error, proposal: p, note: serverNote }) {
               if (!ok || !p) { setBusy(false); say(error || 'Your words couldn\'t be placed.', 'error'); return; }
               proposal = p;
               preview.innerHTML = `
@@ -2487,7 +2781,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
               actions.innerHTML = `
                 <button type="button" data-sw-apply class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Apply to my page</button>
                 <button type="button" data-sw-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`;
-              say('Nothing has changed yet.');
+              say(serverNote ? `Nothing has changed yet. ${serverNote}` : 'Nothing has changed yet.');
             },
           },
         }));
@@ -2512,7 +2806,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('site_words', renderSiteWordsCard);
 
-  // { type: 'booking_setup', summary, settings, section? } — hours & booking rules into Business
+  // { type: 'booking_setup', summary, settings, section?, serviceLocations? } — hours & booking rules into Business
   // Information, and (optionally) a booking section on a page: sites.ts `booking_setup`, after the
   // owner's click. The settings pass the same checks as Business Information (booking-settings.ts).
   const BK_DAYS = [['mon', 'Mon'], ['tue', 'Tue'], ['wed', 'Wed'], ['thu', 'Thu'], ['fri', 'Fri'], ['sat', 'Sat'], ['sun', 'Sun']];
@@ -2522,14 +2816,19 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const hours = settings.weeklyHours && typeof settings.weeklyHours === 'object' ? settings.weeklyHours : null;
     const hoursList = hours ? BK_DAYS.map(([k, l]) => `<li class="text-xs text-gray-700">${l}: ${Array.isArray(hours[k]) && hours[k].length ? hours[k].map((p) => `${esc(p.start)}–${esc(p.end)}`).join(', ') : 'closed'}</li>`).join('') : '';
     const kinds = { appointment: 'Appointments', consultation: 'Consultations', table: 'Tables' };
+    // Where services happen (booking-meeting.ts): [{ serviceId, location, name? }].
+    const serviceLocations = Array.isArray(ui.serviceLocations) ? ui.serviceLocations.filter((x) => x && typeof x === 'object').slice(0, 100) : [];
+    const LOC = { in_person: 'in person', phone: 'a phone call', video: 'a video call' };
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
-      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${settings.mode || section ? 'Set up bookings' : 'Hours &amp; location'} · Approval needed</p>
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${settings.mode || section || serviceLocations.length || settings.meetingUrl ? 'Set up bookings' : 'Hours &amp; location'} · Approval needed</p>
       ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
       ${hoursList ? `<p class="text-xs font-bold text-gray-800 mt-2">Opening hours</p><ul class="mt-1 space-y-0.5">${hoursList}</ul>` : ''}
       ${typeof settings.visitAddress === 'string' && settings.visitAddress.trim() ? `<p class="text-xs font-bold text-gray-800 mt-2">Address customers visit</p><p class="text-xs text-gray-700">${esc(settings.visitAddress).replace(/\n/g, '<br>')}</p>` : ''}
       ${typeof settings.whatsapp === 'string' && settings.whatsapp.trim() ? `<p class="text-xs text-gray-700 mt-1">WhatsApp: ${esc(settings.whatsapp)}</p>` : ''}
+      ${serviceLocations.length ? `<p class="text-xs font-bold text-gray-800 mt-2">Where services happen</p><ul class="mt-1 space-y-0.5">${serviceLocations.map((x) => `<li class="text-xs text-gray-700">${esc(x.name || `Service ${x.serviceId}`)}: ${esc(LOC[x.location] || 'in person')}</li>`).join('')}</ul>` : ''}
+      ${typeof settings.meetingUrl === 'string' && settings.meetingUrl.trim() ? `<p class="text-xs text-gray-700 mt-1">Video call link: ${esc(settings.meetingUrl)}</p>` : ''}
       ${settings.mode ? `<p class="text-xs text-gray-700 mt-2">${settings.mode === 'instant' ? 'Bookings are confirmed straight away.' : 'You confirm each booking.'}</p>` : ''}
       ${section ? `<p class="text-xs text-gray-700 mt-1">Adds a ${esc(kinds[section.kind] || 'booking')} section to your site.</p>` : ''}
       <p class="text-xs text-gray-600 mt-2">Saved to Business Information (Hours &amp; Location, and Bookings), where you can change it any time. Uses no tasks.</p>
@@ -2549,7 +2848,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       el.dispatchEvent(new CustomEvent('site:bookingSetup', {
         bubbles: true,
         detail: {
-          settings, section,
+          settings, section, serviceLocations: serviceLocations.map((x) => ({ serviceId: x.serviceId, location: x.location })),
           respond({ ok, error }) {
             if (!ok) { setBusy(false); say(error || 'That couldn\'t be saved — nothing was changed.', 'error'); return; }
             say('Bookings are set up — see the Website tab, under Bookings.');
@@ -2572,6 +2871,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     bookings: 'People book time with us (appointments, classes, tables or events)',
     visits: 'Customers visit us (a shop, venue or studio)',
     menu: 'We serve food or drink',
+    stays: 'Guests stay with us (holiday lets, B&B or guest house rooms)',
   };
   function renderOfferProfileCard(ui, esc) {
     const offers = Array.isArray(ui.offers) ? ui.offers.filter((k) => OFFER_LABELS[k]) : [];
@@ -2859,7 +3159,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       eyebrow: issue ? 'Report a problem to Be More Swan' : 'Message Be More Swan support', summary: ui.summary, why: null,
       bodyHtml: `<div class="mt-2 rounded-lg bg-gray-50 border border-dashed border-gray-300 px-3 py-2"><p class="text-xs font-bold text-gray-900">${esc(String(ui.subject || ''))}</p><p class="text-xs text-gray-700 mt-1 whitespace-pre-line break-words">${esc(String(ui.description || ''))}</p></div>`,
       goLabel: issue ? 'Send report' : 'Send', eventName: 'mentor:support',
-      detail: { destination: issue ? 'issue' : 'support', subject: ui.subject, description: ui.description },
+      detail: { destination: issue ? 'issue' : 'support', subject: ui.subject, description: ui.description, from: typeof ui.from === 'string' ? ui.from : undefined },
       doneText: issue ? 'Sent — follow it under Help & Support ▸ Report an Issue.' : 'Sent — the team will reply by email and in Help & Support.',
       note: 'Only what’s written here is sent, with the page you were on. Nothing else from your workspace.',
     });
@@ -3612,7 +3912,106 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('listings_add', renderListingsAddCard);
 
-  // { type: 'site_picture', pageId, sectionId, sectionLabel, place: 'in' | 'after', kind: 'picture' | 'video', source: 'ai' | 'stock', description, alt }
+  // ── Holiday lets and B&B rooms (docs/holiday-lets-plan.md) ─────────────────────────────────────
+  // Shared look for the three stay cards: a heading, lines, a primary button and "Not now". The click
+  // dispatches `eventName` with { ...detail, respond } — chat-session.js calls the same server action
+  // as Business Information ▸ Stays (stays.ts) or the Website tab ▸ Bookings (sites.ts).
+  function stayCard(ui, esc, { kicker, lines, note, go, eventName, detail, done }) {
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${esc(kicker)}</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <ul class="mt-2 space-y-1">${lines.map((l) => `<li class="text-xs text-gray-700">${esc(l)}</li>`).join('')}</ul>
+      ${note ? `<p class="text-xs text-gray-600 mt-2">${esc(note)}</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-st-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50" ${lines.length ? '' : 'disabled'}>${esc(go)}</button>
+        <button type="button" data-st-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-st-status></p>`;
+    const status = el.querySelector('[data-st-status]');
+    const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-indigo-700'}`; };
+    const setBusy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('[data-st-cancel]')) { setBusy(true); say('Nothing changed.'); return; }
+      if (!e.target.closest('[data-st-go]')) return;
+      setBusy(true);
+      say('Saving…');
+      el.dispatchEvent(new CustomEvent(eventName, { bubbles: true, detail: { ...detail, respond(r) {
+        if (!r || !r.ok) { setBusy(false); say((r && r.error) || 'That couldn\'t be saved.', 'error'); return; }
+        say(done(r));
+      } } }));
+    });
+    return el;
+  }
+
+  // { type: 'stay_setup', summary, stayId: number | null, stay: { …only the fields that change } }
+  // A new holiday let / room type, or a change to one — what the owner told the chat. Nothing is saved
+  // until the click; stays.ts runs the same checks as the Stays tab (and a change is laid over what's saved).
+  const STAY_PER = { stay: 'per stay', night: 'a night', guest_night: 'per guest per night' };
+  const STAY_DAYS = { mon: 'Mondays', tue: 'Tuesdays', wed: 'Wednesdays', thu: 'Thursdays', fri: 'Fridays', sat: 'Saturdays', sun: 'Sundays' };
+  /** "2027-05-10" → "10 May 2027" (a calendar date: no timezone). */
+  const stayDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(String(d)) ? new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }) : String(d || '?'));
+  function renderStaySetupCard(ui, esc) {
+    const st = ui.stay && typeof ui.stay === 'object' ? ui.stay : {};
+    const stayId = Number.isInteger(ui.stayId) && ui.stayId > 0 ? ui.stayId : null;
+    const cur = { GBP: '£', EUR: '€', USD: '$', AUD: 'A$', CAD: 'C$' }[st.currency] || '';
+    const money = (v) => (v === null || v === undefined || v === '' ? null : `${cur}${v}`);
+    const lines = [];
+    if (st.name) lines.push(`${st.stayType === 'room' ? 'Room type' : st.stayType === 'whole' ? 'Whole property' : 'Name'}: ${st.name}`);
+    if (st.maxGuests) lines.push(`Sleeps ${st.maxGuests}${st.stayType === 'room' ? ' per room' : ''}${st.bedrooms != null ? ` · ${st.bedrooms} bedrooms` : ''}${st.bathrooms != null ? ` · ${st.bathrooms} bathrooms` : ''}${st.beds ? ` · ${st.beds}` : ''}`);
+    if (Array.isArray(st.rooms) && st.rooms.length) lines.push(`Rooms: ${st.rooms.slice(0, 30).join(', ')}`);
+    if (st.checkInTime || st.checkOutTime) lines.push(`Check-in ${st.checkInTime || '—'}, check-out ${st.checkOutTime || '—'}`);
+    for (const r of (Array.isArray(st.rates) ? st.rates : []).slice(0, 12)) {
+      lines.push(`${r.name || (r.startsOn ? 'Season' : 'Standard')}${r.startsOn ? ` (${stayDay(r.startsOn)} to ${stayDay(r.endsOn)})` : ''}: ${money(r.nightly) || '?'} a night${r.weekendNightly ? `, Fri–Sat ${money(r.weekendNightly)}` : ''}${r.weeklyNightly ? `, 7+ nights ${money(r.weeklyNightly)}` : ''}${r.minNights ? `, at least ${r.minNights} night${r.minNights === 1 ? '' : 's'}` : ''}${Array.isArray(r.changeoverDays) && r.changeoverDays.length ? `, starting on ${r.changeoverDays.map((d) => STAY_DAYS[d] || d).join(' or ')}` : ''}`);
+    }
+    for (const f of (Array.isArray(st.fees) ? st.fees : []).slice(0, 12)) lines.push(`${f.label || f.kind}: ${money(f.amount) || '?'} ${STAY_PER[f.per] || ''}`);
+    if (st.depositPercent != null) lines.push(Number(st.depositPercent) ? `${st.depositPercent}% deposit when booking; the rest ${st.balanceDays != null ? `${st.balanceDays} days before arrival` : 'before arrival'}${st.balanceCollection ? ` (${st.balanceCollection === 'auto' ? 'card charged automatically' : 'payment link emailed'})` : ''}` : 'Paid in full when booking');
+    if (st.damageDeposit !== undefined) lines.push(st.damageDeposit ? `Refundable damage deposit: ${money(st.damageDeposit)}` : 'No damage deposit');
+    if (Array.isArray(st.cancellation)) lines.push(`Cancellation: ${st.cancellation.map((c) => `${c.refund}% back ${c.days}+ days before`).join('; ') || 'no refund'}`);
+    if (st.mode) lines.push(st.mode === 'instant' ? 'Bookings confirmed straight away' : 'You confirm each booking');
+    if (Array.isArray(st.amenities)) lines.push(`Amenities: ${st.amenities.join(', ') || 'none'}`);
+    if (st.houseRules) lines.push(`House rules: ${String(st.houseRules).slice(0, 160)}`);
+    if (st.arrivalDetails) lines.push('Arrival details: as you gave them (private — emailed to guests only)');
+    if (st.licenceNumber) lines.push(`Licence number: ${st.licenceNumber}`);
+    if (st.summary) lines.push(`About it: ${String(st.summary).slice(0, 200)}`);
+    return stayCard(ui, esc, {
+      kicker: stayId ? 'Change a stay' : 'New stay', lines,
+      note: stayId ? 'Only these change; everything else stays as it is. You can edit it all in Business Information ▸ Stays.' : 'Saved in Business Information ▸ Stays, where you can add photos and edit everything. Add a "Stays" section to your website to show it.',
+      go: stayId ? 'Save the change' : 'Add it', eventName: 'site:staySetup', detail: { stayId, stay: st },
+      done: () => (stayId ? 'Saved.' : 'Added — it\'s in Business Information ▸ Stays.'),
+    });
+  }
+  register('stay_setup', renderStaySetupCard);
+
+  // { type: 'stay_block', summary, blocks: [{ unitId, startsOn, endsOn, note }] } — close dates (stays.ts POST { block }).
+  function renderStayBlockCard(ui, esc) {
+    const blocks = (Array.isArray(ui.blocks) ? ui.blocks : []).slice(0, 20).filter((b) => b && Number.isInteger(b.unitId) && /^\d{4}-\d{2}-\d{2}$/.test(b.startsOn) && /^\d{4}-\d{2}-\d{2}$/.test(b.endsOn));
+    return stayCard(ui, esc, {
+      kicker: 'Close dates', lines: blocks.map((b) => `Closed from the night of ${stayDay(b.startsOn)}, open again on ${stayDay(b.endsOn)}${b.note ? ` — ${b.note}` : ''}`),
+      note: 'Nobody can book these nights on your website. Open them again in Business Information ▸ Stays.',
+      go: blocks.length === 1 ? 'Close these dates' : `Close all ${blocks.length}`, eventName: 'site:stayBlock', detail: { blocks },
+      done: (r) => `Closed${r.done > 1 ? ` (${r.done})` : ''}.`,
+    });
+  }
+  register('stay_block', renderStayBlockCard);
+
+  // { type: 'stay_damage', summary, bookingId, decision: 'return' | 'keep', keep, reason } — sites.ts damage_return / damage_keep.
+  function renderStayDamageCard(ui, esc) {
+    const keep = ui.decision === 'keep';
+    const lines = Number.isInteger(ui.bookingId) ? (keep
+      ? [`Keep ${ui.keep || '?'} of the damage deposit and return the rest`, `Reason the guest is sent: ${ui.reason || '(none given)'}`]
+      : ['Return all of the damage deposit to the guest now']) : [];
+    return stayCard(ui, esc, {
+      kicker: 'Damage deposit', lines, note: 'It goes back to the card they paid with, and they\'re emailed.',
+      go: keep ? 'Keep it and return the rest' : 'Return it now', eventName: 'site:stayDamage',
+      detail: { bookingId: ui.bookingId, decision: keep ? 'keep' : 'return', keep: ui.keep || null, reason: ui.reason || null },
+      done: () => (keep ? 'Done — the rest is on its way back to them.' : 'Returned — it\'s on its way back to them.'),
+    });
+  }
+  register('stay_damage', renderStayDamageCard);
+
+  // { type: 'site_picture', pageId, sectionId, sectionLabel, place: 'in' | 'after', kind: 'picture' | 'video', source: 'library' | 'ai' | 'stock', description, alt }
   // A picture for one section, found or made RIGHT HERE (owner, 2026-11-05: the chat said "I'm generating
   // it now" and nothing ever came back — a reply can't make a picture; this card does, on a click).
   // Stock (pexels-search.ts, free) or AI (generate-ai-image.ts, charges as it says; blank = the business
@@ -3621,12 +4020,30 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   // preview shows a placeholder where it will go (site:pictureWorking).
   function renderSitePictureCard(ui, esc) {
     const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    // Several sections on one card (FR#9, site-picture-card.ts): a picker per section, each on its own,
+    // worked through in any order. Same kind and source to start with; each can switch.
+    if (Array.isArray(ui.sections) && ui.sections.length > 1) {
+      const items = ui.sections.slice(0, 6)
+        .map((s) => (s && typeof s === 'object' ? renderSitePictureCard({ type: 'site_picture', kind: ui.kind, source: ui.source, ...s, sections: null }, esc) : null))
+        .filter(Boolean);
+      if (items.length > 1) {
+        const wrap = document.createElement('div');
+        wrap.className = 'w-full max-w-md space-y-3';
+        wrap.setAttribute('data-sp-multi', '');
+        wrap.innerHTML = `<p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${esc(`${ui.kind === 'video' ? 'Videos' : 'Pictures'} for ${items.length} sections`)}</p>
+          <p class="text-xs text-gray-600">Each one has its own options below — do them in any order. Nothing is added until you choose one.</p>`;
+        items.forEach((it) => wrap.appendChild(it));
+        return wrap;
+      }
+      if (items.length === 1) return items[0];
+    }
     const pageId = str(ui.pageId, 80);
     const sectionId = str(ui.sectionId, 80);
     if (!pageId || !sectionId) return null;
     const label = str(ui.sectionLabel, 120) || 'this section';
     const place = ui.place === 'after' ? 'after' : 'in';
-    let source = ui.source === 'stock' ? 'stock' : 'ai';
+    // 'library': one of their own, from My Content (owner, 2026-11-10: the chat couldn't open it).
+    let source = ui.source === 'stock' ? 'stock' : ui.source === 'library' ? 'library' : 'ai';
     // Picture or video (owner, 2026-11-05: "do the same for videos"). A video plays silently on a loop
     // with a pause button, in a hero, a text section or a gallery (site-definition.ts markVideos).
     let kind = ui.kind === 'video' ? 'video' : 'picture';
@@ -3643,6 +4060,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       <label class="block text-xs font-bold text-gray-700 mt-2"><span data-sp-desc-label></span>
         <textarea data-sp-desc rows="2" maxlength="600" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm mt-1">${esc(str(ui.description, 600))}</textarea></label>
       <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-sp-go="library" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Choose from My Content</button>
         <button type="button" data-sp-go="ai" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50">Create with AI</button>
         <button type="button" data-sp-go="stock" class="px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50" data-sp-stock-label></button>
       </div>
@@ -3667,6 +4085,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       aiBtn.disabled = !canAi;
       aiBtn.title = canAi ? '' : video ? (caps && caps.assistantCanVideo ? 'AI video is on the Busywork Buster and Digital Employee plans' : 'None of your assistants can create videos') : 'None of your assistants can create pictures';
       if (!canAi && source === 'ai') source = 'stock';
+      // My Content needs the picture window (media-picker.js) on the page.
+      const libBtn = el.querySelector('[data-sp-go="library"]');
+      libBtn.hidden = !(window.MediaPicker && typeof window.MediaPicker.open === 'function');
+      if (libBtn.hidden && source === 'library') source = 'stock';
       el.querySelectorAll('[data-sp-go]').forEach((b) => { b.className = `${b.dataset.spGo === source ? 'btn-primary' : 'btn-secondary'} px-3 py-2 text-xs font-bold rounded-lg border disabled:opacity-50`; });
       const cost = caps && (video ? caps.videoCost : caps.imageCost);
       $('[data-sp-cost]').textContent = !caps || !canAi || !cost ? (video ? 'Stock videos are free.' : 'Stock photos are free.')
@@ -3714,7 +4136,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           $('[data-sp-more]').innerHTML = '<button type="button" data-sp-again class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">Show different ones</button>';
         } else if (!video) {
           say('Creating four for you to choose from — about half a minute…');
-          const res = await call('generate-ai-image', { prompt: desc, aspectRatio: '16:9' });
+          const res = await call('generate-ai-image', { prompt: desc, aspectRatio: '16:9', assistantId: window._currentAssistantId || undefined });
           if (mine !== run) return;
           if (!res.ok) throw new Error(res.body && res.body.error === 'insufficient_credits' ? 'Your monthly tasks are used up — they reset on the 1st.' : (res.body && (res.body.message || res.body.error)) || 'It couldn\'t be created.');
           job = res.body.jobId;
@@ -3746,13 +4168,27 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       } catch (err) { if (mine === run) { say(err.message, 'error'); working(false); } }
       if (mine === run) setBusy(false);
     }
+    // My Content: the same picture window as "Choose picture" on the Website tab — their library, or upload one.
+    function fromLibrary() {
+      if (!window.MediaPicker || typeof window.MediaPicker.open !== 'function') { say('Your content can\'t be opened on this page — use "Choose picture" on the section instead.', 'error'); return; }
+      run++; grid.innerHTML = ''; $('[data-sp-more]').innerHTML = ''; status.className = 'hidden';
+      // A sign-up form holds a picture, never a video (markVideos).
+      const videoOk = !(place === 'in' && /sign.?up/i.test(label));
+      window.MediaPicker.open({
+        title: `Choose from My Content for “${label}”`, video: videoOk, topic: $('[data-sp-desc]').value.trim() || label,
+        onPick: (asset) => { if (asset && asset.id) choose(asset); },
+      });
+    }
     async function choose(key) {
       setBusy(true);
       say('Saving it and putting it on your page…');
-      const video = kind === 'video';
+      const video = typeof key === 'object' && key ? !!key.video : kind === 'video';
       try {
         let assetId; let alt = str(ui.alt, 150) || $('[data-sp-desc]').value.trim().slice(0, 150);
-        if (key[0] === 's') {
+        if (typeof key === 'object' && key) {
+          // From My Content: already in the library.
+          assetId = Number(key.id); alt = alt || key.name || label;
+        } else if (key[0] === 's') {
           const c = stock.candidates[Number(key.slice(1))];
           const res = await call('pexels-search', { action: 'save', candidate: c, mediaType: video ? 'video' : 'image' });
           if (!res.ok || !res.body.assetId) throw new Error((res.body && res.body.error) || 'It couldn\'t be saved.');
@@ -3779,6 +4215,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       const k = e.target.closest('[data-sp-kind]');
       if (k) { if (k.dataset.spKind !== kind) { kind = k.dataset.spKind; run++; grid.innerHTML = ''; $('[data-sp-more]').innerHTML = ''; status.className = 'hidden'; working(false); setBusy(false); paint(); } return; }
       const go = e.target.closest('[data-sp-go]');
+      if (go && go.dataset.spGo === 'library') { source = 'library'; paint(); fromLibrary(); return; }
       if (go) { source = go.dataset.spGo; paint(); find(false); return; }
       if (e.target.closest('[data-sp-again]')) { find(true); return; }
       const pick = e.target.closest('[data-sp-pick]');
@@ -4526,7 +4963,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
     el.innerHTML = `
-      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change to a text box</p>
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change to the words on the picture</p>
       ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
       <p class="text-xs font-bold text-gray-500 mt-3">Now</p>
       <p class="text-sm text-gray-500 bg-white border border-gray-200 rounded-lg px-3 py-2 mt-1 line-through decoration-gray-300 whitespace-pre-line">${esc(find)}</p>
@@ -4545,9 +4982,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       if (!e.target.closest('[data-pt-go]')) return;
       setBusy(true);
       say('Changing it…');
-      const detail = { postId, find, replace, handled: false, respond({ ok, error }) {
+      const detail = { postId, find, replace, handled: false, respond({ ok, error, message }) {
         if (!ok) { setBusy(false); say(error || 'That couldn\'t be changed.', 'error'); return; }
-        say('Done — the text box is changed.');
+        say(message || 'Done — the text box is changed.');
       } };
       document.dispatchEvent(new CustomEvent('post:textEdit', { detail }));
       if (!detail.handled) detail.respond({ ok: false, error: 'Open the post to use this.' });
@@ -4556,7 +4993,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('post_text_edit', renderPostTextEditCard);
 
-  // { type: 'post_picture', postId, kind: 'image' | 'video', description }
+  // { type: 'post_picture', postId, kind: 'image' | 'video', description, source?: 'library' }
+  // "Choose from My Content" opens the same step on "Use my own" — their library (owner, 2026-11-10).
   // A new picture or video for a post. Opens the post editor's own picture step with the description
   // filled in (post:pictureAsk, workspace.html): its search, its Generate button, its charge.
   function renderPostPictureCard(ui, esc) {
@@ -4572,7 +5010,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           class="block w-full mt-1 px-3 py-2 text-sm font-normal bg-white border border-gray-200 rounded-lg">
       </label>
       <div class="flex flex-wrap items-center gap-2 mt-3">
-        <button type="button" data-pp-go="stock" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Find stock ${noun === 'video' ? 'videos' : 'photos'}</button>
+        <button type="button" data-pp-go="library" class="${ui.source === 'library' ? 'btn-primary' : 'btn-secondary border'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Choose from My Content</button>
+        <button type="button" data-pp-go="stock" class="${ui.source === 'library' ? 'btn-secondary border' : 'btn-primary'} px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Find stock ${noun === 'video' ? 'videos' : 'photos'}</button>
         <button type="button" data-pp-go="ai" class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Create with AI</button>
       </div>
       <p class="text-xs text-gray-600 mt-2">Stock is free. AI uses tasks when you press Generate in the picture window.</p>
@@ -4597,6 +5036,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   // One scene of a storyboard. It only changes the plan: making the video stays the button on the video,
   // which states its cost. chat-session.js → video-projects.ts `edit_scene`, as "Change" on the scene.
   const VIDEO_SCENE_SOURCES = { stock_video: 'Stock footage', stock_photo: 'Stock photo', brand_card: 'Branded card', ai_image: 'AI picture', ai_video: 'AI clip' };
+  // The words' place, timing, look and entrance (src/lib/scene-text.ts labels).
+  const VIDEO_TEXT_LABELS = {
+    textPos: ['Where the words sit', { top: 'Top', middle: 'Middle', bottom: 'Bottom' }],
+    textWhen: ['When they show', { scene: 'The whole scene', first: 'The first 3 seconds', last: 'The last 3 seconds', words: 'While its words are said' }],
+    textStyle: ['How they look', { dark: 'Dark box', plain: 'Plain (light backing)', brand: 'Brand-colour box' }],
+    textAnim: ['How they appear', { none: 'Cut', fade: 'Fade', rise: 'Rise', pop: 'Pop' }],
+  };
   function renderVideoSceneEditCard(ui, esc) {
     const patch = ui.patch && typeof ui.patch === 'object' ? ui.patch : null;
     if (!patch || !Number.isInteger(Number(ui.projectId)) || !ui.sceneId || !Object.keys(patch).length) return null;
@@ -4614,6 +5060,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ${patch.onScreenText != null ? change('On-screen text', now.onScreenText, patch.onScreenText) : ''}
       ${patch.source != null ? change('Picture from', '', VIDEO_SCENE_SOURCES[patch.source] || patch.source) : ''}
       ${words != null ? change('What to show', '', words) : ''}
+      ${Object.entries(VIDEO_TEXT_LABELS).filter(([k]) => patch[k] && VIDEO_TEXT_LABELS[k][1][patch[k]]).map(([k, [label, names]]) => change(label, '', names[patch[k]])).join('')}
+      ${'nameCaption' in patch ? change('Name caption', '', patch.nameCaption ? `${patch.nameCaption.name}${patch.nameCaption.role ? ` · ${patch.nameCaption.role}` : ''}` : '(none)') : ''}
       <p class="text-xs text-gray-600 mt-2">This only changes the plan. Nothing is made until you press “Make the video”, which says what it uses.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-vse-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Change the scene</button>
@@ -4781,6 +5229,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     voiceover: { head: 'Add a voiceover', button: 'Make the voiceover', busy: 'Recording the voiceover…' },
     captions: { head: 'Change the captions', button: 'Save the captions', busy: 'Saving…' },
     time_text: { head: 'Time the text to the voice', button: 'Time the text', busy: 'Listening for the words…' },
+    // The post editor's "Bring back" on a removed or rejected post (restore-post.ts).
+    restore: { head: 'Bring this post back', button: 'Bring it back', busy: 'Bringing it back…' },
   };
 
   function renderPostActionProposalCard(ui, esc) {
@@ -4815,6 +5265,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         </label>` : ''}
       ${!blocked && ui.action === 'approve' ? '<p class="text-xs text-gray-600 mt-3">It’s booked into a free slot in your posting schedule.</p>' : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
+      ${!blocked && ui.action === 'restore' ? '<p class="text-xs text-gray-600 mt-3">It goes back to Review for you to check and approve again. Nothing is posted until you approve it.</p>' : ''}
       ${!blocked && ui.action === 'voiceover' ? `
         <p class="text-xs font-bold text-gray-700 mt-3">What it says</p>
         <p class="text-sm text-gray-900 mt-0.5 break-words">“${esc(ui.script || '')}”</p>
@@ -4886,6 +5337,33 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     return el;
   });
 
+  // ── Built-in: Share for review (Social Media Assistant chat) ──────────────
+  // { type: 'share_for_review_proposal', summary, postId, postLabel }. The orchestrator checked the
+  // post is this assistant's. Nothing is made or sent until the click (src/components/review-links.js).
+  register('share_for_review_proposal', (ui, esc) => {
+    const postId = Number(ui.postId);
+    if (!Number.isInteger(postId)) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-200 rounded-xl shadow-sm p-4 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Share for review</p>
+      ${ui.postLabel ? `<p class="text-sm font-semibold text-gray-900 mt-1">${esc(String(ui.postLabel).slice(0, 200))}</p>` : ''}
+      ${ui.summary ? `<p class="text-sm text-gray-800 mt-1">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <div data-rl-card-form class="mt-3 space-y-2 text-xs">
+        <label class="block font-semibold text-gray-700">Who's it for? <span class="font-normal text-gray-500">(optional, only you see this)</span>
+          <input type="text" data-rl-label maxlength="80" value="${esc(String(ui.label || '').slice(0, 80))}" class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 font-normal">
+        </label>
+        <label class="block font-semibold text-gray-700">Email it to <span class="font-normal text-gray-500">(optional)</span>
+          <input type="email" data-rl-email maxlength="200" class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 font-normal">
+        </label>
+        <button type="button" data-rl-card-create class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Create link</button>
+        <p class="text-[11px] text-gray-500">Anyone with the link can see this post and respond. Nothing is posted until you approve it.</p>
+      </div>
+      <div data-rl-card-result class="hidden mt-3 text-xs"></div>`;
+    el.querySelector('[data-rl-card-create]').addEventListener('click', () => window.ReviewLinks?.shareCard(postId, el));
+    return el;
+  });
+
   // ── Built-in: Blog Action Proposal Card (Blog Writer chat) ─────────────────
   // { type: 'blog_action_proposal', action: 'approve'|'schedule'|'unschedule'|'reject', postId,
   //   title, status, publishDate, scheduleAt, timezone, reason, when, blocked, settled? }
@@ -4914,7 +5392,11 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   };
 
   function renderBlogActionProposalCard(ui, esc) {
-    const copy = BLOG_ACTION_COPY[ui.action];
+    // A picture the user selected, to be swapped in the same place (issue 35).
+    const replaceAsset = ui.action === 'pictures' && Number.isInteger(Number(ui.replaceAsset)) && Number(ui.replaceAsset) > 0 ? Number(ui.replaceAsset) : null;
+    const copy = replaceAsset
+      ? { head: 'Replace this picture', button: 'Replace the picture', busy: 'Finding the new picture — about a minute…' }
+      : BLOG_ACTION_COPY[ui.action];
     const postId = Number(ui.postId);
     if (!copy || !Number.isInteger(postId)) return null;
     const fmt = (iso) => {
@@ -4944,13 +5426,15 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         <textarea id="bap-instruction-${postId}" data-bap-instruction rows="3" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
         <p class="text-xs text-gray-600 mt-2">The article is rewritten and saved in place, using your Business Knowledge for anything new — no invented facts. Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
       ${!blocked && ui.action === 'pictures' ? `
-        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">Anything in particular? (optional)</label>
-        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="2" maxlength="500" placeholder="Leave blank and your assistant decides" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
+        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">${replaceAsset ? 'What the new picture should show' : 'Anything in particular? (optional)'}</label>
+        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="2" maxlength="500" placeholder="${replaceAsset ? 'e.g. a woman listening, happily engaged' : 'Leave blank and your assistant decides'}" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
         <div class="flex flex-wrap gap-3 mt-2 text-xs text-gray-700">
           <label class="flex items-center gap-1.5"><input type="radio" name="bap-source-${postId}" data-bap-source value="stock" ${ui.source === 'ai' ? '' : 'checked'}> Stock photos (free)</label>
           <label class="flex items-center gap-1.5"><input type="radio" name="bap-source-${postId}" data-bap-source value="ai" ${ui.source === 'ai' ? 'checked' : ''}> AI images (uses tasks for each)</label>
         </div>
-        <p class="text-xs text-gray-600 mt-2">Up to 3 pictures, placed where they help the reader. The words aren’t changed; move or remove any picture in Blog Studio.</p>` : ''}
+        <p class="text-xs text-gray-600 mt-2">${replaceAsset
+          ? 'The picture you selected is swapped for the new one, in the same place. The words aren’t changed, and the old picture stays in your library.'
+          : 'Up to 3 pictures, placed where they help the reader. The words aren’t changed; move or remove any picture in Blog Studio.'}</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
       ${!blocked && ui.action === 'reject' ? `
         <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-reason-${postId}">What’s wrong with it</label>
@@ -4992,6 +5476,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         detail: {
           action: ui.action, postId, scheduleAt: ui.scheduleAt || null, timezone: ui.timezone || null, reason, instruction,
           source: el.querySelector('[data-bap-source]:checked')?.value === 'ai' ? 'ai' : 'stock',
+          replaceAsset,
           applyAsRule: !!el.querySelector('[data-bap-rule]')?.checked,
           redraft: !!el.querySelector('[data-bap-redraft]')?.checked,
           respond({ ok, message, error }) {

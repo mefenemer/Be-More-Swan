@@ -1,4 +1,4 @@
-// What work costs comes from Admin → Revenue → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
 window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/design-studio.js — the Brand Designer's editor (owner, 2026-11-05): the design on the left, the chat on

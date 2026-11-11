@@ -3445,6 +3445,12 @@
     const host = document.getElementById('datahub-toolbar');
     if (!host) return;
     const hub = state.hub;
+    // The role's primary action sits beside Full screen, as on every other tab (owner, 2026-11-07). Kept out of
+    // the way of this repaint, which would otherwise destroy it and its handler.
+    const primary = document.getElementById('btn-primary-action');
+    const bar = document.getElementById('detail-action-bar');
+    const movePrimary = !!primary && !primary.classList.contains('hidden');
+    if (movePrimary && bar && host.contains(primary)) bar.appendChild(primary);
     host.innerHTML = `
       <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
         <div class="min-w-0">
@@ -3461,6 +3467,8 @@
              axis and this does nothing). No backticks in here — this comment is inside a template
              literal. -->
         <div class="flex flex-wrap items-center gap-2 shrink-0">
+          ${window._tabFullBtn?.('datahub') || ''}
+          <span data-hub-primary-slot></span>
           ${hub.manualAdd ? `
           <button type="button" data-hub-add
             class="btn-primary inline-flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap">
@@ -3489,6 +3497,13 @@
            a template literal. -->
       <p class="hidden -mt-3 mb-5 text-xs font-semibold" data-hub-status></p>
     `;
+
+    const primarySlot = host.querySelector('[data-hub-primary-slot]');
+    if (movePrimary && primarySlot) {
+      primary.className = 'btn-assistant inline-flex items-center gap-2 min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition cursor-pointer whitespace-nowrap';
+      primarySlot.replaceWith(primary);
+      if (bar) { bar.classList.add('hidden'); bar.style.display = 'none'; }
+    } else primarySlot?.remove();
 
     const fileInput = host.querySelector('[data-hub-file]');
     const importBtn = host.querySelector('[data-hub-import]');

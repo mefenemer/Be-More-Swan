@@ -20,7 +20,7 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { aiAssistants, discussions, discussionWatches } from '../../db/schema';
 import {
-    DAILY_SCAN_MIN_GAP_MS, DEFAULT_DISCUSSION_SITES, DISCUSSION_FIT_LABELS,
+    DAILY_SCAN_MIN_GAP_MS, DEFAULT_DISCUSSION_SITES, DISCUSSION_FIT_LABELS, DISCUSSION_SITE_KEYS, DISCUSSIONS_ENABLED, MAX_OWN_FORUMS,
     MAX_THREAD_AGE_DAYS, MAX_TRIAGE_PER_SCAN, MIN_RELEVANCE, RESULTS_PER_SEARCH, SCAN_STALE_MS,
     discussionQuery, isDiscussionSource, looksLikeThread, normaliseSites, normaliseThreadUrl,
     normaliseTopics, plainForSite, postedAgeDays, siteForUrl, sourceInfo, withDisclosure, TOPIC_WORDING_RULES,
@@ -162,10 +162,11 @@ async function triggerScanWorker(watchId: number): Promise<boolean> {
 
 export type StartScanResult =
     | { ok: true; watch: WatchView }
-    | { ok: false; code: 'no_topics' | 'no_sites' | 'already_running' | 'no_capacity' | 'not_configured' | 'not_started'; error: string };
+    | { ok: false; code: 'no_topics' | 'no_sites' | 'already_running' | 'no_capacity' | 'not_configured' | 'not_started' | 'paused'; error: string };
 
 /** "Scan now" (the tab's button, and the chat card's). Claims the watch and wakes the worker. */
 export async function startScan(db: Db, organisationId: number, assistantId: number): Promise<StartScanResult> {
+    if (!DISCUSSIONS_ENABLED) return { ok: false, code: 'paused', error: 'Discussions is switched off for now.' };
     const watch = await loadWatch(db, organisationId, assistantId);
     if (!watch || !watch.topics.length) return { ok: false, code: 'no_topics', error: 'Add at least one topic to look for first.' };
     if (!normaliseSites(watch.sites).length) return { ok: false, code: 'no_sites', error: 'Choose at least one site to watch first.' };
@@ -184,6 +185,8 @@ export interface DispatchResult { considered: number; queued: number; alreadyRun
 
 /** The daily scan: every enabled watch with topics, on a working assistant, not scanned today. */
 export async function dispatchDueScans(db: Db): Promise<DispatchResult> {
+    // Paused: no daily scan spends anyone's tasks (src/config/discussion-sites.ts DISCUSSIONS_ENABLED).
+    if (!DISCUSSIONS_ENABLED) return { considered: 0, queued: 0, alreadyRunning: 0, failedToStart: 0, deferred: 0 };
     const rows = await db.select({ id: discussionWatches.id, organisationId: discussionWatches.organisationId, topics: discussionWatches.topics, sites: discussionWatches.sites })
         .from(discussionWatches)
         .innerJoin(aiAssistants, eq(aiAssistants.id, discussionWatches.aiAssistantId))
@@ -368,13 +371,23 @@ export function discussionView(r: DiscussionRow): DiscussionView {
 
 export const LIST_PAGE_SIZE = 200;
 
+/**
+ * Threads from sites no longer searched (UK Business Forums, Quora and own forums, retired
+ * 2026-11-11 — src/config/discussion-sites.ts) stay in the table but aren't listed or counted.
+ * Undefined (no filter) while own forums are on, since those can be any host.
+ */
+export function listedSitesFilter() {
+    return MAX_OWN_FORUMS > 0 ? undefined : inArray(discussions.site, [...DISCUSSION_SITE_KEYS]);
+}
+
 export async function listDiscussions(db: Db, organisationId: number, assistantId: number) {
+    const scope = and(eq(discussions.organisationId, organisationId), eq(discussions.aiAssistantId, assistantId), listedSitesFilter());
     const [rows, counts, watch] = await Promise.all([
         db.select().from(discussions)
-            .where(and(eq(discussions.organisationId, organisationId), eq(discussions.aiAssistantId, assistantId)))
+            .where(scope)
             .orderBy(desc(discussions.createdAt)).limit(LIST_PAGE_SIZE),
         db.select({ status: discussions.status, n: sql<number>`count(*)::int` }).from(discussions)
-            .where(and(eq(discussions.organisationId, organisationId), eq(discussions.aiAssistantId, assistantId)))
+            .where(scope)
             .groupBy(discussions.status),
         loadWatch(db, organisationId, assistantId),
     ]);
@@ -492,23 +505,24 @@ export const CHAT_SNAPSHOT_THREADS = 10;
  * rather than something false.
  */
 export async function buildDiscussionsChatBlock(db: Db, organisationId: number, assistantId: number): Promise<string | null> {
+    if (!DISCUSSIONS_ENABLED) return null;
     try {
         const { discussions: rows, counts, watch } = await listDiscussions(db, organisationId, assistantId);
         const fresh = rows.filter((r) => r.status === 'new').slice(0, CHAT_SNAPSHOT_THREADS);
         const siteLabels = watch.sites.map((s) => sourceInfo(s).label).join(', ') || 'none';
         const lines = fresh.map((r) => `#${r.id} · ${r.siteLabel} · relevance ${r.relevance} · ${r.fitLabel} · "${r.title.replace(/\s+/g, ' ').slice(0, 120)}"`);
-        return `YOUR DISCUSSIONS TAB — public forum threads (Reddit, UK Business Forums, Quora, LinkedIn, and any forums of the user's own) where someone is asking for what this business sells, each with a reply you drafted. You only LISTEN: nothing is ever posted for the user. On each thread the user presses "Copy reply & open thread", pastes the reply and posts it from their own account, then presses "Mark replied". Every draft ends with a disclosure line ("Full disclosure: I work at …"), added automatically — never tell the user to remove it: posting a recommendation without saying it is from the business breaks the sites' rules and UK consumer law.
+        return `YOUR DISCUSSIONS TAB — public Reddit threads and LinkedIn posts where someone is asking for what this business sells, each with a reply you drafted. You only LISTEN: nothing is ever posted for the user. On each thread the user presses "Copy reply & open thread", pastes the reply and posts it from their own account, then presses "Mark replied". Every draft ends with a disclosure line ("Full disclosure: I work at …"), added automatically — never tell the user to remove it: posting a recommendation without saying it is from the business breaks the sites' rules and UK consumer law.
 What it watches: topics ${watch.topics.length ? watch.topics.map((t) => `"${t}"`).join(', ') : '(none yet — nothing is scanned until there is at least one)'}; sites ${siteLabels}; daily scan ${watch.enabled ? 'on' : 'off'}${watch.scanning ? '; a scan is running now' : ''}${watch.lastScannedAt ? `; last scanned ${watch.lastScannedAt.slice(0, 10)}` : '; never scanned'}.
 Threads: ${counts.new} new, ${counts.replied} replied, ${counts.dismissed} dismissed.${fresh.length ? `\nNew threads${counts.new > fresh.length ? ` (the ${fresh.length} most recent of ${counts.new})` : ''}:\n${lines.join('\n')}` : ''}
 
 To act on the Discussions tab, emit a discussion_action_proposal uiElement — the user confirms on the card, and only their click changes anything:
 { "type": "discussion_action_proposal", "action": "set_watch" | "improve_topics" | "scan_now" | "redraft" | "mark_replied" | "dismiss",
   "topics": ["<phrase someone would search or post, e.g. 'recommend a bookkeeper'>", ...],   // set_watch only, at most 5; the WHOLE list
-  "sites": ["reddit" | "ukbf" | "quora" | "linkedin" | "forum:<web address, e.g. forum:contractortalk.com>", ...],   // set_watch only; the WHOLE list (keep the ones already watched unless asked to drop them); omit to keep the current sites
+  "sites": ["reddit" | "linkedin", ...],   // set_watch only; the WHOLE list (keep the ones already watched unless asked to drop them); omit to keep the current sites
   "enabled": true | false,                                   // set_watch only; the daily scan
   "discussionId": <the number after # above>,                 // redraft / mark_replied / dismiss
   "instruction": "<what to change, in the user's words>" | null }   // redraft only
-Own forums: the user can add up to 5 forums of their own by web address (a trade forum, a US community). Suggestions that are known to have recent threads: indiehackers.com (founders, mostly US), community.shopify.com (online shops), warriorforum.com (internet marketing), biggerpockets.com/forums (US property), contractortalk.com (US trades) — offer one only when it fits this business. Never invent a forum address; if they don't know one, suggest they find it and paste it.
+Only Reddit and LinkedIn are watched. If the user asks for another site or forum (UK Business Forums, Quora, Facebook groups, a trade forum…), say plainly that Discussions covers Reddit and LinkedIn only for now — never put that site on a discussion_action_proposal card. If they want another site added, tell them they can request it right here in chat, and when they say yes, send the mentor_support_request card (destination "support", subject "Discussions: add <site>", description naming the site and what they would use it for) so they can send the request to the Be More Swan team.
 Suggest topics written the way a customer would ask for help, from what this business sells — not the business's own name.
 ${TOPIC_WORDING_RULES}
 When the user asks you to improve, reword or check their topics (or why a scan finds little), send "improve_topics" (no other fields — it always rewords the saved topics): its "Suggest wording" button asks for the same suggested wording as the swan button beside the Topics box ("Ask <your name> to improve"), shows it on the card, and the user picks "Use these topics" or keeps their own. Don't write new wording in your own message, and don't say you have suggested anything yet — say "Press Suggest wording on the card and I'll suggest better wording for each topic". A scan costs one task. Never write a reply to a thread in your own message: the card shows the stored draft, and "redraft" rewrites it. Never say a reply HAS been posted — only the user posts. The card does nothing until the user presses its button, so your message must NOT say you are scanning, will scan now, have started a scan, have saved the topics, have marked, dismissed or rewritten anything, or are doing so — say the card is there for them to confirm (e.g. "Press Scan now on the card below and I'll look", "Press Mark replied on the card to file it").

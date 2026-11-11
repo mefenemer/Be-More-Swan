@@ -1,12 +1,13 @@
 // netlify/functions/get-workspace-assets.ts
 // US-STOR-1.2.1: List the active organisation's brand/workspace assets for the Brand Assets page.
 //
-// GET → { assets: [{ id, name, category, assetType, status, mimeType, fileSizeBytes, isFile, externalUrl, createdAt }] }
+// GET → { assets: [{ id, name, category, assetType, status, mimeType, fileSizeBytes, isFile, externalUrl, createdAt, hasText }] }
+// hasText: words were read from it — only then can an assistant use a document or link.
 //
 // Org is resolved from the session (requireTenant); only the caller's org's assets are returned.
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, desc, eq, ne } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { workspaceAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -33,6 +34,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 r2Key:         workspaceAssets.r2Key,
                 externalUrl:   workspaceAssets.externalUrl,
                 createdAt:     workspaceAssets.createdAt,
+                hasText:       sql<boolean>`coalesce(length(trim(${workspaceAssets.extractedText})), 0) > 0`,
             })
             .from(workspaceAssets)
             .where(and(

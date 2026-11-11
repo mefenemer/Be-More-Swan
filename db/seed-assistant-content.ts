@@ -73,7 +73,7 @@ interface RoleContent {
 //
 // Since anglicised to house style (British spelling) where the old hardcoded file used US spelling —
 // see the `lead_qualifier` note. That was a deliberate, reviewed copy decision; it is no longer a
-// byte-for-byte transcription. Any further rewording should happen in Admin → Master Data →
+// byte-for-byte transcription. Any further rewording should happen in Admin → Assistants →
 // Assistants, and be mirrored here only so a fresh environment starts from the same copy.
 const MIGRATED: RoleContent[] = [
     {
@@ -411,14 +411,14 @@ async function main() {
 
     if (uncovered.length) {
         console.log(`\n${uncovered.length} active roles have NO hardcoded copy to migrate — they render with an empty`);
-        console.log('Key Features list until copy is added in Admin → Master Data → Assistants:');
+        console.log('Key Features list until copy is added in Admin → Assistants → Assistants:');
         for (const a of uncovered) console.log(`   · ${a.roleKey} (${a.name})`);
     }
 
     if (diffs.length) {
         console.log(`\n⚠  ${diffs.length} role(s) had a DIFFERENT description in the DB vs the hardcoded file.`);
         console.log('   The card and the detail modal were showing different copy. The file value won —');
-        console.log('   review each, and correct in Admin → Master Data → Assistants if the DB one was better:\n');
+        console.log('   review each, and correct in Admin → Assistants → Assistants if the DB one was better:\n');
         for (const d of diffs) {
             console.log(`   ${d.roleKey}`);
             console.log(`     was (DB, on the card):   ${d.db}`);

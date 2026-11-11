@@ -45,6 +45,7 @@ import { safeSlice } from '../../src/utils/text-safe';
 import {
     pickAutonomousSlot, pickPillar, hasUsableBrief, buildAutonomousDraftSystem,
 } from '../../src/utils/autonomous-draft-brief';
+import { loadDraftPillars } from '../../src/utils/content-pillars-store';
 
 
 interface DraftCopy { caption: string; hashtags: string; imagePrompt: string; }
@@ -179,25 +180,31 @@ export async function runAutonomousDrafts(opts: { imageWriter?: boolean } = {}) 
             });
             if (!gapDay) { skippedNoGap++; continue; }
 
-            // Least-used pillar over the last 60 days, the same balance the scheduled path keeps.
+            // Least-used pillar over the last 60 days, the same balance the scheduled path keeps:
+            // the pillar records (or the old text until the assistant has rows), counted by pillar_id
+            // where a post has one, so a renamed pillar keeps its count.
+            const draftPillars = await loadDraftPillars(db, a.organisationId, a.id, a.onboardingContext);
             let pillarUsage: Record<string, number> = {};
             try {
                 const used = await db
-                    .select({ pillar: scheduledPosts.pillar, n: sql<number>`count(*)::int` })
+                    .select({ pillarId: scheduledPosts.pillarId, pillar: scheduledPosts.pillar, n: sql<number>`count(*)::int` })
                     .from(scheduledPosts)
                     .where(and(
                         eq(scheduledPosts.assistantId, a.id),
                         isNotNull(scheduledPosts.pillar),
                         sql`${scheduledPosts.createdAt} > now() - interval '60 days'`,
                     ))
-                    .groupBy(scheduledPosts.pillar);
-                pillarUsage = Object.fromEntries(used.map(u => [u.pillar as string, u.n]));
+                    .groupBy(scheduledPosts.pillarId, scheduledPosts.pillar);
+                pillarUsage = Object.fromEntries(draftPillars.map((p) => [p.name, used
+                    .filter((u) => (p.id !== null && u.pillarId === p.id) || (u.pillarId === null && u.pillar === p.name))
+                    .reduce((n, u) => n + u.n, 0)]));
             } catch { /* plain rotation */ }
-            const pillar = pickPillar(a.onboardingContext, pillarUsage, gapDay);
+            const pillar = pickPillar({ content_pillars: draftPillars.map((p) => p.name) }, pillarUsage, gapDay);
+            const pillarRecord = pillar ? draftPillars.find((p) => p.name === pillar) ?? null : null;
 
             const copy = await draftCopy(buildAutonomousDraftSystem({
                 org, assistantName: a.name, platformLabel: fmt.label,
-                onboardingContext: a.onboardingContext, pillar, slot: gapDay,
+                onboardingContext: a.onboardingContext, pillar, pillarDescription: pillarRecord?.description ?? null, slot: gapDay,
             }));
             if (!copy.caption) { failed++; continue; }
 
@@ -307,7 +314,7 @@ export async function runAutonomousDrafts(opts: { imageWriter?: boolean } = {}) 
                     caption: copy.caption, hashtags: copy.hashtags || null,
                     contentAssetIds: [assetId],
                     connectionId: gate.connectionId,
-                    status: gate.status, isAutonomous: true, triggerType: 'scheduled', pillar,
+                    status: gate.status, isAutonomous: true, triggerType: 'scheduled', pillar, pillarId: pillarRecord?.id ?? null,
                     // Marks the post unattended and counts toward the rolling weekly ceiling.
                     autoPublishedAt: gate.status === 'scheduled' ? new Date() : null,
                     ownerLabel: `AI: ${a.name}`,

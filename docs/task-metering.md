@@ -6,7 +6,7 @@ AI media credits and X posting credits are retired.
 ## The rules
 
 - **A task is one finished piece of work.** Costs live in the database and a super admin sets them
-  in Admin → Revenue → Task costs (see "Changing a cost" below). These are the starting costs:
+  in Admin → Money → Task costs (see "Changing a cost" below). These are the starting costs:
 
   | Work | Tasks |
   |---|---|
@@ -51,7 +51,7 @@ the cap is still recorded. That keeps the count honest, and every later request 
 
 Nothing is decided in code. A code path that charges or quotes a cost calls `getTaskCosts()`.
 
-1. A super admin enters new values in Admin → Revenue → Task costs, with a start date and a reason. This
+1. A super admin enters new values in Admin → Money → Task costs, with a start date and a reason. This
    is a draft. It changes nothing and tells nobody.
 2. They read the notice as customers will, can send a test to themselves, and announce it by typing the
    number of people it goes to. Everyone on a running plan gets an in-app notice and an email, once each.

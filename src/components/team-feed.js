@@ -7,7 +7,7 @@
  * assistant; a note about a campaign reaches what it drafts for that campaign.
  *
  * Three places, one component:
- *   TeamFeed.mount(host, { mode: 'page', thread? })              — Notifications → Messages (thread: {type, id} to open on)
+ *   TeamFeed.mount(host, { mode: 'page', thread? })              — Notifications, the Team Chat tab (thread: {type, id} to open on)
  *   TeamFeed.mount(host, { mode: 'assistant', assistantId })     — "From your team" on an assistant
  *   TeamFeed.mount(host, { mode: 'campaign', campaignId })       — a campaign's own conversation
  *

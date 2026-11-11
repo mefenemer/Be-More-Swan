@@ -21,7 +21,7 @@ import {
     listDiscussions, redraftDiscussion, saveDraft, saveWatch, setDiscussionStatus, startScan, suggestTopicWording,
 } from '../../src/utils/discussions';
 import {
-    DISCUSSION_SITES, DISCUSSION_SITE_KEYS, DISCUSSION_STATUSES, MAX_OWN_FORUMS, MAX_TOPICS, SUGGESTED_FORUMS,
+    DISCUSSIONS_ENABLED, DISCUSSION_SITES, DISCUSSION_SITE_KEYS, DISCUSSION_STATUSES, MAX_OWN_FORUMS, MAX_TOPICS, SUGGESTED_FORUMS,
     normaliseForumAddress, type DiscussionStatus,
 } from '../../src/config/discussion-sites';
 
@@ -39,11 +39,13 @@ function isMissingTable(err: unknown): boolean {
 }
 
 const SCAN_STATUS: Record<string, number> = {
-    no_topics: 422, no_sites: 422, already_running: 409, no_capacity: 402, not_configured: 503, not_started: 502,
+    paused: 410, no_topics: 422, no_sites: 422, already_running: 409, no_capacity: 402, not_configured: 503, not_started: 502,
 };
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
+    // Paused (src/config/discussion-sites.ts DISCUSSIONS_ENABLED): nothing reads, saves or scans.
+    if (!DISCUSSIONS_ENABLED) return json(410, { error: 'Discussions is switched off for now.', code: 'paused' });
 
     const db = getDb();
     const ctx = await requireTenant(event, db);
@@ -73,8 +75,9 @@ export default withLambda(async (event) => {
         if (action === 'save_watch') {
             // An own forum that can't be watched is said out loud, not silently dropped.
             const own = Array.isArray(body.sites) ? body.sites.filter((v): v is string => typeof v === 'string' && v.startsWith('forum:')) : [];
+            if (own.length && MAX_OWN_FORUMS === 0) return json(422, { error: 'Discussions watches Reddit and LinkedIn only. To ask for another site, ask your Lead Generator in chat.' });
             const bad = own.find((v) => !normaliseForumAddress(v));
-            if (bad) return json(422, { error: `“${bad.slice(6)}” isn’t a forum address we can watch. Paste the forum’s web address, like contractortalk.com. Reddit, UK Business Forums, Quora and LinkedIn are ticked above instead.` });
+            if (bad) return json(422, { error: `“${bad.slice(6)}” isn’t a forum address we can watch. Paste the forum’s web address, like contractortalk.com. Reddit and LinkedIn are ticked above instead.` });
             if (new Set(own.map((v) => normaliseForumAddress(v))).size > MAX_OWN_FORUMS) return json(422, { error: `You can watch up to ${MAX_OWN_FORUMS} forums of your own.` });
             return json(200, { watch: await saveWatch(db, orgId, assistantId, { topics: body.topics, sites: body.sites, enabled: body.enabled }) });
         }

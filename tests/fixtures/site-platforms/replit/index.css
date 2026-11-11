@@ -1,0 +1,7 @@
+*,:before,:after{box-sizing:border-box;border-width:0;border-style:solid}
+:root{--background: 40 33% 98%;--foreground: 160 25% 12%;--card: 0 0% 100%;--card-foreground: 160 25% 12%;--primary: 152 58% 30%;--primary-foreground: 0 0% 100%;--secondary: 32 85% 52%;--secondary-foreground: 0 0% 100%;--muted: 40 20% 94%;--muted-foreground: 160 10% 40%;--border: 40 15% 88%;--radius: .75rem}
+.dark{--background: 160 25% 8%;--foreground: 40 33% 98%;--primary: 152 50% 45%}
+body{background-color:hsl(var(--background));color:hsl(var(--foreground));font-family:Inter,ui-sans-serif,system-ui,sans-serif}
+h1,h2,h3{font-family:"Playfair Display",Georgia,serif}
+.bg-primary{background-color:hsl(var(--primary))}.text-primary-foreground{color:hsl(var(--primary-foreground))}
+.bg-secondary{background-color:hsl(var(--secondary))}.rounded-md{border-radius:calc(var(--radius) - 2px)}.rounded-lg{border-radius:var(--radius)}

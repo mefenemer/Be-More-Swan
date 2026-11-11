@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Your thoughts, please</title>
+  <!-- One page per private link: never indexed, and the address never leaks to another site. -->
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="no-referrer">
+  <!-- ⚠️ Served at /r/<token> by a rewrite (netlify.toml), so EVERY path on this page is root-relative. -->
+  <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+  <style>
+    :root {
+      --ink: #111827; --muted: #4b5563; --line: #e5e7eb; --page: #f9fafb; --card: #ffffff;
+      --brand: #d6006b; --brand-dark: #b0005a; --ok: #166534; --ok-bg: #f0fdf4; --err: #b91c1c; --err-bg: #fef2f2;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--page); color: var(--ink); font: 16px/1.55 -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    main { max-width: 620px; margin: 0 auto; padding: 24px 16px 32px; }
+    h1 { font-size: 22px; line-height: 1.3; margin: 0 0 4px; overflow-wrap: anywhere; }
+    h2 { font-size: 16px; margin: 0 0 12px; }
+    .sub { color: var(--muted); margin: 0 0 20px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .tab { border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 6px 14px; min-height: 36px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .tab[aria-selected="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+    .media { display: grid; gap: 8px; margin-bottom: 12px; }
+    .media img, .media video { display: block; width: 100%; max-height: 520px; object-fit: contain; background: #f3f4f6; border-radius: 8px; }
+    .caption { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+    .tags, .link, .words, .when { font-size: 14px; color: var(--muted); margin: 10px 0 0; overflow-wrap: anywhere; }
+    .words { background: var(--page); border-radius: 8px; padding: 8px 10px; white-space: pre-wrap; }
+    label { display: block; font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+    input[type="text"], textarea { width: 100%; font: inherit; color: var(--ink); background: #fff; border: 1px solid #9ca3af; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+    textarea { min-height: 96px; resize: vertical; }
+    .hint { font-size: 13px; color: var(--muted); margin: -8px 0 12px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    button.primary, button.secondary, a.primary { flex: 1 1 180px; display: inline-block; text-align: center; text-decoration: none; min-height: 44px; padding: 10px 16px; border-radius: 8px; font: inherit; font-weight: 700; cursor: pointer; }
+    button.primary, a.primary { background: var(--brand); border: 1px solid var(--brand); color: #fff; }
+    button.primary:hover, a.primary:hover { background: var(--brand-dark); }
+    button.secondary { background: #fff; border: 1px solid #6b7280; color: var(--ink); }
+    button:disabled { opacity: .6; cursor: not-allowed; }
+    :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+    .error { background: var(--err-bg); color: var(--err); border-radius: 8px; padding: 8px 12px; font-size: 14px; margin: 0 0 12px; }
+    .thanks { background: var(--ok-bg); border-color: #bbf7d0; }
+    .thanks h2 { color: var(--ok); }
+    .thanks p, .offer p { margin: 0; }
+    .offer p { margin-bottom: 12px; color: var(--muted); }
+    .trap { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+    footer { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding-top: 4px; }
+    footer a { color: inherit; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <main>
+    <p id="loading" class="sub" role="status">Opening…</p>
+
+    <section id="dead" class="card" hidden>
+      <h1 style="font-size:18px">This link is no longer active</h1>
+      <p class="sub" style="margin:4px 0 0">Ask the person who sent it for a new one.</p>
+    </section>
+
+    <div id="review" hidden>
+      <h1 id="heading"></h1>
+      <p class="sub">They'd like to know what you think of this post before it goes out.</p>
+
+      <section class="card" aria-label="The post">
+        <div id="tabs" class="tabs" role="tablist" aria-label="Where it will be posted" hidden></div>
+        <div id="media" class="media"></div>
+        <p id="caption" class="caption"></p>
+        <p id="tags" class="tags" hidden></p>
+        <p id="link" class="link" hidden></p>
+        <p id="words" class="words" hidden></p>
+        <p id="when" class="when" hidden></p>
+      </section>
+
+      <form id="respond" class="card" novalidate>
+        <h2>Your response</h2>
+        <p id="form-error" class="error" role="alert" hidden></p>
+        <label for="name">Your name</label>
+        <input id="name" type="text" maxlength="80" autocomplete="name" required>
+        <label for="body">Your comments</label>
+        <textarea id="body" maxlength="2000"></textarea>
+        <p class="hint">Needed if you're asking for changes. Your response goes to the person who sent this, and nothing is posted because of it.</p>
+        <div class="trap" aria-hidden="true">
+          <label for="website">Leave this empty</label>
+          <input id="website" type="text" tabindex="-1" autocomplete="off">
+        </div>
+        <div class="actions">
+          <button type="button" class="primary" data-decision="approved">Approve</button>
+          <button type="button" class="secondary" data-decision="changes">Ask for changes</button>
+        </div>
+      </form>
+
+      <section id="thanks" class="card thanks" role="status" hidden>
+        <h2>Thank you</h2>
+        <p id="thanks-text"></p>
+      </section>
+
+      <!-- The offer never appears before they have responded. -->
+      <section id="offer" class="card offer" hidden>
+        <h2>Want an AI team of your own?</h2>
+        <p>Be More Swan's assistants draft work like this for you to approve. Try it free for 14 days, with no card.</p>
+        <a id="offer-link" class="primary" href="/register.html?src=review-link&amp;cmp=social_post">Start your free trial</a>
+      </section>
+
+      <footer>
+        <span>Shared with <a href="/" rel="noreferrer">Be More Swan</a></span>
+        <a href="mailto:support@bemoreswan.com?subject=Reporting%20a%20shared%20review%20page">Report this page</a>
+      </footer>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      'use strict';
+      var FN = '/.netlify/functions/review-link-public';
+      var token = (window.location.pathname.split('/').filter(Boolean).pop() || '');
+      var $ = function (id) { return document.getElementById(id); };
+      var startedAt = Date.now();
+      var trialOffer = false;
+
+      function call(action, extra) {
+        return fetch(FN, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.assign({ action: action, token: token }, extra || {})),
+        });
+      }
+
+      function showDead() {
+        $('loading').hidden = true;
+        $('review').hidden = true;
+        $('dead').hidden = false;
+      }
+
+      var PLATFORM_NAMES = { facebook: 'Facebook', instagram: 'Instagram', linkedin: 'LinkedIn', x: 'X', twitter: 'X', threads: 'Threads', youtube: 'YouTube', tiktok: 'TikTok', pinterest: 'Pinterest' };
+      function platformName(p) { return PLATFORM_NAMES[p] || p; }
+
+      function safeUrl(u) {
+        try { var parsed = new URL(u, window.location.origin); return /^https?:$/.test(parsed.protocol) ? parsed.href : ''; }
+        catch (e) { return ''; }
+      }
+
+      function setText(id, text) {
+        var el = $(id);
+        el.textContent = text || '';
+        el.hidden = !text;
+      }
+
+      // Everything from the server is set as text or as a checked URL, never as HTML.
+      function drawVersion(v) {
+        var media = $('media');
+        media.textContent = '';
+        (v.media || []).forEach(function (m) {
+          var url = safeUrl(m.url);
+          if (!url) return;
+          var el = document.createElement(m.kind === 'video' ? 'video' : 'img');
+          el.src = url;
+          if (m.kind === 'video') { el.controls = true; el.preload = 'metadata'; el.playsInline = true; }
+          else { el.alt = 'Picture in the post'; el.referrerPolicy = 'no-referrer'; }
+          media.appendChild(el);
+        });
+        $('caption').textContent = v.caption || '';
+        setText('tags', v.hashtags);
+        setText('link', v.link ? 'Link: ' + v.link : '');
+        setText('words', v.pictureWords && v.pictureWords.length ? 'These words will be added on the picture:\n' + v.pictureWords.join('\n') : '');
+        var when = 'For ' + platformName(v.platform);
+        if (v.plannedFor) {
+          when += ', planned for ' + new Date(v.plannedFor).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+        }
+        setText('when', when);
+      }
+
+      function drawTabs(versions) {
+        var tabs = $('tabs');
+        tabs.textContent = '';
+        tabs.hidden = versions.length < 2;
+        versions.forEach(function (v, i) {
+          var b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'tab';
+          b.setAttribute('role', 'tab');
+          b.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+          b.textContent = platformName(v.platform);
+          b.addEventListener('click', function () {
+            Array.prototype.forEach.call(tabs.children, function (c) { c.setAttribute('aria-selected', c === b ? 'true' : 'false'); });
+            drawVersion(v);
+          });
+          tabs.appendChild(b);
+        });
+      }
+
+      // A person touched the page. Scanners run scripts but don't scroll, tap or type, so a view is
+      // only counted from here and never on load.
+      function countViewOnFirstTouch() {
+        var events = ['pointerdown', 'keydown', 'scroll', 'touchstart'];
+        var done = false;
+        function once() {
+          if (done) return;
+          done = true;
+          events.forEach(function (name) { window.removeEventListener(name, once, true); });
+          call('opened').catch(function () {});
+        }
+        events.forEach(function (name) { window.addEventListener(name, once, { capture: true, passive: true }); });
+      }
+
+      function showError(msg, focusId) {
+        var el = $('form-error');
+        el.textContent = msg;
+        el.hidden = false;
+        if (focusId) $(focusId).focus();
+      }
+
+      // Enter in the name box must never count as an approval: only a button sends a response.
+      $('respond').addEventListener('submit', function (e) { e.preventDefault(); });
+
+      $('respond').addEventListener('click', async function (e) {
+        var pressedBtn = e.target.closest ? e.target.closest('button[data-decision]') : null;
+        if (!pressedBtn) return;
+        var decision = pressedBtn.getAttribute('data-decision');
+        var name = $('name').value.trim();
+        var body = $('body').value.trim();
+        $('form-error').hidden = true;
+        if (!name) return showError('Please add your name.', 'name');
+        if (decision === 'changes' && !body) return showError('Please say what you would like changed.', 'body');
+
+        var buttons = this.querySelectorAll('button');
+        buttons.forEach(function (b) { b.disabled = true; });
+        try {
+          var res = await call('respond', { name: name, decision: decision, body: body, hp: $('website').value, ms: Date.now() - startedAt });
+          if (res.status === 404) return showDead();
+          var data = await res.json().catch(function () { return {}; });
+          if (!res.ok) {
+            buttons.forEach(function (b) { b.disabled = false; });
+            return showError(data.error || 'That did not send. Please try again.');
+          }
+          $('respond').hidden = true;
+          $('thanks-text').textContent = decision === 'approved'
+            ? 'Your approval has been passed on. They make the final call on when it goes out.'
+            : 'Your comments have been passed on.';
+          $('thanks').hidden = false;
+          $('offer').hidden = !trialOffer;
+          $('thanks').scrollIntoView({ block: 'nearest' });
+        } catch (err) {
+          buttons.forEach(function (b) { b.disabled = false; });
+          showError('That did not send. Please check your connection and try again.');
+        }
+      });
+
+      $('offer-link').addEventListener('click', function () {
+        // keepalive: the page is about to go away, and the count must not delay them.
+        fetch(FN, {
+          method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'trial_click', token: token }),
+        }).catch(function () {});
+      });
+
+      (async function load() {
+        if (!/^[a-f0-9]{64}$/.test(token)) return showDead();
+        try {
+          var res = await call('view');
+          if (!res.ok) return showDead();
+          var data = await res.json();
+          if (!data.versions || !data.versions.length) return showDead();
+          trialOffer = !!data.trialOffer;
+          document.title = data.workspaceName + ' would like your thoughts';
+          $('heading').textContent = data.workspaceName + ' would like your thoughts';
+          drawTabs(data.versions);
+          drawVersion(data.versions[0]);
+          $('loading').hidden = true;
+          $('review').hidden = false;
+          countViewOnFirstTouch();
+        } catch (err) {
+          $('loading').textContent = 'This page could not load. Please check your connection and try again.';
+        }
+      })();
+    })();
+  </script>
+</body>
+</html>

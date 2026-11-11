@@ -75,7 +75,7 @@ check('the checkout: the deposit only, on their email, closing before the hold d
 check('a hold counts as taken only while in time; nobody is told until it is paid', () => {
     const dep = read('src/utils/booking-deposits.ts');
     assert.ok(dep.includes("(${bookings.status} = 'awaiting_payment' AND ${bookings.holdExpiresAt} > now())"));
-    assert.ok(read('src/utils/bookings.ts').includes('.where(and(eq(bookings.organisationId, orgId), holdsTime, gte(bookings.startsAt, from)'));
+    assert.ok(read('src/utils/bookings.ts').includes(".where(and(eq(bookings.organisationId, orgId), holdsTime, ne(bookings.kind, 'stay'), gte(bookings.startsAt, from)"));
     assert.ok(read('src/utils/class-sessions.ts').includes('.where(and(inArray(bookings.sessionId, ids), holdsTime))'));
     const sb = read('src/utils/site-booking.ts');
     const pay = sb.indexOf("if (made.booking.status === 'awaiting_payment' && deposit) return payDeposit(");
@@ -135,7 +135,7 @@ check('the SQL is re-run safe and keeps one booking per checkout', () => {
     assert.ok(s.includes("(deposit_type = 'percent' AND deposit_amount BETWEEN 1 AND 100)"));
 });
 check('Business Information sets it; the chat explains it', () => {
-    const ui = read('assets.html');
+    const ui = (read('assets.html') + read('src/components/products-editor.js'));
     assert.ok(ui.includes('id="op-deposit-type"') && ui.includes("depositType: get('op-deposit-type') || null, depositAmount: get('op-deposit-amount')"));
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('DEPOSITS: a service or class can ask for a deposit'));
 });

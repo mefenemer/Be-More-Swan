@@ -1,5 +1,5 @@
 // netlify/functions/ai-visibility-reminder.ts
-// Monthly nudge to run the AI Visibility check (Admin → Platform → Insights → AI Visibility,
+// Monthly nudge to run the AI Visibility check (Admin → Growth → AI visibility,
 // admin-ai-visibility.ts). The check is only useful as a monthly series, and nothing else starts a
 // run: the API fetch (ai-visibility-fetch-background.ts) fills a run an admin has created.
 // Scheduled: 1st of every month at 08:00 UTC (netlify.toml). Email only, to the business inbox.

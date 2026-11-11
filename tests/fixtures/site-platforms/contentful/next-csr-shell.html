@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<!-- SYNTHETIC fixture: the "classes" page of a made-up pottery studio on Next.js + Contentful whose
+     page body is drawn only in the browser (a client-only component), so the HTML is an empty shell
+     and the words sit in __NEXT_DATA__ as Contentful REST entries (links resolved, rich text JSON).
+     Shape modelled on contentful.js getEntries() output. No real business's words. -->
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<title>Classes | Fernbrook Pottery Studio</title>
+<link rel="preconnect" href="https://cdn.contentful.com">
+</head>
+<body>
+<div id="__next">
+  <header><nav><a href="/">Home</a><a href="/classes">Classes</a><a href="/visit">Visit us</a></nav></header>
+  <main><div class="Loading_spinner__z1" aria-busy="true"></div></main>
+  <footer><p>© 2026 Fernbrook Pottery Studio</p></footer>
+</div>
+<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{
+"navigation":{"sys":{"id":"nav1","type":"Entry","contentType":{"sys":{"type":"Link","linkType":"ContentType","id":"navigationMenu"}}},"fields":{"title":"Main menu","items":[{"sys":{"id":"navA","type":"Entry","contentType":{"sys":{"type":"Link","linkType":"ContentType","id":"navigationItem"}}},"fields":{"title":"Classes","url":"/classes"}}]}},
+"seo":{"sys":{"id":"seo1","type":"Entry","contentType":{"sys":{"type":"Link","linkType":"ContentType","id":"seoMetadata"}}},"fields":{"title":"Classes | Fernbrook","description":"Book a pottery class near you."}},
+"page":{"sys":{"space":{"sys":{"type":"Link","linkType":"Space","id":"fakespace01"}},"id":"classesPage","type":"Entry","contentType":{"sys":{"type":"Link","linkType":"ContentType","id":"page"}}},"fields":{"internalName":"Classes page","slug":"classes","sections":[
+ {"sys":{"id":"hero2","type":"Entry","contentType":{"sys":{"type":"Link","linkType":"ContentType","id":"heroBanner"}}},"fields":{"internalName":"Classes hero","headline":"Classes for every pair of hands","subheadline":"From a first wobbly cylinder to a matching dinner set.","image":{"sys":{"id":"4dAsset","type":"Asset"},"fields":{"title":"Rows of drying mugs","description":"Rows of mugs drying on a wooden shelf","file":{"url":"//images.ctfassets.net/fakespace01/4dAsset/jkl444/drying-mugs.jpg","contentType":"image/jpeg","details":{"image":{"width":4800,"height":3200}}}}}}},
+ {"sys":{"id":"body2","type":"Entry","contentType":{"sys":{"type":"Link","linkType":"ContentType","id":"richTextBlock"}}},"fields":{"internalName":"Classes body","body":{"nodeType":"document","data":{},"content":[
+  {"nodeType":"heading-2","data":{},"content":[{"nodeType":"text","value":"Taster evening","marks":[],"data":{}}]},
+  {"nodeType":"paragraph","data":{},"content":[{"nodeType":"text","value":"Two hours on the wheel with tea and biscuits. Read our ","marks":[],"data":{}},{"nodeType":"hyperlink","data":{"uri":"/visit"},"content":[{"nodeType":"text","value":"directions to the barn","marks":[],"data":{}}]},{"nodeType":"text","value":" before you come.","marks":[],"data":{}}]},
+  {"nodeType":"embedded-asset-block","data":{"target":{"sys":{"id":"5eAsset","type":"Asset"},"fields":{"title":"Glazed bowls","description":"Three glazed bowls in sea green","file":{"url":"//images.ctfassets.net/fakespace01/5eAsset/mno555/green-bowls.heic","contentType":"image/heic"}}}},"content":[]},
+  {"nodeType":"heading-3","data":{},"content":[{"nodeType":"text","value":"Six-week course","marks":[],"data":{}}]},
+  {"nodeType":"unordered-list","data":{},"content":[
+   {"nodeType":"list-item","data":{},"content":[{"nodeType":"paragraph","data":{},"content":[{"nodeType":"text","value":"Throwing, trimming and handles","marks":[],"data":{}}]}]},
+   {"nodeType":"list-item","data":{},"content":[{"nodeType":"paragraph","data":{},"content":[{"nodeType":"text","value":"Your own glaze test tiles","marks":[{"type":"bold"}],"data":{}}]}]}]},
+  {"nodeType":"blockquote","data":{},"content":[{"nodeType":"paragraph","data":{},"content":[{"nodeType":"text","value":"The most relaxing Tuesday of my week.","marks":[],"data":{}}]}]},
+  {"nodeType":"embedded-entry-block","data":{"target":{"sys":{"id":"cta1","type":"Entry","contentType":{"sys":{"type":"Link","linkType":"ContentType","id":"callToAction"}}},"fields":{"label":"Ask about dates","url":"mailto:hello@fernbrook.example"}}},"content":[]},
+  {"nodeType":"paragraph","data":{},"content":[{"nodeType":"text","value":"\u003cscript\u003ealert(1)\u003c/script\u003e Kilns run on Fridays.","marks":[],"data":{}}]}
+ ]}}}
+]}}},"__N_SSP":true},"page":"/[slug]","query":{"slug":"classes"},"buildId":"fake-build","isFallback":false,"gssp":true}</script>
+</body>
+</html>

@@ -9,6 +9,7 @@
 
 import { randomBytes } from 'crypto';
 import { formatPounds } from './product-price';
+import { ownerMeetingLine } from './booking-meeting';
 
 export const newFeedToken = () => randomBytes(16).toString('hex');
 export const FEED_TOKEN_RE = /^[0-9a-f]{32}$/;
@@ -40,6 +41,8 @@ export interface FeedBooking {
     id: number; kind: string; status: string; startsAt: Date; endsAt: Date; what: string;
     customerName: string; customerEmail: string; customerPhone: string | null; notes: string | null; partySize: number;
     depositPence: number | null; paymentStatus: string | null;
+    /** Where it happens and the video link (booking-meeting.ts). */
+    meetingLocation?: string | null; meetingUrl?: string | null;
 }
 export interface FeedSession { id: number; title: string; status: string; startsAt: Date; endsAt: Date; resourceName: string | null; capacity: number; taken: number; people: string[]; }
 
@@ -60,7 +63,7 @@ export function buildOwnerFeed(p: { business: string; bookings: FeedBooking[]; s
         const money = b.depositPence ? `${formatPounds(b.depositPence)} deposit ${b.paymentStatus === 'paid' ? 'paid' : b.paymentStatus === 'refunded' ? 'refunded' : b.paymentStatus ?? ''}`.trim() : '';
         event(`owner-booking-${b.id}@bemoreswan.com`, b.startsAt, b.endsAt,
             `${b.status === 'cancelled' ? 'Cancelled: ' : ''}${b.what} — ${b.customerName}${pending ? ' (to confirm)' : ''}`,
-            [b.customerName, b.customerEmail, b.customerPhone, b.kind === 'table' ? `Party of ${b.partySize}` : '', money, b.notes ? `Notes: ${b.notes}` : '',
+            [b.customerName, b.customerEmail, b.customerPhone, b.kind === 'table' ? `Party of ${b.partySize}` : '', ownerMeetingLine({ status: b.status, meetingLocation: b.meetingLocation ?? null, meetingUrl: b.meetingUrl ?? null, customerPhone: b.customerPhone }), money, b.notes ? `Notes: ${b.notes}` : '',
                 pending ? 'Confirm or decline it on the Bookings tab.' : ''].filter(Boolean).join('\n'),
             b.status === 'cancelled' ? 'CANCELLED' : pending ? 'TENTATIVE' : 'CONFIRMED');
     }

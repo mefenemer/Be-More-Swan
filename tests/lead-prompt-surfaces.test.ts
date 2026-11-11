@@ -219,9 +219,9 @@ check('the prompt does not invent a target-persona field the form lacks', () => 
 
 console.log('\n──── the prompt points at where the button actually is ────');
 
-check('"Find New Leads" lives in that tab\'s toolbar, where the prompt sends users', () => {
+check('"New search" lives in that tab\'s toolbar, where the prompt sends users', () => {
     const inbox = read('src/components/assistant-signal-inbox.js');
-    assert.match(inbox, /Find New Leads/,
+    assert.match(inbox, /New search/,
         'The prompt tells users the button is in that tab\'s toolbar, but assistant-signal-inbox.js '
         + 'no longer renders it. It has moved once already (out of the Overview action bar); if it has '
         + 'moved again, update leadGeneratorSurfaces() to name the new location.');

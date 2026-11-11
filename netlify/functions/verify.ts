@@ -12,6 +12,7 @@ import { resolveActiveOrg } from '../../src/utils/tenant';
 import { findReferralOffer } from '../../src/utils/referral-offer';
 import { startTrialIfEligible } from '../../src/utils/trial';
 import { recordLogin } from '../../src/utils/login-events';
+import { isSameLoginBrowser, maskEmail, readLoginRef, sessionUserId } from '../../src/utils/login-link';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -72,10 +73,22 @@ export default withLambda(async (event) => {
             .limit(1);
 
         if (!user) {
+            // A used or expired link. `r` still says whose it was (src/utils/login-link.ts).
+            const linkUserId = readLoginRef(body.r);
+            if (linkUserId !== null && linkUserId === sessionUserId(event.headers.cookie)) {
+                // Already logged in as this person: the second click on a link, say. No new session.
+                const here = resolveBaseUrl(event.headers);
+                if (!here) return { statusCode: 500, headers: getHeaders(), body: JSON.stringify({ error: 'Server misconfigured.' }) };
+                return {
+                    statusCode: 200,
+                    headers: getHeaders(),
+                    body: JSON.stringify({ success: true, alreadyLoggedIn: true, redirect: `${here}${postLoginRedirect || '/workspace.html'}` })
+                };
+            }
             return {
                 statusCode: 400,
                 headers: getHeaders(),
-                body: JSON.stringify({ error: 'Invalid or expired verification link.' })
+                body: JSON.stringify({ error: 'Invalid or expired verification link.', spent: true, canRequestNew: linkUserId !== null })
             };
         }
 
@@ -85,6 +98,20 @@ export default withLambda(async (event) => {
                 statusCode: 403,
                 headers: getHeaders(),
                 body: JSON.stringify({ error: 'Your account has been locked. Please contact support@bemoreswan.com for assistance.' })
+            };
+        }
+
+        // The page asks on load, and email scanners run that script too. Nothing below this may run
+        // for them: it spends the token, starts the trial and logs in. So on load, only the browser
+        // that asked for this link, or one already logged in as this person, goes on. Anyone else
+        // must click, which scanners don't do.
+        const provenOnLoad = isSameLoginBrowser(event.headers.cookie, String(plainToken), body.b)
+            || sessionUserId(event.headers.cookie) === user.id;
+        if (body.auto === true && !provenOnLoad) {
+            return {
+                statusCode: 200,
+                headers: getHeaders(),
+                body: JSON.stringify({ confirm: true, email: maskEmail(user.email) })
             };
         }
 

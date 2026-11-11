@@ -1,7 +1,7 @@
 // help.js — Help & Support (the workspace's `help` view, help-content.html).
 //
 // Three tabs:
-//   Knowledge Base   → help_articles (read-only here; edited in Admin → Master Data → Help articles)
+//   Knowledge Base   → help_articles (read-only here; edited in Admin → Growth → Help articles)
 //   Contact us       → ONE form and ONE list for the customer (2026-10-18), two queues behind it:
 //                        "Something isn't working" → issue_reports (Admin → Issue Reports, the fix
 //                        workflow, with area + screenshot); every other topic → support_tickets +

@@ -1,6 +1,6 @@
 // netlify/functions/admin-coupons.ts
 //
-// Admin → Revenue → Coupons. Every coupon is created in Stripe AND recorded in billing_coupons, so
+// Admin → Money → Coupons. Every coupon is created in Stripe AND recorded in billing_coupons, so
 // the admin portal can list, edit and delete them without anyone opening the Stripe dashboard.
 // Checkout keeps asking Stripe whether a code is valid (validate-promo.ts) — Stripe is the
 // authority on redemption; this table is our record of what exists and who made it.

@@ -41,7 +41,25 @@ export interface AudioOverlay {
     captions?: boolean;
     /** How those captions look (captions.ts CaptionStyle); absent = the original look. */
     captionStyle?: CaptionStyle;
+    /**
+     * Extra gain on top of `volume`, up to MAX_LEVEL (src/lib/loudness.ts): a quiet voice brought up
+     * to the loudness target. Absent = 1. Only the Video Producer sets it; an older render bundle
+     * ignores it and plays the track at `volume`.
+     */
+    level?: number;
+    /**
+     * Duck this track (a music bed) while someone speaks: inside each window, seconds from the
+     * track's own start, the gain is multiplied by `volume` (0..1), with a short ramp either side.
+     */
+    duck?: AudioDuck;
 }
+
+export interface AudioDuck { volume: number; windows: Array<{ startS: number; endS: number }> }
+
+/** The most extra gain a track may carry (+12 dB). */
+export const MAX_LEVEL = 4;
+/** How long a duck takes to come down and go back up. */
+export const DUCK_RAMP_S = 0.25;
 
 export const AUDIO_DEFAULTS = { volume: 1, fadeInS: 0.05, fadeOutS: 0.05 };
 
@@ -87,9 +105,42 @@ export function sanitiseAudioOverlays(raw: unknown): AudioOverlay[] | null {
             ...(endS != null ? { endS } : {}),
             ...(typeof o.captions === 'boolean' ? { captions: o.captions } : {}),
             ...(o.captionStyle && typeof o.captionStyle === 'object' ? { captionStyle: normalizeCaptionStyle(o.captionStyle) } : {}),
+            ...(typeof o.level === 'number' && Number.isFinite(o.level) && o.level > 0 && o.level !== 1 ? { level: Math.min(MAX_LEVEL, o.level) } : {}),
+            ...(readDuck(o.duck) ? { duck: readDuck(o.duck)! } : {}),
         });
     }
     return out;
+}
+
+/** A duck from stored data, or null when it isn't one. At most 200 windows. Pure. */
+export function readDuck(raw: unknown): AudioDuck | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const d = raw as Record<string, unknown>;
+    if (!Array.isArray(d.windows)) return null;
+    const windows = d.windows.slice(0, 200).flatMap((w) => {
+        const o = (w && typeof w === 'object' ? w : {}) as Record<string, unknown>;
+        const a = Number(o.startS), b = Number(o.endS);
+        return Number.isFinite(a) && Number.isFinite(b) && b > a && a >= 0 ? [{ startS: a, endS: b }] : [];
+    });
+    if (!windows.length) return null;
+    return { volume: clamp01(Number(d.volume) || 0), windows };
+}
+
+/**
+ * The duck multiplier at `t` seconds into the track: `volume` inside a window, 1 well outside, and a
+ * straight ramp over DUCK_RAMP_S on each edge (outside the window, so speech is never caught loud). Pure.
+ */
+export function duckAt(duck: AudioDuck | null | undefined, t: number): number {
+    if (!duck || !duck.windows.length) return 1;
+    let m = 1;
+    for (const w of duck.windows) {
+        let k = 1;
+        if (t >= w.startS && t < w.endS) k = duck.volume;
+        else if (t < w.startS && t > w.startS - DUCK_RAMP_S) k = duck.volume + (1 - duck.volume) * ((w.startS - t) / DUCK_RAMP_S);
+        else if (t >= w.endS && t < w.endS + DUCK_RAMP_S) k = duck.volume + (1 - duck.volume) * ((t - w.endS) / DUCK_RAMP_S);
+        if (k < m) m = k;
+    }
+    return m;
 }
 
 /** Clips with something to play. Mirrors renderableOverlays() for text. */
@@ -152,6 +203,9 @@ export function audioGainAt(params: {
     volume: number;
     fadeInS?: number;
     fadeOutS?: number;
+    /** Extra gain (AudioOverlay.level). Absent = 1, and the result stays within 0..1 as it always has. */
+    level?: number;
+    duck?: AudioDuck | null;
 }): number {
     const total = Math.max(1, Math.floor(params.durationInFrames) || 1);
     const frame = Math.min(Math.max(Math.floor(params.frame) || 0, 0), total);
@@ -165,7 +219,9 @@ export function audioGainAt(params: {
     let gain = clamp01(params.volume);
     if (fadeIn > 0 && frame < fadeIn) gain *= frame / fadeIn;
     if (fadeOut > 0 && frame > total - fadeOut) gain *= (total - frame) / fadeOut;
-    return clamp01(gain);
+    if (params.duck) gain *= duckAt(params.duck, frame / (params.fps || 30));
+    const level = typeof params.level === 'number' && Number.isFinite(params.level) && params.level > 0 ? Math.min(MAX_LEVEL, params.level) : 1;
+    return level === 1 ? clamp01(gain) : Math.min(MAX_LEVEL, Math.max(0, clamp01(gain) * level));
 }
 
 /**

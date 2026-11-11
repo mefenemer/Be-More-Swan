@@ -47,7 +47,7 @@ STRIPE_SECRET_KEY_TEST=sk_test_…         # Stripe test secret key
 2. Create the schema in it: point drizzle at the sandbox URL and run `npm run db:push`.
    (e.g. `NETLIFY_DATABASE_URL=$SANDBOX_DATABASE_URL npm run db:push`)
 3. Add `STRIPE_SECRET_KEY_TEST`.
-4. Seed it: `npm run db:seed:sandbox` (CLI) or use **Platform → Sandbox Environment →
+4. Seed it: `npm run db:seed:sandbox` (CLI) or use **System → Sandbox →
    Seed Master Data** in the Admin Portal.
 
 ## Master data source of truth (US6)
@@ -67,7 +67,7 @@ npm run db:seed:sandbox         # seed SANDBOX
 npm run db:seed -- --no-stripe  # skip Stripe sync
 ```
 
-## Sandbox data management (Admin Portal → Platform → Sandbox Environment)
+## Sandbox data management (Admin Portal → System → Sandbox)
 
 Visible to super_admins; the action buttons appear **only in Sandbox mode**.
 

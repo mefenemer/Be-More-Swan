@@ -1448,16 +1448,13 @@
   }
 
   function toolbarHtml() {
-    if (state.form) return '';
-    return `
-      <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-        <p class="text-sm font-bold text-gray-900 mr-auto" style="margin-right:auto" data-explain="campaign">Your campaigns</p>
-        <!-- The chat route to a campaign, where the user lands. "Set an Objective" lived only on the
-             Orders tab, as a full page load, beside a header Chat button that opened a pop-up
-             (review, 2026-10-22). Both now open the same pop-up. -->
-        ${chatPaneAvailable() ? '' : '<button type="button" data-cmp-chat class="btn-assistant min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">Set an objective in chat</button>'}
-        <button type="button" data-cmp-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New campaign</button>
-      </div>`;
+    // The standard tab header (owner, 2026-11-07). The chat route to a campaign stays a secondary button where
+    // there is no docked chat: "Set an Objective" once lived only on the Orders tab, as a full page load (2026-10-22).
+    const chatBtn = chatPaneAvailable() || state.form ? '' : window._tabSecBtn('Set an objective in chat', 'data-cmp-chat');
+    return window._tabHead({
+      title: 'Campaigns', explain: 'campaign',
+      right: `${chatBtn}${window._tabFullBtn?.('campaigns') || ''}${state.form ? '' : window._tabNewBtn('New campaign', 'data-cmp-new')}`,
+    });
   }
 
   // ── Budget & Control strip ─────────────────────────────────────────────────

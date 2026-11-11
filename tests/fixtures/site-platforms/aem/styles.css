@@ -1,0 +1,15 @@
+/* SYNTHETIC: the shape of an Edge Delivery boilerplate styles.css */
+:root {
+  --background-color: #fffaf3;
+  --light-color: #f3eadd;
+  --dark-color: #4a3b2c;
+  --text-color: #2b2118;
+  --link-color: #b5532a;
+  --link-hover-color: #8e3f1f;
+  --body-font-family: 'Lora', georgia, serif;
+  --heading-font-family: 'Josefin Sans', helvetica, sans-serif;
+}
+body { font-family: var(--body-font-family); color: var(--text-color); background-color: var(--background-color); }
+h1, h2, h3 { font-family: var(--heading-font-family); }
+a:any-link { color: var(--link-color); }
+a.button:any-link, button { border-radius: 2.4em; background-color: var(--link-color); color: #fff; }

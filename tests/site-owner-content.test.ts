@@ -283,7 +283,7 @@ Our roastery is open on Saturdays from 9 until 1.`;
         assert.ok(card.includes("new CustomEvent('site:words'") && card.includes("new CustomEvent('site:apply'") && card.includes('Your wording, unchanged'));
         assert.ok(card.indexOf("'site:words'") < card.indexOf("'site:apply'"));
         const chat = read('src/components/chat-session.js');
-        assert.ok(chat.includes("sitePost({ action: 'words', assistantId, pageId: d.pageId, attachmentId: d.attachmentId, quote: d.quote, chatSessionId"));
+        assert.ok(chat.includes("sitePost({ action: 'words', assistantId, pageId: d.pageId, attachmentId: d.attachmentId, quote: d.quote, sourceUrl: d.sourceUrl || null, chatSessionId"));
         assert.ok(chat.includes("container.addEventListener('site:words', onSiteWords)") && chat.includes("container.removeEventListener('site:words', onSiteWords)"));
     });
 

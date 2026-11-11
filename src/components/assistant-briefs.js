@@ -1,4 +1,4 @@
-// What work costs comes from Admin → Revenue → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
 window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/assistant-briefs.js
@@ -203,15 +203,13 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ${''/* Pills in a grey track, not underlined tabs (owner, 2026-11-06): the page's own tabs above are
          underlined, and these filter a list rather than move round the page. overflow-y is hidden inline:
          overflow-x:auto alone gave the row a stray vertical scrollbar. */}
-      <div role="tablist" aria-label="Briefs by stage" class="inline-flex max-w-full gap-1 p-1 rounded-xl bg-gray-100 mb-4" style="overflow-x:auto;overflow-y:hidden" data-brief-tabs>
+      <div role="tablist" aria-label="Briefs by stage" class="stage-pills tab-scroller" data-brief-tabs>
         ${TABS.map((t) => {
           const n = inTab(t.key).length;
           const on = state.tab === t.key;
-          const urgent = t.key === 'todo' && inTab('todo').some(hasOptionsWaiting);
+          // The one count style (owner, 2026-11-07): amber on To do, which is what waits for you; grey elsewhere, 0 shown.
           return `<button type="button" role="tab" id="brief-tab-${t.key}" aria-selected="${on}" aria-controls="brief-tab-panel" tabindex="${on ? 0 : -1}" data-brief-tab="${t.key}"
-            class="flex-shrink-0 min-h-[44px] sm:min-h-0 px-3 py-1.5 rounded-lg text-sm font-bold whitespace-nowrap transition ${on ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:text-gray-900'}">
-            ${esc(t.label)} <span class="ml-1 inline-block min-w-[20px] px-1.5 rounded-full text-[11px] text-center ${urgent ? 'bg-amber-100 text-amber-900' : on ? 'bg-gray-100 text-gray-700' : 'bg-gray-200 text-gray-700'}">${n}</span>
-          </button>`;
+            class="flex-shrink-0 min-h-[44px] sm:min-h-0 text-sm whitespace-nowrap">${esc(t.label)}${window._tabPillCount(n, t.key === 'todo')}</button>`;
         }).join('')}
       </div>`;
   }
@@ -743,16 +741,11 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const creditsLabel = `${state.unit === 'tasks' ? 'Tasks left this month' : 'AI credits left this month'}: ${leftText}`;
     const credits = state.credits == null || (state.unit === 'tasks' && state.credits >= 1000000) || allowanceShown ? ''
       : `<span class="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 text-[11px] font-semibold text-gray-600 whitespace-nowrap" title="${esc(creditsLabel)}">${esc(leftText)} ${state.unit === 'tasks' ? 'tasks' : 'credits'} left</span>`;
-    return `
-      <div class="flex items-center justify-between gap-3 mb-3" data-brief-toolbar>
-        <h2 class="text-base font-bold text-gray-900 shrink-0"><span data-explain="brand-briefs">Briefs</span></h2>
-        <div class="flex flex-wrap items-center justify-end gap-2">
-          ${credits}
-          ${''/* Select lives in the editor, where the design is changed (owner 2026-11-05): not beside New brief. */}
-          <button type="button" data-brief-full aria-pressed="${state.full ? 'true' : 'false'}" title="${state.full ? 'Back to the page (Esc)' : 'Use the whole screen for your briefs and the chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg">${state.full ? 'Exit full screen' : 'Full screen'}</button>
-          ${state.form ? '' : `<button type="button" data-brief-new class="btn-primary min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition">New brief</button>`}
-        </div>
-      </div>`;
+    // The standard tab header (owner, 2026-11-07): what's left this month is its status chip.
+    const chip = credits.replace('class="inline-flex items-center px-2 py-1 rounded-full bg-gray-100 text-[11px] font-semibold text-gray-600 whitespace-nowrap"', 'class="tab-head-chip"');
+    const full = `<button type="button" data-brief-full aria-pressed="${state.full ? 'true' : 'false'}" title="${state.full ? 'Back to the page (Esc)' : 'Use the whole screen for your briefs and the chat'}" class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-2 text-sm font-bold rounded-lg whitespace-nowrap">${state.full ? 'Exit full screen' : 'Full screen'}</button>`;
+    return window._tabHead({ title: 'Briefs', explain: 'brand-briefs', chip, attrs: 'data-brief-toolbar',
+      right: `${full}${state.form ? '' : window._tabNewBtn('New brief', 'data-brief-new')}` });
   }
 
   /**
@@ -763,7 +756,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   function emptyState() {
     return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center">
+      <div class="p-8 text-center">
         <p class="text-sm font-bold text-gray-700">No briefs yet</p>
         <p class="text-xs text-gray-500 mt-2">Press "New brief" and ${esc(state.assistantName || 'your Brand Designer')} will ask a few quick questions, or just say what you need in the chat. Once you have answered, it starts making the design and opens it here, to change and approve. Only an AI-made picture uses a task, and the question says so.</p>
       </div>`;
@@ -800,15 +793,20 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     if (state.tab === 'making' && !inTab('making').length && inTab('todo').some(hasOptionsWaiting)) state.tab = 'todo';
     const tab = TABS.find((t) => t.key === state.tab);
     const shown = inTab(state.tab);
+    // The standard tab card (owner, 2026-11-07): pills first with Show all / Hide all at their right, the
+    // tab's help line, then the briefs.
+    const foldLink = shown.length > 1 ? (shown.every((b) => isCollapsed(b.id))
+      ? '<button type="button" data-brief-expand-all class="tab-link min-h-[44px] sm:min-h-0">Show all</button>'
+      : '<button type="button" data-brief-collapse-all class="tab-link min-h-[44px] sm:min-h-0">Hide all</button>') : '';
     host.innerHTML = `
       ${toolbarHtml()}
       ${formHtml()}
-      ${state.briefs.length || state.form ? tabsHtml() : ''}
-      <div id="brief-tab-panel" role="tabpanel" aria-labelledby="brief-tab-${tab.key}" class="${state.picking ? 'brief-picking' : ''}">
-        ${!state.briefs.length && !state.form ? emptyState() : shown.length ? `<div class="flex flex-wrap items-center justify-between gap-2 mb-3"><p class="text-xs text-gray-600">${esc(tab.help)}</p>${shown.length > 1 ? (shown.every((b) => isCollapsed(b.id))
-          ? '<button type="button" data-brief-expand-all class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold">Show all</button>'
-          : '<button type="button" data-brief-collapse-all class="btn-swan-link min-h-[44px] sm:min-h-0 text-xs font-bold">Hide all</button>') : ''}</div>` : `<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center"><p class="text-sm text-gray-600">${esc(tab.empty)}</p></div>`}
-        <div class="space-y-4">${shown.map(briefCard).join('')}</div>
+      <div class="tab-card">
+        ${state.briefs.length || state.form ? `<div class="tab-pillbar">${tabsHtml()}<div class="tab-pillbar-actions">${foldLink}</div></div>` : ''}
+        <div id="brief-tab-panel" role="tabpanel" aria-labelledby="brief-tab-${tab.key}" class="px-4 pb-4 pt-2 ${state.picking ? 'brief-picking' : ''}">
+          ${!state.briefs.length && !state.form ? emptyState() : shown.length ? `<p class="text-xs text-gray-600 mb-3">${esc(tab.help)}</p>` : `<div class="p-8 text-center"><p class="text-sm text-gray-600">${esc(tab.empty)}</p></div>`}
+          <div class="space-y-4">${shown.map(briefCard).join('')}</div>
+        </div>
       </div>`;
     ensurePickCss();
 

@@ -20,6 +20,7 @@ import { VOICES } from '../src/lib/tts';
 import { VIDEO_PRODUCER_ROLE_KEY } from '../src/constants/roles';
 import { RULE_READING_ROLES } from '../src/utils/assistant-rules-prompt';
 import { promptLayersFor, ROLE_MODEL_PATHS } from '../src/config/assistant-prompt-layers';
+import { ROLE_CONNECTIONS, isServiceAllowedForAssistant } from '../src/utils/connection-map';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -39,7 +40,12 @@ check('the role key is one constant, used verbatim everywhere', () => {
 });
 
 check('it has an explicit connection policy — never the fail-open fallback', () => {
-    assert.ok(/video_producer:\s*\['social', 'design'\]/.test(read('src/utils/connection-map.ts')));
+    // Canva only: the studio never posts, so social accounts connect to the Social Media Manager.
+    assert.ok(/video_producer:\s*\['design'\],/.test(read('src/utils/connection-map.ts')));
+    assert.deepStrictEqual(ROLE_CONNECTIONS.video_producer, ['design']);
+    assert.ok(!isServiceAllowedForAssistant('instagram', { roleKey: 'video_producer', role: 'Video Producer' }));
+    assert.ok(!isServiceAllowedForAssistant('youtube', { roleKey: 'video_producer', role: 'Video Producer' }));
+    assert.ok(isServiceAllowedForAssistant('canva', { roleKey: 'video_producer', role: 'Video Producer' }));
 });
 
 check('inserted HIDDEN, with the three capability grants it needs', () => {
@@ -76,7 +82,8 @@ check('the chat names only tabs and buttons that exist', () => {
     const registry = read('src/components/assistant-dashboard-registry.js');
     const tab = read('src/components/assistant-videos.js');
     assert.ok(registry.includes("videosTab: { label: 'Videos' }") && surfaces.includes('"Videos" tab'));
-    assert.ok(registry.includes("reviewQueue: { kind: 'posts', label: 'Review Queue' }") && surfaces.includes('"Review Queue" tab'));
+    // No Review Queue tab since 2026-11-10 (a studio never posts); its videos are on My Content.
+    assert.ok(registry.includes("myContentTab: { label: 'My Content', type: 'video' }") && surfaces.includes('"My Content" tab') && !surfaces.includes('"Review Queue" tab'));
     for (const button of ['New video', 'Change', 'Plan it again', 'Make the video', 'Cancel']) {
         assert.ok(surfaces.includes(`"${button}"`), `chat names "${button}"`);
         assert.ok(tab.includes(`>${button}`) || tab.includes(`>${button}$`) || tab.includes(`${button}</button>`) || tab.includes(`>Make the video\${`), `the tab has "${button}"`);

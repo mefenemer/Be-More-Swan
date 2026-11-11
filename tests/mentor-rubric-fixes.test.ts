@@ -39,7 +39,7 @@ check('W8: only a Mentor turn passes the no-plan paywall, never a Team note, and
 check('W8: help-only mode reads the Help Centre and draws nothing but the support card and Take Me There', () => {
     assert.match(ORCH, /const mentorNoPlanBlock = mentorNoPlan \?/);
     assert.match(ORCH, /loadHelpKnowledge\(db\)/);
-    assert.match(ORCH, /myAccountBlock, mentorPointerBlock, mentorNoPlanBlock\]\.filter\(Boolean\)/);
+    assert.match(ORCH, /myAccountBlock, mentorPointerBlock, mentorNoPlanBlock, offersOwnCards \? SUPPORT_REQUEST_PROMPT : null, ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT\]\.filter\(Boolean\)/);
     // Take Me There (2026-11-02) only opens a page and changes nothing, so it is allowed without a plan too.
     assert.match(ORCH, /if \(mentorNoPlan && !\['mentor_support_request', 'mentor_take_me_there'\]\.includes\(String\(\(uiElement as \{ type\?: unknown \} \| null\)\?\.type\)\)\) uiElement = null;/);
     assert.match(ORCH, /if \(!uiElement && !mentorNoPlan\) uiElement = cardTheUserAskedFor\(typed\);/);
@@ -72,11 +72,11 @@ check('prod 2026-10-26: a reply that points at a change below without saying "ca
     }
 });
 
-check('W6: the Mentor route applies the guard after the last card decision', () => {
+check('W6: every route (the Mentor included) applies the guard after the last card decision', () => {
     const at = ORCH.indexOf('const fixed = missingCardReply(content, !!uiElement);');
     assert.ok(at > 0);
     assert.ok(at > ORCH.indexOf('if (!uiElement && asksForACall(typed)) uiElement = callbackOfferElement();'));
-    assert.match(ORCH, /if \(route === ROUTES\.business_mentor\) \{\s*const fixed = missingCardReply/);
+    assert.match(ORCH, /\{\s*const fixed = missingCardReply/); // every route since prod 2026-11-07 (org 40)
 });
 
 check('W9: the shared rule only names the call-back button when it is really shown', () => {

@@ -31,7 +31,7 @@ import { OVERLAY_ANIM_S, OVERLAY_ANIMS } from '../src/lib/overlay-geometry';
 import {
     OUTCOMES, OUTCOME_LABELS, LOSS_REASONS, LOSS_REASON_LABELS, OUTCOMES_REQUIRING_LOSS_REASON,
 } from '../src/config/revenue-events';
-import { EDIT_REASONS, EDIT_REASON_LABELS } from '../src/config/template-feedback';
+import { EDIT_NOTE_MAX, EDIT_REASONS, EDIT_REASON_LABELS } from '../src/config/template-feedback';
 import { LEAD_REJECT_REASONS, LEAD_REJECT_REASON_LABELS } from '../src/config/lead-reject-reasons';
 import {
     CAMPAIGN_REJECT_REASONS, CAMPAIGN_REJECT_REASON_LABELS,
@@ -319,6 +319,9 @@ ${formatRows}
     editReasonLabel: function (r) {
       return EDIT_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
     },
+
+    /** The longest note after "Something else" (Fix pipeline #37), from src/config/template-feedback.ts. */
+    editNoteMax: ${EDIT_NOTE_MAX},
 
     /** Why a reviewer rejected a lead, from src/config/lead-reject-reasons.ts. */
     leadRejectReasons: LEAD_REJECT_REASONS,

@@ -242,7 +242,7 @@ check('Mystery Shopper: "Checking your site…" clears when the check ends, in b
 check('the sidebar Calendar loads every assistant\'s own dated work, not only on the assistant\'s tab', () => {
     const cal = read('calendar.js');
     assert.ok(cal.includes(': _globalExtraTargets(assistants || _assistants);'));
-    assert.ok(cal.includes("const datedSource = ['records', 'briefs', 'checks', 'campaigns'].includes(cfg.calendarItems)"), 'roles from the registry');
+    assert.ok(cal.includes("const datedSource = ['records', 'briefs', 'checks', 'campaigns', 'videos'].includes(cfg.calendarItems)"), 'roles from the registry');
     for (const fn of ['_datedItemsOnDate', '_scheduledRecordsOnDate', '_followUpsOnDate']) {
         const body = cal.slice(cal.indexOf(`function ${fn}(`), cal.indexOf(`function ${fn}(`) + 300);
         assert.ok(body.includes('_matchesAssistantFilter('), `${fn} respects the assistant filter`);

@@ -1,0 +1,7 @@
+/* SYNTHETIC excerpt modelled on a Squarespace 7.1 site.css (static1.squarespace.com/static/versioned-site-css/…/site.css). The palette is HSL triples on :root; fonts sit behind --*-font-font-family. */
+:root{--white-hsl:40,33.33333333%,97.05882353%;--sqsp-palette-lightest-color:hsla(40,33.33333333%,97.05882353%,1);--black-hsl:200,18.18181818%,12.94117647%;--sqsp-palette-darkest-color:hsla(200,18.18181818%,12.94117647%,1);--accent-hsl:16,55.55555556%,47.05882353%;--sqsp-palette-accent-color:hsla(16,55.55555556%,47.05882353%,1);--lightAccent-hsl:30,30%,90%;--darkAccent-hsl:160,25%,25%;--safeLightAccent-hsl:16,55.55555556%,47.05882353%;--safeDarkAccent-hsl:16,55.55555556%,47.05882353%}
+:root{--heading-font-font-family:"Playfair Display";--body-font-font-family:"Work Sans";--meta-font-font-family:"Work Sans"}
+.white{--siteBackgroundColor:hsla(var(--white-hsl),1);--headingLargeColor:hsla(var(--black-hsl),1);--paragraphMediumColor:hsla(var(--black-hsl),1);--primaryButtonBackgroundColor:hsla(var(--accent-hsl),1)}
+.sqs-button-element--primary{font-family:var(--primary-button-font-font-family);border-radius:300px}
+h1{font-family:var(--heading-font-font-family)}
+body{font-family:var(--body-font-font-family)}

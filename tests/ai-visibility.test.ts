@@ -1,5 +1,5 @@
 // tests/ai-visibility.test.ts
-// Admin → Platform → AI Visibility (admin-ai-visibility.ts, ai-visibility-fetch-background.ts,
+// Admin → Growth → AI visibility (admin-ai-visibility.ts, ai-visibility-fetch-background.ts,
 // src/utils/ai-visibility.ts, db/z-ai-visibility.sql).
 //
 // The numbers on that page decide where marketing effort goes, and every way they can be wrong is
@@ -269,10 +269,10 @@ console.log('Admin page');
 const html = read('admin.html');
 const $ = cheerio.load(html);
 
-check('the nav entry sits under Platform → Insights with the permission the API enforces', () => {
-    assert.match(html, /\{ view: 'ai-visibility',\s+icon: '🔎', label: 'AI Visibility',\s+perm: 'platform_config',\s+group: 'Insights' \}/);
+check('the nav entry sits under Growth → Reputation with the permission the API enforces', () => {
+    assert.match(html, /\{ view: 'ai-visibility',\s+icon: '🔎', label: 'AI visibility',\s+perm: 'platform_config',\s+group: 'Reputation' \}/);
     assert.match(html, /if \(view === 'ai-visibility'\)\s+loadAiVisibility\(\);/);
-    assert.match(html, /'ai-visibility': 'AI Visibility'/);
+    assert.match(html, /'ai-visibility': 'AI visibility'/);
 });
 
 check('the section exists and the answer form is NOT inside any .admin-view (it would never open)', () => {

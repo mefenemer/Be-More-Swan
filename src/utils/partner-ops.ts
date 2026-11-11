@@ -1,5 +1,5 @@
 // src/utils/partner-ops.ts
-// Affiliate Partner Programme — the READ side shared by Admin → Revenue → Partners (admin-partners.ts)
+// Affiliate Partner Programme — the READ side shared by Admin → Money → Partners (admin-partners.ts)
 // and its Partner Ops chat (admin-partners-chat.ts). One query per question, so the screen and the
 // chat can never disagree about a partner's numbers.
 //

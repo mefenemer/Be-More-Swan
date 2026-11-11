@@ -9,7 +9,7 @@
 // Services are Business Information products (org_products) with a duration; their names and
 // prices are read from there, never typed here. Opening hours and rules: booking_settings.
 
-import { and, asc, eq, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNotNull, lt, ne, or, sql } from 'drizzle-orm';
 import { createHash } from 'crypto';
 import type { getDb } from '../../db/client';
 import { aiAssistants, bookableResources, bookingSettings, bookings, orgProducts, users } from '../../db/schema';
@@ -24,16 +24,19 @@ import { depositNote, holdsTime, holdUntil, refundDeposit } from './booking-depo
 import { connectAccountFor } from './site-shop';
 import { loadBusy } from './calendar-sync';
 import { depositLabel } from './product-price';
+import { customerMeetingHtml, icsMeeting, meetingForNewBooking, ownerMeetingLine } from './booking-meeting';
 
 type Db = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
 export interface BookableService { id: number; name: string; price: string | null; durationMinutes: number; description: string | null;
-    depositType: string | null; depositAmount: number | null; priceType: string | null; priceAmount: number | null; }
+    depositType: string | null; depositAmount: number | null; priceType: string | null; priceAmount: number | null; priceCurrency?: string | null;
+    /** 'in_person' | 'phone' | 'video'; null = in person (booking-meeting.ts). */
+    meetingLocation?: string | null; }
 export interface BookingSetup {
     exists: boolean;
     settings: typeof BOOKING_DEFAULTS;
-    resources: Array<AvailabilityResource & { kind: string }>;
+    resources: Array<AvailabilityResource & { kind: string; meetingUrl?: string | null }>;
     services: BookableService[];
 }
 
@@ -43,7 +46,7 @@ export async function loadBookingSetup(db: Db | Tx, orgId: number): Promise<Book
         .where(and(eq(bookableResources.organisationId, orgId), eq(bookableResources.status, 'active')))
         .orderBy(asc(bookableResources.sortOrder), asc(bookableResources.id));
     const svc = await db.select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price, durationMinutes: orgProducts.durationMinutes, description: orgProducts.description,
-        depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount })
+        depositType: orgProducts.depositType, depositAmount: orgProducts.depositAmount, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceCurrency: orgProducts.priceCurrency, meetingLocation: orgProducts.meetingLocation })
         .from(orgProducts)
         .where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active'), isNotNull(orgProducts.durationMinutes)))
         .orderBy(asc(orgProducts.sortOrder), asc(orgProducts.id));
@@ -53,7 +56,7 @@ export async function loadBookingSetup(db: Db | Tx, orgId: number): Promise<Book
         resources: res.map((r) => {
             const hours = r.weeklyHours ? cleanWeeklyHours(r.weeklyHours) : null;
             return {
-                id: r.id, name: r.name, kind: r.kind, capacity: r.capacity,
+                id: r.id, name: r.name, kind: r.kind, capacity: r.capacity, meetingUrl: r.meetingUrl ?? null,
                 weeklyHours: hours && hours.ok && Object.keys(hours.value).length ? hours.value : null,
                 serviceIds: Array.isArray(r.serviceIds) ? (r.serviceIds as unknown[]).map(Number).filter(Number.isInteger) : null,
             };
@@ -81,7 +84,8 @@ async function takenOn(db: Db | Tx, orgId: number, date: string): Promise<TakenB
     const to = new Date(`${addDays(date, 2)}T00:00:00Z`);
     const rows = await db.select({ resourceId: bookings.resourceId, startsAt: bookings.startsAt, endsAt: bookings.endsAt, partySize: bookings.partySize })
         .from(bookings)
-        .where(and(eq(bookings.organisationId, orgId), holdsTime, gte(bookings.startsAt, from), lt(bookings.startsAt, to)));
+        // Stays (holiday lets, B&B rooms) hold houses and rooms, never staff or tables (stays.ts).
+        .where(and(eq(bookings.organisationId, orgId), holdsTime, ne(bookings.kind, 'stay'), gte(bookings.startsAt, from), lt(bookings.startsAt, to)));
     return rows.map((r) => ({ resourceId: r.resourceId, startsAt: new Date(r.startsAt), endsAt: new Date(r.endsAt), partySize: r.partySize }));
 }
 
@@ -165,6 +169,8 @@ export async function createBooking(db: Db, orgId: number, b: NewBooking & { rep
             status: awaiting ? 'awaiting_payment' : instant ? 'confirmed' : 'pending',
             decidedAt: !awaiting && instant ? new Date() : null,
             movedFromId: b.replaceBookingId ?? null,
+            // Where it happens and the video link, as they are now (booking-meeting.ts). Tables: none.
+            ...(b.kind === 'table' ? {} : meetingForNewBooking(service, resource, setup.settings)),
             // A deposit: held until paid. A MOVE keeps the deposit already paid on the booking it replaces.
             ...(awaiting ? { depositPence: b.deposit, paymentStatus: 'unpaid', holdExpiresAt: holdUntil(b.now) } : {}),
             ...(moved?.depositPence ? { depositPence: moved.depositPence, paymentStatus: moved.paymentStatus, paymentIntentId: moved.paymentIntentId } : {}),
@@ -227,6 +233,15 @@ export async function announceCustomerChange(db: Db, change: 'cancelled' | 'move
 export type BookingRow = typeof bookings.$inferSelect;
 
 export function describeBooking(b: BookingRow, tz: string): { when: string; what: string } {
+    // A stay (holiday let / B&B room, stays.ts): dates and nights, not a time of day.
+    if (b.kind === 'stay' && b.checkIn && b.checkOut) {
+        const nights = Math.round((Date.parse(`${b.checkOut}T00:00:00Z`) - Date.parse(`${b.checkIn}T00:00:00Z`)) / 86_400_000);
+        const rooms = (b.rooms ?? 1) > 1 ? `${b.rooms} rooms, ` : '';
+        return {
+            what: `${b.serviceName ?? 'Stay'} (${rooms}${b.partySize} guest${b.partySize === 1 ? '' : 's'})`,
+            when: `${formatDate(b.checkIn)} to ${formatDate(b.checkOut)} (${nights} night${nights === 1 ? '' : 's'})`,
+        };
+    }
     const z = utcToZoned(new Date(b.startsAt), tz);
     const end = utcToZoned(new Date(b.endsAt), tz);
     const what = b.kind === 'table'
@@ -241,6 +256,7 @@ const icsTime = (d: Date) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{
 /** A calendar invite (RFC 5545) the customer's calendar can add in one tap. */
 export function bookingIcs(b: BookingRow, business: string, uidDomain = 'bemoreswan.site'): string {
     const { what } = describeBooking(b, 'UTC');
+    const m = icsMeeting(b);
     return [
         'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Be More Swan//Bookings//EN', 'METHOD:PUBLISH',
         'BEGIN:VEVENT',
@@ -249,7 +265,9 @@ export function bookingIcs(b: BookingRow, business: string, uidDomain = 'bemores
         `DTSTART:${icsTime(new Date(b.startsAt))}`,
         `DTEND:${icsTime(new Date(b.endsAt))}`,
         `SUMMARY:${icsText(`${what} — ${business}`)}`,
-        `DESCRIPTION:${icsText(`Booked with ${business}.`)}`,
+        `DESCRIPTION:${icsText([`Booked with ${business}.`, m.url ? `Join the video call: ${m.url}` : ''].filter(Boolean).join('\n'))}`,
+        ...(m.location ? [`LOCATION:${icsText(m.location)}`] : []),
+        ...(m.url ? [`URL:${icsText(m.url)}`] : []),
         'STATUS:CONFIRMED',
         'END:VEVENT', 'END:VCALENDAR', '',
     ].join('\r\n');
@@ -294,6 +312,7 @@ export async function announceNewBooking(db: Db, b: BookingRow, ctx: BookingNoti
                 subject: `${pending ? 'Booking request' : 'New booking'}: ${what}, ${when}`,
                 html: `<p><strong>${esc(b.customerName)}</strong> ${pending ? 'asked to book' : 'booked'} <strong>${esc(what)}</strong> on <strong>${esc(when)}</strong>.</p>
 <p>Email: ${esc(b.customerEmail)}${b.customerPhone ? `<br>Phone: ${esc(b.customerPhone)}` : ''}</p>
+${ownerMeetingLine(b) ? `<p>${esc(ownerMeetingLine(b))}</p>` : ''}
 ${b.notes ? `<p style="white-space:pre-wrap">${esc(b.notes)}</p>` : ''}
 <p>${pending ? 'Confirm or decline it on your Website Assistant\'s Bookings tab — the time is held until you do.' : 'It is confirmed and on your Bookings tab.'} Reply to this email to write to them.</p>`,
             }).catch((err: unknown) => console.error('[bookings] owner email failed', err instanceof Error ? err.message : err));
@@ -318,6 +337,8 @@ export async function emailCustomer(b: BookingRow, notice: CustomerNotice, ctx: 
     const link = ctx.siteOrigin && (notice === 'received' || notice === 'confirmed' || notice === 'reminder') ? manageBookingUrl(ctx.siteOrigin, b.id) : null;
     const manage = link ? `<p><a href="${esc(link)}">Change or cancel your booking</a></p>` : '';
     const { subject, body } = lines[notice];
+    // How it happens — the video link only once confirmed (booking-meeting.ts).
+    const meeting = notice === 'received' || notice === 'confirmed' || notice === 'reminder' ? customerMeetingHtml(b, ctx.business) : '';
     const policy = (notice === 'confirmed' || notice === 'received') && ctx.cancellationPolicy ? `<p><strong>Cancellation:</strong> ${esc(ctx.cancellationPolicy)}</p>` : '';
     // The deposit, where there is one: paid with the booking, or given back when it ended.
     const money = depositNote(b);
@@ -327,7 +348,7 @@ export async function emailCustomer(b: BookingRow, notice: CustomerNotice, ctx: 
         : b.paymentStatus === 'refund_failed' ? `<p>${esc(ctx.business)} will refund your deposit.</p>` : '';
     await sendEmail({
         to: b.customerEmail, from: fromLine(ctx.business), ...(ownerEmail ? { replyTo: ownerEmail } : {}),
-        subject, html: `${body}${depositLine}${policy}${manage}<p>${manage ? 'Or reply to this email.' : 'To change anything, reply to this email.'}</p>`,
+        subject, html: `${body}${meeting}${depositLine}${policy}${manage}<p>${manage ? 'Or reply to this email.' : 'To change anything, reply to this email.'}</p>`,
         ...(notice === 'confirmed' ? { attachments: [{ filename: 'booking.ics', content: Buffer.from(bookingIcs(b, ctx.business)).toString('base64'), contentType: 'text/calendar' }] } : {}),
     }).catch((err: unknown) => console.error('[bookings] customer email failed', err instanceof Error ? err.message : err));
 }
@@ -341,6 +362,8 @@ export async function decideBooking(db: Db, orgId: number, id: number, action: '
     if (!row) return { ok: false, error: 'That booking has already been dealt with.' };
     // Declined or cancelled by the business: a deposit always goes back, before they're told.
     if (action !== 'confirm' && row.paymentStatus === 'paid') row.paymentStatus = await refundDeposit(db, row) === 'refunded' ? 'refunded' : 'refund_failed';
+    // A stay may also have taken its balance and a damage deposit: all of it goes back, and nothing more is asked for.
+    if (action !== 'confirm' && row.kind === 'stay') await (await import('./stay-charges')).refundStayRest(db, row);
     const [owner] = ctx.assistantId ? await db.select({ email: users.email }).from(aiAssistants).leftJoin(users, eq(users.id, aiAssistants.userId)).where(eq(aiAssistants.id, ctx.assistantId)).limit(1) : [];
     await emailCustomer(row, ({ confirm: 'confirmed', decline: 'declined', cancel: 'cancelled' } as const)[action], ctx, owner?.email ?? null);
     await calendarSoon(db, orgId);
@@ -350,7 +373,9 @@ export async function decideBooking(db: Db, orgId: number, id: number, action: '
 /** Upcoming and recent bookings for the owner (newest decisions needed first, then by time). */
 export async function listBookings(db: Db, orgId: number, sinceDaysAgo = 30): Promise<BookingRow[]> {
     const since = new Date(Date.now() - sinceDaysAgo * 86_400_000);
-    return db.select().from(bookings).where(and(eq(bookings.organisationId, orgId), gte(bookings.startsAt, since))).orderBy(asc(bookings.startsAt));
+    // A stay whose damage deposit is still held stays on the list however long ago it began (stay-jobs.ts).
+    return db.select().from(bookings).where(and(eq(bookings.organisationId, orgId), or(gte(bookings.startsAt, since), and(eq(bookings.kind, 'stay'), eq(bookings.damageDepositStatus, 'held')))))
+        .orderBy(asc(bookings.startsAt));
 }
 
 /** The customer's email address, hashed — for a per-person rate limit without storing it twice. */

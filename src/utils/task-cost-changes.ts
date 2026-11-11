@@ -1,7 +1,7 @@
 // src/utils/task-cost-changes.ts — changing what work costs: draft → announce → in force, with acceptance.
 //
 // Owner decisions, 2026-11-06:
-//   · A super admin sets costs in Admin → Revenue → Task costs. Nothing is decided in code.
+//   · A super admin sets costs in Admin → Money → Task costs. Nothing is decided in code.
 //   · Every change is announced to customers by broadcast (in-app and email), and asks for acceptance.
 //   · The new cost applies to everyone on its date. A workspace owner who has not accepted by then sees a
 //     prompt they cannot dismiss (accept, or go to Billing to cancel: terms 20.2, 20.3). Scheduled work

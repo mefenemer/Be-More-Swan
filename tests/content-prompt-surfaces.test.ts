@@ -126,7 +126,7 @@ for (const r of ROLES) {
             assert.ok(surfaces.includes(`"${tab}" tab`), `${r.helper}() no longer mentions the "${tab}" tab`);
             assert.ok(TAB_ON_PAGE[tab](reg), `the "${tab}" tab is named in ${r.helper}() but is not on the page for ${r.role}`);
         }
-        assert.ok(page.includes('<span id="profile-btn-label">Assistant Settings</span>') && surfaces.includes('"Assistant Settings" button'));
+        assert.ok(page.includes('<span id="profile-btn-label">Assistant Settings</span>') && surfaces.includes('"Assistant Settings" (the menu down the right of the page'));
     });
 
     check('every column and Profile card it names is on the page', () => {
@@ -147,7 +147,7 @@ for (const r of ROLES) {
         // chat-email-action.ts) — but only by proposing a card the user confirms.
         if (r.helper === 'socialSurfaces') {
             assert.ok(/only that click changes anything/.test(surfaces), 'the social chat must say the user\'s click acts, not the chat');
-            assert.ok(/never say a post HAS been approved, rejected, retried, moved, removed, shortened, lengthened or made into a video/.test(surfaces));
+            assert.ok(/never say a post HAS been approved, rejected, retried, moved, removed, brought back, shortened, lengthened or made into a video/.test(surfaces));
         } else if (r.helper === 'blogSurfaces') {
             assert.ok(/only that click changes anything/.test(surfaces), 'the blog chat must say the user\'s click acts, not the chat');
             assert.ok(/never say an article HAS been approved, scheduled, unscheduled, rejected, removed, shortened, lengthened, revised or given pictures/.test(surfaces));

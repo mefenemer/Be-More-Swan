@@ -59,6 +59,7 @@ import { sanitizeForModel } from './text-safe';
 import { shortQuestion } from './mentor-jobs';
 import { isGlobalAiDisabled } from './platform-config';
 import { resolveBaseUrl } from './base-url';
+import { OUTSIDE_PRODUCTS_RULE } from '../constants/assistant-shared-prompts';
 
 type Db = any;
 
@@ -543,7 +544,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                 : '';
             const system = [
                 `You are ${name}, the Business Mentor of ${org?.name || 'this business'} on Be More Swan.`,
-                MENTOR_REVIEW_CRAFT, MENTOR_HONESTY_RULES, REVIEW_CONSISTENCY_RULES,
+                MENTOR_REVIEW_CRAFT, MENTOR_HONESTY_RULES, REVIEW_CONSISTENCY_RULES, OUTSIDE_PRODUCTS_RULE,
                 SPECIAL_CATEGORY_RULE,
                 renderMentorSnapshot(inputs.data), renderProposalState(inputs.proposals, now),
                 renderFigures(inputs.figures, inputs.data, now).join('\n'),

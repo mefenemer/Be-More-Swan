@@ -11,6 +11,8 @@
 // tests/video-chat-pane.test.ts.
 
 import type { Scene, Storyboard } from '../lib/storyboard';
+import { readNameCaption, type NameCaption } from '../lib/lower-third';
+import { readSceneText, type SceneTextFields } from '../lib/scene-text';
 
 export const VIDEO_SCENE_EDIT_TYPE = 'video_scene_edit';
 
@@ -21,11 +23,15 @@ type CardSource = typeof CARD_SOURCES[number];
 export interface VideoSceneRequest {
     projectId: number; scene: number; summary: string | null;
     voiceover?: string; onScreenText?: string; source?: CardSource; picture?: string;
+    /** A name caption for the scene; null takes it off. */
+    nameCaption?: NameCaption | null;
+    /** Where, when, how the words look and appear (scene-text.ts). Only valid values travel. */
+    text?: SceneTextFields;
 }
 export interface VideoSceneCard {
     type: typeof VIDEO_SCENE_EDIT_TYPE; projectId: number; scene: number; sceneId: string; summary: string | null;
     /** What edit_scene is sent. */
-    patch: { voiceover?: string; onScreenText?: string; source?: CardSource; keywords?: string; prompt?: string };
+    patch: { voiceover?: string; onScreenText?: string; source?: CardSource; keywords?: string; prompt?: string; nameCaption?: NameCaption | null } & SceneTextFields;
     now: { voiceover: string; onScreenText: string };
 }
 
@@ -46,7 +52,11 @@ export function videoSceneRequestFromUiElement(uiElement: unknown): VideoSceneRe
     if ((CARD_SOURCES as readonly unknown[]).includes(ui.source)) req.source = ui.source as CardSource;
     const picture = str(ui.picture, 120);
     if (picture) req.picture = picture;
-    return req.voiceover != null || req.onScreenText != null || req.source != null || req.picture != null ? req : null;
+    if (ui.nameCaption === null || (ui.nameCaption && typeof ui.nameCaption === 'object' && !String((ui.nameCaption as Record<string, unknown>).name ?? '').trim())) req.nameCaption = null;
+    else if (ui.nameCaption) { const nc = readNameCaption(ui.nameCaption); if (nc) req.nameCaption = nc; }
+    const text = readSceneText(ui);
+    if (Object.keys(text).length) req.text = text;
+    return req.voiceover != null || req.onScreenText != null || req.source != null || req.picture != null || req.nameCaption !== undefined || req.text ? req : null;
 }
 
 /** The card for this scene of this storyboard. Null when there is no such scene, or nothing would change. */
@@ -61,6 +71,14 @@ export function videoSceneCard(req: VideoSceneRequest, storyboard: Storyboard | 
         const source = req.source ?? scene.source;
         if (source === 'ai_image' || source === 'ai_video') patch.prompt = req.picture;
         else patch.keywords = req.picture;
+    }
+    if (req.nameCaption !== undefined && JSON.stringify(req.nameCaption) !== JSON.stringify(scene.nameCaption ?? null)) patch.nameCaption = req.nameCaption;
+    // Text placement only means something on words over a picture (a branded card draws its own).
+    if (req.text && scene.source !== 'brand_card' && (req.onScreenText ?? scene.onScreenText)) {
+        for (const k of ['textPos', 'textWhen', 'textStyle', 'textAnim'] as const) {
+            const v = req.text[k];
+            if (v && v !== scene[k]) (patch as Record<string, unknown>)[k] = v;
+        }
     }
     if (!Object.keys(patch).length) return null;
     return {

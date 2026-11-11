@@ -10,6 +10,8 @@
 //   PUT    { feedReset: true }   → { calendar }   a new private calendar link (the old one stops working)
 //   PUT    { busyCalendarUrl }   → { calendar }   the business's private iCal address ('' to remove); read at once
 //   PATCH  { id, busyCalendarUrl } → { resource } the same for one person / room (calendar-sync.ts)
+//   meetingUrl (PUT for the business, PATCH for a person) — the video link for video services
+//   (booking-meeting.ts); upcoming video bookings are given the new link.
 //
 // Services are NOT here: they are Business Information products with a length (org-products.ts).
 // Tenant-scoped on every statement.
@@ -25,6 +27,14 @@ import { feedUrl, newFeedToken, webcalUrl } from '../../src/utils/booking-calend
 import { setBusyCalendar, syncOne } from '../../src/utils/calendar-sync';
 import { microsoftConnected } from '../../src/utils/calendar-microsoft';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { refreshMeetingLinks } from '../../src/utils/booking-meeting';
+
+/** A video link changed: upcoming video bookings get the new one, and a signed-in Outlook calendar follows. */
+async function relink(db: ReturnType<typeof getDb>, orgId: number): Promise<void> {
+    try {
+        if (await refreshMeetingLinks(db, orgId, new Date())) await (await import('../../src/utils/calendar-microsoft')).reconcileSoon(db, orgId);
+    } catch (err) { console.error('[booking-settings] meeting links not refreshed', err); }
+}
 
 /**
  * The owner's calendar links and the busy-time status. The private feed token is made on first
@@ -88,6 +98,7 @@ export default withLambda(async (event) => {
             const values = { ...r.value, updatedAt: new Date() };
             const [row] = await db.insert(bookingSettings).values({ organisationId: orgId, ...values })
                 .onConflictDoUpdate({ target: bookingSettings.organisationId, set: values }).returning();
+            if ('meetingUrl' in r.value) await relink(db, orgId);
             return json(200, { settings: row });
         }
 
@@ -126,6 +137,7 @@ export default withLambda(async (event) => {
             if (!Object.keys(values).length) return json(400, { error: 'Nothing to change.' });
             const [resource] = await db.update(bookableResources).set({ ...values, updatedAt: new Date() })
                 .where(and(eq(bookableResources.id, id), eq(bookableResources.organisationId, orgId))).returning();
+            if (resource && 'meetingUrl' in values) await relink(db, orgId);
             return resource ? json(200, { resource }) : json(404, { error: 'Not found.' });
         }
 

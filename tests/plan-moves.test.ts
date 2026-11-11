@@ -1,5 +1,5 @@
 // tests/plan-moves.test.ts
-// Admin → Revenue → Plan moves, and the shared scheduler behind every plan change at renewal.
+// Admin → Customers → Plan moves, and the shared scheduler behind every plan change at renewal.
 //
 // WHY THIS EXISTS (owner, 2026-10-19). Moving customers between plans in bulk changes what real
 // people pay. What can go wrong without anything failing:

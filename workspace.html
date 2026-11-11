@@ -122,6 +122,9 @@
     width: min(420px, 100%); box-shadow: -8px 0 30px rgba(0,0,0,.18); } }
   /* Over the post on a narrow screen, so it steps aside while they pick a part of it ("Select"). */
   @media (max-width: 1279px) { .pce-chat-col.pce-chat-aside { display: none; } }
+  /* Folded to its strip (chat-pane.js, owner 2026-11-09): the post gets the room. */
+  .pce-chat-col:has(.is-collapsed[data-chatpane]) { width: 80px; }
+  @media (max-width: 1279px) { .pce-chat-col:has(.is-collapsed[data-chatpane]) { bottom: auto; background: transparent; border: 0; box-shadow: none; } }
   .pce-selecting [data-caption-host], .pce-selecting [data-media-host], .pce-selecting [data-overlay-layer] > * { cursor: crosshair !important; }
   .pce-selecting [data-caption-host]:hover, .pce-selecting [data-overlay-layer] > *:hover { outline: 2px solid #db2777; outline-offset: 2px; background: rgba(219,39,119,.06); }
   .pce-selecting [data-media-host]:hover { outline: 2px solid #db2777; outline-offset: -2px; }
@@ -404,7 +407,7 @@ async function submitDpaAcceptance(btn) {
 }
 </script>
 
-<!-- A change to task costs (Admin → Revenue → Task costs): the workspace owner reviews and accepts.
+<!-- A change to task costs (Admin → Money → Task costs): the workspace owner reviews and accepts.
      Before the change starts it can wait. Once it has started it can't be dismissed: accept, or go to
      Billing to cancel (terms 20.2, 20.3). Scheduled work keeps running either way.
      Server: netlify/functions/task-cost-review.ts. -->
@@ -2062,6 +2065,8 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div id="post-review-archive" class="hidden mt-4 text-xs"></div>
       <!-- "Make a video version" (Video Producer Phase 7, src/utils/video-handoff.ts) — painted by _rqVideoPaint. -->
       <div id="post-review-video" class="hidden mt-3 text-xs"></div>
+      <!-- Guest review links (src/components/review-links.js). Filled for a post that is still going out. -->
+      <div id="post-review-share" class="hidden mt-3 text-xs"></div>
     </div>
     <!-- Footer: actions -->
     <div id="post-review-actions" class="border-t border-gray-100 p-4 space-y-3 shrink-0">
@@ -2452,22 +2457,13 @@ window.showComplianceModals = function showComplianceModals(force) {
 
   // US2 AC2.3: workspace owner invites the requester into their org (reuses the member-invite
   // flow, so billing stays consolidated). Triggered from the suggested_action notification CTA.
-  window._inviteFromAccessRequest = async function (email, notifId) {
+  // Opens the invite form on Business Information → Team Members with the email filled in, so the
+  // owner picks a role and which assistants they can use rather than handing over every one.
+  window._inviteFromAccessRequest = function (email) {
     if (!email) { window.showToast?.('Could not determine which user to invite.', { icon: '⚠️' }); return; }
-    window.showConfirmModal(
-      `Invite ${email} to your workspace? They'll join your team and your billing stays consolidated.`,
-      async () => {
-        try {
-          const r = await fetch('/.netlify/functions/invite-member', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email }),
-          });
-          const d = await r.json().catch(() => ({}));
-          if (!r.ok) { window.showToast?.(d.error || 'Could not send the invite.', { icon: '⚠️' }); return; }
-          window.showToast?.(`Invite sent to ${email}.`, { icon: '✅' });
-        } catch { window.showToast?.('Network error — please try again.', { icon: '⚠️' }); }
-      },
-      { title: 'Invite to workspace?', confirmLabel: 'Yes, send invite', cancelLabel: 'Cancel' }
-    );
+    window._bizinfoInitialTab = 'team';
+    window._teamInviteEmail = email;
+    if (window.loadView) window.loadView('assets');
   };
 </script>
 
@@ -3207,7 +3203,7 @@ function formatCurrency(amount, currency) {
     });
 
     async function loadView(routeKey, param = null) {
-      // Team Chat is the Messages tab of Notifications now (2026-10-23). The old key keeps working —
+      // Team Chat is a tab of Notifications now (2026-10-23). The old key keeps working —
       // the chat pop-up's "Open Team Chat", a remembered last view, an old deep link.
       if (routeKey === 'team') { routeKey = 'notifications'; param = { tab: 'messages' }; }
       if (!routes[routeKey]) return;
@@ -6234,6 +6230,7 @@ function formatCurrency(amount, currency) {
 <!-- One pillar splitter for the profile and the post writer (see the file). Before assistants.js. -->
 <script src="/src/public/content-pillars.js"></script>
 <script src="/src/public/assistant-sectors.js"></script>
+<script src="/src/components/tab-head.js"></script>
 <script src="/assistants.js"></script>
 <script src="/help.js"></script>
 <script src="/my-content.js"></script>
@@ -6285,6 +6282,8 @@ function formatCurrency(amount, currency) {
 <!-- Business Mentor cards' clicks, and "Review all" (chat, the Mentor's Suggestions tab, Inbox "Needs you"). -->
 <script src="/src/components/mentor-apply.js"></script>
 <script src="/src/components/redraft-upcoming.js"></script>
+<script src="/src/components/pillar-list.js"></script>
+<script src="/src/components/review-links.js"></script>
 <script src="/src/components/mentor-review-all.js"></script>
 <!-- Chat modal (workspace "💬 Chat" card action) — same mountable widget assistant-chat.html
      uses, embedded in-page instead of navigating to a separate page. -->
@@ -6340,6 +6339,8 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/assistant-briefs.js"></script>
 <script src="/src/components/voice-picker.js"></script>
 <script src="/src/components/caption-style.js"></script>
+<script src="/src/components/footage-reader.js"></script>
+<script src="/src/components/video-recorder.js"></script>
 <script src="/src/components/assistant-videos.js"></script>
 <script src="/src/components/assistant-mentor-overview.js"></script>
 <script src="/src/components/assistant-mentor-plan.js"></script>
@@ -6348,6 +6349,10 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/assistant-site-audit.js"></script>
 <!-- Website tab (website_assistant) — editor and live preview (sites.ts, site-preview.ts). -->
 <script src="/src/components/media-picker.js"></script>
+<!-- Business Information editors opened beside the Website Assistant (products, stays): site-facts-drawer.js -->
+<script src="/src/components/site-facts-drawer.js"></script>
+<!-- Bold / italics / list buttons above website text boxes (the editor below and the facts drawer use it). -->
+<script src="/src/components/text-format-bar.js"></script>
 <!-- assistant-site-editor.js loads on demand, for a Website Assistant only (assistants.js siteEditor()). -->
 <!-- Email Marketing Assistant ▸ Campaigns tab (welcome + form-started series, with results). -->
 <script src="/src/components/assistant-email-campaigns.js"></script>
@@ -6485,11 +6490,12 @@ async function refreshPendingBadge(opts = {}) {
         // learn by clicking it.
         // `attention` = the tab's family; emails come from newsletter-issues `review=1` (see below).
         // Articles count too (the To approve tab includes them) — see _rqBlogReviewCount.
-        const [socialRes, failedRes, emailRes, blogAwaiting] = await Promise.all([
+        const [socialRes, failedRes, emailRes, blogAwaiting, waiting] = await Promise.all([
             only ? Promise.resolve({ ok: false }) : fetch('/.netlify/functions/get-social-drafts?status=pending_approval&limit=1&offset=0'),
             fetch('/.netlify/functions/get-social-drafts?status=attention&limit=1&offset=0'),
             _rqNewsletterReviewRes(),
             only ? 0 : _rqBlogReviewCount(),
+            only ? null : _rqWaiting(),
         ]);
         const body = socialRes.ok ? await socialRes.json() : {};
         // `total` is the grouped count. Fall back to grouping the page only if it is missing.
@@ -6501,7 +6507,7 @@ async function refreshPendingBadge(opts = {}) {
         const emails = emailRes && emailRes.ok ? await emailRes.json().catch(() => ({})) : {};
         const emailAwaiting = Number(emails.awaiting) || 0;
         const emailFailed = Number(emails.failed) || 0;
-        const reviewCount = socialCount + emailAwaiting + blogAwaiting;
+        const reviewCount = socialCount + emailAwaiting + blogAwaiting + (waiting?.total || 0);
         if (!only) _rqSetPendingBadge(reviewCount);
 
         if (failedRes.ok) {
@@ -6530,6 +6536,32 @@ async function refreshPendingBadge(opts = {}) {
         }
         _rqLastSocialCount = reviewCount;
     } catch { /* non-blocking */ }
+}
+
+// Everything else waiting on the user, from every assistant (review-waiting.ts): leads, invoices, decisions, designs,
+// storyboards, fixes, enquiries, bookings, suggestions. Shared the same way as the emails below, so the pill and
+// the list add up. Null when the feed is unreachable: the page still lists what it has.
+let _rqWaitingReq = null;   // { at, p }
+function _rqWaiting() {
+    if (!_rqWaitingReq || Date.now() - _rqWaitingReq.at > 3000) {
+        _rqWaitingReq = { at: Date.now(), p: fetch('/.netlify/functions/review-waiting').then(r => (r.ok ? r.json() : null)).catch(() => null) };
+    }
+    return _rqWaitingReq.p;
+}
+// One row of it: opens that assistant's own tab, where it is approved by that tab's own rules.
+function _rqOpenWaiting(assistantId, tab) {
+    window._assistantDetailInitialTab = tab;
+    window.routeToAssistantDetail?.(assistantId);
+}
+function rqRenderWaitingRow(g, item) {
+    return `<button type="button" onclick="_rqOpenWaiting(${Number(g.assistantId)}, '${_rqEsc(g.tab)}')" data-rq-waiting="${_rqEsc(g.key)}"
+        class="focus-ring w-full text-left flex items-center gap-3 py-3 cursor-pointer hover:bg-gray-50 -mx-4 px-4 transition">
+        <span class="flex-1 min-w-0">
+          <span class="block text-sm font-semibold text-gray-900 truncate">${_rqEsc(item.title)}</span>
+          <span class="block text-xs text-gray-600 truncate">${item.at ? `${_rqEsc(rqTimeAgo(item.at))} · ` : ''}open it on ${_rqEsc(g.assistantName)}’s page</span>
+        </span>
+        <svg class="w-4 h-4 text-gray-400 shrink-0" aria-hidden="true" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </button>`;
 }
 
 // newsletter-issues?review=1, shared: the badge poll and the Review list both ask for it as the page
@@ -6734,15 +6766,17 @@ async function rqRenderGroups(statusKey, opts = {}) {
         try { const bw = await window.resolveBlogWriter(); _rqBlogWriterActive = !!bw; _rqBlogWriterName = bw?.name || null; } catch { /* non-blocking */ }
     }
 
-    let posts = [], blogPosts = [], emails = [], emailsShown = false;
+    let posts = [], blogPosts = [], emails = [], emailsShown = false, waiting = null;
     let pj;
     try {
         const wantEmail = !!RQ_EMAIL_STATUSES[statusKey];
-        const [pRes, allBlog, eRes] = await Promise.all([
+        const [pRes, allBlog, eRes, w] = await Promise.all([
             fetch(_rqPostsUrl(col, limit, 0)),
             _rqBlogWriterActive ? _rqFetchBlogPosts(quiet) : Promise.resolve(null),
             wantEmail ? _rqNewsletterReviewRes() : Promise.resolve(null),
+            statusKey === 'review' ? _rqWaiting() : Promise.resolve(null),
         ]);
+        waiting = w;
         // A non-OK answer is a FAILURE, not "no posts": it used to render "No social media posts
         // awaiting review", a false all-clear from a server that didn't answer.
         if (!pRes.ok) throw new Error('posts load failed');
@@ -6794,7 +6828,7 @@ async function rqRenderGroups(statusKey, opts = {}) {
         // the current page, which would report "10 awaiting review" on a queue of 24.
         const pending = _rqPostsTotal ?? postGroups.length;
         // The TAB counts every group under it, so the group pills add up to it.
-        const tabCount = pending + (_rqBlogWriterActive ? blogPosts.length : 0) + emails.length;
+        const tabCount = pending + (_rqBlogWriterActive ? blogPosts.length : 0) + emails.length + (waiting?.total || 0);
         const badge = document.getElementById('rq-col-count-review');
         if (badge) { badge.textContent = tabCount || ''; badge.classList.toggle('hidden', !tabCount); }
         // The sidebar pill: the same sum as the tab and as the 60s poll, so the two writers can't
@@ -6804,11 +6838,20 @@ async function rqRenderGroups(statusKey, opts = {}) {
     // The cards on screen — a session covers what is loaded, and says so at the end if more wait.
     _rqSyncReviewAllButton(statusKey === 'review' ? postGroups.length : 0);
 
-    const groups = [...RQ_GROUPS, ...(_rqBlogWriterActive ? [RQ_BLOG_GROUP] : []), ...(emailsShown ? [RQ_EMAIL_GROUP] : [])];
+    // Posts, articles and emails first, as they can be decided here; then one section per kind of work waiting on
+    // another assistant's page. A section with nothing in it isn't drawn.
+    const waitingGroups = (waiting?.groups || []).filter(g => g.count > 0);
+    const groups = [...RQ_GROUPS, ...(_rqBlogWriterActive ? [RQ_BLOG_GROUP] : []), ...(emailsShown ? [RQ_EMAIL_GROUP] : []),
+        ...waitingGroups.map(g => ({ key: `w-${g.key}`, label: `${_rqEsc(g.label)} · ${_rqEsc(g.assistantName)}`, empty: '', emptyReview: '' }))];
     const itemsByGroup = { posts: postGroups, blog: blogPosts, email: emails };
     const renderByGroup = { posts: rqRenderSocialCard, blog: rqRenderBlogCard, email: rqRenderEmailCard };
     // Posts are paged by the server; blog posts and emails arrive whole, so loaded count IS total.
     const totalByGroup = { posts: _rqPostsTotal ?? postGroups.length, blog: blogPosts.length, email: emails.length };
+    for (const g of waitingGroups) {
+        itemsByGroup[`w-${g.key}`] = g.items;
+        renderByGroup[`w-${g.key}`] = (item) => rqRenderWaitingRow(g, item);
+        totalByGroup[`w-${g.key}`] = g.count;
+    }
     // The write replaces every node, so a keyboard user on card 6 was dropped back to <body> by the
     // background refresh. Remember the focused card (or control) and put focus back on its successor.
     const active = document.activeElement;
@@ -7273,6 +7316,7 @@ function rqRenderSocialCard(draft, opts) {
         ${draft.caption ? `<span class="block text-sm text-gray-700 line-clamp-2 mt-0.5 ${isArchived ? 'line-through opacity-60' : ''}">${_rqEsc(draft.caption)}</span>` : ''}
         ${failureLine}
         ${chips}
+        ${!isArchived ? `<span data-review-status="${group.map(g => g.id).join(',')}" class="hidden mt-1 w-fit text-[11px] font-bold px-2 py-0.5 rounded-full border bg-sky-50 border-sky-200 text-sky-800"></span>` : ''}
         ${statusChipPhone}
         ${anyMediaMissing ? '<span class="sm:hidden inline-flex mt-1 ml-1 text-[11px] font-bold px-2 py-0.5 rounded-full border bg-red-50 border-red-200 text-red-700"><span aria-hidden="true">⚠ </span>Media deleted</span>' : ''}
       </span>
@@ -7889,7 +7933,11 @@ function _rqRenderCanvasOverlays(post, canvasOnly) {
         // against a single frame, and coming back.
         // A hidden box is not painted. It is still in `overlays` and still saved — this is a filter
         // on what is on screen, nothing more.
-        const shown = overlays.filter((ov) => !_pceTextHidden(ov && ov.id));
+        // A finished render of a timeline already has the text burned in. Painting the editable copy
+        // over it doubled every box ("Book online" over "Marmalade Productions", staging 2026-11-09).
+        // Editing the text is still possible from the Text panel; approval renders it again.
+        const burnedIn = isVideo && post && post.renderStatus === 'done' && post.videoEdit && Array.isArray(post.videoEdit.clips) && post.videoEdit.clips.length > 0;
+        const shown = burnedIn ? [] : overlays.filter((ov) => !_pceTextHidden(ov && ov.id));
         const nodes = window.ImageOverlayEditor.render(layer, shown, {
             refEl: media || undefined,
             onGrab: (ov) => {
@@ -8503,7 +8551,7 @@ function _rqRenderTimeline() {
 //
 // Stored on the post as video_edit and rendered by Remotion at approval (src/lib/video-edit.ts).
 // Nothing is re-encoded here — this is a description of a cut, not the cut itself.
-const _PCE_MAX_CLIPS = 20;
+const _PCE_MAX_CLIPS = 40;   // = MAX_CLIPS in src/lib/video-edit.ts
 // Three minutes is where YouTube stops calling it a Short and wants a 16:9 video instead, which
 // would be a third render of the same material. The editor states the limit rather than enforcing
 // it, because the post may not be going to YouTube at all.
@@ -15036,6 +15084,43 @@ async function _pceLoadEnabledPlatforms(assistantId) {
     } catch { /* unknown → show everything, as before; the server still refuses nothing new */ }
 }
 
+// ── "Use in a post" from the Video Producer (docs/video-producer-studio-plan.md Phase 4) ─────────
+// The Video Producer makes videos; posting is the Social Media Manager's job. So a finished video is
+// handed over through THIS assistant's own new-post flow: "Where should this go?" with the video
+// formats ticked for its shape, then a draft carrying the video and the producer's suggested words,
+// opened in the post editor. Free — no model call (owner decision D-S3).
+let _pceCreateWith = null;          // { assetId, caption, shape } while a video hand-off is open
+
+/** The live video format a platform takes for this shape (Reel / Short for vertical, …), or null. */
+function _pceVideoFormatFor(platform, shape) {
+    const live = _pceFormatsFor(platform).filter(f => f.a === 'live' && (f.m === 'video' || f.m === 'mixed'));
+    const fits = (f) => !Array.isArray(f.ar) || !f.ar.length || f.ar.includes(shape);
+    return live.find(f => f.m === 'video' && fits(f)) || live.find(f => fits(f)) || null;
+}
+
+window.pceStartPostWithVideo = async function (assistantId, video) {
+    if (!assistantId || !video || !video.assetId) return;
+    _pceCreateWith = { assetId: Number(video.assetId), caption: String(video.caption || video.title || 'New video').slice(0, 2000), shape: video.shape || '9:16' };
+    await pceOpenDestinationsForCreate(assistantId);
+    // Re-tick: every connected platform that takes this shape of video, in its video format.
+    const keep = [];
+    for (const key of _pceDestChosen) {
+        const { platform } = _pceDestParse(key);
+        const f = _pceVideoFormatFor(platform, _pceCreateWith.shape);
+        if (f) keep.push(_pceDestKey(platform, f.k));
+    }
+    if (!keep.length) {
+        const any = window.PlatformConstants.all.map(p => p.id).filter(id => !_pceDestEnabled || _pceDestEnabled.has(id))
+            .map(id => [id, _pceVideoFormatFor(id, _pceCreateWith.shape)]).find(([, f]) => f);
+        if (any) keep.push(_pceDestKey(any[0], any[1].k));
+    }
+    _pceDestChosen = new Set(keep);
+    document.getElementById('pce-dest-title').textContent = 'Where should this video go?';
+    document.getElementById('pce-dest-sub').textContent = 'Your Social Media Assistant makes a draft with the video and the suggested words. You check it in the Review Queue before anything posts.';
+    document.getElementById('pce-dest-confirm').textContent = 'Make the draft';
+    _pceRenderDestinations();
+};
+
 async function pceOpenDestinationsForCreate(assistantId) {
     _pceDestMode = 'create';
     _pceDestAssistantId = assistantId;
@@ -15097,6 +15182,8 @@ function _pceShowDestinations() {
 function pceCloseDestinations() {
     // A Calendar day's date belongs to the one post it was clicked for, created or not.
     window._gpPrefillPublishDate = null;
+    // So does a Video Producer hand-off: a cancelled one must not attach its video to the next post.
+    _pceCreateWith = null;
     const m = document.getElementById('pce-dest-modal');
     if (!m) return;
     m.classList.add('hidden');
@@ -15228,10 +15315,14 @@ async function pceConfirmDestinations() {
             // button below says "Working…" but is dismissed before the slow half even begins.
             _rqSetBusyCursor(true);
             busy = true;
+            // "Use in a post" from the Video Producer (pceStartPostWithVideo): the draft starts WITH the
+            // finished video and its suggested words, so it lands in the Review Queue like any draft.
+            const withVideo = _pceCreateWith;
             const res = await fetch('/.netlify/functions/create-manual-post', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 // A post started from a Calendar day carries that day (calendar.js _calNewPost).
-                body: JSON.stringify({ assistantId: _pceDestAssistantId, destinations, blank: true,
+                body: JSON.stringify({ assistantId: _pceDestAssistantId, destinations,
+                    ...(withVideo ? { caption: withVideo.caption, contentAssetIds: [withVideo.assetId] } : { blank: true }),
                     ...(window._gpPrefillPublishDate ? { publishDate: window._gpPrefillPublishDate } : {}) }),
             });
             const d = await res.json().catch(() => ({}));
@@ -15239,6 +15330,7 @@ async function pceConfirmDestinations() {
             const created = (d.created || [])[0];
             if (!created) throw new Error('Could not start a new post.');
             _gpCurrentAssistantId = _pceDestAssistantId;
+            _pceCreateWith = null;
             pceCloseDestinations();
             await openPostReview(created.id);
         } else {
@@ -18501,6 +18593,11 @@ function _rqReviewRenderActive() {
     const reviewable = ['pending_approval', 'draft', 'in_review'].includes(post.status);
     document.getElementById('post-review-actions').classList.toggle('hidden', !reviewable);
     _rqVideoPaint(post);
+    const _rqShareEl = document.getElementById('post-review-share');
+    if (_rqShareEl) {
+        _rqShareEl.classList.add('hidden');
+        if (!['rejected', 'cancelled'].includes(post.status)) window.ReviewLinks?.paint(post.id, _rqShareEl);
+    }
 
     // ── Step 7 labels + which footer you get ──────────────────────────────────────────────────
     // The footer's own Approve/Reject buttons are gone: approving and rejecting BOTH live in step 7
@@ -18570,12 +18667,16 @@ function _rqReviewRenderActive() {
     // every scheduled, approved or published post threw "Can't find variable: when" on open.
     const when = post.publishDate ? new Date(post.publishDate).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
     const noteEl = document.getElementById('post-review-archive');
-    if (post.status === 'rejected') {
+    if (post.status === 'rejected' || post.status === 'cancelled') {
+        // Removed ('cancelled') and rejected posts both sit in Archived. A cancelled one used to open
+        // with no note at all, and neither could be brought back (2026-11-07) — see restore-post.ts.
         const days = post.daysRemaining;
         noteEl.className = 'mt-4 text-xs rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-600';
-        noteEl.innerHTML = `<p class="font-semibold text-gray-700">Archived</p>
-          ${post.rejectionReason ? `<p class="mt-0.5">Reason: <span class="italic">"${_rqEsc(post.rejectionReason)}"</span></p>` : ''}
-          <p class="mt-0.5 text-gray-400">${days != null ? `Deletes in ${days} day${days === 1 ? '' : 's'}.` : 'Scheduled for deletion.'}</p>`;
+        noteEl.innerHTML = `<p class="font-semibold text-gray-700">${post.status === 'cancelled' ? 'Removed' : 'Archived'}</p>
+          ${post.status === 'rejected' && post.rejectionReason ? `<p class="mt-0.5">Reason: <span class="italic">"${_rqEsc(post.rejectionReason)}"</span></p>` : ''}
+          ${post.status === 'rejected' ? `<p class="mt-0.5 text-gray-400">${days != null ? `Deletes in ${days} day${days === 1 ? '' : 's'}.` : 'Scheduled for deletion.'}</p>` : ''}
+          <button type="button" id="post-review-restore-btn" onclick="rqReviewRestorePost()" class="btn-secondary mt-2 py-1.5 px-3 text-xs font-bold border rounded-lg cursor-pointer">Bring back</button>
+          <p class="mt-1 text-gray-400">It goes back to Review for you to check and approve again.</p>`;
         noteEl.classList.remove('hidden');
     } else if (post.status === 'scheduled' || post.status === 'approved') {
         noteEl.className = 'mt-4 text-xs rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-blue-700';
@@ -18636,7 +18737,9 @@ async function _rqVideoPaint(post) {
     el.classList.add('hidden');
     el.innerHTML = '';
     _rqVideoBusy = false;
-    if (!post || _rqMediaIsVideo(post) || !String(post.caption || '').trim() || post.status === 'rejected') return;
+    if (!post || post.status === 'rejected') return;
+    if (_rqMediaIsVideo(post)) { _rqSuggestEditsPaint(post, el); return; }
+    if (!String(post.caption || '').trim()) return;
     const shownFor = _rqReviewPostId;
     const producer = await _rqVideoProducerLoad();
     if (!producer || _rqReviewPostId !== shownFor) return;   // the user may have moved on to another post
@@ -18674,6 +18777,34 @@ async function _rqVideoFromPost() {
         if (go) { go.disabled = false; go.textContent = 'Make a video version'; }
         _rqVideoBusy = false;
     }
+}
+
+// ── "Suggest edits" on a video post (docs/video-producer-footage-and-ai-plan.md §4.4) ───────────
+// The Video Producer watches this post's own clips and suggests edits for a better cut. Only the
+// browser can read a video, so this opens the producer's "Use my own footage" form filled in with the
+// post's clips (assistant-videos.js reads the prefill when its Videos tab opens). The post itself is
+// never changed: the edits make a new video, which comes back to the Review Queue.
+let _rqSuggestPrefill = null;
+async function _rqSuggestEditsPaint(post, el) {
+    const shownFor = _rqReviewPostId;
+    const producer = await _rqVideoProducerLoad();
+    if (!producer || _rqReviewPostId !== shownFor) return;
+    const edit = post.videoEdit || post.video_edit;
+    const fromEdit = edit && Array.isArray(edit.clips) ? edit.clips.filter(c => c && c.kind !== 'image').map(c => Number(c.assetId)) : [];
+    const ids = [...new Set((fromEdit.length ? fromEdit : (post.contentAssetIds || post.content_asset_ids || []).map(Number)).filter(n => Number.isInteger(n) && n > 0))].slice(0, 10);
+    if (!ids.length) return;
+    _rqSuggestPrefill = { assetIds: ids, message: `A better cut of this post: ${String(post.caption || '').slice(0, 600)}`, voiceover: false };
+    el.className = 'mt-3 text-xs rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5 text-gray-700';
+    el.innerHTML = `
+        <p class="font-semibold text-gray-800">Suggest edits</p>
+        <p class="mt-0.5 text-gray-600">${_rqEsc(producer.name)} watches this video and suggests edits — cuts, order, captions — for a new version. You tick the ones you want. This post isn’t changed.</p>
+        <button type="button" onclick="_rqSuggestEdits(${Number(producer.id)})" class="btn-secondary mt-2 py-1.5 px-3 text-xs font-bold border rounded-lg transition cursor-pointer">Suggest edits</button>`;
+    el.classList.remove('hidden');
+}
+function _rqSuggestEdits(assistantId) {
+    if (!_rqSuggestPrefill) return;
+    try { sessionStorage.setItem('bms-footage-prefill', JSON.stringify(_rqSuggestPrefill)); } catch (e) { /* private window */ }
+    _rqVideoOpenTab(assistantId);
 }
 
 function _rqVideoOpenTab(assistantId) {
@@ -18871,8 +19002,8 @@ async function rqReviewDiscardDraft() {
     // because the difference from Reject is the whole point of the button.
     const ownDraft = (_rqPostCache[_rqReviewPostId] || {}).status === 'draft';
     const ok = await window.confirmModal(ownDraft
-        ? 'This cannot be undone from here.'
-        : 'It disappears from your queue. Your assistant won’t learn anything from it or write a replacement — if it got something wrong, use Reject and redraft instead. This cannot be undone from here.', {
+        ? 'It moves to Archived, where you can open it and bring it back.'
+        : 'It moves to Archived, where you can open it and bring it back. Your assistant won’t learn anything from it or write a replacement — if it got something wrong, use Reject and redraft instead.', {
         title: `Remove ${what}?`,
         confirmLabel: 'Yes, remove it',
         cancelLabel: 'Keep it',
@@ -18896,6 +19027,48 @@ async function rqReviewDiscardDraft() {
     rqRefreshVisibleReviewSurface();
     _rqSessionContinue(ids[0]);
 }
+
+/**
+ * "Bring back" on a removed or rejected post (restore-post.ts): the post and its archived platform
+ * rows go back to Review, and the editor reopens on it so it can be checked and approved.
+ */
+async function rqReviewRestorePost() {
+    const postId = _rqReviewPostId;
+    if (postId == null) return;
+    const btn = document.getElementById('post-review-restore-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Bringing it back…'; }
+    let data = {};
+    try {
+        const res = await fetch('/.netlify/functions/restore-post', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin',
+            body: JSON.stringify({ postId }),
+        });
+        data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || `That didn’t work (HTTP ${res.status}).`);
+    } catch (err) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Bring back'; }
+        window.showToast?.(err.message || 'The post could not be brought back.', { icon: '⚠️' });
+        return;
+    }
+    // Update the cached rows in place rather than dropping them: reopening a post that isn't cached
+    // refetches get-social-drafts, which returns only the newest 50 — an old post (staging #26,
+    // drafted 126 days earlier, behind 72 waiting) wasn't in them, and "Bring back" ended on
+    // "That post couldn't be opened".
+    const restored = new Set((data.restoredIds || [postId]).map(Number));
+    restored.forEach(id => {
+        const row = _rqPostCache[id];
+        if (!row) return;
+        Object.assign(row, { status: 'pending_approval', rejectedAt: null, rejectionReason: null, cancelledAt: null, daysRemaining: null });
+        if (data.mediaGone) row.mediaMissing = true;
+    });
+    window.showToast?.(data.mediaGone
+        ? 'Brought back to Review. Its picture had already been deleted, so add a new one before approving.'
+        : 'Brought back — it’s in Review.', { icon: '↩️' });
+    rqRefreshVisibleReviewSurface();
+    document.dispatchEvent(new CustomEvent('posts:changed', { detail: {} }));
+    await openPostReview(postId);
+}
+window.rqReviewRestorePost = rqReviewRestorePost;
 
 function closePostReview() {
     window.ScrollLock?.release('post-review');
@@ -21548,6 +21721,8 @@ async function _pceChatSync() {
                 : null,
             composerRows: 3,
             draftTarget: () => window.ChatDockedDraftTarget,
+            // Folding the chat changes the post's width, as hiding it does: its text boxes are sized off the picture.
+            onCollapse: () => requestAnimationFrame(() => { const p = _rqPostCache[_rqReviewPostId]; if (p) _rqRenderCanvasOverlays(p, true); }),
         }),
     };
 }
@@ -21597,7 +21772,14 @@ function _pceChatPick(ev) {
         ref = { label: text ? `Caption “${short(text)}”` : 'The caption', message: `About this part of my post #${post.id}: the caption “${text.slice(0, 2500)}”.` };
     } else {
         const noun = _rqMediaIsVideo(post) ? 'video' : 'picture';
-        ref = { label: `The ${noun}`, message: `About this part of my post #${post.id}: the ${noun}.` };
+        // Its words go with it (FR#6/7, 2026-11-10): told only "the picture", the assistant could not see
+        // or change the words on it. A branded card's words are its own; a photo's are its text boxes.
+        const boxes = (post.overlays || []).map((o) => String(o?.text || '').trim()).filter(Boolean);
+        const words = post.brandCard
+            ? ` It is a branded card; its words are “${String(post.brandCard.headline || '').trim()}”.`
+            : boxes.length ? ` Its text boxes: ${boxes.map((t) => `“${t}”`).join('; ')}.`
+            : ` It has no text boxes; any words in it are part of the ${noun} itself.`;
+        ref = { label: `The ${noun}`, message: `About this part of my post #${post.id}: the ${noun}.${words}` };
     }
     if (!_pceChatIsOn()) { try { localStorage.setItem(_PCE_CHAT_ON_KEY, '1'); } catch { /* private window */ } }
     _pceChatSync().then(() => _pceChat?.pane?.setReference(ref));
@@ -21626,10 +21808,31 @@ document.addEventListener('post:textEdit', async (e) => {
     d.handled = true;
     const post = _rqPostCache[_rqReviewPostId];
     const ov = (post.overlays || []).find((o) => o && _pceChatSameText(o.text, d.find));
+    // A branded card's own words (FR#6/7): redrawn by the card editor's own save (edit-brand-card), so the
+    // card and the stored image stay one thing. The card editor is mounted for the open post.
+    const head = _pceEl('pce-headline');
+    if (!ov && post.brandCard && head && Number(_pceState.postId) === Number(post.id)
+        && (_pceChatSameText(head.value, d.find) || _pceChatSameText(post.brandCard.headline, d.find))) {
+        if (d.replace.length > 120) { d.respond({ ok: false, error: 'A card’s words can be at most 120 characters — ask for something shorter.' }); return; }
+        const before = head.value;
+        head.value = d.replace;
+        _pceScheduleCardSave();
+        await _pceFlushCardSave();
+        if (_pceEl('pce-msg')?.dataset.tone === 'error') {
+            const h = _pceEl('pce-headline'); if (h) h.value = before;
+            d.respond({ ok: false, error: _pceEl('pce-msg')?.textContent || 'The card couldn’t be saved just now.' });
+            return;
+        }
+        d.respond({ ok: true, message: 'Done — the card’s words are changed.' });
+        return;
+    }
     if (!ov) { d.respond({ ok: false, error: 'That text box has changed since — select it again and ask once more.' }); return; }
     const before = ov.text;
     ov.text = d.replace;
     _rqRenderCanvasOverlays(post);
+    // The styling panel's Wording box is built once per box; rebuilt now, or it keeps the old words and
+    // typing there puts them back (staging check, 2026-11-10).
+    if (_pceStyleMountedFor === ov.id) { _pceStyleMountedFor = null; _pceRenderTextStyle(); }
     if (await _rqPersistOverlays(_rqReviewPostId)) { d.respond({ ok: true }); return; }
     ov.text = before;
     _rqRenderCanvasOverlays(post);
@@ -21641,6 +21844,11 @@ document.addEventListener('post:pictureAsk', (e) => {
     d.handled = true;
     _pceOpenMediaPicker();   // sets the post the search and Generate act on
     gpAiSetMediaType(d.kind === 'video' ? 'video' : 'image');
+    if (d.source === 'library') {
+        gpAiUseOwn();
+        d.respond({ ok: true, message: 'Your content is open in the picture window. Pick the one you want.' });
+        return;
+    }
     if (d.source === 'ai') {
         const ai = document.getElementById('gp-ai-src-ai');
         if (!ai || ai.disabled || ai.closest('.hidden')) { d.respond({ ok: false, error: ai?.title || 'AI pictures aren’t available on this post. Stock photos are.' }); return; }

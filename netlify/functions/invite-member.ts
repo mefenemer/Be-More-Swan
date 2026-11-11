@@ -9,22 +9,27 @@
 // SC3: Workspace Collaboration must be on the plan, and the seat cap (if any) not reached —
 //      src/utils/team-seats.ts holds the rule
 // SC4: Invite email contains inviter name, org name, role, 7-day expiry link
-// SC6: Resend invalidates previous token (overwrites verificationToken + tokenExpiresAt)
+// SC6: Resend invalidates the previous link (replaces its pending membership row)
+//
+// assistantIds: which assistants a member or viewer can use (src/utils/assistant-access.ts). Required
+// for a new member or viewer; admins always get every assistant. A resend keeps what was chosen.
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import crypto from 'crypto';
 import { eq, and, count } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     users,
     userOrganisations,
     organisations,
+    aiAssistants,
 } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTeamAllowance, canAddSeat, seatRefusal } from '../../src/utils/team-seats';
+import { signInviteLink } from '../../src/utils/invite-link';
+import { parseRequestedAccess, type AssistantAccess } from '../../src/utils/assistant-access';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret  = process.env.JWT_SECRET;
@@ -58,7 +63,7 @@ export default withLambda(async (event) => {
         .select({ email: users.email, firstName: users.firstName, lastName: users.lastName })
         .from(users).where(eq(users.id, ctx.userId)).limit(1);
 
-    let body: { email?: string; role?: string; resend?: boolean };
+    let body: { email?: string; role?: string; resend?: boolean; assistantIds?: unknown };
     try { body = JSON.parse(event.body || '{}'); } catch {
         return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) };
     }
@@ -76,7 +81,7 @@ export default withLambda(async (event) => {
 
     // Check if they're already an active member
     const [existingMembership] = await db
-        .select({ role: userOrganisations.role, userId: userOrganisations.userId })
+        .select({ role: userOrganisations.role, userId: userOrganisations.userId, assistantIds: userOrganisations.assistantIds })
         .from(userOrganisations)
         .innerJoin(users, eq(userOrganisations.userId, users.id))
         .where(and(
@@ -88,6 +93,30 @@ export default withLambda(async (event) => {
     if (existingMembership && existingMembership.role !== 'invited') {
         return { statusCode: 409, body: JSON.stringify({ error: 'This person is already a member of your workspace.' }) };
     }
+
+    // Which assistants they get. A resend that doesn't say keeps what the first invite chose; a new
+    // member or viewer must have them chosen, never every assistant by default.
+    const workspaceAssistants = await db
+        .select({ id: aiAssistants.id, name: aiAssistants.name })
+        .from(aiAssistants)
+        .where(eq(aiAssistants.organisationId, orgId));
+    let assistantAccess: AssistantAccess;
+    if (body.assistantIds === undefined && existingMembership?.role === 'invited') {
+        assistantAccess = role === 'admin' ? null : (existingMembership.assistantIds ?? null);
+    } else if (body.assistantIds === undefined && role !== 'admin') {
+        return { statusCode: 400, body: JSON.stringify({ error: 'Choose which assistants they can use.', code: 'ASSISTANTS_REQUIRED' }) };
+    } else {
+        const parsed = parseRequestedAccess(role, body.assistantIds, workspaceAssistants.map((a) => a.id));
+        if ('error' in parsed) return { statusCode: 400, body: JSON.stringify({ error: parsed.error }) };
+        assistantAccess = parsed.access;
+    }
+    const assistantNames = assistantAccess === null
+        ? null
+        : workspaceAssistants.filter((a) => assistantAccess!.includes(a.id)).map((a) => a.name);
+    const escapeHtml = (v: string) => v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+    const accessLine = assistantNames && assistantNames.length
+        ? `You'll work with ${assistantNames.map((n) => `<strong>${escapeHtml(n)}</strong>`).join(', ')}.`
+        : '';
 
     // SC3: Workspace Collaboration + seats (src/utils/team-seats.ts). A resend re-uses the seat its
     // pending invite already holds, so only a NEW person is counted. Pending invites count as seats.
@@ -114,7 +143,7 @@ export default withLambda(async (event) => {
 
     // SC2: Check if the invitee is already a registered Be More Swan user
     const [existingUser] = await db
-        .select({ id: users.id, email: users.email, firstName: users.firstName })
+        .select({ id: users.id, email: users.email, firstName: users.firstName, status: users.status })
         .from(users)
         .where(eq(users.email, email.toLowerCase()))
         .limit(1);
@@ -125,6 +154,7 @@ export default withLambda(async (event) => {
             userId:         existingUser.id,
             organisationId: orgId,
             role:           role as any,
+            assistantIds:   assistantAccess,
         }).onConflictDoNothing();
 
         // SC2a: In-app notification
@@ -139,7 +169,7 @@ export default withLambda(async (event) => {
             to: existingUser.email,
             subject: `You've been added to ${orgName} on Be More Swan`,
             html: `<p>Hi ${existingUser.firstName || 'there'},</p>
-                   <p><strong>${inviterName}</strong> has added you to <strong>${orgName}</strong> on Be More Swan as a ${role}.</p>
+                   <p><strong>${inviterName}</strong> has added you to <strong>${orgName}</strong> on Be More Swan as a ${role}. ${accessLine}</p>
                    <p style="margin-top:20px;">
                      <a href="${BASE_URL}/workspace.html" style="background:#10b981;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">
                        Open Workspace →
@@ -154,54 +184,62 @@ export default withLambda(async (event) => {
         };
     }
 
-    // SC4 / SC6: Generate 7-day invite token (resend overwrites existing token)
-    const plainToken  = crypto.randomBytes(32).toString('hex');
-    const hashedToken = crypto.createHash('sha256').update(plainToken).digest('hex');
-    const expiresAt   = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    // SC4 / SC6: A 7-day link to a pending membership row. It uses no token, so it can't overwrite a
+    // sign-up or login link, or be overwritten by one (src/utils/invite-link.ts).
+    if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-    let invitedUserId: number;
+    let invitedMembershipId: number;
 
     if (existingUser) {
-        // SC6: Resend — overwrite token
-        await db.update(users)
-            .set({ verificationToken: hashedToken, tokenExpiresAt: expiresAt })
-            .where(eq(users.id, existingUser.id));
-        invitedUserId = existingUser.id;
+        // Reaching here means this person's membership here is still 'invited' (SC2a returned above).
+        // An unverified account must outlast its invite, or purge-ghost-accounts deletes it first.
+        // A verified account is left alone: its date belongs to its own login link.
+        if (existingUser.status === 'pending_verification') {
+            await db.update(users)
+                .set({ tokenExpiresAt: expiresAt })
+                .where(eq(users.id, existingUser.id));
+        }
 
-        // Ensure org membership row exists as 'invited'
-        if (existingMembership) {
-            await db.update(userOrganisations)
-                .set({ role: 'invited' } as any)
+        // SC6: Resend. A new row means a new link, and the old link's row is gone. The join date is
+        // kept because resolveActiveOrg orders by it, so a resend can't change a person's workspace.
+        invitedMembershipId = await db.transaction(async (tx) => {
+            const [previous] = await tx.delete(userOrganisations)
                 .where(and(
                     eq(userOrganisations.userId, existingUser.id),
                     eq(userOrganisations.organisationId, orgId),
-                ));
-        } else {
-            await db.insert(userOrganisations).values({
-                userId: existingUser.id, organisationId: orgId, role: 'invited' as any,
-            }).onConflictDoNothing();
-        }
+                    eq(userOrganisations.role, 'invited'),
+                ))
+                .returning({ joinedAt: userOrganisations.joinedAt });
+            const [row] = await tx.insert(userOrganisations).values({
+                userId: existingUser.id,
+                organisationId: orgId,
+                role: 'invited' as any,
+                assistantIds: assistantAccess,
+                ...(previous ? { joinedAt: previous.joinedAt } : {}),
+            }).returning({ id: userOrganisations.id });
+            return row.id;
+        });
     } else {
-        // New user — create stub account
+        // New user: a stub account. The date is what purge-ghost-accounts reads.
         const [newUser] = await db.insert(users).values({
-            email:             email.toLowerCase(),
-            status:            'pending_verification',
-            verificationToken: hashedToken,
-            tokenExpiresAt:    expiresAt,
+            email:          email.toLowerCase(),
+            status:         'pending_verification',
+            tokenExpiresAt: expiresAt,
         }).returning({ id: users.id });
-        invitedUserId = newUser.id;
 
         // Pending org membership
-        await db.insert(userOrganisations).values({
-            userId: invitedUserId, organisationId: orgId, role: 'invited' as any,
-        }).onConflictDoNothing();
+        const [row] = await db.insert(userOrganisations).values({
+            userId: newUser.id, organisationId: orgId, role: 'invited' as any, assistantIds: assistantAccess,
+        }).returning({ id: userOrganisations.id });
+        invitedMembershipId = row.id;
     }
 
-    // Store intended role in metadata so accept-invite.ts can apply it
-    // We store it as JSON in the user's existing metadata field or via a custom column.
-    // Since there's no dedicated invitations table, we store role info in tokenExpiresAt + encode
-    // in the URL so accept-invite can apply it. The role is appended as a second param.
-    const acceptUrl = `${BASE_URL}/accept-invite.html?token=${plainToken}&orgId=${orgId}&role=${encodeURIComponent(role)}`;
+    // There is no invitations table, so the workspace and role travel in the URL. The signature stops
+    // them being changed (src/utils/invite-link.ts).
+    const expiresAtMs = expiresAt.getTime();
+    const sig = signInviteLink(invitedMembershipId, orgId, role, expiresAtMs, jwtSecret);
+    const acceptUrl = `${BASE_URL}/accept-invite.html?invite=${invitedMembershipId}&orgId=${orgId}&role=${encodeURIComponent(role)}&exp=${expiresAtMs}&sig=${sig}`;
 
     // SC4: Send invite email with all required content
     sendEmail({
@@ -217,7 +255,7 @@ export default withLambda(async (event) => {
     <p style="color:#374151;margin:0 0 6px;line-height:1.6">
       <strong>${inviterName}</strong> has invited you to join <strong>${orgName}</strong> on Be More Swan.
     </p>
-    <p style="color:#6b7280;margin:0 0 24px;font-size:14px">You'll be joining as a <strong>${role}</strong>.</p>
+    <p style="color:#6b7280;margin:0 0 24px;font-size:14px">You'll be joining as a <strong>${role}</strong>. ${accessLine}</p>
     <a href="${acceptUrl}" style="display:inline-block;padding:14px 28px;background:#10b981;color:#fff;font-weight:700;text-decoration:none;border-radius:8px;font-size:15px">
       Join ${orgName} on Be More Swan →
     </a>

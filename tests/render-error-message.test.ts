@@ -58,7 +58,7 @@ check('the Videos tab says when a built video failed its final render', () => {
     assert.match(view, /postRenderStatus/);
     const tab = readFileSync('src/components/assistant-videos.js', 'utf8');
     assert.match(tab, /render_failed: 'Made, but the final render failed/);
-    assert.match(tab, /v\.status === 'built' && v\.postRenderStatus === 'failed' \? 'render_failed'/);
+    assert.match(tab, /v\.status === 'built' && v\.postRenderStatus === 'failed' \? 'post_render_failed'/);
 });
 
 console.log(`\n${passed} passed`);

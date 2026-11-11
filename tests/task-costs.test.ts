@@ -1,5 +1,5 @@
 // tests/task-costs.test.ts
-// Task costs are set in Admin → Revenue → Task costs, not in code (owner, 2026-11-06). What goes wrong
+// Task costs are set in Admin → Money → Task costs, not in code (owner, 2026-11-06). What goes wrong
 // silently if these drift:
 //   · a charge reading a number out of code, so the admin screen changes nothing
 //   · applying the migration quietly changing what customers pay

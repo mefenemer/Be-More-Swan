@@ -338,6 +338,14 @@
   to   = "/invite.html"
   status = 200
 
+# Guest review links: /r/<token> -> shared-review.html (docs/review-link-plan.md). A 200 REWRITE, since
+# the page reads the token off the last path segment. Same rules as /invite above: ":token" = ONE
+# segment, and the page keeps every path root-relative.
+[[redirects]]
+  from = "/r/:token"
+  to   = "/shared-review.html"
+  status = 200
+
 # Phase 1 External Integrations: pretty /api/* routes for the OAuth router and the
 # generic action-sync endpoint. Rewrites (status 200) — the original path survives in
 # event.rawUrl, which oauth-integrations.ts parses for :provider/:action; provider
@@ -843,6 +851,19 @@ node_bundler = "esbuild"
   [headers.values]
     X-Robots-Tag = "noindex, nofollow"
 
+# A private review link must not be indexed, or leak its address to another site.
+[[headers]]
+  for = "/r/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Referrer-Policy = "no-referrer"
+
+[[headers]]
+  for = "/shared-review*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Referrer-Policy = "no-referrer"
+
 # ── auth-guard bindings ─────────────────────────────────────────────────────────
 # Netlify serves every page at BOTH /foo.html and /foo. These two rules used to be the whole
 # binding, and neither matches the extensionless form — so /admin returned the complete admin
@@ -917,6 +938,10 @@ node_bundler = "esbuild"
 [[edge_functions]]
   function = "rate-limit"
   path = "/.netlify/functions/site-audit-public"
+
+[[edge_functions]]
+  function = "rate-limit"
+  path = "/.netlify/functions/review-link-public"
 
 # SC3: Daily task-volume threshold check — 08:00 UTC every day
 # "Import my current site" runs a site's JavaScript in headless Chrome when the plain read finds
@@ -1123,7 +1148,7 @@ node_bundler = "esbuild"
 [functions.quarterly-bias-reminder]
   schedule = "0 8 1 1,4,7,10 *"
 
-# Monthly reminder to run the AI Visibility check (Admin → Insights → AI Visibility) — 1st at 08:00 UTC
+# Monthly reminder to run the AI Visibility check (Admin → Growth → AI visibility) — 1st at 08:00 UTC
 [functions.ai-visibility-reminder]
   schedule = "0 8 1 * *"
 
@@ -1203,7 +1228,12 @@ node_bundler = "esbuild"
 [functions.generate-voiceover]
   timeout = 26
 
-# Admin → Revenue → Partners ▸ Partner Ops chat: a Claude tool loop (read tools + action cards).
+# Video Producer: "My own voice" transcribes the owner's recording inside the request (own-voice.ts,
+# ≤18 s for one recording of a whole 60 s script). Everything else here answers in well under 10 s.
+[functions.video-projects]
+  timeout = 26
+
+# Admin → Money → Partners ▸ Partner Ops chat: a Claude tool loop (read tools + action cards).
 # Synchronous max, and the function keeps its own 21s budget under it (admin-partners-chat.ts).
 [functions.admin-partners-chat]
   timeout = 26
@@ -1247,6 +1277,26 @@ node_bundler = "esbuild"
 # more than the 10s default allows on a slow reply.
 [functions.sites]
   timeout = 26
+  external_node_modules = ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"]
+  included_files = ["node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "node_modules/@napi-rs/canvas/**", "node_modules/@napi-rs/canvas-*/**"]
+
+# pdf-parse v2 (pdfjs-dist 5) must ship as it is, never bundled. Bundled to CJS, pdfjs loses
+# import.meta.url, can't load @napi-rs/canvas for its DOMMatrix polyfill, and throws
+# "DOMMatrix is not defined" AS THE MODULE LOADS, before the handler runs. Every brand document
+# uploaded to prod sat at 'confirmed' with no text from July to 2026-11-08 because of it, so no
+# assistant ever read one. External alone was not enough (staging, 2026-11-08: still 'failed'):
+# the file trace never picks up @napi-rs/canvas (pdfjs requires it by a runtime path) or
+# pdf.worker.mjs, so both are included by hand. Checked by packaging the function with
+# zip-it-and-ship-it and reading a PDF from only the packaged files: without these, "DOMMatrix is
+# not defined"; with them, the words come back. Every function that imports pdf-parse is listed
+# here (tests/pdf-parse-external.test.ts checks).
+[functions.process-asset-background]
+  external_node_modules = ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"]
+  included_files = ["node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "node_modules/@napi-rs/canvas/**", "node_modules/@napi-rs/canvas-*/**"]
+
+[functions.process-inspo-background]
+  external_node_modules = ["pdf-parse", "pdfjs-dist", "@napi-rs/canvas"]
+  included_files = ["node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", "node_modules/@napi-rs/canvas/**", "node_modules/@napi-rs/canvas-*/**"]
 
 # Website bookings: the day-before reminder (send-booking-reminders.ts). Hourly at :20 — one indexed
 # query that usually finds nothing; a booking is reminded once (reminder_sent_at).

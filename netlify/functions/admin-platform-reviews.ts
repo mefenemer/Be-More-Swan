@@ -1,5 +1,5 @@
 // netlify/functions/admin-platform-reviews.ts
-// Admin → Customers → Reviews: what the people using Be More Swan say about it
+// Admin → Growth → Reviews: what the people using Be More Swan say about it
 // (src/utils/platform-reviews.ts).
 //
 //   GET                                                  → { setUp, reviews, stats, asks, destinations }

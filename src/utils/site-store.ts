@@ -22,6 +22,8 @@ import { listSignupForms } from './site-forms';
 import { connectAccountFor } from './site-shop';
 import { loadBookingSetup } from './bookings';
 import { describeHours } from './booking-settings';
+import { MEETING_LOCATION_LABEL, meetingLocationOf } from './booking-meeting';
+import { bookingLinkFor } from './site-booking-page';
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
@@ -30,7 +32,7 @@ import { parseModelJson } from './model-json';
 import { createNotification } from './notify';
 import { loadProductsBlock } from './org-products';
 import {
-    applySiteOperation, assetIdsIn, DEFAULT_MAX_PAGES, FEATURE_LABELS, markVideos, normaliseSiteDefinition, SITE_FEATURES, withoutAssets, type SiteDefinition, type SiteOperation,
+    applySiteOperation, applySiteOperationBatch, assetIdsIn, DEFAULT_MAX_PAGES, FEATURE_LABELS, markVideos, normaliseSiteDefinition, SITE_FEATURES, withoutAssets, type SiteDefinition, type SiteOperation,
 } from './site-definition';
 import { buildDraftPrompt, placeholdersIn, siteFromDraftReply, starterSite, themeFromBrandKit, type BusinessFacts } from './site-draft';
 import { buildFillPrompt, siteFromFillReply } from './site-template-fill';
@@ -38,6 +40,10 @@ import { KEEP_VERSIONS, sameDefinition, siteOrigin, siteSlugProblem, slugFromHos
 import { assemblePlacement, buildPlacementPrompt, MAX_WORDS_CHARS, readPlan, tidyWords, wordsToBlocks, type WordsPlan, type WordsProposal } from './site-words';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from './work-metering';
 import { describeImportForChat, importView, loadImport } from './site-import-store';
+import {
+    DRAFT_NOTE_ADDING_MEDIA, DRAFT_NOTE_MEDIA_STOPPED, draftMediaPromptLine, mediaSlots, NO_DRAFT_MEDIA, placeMedia, wantsDraftMedia, type DraftMediaChoice, type MediaPlanBrief, type MediaSlot,
+} from './site-draft-media';
+import { draftMediaOptions } from './site-draft-media-options';
 
 type Db = ReturnType<typeof getDb>;
 export type SiteRow = typeof sites.$inferSelect;
@@ -48,12 +54,13 @@ export const DRAFT_TIMEOUT_MS = 10 * 60 * 1000;
  *  The SDK makes up to 3 tries, so 3 × this must stay inside DRAFT_TIMEOUT_MS (the claim's life). */
 export const SITE_WRITE_DEADLINE_MS = 180_000;
 /** Set-up keys (assistant-onboarding-schemas.js → website_assistant), read by the AI draft. */
-export const SITE_SETUP_KEYS = { goal: 'siteGoal', pages: 'pagesWanted', style: 'siteStyle', currentSite: 'currentWebsite' } as const;
+export const SITE_SETUP_KEYS = { goal: 'siteGoal', pages: 'pagesWanted', style: 'siteStyle', currentSite: 'currentWebsite', pictures: 'sitePictures', videos: 'siteVideos' } as const;
 
 // The page ceiling and the published read live in site-published.ts (light imports, for readers
 // that don't need the rest of this module); re-exported so existing callers are unchanged.
 export { maxPagesFor, publishedDefinition } from './site-published';
 import { maxPagesFor, publishedDefinition } from './site-published';
+import { recordPlatformIncident } from './platform-incident';
 
 async function businessFacts(db: Db, orgId: number, userId: number | null): Promise<{ facts: BusinessFacts; brandKit: unknown }> {
     const [org] = await db.select({
@@ -102,14 +109,10 @@ export function definitionOf(site: SiteRow, maxPages: number): { definition: Sit
 export async function applySiteOperations(
     db: Db, site: SiteRow, ops: SiteOperation[], maxPages: number,
 ): Promise<{ ok: true; site: SiteRow; warnings: string[] } | { ok: false; error: string; index: number }> {
-    let def = definitionOf(site, maxPages).definition;
-    const warnings: string[] = [];
-    for (let i = 0; i < ops.length; i++) {
-        const r = applySiteOperation(def, ops[i], { maxPages });
-        if (!r.ok) return { ok: false, error: r.error, index: i };
-        def = r.definition;
-        for (const w of r.warnings) if (!warnings.includes(w)) warnings.push(w);
-    }
+    const batch = applySiteOperationBatch(definitionOf(site, maxPages).definition, ops, { maxPages });
+    if (!batch.ok) return batch;
+    const def = batch.definition;
+    const warnings = [...batch.warnings];
     const checked = await verifySiteAssets(db, site.organisationId, def);
     for (const w of checked.warnings) if (!warnings.includes(w)) warnings.push(w);
     const [saved] = await db.update(sites).set({ draft: checked.definition, updatedAt: new Date() }).where(eq(sites.id, site.id)).returning();
@@ -152,11 +155,42 @@ export async function endDraft(db: Db, siteId: number, note: string | null): Pro
     await db.update(sites).set({ draftingAt: null, draftNote: note, updatedAt: new Date() }).where(eq(sites.id, siteId));
 }
 
+/** Inside the worker's 15-minute ceiling, whatever the model took. */
+const WORKER_CEILING_MS = 13.5 * 60 * 1000;
+
+/**
+ * The media stage of a draft whose words are already saved: find or make it, then put it on the site as
+ * it is NOW, so changes made meanwhile stay. Always ends the draft; a failure here leaves the words.
+ */
+async function addMediaToDraft(db: Db, site: SiteRow, ctx: {
+    choice: DraftMediaChoice; slots: MediaSlot[]; brief: MediaPlanBrief; userId: number; maxPages: number; startedAt: number;
+}): Promise<void> {
+    try {
+        // Loaded here, in the background worker only: nothing else that reads a site needs it.
+        const { DRAFT_MEDIA_BUDGET_MS, liveDraftMediaDeps, sourceDraftMedia } = await import('./site-draft-media-run');
+        const deadlineAt = Math.min(Date.now() + DRAFT_MEDIA_BUDGET_MS, ctx.startedAt + WORKER_CEILING_MS);
+        const deps = liveDraftMediaDeps(db, { orgId: site.organisationId, userId: ctx.userId, assistantId: site.aiAssistantId, slots: ctx.slots, brief: ctx.brief, deadlineAt });
+        const { placements, note } = await sourceDraftMedia(ctx.choice, ctx.slots, deps);
+        const [now] = await db.select().from(sites).where(eq(sites.id, site.id)).limit(1);
+        if (!now?.draftingAt) return;
+        const placed = placeMedia(definitionOf(now, ctx.maxPages).definition, placements, ctx.maxPages);
+        const checked = await verifySiteAssets(db, site.organisationId, placed);
+        await db.update(sites).set({ draft: checked.definition, draftingAt: null, draftNote: note, updatedAt: new Date() })
+            .where(and(eq(sites.id, site.id), sql`${sites.draftingAt} IS NOT NULL`));
+    } catch (err) {
+        console.error('[site-store] draft media failed', { siteId: site.id, message: err instanceof Error ? err.message : String(err) });
+        await endDraft(db, site.id, DRAFT_NOTE_MEDIA_STOPPED).catch(() => {});
+    }
+}
+
 /**
  * The worker's job (draft-site-background.ts): write the whole site with the model, through the
- * gate, and save it as the new draft. One task, charged after the draft is saved. Never throws.
+ * gate, and save it as the new draft. One task, charged after the draft is saved. With placeholder
+ * media chosen, the words are saved first and the media follows, so media can never cost them the
+ * draft. Never throws.
  */
-export async function runSiteDraft(db: Db, siteId: number, request: string | null): Promise<void> {
+export async function runSiteDraft(db: Db, siteId: number, request: string | null, media: DraftMediaChoice = NO_DRAFT_MEDIA): Promise<void> {
+    const startedAt = Date.now();
     const [site] = await db.select().from(sites).where(eq(sites.id, siteId)).limit(1);
     if (!site) return;
     try {
@@ -178,6 +212,7 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
             productsBlock, rulesBlock, maxPages,
             goal: str(SITE_SETUP_KEYS.goal), pagesWanted: str(SITE_SETUP_KEYS.pages), style: str(SITE_SETUP_KEYS.style),
             request: request?.trim().slice(0, 2000) || null,
+            mediaWanted: wantsDraftMedia(media),
         };
         // Started from a template: write the words INTO its layout (site-template-fill.ts) — the
         // pages, sections, pictures and design stay as they are. Otherwise, a whole new site.
@@ -206,11 +241,24 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
             return;
         }
 
-        // The success latch: saved only if this draft still holds the claim.
-        const [saved] = await db.update(sites).set({ draft: drafted.definition, draftingAt: null, draftNote: null, updatedAt: new Date() })
+        // Where the chosen media can go. A template keeps its layout: only its sample pictures are swapped.
+        const slots = wantsDraftMedia(media) && assistant?.userId ? mediaSlots(drafted.definition, { onlyReplace: fromTemplate }) : [];
+
+        // The success latch: saved only if this draft still holds the claim. With media to come, the
+        // claim is renewed and kept, so the Website tab keeps showing that work is going on.
+        const [saved] = await db.update(sites).set(slots.length
+            ? { draft: drafted.definition, draftingAt: new Date(), draftNote: DRAFT_NOTE_ADDING_MEDIA, updatedAt: new Date() }
+            : { draft: drafted.definition, draftingAt: null, draftNote: null, updatedAt: new Date() })
             .where(and(eq(sites.id, site.id), sql`${sites.draftingAt} IS NOT NULL`)).returning({ id: sites.id });
         if (!saved) return;
         await recordCompletedWork(db, site.organisationId, 'site_draft', { ref: site.id, assistantId: site.aiAssistantId });
+
+        if (slots.length && assistant) {
+            await addMediaToDraft(db, site, {
+                choice: media, slots, maxPages, startedAt, userId: assistant.userId,
+                brief: { name: brief.business.name, industry: brief.business.industry, description: brief.business.description, request: brief.request },
+            });
+        }
 
         if (assistant) {
             await createNotification(db, 'site_draft_ready', {
@@ -221,6 +269,7 @@ export async function runSiteDraft(db: Db, siteId: number, request: string | nul
         }
     } catch (err) {
         console.error('[site-store] draft failed', { siteId, message: err instanceof Error ? err.message : String(err) });
+        await recordPlatformIncident(db, { kind: 'site_draft', error: err, organisationId: site.organisationId, assistantId: site.aiAssistantId, role: 'website_assistant', view: 'site-store', ids: { siteId } });
         await endDraft(db, siteId, 'The draft couldn\'t be completed this time — your site is unchanged and nothing was charged. Try again in a few minutes.').catch(() => {});
     }
 }
@@ -402,6 +451,16 @@ async function currentWebsiteLine(db: Db, orgId: number, assistantId: number, sl
     return 'Their website before this one: not known — ask.';
 }
 
+/** What placeholder media a draft can have and costs, from the live weights, so the chat quotes the card's numbers. */
+async function draftMediaLine(db: Db, orgId: number, assistantId: number): Promise<string> {
+    try {
+        const [a] = await db.select({ ctx: aiAssistants.onboardingContext }).from(aiAssistants).where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId))).limit(1);
+        return draftMediaPromptLine(await draftMediaOptions(db, orgId, a?.ctx));
+    } catch {
+        return 'Placeholder pictures and videos for a whole-site draft: their cost could not be read this turn, so do not state one; the card shows it.';
+    }
+}
+
 export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: number): Promise<string> {
     const [site] = await db.select().from(sites).where(and(eq(sites.aiAssistantId, assistantId), eq(sites.organisationId, orgId))).limit(1);
     if (!site) return 'YOUR SITE RIGHT NOW: not started. The first time the Website tab opens it starts from their business details; or propose a site_draft_request to draft the whole site.';
@@ -417,7 +476,9 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
                 : `private draft — not published${site.slug ? ` (address chosen: ${siteOrigin(site.slug)})` : ''}`}${drafting ? '; an AI draft of the whole site is being written right now' : ''}.`,
         'Publishing, taking the site offline, choosing its address and connecting a domain they own (like yourbusiness.co.uk — they add one or two DNS settings where they bought it, and the card shows exactly what) are buttons on the Website tab only — you cannot do them from chat; point them to the Publish card there.',
         `Can they press Publish now: ${(() => { const b = publishBlocker(site, d); return b ? `NO — ${b}` : 'yes'; })()}`,
+        await draftMediaLine(db, orgId, assistantId),
         `Pages: ${d.pages.length} (no plan limits pages). Layout: ${d.structure === 'one_page' ? 'ONE PAGE — the menu jumps down the home page to sections with a menu label' : 'several pages — the menu lists the pages not hidden'}.`,
+        `Old addresses forwarding to a page (set_redirects): ${d.redirects?.length ? d.redirects.slice(0, 30).map((r) => `${r.from} → ${r.to}`).join('; ') : 'none'}`,
         `Business: ${d.settings.siteName}${d.settings.locality ? `, ${d.settings.locality}` : ''} · email ${d.settings.email ?? 'none'} · phone ${d.settings.phone ?? 'none'} · type ${d.settings.businessType}`,
         await currentWebsiteLine(db, orgId, assistantId, site.slug),
         d.settings.features
@@ -426,7 +487,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         `Theme: main colour ${d.theme.primaryColor}, text ${d.theme.textColor}, background ${d.theme.backgroundColor}, lettering ${d.theme.font}, corners ${d.theme.radius}${d.theme.logoUrl ? ', has a logo' : ', no logo'}.`,
     ];
     for (const p of d.pages) {
-        lines.push(`- Page "${p.title}" (pageId ${p.id}, address ${p.slug ? `/${p.slug}` : '/'}${p.hideFromMenu ? ', HIDDEN from the menu' : ''}${p.seo.title ? `, search title "${clip(p.seo.title, 70)}"` : ', no search title'}):`);
+        lines.push(`- Page "${p.title}" (pageId ${p.id}, address ${p.slug ? `/${p.slug}` : '/'}${p.hideFromMenu ? ', HIDDEN from the menu' : ''}${p.menuParent ? `, in the menu UNDER "${clip(d.pages.find((x) => x.id === p.menuParent)?.title ?? p.menuParent, 40)}"` : ''}${p.seo.title ? `, search title "${clip(p.seo.title, 70)}"` : ', no search title'}):`);
         if (!p.sections.length) lines.push('    (no sections)');
         for (const s of p.sections) {
             const pr = s.props as unknown as Record<string, unknown>;
@@ -436,6 +497,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
                 ? ` · look: ${[s.look.background !== 'auto' ? `${s.look.background} background` : '', s.look.columns !== 'auto' ? `${s.look.columns} columns` : '', s.look.menuLabel ? `menu label "${s.look.menuLabel}"` : ''].filter(Boolean).join(', ')}` : '';
             const feed = s.type === 'social_feed' ? ` · ${s.props.enabled ? 'ON' : 'SWITCHED OFF'}, ${s.props.count} newest from ${s.props.platforms.length ? s.props.platforms.join(', ') : 'every platform'}`
                 : s.type === 'blog_posts' ? ` · ${s.props.enabled ? 'ON' : 'SWITCHED OFF'}, ${s.props.count} newest blog posts`
+                : s.type === 'stays' ? ` · ${s.props.stayIds.length ? `stays ${s.props.stayIds.join(', ')}` : 'every active stay'} (Business Information ▸ Stays), button "${s.props.buttonLabel}"`
                 : s.type === 'listings' ? ` · ${s.props.kind === 'event' ? 'events' : 'entries'}${s.props.categories.length ? ` in ${s.props.categories.join(', ')}` : ''}, ${s.props.show === 'all' ? 'all' : 'upcoming only'}, up to ${s.props.count}, ${s.props.layout}${s.props.allowPosts ? `, visitors may send one in ("${s.props.postLabel}")` : ''}` : '';
             lines.push(`    · ${s.type} (sectionId ${s.id})${main ? `: "${clip(main, 90)}"` : ''}${items}${typeof pr.body === 'string' ? ` · "${clip(pr.body, 80)}"` : ''}${feed}${lk}`);
         }
@@ -445,7 +507,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
         ? 'Payments: their Stripe account is connected — Buy buttons on a products section work on the live site.'
         : acct ? 'Payments: they started connecting Stripe but it is not finished — Buy buttons do not show yet. Point them to the Orders tab.'
             : 'Payments: not connected. Buy buttons on a products section only appear once they connect Stripe on the Orders tab (owner or admin).');
-    const catalogue = await db.select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, dietary: orgProducts.dietary })
+    const catalogue = await db.select({ id: orgProducts.id, name: orgProducts.name, price: orgProducts.price, priceType: orgProducts.priceType, priceAmount: orgProducts.priceAmount, priceCurrency: orgProducts.priceCurrency, dietary: orgProducts.dietary })
         .from(orgProducts).where(and(eq(orgProducts.organisationId, orgId), eq(orgProducts.status, 'active'))).orderBy(orgProducts.sortOrder, orgProducts.id).catch(() => []);
     lines.push(catalogue.length
         ? `Their Business Information products (for productIds in a products or menu section): ${catalogue.slice(0, 40).map((p) => `${p.name} (productId ${p.id}, ${p.price ?? 'no price shown'}${buyablePence(p) !== null ? ', can be bought online' : ''}${dietaryWords(p.dietary) ? `, ${dietaryWords(p.dietary)}` : ''})`).join('; ')}.`
@@ -454,8 +516,13 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     const bk = await loadBookingSetup(db, orgId).catch(() => null);
     if (bk) {
         lines.push(Object.keys(bk.settings.weeklyHours).length
-            ? `Bookings: opening hours ${describeHours(bk.settings.weeklyHours)} (${bk.settings.timezone}); ${bk.settings.mode === 'instant' ? 'confirmed straight away' : 'they confirm each booking'}; bookable services (with a length): ${bk.services.length ? bk.services.map((x) => `${x.name} (serviceId ${x.id}, ${x.durationMinutes} min${depositLabel(x) ? `, ${depositLabel(x)}` : ''})`).join(', ') : 'none yet'}; who/what can be booked: ${bk.resources.length ? bk.resources.map((r) => `${r.name} (${r.kind})`).join(', ') : 'just them'}.`
+            ? `Bookings: opening hours ${describeHours(bk.settings.weeklyHours)} (${bk.settings.timezone}); ${bk.settings.mode === 'instant' ? 'confirmed straight away' : 'they confirm each booking'}; bookable services (with a length): ${bk.services.length ? bk.services.map((x) => `${x.name} (serviceId ${x.id}, ${x.durationMinutes} min, ${MEETING_LOCATION_LABEL[meetingLocationOf(x.meetingLocation)].toLowerCase()}${depositLabel(x) ? `, ${depositLabel(x)}` : ''})`).join(', ') : 'none yet'}; who/what can be booked: ${bk.resources.length ? bk.resources.map((r) => `${r.name} (resourceId ${r.id}, ${r.kind}${r.meetingUrl ? ', has their own video link' : ''})`).join(', ') : 'just them'}; video call link: ${bk.settings.meetingUrl ?? 'none set'}.`
             : 'Bookings: not set up (no opening hours yet).');
+        // The booking link (site-booking-page.ts) — theirs to share; it works before the site is published.
+        const link = await bookingLinkFor(db, orgId).catch(() => null);
+        lines.push(link
+            ? `Booking link (works now${site.status === 'published' ? '' : ', even though the site isn\'t published — it shows only the booking pages'}): ${link}. One service: ${link}?svc=<serviceId>; one person: ${link}?res=<resourceId>. It is on the Bookings tab ▸ "Your booking link", with a "Book now" button for another website.`
+            : `Booking link: none yet — it needs ${site.slug ? '' : 'the site\'s address chosen (Publish card on the Website tab; no need to publish), '}opening hours and something to book.`);
         lines.push(`Where to find them (Business Information, for an hours section): ${bk.settings.visitAddress ? `visit address "${bk.settings.visitAddress.split('\n').join(', ')}"` : 'no visit address'}; ${bk.settings.whatsapp ? `WhatsApp ${bk.settings.whatsapp}` : 'no WhatsApp number'}.`);
     }
     const tt = await bookableSessions(db, orgId, new Date(), [], 20).catch(() => null);
@@ -466,6 +533,8 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     lines.push(await socialFeedForPrompt(db, orgId).catch(() => 'Their published social posts could not be read this turn.'));
     lines.push(await siteBlogForPrompt(db, orgId, d).catch(() => 'Their blog posts could not be read this turn.'));
     lines.push(await listingsForPrompt(db, orgId).catch(() => 'Their listings could not be read this turn.'));
+    // Holiday lets and B&B rooms, and the stays booked (stays-prompt.ts) — for stay_setup / stay_block / stay_damage cards.
+    lines.push(await (await import('./stays-prompt')).staysForPrompt(db, orgId).catch(() => 'Their stays could not be read this turn.'));
     lines.push(await visitStats(db, site.id).then((v) => visitsLine(v, site.status === 'published')).catch(() => 'Visitor figures could not be read this turn.'));
     const forms = await listSignupForms(db, orgId).catch(() => []);
     lines.push(forms.length

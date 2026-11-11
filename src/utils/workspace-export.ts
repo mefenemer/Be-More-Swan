@@ -57,6 +57,8 @@ function stripDeep(v: unknown): unknown {
 export const WORKSPACE_TABLES: Record<string, any> = {
     assistants: s.aiAssistants,
     scheduledPosts: s.scheduledPosts,
+    reviewLinks: s.reviewLinks,
+    reviewLinkResponses: s.reviewLinkResponses,
     postInsights: s.postInsights,
     postIdeas: s.postIdeaSuggestions,
     postedAssets: s.postedAssets,
@@ -100,6 +102,13 @@ export const WORKSPACE_TABLES: Record<string, any> = {
     bookings: s.bookings,
     bookingSettings: s.bookingSettings,
     bookableResources: s.bookableResources,
+    // Holiday lets and B&B rooms (db/z-stays.sql).
+    stayTypes: s.stayTypes,
+    stayRates: s.stayRates,
+    stayFees: s.stayFees,
+    stayUnits: s.stayUnits,
+    stayBlocks: s.stayBlocks,
+    bookingUnits: s.bookingUnits,
     stripeConnectAccounts: s.stripeConnectAccounts,
     swanIndexProfiles: s.swanIndexProfiles,
     swanIndexPosts: s.swanIndexPosts,

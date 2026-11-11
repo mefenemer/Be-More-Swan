@@ -1,4 +1,4 @@
-// What work costs comes from Admin → Revenue → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
 window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/assistant-mentor-plan.js
@@ -484,6 +484,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     try { if (active && el.contains(active) && typeof active.selectionStart === 'number') caret = [active.selectionStart, active.selectionEnd]; } catch (e) { /* number inputs */ }
     const focusKey = active && el.contains(active) ? (active.getAttribute('data-mplan-field') || active.getAttribute('data-mplan-assumption') || active.getAttribute('data-mplan-calc') || (active.hasAttribute('data-mplan-research-q') ? 'research' : active.hasAttribute('data-mplan-feedback-text') ? 'feedback' : null)) : null;
     el.innerHTML = `
+      <div class="flex items-center justify-between gap-3 mb-3"><h2 class="text-base font-bold text-gray-900 shrink-0">Plan</h2><div class="flex flex-wrap items-center justify-end gap-2">${window._tabFullBtn?.('mentorplan') || ''}</div></div>
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-3 items-start">
         <div class="space-y-4 min-w-0 lg:col-span-2">${checklistHtml(state.setup?.checklist || [])}${plansHtml()}${researchHtml()}${feedbackHtml()}</div>
         <div class="space-y-4 min-w-0">${state.setup ? recommendedHtml(state.setup.recommended) : ''}${calcHtml()}${playbookHtml()}

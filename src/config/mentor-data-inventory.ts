@@ -51,6 +51,9 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('always', 'Its track record: accepted suggestions and what happened since (§5.3)', ['mentor_outcomes'], 'What changed since you accepted its suggestions'),
     ...group('on_request', 'Task detail: what spent tasks this month and bonus tasks', ['task_ledger', 'task_bonus', 'chat_task_tally', 'task_cost_acceptances']),
     ...group('on_request', 'Drafting jobs in progress, and the compiled assistant brief', ['content_generation_jobs', 'ai_blueprints']),
+    // The active pillars' NAMES already reach the Mentor every turn, as the derived content_pillars
+    // set-up answer on ai_assistants. The records add descriptions and switched-off pillars.
+    ...group('on_request', 'A Social Media assistant\'s content pillars with their descriptions (the names are in its set-up answers)', ['content_pillars']),
     ...group('on_request', 'Results: goal measurements and post performance', ['goal_telemetry', 'post_insights', 'manual_follower_counts']),
     // Phase 3b (§5.2): read by src/utils/mentor-customers.ts — in chat when the user asks about their
     // customers, and always in the weekly review and on the Customers panel. Only while the assistant
@@ -78,6 +81,9 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('on_request', 'Email results: sends and link clicks (totals)', ['newsletter_sends', 'newsletter_link_clicks', 'newsletter_sequences']),
     ...group('on_request', 'Brand Designer briefs and Inspo titles', ['visual_briefs', 'inspo_items']),
     ...group('on_request', 'Video Producer videos: titles, status and what they cost', ['video_projects']),
+    // The owner's own videos as the Video Producer understood them (shot lists, spoken words) — only
+    // the Video Producer reads them; nothing the Mentor needs.
+    ...group('never', 'Video Producer footage reviews: shot lists and transcripts of the owner\'s own videos', ['footage_analyses']),
     ...group('on_request', 'The user\'s own support tickets and issue reports, with status', ['support_tickets', 'issue_reports']),
     ...group('on_request', 'A half-finished assistant set-up, to offer picking it up', ['onboarding_drafts']),
     ...group('on_request', 'Bookings: counts and upcoming, when bookings are in use', ['bookings', 'booking_settings', 'class_sessions']),
@@ -85,6 +91,9 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     ...group('on_request', 'Its own chat history with this user (never other assistants\' — §2.8)', ['chat_sessions']),
 
     // ── never ─────────────────────────────────────────────────────────────────────────────────
+    ...group('never', 'Guest review links: private addresses, and names and comments typed by people outside the workspace. Guest text reaches a model only on the user\'s click', [
+        'review_links', 'review_link_responses',
+    ]),
     ...group('never', 'Secrets and connection credentials', [
         'vault_secrets', 'api_keys', 'system_connections', 'workspace_integrations', 'stripe_connect_accounts',
         'newsletter_sending_domains', 'webhook_endpoints',
@@ -94,6 +103,11 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
         'audience_form_submissions', 'lead_opt_outs', 'review_opt_outs', 'suppression_list', 'site_enquiries',
     ], 'Your contacts\' email addresses, phone numbers and consent records'),
     ...group('never', 'Website visitor counts — the Website Assistant reports them; the hashed visitor ids are only for counting each visitor once a day', ['site_visit_days', 'site_visit_pages', 'site_visit_refs', 'site_visit_seen'], 'How many people visit your website'),
+    // Holiday lets and B&B rooms (db/z-stays.sql). stay_types holds the door codes and Wi-Fi passwords
+    // emailed to guests — never for a model. The Mentor sees stays as bookings (kind 'stay').
+    ...group('never', 'Holiday lets and B&B rooms: rates, rooms, blocked dates, and the arrival details (door codes) sent to guests; the Website Assistant manages them', [
+        'stay_types', 'stay_rates', 'stay_fees', 'stay_units', 'stay_blocks', 'booking_units',
+    ], 'Your holiday let\'s door codes and arrival details'),
     ...group('never', 'Website listings (events and directory entries) — they hold the names and emails of visitors who sent entries in; the Website Assistant manages them', ['site_listings'], 'Your website\'s listings and who sent them in'),
     ...group('never', 'Message bodies and transcripts (size and privacy; the owning assistant reads them)', [
         'lead_messages', 'chat_attachments',

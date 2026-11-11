@@ -1048,7 +1048,7 @@
     const q = c.approvedQueries;
     const total = q ? q.niche_scrape.length + q.intent_signal.length + q.footprint.length : 0;
     if (!total) {
-      return `<p class="text-xs text-gray-500">No search plan has been approved yet. Press <span class="font-semibold">Review plan</span> under Find New Leads to draft one — until then this search has nothing to run.</p>`;
+      return `<p class="text-xs text-gray-500">No search plan has been approved yet. Press <span class="font-semibold">Review plan</span> on the Searches tab to draft one — until then this search has nothing to run.</p>`;
     }
     return ['niche_scrape', 'intent_signal', 'footprint'].map((key) => {
       const list = q[key] || [];
@@ -1134,7 +1134,7 @@
     const blocked = c.status === 'draft'
       ? 'This search has not been started yet. Save a schedule now if you like — it begins repeating once you press Start search.'
       : c.status === 'paused'
-        ? 'This search is paused, so nothing will run until you resume it under Find New Leads.'
+        ? 'This search is paused, so nothing will run until you resume it on the Searches tab.'
         : null;
     return `
       <div class="space-y-3">
@@ -1364,7 +1364,7 @@
       <div class="bg-white rounded-2xl shadow-xl w-full max-w-xl max-h-[90vh] flex flex-col">
         <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100 shrink-0">
           <div>
-            <h3 class="text-lg font-bold text-gray-900">${esc(state.cfg?.title || 'Find New Leads')}</h3>
+            <h3 class="text-lg font-bold text-gray-900">${esc(state.cfg?.title || 'New search')}</h3>
             <p class="text-sm text-gray-500 mt-0.5">Describe who you want to reach — the ${esc(window.RoleLabels ? window.RoleLabels.get('lead_qualifier') : 'Lead Generation Assistant')} searches the web, scores what it finds, and files leads for your approval.</p>
           </div>
           <button type="button" data-dc-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>

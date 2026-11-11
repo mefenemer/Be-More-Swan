@@ -1,6 +1,6 @@
 // netlify/functions/admin-partners.ts
 //
-// Admin → Revenue → Partners (docs/affiliate-partner-programme-plan.md §4.5): the affiliate partner
+// Admin → Money → Partners (docs/affiliate-partner-programme-plan.md §4.5): the affiliate partner
 // programme's rates, applications and partners. Partners earn CASH; customers who refer a friend
 // stay on the token track and never appear here.
 //

@@ -22,8 +22,13 @@ import type { SiteBlogCard, SiteBlogIndex, SiteBlogPost, SiteRenderBlog } from '
 import type { SessionView } from './class-sessions';
 import { LISTING_PATH, listingLd, listingsFor, type SiteRenderListing, type SiteRenderListings } from './site-listings';
 import { dietaryKey, dietaryMarks, dietaryWords } from './product-dietary';
+import { STAY_PATH, staysFor, type SiteRenderStay, type SiteRenderStays, type StayPageView } from './site-stays';
+import { describeCancellation } from './stay-quote';
+import { STAY_AMENITIES } from './stay-clean';
 import type { WeeklyHours } from './booking-availability';
-import { BLOG_MENU_ID, BLOG_PATH, blogOn, buttonInk, menuOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
+import { BOLD, BULLET, INLINE_LINK, ITALIC, NUMBERED, SUBHEADING } from './site-rich-text';
+import { contrastRatio, readableInkOn } from './brand-kit';
+import { BLOG_MENU_ID, BLOG_PATH, blogOn, buttonInk, cleanHref, menuOf, socialSiteOf, type Link, type Section, type SiteDefinition, type SitePageDef, type SiteTheme } from './site-definition';
 
 /** What a sign-up section needs to draw one Form Builder form (form-definition.ts publicDefinition). */
 export interface SiteSignupForm {
@@ -35,7 +40,7 @@ export interface SiteSignupForm {
 /** Where forms post, on the site's own origin (sites-host forwards it to site-serve.ts). */
 export const FORM_ACTION = '/_form';
 /** A product as drawn: from Business Information, never typed into the site (site-shop.ts SiteProduct). */
-export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; imageAssetId: number | null; durationMinutes?: number | null; dietary?: unknown; allergens?: string | null; }
+export interface SiteRenderProduct { id: number; name: string; description: string | null; price: string | null; buyPence: number | null; currency?: string; imageAssetId: number | null; durationMinutes?: number | null; dietary?: unknown; allergens?: string | null; }
 
 /** "45 min", "1 hr", "1 hr 30 min". */
 export function formatDuration(minutes: number): string {
@@ -54,6 +59,8 @@ export interface SiteRenderBooking { ready: boolean; services: Array<{ id: numbe
 
 /** Where every booking step lives (booking-render.ts, served by site-serve.ts). */
 export const BOOK_PATH = '/_book';
+/** The booking link of its own (site-booking-page.ts): works even before the site is published. */
+export const BOOKING_PAGE_PATH = '/book';
 
 /** A customer's review page (site-review.ts): the link in a review request email. Its form posts to FORM_ACTION. */
 export const REVIEW_PATH = '/_review';
@@ -131,6 +138,8 @@ export interface RenderContext {
     blog?: SiteRenderBlog | null;
     /** The workspace's published listings (site-listings.ts loadSiteListings); null = no listings section. */
     listings?: SiteRenderListings | null;
+    /** Holiday lets and B&B rooms (site-stays.ts loadSiteStays); null = no stays section. */
+    stays?: SiteRenderStays | null;
     /** The page's query string (without '?') on the live site — a listings section's ?category= filter. */
     query?: string;
     /** "Now", for the Open-now badge (tests pass a fixed time). */
@@ -202,13 +211,33 @@ export function themeCss(theme: SiteTheme): string {
     const pair = FONT_PAIRS[theme.font] || FONT_PAIRS.sans;
     const faces = pair.faces.map((f) => `@font-face{font-family:"${FACE_NAMES[f].family}";src:url(${SITE_FONTS_PATH}/${f}.woff2) format("woff2");font-weight:${FACE_NAMES[f].weights};font-style:normal;font-display:swap}`).join('');
     const tint = theme.accentColor ? mixHex(theme.backgroundColor, theme.accentColor, 0.14) : null;
+    // The second colour paints the call-to-action button only where it can be told apart from the band.
+    const second = theme.secondaryColor && contrastRatio(theme.secondaryColor, theme.primaryColor) >= 1.6 ? theme.secondaryColor : null;
+    const secondCss = second ? `.cta .btn{background:${second};color:${readableInkOn(second)}}` : '';
+    // The 2026-11-08 design settings — each only when set, so older sites draw exactly as before.
+    const extra = [
+        // A soft wash from the main colour into the second (or the tint), always light enough for the text.
+        `.grad{background:linear-gradient(135deg,${mixHex(theme.backgroundColor, theme.primaryColor, 0.16)},${mixHex(theme.backgroundColor, theme.secondaryColor || theme.accentColor || theme.primaryColor, 0.22)})}`,
+        `.card>.ci{display:block;width:calc(100% + 2*var(--cp));max-width:none;margin:calc(-1*var(--cp)) calc(-1*var(--cp)) 16px;aspect-ratio:3/2;object-fit:cover;border-radius:var(--r) var(--r) 0 0}`,
+        // Outlined on the page's own background only: on a coloured band (CTA, brand band, banner or
+        // cover hero) the outline would be the band's colour, so the solid button stays there.
+        theme.buttonStyle === 'outline' ? ':where(section:not(.band):not(.cta):not(.banner):not(.cover)) .btn:not(.s){background:transparent;color:var(--p);border:2px solid var(--p)}' : '',
+        theme.buttonStyle === 'pill' ? '.btn{border-radius:999px}' : '',
+        theme.cardStyle === 'shadow' ? '.card{border-color:transparent;box-shadow:0 1px 2px rgba(0,0,0,.06),0 10px 28px rgba(0,0,0,.09)}' : '',
+        theme.cardStyle === 'flat' ? '.card{border:0;background:transparent;--cp:0px}.card>.ci{border-radius:var(--r)}' : '',
+        theme.headingColor ? `h1,h2,h3{color:${theme.headingColor}}.band h1,.band h2,.band h3,.hero.banner h1,.hero.cover h1,.cta h2{color:inherit}` : '',
+        theme.headerColor ? `.hd{background:${theme.headerColor};color:${readableInkOn(theme.headerColor)};border-bottom-color:transparent}.hd .brand,.hd .nav>li>a,.hd .nav a[aria-current=page]{color:${readableInkOn(theme.headerColor)}}.hd .nav .sub a{color:var(--t)}@media(max-width:720px){.hd .nav .sub a{color:${readableInkOn(theme.headerColor)}}}` : '',
+        theme.footerColor ? `.ft{background:${theme.footerColor};color:${readableInkOn(theme.footerColor)};opacity:1;border-top-color:transparent}` : '',
+    ].join('');
     return `${faces}:root{--p:${theme.primaryColor};--t:${theme.textColor};--b:${theme.backgroundColor};--ink:${ink};--r:${RADIUS[theme.radius]};--f:${pair.body};--hf:${pair.heading};--hw:${pair.weight};--sp:${SPACING[theme.spacing ?? 'regular']}}
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}body{margin:0;font-family:var(--f);color:var(--t);background:var(--b);line-height:1.6;font-size:17px}
 img{max-width:100%;height:auto;display:block}a{color:var(--p)}h1,h2,h3{line-height:1.2;margin:0 0 .5em;font-family:var(--hf);font-weight:var(--hw)${pair.upper ? ';text-transform:uppercase' : ''}${pair.tracking ? `;letter-spacing:${pair.tracking}` : ''}}.brand{font-family:var(--hf)}h1{font-size:clamp(2rem,5vw,3.2rem)}h2{font-size:clamp(1.5rem,3.5vw,2.2rem)}h3{font-size:1.15rem}
-p{margin:0 0 1em}.w{max-width:1080px;margin:0 auto;padding:0 20px}.n{max-width:760px}
+p{margin:0 0 1em}.rt{margin:0 0 1em;padding-left:1.4em}.rt li{margin:.25em 0}.w{max-width:1080px;margin:0 auto;padding:0 20px}.n{max-width:760px}
 .hd{border-bottom:1px solid rgba(0,0,0,.08)}.hd .w{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding-top:14px;padding-bottom:14px}
 .brand{font-weight:800;font-size:1.15rem;text-decoration:none;color:var(--t)}.brand img{max-height:40px;width:auto}
 .nav{display:flex;flex-wrap:wrap;gap:4px 18px;margin:0;padding:0;list-style:none}.nav a{text-decoration:none;color:var(--t);font-weight:600;font-size:.95rem}.nav a[aria-current=page]{color:var(--p)}
+.hd{position:relative;z-index:30}.nav li{position:relative}.nav .sub{list-style:none;margin:0;padding:6px 0;display:none;position:absolute;left:-14px;top:100%;width:max-content;min-width:200px;max-width:320px;background:var(--b);border:1px solid rgba(0,0,0,.1);border-radius:var(--r);box-shadow:0 10px 28px rgba(0,0,0,.1)}.nav .sub a{display:block;padding:7px 14px;font-weight:500}.nav .has-sub>a::after{content:"▾";font-size:.7em;margin-left:5px}.nav .has-sub:hover>.sub,.nav .has-sub:focus-within>.sub{display:block}
+@media(max-width:720px){.nav .has-sub{flex-basis:100%}.nav .sub{display:block;position:static;min-width:0;border:0;box-shadow:none;background:none;padding:2px 0 4px 12px}.nav .sub a{padding:2px 0;font-size:.9rem}.nav .has-sub>a::after{content:none}}
 section{padding:var(--sp) 0}.alt{background:${tint ?? 'rgba(0,0,0,.035)'}}
 .hd.ctr .w{flex-direction:column;justify-content:center;gap:10px;padding-top:22px}.hd.ctr .brand{font-size:1.5rem}.hd.ctr .nav{justify-content:center}
 .btn{display:inline-block;padding:12px 22px;border-radius:var(--r);background:var(--p);color:var(--ink);font-weight:700;text-decoration:none;margin:4px 8px 4px 0}.btn.s{background:transparent;color:var(--p);border:2px solid var(--p)}
@@ -222,9 +251,9 @@ section{padding:var(--sp) 0}.alt{background:${tint ?? 'rgba(0,0,0,.035)'}}
 .hero.cover .w{position:relative;z-index:1;width:100%}.hero.cover h1{font-size:clamp(2.4rem,6.2vw,4.6rem);color:#fff}.hero.cover .eb{color:#fff;opacity:.9}.hero.cover .sub{opacity:.95}
 .hero.cover a.btn.s{color:#fff;border-color:#fff}.hero.cover video.bg{background:transparent}
 .grid{display:grid;gap:24px;margin-top:28px}@media(min-width:700px){.grid{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}}
-.card{border:1px solid rgba(0,0,0,.08);border-radius:var(--r);padding:22px;background:var(--b)}.num{display:inline-flex;width:34px;height:34px;border-radius:50%;background:var(--p);color:var(--ink);align-items:center;justify-content:center;font-weight:800;margin-bottom:10px}
+.card{--cp:22px;border:1px solid rgba(0,0,0,.08);border-radius:var(--r);padding:var(--cp);background:var(--b);overflow:hidden}.card>.more{display:inline-block;margin-top:6px;font-weight:700}.num{display:inline-flex;width:34px;height:34px;border-radius:50%;background:var(--p);color:var(--ink);align-items:center;justify-content:center;font-weight:800;margin-bottom:10px}
 .intro{max-width:680px;opacity:.85}details{border:1px solid rgba(0,0,0,.1);border-radius:var(--r);padding:14px 18px;margin:10px 0;background:var(--b)}summary{cursor:pointer;font-weight:700}details p{margin:.6em 0 0}
-.cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}
+.cta{text-align:center}.cta .box{background:var(--p);color:var(--ink);border-radius:var(--r);padding:44px 24px}.cta .btn{background:var(--ink);color:var(--p)}${secondCss}${extra}
 .ft{border-top:1px solid rgba(0,0,0,.08);padding:28px 0;font-size:.85rem;opacity:.85}.ft .w{display:flex;flex-wrap:wrap;gap:8px 20px;justify-content:space-between}.ft a{color:inherit}
 .pv{background:#111;color:#fff;text-align:center;font-size:.85rem;padding:8px}
 .stars{color:#f59e0b;letter-spacing:1px}.stars .off{color:rgba(0,0,0,.15)}.rv{margin:0}.rv blockquote{margin:8px 0}.rv figcaption{font-size:.95rem}.rsum{margin:8px 0 0}
@@ -240,7 +269,7 @@ address{font-style:normal;margin:0 0 12px}
 html{scroll-behavior:smooth}section[id]{scroll-margin-top:12px}
 .band{background:var(--p);color:var(--ink)}.band a:not(.btn){color:var(--ink)}.band .card,.band details{color:var(--t)}.band .btn{background:var(--ink);color:var(--p)}
 @media(min-width:700px){.grid.c2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid.c3{grid-template-columns:repeat(3,minmax(0,1fr))}}
-.tx{display:grid;gap:28px;align-items:center}.tx img{border-radius:var(--r)}@media(min-width:800px){.tx{grid-template-columns:1fr 1fr}.tx.left img{order:0}.tx.right img{order:2}}
+.ha-c{text-align:center}.ha-r{text-align:right}.tx{display:grid;gap:28px;align-items:center}.tx img{border-radius:var(--r)}@media(min-width:800px){.tx{grid-template-columns:1fr 1fr}.tx.left img{order:0}.tx.right img{order:2}}
 video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r);background:#000}.hero video{margin:24px auto 0}.hero.split video{margin:0}.gal.sq video{aspect-ratio:1/1;object-fit:cover}@media(min-width:800px){.tx.left video{order:0}.tx.right video{order:2}}
 .fm{display:grid;gap:14px;margin-top:20px;max-width:560px}.fm label{display:grid;gap:4px;font-weight:600;font-size:.95rem}.fm .opt{display:flex;gap:8px;align-items:flex-start;font-weight:400}
 .fm input:not([type=checkbox]):not([type=radio]),.fm textarea,.fm select{font:inherit;color:var(--t);background:var(--b);border:1px solid rgba(0,0,0,.25);border-radius:var(--r);padding:10px 12px;width:100%}
@@ -248,10 +277,70 @@ video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r)
 .lf{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 0}.lf a{border:1px solid rgba(0,0,0,.18);border-radius:999px;padding:6px 14px;text-decoration:none;color:var(--t);font-size:.92rem}.lf a[aria-current]{background:var(--p);color:var(--ink);border-color:var(--p)}.lcat{text-transform:uppercase;letter-spacing:.06em;font-weight:700}.when{font-weight:700}
 .ls{list-style:none;padding:0;margin:24px 0 0;display:grid;gap:14px}.lr{display:flex;gap:16px;align-items:flex-start;border-bottom:1px solid rgba(0,0,0,.08);padding-bottom:14px}.lr img{width:112px;aspect-ratio:4/3;object-fit:cover;border-radius:var(--r);flex-shrink:0}.lr h2,.lr h3{margin:0;font-size:1.15rem}.lr p{margin:4px 0 0}.lr h2 a,.lr h3 a{color:var(--t)}
 .li .facts{display:grid;gap:6px;margin:16px 0 20px;padding:16px 18px;border-radius:var(--r);background:rgba(0,0,0,.04)}.li .facts p{margin:0}
-.fm button{border:0;cursor:pointer;font:inherit;justify-self:start}.fm button[disabled]{opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}`;
+.fm button{border:0;cursor:pointer;font:inherit;justify-self:start}.fm button[disabled]{opacity:.6;cursor:not-allowed}.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.st .facts{display:flex;flex-wrap:wrap;gap:6px 18px;margin:12px 0 18px;padding:14px 18px;border-radius:var(--r);background:rgba(0,0,0,.04)}.st .facts span{white-space:nowrap}.st .price{font-weight:700;font-size:1.1rem}
+.st .pics{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:20px 0}.st .pics img{border-radius:var(--r);width:100%;aspect-ratio:3/2;object-fit:cover}.st .pics img:first-child{grid-column:1/-1}@media(min-width:700px){.st .pics{grid-template-columns:2fr 1fr 1fr}.st .pics img:first-child{grid-column:auto;grid-row:span 2;height:100%}}.st .fm{margin-bottom:36px}.st h2{margin-top:1.6em}
+.st .am{columns:2 180px;padding-left:1.1em;margin:8px 0 20px}.cals{display:grid;gap:24px;margin:14px 0}@media(min-width:700px){.cals{grid-template-columns:1fr 1fr}}
+.cal{width:100%;border-collapse:collapse;table-layout:fixed;font-size:.92rem}.cal caption{font-weight:700;text-align:left;padding-bottom:6px}.cal th{font-weight:600;font-size:.8rem;opacity:.7;padding:4px 0}.cal td{text-align:center;padding:2px}
+.cal td span,.cal td a{display:block;padding:7px 0;border-radius:var(--r)}.cal td a{background:rgba(0,0,0,.05);color:var(--t);text-decoration:none;font-weight:600}.cal td a:hover{background:var(--p);color:var(--ink)}.cal .gone{opacity:.35;text-decoration:line-through}.cal .past{opacity:.3}
+.calnav{display:flex;justify-content:space-between;gap:12px}.qt{width:100%;border-collapse:collapse;margin:12px 0}.qt td{padding:7px 0;border-bottom:1px solid rgba(0,0,0,.08)}.qt td:last-child{text-align:right;white-space:nowrap}.qt tr.tot td{font-weight:700;border-bottom:0}`;
 }
 
-const paragraphs = (text: string) => text.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, '<br>')}</p>`).join('');
+/**
+ * Words in, paragraphs out — escaped, with the marks site-rich-text.ts allows: [words](address)
+ * links, through the same gate as buttons (an address that isn't safe, or a page that doesn't exist,
+ * draws the words alone), "### " subheading lines, **bold**, *italics*, and bullet ("- ") and numbered
+ * ("1. ") list lines. `rich: false` (other people's words: reviews, social captions) keeps links and
+ * paragraphs only, so a "*" someone typed is never read as formatting.
+ */
+const emphasis = (html: string) => html.replace(BOLD, '<strong>$1</strong>').replace(ITALIC, '<em>$1</em>');
+const inline = (text: string, rich = true) => {
+    const plain = (t: string) => (rich ? emphasis(esc(t)) : esc(t)).replace(/\n/g, '<br>');
+    let out = '';
+    let last = 0;
+    for (const m of text.matchAll(INLINE_LINK)) {
+        out += plain(text.slice(last, m.index));
+        const to = cleanHref(m[2]);
+        const ok = to && (!to.startsWith('/') || pagePaths.has(to.split(/[?#]/)[0]));
+        out += ok ? `<a href="${esc(href(to!))}">${plain(m[1])}</a>` : plain(m[1]);
+        last = (m.index ?? 0) + m[0].length;
+    }
+    return out + plain(text.slice(last));
+};
+/** One paragraph's lines: runs of list lines become <ul>/<ol>, the lines between them a <p>. */
+const block = (p: string) => {
+    let out = '';
+    let words: string[] = [];
+    let list: { tag: 'ul' | 'ol'; start: number; items: string[] } | null = null;
+    const endWords = () => { if (words.length) out += `<p>${inline(words.join('\n'))}</p>`; words = []; };
+    const endList = () => {
+        if (list) out += `<${list.tag} class="rt"${list.tag === 'ol' && list.start !== 1 ? ` start="${list.start}"` : ''}>${list.items.map((i) => `<li>${inline(i)}</li>`).join('')}</${list.tag}>`;
+        list = null;
+    };
+    for (const line of p.split('\n')) {
+        const b = line.match(BULLET);
+        const n = b ? null : line.match(NUMBERED);
+        const tag = b ? 'ul' : n ? 'ol' : null;
+        if (!tag) { endList(); words.push(line); continue; }
+        endWords();
+        if (!list || list.tag !== tag) { endList(); list = { tag, start: n ? Number(n[1]) : 1, items: [] }; }
+        list.items.push(line.slice((b ?? n)![0].length));
+    }
+    endWords();
+    endList();
+    return out;
+};
+const paragraphs = (text: string, rich = true) => text.split(/\n{2,}/).map((p) => {
+    const sub = p.match(SUBHEADING);
+    if (sub) return `<h3>${rich ? emphasis(esc(sub[1])) : esc(sub[1])}</h3>`;
+    return rich ? block(p) : `<p>${inline(p, false)}</p>`;
+}).join('');
+/** Set per render call — the site's own page addresses, so an inline link to a missing page draws as words. */
+let pagePaths = new Set<string>(['/']);
+const setPagePaths = (def: SiteDefinition) => {
+    pagePaths = new Set(def.pages.map((p) => (p.slug ? `/${p.slug}` : '/')));
+    if (blogOn(def)) pagePaths.add(BLOG_PATH);
+};
 
 /** Set per render call (renderSitePage) — internal links go through the context's pagePath. */
 let mapPath: (path: string) => string = (p) => p;
@@ -283,6 +372,7 @@ let socialFeedData: SiteRenderSocialFeed | null = null;
 /** Set per render call — the listings a listings section may show, and the category picked in its filter. */
 let listingsData: SiteRenderListings | null = null;
 let listingPicked: string | null = null;
+let staysData: SiteRenderStays | null = null;
 /** Set per render call — the blog posts a blog_posts section may show, and whether the blog is on. */
 let blogData: { latest: SiteRenderBlog | null; on: boolean } = { latest: null, on: false };
 /** Which posts a social_feed section shows: those that went to one of its platforms (none ticked = all), newest first. */
@@ -351,9 +441,27 @@ function listingCardHtml(l: SiteRenderListing, tag: 'h2' | 'h3', layout: 'cards'
     return `<article class="card bp">${src ? `<a href="${esc(link)}" tabindex="-1" aria-hidden="true"><img src="${esc(src)}" alt="" loading="lazy"></a>` : ''}<div class="bpb">${inner}<a class="more" href="${esc(link)}" aria-label="More about ${esc(l.title)}">More</a></div></article>`;
 }
 
+/** "Sleeps 4 · 2 bedrooms · 1 bathroom" — the facts a guest compares first. */
+function stayFacts(x: SiteRenderStay): string[] {
+    return [
+        `Sleeps ${x.maxGuests}${x.stayType === 'room' ? ' per room' : ''}`,
+        x.bedrooms !== null ? `${x.bedrooms} bedroom${x.bedrooms === 1 ? '' : 's'}` : '',
+        x.bathrooms !== null ? `${x.bathrooms} bathroom${x.bathrooms === 1 ? '' : 's'}` : '',
+        x.beds || '',
+        x.breakfast === 'included' ? 'Breakfast included' : x.breakfast === 'optional' ? 'Breakfast available' : '',
+    ].filter(Boolean);
+}
+
+function stayCardHtml(x: SiteRenderStay, tag: 'h2' | 'h3', button: string): string {
+    const link = href(`${STAY_PATH}/${x.slug}`);
+    const img = x.images[0];
+    const src = img ? assetUrlOf(img.assetId) || '' : '';
+    return `<article class="card bp">${src ? `<a href="${esc(link)}" tabindex="-1" aria-hidden="true"><img src="${esc(src)}" alt="" loading="lazy"></a>` : ''}<div class="bpb"><${tag}><a href="${esc(link)}">${esc(x.name)}</a></${tag}><p class="fine">${esc(stayFacts(x).slice(0, 3).join(' · '))}</p>${x.summary ? `<p>${esc(x.summary)}</p>` : ''}${x.fromPrice ? `<p><strong>${esc(x.fromPrice)}</strong></p>` : ''}<a class="btn s" href="${esc(link)}">${esc(button)}</a></div></article>`;
+}
+
 /** One section. `h1` is true for the single section that carries the page's main heading. */
 /** The background a section is drawn on: none, the soft tint, or the brand colour (look.background). */
-type SectionBg = '' | 'alt' | 'band';
+type SectionBg = '' | 'alt' | 'band' | 'grad';
 
 function sectionHtml(s: Section, h1: boolean, bg: SectionBg): string {
     const H = h1 ? 'h1' : 'h2';
@@ -375,13 +483,19 @@ function sectionHtml(s: Section, h1: boolean, bg: SectionBg): string {
         case 'features':
         case 'steps': {
             const p = s.props;
-            const cards = p.items.map((it, i) => `<div class="card">${s.type === 'steps' ? `<span class="num">${i + 1}</span>` : ''}<h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}</div>`).join('');
-            const list = s.type === 'steps' ? `<ol class="grid" style="list-style:none;padding:0">${p.items.map((it, i) => `<li class="card"><span class="num">${i + 1}</span><h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}</li>`).join('')}</ol>` : `<div class="grid">${cards}</div>`;
+            // A card's own link ("Read more", "Course details") sits under its words.
+            const more = (it: typeof p.items[number]) => (it.link ? `<a class="more" href="${esc(href(it.link.href))}">${esc(it.link.label)}</a>` : '');
+            // A card's own picture, across its top (2026-11-08).
+            const pic = (it: typeof p.items[number]) => { const src = imageSrc(it.image); return it.image && src ? mediaHtml({ alt: it.image.alt }, src, 'lazy', 'ci') : ''; };
+            const cards = p.items.map((it, i) => `<div class="card">${pic(it)}${s.type === 'steps' ? `<span class="num">${i + 1}</span>` : ''}<h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}${more(it)}</div>`).join('');
+            const list = s.type === 'steps' ? `<ol class="grid" style="list-style:none;padding:0">${p.items.map((it, i) => `<li class="card">${pic(it)}<span class="num">${i + 1}</span><h3>${esc(it.title)}</h3>${it.body ? paragraphs(it.body) : ''}${more(it)}</li>`).join('')}</ol>` : `<div class="grid">${cards}</div>`;
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${list}</div></section>`;
         }
         case 'text': {
             const p = s.props;
-            const words = `${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${paragraphs(p.body)}`;
+            // Heading alignment (FR#8): a class, never an inline style (the CSP).
+            const ha = p.headingAlign === 'center' ? ' class="ha-c"' : p.headingAlign === 'right' ? ' class="ha-r"' : '';
+            const words = `${p.heading ? `<${H}${ha}>${esc(p.heading)}</${H}>` : ''}${paragraphs(p.body)}`;
             const src = imageSrc(p.image);
             if (p.image && src) {
                 // Beside the words on a wide screen (left or right), above them on a phone.
@@ -447,7 +561,7 @@ ${formButton(p.buttonLabel)}
             const sum = p.showSummary && data?.summary ? data.summary : null;
             if (!chosen.length && !sum) return formState.preview
                 ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Reviews section: add your reviews in Audience ▸ Reviews. Until then it doesn't appear on your live site.</p></div></section>` : '';
-            const card = (r: SiteRenderReview) => `<figure class="card rv">${r.rating ? `<p>${stars(r.rating)}</p>` : ''}<blockquote>${paragraphs(r.body)}</blockquote><figcaption><strong>${esc(r.authorName)}</strong>${r.authorDetail ? `, ${esc(r.authorDetail)}` : ''}<br><span class="fine">${r.sourceUrl ? `<a href="${esc(r.sourceUrl)}" rel="noopener">${esc(r.sourceLabel)}</a>` : esc(r.sourceLabel)}${r.reviewedOn ? ` · ${esc(monthYear(r.reviewedOn))}` : ''}</span></figcaption></figure>`;
+            const card = (r: SiteRenderReview) => `<figure class="card rv">${r.rating ? `<p>${stars(r.rating)}</p>` : ''}<blockquote>${paragraphs(r.body, false)}</blockquote><figcaption><strong>${esc(r.authorName)}</strong>${r.authorDetail ? `, ${esc(r.authorDetail)}` : ''}<br><span class="fine">${r.sourceUrl ? `<a href="${esc(r.sourceUrl)}" rel="noopener">${esc(r.sourceLabel)}</a>` : esc(r.sourceLabel)}${r.reviewedOn ? ` · ${esc(monthYear(r.reviewedOn))}` : ''}</span></figcaption></figure>`;
             const summary = sum ? `<p class="rsum">${stars(Math.round(sum.average))} <strong>${sum.average.toFixed(1)} out of 5</strong> <span class="fine">from ${sum.rated} rated review${sum.rated === 1 ? '' : 's'}</span></p>` : '';
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${summary}${chosen.length ? `<div class="grid">${chosen.map(card).join('')}</div>` : ''}</div></section>`;
         }
@@ -464,7 +578,7 @@ ${formButton(p.buttonLabel)}
                 const src = post.media ? imageSrc({ url: '', assetId: post.media.assetId }) : '';
                 const media = src ? mediaHtml({ alt: `Picture from our ${where} post`, video: post.media!.video }, src, 'lazy') : '';
                 const links = post.links.map((l) => (l.url ? `<a href="${esc(l.url)}" rel="noopener">See it on ${esc(l.label)}</a>` : `<span>On ${esc(l.label)}</span>`)).join('');
-                return `<article class="card sp">${media}<div class="spb"><p class="fine">${esc(shortDate(post.publishedAt))}</p>${post.caption ? `<div class="spt">${paragraphs(post.caption)}</div>` : ''}<p class="spl">${links}</p></div></article>`;
+                return `<article class="card sp">${media}<div class="spb"><p class="fine">${esc(shortDate(post.publishedAt))}</p>${post.caption ? `<div class="spt">${paragraphs(post.caption, false)}</div>` : ''}<p class="spl">${links}</p></div></article>`;
             };
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid">${posts.map(card).join('')}</div></div></section>`;
         }
@@ -495,6 +609,16 @@ ${formButton(p.buttonLabel)}
                 ? (p.layout === 'list' ? `<ul class="ls">${items.map((l) => listingCardHtml(l, tag, 'list')).join('')}</ul>` : `<div class="grid">${items.map((l) => listingCardHtml(l, tag, 'cards')).join('')}</div>`)
                 : `<p>${none}${formState.preview && !listingsData?.all.length ? ' <span class="fine">(Add listings on the Listings tab — this note is only in your preview.)</span>' : ''}</p>`;
             return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}${filter}${list}${post}</div></section>`;
+        }
+        case 'stays': {
+            // Holiday lets and B&B rooms from Business Information ▸ Stays, read when the page is drawn.
+            const p = s.props;
+            const list = staysFor(staysData, p.stayIds);
+            if (!list.length) {
+                return formState.preview ? `<section${cls} id="${esc(s.id)}"><div class="w n"><p class="fine">Stays: nothing to show yet. Add your holiday let or rooms in Business Information ▸ Stays. Until then this doesn't appear on your live site.</p></div></section>` : '';
+            }
+            const tag = h1 ? 'h2' : 'h3';
+            return `<section${cls} id="${esc(s.id)}"><div class="w">${p.heading ? `<${H}>${esc(p.heading)}</${H}>` : ''}${p.intro ? `<div class="intro">${paragraphs(p.intro)}</div>` : ''}<div class="grid">${list.map((x) => stayCardHtml(x, tag, p.buttonLabel)).join('')}</div></div></section>`;
         }
         case 'gallery': {
             const p = s.props;
@@ -629,6 +753,7 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
             ...(logoSrc(def.theme) ? { logo: logoSrc(def.theme) } : {}),
             ...(s.email ? { email: s.email } : {}),
             ...(s.phone ? { telephone: s.phone } : {}),
+            ...(s.socialLinks?.length ? { sameAs: s.socialLinks } : {}),
             ...(s.locality || business.info?.visitAddress ? { address: { '@type': 'PostalAddress',
                 ...(business.info?.visitAddress ? { streetAddress: business.info.visitAddress.split('\n').join(', ') } : {}),
                 ...(s.locality ? { addressLocality: s.locality } : {}) } } : {}),
@@ -651,7 +776,7 @@ function structuredData(def: SiteDefinition, page: SitePageDef, origin: string):
                 '@context': 'https://schema.org', '@type': 'Product', name: pr.name,
                 ...(pr.description ? { description: pr.description } : {}),
                 ...(img ? { image: img } : {}),
-                ...(pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: 'GBP', seller: { '@type': 'Organization', name: s.siteName } } } : {}),
+                ...(pr.buyPence !== null ? { offers: { '@type': 'Offer', price: (pr.buyPence / 100).toFixed(2), priceCurrency: pr.currency || 'GBP', seller: { '@type': 'Organization', name: s.siteName } } } : {}),
             });
         }
     }
@@ -701,13 +826,13 @@ ${ld.map((x) => `<script type="application/ld+json">${jsonLd(x)}</script>`).join
 ${ctx.preview ? '<div class="pv">Preview — this version is not live yet.</div>' : ''}
 <header class="hd${def.theme.header === 'centered' ? ' ctr' : ''}"><div class="w">
 <a class="brand" href="${esc(href('/'))}">${logoSrc(def.theme) ? `<img src="${esc(logoSrc(def.theme))}" alt="${esc(s.siteName)}">` : esc(s.siteName)}</a>
-${menu.length > (def.structure === 'one_page' ? 0 : 1) ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li><a href="${esc(m.sectionId && page && page.slug !== '' ? `${href('/')}${m.path}` : href(m.path))}"${current && m.pageId === current && !m.sectionId ? ' aria-current="page"' : ''}>${esc(m.label)}</a></li>`).join('')}</ul></nav>` : ''}
+${menu.length > (def.structure === 'one_page' ? 0 : 1) ? `<nav aria-label="Main"><ul class="nav">${menu.map((m) => `<li${m.children ? ' class="has-sub"' : ''}><a href="${esc(m.sectionId && page && page.slug !== '' ? `${href('/')}${m.path}` : href(m.path))}"${current && m.pageId === current && !m.sectionId ? ' aria-current="page"' : ''}>${esc(m.label)}</a>${m.children ? `<ul class="sub">${m.children.map((c) => `<li><a href="${esc(href(c.path))}"${current && c.pageId === current ? ' aria-current="page"' : ''}>${esc(c.label)}</a></li>`).join('')}</ul>` : ''}</li>`).join('')}</ul></nav>` : ''}
 </div></header>
 <main>
 ${body}
 </main>
 <footer class="ft"><div class="w">
-<div>${def.footer.text ? `${paragraphs(def.footer.text)}` : ''}<p>© ${year} ${esc(s.siteName)}${s.email ? ` · <a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : ''}${s.phone ? ` · <a href="tel:${esc(s.phone.replace(/[^0-9+]/g, ''))}">${esc(s.phone)}</a>` : ''}</p></div>
+<div>${def.footer.text ? `${paragraphs(def.footer.text)}` : ''}${s.socialLinks?.length ? `<p class="soc">${s.socialLinks.map((u) => `<a href="${esc(u)}" rel="noopener me">${esc(socialSiteOf(u) ?? 'Profile')}</a>`).join(' · ')}</p>` : ''}<p>© ${year} ${esc(s.siteName)}${s.email ? ` · <a href="mailto:${esc(s.email)}">${esc(s.email)}</a>` : ''}${s.phone ? ` · <a href="tel:${esc(s.phone.replace(/[^0-9+]/g, ''))}">${esc(s.phone)}</a>` : ''}</p></div>
 <div><p>${ctx.creditUrl ? `<a href="${esc(ctx.creditUrl)}">Made with Be More Swan</a> · ` : ''}<a href="${esc(ctx.reportUrl)}" rel="nofollow">Report this site</a></p></div>
 </div></footer>
 </body>
@@ -717,12 +842,14 @@ ${body}
 /** One page by path ('/', '/services'). An unknown path is a real 404 page in the site's own look. */
 export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderContext): RenderedPage {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     const page = findPage(def, path);
     reviewsData = ctx.reviews ?? null;
     socialFeedData = ctx.socialFeed ?? null;
     blogData = { latest: ctx.blog ?? null, on: blogOn(def) };
     listingsData = ctx.listings ?? null;
+    staysData = ctx.stays ?? null;
     // ?category= reaches here inside the path (the preview) or as the live site's query string.
     try { listingPicked = new URLSearchParams(path.includes('?') ? path.split('?')[1].split('#')[0] : (ctx.query || '')).get('category')?.slice(0, 40) || null; } catch { listingPicked = null; }
     business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
@@ -738,7 +865,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
         // plain, the soft tint, or a band of their brand colour (look.background).
         const look = s.look;
         const auto: SectionBg = shade && s.type !== 'hero' && s.type !== 'cta' ? 'alt' : '';
-        const bg: SectionBg = !look || look.background === 'auto' ? auto : look.background === 'soft' ? 'alt' : look.background === 'brand' ? 'band' : '';
+        const bg: SectionBg = !look || look.background === 'auto' ? auto : look.background === 'soft' ? 'alt' : look.background === 'brand' ? 'band' : look.background === 'gradient' ? 'grad' : '';
         if (s.type !== 'hero' && s.type !== 'cta') shade = !shade;
         let html = sectionHtml(s, i === h1At, bg);
         // Columns for grid sections (look.columns) — a class on the section's one grid.
@@ -751,6 +878,7 @@ export function renderSitePage(def: SiteDefinition, path: string, ctx: RenderCon
 /** A plain page in the site's own look — what a visitor sees after sending a form, or when it fails. */
 export function renderSiteNotice(def: SiteDefinition, ctx: RenderContext, title: string, message: string, back: { label: string; path: string }): string {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     const body = `<section><div class="w n"><h1>${esc(title)}</h1>${paragraphs(message)}<p><a class="btn" href="${esc(href(back.path))}">${esc(back.label)}</a></p></div></section>`;
     return documentHtml(def, null, { ...ctx }, body).replace('<title>Page not found |', `<title>${esc(title)} |`);
@@ -759,12 +887,14 @@ export function renderSiteNotice(def: SiteDefinition, ctx: RenderContext, title:
 /** A page of the site's own, with any body — the booking steps (booking-render.ts). Never indexed. */
 export function renderSiteShell(def: SiteDefinition, ctx: RenderContext, title: string, bodyHtml: string): string {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     return documentHtml(def, null, { ...ctx }, bodyHtml).replace('<title>Page not found |', `<title>${esc(title)} |`);
 }
 
 function startRender(def: SiteDefinition, ctx: RenderContext): void {
     mapPath = ctx.pagePath ?? ((p) => p);
+    setPagePaths(def);
     assetUrlOf = ctx.assetUrl ?? (() => null);
     business = { info: ctx.business ?? null, now: ctx.now ?? new Date(), settings: def.settings };
 }
@@ -862,15 +992,104 @@ ${buttons ? `<p>${buttons}</p>` : ''}
     });
 }
 
+/** Two months of a stay's calendar. A free night links to the booking step starting that day. */
+function stayCalendarHtml(v: StayPageView, bookBase: string): string {
+    const head = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => `<th scope="col" abbr="${d}">${d.slice(0, 2)}</th>`).join('');
+    const months = v.months.map((m) => {
+        const cells = m.days.map((d) => {
+            if (!d) return '<td></td>';
+            const n = Number(d.date.slice(8));
+            const label = new Date(`${d.date}T12:00:00Z`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+            if (d.past || !d.open) return `<td><span class="past">${n}</span></td>`;
+            if (d.free <= 0) return `<td><span class="gone" aria-label="${esc(`${label}: booked`)}">${n}</span></td>`;
+            return `<td><a href="${esc(href(`${bookBase}&in=${d.date}`))}" aria-label="${esc(`Arrive ${label}`)}">${n}</a></td>`;
+        });
+        const rows: string[] = [];
+        for (let i = 0; i < cells.length; i += 7) rows.push(`<tr>${cells.slice(i, i + 7).join('')}${'<td></td>'.repeat(Math.max(0, 7 - cells.slice(i, i + 7).length))}</tr>`);
+        return `<table class="cal"><caption>${esc(m.label)}</caption><thead><tr>${head}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
+    }).join('');
+    const here = `${STAY_PATH}/${v.stay.slug}`;
+    const nav = v.prevMonth || v.nextMonth
+        ? `<nav class="calnav" aria-label="Other months">${v.prevMonth ? `<a href="${esc(href(`${here}?month=${v.prevMonth}`))}#dates">← Earlier</a>` : '<span></span>'}${v.nextMonth ? `<a href="${esc(href(`${here}?month=${v.nextMonth}`))}#dates">Later →</a>` : ''}</nav>` : '';
+    return `<div class="cals">${months}</div>${nav}`;
+}
+
+/** /stays/<slug> — one holiday let or room type: photos, facts, prices from, calendar, and "check dates". */
+export function renderSiteStay(def: SiteDefinition, ctx: RenderContext, v: StayPageView, bookPath: string): string {
+    startRender(def, ctx);
+    const s = def.settings;
+    const x = v.stay;
+    const pageUrl = `${ctx.origin}${STAY_PATH}/${encodeURIComponent(x.slug)}`;
+    const pics = x.images.map((im) => ({ src: assetUrlOf(im.assetId) || '', alt: im.alt })).filter((im) => im.src);
+    const back = def.pages.find((p) => p.sections.some((sec) => sec.type === 'stays'));
+    const backPath = back ? (back.slug ? `/${back.slug}` : '/') : '/';
+    const bookBase = `${bookPath}?stay=${x.id}`;
+    const maxRooms = x.stayType === 'room' ? Math.max(1, x.units) : 1;
+    const guestOpts = Array.from({ length: x.maxGuests * maxRooms }, (_, i) => `<option value="${i + 1}"${i + 1 === Math.min(2, x.maxGuests) ? ' selected' : ''}>${i + 1}</option>`).join('');
+    const roomOpts = maxRooms > 1 ? `<label>Rooms<select name="rooms">${Array.from({ length: maxRooms }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}</select></label>` : '';
+    const facts = stayFacts(x);
+    const times = `Check-in from ${esc(fmtClock(x.checkInTime))} · check-out by ${esc(fmtClock(x.checkOutTime))}`;
+    const amenities = x.amenities.map((a) => STAY_AMENITIES[a]).filter(Boolean);
+    const body = `<article><section><div class="w art st">
+<p class="meta"><a href="${esc(href(backPath))}">← ${esc(back ? back.title : 'Home')}</a></p>
+<h1>${esc(x.name)}</h1>
+${x.summary ? `<p class="sub">${esc(x.summary)}</p>` : ''}
+${pics.length ? `<div class="pics">${pics.slice(0, 5).map((im, i) => `<img src="${esc(im.src)}" alt="${esc(im.alt)}"${i ? ' loading="lazy"' : ''}>`).join('')}</div>` : ''}
+<div class="facts">${facts.map((f) => `<span>${esc(f)}</span>`).join('')}${x.fromPrice ? `<span class="price">${esc(x.fromPrice)}</span>` : ''}</div>
+${x.description ? `<div class="body">${paragraphs(x.description)}</div>` : ''}
+${amenities.length ? `<h2>What's there</h2><ul class="am">${amenities.map((a) => `<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+<h2 id="dates">Dates and prices</h2>
+<p class="fine">${times}. Choose the day you arrive, or put in your dates below. Crossed-out dates are booked.</p>
+${stayCalendarHtml(v, bookBase)}
+<form class="fm" method="get" action="${esc(href(bookPath))}">
+<input type="hidden" name="stay" value="${x.id}">
+<label>Arrive<input type="date" name="in" required min="${esc(v.today)}"></label>
+<label>Leave<input type="date" name="out" required min="${esc(v.today)}"></label>
+<label>Guests<select name="guests">${guestOpts}</select></label>
+${roomOpts}
+<button class="btn" type="submit">Check price</button>
+</form>
+${x.houseRules ? `<h2>House rules</h2><div class="body">${paragraphs(x.houseRules)}</div>` : ''}
+<h2>Cancellation</h2><p>${esc(describeCancellation(x.pricing.cancellation))}</p>
+${x.address ? `<p><strong>Where:</strong> ${esc(x.address)}</p>` : ''}
+${x.licenceNumber ? `<p class="fine">Licence / registration number: ${esc(x.licenceNumber)}</p>` : ''}
+</div></section></article>`;
+    const isRoom = x.stayType === 'room';
+    const ld: Record<string, unknown> = {
+        '@context': 'https://schema.org', '@type': isRoom ? 'HotelRoom' : 'VacationRental', name: x.name, url: pageUrl,
+        ...(x.summary || x.description ? { description: x.summary || x.description!.slice(0, 300) } : {}),
+        ...(pics.length ? { image: pics.map((p) => p.src) } : {}),
+        ...(x.address ? { address: x.address } : {}),
+        occupancy: { '@type': 'QuantitativeValue', maxValue: x.maxGuests },
+        ...(x.bedrooms !== null ? { numberOfBedrooms: x.bedrooms } : {}),
+        ...(x.bathrooms !== null ? { numberOfBathroomsTotal: x.bathrooms } : {}),
+        ...(amenities.length ? { amenityFeature: amenities.map((a) => ({ '@type': 'LocationFeatureSpecification', name: a, value: true })) } : {}),
+        ...(isRoom ? { containedInPlace: { '@type': 'BedAndBreakfast', name: s.siteName, url: ctx.origin } } : { checkinTime: x.checkInTime, checkoutTime: x.checkOutTime }),
+    };
+    return documentHtml(def, null, ctx, body, {
+        title: `${x.name} | ${s.siteName}`,
+        description: x.summary || (x.description ? x.description.replace(/\s+/g, ' ').slice(0, 160) : `${facts.join(', ')}.`),
+        canonical: pageUrl, pageUrl, robots: null, ogType: 'website', image: pics[0]?.src ?? null, menuId: back?.id ?? '',
+        ld: [ld],
+    });
+}
+
+/** "16:00" → "4pm", "10:30" → "10:30am". */
+function fmtClock(t: string): string {
+    const [h, m] = t.split(':').map(Number);
+    return `${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''}${h < 12 ? 'am' : 'pm'}`;
+}
+
 /** `blog`: the blog's own addresses when it is on — only posts whose canonical is this site belong here. */
-export function renderSitemap(def: SiteDefinition, origin: string, blog: Array<{ slug: string; lastmod: string | null }> = [], listings: Array<{ slug: string; lastmod: string | null }> = []): string {
+export function renderSitemap(def: SiteDefinition, origin: string, blog: Array<{ slug: string; lastmod: string | null }> = [], listings: Array<{ slug: string; lastmod: string | null }> = [], stays: string[] = []): string {
     const blogUrls = blogOn(def)
         ? [`  <url><loc>${esc(`${origin}${BLOG_PATH}`)}</loc></url>`, ...blog.map((b) => `  <url><loc>${esc(`${origin}${BLOG_PATH}/${encodeURIComponent(b.slug)}`)}</loc>${b.lastmod ? `<lastmod>${esc(b.lastmod.slice(0, 10))}</lastmod>` : ''}</url>`)]
         : [];
     return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${[...def.pages.map((p) => `  <url><loc>${esc(`${origin}${p.slug ? `/${p.slug}` : '/'}`)}</loc></url>`), ...blogUrls,
-    ...listings.map((l) => `  <url><loc>${esc(`${origin}${LISTING_PATH}/${encodeURIComponent(l.slug)}`)}</loc>${l.lastmod ? `<lastmod>${esc(l.lastmod.slice(0, 10))}</lastmod>` : ''}</url>`)].join('\n')}
+    ...listings.map((l) => `  <url><loc>${esc(`${origin}${LISTING_PATH}/${encodeURIComponent(l.slug)}`)}</loc>${l.lastmod ? `<lastmod>${esc(l.lastmod.slice(0, 10))}</lastmod>` : ''}</url>`),
+    ...stays.map((slug) => `  <url><loc>${esc(`${origin}${STAY_PATH}/${slug}`)}</loc></url>`)].join('\n')}
 </urlset>
 `;
 }

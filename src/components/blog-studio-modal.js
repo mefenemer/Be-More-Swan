@@ -14,6 +14,9 @@
  *
  * Public API (attached to window):
  *   openBlogStudio({ assistantId?, postId?, intent? })  — open the modal; postId loads an existing draft.
+ *   openBlogStudio({ assistantId, withVideo: { assetId, title?, words? } })  — "Use in a blog post" from the
+ *     Video Producer (docs/video-producer-studio-plan.md Phase 4): a new draft titled after the video,
+ *     starting with its suggested words, with the video placed in the body. Free — no model call.
  *     intent:'review' puts the Approve / Pick a time / Reject bar on screen while the post is undecided.
  *   openBlogStudio({ mode:'setup', assistantId? })  — "Blog setup": Search Console and the blog widget
  *     only. Both are set once for the whole blog, so they are not shown in a post's editor.
@@ -205,6 +208,9 @@
     + '@media (max-width:1279px){.bs-grid.bs-chat-on{grid-template-columns:300px minmax(0,1fr);}'
     + '.bs-chat-col{position:fixed;right:12px;top:76px;bottom:12px;height:auto;min-height:0;width:min(420px,calc(100vw - 24px));z-index:6;box-shadow:0 18px 50px rgba(0,0,0,.25);border-radius:16px;}}'
     + '@media (max-width:860px){.bs-grid.bs-chat-on{grid-template-columns:minmax(0,1fr);}}'
+    // Folded to its strip (chat-pane.js, owner 2026-11-09): the article gets the room.
+    + '@media (min-width:1280px){.bs-grid.bs-chat-on:has(.bs-chat-col .is-collapsed[data-chatpane]){grid-template-columns:300px minmax(0,1fr) 56px;}}'
+    + '@media (max-width:1279px){.bs-chat-col:has(.is-collapsed[data-chatpane]){width:56px;bottom:auto;}}'
     // "Select": click a paragraph, heading or list to talk about it in the chat.
     + '@media (max-width:1279px){.bs-chat-col.bs-chat-aside{display:none;}}'   // over the article there, so it steps aside
     + '.bs-selecting .bmsme-block{cursor:crosshair;}'
@@ -278,6 +284,7 @@
     + '#bms-blog-backdrop.bs-setup .bs-sec:not([data-bs-sec=search]):not([data-bs-sec=widget]){display:none;}'
     + '#bms-blog-backdrop.bs-setup #bs-workspace{grid-template-columns:minmax(0,1fr);max-width:680px;}'
     + '#bms-blog-backdrop.bs-setup #bs-workspace > div:nth-child(2),#bms-blog-backdrop.bs-setup #bs-setup-link,#bms-blog-backdrop.bs-setup .bs-sec-num{display:none;}'
+    + '#detail-rq-blog-setup .bs-sec-num{display:none;}'
     + '.bs-setup-link{display:block;width:100%;text-align:left;background:none;border:1px dashed #d1d5db;border-radius:12px;padding:10px 12px;'
     + 'font-size:13px;font-weight:600;color:#374151;cursor:pointer;}'
     + '.bs-setup-link:hover{border-color:#f9a8d4;color:#9d174d;background:#fff;}'
@@ -927,8 +934,13 @@
     var kind = blockKind(b.raw);
     var text = String(b.raw).trim();
     var short = text.replace(/\s+/g, ' ').replace(/^#{1,6}\s+/, '');
+    // A picture's chip names it, not its markup; the message below still quotes the line, whose
+    // asset number is what "replace this picture" swaps (issue 35).
+    var pic = kind === 'picture' ? (/\balt\s*=\s*"([^"]+)"/.exec(text) || /^!\[([^\]]+)\]/.exec(text)) : null;
     var ref = {
-      label: kind.charAt(0).toUpperCase() + kind.slice(1) + ' “' + (short.length > 48 ? short.slice(0, 47) + '…' : short) + '”',
+      label: kind === 'picture'
+        ? 'Picture' + (pic ? ' “' + (pic[1].length > 48 ? pic[1].slice(0, 47) + '…' : pic[1]) + '”' : '')
+        : kind.charAt(0).toUpperCase() + kind.slice(1) + ' “' + (short.length > 48 ? short.slice(0, 47) + '…' : short) + '”',
       // The whole block, word for word: the assistant's blog_block_edit card must quote it back exactly.
       message: 'About this part of my article #' + state.postId + ': the ' + kind + ' “' + text.slice(0, 2500) + '”.',
     };
@@ -960,9 +972,13 @@
   // article is open. The worker writes its body on the server, so as with this studio's own buttons:
   // save what is on screen first, lock the editor meanwhile, and reload it afterwards. Without this the
   // editor's next autosave silently put the old words back over the rewrite.
+  // A rewrite pressed in the chat beside the Blogs list, on an article that is NOT open yet: the list is right
+  // there, so it can be opened mid-rewrite. openWorkspace locks it the same way, or it shows the old words and
+  // the next autosave puts them back over the rewrite.
+  var rewritesRunning = {};
   document.addEventListener('blog:rewriteStarting', function (e) {
     var d = e.detail || {};
-    if (!isOpenHere(d.postId)) return;
+    if (!isOpenHere(d.postId)) { rewritesRunning[Number(d.postId)] = true; return; }
     if (state.aiDraftJobId || state.chatRewriting) { d.busy = true; return; }
     d.open = true;
     setSelecting(false);
@@ -973,6 +989,7 @@
   });
   document.addEventListener('blog:rewriteFinished', function (e) {
     var d = e.detail || {};
+    delete rewritesRunning[Number(d.postId)];
     if (state.chatRewriting == null || Number(d.postId) !== Number(state.chatRewriting)) return;
     // Still running: stays locked, because the worker has yet to write. Closing the article releases it.
     if (d.outcome === 'running') { setBanner('bs-action-status', 'Still working \u2014 close this article and reopen it in a minute to see the new version.', 'info'); return; }
@@ -1056,6 +1073,11 @@
     renderHooks(post);
     setSelecting(false);
     if (state.chatRewriting && Number(state.chatRewriting) !== Number(postId)) { state.chatRewriting = null; aiDraftBusy(false); }
+    if (rewritesRunning[Number(postId)]) {
+      state.chatRewriting = postId;
+      aiDraftBusy(true);
+      setBanner('bs-action-status', 'Your assistant is working on this article… about a minute.', 'info');
+    }
     syncChatPane();
     return state.editor;
   }
@@ -1072,10 +1094,15 @@
     syncRejectButton(null);
     syncDecideBar(null);
     setStatus('bs-save-status', 'Creating…');
-    api('blog-posts', { method: 'POST', body: JSON.stringify({ title: 'Untitled draft', assistantId: state.assistantId }) }).then(function (res) {
+    var video = state.pendingVideo;
+    state.pendingVideo = null;
+    var title = video && video.title ? String(video.title).slice(0, 200) : 'Untitled draft';
+    api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title, assistantId: state.assistantId }) }).then(function (res) {
       if (!res.ok) { setBanner('bs-action-status', 'Could not create a draft: ' + ((res.body && res.body.error) || 'please try again.'), 'error'); return; }
       setStatus('bs-save-status', '');
-      var editor = openWorkspace(res.body.post.id, 'Untitled draft', '');
+      var editor = openWorkspace(res.body.post.id, title, video && video.words ? String(video.words) : '');
+      // A video handed over by the Video Producer goes into the body straight away.
+      if (video) attachInline({ assetId: Number(video.assetId) });
       if (editor && editor.focus) editor.focus();   // drop straight into typing
     });
   }
@@ -2393,6 +2420,12 @@
     el('bs-setup-link').addEventListener('click', function () {
       var aid = state.assistantId;
       closeBlogStudio();
+      // On this assistant's own page it is a sub tab of Blogs. Opened from anywhere else, the studio shows it.
+      if (document.getElementById('detail-rq-col-setup') && window._rqOpenBlogSetup && Number(window._currentAssistantId) === Number(aid)) {
+        if (window._activateMainTab) window._activateMainTab('review-queue');
+        window._rqOpenBlogSetup();
+        return;
+      }
       openBlogStudio({ mode: 'setup', assistantId: aid });
     });
     el('bs-decide-approve').addEventListener('click', function () { el('bs-approve').click(); });
@@ -2918,7 +2951,7 @@
       mediaEls.picker.innerHTML = '<div class="bs-media-empty">Generating…</div>';
       // Blank reads the SAVED article, so save what is on screen first.
       (prompt ? Promise.resolve() : flushDraft())
-        .then(function () { return api('generate-ai-image', { method: 'POST', body: JSON.stringify({ prompt: prompt, blogPostId: state.postId, aspectRatio: '16:9' }) }); })
+        .then(function () { return api('generate-ai-image', { method: 'POST', body: JSON.stringify({ assistantId: state.assistantId || undefined, prompt: prompt, blogPostId: state.postId, aspectRatio: '16:9' }) }); })
         .then(function (res) {
           if (!res.ok) {
             mediaEls.picker.innerHTML = '';
@@ -3144,8 +3177,10 @@
   function openBlogStudio(opts) {
     opts = opts || {};
     inject();
+    returnSetupSections();   // the studio's own code expects them in the page whenever it is open
     state.assistantId = opts.assistantId != null ? opts.assistantId : null;
     state.reviewIntent = opts.intent === 'review';
+    state.pendingVideo = opts.withVideo && opts.withVideo.assetId ? opts.withVideo : null;
     state.nextPostId = null;
     el('bs-approved').classList.add('bs-hidden');
     var setup = opts.mode === 'setup';
@@ -3220,6 +3255,7 @@
     setSelecting(false);
     el('bms-blog-backdrop').classList.remove('bs-open');
     window.ScrollLock.release('blog-studio');
+    if (setupTab.host && setupTab.host.isConnected && !setupTab.host.classList.contains('hidden')) mountBlogSetup(setupTab.host, setupTab.assistantId);
     // Edits that never moved the post between lifecycle columns still change what the list behind
     // this modal draws — its title and its excerpt. Those had no refresh at all: notifyChanged was
     // wired only to publish/approve/schedule/unschedule, so renaming a post or writing its body and
@@ -3241,6 +3277,40 @@
   // tests/blog-destinations-panel-copy.test.ts calls them directly — the claims they make about
   // WHEN a post is sent and WHO releases it are the kind that render perfectly while being false.
   window._blogStudioCopy = { distributionTiming: distributionTiming, destinationNote: destinationNote };
+  // Blog setup as a sub tab of Blogs (assistants.js _rqOpenBlogSetup): Search Console and the blog widget, the same
+  // two sections and handlers as the studio's mode:'setup', moved into the tab's panel while it is open. They go
+  // back whenever the tab closes or the studio opens, because opening an article reads and writes them by id.
+  var setupTab = { host: null, assistantId: null, sections: null, home: null, before: null };
+  function returnSetupSections() {
+    if (!setupTab.sections) return;
+    setupTab.sections.forEach(function (s) { if (s.parentNode !== setupTab.home) setupTab.home.insertBefore(s, setupTab.before); });
+  }
+  function mountBlogSetup(host, assistantId) {
+    inject();
+    if (!setupTab.sections) {
+      var search = document.querySelector('#bms-blog-backdrop [data-bs-sec="search"]');
+      var widget = document.querySelector('#bms-blog-backdrop [data-bs-sec="widget"]');
+      if (!search || !widget) return;
+      setupTab.sections = [search, widget];
+      setupTab.home = widget.parentNode;
+      setupTab.before = widget.nextSibling;
+    }
+    setupTab.host = host;
+    setupTab.assistantId = assistantId;
+    state.assistantId = assistantId != null ? assistantId : null;
+    setupTab.sections.forEach(function (s) { s.open = true; host.appendChild(s); });
+    loadWidget();
+    loadSearchConsole();
+  }
+  function unmountBlogSetup() {
+    if (!setupTab.host) return;
+    if (state.flushWidgetSettings) state.flushWidgetSettings();
+    setupTab.host = null;
+    returnSetupSections();
+  }
+  window.mountBlogSetup = mountBlogSetup;
+  window.unmountBlogSetup = unmountBlogSetup;
+
   window.openBlogStudio = openBlogStudio;
   window.closeBlogStudio = closeBlogStudio;
   window.blogStudioAvailable = blogStudioAvailable;

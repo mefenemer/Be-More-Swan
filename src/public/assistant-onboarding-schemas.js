@@ -268,6 +268,8 @@
     // Website Assistant (docs/website-assistant-plan.md). pagesWanted, siteStyle and siteGoal are read
     // by every AI draft of the site (src/utils/site-store.ts runSiteDraft, SITE_SETUP_KEYS) — the keys
     // must match there. currentWebsite fills "Import my current site" (sites.ts importSuggestUrl).
+    // sitePictures and siteVideos are what a from-scratch draft starts with (site-draft-media.ts,
+    // values 'stock' | 'ai' | 'none'); costs are shown on the Website tab, from the live weights.
     // Business name, description and audience come from Business Information, not from here.
     website_assistant: [
       {
@@ -297,6 +299,32 @@
             required: false,
             placeholder: 'e.g. Friendly and plain-spoken, like talking to a neighbour. No jargon.',
             helpText: 'Optional. Colours, font and logo come from your brand kit.',
+          },
+          {
+            key: 'sitePictures',
+            label: 'What placeholder pictures should a new site start with?',
+            type: 'dropdown',
+            required: false,
+            placeholder: 'Choose one…',
+            helpText: 'Optional. They go in your sections until you swap in your own. An imported site keeps its own pictures. AI-made ones use tasks: the Website tab shows how many before anything is made.',
+            options: [
+              { value: 'stock', label: 'Stock photos (free)' },
+              { value: 'ai', label: 'AI-made pictures' },
+              { value: 'none', label: 'No pictures for now' },
+            ],
+          },
+          {
+            key: 'siteVideos',
+            label: 'And placeholder videos?',
+            type: 'dropdown',
+            required: false,
+            placeholder: 'Choose one…',
+            helpText: 'Optional. AI-made video uses tasks and depends on your plan: the Website tab shows the cost before anything is made.',
+            options: [
+              { value: 'stock', label: 'Stock videos (free)' },
+              { value: 'ai', label: 'AI-made video' },
+              { value: 'none', label: 'No videos for now' },
+            ],
           },
         ],
       },
@@ -490,12 +518,85 @@
             ],
           },
           {
+            // docs/video-producer-studio-plan.md D-S2: a shape, never platforms — the finished video is
+            // saved to My Content and posted by whoever uses it.
+            key: 'defaultShape',
+            label: 'What shape should your videos usually be?',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: '9:16', label: 'Vertical 9:16', description: 'Instagram Reels, YouTube Shorts, TikTok, Stories.' },
+              { value: '1:1', label: 'Square 1:1', description: 'Facebook and LinkedIn feeds.' },
+              { value: '16:9', label: 'Wide 16:9', description: 'YouTube and your website.' },
+            ],
+          },
+          {
             key: 'defaultCta',
             label: 'What should viewers do at the end?',
             type: 'text',
             required: false,
             placeholder: 'e.g. Book through the link in our bio',
             helpText: 'Optional. Used as the call to action unless you give a different one on a video.',
+          },
+          {
+            // video-producer.ts withSetupDefaults → brief.audience; the storyboard planner writes for them.
+            key: 'defaultAudience',
+            label: 'Who are your videos usually for?',
+            type: 'text',
+            required: false,
+            placeholder: 'e.g. Busy parents in Leeds',
+            helpText: 'Optional. The script is written for them. Every video can say someone else.',
+          },
+          {
+            // video-producer.ts withSetupDefaults → brief.goal; the planner builds towards it.
+            key: 'defaultGoal',
+            label: 'What should they usually do after watching?',
+            type: 'text',
+            required: false,
+            placeholder: 'e.g. Book a free taster class',
+            helpText: 'Optional. The video builds towards it and ends on it.',
+          },
+          {
+            // video-producer.ts withSetupDefaults → brief.musicMood (src/lib/video-music.ts).
+            key: 'defaultMusic',
+            label: 'What music should go under your videos?',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: 'auto', label: 'Made to suit each video', description: 'A track made with AI for each video — one music track’s worth of tasks, shown before anything is made. It goes quiet whenever someone speaks.' },
+              { value: 'upbeat', label: 'Upbeat', description: 'Lively and bright.' },
+              { value: 'chill', label: 'Chilled', description: 'Relaxed, lo-fi.' },
+              { value: 'inspiring', label: 'Inspiring', description: 'Uplifting, for stories and big news.' },
+              { value: 'ambient', label: 'Calm, in the background', description: 'Soft and unobtrusive.' },
+              { value: 'none', label: 'No music', description: 'Just the voice, or the sound in your own footage.' },
+            ],
+          },
+          {
+            // video-producer.ts withSetupDefaults → brief.look (src/lib/video-look.ts).
+            key: 'defaultLook',
+            label: 'Should your videos have a colour look?',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: 'natural', label: 'Natural', description: 'Every scene as it was filmed.' },
+              { value: 'brand', label: 'Your brand colours', description: 'A faint wash of your brand colour over every scene, so stock and your own footage look like one film.' },
+              { value: 'warm', label: 'Warm', description: 'Golden and friendly.' },
+              { value: 'cool', label: 'Cool', description: 'Crisp and blue.' },
+              { value: 'punchy', label: 'Bright and punchy', description: 'Stronger colour and contrast.' },
+              { value: 'mono', label: 'Black and white', description: 'Classic and simple.' },
+            ],
+          },
+          {
+            // video-producer.ts withSetupDefaults → brief.lowerThird (src/lib/lower-third.ts).
+            key: 'defaultLowerThird',
+            label: 'How should name captions look when someone is on screen?',
+            type: 'radio',
+            required: false,
+            options: [
+              { value: 'bar', label: 'Brand-colour bar, left', description: 'Their name on your brand colour, their role underneath.' },
+              { value: 'clean', label: 'Plain white words, left', description: 'No box — just the words.' },
+              { value: 'boxed', label: 'White box, centred', description: 'Dark words on a white box in the middle.' },
+            ],
           },
           {
             // src/utils/video-autopilot.ts (owner decision D7: off by default; always reviewed).

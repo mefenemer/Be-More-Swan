@@ -20,7 +20,7 @@ import crypto from 'crypto';
 import { eq, and } from 'drizzle-orm';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
-import { blogPosts, contentAssets, mediaGenerationJobs, organisations } from '../../db/schema';
+import { aiAssistants, blogPosts, contentAssets, mediaGenerationJobs, organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { orgHasAssistantFeature, featureUnavailableResponse } from '../../src/utils/assistant-capabilities';
 import { enforcePromptModeration } from '../../src/utils/moderation';
@@ -64,6 +64,27 @@ function mockImages(aspect: AspectRatio): GeneratedImage[] {
     }));
 }
 
+/**
+ * Whose task this is on the "Tasks this month" split: the assistant whose page or article asked for it. This
+ * workspace's only, never a number taken on trust. Null for a picture made with no assistant in view (My Content
+ * from the main menu), which the split lists as Unattributed. Never in the way of the picture itself.
+ */
+async function creditedAssistant(db: ReturnType<typeof getDb>, orgId: number, body: { assistantId?: unknown; blogPostId?: unknown }): Promise<number | null> {
+    try {
+        const asked = Number(body.assistantId);
+        if (Number.isInteger(asked) && asked > 0) {
+            const [row] = await db.select({ id: aiAssistants.id }).from(aiAssistants).where(and(eq(aiAssistants.id, asked), eq(aiAssistants.organisationId, orgId))).limit(1);
+            if (row) return row.id;
+        }
+        const postId = Number(body.blogPostId);
+        if (Number.isInteger(postId) && postId > 0) {
+            const [row] = await db.select({ id: blogPosts.assistantId }).from(blogPosts).where(and(eq(blogPosts.id, postId), eq(blogPosts.organisationId, orgId))).limit(1);
+            return row?.id ?? null;
+        }
+    } catch { /* an uncredited task beats no picture */ }
+    return null;
+}
+
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
@@ -72,7 +93,7 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const { userId, organisationId: orgId } = ctx;
 
-    let body: { action?: string; prompt?: string; aspectRatio?: string; jobId?: number; index?: number; words?: boolean; blogPostId?: number };
+    let body: { assistantId?: number; action?: string; prompt?: string; aspectRatio?: string; jobId?: number; index?: number; words?: boolean; blogPostId?: number };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
 
@@ -135,7 +156,7 @@ export default withLambda(async (event) => {
             : mockImages(aspectRatio);
 
         // Success → debit the held credit and record the completed job with its candidate URLs.
-        await settleHold(db, { orgId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId });
+        await settleHold(db, { orgId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId, assistantId: await creditedAssistant(db, orgId, body) });
         const [job] = await db.insert(mediaGenerationJobs).values({
             organisationId: orgId, userId, mediaType: 'image', prompt, aspectRatio,
             model: IMAGE_MODEL, creditCost: IMAGE_CREDIT_COST, status: 'completed',
