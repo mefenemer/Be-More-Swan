@@ -1753,6 +1753,19 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       done: 'Noted. It’s on the video on the Videos tab.',
     });
   }
+  // { type: 'video_chapter_proposal', projectId, chapter, title } — rename a finished video's chapter
+  // ("" puts its own name back): the same 'rename_chapter' action as ✎ on the Videos tab. Free.
+  function renderVideoChapterProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const n = Number.isInteger(Number(ui.chapter)) && Number(ui.chapter) > 0 ? Number(ui.chapter) : null;
+    const title = typeof ui.title === 'string' ? ui.title.replace(/\s+/g, ' ').trim().slice(0, 60) : null;
+    return videoActionCard(esc, {
+      kicker: 'Rename a chapter', rows: [n ? ['Chapter', String(n)] : null, title != null ? ['New name', title || 'Its own name back'] : null],
+      note: 'Free. Nothing is made again: the name shows on the Videos tab, and goes in the description when the video is posted to YouTube.',
+      button: 'Rename it', body: id && n && title != null ? { action: 'rename_chapter', id, chapter: n, title } : null,
+      done: 'Renamed. It’s on the video on the Videos tab.',
+    });
+  }
   // { type: 'video_notes_version_proposal', projectId }
   function renderVideoNotesVersionProposalCard(ui, esc) {
     const id = videoId(ui);
@@ -1979,7 +1992,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     return videoActionCard(esc, {
       kicker: 'New AI clip',
       rows: [['Shows', description || '(nothing yet)'], ['Style', CLIP_STYLE_NAMES[style]], ['Length', `${lengthS} seconds`], ['Shape', VIDEO_SHAPE_NAMES[shape]], ui.sound === true ? ['Sound', 'Natural background sound, no speech (1.5× the clip’s tasks, where the model can make it)'] : null],
-      note: 'Free to save. On the Videos tab you see its first frame (1 task) before the clip is made, and “Make the clip” says what it uses. Made-up people only.',
+      note: `Free to save. On the Videos tab you see its first frame (${window.taskCost('ai_image')}) before the clip is made, and “Make the clip” says what it uses. Made-up people only.`,
       button: 'Save the clip', body: description.length >= 8 ? { action: 'clip_create', description, style, lengthS, shape, sound: ui.sound === true } : null,
       done: 'Saved. Press “See the first frame” on the Videos tab.',
     });
@@ -2021,6 +2034,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   register('video_note_proposal', renderVideoNoteProposalCard);
   register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
   register('video_reshape_proposal', renderVideoReshapeProposalCard);
+  register('video_chapter_proposal', renderVideoChapterProposalCard);
 
   // ── Built-ins: Mystery Shopper cards (docs/mystery-shopper-plan.md §4.6) ──────────────────────
   // The chat twins of the Website tab's buttons — same server actions (site-audits.ts), handled in
@@ -3174,6 +3188,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     });
   });
 
+  // Both chat windows a card can sit in: workspace.html's #chat-modal and assistant-chat-modal.js.
+  function closeChatWindows() {
+    window.closeAssistantChatModal?.();
+    window.closeAssistantChat?.();
+  }
+
   // "Take Me There" (src/config/take-me-there.ts): where the user asked about, one click away. The
   // server built the destination from a closed list; this only follows it. Changes nothing.
   register('mentor_take_me_there', (ui, esc) => {
@@ -3184,8 +3204,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ${ui.summary ? `<p class="text-sm text-gray-800 mt-1">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
       <button type="button" data-take-me-there class="btn-primary mt-3 px-4 py-2 text-sm font-bold rounded-lg transition">Take Me There</button>`;
     el.querySelector('[data-take-me-there]').addEventListener('click', () => {
-      // A chat opened over the page (the pop-up) is closed first, so the page is what they see.
-      window.closeAssistantChatModal?.();
+      // A chat opened over the page is closed first, so the page is what they see — either chat window:
+      // the older #chat-modal or the newer one (assistant-chat-modal.js), which stayed open over the
+      // destination (staging, 2026-11-11).
+      closeChatWindows();
       if (ui.assistantId && typeof window.routeToAssistantDetail === 'function') {
         if (ui.assistantTab) window._assistantDetailInitialTab = ui.assistantTab;
         window.routeToAssistantDetail(ui.assistantId);
@@ -3386,7 +3408,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   // Overview tab and the catalogue's "Recommended" badge). Hires nothing: each pick opens the catalogue.
   function openCatalogue(roleKey) {
     try { sessionStorage.setItem('intended_role', roleKey); } catch (e) { /* the badge still marks it */ }
-    window.closeAssistantChatModal?.();
+    closeChatWindows();
     if (typeof window.loadView === 'function') window.loadView('catalog');
     else window.location.href = '/workspace.html';
   }
@@ -5458,8 +5480,11 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const before = ui.before || null;
     const change = ui.change || {};
     const onOff = (v) => (v ? 'switched on' : 'switched off');
-    const eyebrow = { add: 'New content pillar', update: 'Change a content pillar', archive: 'Archive a content pillar', restore: 'Bring back a content pillar' }[action];
-    const goLabel = { add: 'Add this pillar', update: 'Save this change', archive: 'Archive it', restore: 'Bring it back' }[action];
+    // "pillar" on a Social assistant, "topic" on a Blog or Email one (src/utils/pillar-profiles.ts).
+    const isTopic = ui.noun === 'topic';
+    const thing = isTopic ? 'topic' : 'content pillar';
+    const eyebrow = { add: `New ${thing}`, update: `Change a ${thing}`, archive: `Archive a ${thing}`, restore: `Bring back a ${thing}` }[action];
+    const goLabel = { add: `Add this ${isTopic ? 'topic' : 'pillar'}`, update: 'Save this change', archive: 'Archive it', restore: 'Bring it back' }[action];
     const row = (label, value) => `<div class="break-words"><dt class="inline text-gray-500">${label}</dt> <dd class="inline">${value}</dd></div>`;
     let body = '';
     if (action === 'add') {
@@ -5474,8 +5499,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         if (change.isActive !== undefined) body += row('After:', onOff(change.isActive));
       }
     }
-    const note = action === 'archive' ? 'New posts stop using it. Posts already written under it keep it, and you can bring it back.'
-      : action === 'restore' ? (ui.landsOff ? 'Five pillars are already on, so it comes back switched off.' : 'It comes back with its description and post history.')
+    const maxOn = Number(ui.maxActive) || (isTopic ? 8 : 5);
+    const note = action === 'archive' ? (isTopic ? 'New drafts stop using it. Anything already written under it keeps it, and you can bring it back.' : 'New posts stop using it. Posts already written under it keep it, and you can bring it back.')
+      : action === 'restore' ? (ui.landsOff ? `${maxOn} ${isTopic ? 'topics' : 'pillars'} are already on, so it comes back switched off.` : `It comes back with its description and ${isTopic ? 'history' : 'post history'}.`)
+      : isTopic ? 'Only this topic changes. It’s also on “Topics & themes” under “When and how I work” in my settings.'
       : 'Only this pillar changes. It’s also on “What I post about” in my settings.';
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-emerald-200 rounded-xl shadow-sm p-4 max-w-md';
@@ -5500,8 +5527,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         status.className = 'text-xs font-semibold text-emerald-800 mt-2';
         status.textContent = { add: 'Added.', update: 'Saved.', archive: 'Archived.', restore: data.switchedOff ? 'Brought back, switched off.' : 'Brought back.' }[action];
         window.PillarList?.reload();
-        // What the posts are about changed: offer to redraft the upcoming drafts (redraft-upcoming.js).
-        if (action !== 'restore' || !data.switchedOff) window.offerRedraftUpcoming?.(Number(ui.assistantId));
+        // What the posts are about changed: offer to redraft the upcoming drafts (redraft-upcoming.js) —
+        // a Social assistant's scheduled posts only; a Blog or Email topic reaches the next draft.
+        if (!isTopic && (action !== 'restore' || !data.switchedOff)) window.offerRedraftUpcoming?.(Number(ui.assistantId));
       } catch (err) {
         go.disabled = false; go.textContent = goLabel;
         status.className = 'text-xs text-red-700 mt-2';
@@ -6278,7 +6306,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   // ── Built-in: Rule Proposal Card (every structured chat) ──────────────────
   // { type: 'rule_proposal', action: 'add'|'edit'|'turn_off'|'turn_on'|'delete', assistantId, ruleId,
-  //   currentText, ruleText, platform, platformLabel, isActive, blocked, settled? }
+  //   currentText, ruleText, platform, platformLabel, isActive, scope: 'assistant'|'workspace', blocked, settled? }
+  // scope 'workspace' (FR#10) = every assistant follows the rule; the card says so on every line.
   // A change to the assistant's Do's and don'ts, checked against content_rules by the orchestrator
   // (src/utils/chat-rules.ts). The click dispatches `rule:change`; chat-session.js calls
   // content-rules.ts — the endpoint the Do's and don'ts card uses.
@@ -6290,23 +6319,35 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     delete: { head: 'Delete a rule', button: 'Delete rule', busy: 'Deleting…', danger: true },
   };
 
+  // What the user did with a rule or goal card, saved on its chat message (chat-session.js → mentor.ts
+  // card_outcome), so a later turn knows the card is settled (mentor-card-outcome.ts). Without it the
+  // Business Mentor read a saved rule card as unanswered and said "you don't need to confirm the
+  // earlier card" after it had been saved (staging, 2026-11-11). Fire-and-forget.
+  const sendCardOutcome = (el, status, note) => el.dispatchEvent(new CustomEvent('mentor:cardOutcome', { bubbles: true, detail: { outcome: status, note: note || null } }));
+
   function renderRuleProposalCard(ui, esc) {
     const copy = RULE_COPY[ui.action];
     const assistantId = Number(ui.assistantId);
     if (!copy || !Number.isInteger(assistantId)) return null;
     const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
     const ruleNo = Number.isInteger(Number(ui.ruleId)) && ui.ruleId ? `#${Number(ui.ruleId)}` : '';
+    const everyone = ui.scope === 'workspace';
+    const afterNote = {
+      add: everyone ? 'Every one of your assistants follows it from your next message.' : 'Your assistant follows it in everything it does from your next message.',
+      edit: everyone ? 'This changes it for every assistant, from your next message.' : 'Your assistant follows it in everything it does from your next message.',
+      turn_off: everyone ? 'It switches off for every assistant. It is kept, and can be switched back on any time.' : 'It is kept, and can be switched back on any time.',
+      turn_on: everyone ? 'Every one of your assistants follows it again.' : '',
+      delete: everyone ? 'This removes it for good, for every assistant. To stop it for now instead, switch it off.' : 'This removes it for good. To stop it for now instead, switch it off.',
+    }[ui.action] || '';
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
       <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
-      <p class="text-xs text-gray-500 mt-2">Do’s and don’ts${ruleNo ? ` · rule ${ruleNo}` : ''}${ui.platformLabel ? ` · only for ${esc(ui.platformLabel)}` : ''}</p>
+      <p class="text-xs text-gray-500 mt-2">Do’s and don’ts${ruleNo ? ` · rule ${ruleNo}` : ''}${everyone ? ' · <span class="font-bold text-sky-800">every assistant</span>' : ''}${ui.platformLabel ? ` · only for ${esc(ui.platformLabel)}` : ''}</p>
       ${ui.currentText ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">${ui.action === 'edit' ? 'Now:' : 'Rule:'}</span> ${esc(ui.currentText)}</p>` : ''}
       ${ui.ruleText && (ui.action === 'add' || ui.action === 'edit') ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">${ui.action === 'edit' ? 'After:' : 'Rule:'}</span> ${esc(ui.ruleText)}</p>` : ''}
       ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
-      ${!blocked && ui.action === 'turn_off' ? '<p class="text-xs text-gray-600 mt-3">It is kept, and can be switched back on any time.</p>' : ''}
-      ${!blocked && ui.action === 'delete' ? '<p class="text-xs text-gray-600 mt-3">This removes it for good. To stop it for now instead, switch it off.</p>' : ''}
-      ${!blocked && (ui.action === 'add' || ui.action === 'edit') ? '<p class="text-xs text-gray-600 mt-3">Your assistant follows it in everything it does from your next message.</p>' : ''}
+      ${!blocked && afterNote ? `<p class="text-xs text-gray-600 mt-3">${esc(afterNote)}</p>` : ''}
       <div class="flex flex-wrap items-center gap-2 mt-3">
         ${blocked ? '' : `<button type="button" data-rp-go class="${copy.danger ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
         <button type="button" data-rp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
@@ -6316,7 +6357,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
     const setBusy = (b) => el.querySelectorAll('[data-rp-go], [data-rp-cancel]').forEach((x) => { x.disabled = b; });
     el.addEventListener('click', (e) => {
-      if (e.target.closest('[data-rp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (e.target.closest('[data-rp-cancel]')) { setBusy(true); say('Left as it is.'); sendCardOutcome(el, 'not_now'); return; }
       if (!e.target.closest('[data-rp-go]')) return;
       setBusy(true);
       say(copy.busy);
@@ -6324,10 +6365,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         bubbles: true,
         detail: {
           action: ui.action, assistantId, ruleId: ui.ruleId ?? null, ruleText: ui.ruleText ?? null, platform: ui.platform ?? null,
+          scope: everyone ? 'workspace' : 'assistant',
           respond({ ok, message, error }) {
-            if (ok) { say(message || 'Done.'); return; }
+            if (ok) { say(message || 'Done.'); sendCardOutcome(el, 'applied', message); return; }
             setBusy(false);
             say(error || 'That didn’t work — please try again.', 'error');
+            sendCardOutcome(el, 'failed', error);
           },
         },
       }));
@@ -6374,7 +6417,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const say = (t, tone) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${tone === 'error' ? 'text-red-600' : 'text-emerald-800'}`; };
     const setBusy = (b) => el.querySelectorAll('[data-gp-go], [data-gp-cancel]').forEach((x) => { x.disabled = b; });
     el.addEventListener('click', (e) => {
-      if (e.target.closest('[data-gp-cancel]')) { setBusy(true); say('Left as it is.'); return; }
+      if (e.target.closest('[data-gp-cancel]')) { setBusy(true); say('Left as it is.'); sendCardOutcome(el, 'not_now'); return; }
       if (!e.target.closest('[data-gp-go]')) return;
       setBusy(true);
       say(copy.busy);
@@ -6387,9 +6430,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           title: Object.prototype.hasOwnProperty.call(ui, 'title') ? ui.title : undefined,
           isPrimary: typeof ui.isPrimary === 'boolean' ? ui.isPrimary : undefined,
           respond({ ok, message, error }) {
-            if (ok) { say(message || 'Done.'); return; }
+            if (ok) { say(message || 'Done.'); sendCardOutcome(el, 'applied', message); return; }
             setBusy(false);
             say(error || 'That didn’t work — please try again.', 'error');
+            sendCardOutcome(el, 'failed', error);
           },
         },
       }));

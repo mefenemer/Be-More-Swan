@@ -264,7 +264,7 @@ test('the Plan tab is wired, and the prompt names its real labels', () => {
     assert.match(read('workspace.html'), /<script src="\/src\/components\/assistant-mentor-plan\.js"><\/script>/);
     assert.match(read('assistants.js'), /window\.AssistantMentorPlan\?\.init\(/);
     const o = read('netlify/functions/chat-orchestrator.ts');
-    const surfaces = o.slice(o.indexOf('function businessMentorSurfaces()'), o.indexOf('function mysteryShopperSurfaces()'));
+    const surfaces = o.slice(o.indexOf('function businessMentorSurfaces('), o.indexOf('function mysteryShopperSurfaces()'));
     const plan = read('src/components/assistant-mentor-plan.js');
     for (const label of ['Your plans', 'Lean Canvas', 'Riskiest assumptions', 'Save draft', 'Approve', 'Earlier versions', 'Draft it for me', 'Draft my canvas', 'Use this draft', 'Look this up', 'Break-even calculator', 'A guess', 'Work it out', 'Back', 'Next']) {
         assert.ok(surfaces.includes(`"${label}"`), `prompt names "${label}"`);

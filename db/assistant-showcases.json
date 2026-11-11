@@ -63,7 +63,7 @@
       },
       {
         "q": "Does it use tasks?",
-        "a": "Each drafted post uses one task, however many platforms it goes to. An AI image adds 1 task, an AI video 20 (on the Busywork Buster plan) and an AI music track 20 (12 if you share it with the Be More Swan community). A post to X with a link uses 10. Your own uploads, stock media and branded graphics are free."
+        "a": "Each drafted post uses {{tasks.social_post}}, however many platforms it goes to. An AI image adds {{tasks.ai_image}}, an AI video {{tasks.ai_video}} (on the Busywork Buster plan) and an AI music track {{tasks.ai_music}} ({{tasks.ai_music_shared}} if you share it with the Be More Swan community). A post to X with a link uses {{tasks.x_link_post}}. Your own uploads, stock media and branded graphics are free."
       },
       {
         "q": "Which platforms can it post to?",
@@ -371,7 +371,7 @@
     "faqs": [
       {
         "q": "Does it use tasks?",
-        "a": "Stock photos, stock videos and branded graphics are free. AI images use 1 task for a round of four, having it write a flyer's words uses 1 task, and an AI video clip uses 20 tasks — AI video is on the Busywork Buster plan."
+        "a": "Stock photos, stock videos and branded graphics are free. AI images use {{tasks.ai_image}} for a round of four, having it write a flyer's words uses {{tasks.flyer_words}}, and an AI video clip uses {{tasks.ai_video}} — AI video is on the Busywork Buster plan."
       },
       {
         "q": "Can I use my own photos?",
@@ -432,11 +432,11 @@
     "faqs": [
       {
         "q": "Does it use tasks?",
-        "a": "Planning a storyboard is free. Making the video uses tasks only for AI scenes and the voiceover: 20 tasks for an AI clip (at most 3 in a video), 1 for an AI picture and 1 for the voiceover. Stock footage, stock photos, your own pictures and branded cards use none. Making videos is on the Busywork Buster plan."
+        "a": "Planning a storyboard is free. Making the video uses tasks only for AI scenes and the voiceover: {{tasks.ai_video}} for an AI clip (at most 3 in a video), {{tasks.ai_image}} for an AI picture and {{tasks.ai_voiceover}} for the voiceover. Stock footage, stock photos, your own pictures and branded cards use none. Making videos is on the Busywork Buster plan."
       },
       {
         "q": "Can it edit my own footage?",
-        "a": "Yes. Give it videos you filmed (up to 5 minutes each) and it says what it sees, suggests edits you tick or untick, and cuts out pauses, “um”s and repeated takes. Your videos are never changed — the edits go into the new video. Reviewing a video it hasn’t seen before uses 2 tasks."
+        "a": "Yes. Give it videos you filmed (up to 5 minutes each) and it says what it sees, suggests edits you tick or untick, and cuts out pauses, “um”s and repeated takes. Your videos are never changed — the edits go into the new video. Reviewing a video it hasn’t seen before uses {{tasks.footage_review}}."
       },
       {
         "q": "Does it post my videos?",
@@ -506,7 +506,7 @@
       },
       {
         "q": "Does it use tasks?",
-        "a": "A check that re-scores your site uses 1 task from your monthly allowance. A week where nothing on your site or your competitors' sites changed costs nothing."
+        "a": "A check that re-scores your site uses {{tasks.site_audit}} from your monthly allowance. A week where nothing on your site or your competitors' sites changed costs nothing."
       },
       {
         "q": "Does it ask ChatGPT about my business?",
@@ -593,7 +593,7 @@
       },
       {
         "q": "Does it use tasks?",
-        "a": "Drafting your whole site, importing your current site, or having it place your own words on a page each uses 1 task from your monthly allowance (an import only uses one if a draft is made). Editing pages yourself, and approving changes it suggests in chat, costs nothing."
+        "a": "Drafting your whole site, importing your current site, or having it place your own words on a page each uses {{tasks.site_draft}} from your monthly allowance (an import only counts if a draft is made). Editing pages yourself, and approving changes it suggests in chat, costs nothing."
       },
       {
         "q": "I already have a website. Can I bring it over?",

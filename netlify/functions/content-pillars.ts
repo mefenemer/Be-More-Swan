@@ -58,10 +58,15 @@ export default withLambda(async (event) => {
     const LIMITS = limitsFor(profile);
 
     if (event.httpMethod === 'GET' && event.queryStringParameters?.usage === '1') {
-        // The Results tab's "Posts by pillar" (src/components/pillar-list.js renderUsage). Never seeds rows.
-        // Social only for now: Blog and Email count by topic in phase 3b (docs/pillar-records-plan.md §7).
-        if (profile.contextKey !== 'content_pillars') return json(200, { usage: null, days: profile.balanceDays });
-        return json(200, { usage: await pillarUsage(db, orgId, assistantId), days: PILLAR_USAGE_DAYS });
+        // The Results tab's "Posts by pillar" / "Posts by topic" / "Emails by topic"
+        // (src/components/pillar-list.js renderUsage). Never seeds rows.
+        const social = profile.contextKey === 'content_pillars';
+        const label = social ? 'Posts by pillar' : profile.contextKey === 'blogTopics' ? 'Posts by topic' : 'Emails by topic';
+        return json(200, {
+            usage: await pillarUsage(db, orgId, assistantId),
+            days: social ? PILLAR_USAGE_DAYS : profile.balanceDays,
+            label, noun: profile.noun, item: profile.contextKey === 'newsletterTopics' ? 'email' : 'post',
+        });
     }
     if (event.httpMethod === 'GET') {
         const pillars = await ensurePillarRecords(db, orgId, assistantId, asst.onboardingContext);

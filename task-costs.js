@@ -13,9 +13,12 @@
 
   function plural(n) { return n + (n === 1 ? ' task' : ' tasks'); }
 
+  // Worded as formatCost() / taskCostLabel() in src/config/task-weights.ts, so a page and the server agree.
   function label(kind, fallback) {
     if (!figures) return fallback == null ? '' : fallback;
     if (kind === 'ai_video' && figures.videoPricedBySecond) return plural(figures.videoTasksPerSecond) + ' a second';
+    if (kind === 'ai_video_per_second' && typeof figures.videoTasksPerSecond === 'number') return plural(figures.videoTasksPerSecond) + ' a second';
+    if (kind === 'chat_messages_per_task' && typeof figures.chatMessagesPerTask === 'number') return 'every ' + figures.chatMessagesPerTask + (figures.chatMessagesPerTask === 1 ? ' message' : ' messages');
     var n = figures.weights && figures.weights[kind];
     if (typeof n !== 'number') return fallback == null ? '' : fallback;
     return n === 0 ? 'no tasks' : plural(n);
@@ -24,7 +27,11 @@
   function apply(root) {
     if (!figures) return;
     (root || document).querySelectorAll('[data-task-cost]').forEach(function (el) {
-      var text = label(el.getAttribute('data-task-cost'), el.textContent);
+      // <span data-task-cost="ai_video_per_second" data-task-seconds="5">20 tasks</span>: a clip of that length.
+      var secs = Number(el.getAttribute('data-task-seconds'));
+      var text = secs > 0 && typeof figures.videoTasksPerSecond === 'number'
+        ? plural(Math.ceil(secs) * figures.videoTasksPerSecond)
+        : label(el.getAttribute('data-task-cost'), el.textContent);
       if (el.textContent !== text) el.textContent = text;
     });
   }

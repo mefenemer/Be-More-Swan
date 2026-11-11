@@ -135,7 +135,7 @@ check('the Website Assistant is told to ask with the card, then propose with its
     const rule = chat.slice(at, chat.indexOf('WHAT THEY SELECTED ON THE PAGE.', at));
     assert.ok(rule.includes('ONE chat_questions card') && rule.includes('"My answers:"') && rule.includes('site_draft_request'));
     assert.ok(chat.includes('"type": "chat_questions"'), 'in the reply shapes');
-    const s = slice(chat, 'function websiteAssistantSurfaces()', '\n}');
+    const s = slice(chat, 'function websiteAssistantSurfaces(', '\n}');
     for (const n of ['"Select"']) {
         assert.ok(s.includes(n), `surfaces: ${n}`);
         assert.ok(editor.includes(n.replace(/"/g, "'")), `editor: ${n}`);

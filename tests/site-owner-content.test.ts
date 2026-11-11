@@ -236,7 +236,7 @@ Our roastery is open on Saturdays from 9 until 1.`;
         assert.ok(words.indexOf('enforcePromptModeration(') < words.indexOf('proposeOwnWords('));
         assert.ok(read('netlify.toml').includes('[functions.sites]\n  timeout = 26'));
         const ed = read('src/components/assistant-site-editor.js');
-        assert.ok(ed.includes('Your wording, unchanged') && ed.includes("action: 'words'") && ed.includes('Uses 1 task.'));
+        assert.ok(ed.includes('Your wording, unchanged') && ed.includes("action: 'words'") && ed.includes("Uses ${window.taskCost('site_words')}."));
         assert.ok(ed.indexOf("t('[data-site-words-apply]')") > 0 && ed.includes('await apply(ops,'), 'Apply goes through the normal apply');
     });
 

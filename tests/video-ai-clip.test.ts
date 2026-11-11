@@ -74,7 +74,7 @@ check('the build animates the frame the owner saw', () => {
 check('tab and chat: New AI clip, frame then make, a card that never spends', () => {
     const tab = read('src/components/assistant-videos.js');
     assert.ok(tab.includes('data-vid-act="clip-new"') && tab.includes('data-vid-clip-form'));
-    assert.ok(tab.includes("'Try another frame — 1 task' : 'See the first frame — 1 task'"));
+    assert.ok(tab.includes("${v.clipFrameUrl ? 'Try another frame' : 'See the first frame'} — ${window.taskCost('ai_image')}"));
     assert.ok(tab.includes('AI clip · ${esc(v.brief.clip.lengthS)}s · ${esc(clipStatus(v))}'), 'a clip never says "Approve the words"');
     assert.ok(tab.includes('${v.clipFrameUrl ? `<button type="button" data-vid-act="build"'), 'Make the clip only once there is a frame');
     const reg = read('src/components/disruptive-ui-registry.js');
@@ -103,7 +103,7 @@ check('footage form: a voiceover in my own voice', () => {
 check('copy says it: FAQ, description, showcase, help', () => {
     const faq = read('faq.html');
     assert.ok(faq.includes('You can read the voiceover yourself instead of an AI voice'));
-    assert.ok(faq.includes('from 3 December 2026, 4 tasks for each second of clip'));
+    assert.ok(faq.includes('from 3 December 2026, <span data-task-cost="ai_video_per_second">4 tasks a second</span> of clip'));
     assert.ok(faq.includes('make single 5 or 10 second AI clips'));
     assert.ok(read('seed/data/master_assistants.json').includes('adds a voiceover (an AI voice or your own) and captions'));
     assert.ok(read('db/z-video-producer-own-voice-copy.sql').includes('(an AI voice or your own)'));

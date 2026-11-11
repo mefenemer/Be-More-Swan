@@ -4156,7 +4156,7 @@ window._detailRqRecordAct = async function (btn, action) {
         const nameHtml = _rqEsc(name);   // the dialog renders title and message as HTML
         const instruction = await window.promptModal(
             `${nameHtml} will rewrite this email and save the new version here for you to read. Nothing is sent. Say what you’d like changed, or leave it blank to let ${nameHtml} improve it generally.`,
-            { title: `Ask ${nameHtml} to improve this email`, confirmLabel: 'Improve it', multiline: true,
+            { title: `Ask ${nameHtml} to improve this email`, confirmLabel: 'Improve it', multiline: true, enterSubmits: true,
               placeholder: 'e.g. shorter, mention our free trial, less formal' },
         );
         if (instruction === null) return;
@@ -6133,6 +6133,8 @@ async function _loadAutopilotNext(assistantId) {
 // Renders content_rules for the current assistant as a chronological, toggleable
 // audit trail. Shares the content-rules CRUD with the Guardrails panel; provenance
 // (manual / feedback / tuning) is foregrounded here.
+// A workspace-wide rule (FR#10) — the label it carries on every list that shows rules.
+const _SHARED_RULE_CHIP = '<span class="px-2 py-0.5 rounded-full text-xs font-bold bg-sky-50 text-sky-800">Every assistant</span>';
 const _RUNBOOK_ORIGIN = {
     manual:             ['Manual',        'bg-gray-100 text-gray-600'],
     rejection_feedback: ['From feedback', 'bg-amber-100 text-amber-700'],
@@ -6299,16 +6301,18 @@ window._renderRunbookDirectives = async function(assistantId) {
                 <p class="text-sm ${active ? 'text-gray-800' : 'text-gray-500 line-through'}">${_escapeHtml(r.ruleText || '')}</p>
                 <div class="flex items-center gap-2 mt-1">
                     <span class="px-2 py-0.5 rounded-full text-xs font-bold ${o[1]}">${o[0]}</span>
+                    ${r.scope === 'workspace' ? _SHARED_RULE_CHIP : ''}
                     <span class="text-xs text-gray-500">${when}</span>
                 </div>
                 ${originPost}
+                ${r.scope === 'workspace' ? '<p class="text-xs text-gray-500 mt-1">Every assistant follows this one. Change it under Assistant Rules.</p>' : ''}
             </div>
-            <button type="button" aria-checked="${active}" onclick="window._toggleDirective(${r.id}, this)" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors mt-0.5 ${active ? 'bg-emerald-500' : 'bg-gray-300'}">
+            ${r.scope === 'workspace' ? '' : `<button type="button" aria-checked="${active}" onclick="window._toggleDirective(${r.id}, this)" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors mt-0.5 ${active ? 'bg-emerald-500' : 'bg-gray-300'}">
                 <span class="${active ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"></span>
             </button>
             <button type="button" onclick="window._deleteDirective(${r.id})" class="text-gray-500 hover:text-red-500 transition mt-1" aria-label="Delete directive">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-            </button>
+            </button>`}
         </div>`;
     }).join('');
 };
@@ -9557,8 +9561,8 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         .finally(() => { if (_skelAutopilot) _endCardLoading('autopilot-status-card'); }));
     // Not awaited: the hero is complete without it, and the strip reveals itself when it lands.
     _renderAssistantTaskShare(assistantId);
-    // Results ▸ Autopilot: posts per content pillar (src/components/pillar-list.js). Social Media only.
-    if (currentData.roleKey === 'social_media_manager') window.PillarList?.renderUsage(assistantId);
+    // Results ▸ Autopilot: posts per content pillar (Social), or per topic (Blog, Email) — src/components/pillar-list.js.
+    if (['social_media_manager', 'blog_writer', 'newsletter_editor'].includes(currentData.roleKey)) window.PillarList?.renderUsage(assistantId);
     // Audience counts hit the platform APIs, so they're deliberately not awaited — the Autopilot
     // card is already complete without them and the block reveals itself when they land.
     // Registry-driven, like metricsSource: a role whose audience isn't social gets its own renderer
@@ -12290,6 +12294,10 @@ const RULE_CATEGORY_EXPLAIN = {
 
 let _rulesAssistantId = null;
 const RULES_API = '/.netlify/functions/content-rules';
+// Workspace-wide rules (FR#10): a rule with scope 'workspace' is followed by EVERY assistant, and
+// shows on every assistant's list. Only owners and admins may add or change one — the GET says so
+// (canManageWorkspaceRules, src/utils/workspace-rules.ts) and the endpoint enforces it again.
+let _rulesCanManageWorkspace = false;
 
 function _setRulesStatus(text, isError) {
     const el = document.getElementById('assistant-rules-status');
@@ -12311,7 +12319,11 @@ async function _fetchAndRenderAssistantRules(assistantId) {
     let rules = [];
     try {
         const res = await _cachedGet(`${RULES_API}?assistantId=${_rulesAssistantId}`);
-        if (res.ok) rules = (await res.json()).rules || [];
+        if (res.ok) {
+            const data = await res.json();
+            rules = data.rules || [];
+            _rulesCanManageWorkspace = data.canManageWorkspaceRules === true;
+        }
     } catch (e) {
         console.warn('Could not load assistant rules:', e);
     }
@@ -12399,23 +12411,67 @@ function _buildRuleRow(catId, placeholder, rule) {
     tr.dataset.cat = catId;
     const active = rule ? rule.isActive !== false : true;
     const isFeedback = rule?.origin === 'rejection_feedback';
+    // FR#10: a workspace-wide rule shows on every assistant's list. Owners and admins get a "Who
+    // follows it" choice on every row (a new one too); anyone else sees a shared rule read-only.
+    const shared = rule?.scope === 'workspace';
+    tr.dataset.scope = shared ? 'workspace' : 'assistant';
+    const canEdit = !shared || _rulesCanManageWorkspace;
+    const scopeHtml = _rulesCanManageWorkspace
+        ? `<label class="flex flex-wrap items-center gap-2 px-3 mt-1 text-xs text-gray-500">Who follows it
+             <select class="ar-scope px-2 py-1 rounded-lg border border-gray-300 text-xs bg-white text-gray-700">
+               <option value="assistant"${shared ? '' : ' selected'}>Just this assistant</option>
+               <option value="workspace"${shared ? ' selected' : ''}>Every assistant</option>
+             </select></label>`
+        : shared ? `<p class="flex items-center gap-2 px-3 mt-1 text-xs text-gray-500">${_SHARED_RULE_CHIP} Set by a workspace owner or admin</p>` : '';
 
     tr.innerHTML = `
         <div class="flex-1 min-w-0">
-            <textarea rows="1" placeholder="${_escapeHtml(placeholder || 'Describe the rule…')}"
+            <textarea rows="1" placeholder="${_escapeHtml(placeholder || 'Describe the rule…')}"${canEdit ? '' : ' readonly'}
                 class="ar-input w-full px-3 py-2 text-sm rounded-lg border border-transparent hover:border-gray-300 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none bg-transparent focus:bg-white resize-none overflow-hidden ${active ? '' : 'text-gray-500 line-through'}">${_escapeHtml(rule?.ruleText || '')}</textarea>
             ${isFeedback ? '<p class="text-xs text-amber-600 font-semibold px-3 mt-0.5">From rejected-post feedback</p>' : ''}
+            ${scopeHtml}
         </div>
         <button type="button" aria-checked="${active}" class="ar-toggle relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-1 ${active ? 'bg-emerald-500' : 'bg-gray-300'}">
             <span class="${active ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"></span>
         </button>
-        <button type="button" class="ar-del text-gray-500 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5">
+        <button type="button" aria-label="Delete this rule" title="Delete this rule" class="ar-del text-gray-500 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </button>`;
 
     const input = tr.querySelector('.ar-input');
+    const autoResizeRO = () => { input.style.height = ''; input.style.height = input.scrollHeight + 'px'; };
+    if (!canEdit) {
+        // Read-only for anyone who isn't an owner or admin: no switch, no delete.
+        tr.querySelector('.ar-toggle')?.remove();
+        tr.querySelector('.ar-del')?.remove();
+        requestAnimationFrame(autoResizeRO);
+        return tr;
+    }
     const toggle = tr.querySelector('.ar-toggle');
     const dot = toggle.querySelector('span');
+
+    // Who follows it (owners and admins only). An unsaved row just remembers the choice for its first
+    // save; a saved one moves now, after saying what that means.
+    const scopeSel = tr.querySelector('.ar-scope');
+    if (scopeSel) scopeSel.addEventListener('change', async () => {
+        const to = scopeSel.value === 'workspace' ? 'workspace' : 'assistant';
+        const from = tr.dataset.scope;
+        if (!tr.dataset.ruleId) { tr.dataset.scope = to; return; }
+        const ok = await window.confirmModal(
+            to === 'workspace'
+                ? 'Every one of your assistants will follow it, not just this one. It shows on each assistant’s Do’s and don’ts.'
+                : 'Only this assistant will follow it. Your other assistants stop following it.',
+            { title: to === 'workspace' ? 'Make this a rule for every assistant?' : 'Make this rule just for this assistant?', confirmLabel: 'Yes, change it', cancelLabel: 'Keep it as it is' });
+        if (!ok) { scopeSel.value = from; return; }
+        _setRulesStatus('Saving…');
+        try {
+            const r = await fetch(RULES_API, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: Number(tr.dataset.ruleId), scope: to, assistantId: _rulesAssistantId }) });
+            if (!r.ok) { scopeSel.value = from; const e = await r.json().catch(() => ({})); _setRulesStatus(e.error || 'Error saving', true); return; }
+            tr.dataset.scope = to;
+            _setRulesStatus(to === 'workspace' ? '✓ Saved for every assistant' : '✓ Saved');
+            _renderKickOff(_rulesAssistantId);
+        } catch { scopeSel.value = from; _setRulesStatus('Error saving', true); }
+    });
 
     const autoResize = () => { input.style.height = ''; input.style.height = input.scrollHeight + 'px'; };
     requestAnimationFrame(autoResize);
@@ -12430,6 +12486,9 @@ function _buildRuleRow(catId, placeholder, rule) {
 
     toggle.addEventListener('click', async () => {
         const nowActive = toggle.getAttribute('aria-checked') !== 'true';
+        if (!nowActive && tr.dataset.scope === 'workspace' && tr.dataset.ruleId && !(await window.confirmModal(
+            'It switches off for every assistant, not just this one. You can switch it back on any time.',
+            { title: 'Switch this rule off for every assistant?', confirmLabel: 'Switch it off', cancelLabel: 'Keep it on' }))) return;
         toggle.setAttribute('aria-checked', nowActive);
         toggle.className = `ar-toggle relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-1 ${nowActive ? 'bg-emerald-500' : 'bg-gray-300'}`;
         dot.className = `${nowActive ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out`;
@@ -12446,8 +12505,9 @@ function _buildRuleRow(catId, placeholder, rule) {
 
     tr.querySelector('.ar-del').addEventListener('click', async () => {
         if (tr.dataset.ruleId) {
-            if (!(await window.confirmModal('It will no longer be applied to this assistant.', {
-                title: 'Delete this rule?', confirmLabel: 'Yes, delete', cancelLabel: 'Keep it',
+            const sharedRule = tr.dataset.scope === 'workspace';
+            if (!(await window.confirmModal(sharedRule ? 'None of your assistants will follow it any more.' : 'It will no longer be applied to this assistant.', {
+                title: sharedRule ? 'Delete this rule for every assistant?' : 'Delete this rule?', confirmLabel: 'Yes, delete', cancelLabel: 'Keep it',
             }))) return;
             _setRulesStatus('Saving…');
             try {
@@ -12488,14 +12548,14 @@ async function _saveRuleRow(tr) {
         if (id) {
             res = await fetch(RULES_API, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, ruleText: text }) });
         } else {
-            res = await fetch(RULES_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assistantId: _rulesAssistantId, ruleText: text, category: tr.dataset.cat || null }) });
+            res = await fetch(RULES_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assistantId: _rulesAssistantId, ruleText: text, category: tr.dataset.cat || null, ...(tr.dataset.scope === 'workspace' ? { scope: 'workspace' } : {}) }) });
             if (res.ok) {
                 const data = await res.json();
                 if (data.rule?.id) tr.dataset.ruleId = String(data.rule.id);
             }
         }
-        if (res.ok) { tr.dataset.savedText = text; _setRulesStatus('✓ Saved'); _renderKickOff(_rulesAssistantId); }
-        else _setRulesStatus('Error saving', true);
+        if (res.ok) { tr.dataset.savedText = text; _setRulesStatus(tr.dataset.scope === 'workspace' ? '✓ Saved for every assistant' : '✓ Saved'); _renderKickOff(_rulesAssistantId); }
+        else { const e = await res.json().catch(() => ({})); _setRulesStatus(e.error || 'Error saving', true); }
     } catch { _setRulesStatus('Error saving', true); }
 }
 
@@ -12537,7 +12597,8 @@ window._confirmCopyRules = async function () {
     try {
         const res = await fetch(`${RULES_API}?assistantId=${sourceId}`);
         const srcRules = res.ok ? ((await res.json()).rules || []) : [];
-        const toCopy = srcRules.filter(r => r.ruleText && r.isActive !== false);
+        // Workspace-wide rules are already followed here too (FR#10) — copying one would make a duplicate.
+        const toCopy = srcRules.filter(r => r.ruleText && r.isActive !== false && r.scope !== 'workspace');
         if (!toCopy.length) {
             if (errEl) { errEl.textContent = 'That assistant has no active rules to copy.'; errEl.classList.remove('hidden'); }
             return;

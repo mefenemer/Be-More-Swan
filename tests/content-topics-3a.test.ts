@@ -110,10 +110,10 @@ check('save path: carries the topic keys across and reconciles a text answer und
     assert.match(ctxSave, /if \(synced\) mergedContext\[synced\.key\] = synced\.value;/);
 });
 
-check('endpoint: any role with a profile; words and cap from the role; Results stays Social for now', () => {
+check('endpoint: any role with a profile; words and cap from the role', () => {
     assert.match(api, /const profile = pillarProfileFor\(asst\.roleKey\);/);
     assert.match(api, /noun: p\.noun, nounPlural: p\.nounPlural/);
-    assert.match(api, /if \(profile\.contextKey !== 'content_pillars'\) return json\(200, \{ usage: null/);
+    // Results counts every role since phase 3b (tests/content-topics-3b.test.ts).
 });
 
 check('Blog: an undirected slot gets the least-used topic, saved on the post', () => {

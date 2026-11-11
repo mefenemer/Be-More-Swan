@@ -398,13 +398,34 @@ export function pillarUsageRows(live: Pillar[], archived: Pillar[], counts: { pi
 export async function pillarUsage(db: PillarDb, orgId: number, assistantId: number): Promise<PillarUsageRow[] | null> {
     const live = await listPillars(db, orgId, assistantId);
     if (live === null) return null;
-    const res = await db.execute(sql`
+    const prof = await pillarProfileForAssistant(db, orgId, assistantId);
+    // Social counts its posts (each cross-post once); Blog its articles; Email its issues (phase 3b), over
+    // the role's balance window — the same window drafting balances over.
+    const res = prof.contextKey === 'content_pillars'
+        ? await db.execute(sql`
         SELECT pillar_id AS "pillarId", pillar, count(DISTINCT coalesce(crosspost_group_id, 'post:' || id::text))::int AS n
           FROM scheduled_posts
          WHERE assistant_id = ${assistantId} AND organisation_id = ${orgId}
            AND pillar IS NOT NULL
            AND status NOT IN ('rejected', 'cancelled', 'admin_test')
            AND created_at > now() - make_interval(days => ${PILLAR_USAGE_DAYS})
+         GROUP BY pillar_id, pillar`)
+        : prof.contextKey === 'blogTopics'
+        ? await db.execute(sql`
+        SELECT pillar_id AS "pillarId", pillar, count(*)::int AS n
+          FROM blog_posts
+         WHERE assistant_id = ${assistantId} AND organisation_id = ${orgId}
+           AND pillar IS NOT NULL
+           AND status NOT IN ('rejected', 'cancelled')
+           AND created_at > now() - make_interval(days => ${prof.balanceDays})
+         GROUP BY pillar_id, pillar`)
+        : await db.execute(sql`
+        SELECT pillar_id AS "pillarId", pillar, count(*)::int AS n
+          FROM newsletter_issues
+         WHERE assistant_id = ${assistantId} AND organisation_id = ${orgId}
+           AND pillar IS NOT NULL
+           AND status NOT IN ('rejected', 'cancelled')
+           AND created_at > now() - make_interval(days => ${prof.balanceDays})
          GROUP BY pillar_id, pillar`);
     const rows = (Array.isArray(res) ? res : (res as { rows?: unknown[] }).rows ?? []) as { pillarId: number | null; pillar: string | null; n: number }[];
     return pillarUsageRows(live, await listArchivedPillars(db, orgId, assistantId), rows.map((r) => ({ pillarId: r.pillarId === null ? null : Number(r.pillarId), pillar: r.pillar, n: Number(r.n) })));

@@ -34,7 +34,7 @@ import { loadAssistantRulesBlock } from './assistant-rules-prompt';
 import { loadOrgProducts, renderProductFacts } from './org-products';
 import { normalizeBrandKit } from './brand-kit';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST, VOICEOVER_CREDIT_COST, MUSIC_CREDIT_COST, type MediaKind } from './ai-credits';
-import { aiVideoTasks, type TaskCosts } from '../config/task-weights';
+import { aiVideoTasks, formatCost, type TaskCosts } from '../config/task-weights';
 import { getTaskCosts } from './task-costs';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
@@ -67,6 +67,7 @@ import { isVideoLook, lookStyle, type LookStyle } from '../lib/video-look';
 import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
 import { defaultTextPos, plannedClearOfCaptions, textFont, textLook, textWindow, textY } from '../lib/scene-text';
 import { isOwnVoice, keepRecordings, linesToRecord, recordedDurations } from './own-voice';
+import { chaptersFor } from '../lib/video-chapters';
 import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
 import { makeVideoTrack, ownMusicTrack, ownMusicTracks, storedFileExists } from './video-music-asset';
 
@@ -222,6 +223,19 @@ export interface ProjectTimeline {
     mix?: { voice: number; ownSound: number; music: number; musicUnder: number; musicTitle?: string | null; /** Why it has no music, when it should have. */ musicNote?: string | null };
     /** Every file this version was made from: scenes, voiceover, music, captions, footage. */
     sourceAssetIds?: number[];
+    /** The owner's chapter names, by each chapter's first scene id (src/lib/video-chapters.ts). Since 2026-11-11. */
+    chapterTitles?: Record<string, string>;
+}
+
+/** Chapter names to keep on a rebuilt timeline: this row's own, else the version it came from. */
+async function keptChapterTitles(db: Db, p: typeof videoProjects.$inferSelect): Promise<Record<string, string> | undefined> {
+    const own = (p.timeline as ProjectTimeline | null)?.chapterTitles;
+    if (own && Object.keys(own).length) return own;
+    if (!p.parentProjectId) return undefined;
+    const [parent] = await db.select({ timeline: videoProjects.timeline }).from(videoProjects)
+        .where(and(eq(videoProjects.id, p.parentProjectId), eq(videoProjects.organisationId, p.organisationId))).limit(1).catch(() => []);
+    const t = (parent?.timeline as ProjectTimeline | null)?.chapterTitles;
+    return t && Object.keys(t).length ? t : undefined;
 }
 
 /** Wake the project render worker. MUST be awaited (Lambda freezes on return). */
@@ -1030,6 +1044,9 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             // Kept with the version: every file it was made from (the Videos tab lists them).
             sourceAssetIds: [...new Set([...clips.map((c) => c.assetId), ...audio.map((a) => a.assetId)])],
         };
+        // Chapter names the owner gave — kept for the scenes this version still has (videoChapters drops the rest).
+        const chapterTitles = await keptChapterTitles(db, p).catch(() => undefined);
+        if (chapterTitles) timeline.chapterTitles = chapterTitles;
 
         // Anything still held (a scene that turned out free, say) goes back.
         if (held > 0) { await settleHold(db, { orgId, amount: held, success: false, mediaType: 'image', userId }); held = 0; }
@@ -1233,6 +1250,8 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         // Notes on moments of the finished video, and where each scene sits on it.
         momentNotes: readNotes(row.momentNotes),
         sceneTimes: row.timeline ? sceneTimesOf(row.timeline) : [],
+        // Its chapters (runs of scenes with one beat) and, when YouTube would show them, the description lines.
+        ...chaptersOf(row, sb, outputDurationS),
         mix: (row.timeline as ProjectTimeline | null)?.mix ?? null,
         editCount: row.editCount,
         sourceFiles: row.status === 'ready' ? await sourceFilesOf(db, orgId, row) : [],
@@ -1278,6 +1297,11 @@ async function ownVoiceUrls(db: Db, orgId: number, row: typeof videoProjects.$in
     const out: Record<string, string> = {};
     for (const r of rows) if (r.storageKey) { const u = await presignR2Get(r.storageKey, 3600, { stableWindowSec: 1800 }).catch(() => null); if (u) out[want.get(r.id)!] = u; }
     return out;
+}
+
+/** A finished video's chapters for the Videos tab and the chat, and its YouTube lines (src/lib/video-chapters.ts chaptersFor). */
+export function chaptersOf(row: Pick<typeof videoProjects.$inferSelect, 'timeline' | 'brief'>, sb: Storyboard | null, durationS?: number | null) {
+    return chaptersFor({ timeline: row.timeline, brief: row.brief, storyboard: sb }, durationS);
 }
 
 function sceneTimesOf(timeline: unknown): SceneTime[] {
@@ -1346,7 +1370,7 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         if (brief.clip) {
             const framed = !!sb?.scenes?.[0]?.assetId;
             const at = r.status === 'planned' || r.status === 'failed'
-                ? (framed ? 'first frame made — waiting for them to press "Make the clip" (or "Try another frame")' : 'saved — waiting for them to press "See the first frame" (1 task)')
+                ? (framed ? 'first frame made — waiting for them to press "Make the clip" (or "Try another frame")' : `saved — waiting for them to press "See the first frame" (${formatCost('ai_image', costs.weights.ai_image)})`)
                 : (WAITING[r.status] ?? r.status);
             return `- id ${r.id}: AI CLIP "${brief.clip.description.slice(0, 100)}" (${brief.clip.style}, ${brief.clip.lengthS}s) — ${at}`;
         }
@@ -1382,7 +1406,11 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         const noteLines = notes.length
             ? notes.map((n) => `\n    • their note at ${mmss(n.atS)}${n.sceneId ? ` (scene ${n.sceneId.slice(1)})` : ''}: "${n.text.slice(0, 160)}"`).join('')
             : '';
-        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${shapeTxt}${from}${own}) — ${WAITING[r.status] ?? r.status}${cost}${script}${note}${extras ? `\n    ${extras}` : ''}${seen}${lines}${noteLines}`;
+        const { chapters, youtubeChapters, chaptersWhyNot } = r.status === 'ready' ? chaptersOf(r, sb) : { chapters: [], youtubeChapters: null, chaptersWhyNot: null };
+        const chapterLines = chapters.length
+            ? `\n    chapters (${youtubeChapters ? 'added to the description when it is posted to YouTube' : chaptersWhyNot === 'not_wide' ? 'Videos tab only — YouTube makes a vertical or square video a Short, and Shorts have no chapters' : 'Videos tab only — YouTube needs at least 3 chapters of 10 seconds or more'}): ${chapters.map((c, i) => `${i + 1}. ${mmss(c.startS)} "${c.title}"${c.named ? '' : ' (its own name)'}`).join('; ')}`
+            : '';
+        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${shapeTxt}${from}${own}) — ${WAITING[r.status] ?? r.status}${cost}${script}${note}${extras ? `\n    ${extras}` : ''}${seen}${lines}${noteLines}${chapterLines}`;
     }), '', footage].join('\n');
 }
 

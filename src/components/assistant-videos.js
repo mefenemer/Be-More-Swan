@@ -1,3 +1,5 @@
+// What work costs comes from Admin → Money → Task costs (/task-costs.js); this keeps a page that didn't load it working.
+window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 /**
  * src/components/assistant-videos.js
  * The Video Producer's Videos tab — docs/video-producer-plan.md §5.2–5.8.
@@ -84,7 +86,7 @@
 
   const state = {
     assistantId: null, assistantName: null, setup: {}, videos: [], loaded: false, loadError: null,
-    rendered: false, form: false, editing: null, replanning: null, rewriting: null, noting: null, notes: {}, busy: new Set(), pollTimer: null,
+    rendered: false, form: false, editing: null, replanning: null, rewriting: null, noting: null, renamingChapter: null, notes: {}, busy: new Set(), pollTimer: null,
     stage: null, userStage: false, opened: new Set(), full: false,
     // "Use my own footage": the form, the library's own videos, what is ticked, and files just added.
     footage: null,
@@ -727,7 +729,7 @@
       <form data-vid-clip-form class="tab-card p-4 mb-3 space-y-3">
         <div class="flex items-center justify-between"><p class="text-sm font-bold text-gray-900">New AI clip</p>
           <button type="button" data-vid-act="clip-close" class="text-xs font-bold text-gray-500 hover:text-gray-800">Close</button></div>
-        <p class="text-xs text-gray-600">A short clip made with AI, saved to My Content. You see its first frame (1 task) before the clip is made, and the button says what the clip uses. Made-up people only.</p>
+        <p class="text-xs text-gray-600">A short clip made with AI, saved to My Content. You see its first frame (${window.taskCost('ai_image')}) before the clip is made, and the button says what the clip uses. Made-up people only.</p>
         <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">What should it show?</span>
           <textarea name="description" rows="3" maxlength="400" required class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2" placeholder="e.g. Steam rising from a fresh cup of coffee on a sunny café table, slow push in"></textarea></label>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -770,7 +772,7 @@
           <p class="text-sm text-gray-900 break-words">“${esc(c.description)}”</p>
           <p class="text-xs text-gray-600">${esc(style)} · ${esc(c.lengthS)} seconds · ${c.sound ? 'with sound' : 'no sound'} · AI clip</p>
           ${open ? `<div class="flex flex-wrap gap-2 pt-1">
-            <button type="button" data-vid-act="clip-frame" data-id="${v.id}" ${busy} class="${v.clipFrameUrl ? 'btn-secondary border' : 'btn-primary'} px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">${v.clipFrameUrl ? 'Try another frame — 1 task' : 'See the first frame — 1 task'}</button>
+            <button type="button" data-vid-act="clip-frame" data-id="${v.id}" ${busy} class="${v.clipFrameUrl ? 'btn-secondary border' : 'btn-primary'} px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">${v.clipFrameUrl ? 'Try another frame' : 'See the first frame'} — ${window.taskCost('ai_image')}</button>
             ${v.clipFrameUrl ? `<button type="button" data-vid-act="build" data-id="${v.id}" ${busy} class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Make the clip${esc(cost)}</button>` : ''}
             <button type="button" data-vid-act="cancel" data-id="${v.id}" ${busy} class="btn-utility px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Cancel</button>
           </div>
@@ -999,6 +1001,12 @@
       <div class="mt-3 flex flex-col sm:flex-row gap-3 items-start">
         <div class="${wide ? 'w-full sm:w-96' : shape === '1:1' ? 'w-56' : 'w-44'} shrink-0">
           <video src="${esc(v.outputUrl)}" controls playsinline preload="metadata" data-vid-player="${v.id}" class="w-full rounded-lg bg-black"></video>
+          <div class="mt-1 flex items-center gap-1" role="group" aria-label="Skip back or forward">
+            <button type="button" data-vid-act="skip" data-id="${v.id}" data-by="-10" aria-label="Back 10 seconds" title="Back 10 seconds" class="btn-secondary border px-2 py-0.5 text-xs font-bold rounded-md">⏪ 10s</button>
+            <button type="button" data-vid-act="skip" data-id="${v.id}" data-by="-5" aria-label="Back 5 seconds" title="Back 5 seconds" class="btn-secondary border px-2 py-0.5 text-xs font-bold rounded-md">⏪ 5s</button>
+            <button type="button" data-vid-act="skip" data-id="${v.id}" data-by="5" aria-label="Forward 5 seconds" title="Forward 5 seconds" class="btn-secondary border px-2 py-0.5 text-xs font-bold rounded-md">5s ⏩</button>
+            <button type="button" data-vid-act="skip" data-id="${v.id}" data-by="10" aria-label="Forward 10 seconds" title="Forward 10 seconds" class="btn-secondary border px-2 py-0.5 text-xs font-bold rounded-md">10s ⏩</button>
+          </div>
           ${strip}
           <button type="button" data-vid-act="note-here" data-id="${v.id}" class="mt-1 text-xs font-bold text-indigo-700 hover:underline">📝 Note on this moment</button>
           ${noting ? `<form data-vid-note-form data-id="${v.id}" class="mt-1 space-y-1">
@@ -1008,7 +1016,7 @@
                 <button type="button" data-vid-act="cancel-note" class="btn-secondary border px-3 py-1 text-xs font-bold rounded-lg">Cancel</button></div>
             </form>` : ''}
         </div>
-        <div class="min-w-0 space-y-2">
+        <div class="min-w-0 w-full sm:w-auto space-y-2">
           <p class="text-xs text-gray-600">${v.outputDurationS ? `${Math.round(v.outputDurationS)} s · ` : ''}${esc(SHAPES.find((x) => x[0] === shape)?.[1] || shape)}${v.version > 1 ? ` · version ${esc(v.version)}` : ''}${ai ? ' · <span class="font-semibold text-amber-800">Contains AI</span>' : ''}</p>
           <div class="flex flex-wrap gap-2">
             <a href="/.netlify/functions/content-asset-download?assetId=${encodeURIComponent(v.outputAssetId)}" class="btn-primary px-4 py-2 text-sm font-bold rounded-lg">Download</a>
@@ -1016,6 +1024,7 @@
           </div>
           <p class="text-[11px] text-gray-500">Saved in My Content. Download it, or pick it from My Content wherever you want to use it.</p>
           ${shapesLeft.length ? `<button type="button" data-vid-act="reshape" data-id="${v.id}" ${state.busy.has(v.id) ? 'disabled' : ''} title="Keeps the voiceover and every clip and picture, cropped to the new shape; branded cards are drawn again." class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Make it ${esc(shapesLeft.map((x) => (SHAPES.find((y) => y[0] === x) || [x, x])[1].toLowerCase()).join(' and '))} too — free</button>` : ''}
+          ${chaptersHtml(v)}
           ${notes.length ? `<div class="border border-amber-200 bg-amber-50 rounded-lg p-2">
               <p class="text-xs font-bold text-amber-900">Your notes (${notes.length})</p>
               <ul class="mt-1 space-y-0.5">${notes.map((n) => `<li class="text-xs text-amber-900 flex items-start gap-1"><button type="button" data-vid-act="seek" data-id="${v.id}" data-at="${esc(n.atS)}" class="font-bold hover:underline shrink-0">${mmss(n.atS)}</button><span class="min-w-0 break-words">${n.sceneId ? `scene ${esc(n.sceneId.slice(1))}: ` : ''}${esc(n.text)}</span><button type="button" data-vid-act="delete-note" data-id="${v.id}" data-note="${esc(n.id)}" aria-label="Delete this note" class="ml-auto shrink-0 text-amber-700 hover:text-red-700">×</button></li>`).join('')}</ul>
@@ -1302,6 +1311,49 @@
     await load();
   }
 
+  /**
+   * A finished video's chapters (video-chapters.ts): runs of scenes with one story beat. Click one to
+   * jump there; ✎ renames it. When YouTube would show them, they go in the description when it's posted
+   * there, and "Copy for YouTube" puts the same lines on the clipboard for anywhere else.
+   */
+  function chaptersHtml(v) {
+    const list = v.chapters || [];
+    if (list.length < 2) return '';
+    const renaming = state.renamingChapter && state.renamingChapter.id === v.id ? state.renamingChapter.sceneId : null;
+    return `<div class="border border-gray-200 rounded-lg p-2" data-vid-chapters="${v.id}">
+        <div class="flex items-center gap-2"><p class="text-xs font-bold text-gray-800">Chapters (${list.length})</p>
+          ${v.youtubeChapters ? `<button type="button" data-vid-act="copy-chapters" data-id="${v.id}" class="ml-auto text-[11px] font-bold text-indigo-700 hover:underline">Copy for YouTube</button>` : ''}</div>
+        <ol class="mt-1 space-y-0.5">${list.map((c, i) => renaming === c.sceneId
+          ? `<li><form data-vid-chapter-form data-id="${v.id}" data-scene="${esc(c.sceneId)}" class="flex items-center gap-1">
+              <span class="text-xs font-bold text-gray-500 shrink-0">${mmss(c.startS)}</span>
+              <input name="title" value="${esc(c.named ? c.title : '')}" placeholder="${esc(c.title)}" maxlength="60" aria-label="Chapter name" class="min-w-0 flex-1 text-xs border border-gray-300 rounded px-1.5 py-0.5">
+              <button type="submit" class="btn-primary px-2 py-0.5 text-[11px] font-bold rounded">Save</button>
+              <button type="button" data-vid-act="cancel-chapter" class="text-[11px] font-bold text-gray-500 hover:underline">Cancel</button>
+            </form></li>`
+          : `<li class="flex items-center gap-1 rounded px-1" data-vid-chapter data-start="${esc(c.startS)}" data-end="${esc(c.endS)}">
+              <button type="button" data-vid-act="seek" data-id="${v.id}" data-at="${esc(c.startS)}" class="flex items-baseline gap-1.5 min-w-0 text-left hover:underline" title="Play from here">
+                <span class="text-xs font-bold text-indigo-700 shrink-0">${mmss(c.startS)}</span><span class="text-xs text-gray-800 truncate">${esc(c.title)}</span></button>
+              <span class="text-[10px] text-gray-400 shrink-0">${c.scenes.length > 1 ? `scenes ${c.scenes[0]}–${c.scenes[c.scenes.length - 1]}` : `scene ${c.scenes[0]}`}</span>
+              <button type="button" data-vid-act="rename-chapter" data-id="${v.id}" data-scene="${esc(c.sceneId)}" aria-label="Rename chapter ${i + 1}" title="Rename" class="ml-auto shrink-0 text-xs text-gray-400 hover:text-indigo-700">✎</button>
+            </li>`).join('')}</ol>
+        <p class="text-[11px] text-gray-500 mt-1">${v.youtubeChapters ? 'Added to the description when this video is posted to YouTube, so viewers can jump between them.' : v.chaptersWhyNot === 'not_wide' ? 'Shown here only — YouTube makes a vertical or square video a Short, and Shorts have no chapters. A wide version gets them.' : 'Shown here only — YouTube needs at least 3 chapters of 10 seconds or more.'}</p>
+      </div>`;
+  }
+
+  // The chapter playing is marked as the video plays (timeupdate doesn't bubble, so it's caught on the way down).
+  document.addEventListener('timeupdate', (e) => {
+    const p = e.target;
+    if (!p || !p.matches || !p.matches('video[data-vid-player]') || !host() || !host().contains(p)) return;
+    const box = host().querySelector(`[data-vid-chapters="${p.dataset.vidPlayer}"]`);
+    if (!box) return;
+    const t = p.currentTime;
+    box.querySelectorAll('[data-vid-chapter]').forEach((li, k, all) => {
+      const on = t >= Number(li.dataset.start) && (t < Number(li.dataset.end) || k === all.length - 1);
+      li.classList.toggle('bg-indigo-50', on);
+      if (on) li.setAttribute('aria-current', 'true'); else li.removeAttribute('aria-current');
+    });
+  }, true);
+
   document.addEventListener('click', (e) => {
     const pill = e.target.closest('[data-vid-stage]');
     if (pill && host() && host().contains(pill)) {
@@ -1464,6 +1516,26 @@
         if (p) { p.currentTime = Number(b.dataset.at) || 0; p.focus(); }
         break;
       }
+      case 'skip': {
+        const p = host()?.querySelector(`[data-vid-player="${id}"]`);
+        if (p) {
+          const end = Number.isFinite(p.duration) ? p.duration : Infinity;
+          try { p.currentTime = Math.max(0, Math.min(end, p.currentTime + (Number(b.dataset.by) || 0))); } catch { /* not loaded yet */ }
+        }
+        break;
+      }
+      case 'rename-chapter':
+        state.renamingChapter = { id, sceneId: b.dataset.scene }; render();
+        host()?.querySelector('[data-vid-chapter-form] input')?.focus();
+        break;
+      case 'cancel-chapter': state.renamingChapter = null; render(); break;
+      case 'copy-chapters': {
+        const v = state.videos.find((x) => x.id === id);
+        if (!v || !v.youtubeChapters) break;
+        const done = (ok) => { state.notes[id] = { text: ok ? 'Chapters copied — paste them at the end of a YouTube description.' : 'Couldn’t copy. Select the chapters and copy them yourself.', error: !ok }; render(); };
+        (navigator.clipboard ? navigator.clipboard.writeText(v.youtubeChapters) : Promise.reject()).then(() => done(true), () => done(false));
+        break;
+      }
       case 'delete-note': act(id, { action: 'delete_note', id, noteId: b.dataset.note }, null); break;
       case 'notes-version': versionFromNotes(id); break;
       case 'reshape': act(id, { action: 'reshape', id }, 'Making it in the other shapes — they appear under “Being made”, and in My Content when they’re done.'); break;
@@ -1622,6 +1694,11 @@
       const n = state.noting;
       state.noting = null;
       act(id, { action: 'add_note', id, atS: n ? n.atS : 0, text: String(new FormData(f).get('text') || '') }, 'Note saved. Add more, then press “Make a new version from my notes”.');
+    } else if (f.matches('[data-vid-chapter-form]')) {
+      e.preventDefault();
+      const id = Number(f.dataset.id);
+      state.renamingChapter = null;
+      act(id, { action: 'rename_chapter', id, sceneId: f.dataset.scene, title: String(new FormData(f).get('title') || '') }, 'Chapter renamed.');
     } else if (f.matches('[data-vid-replan-form]')) {
       e.preventDefault();
       const id = Number(f.dataset.id);

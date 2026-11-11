@@ -126,7 +126,7 @@ check('the website page exists, and only renders for a Live role', () => {
     const show = JSON.parse(read('db/assistant-showcases.json'));
     assert.ok(show.video_producer, 'showcase entry');
     const text = JSON.stringify(show.video_producer);
-    assert.match(text, new RegExp(`${DEFAULT_TASK_WEIGHTS.ai_video} tasks for an AI clip`));
+    assert.match(text, /\{\{tasks\.ai_video\}\} for an AI clip/, 'the price is the live figure, filled by assistant-showcase.ts');
     assert.doesNotMatch(text, /credit/i);
     assert.ok(read('db/z-assistant-showcases.sql').includes("'video_producer'"), 'node scripts/build-showcase-sql.mjs');
     assert.match(read('netlify/functions/master-assistants.ts'), /\.where\(eq\(masterAssistants\.isActive, true\)\)/);
@@ -143,7 +143,7 @@ check('the pricing row (live 2026-10-31) is in the migrations and the seed, on t
     const faq = read('faq.html');
     assert.ok(faq.includes('What does the Video Producer make?') && faq.includes('Does making a video use my tasks?'));
     // Today's flat price (filled in live by /task-costs.js), and the per-second price from the date in the 30 days' notice.
-    assert.match(faq, new RegExp(`${DEFAULT_TASK_WEIGHTS.ai_video} tasks</span> for an AI clip \\(at most ${MAX_AI_CLIPS} in a video; from 3 December 2026, ${DEFAULT_TASK_COSTS.videoTasksPerSecond} tasks for each second of clip; one and a half times that for a single AI clip with sound\\)`));
+    assert.match(faq, new RegExp(`${DEFAULT_TASK_WEIGHTS.ai_video} tasks</span> for an AI clip \\(at most ${MAX_AI_CLIPS} in a video; from 3 December 2026, <span data-task-cost="ai_video_per_second">${DEFAULT_TASK_COSTS.videoTasksPerSecond} tasks a second</span> of clip; one and a half times that for a single AI clip with sound\\)`));
 });
 
 check('the Mentor recommends it only when Live, on a plan with video, with someone posting', () => {

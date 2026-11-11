@@ -12,7 +12,9 @@
 // ("Goal card is ready to confirm.") is kept as written.
 
 /** Words that report a change as made or promise to make it — what only the click may do. */
-const CLAIMS = /\b(updated|changed|saved|switched|stopped|started|added|removed|approved|declined|turned (on|off)|set up|all set|done)\b|\bI(?:'|’)?ll (stop|start|write|post|switch|turn|add|change|update|save|keep|use|draft)\b|\bI will (stop|start|write|post|switch|turn|add|change|update|save|keep|use|draft)\b|\bI(?:'|’)?ve (stopped|started|written|switched|turned|added|changed|updated|saved|set)\b/i;
+// "I'll set that up as a rule across your whole team" over a rule card got through (staging 2026-11-11, FR#10):
+// set / make / remove / delete joined the I'll and I will lists.
+const CLAIMS = /\b(updated|changed|saved|switched|stopped|started|added|removed|approved|declined|turned (on|off)|set up|all set|done)\b|\bI(?:'|’)?ll (stop|start|write|post|switch|turn|add|change|update|save|keep|use|draft|set|make|remove|delete)\b|\bI will (stop|start|write|post|switch|turn|add|change|update|save|keep|use|draft|set|make|remove|delete)\b|\bI(?:'|’)?ve (stopped|started|written|switched|turned|added|changed|updated|saved|set)\b/i;
 
 export function replyClaimsChange(content: string): boolean {
     return CLAIMS.test(content);
