@@ -190,7 +190,8 @@ test('a route other than the Mentor can only change its own answers', async () =
     const o = read('netlify/functions/chat-orchestrator.ts');
     assert.match(o, /resolveSetupFieldProposal\(db, orgId, session\.aiAssistantId, setupReq, \{ allowOthers: isMentor \}\)/);
     // A Social assistant's own block leaves content_pillars out: it has a pillar card (2026-11-11, chat-pillar-card.ts).
-    assert.match(o, /assistantSetupFieldBlock\(assistantRow\.roleKey, session\.aiAssistantId, assistantRow\.onboardingContext, pillarsBlock \? \{ omitKeys: \['content_pillars'\] \} : undefined\)/);
+    // …and a Blog / Email assistant's own block leaves its topics out (phase 3b): the role's key.
+    assert.match(o, /assistantSetupFieldBlock\(assistantRow\.roleKey, session\.aiAssistantId, assistantRow\.onboardingContext, pillarsBlock && pillarProfile \? \{ omitKeys: \[pillarProfile\.contextKey\] \} : undefined\)/);
     assert.match(o, /ctaCardBlock, scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock/);
     assert.match(o, /\?\? ctaCard \?\? setupFieldCard \?\? supportCard\)/, 'the blog and email routes keep it (profileCard)');
     const block = assistantSetupFieldBlock('blog_writer', 7, { tone_of_voice: 'Casual' })!;

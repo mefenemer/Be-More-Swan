@@ -9561,8 +9561,8 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         .finally(() => { if (_skelAutopilot) _endCardLoading('autopilot-status-card'); }));
     // Not awaited: the hero is complete without it, and the strip reveals itself when it lands.
     _renderAssistantTaskShare(assistantId);
-    // Results ▸ Autopilot: posts per content pillar (src/components/pillar-list.js). Social Media only.
-    if (currentData.roleKey === 'social_media_manager') window.PillarList?.renderUsage(assistantId);
+    // Results ▸ Autopilot: posts per content pillar (Social), or per topic (Blog, Email) — src/components/pillar-list.js.
+    if (['social_media_manager', 'blog_writer', 'newsletter_editor'].includes(currentData.roleKey)) window.PillarList?.renderUsage(assistantId);
     // Audience counts hit the platform APIs, so they're deliberately not awaited — the Autopilot
     // card is already complete without them and the block reveals itself when they land.
     // Registry-driven, like metricsSource: a role whose audience isn't social gets its own renderer

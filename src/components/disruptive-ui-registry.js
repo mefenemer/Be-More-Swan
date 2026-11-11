@@ -5472,8 +5472,11 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const before = ui.before || null;
     const change = ui.change || {};
     const onOff = (v) => (v ? 'switched on' : 'switched off');
-    const eyebrow = { add: 'New content pillar', update: 'Change a content pillar', archive: 'Archive a content pillar', restore: 'Bring back a content pillar' }[action];
-    const goLabel = { add: 'Add this pillar', update: 'Save this change', archive: 'Archive it', restore: 'Bring it back' }[action];
+    // "pillar" on a Social assistant, "topic" on a Blog or Email one (src/utils/pillar-profiles.ts).
+    const isTopic = ui.noun === 'topic';
+    const thing = isTopic ? 'topic' : 'content pillar';
+    const eyebrow = { add: `New ${thing}`, update: `Change a ${thing}`, archive: `Archive a ${thing}`, restore: `Bring back a ${thing}` }[action];
+    const goLabel = { add: `Add this ${isTopic ? 'topic' : 'pillar'}`, update: 'Save this change', archive: 'Archive it', restore: 'Bring it back' }[action];
     const row = (label, value) => `<div class="break-words"><dt class="inline text-gray-500">${label}</dt> <dd class="inline">${value}</dd></div>`;
     let body = '';
     if (action === 'add') {
@@ -5488,8 +5491,10 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         if (change.isActive !== undefined) body += row('After:', onOff(change.isActive));
       }
     }
-    const note = action === 'archive' ? 'New posts stop using it. Posts already written under it keep it, and you can bring it back.'
-      : action === 'restore' ? (ui.landsOff ? 'Five pillars are already on, so it comes back switched off.' : 'It comes back with its description and post history.')
+    const maxOn = Number(ui.maxActive) || (isTopic ? 8 : 5);
+    const note = action === 'archive' ? (isTopic ? 'New drafts stop using it. Anything already written under it keeps it, and you can bring it back.' : 'New posts stop using it. Posts already written under it keep it, and you can bring it back.')
+      : action === 'restore' ? (ui.landsOff ? `${maxOn} ${isTopic ? 'topics' : 'pillars'} are already on, so it comes back switched off.` : `It comes back with its description and ${isTopic ? 'history' : 'post history'}.`)
+      : isTopic ? 'Only this topic changes. It’s also on “Topics & themes” under “When and how I work” in my settings.'
       : 'Only this pillar changes. It’s also on “What I post about” in my settings.';
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-emerald-200 rounded-xl shadow-sm p-4 max-w-md';
@@ -5514,8 +5519,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         status.className = 'text-xs font-semibold text-emerald-800 mt-2';
         status.textContent = { add: 'Added.', update: 'Saved.', archive: 'Archived.', restore: data.switchedOff ? 'Brought back, switched off.' : 'Brought back.' }[action];
         window.PillarList?.reload();
-        // What the posts are about changed: offer to redraft the upcoming drafts (redraft-upcoming.js).
-        if (action !== 'restore' || !data.switchedOff) window.offerRedraftUpcoming?.(Number(ui.assistantId));
+        // What the posts are about changed: offer to redraft the upcoming drafts (redraft-upcoming.js) —
+        // a Social assistant's scheduled posts only; a Blog or Email topic reaches the next draft.
+        if (!isTopic && (action !== 'restore' || !data.switchedOff)) window.offerRedraftUpcoming?.(Number(ui.assistantId));
       } catch (err) {
         go.disabled = false; go.textContent = goLabel;
         status.className = 'text-xs text-red-700 mt-2';

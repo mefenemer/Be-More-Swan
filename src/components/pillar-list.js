@@ -283,16 +283,22 @@
       if (!box.isConnected) return;
       const rows = Array.isArray(data.usage) ? data.usage : [];
       if (!res.ok || !rows.length) { box.classList.add('hidden'); return; }
+      const topic = data.noun === 'topic';
+      const item = data.item === 'email' ? 'email' : 'post';
+      const label = document.getElementById('pillar-usage-label');
+      if (label && data.label) label.textContent = String(data.label);
       const note = document.getElementById('pillar-usage-note');
       if (note) {
         note.textContent = `Last ${Number(data.days) || 60} days`;
-        note.title = 'Posts drafted under each pillar, each cross-post counted once. Your assistant gives the next posts to the pillars used least.';
+        note.title = topic
+          ? `${item === 'email' ? 'Emails' : 'Articles'} drafted under each topic. Your assistant gives the next one to the topic used least.`
+          : 'Posts drafted under each pillar, each cross-post counted once. Your assistant gives the next posts to the pillars used least.';
       }
       const max = Math.max(1, ...rows.map((r) => r.posts));
       bars.innerHTML = `<div class="space-y-2.5">${rows.map((r) => {
         const tag = r.archived ? ' <span class="font-normal text-gray-400">(archived)</span>' : (!r.isActive ? ' <span class="font-normal text-gray-400">(off)</span>' : '');
         const pct = Math.round((r.posts / max) * 100);
-        return `<div title="${esc(r.name)}: ${r.posts} post${r.posts === 1 ? '' : 's'}">
+        return `<div title="${esc(r.name)}: ${r.posts} ${item}${r.posts === 1 ? '' : 's'}">
             <div class="flex items-center justify-between text-xs font-semibold mb-1">
               <span class="text-gray-700 min-w-0 truncate">${esc(r.name)}${tag}</span>
               <span class="text-gray-500 shrink-0" style="font-variant-numeric:tabular-nums">${r.posts}</span>

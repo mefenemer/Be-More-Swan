@@ -37,7 +37,7 @@ check('the cards reach the user: only for this workspace\'s post, only with a po
 });
 
 check('the words beside the cards stay honest', () => {
-    assert.ok(chat.includes('!postActionReq && !postPartCard && !profileCard && replyClaimsPostSaved(content)'), 'the reply beside the card is replaced by an apology');
+    assert.ok(chat.includes('!postActionReq && !postPartCard && !profileCard && !pillarCard && replyClaimsPostSaved(content)'), 'the reply beside the card is replaced by an apology');
     assert.ok(chat.includes('(!!postPartCard && uiElement === postPartCard)'), 'the reply can claim the change is made');
     assert.ok(chat.includes('postPartCard?.type === POST_PICTURE_TYPE) content = pictureReply(content, true)'), 'the reply can say it is making a picture');
 });

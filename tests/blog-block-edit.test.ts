@@ -67,9 +67,9 @@ check('the card is checked and rebuilt: only its own fields, nothing without a p
 
 check('the blog route keeps the card (it rebuilds uiElement from a fixed list), and its words stay honest', () => {
     const chat = read('netlify/functions/chat-orchestrator.ts');
-    assert.ok(chat.includes('blogAction ?? blogBlockEdit ?? profileCard'), 'the card is thrown away before it reaches the user');
+    assert.ok(chat.includes('blogAction ?? blogBlockEdit ?? pillarCard ?? profileCard'), 'the card is thrown away before it reaches the user');
     assert.ok(chat.includes('uiElement === blogBlockEdit'), 'the reply beside the card can claim the change is made');
-    assert.ok(chat.includes('!blogAction && !blogBlockEdit && !profileCard'), 'the reply is replaced by a "no draft" apology');
+    assert.ok(chat.includes('!blogAction && !blogBlockEdit && !profileCard && !pillarCard'), 'the reply is replaced by a "no draft" apology');
     assert.ok(chat.includes('eq(blogPosts.id, blogBlockReq.postId), eq(blogPosts.organisationId, orgId)'), 'a card for someone else\'s article');
 });
 

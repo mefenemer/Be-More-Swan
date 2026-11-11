@@ -139,7 +139,8 @@ import { asksForACall, callbackOfferElement } from '../../src/utils/callback-req
 import { asksAboutCustomers, buildMentorSnapshotParts, type MentorSnapshotData } from '../../src/utils/mentor-snapshot';
 import { recommendHires } from '../../src/utils/mentor-hire';
 import { assistantSetupFieldBlock, resolveSetupFieldProposal, setupFieldRequestFromUiElement, type SetupFieldCard } from '../../src/utils/chat-setup-field';
-import { buildPillarChatBlock, pillarRequestFromUiElement, resolvePillarProposal } from '../../src/utils/chat-pillar-card';
+import { buildPillarChatBlock, pillarRequestFromUiElement, resolvePillarProposal, settingsPlaceFor, type PillarCard } from '../../src/utils/chat-pillar-card';
+import { pillarProfileFor } from '../../src/utils/pillar-profiles';
 import { buildTakeMeThereCard } from '../../src/config/take-me-there';
 import { cardTheUserAskedFor, mentorCardFromUiElement, mentorCardsPromptBlock, onlyGapFields, proposalKind, recordMentorProposal, resolveProductRemoval, resolveProductUpdate } from '../../src/utils/mentor-cards';
 import { gateMentorSuggestion, proposalFields, supersedeSetupFieldProposals } from '../../src/utils/mentor-proposals';
@@ -3491,10 +3492,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // docs/business-mentor-plan.md). The Mentor gets every active assistant's in its <workspace> block.
     // A Social Media assistant's content pillars are RECORDS with their own card (src/utils/chat-pillar-card.ts),
     // so its set-up answers leave content_pillars out: retyping the whole list is what that card replaces.
-    const pillarsBlock = offersOwnCards && assistantRow.roleKey === 'social_media_manager'
+    // Blog and Email topics the same way since phase 3b (src/utils/pillar-profiles.ts: blogTopics / newsletterTopics).
+    const pillarProfile = pillarProfileFor(assistantRow.roleKey);
+    const pillarsBlock = offersOwnCards && pillarProfile
         ? await buildPillarChatBlock(db, orgId, session.aiAssistantId) : null;
     const setupFieldBlock = offersOwnCards
-        ? assistantSetupFieldBlock(assistantRow.roleKey, session.aiAssistantId, assistantRow.onboardingContext, pillarsBlock ? { omitKeys: ['content_pillars'] } : undefined)
+        ? assistantSetupFieldBlock(assistantRow.roleKey, session.aiAssistantId, assistantRow.onboardingContext, pillarsBlock && pillarProfile ? { omitKeys: [pillarProfile.contextKey] } : undefined)
         : null;
     // The "Use for this assistant" switches, for the roles whose Connections card shows them
     // (src/utils/chat-platforms.ts). Null for every other role; never throws.
@@ -3771,17 +3774,21 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 : null;
             if (!card) content = `${content}\n\n(I didn’t include a share card, because I couldn’t find that post in your list.)`;
         }
-        // One content pillar (src/utils/chat-pillar-card.ts): the Social Media route's own card, rebuilt from the
-        // rows so it only offers what the pillar rules allow. The click applies it via content-pillars.ts.
+        // One content pillar (Social) or topic (Blog, Email) (src/utils/chat-pillar-card.ts): the route's own
+        // card, rebuilt from the rows so it only offers what the rules allow. The click applies it via
+        // content-pillars.ts. Kept as pillarCard so the Blog and Email routes, which rebuild uiElement from a
+        // fixed list further down, keep it too.
         const pillarReq = pillarRequestFromUiElement(uiElement);
+        let pillarCard: PillarCard | null = null;
         if (pillarReq) {
-            const card = route === ROUTES.social_media_manager
+            const ownRoute = route === ROUTES.social_media_manager || route === ROUTES.blog_writer || route === ROUTES.newsletter_editor;
+            const card = ownRoute && pillarProfile
                 ? await resolvePillarProposal(db, orgId, session.aiAssistantId, pillarReq)
-                : { error: 'Only a Social Media assistant has content pillars.' };
+                : { error: 'Only a Social Media, Blog Writing or Email Marketing assistant has pillars or topics.' };
             if ('error' in card) {
                 uiElement = null;
-                content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)} You can change pillars on “What I post about” in my settings.)`;
-            } else uiElement = card;
+                content = `${content}\n\n(I didn’t include a card for that — ${card.error.charAt(0).toLowerCase()}${card.error.slice(1)}${pillarProfile ? ` You can change them on ${settingsPlaceFor(pillarProfile)}.` : ''})`;
+            } else { uiElement = card; pillarCard = card; }
         }
         if ((uiElement as { type?: unknown } | null)?.type === 'redraft_upcoming_proposal') {
             uiElement = route === ROUTES.social_media_manager
@@ -3797,8 +3804,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         if (setupReq) {
             const isMentor = route === ROUTES.business_mentor;
             // The Social chat changes pillars one at a time with pillar_proposal, never by retyping the list.
-            const card = !isMentor && pillarsBlock && setupReq.key === 'content_pillars'
-                ? { error: 'Pillars are changed one at a time with the pillar card.' }
+            const card = !isMentor && pillarsBlock && pillarProfile && setupReq.key === pillarProfile.contextKey
+                ? { error: `${pillarProfile.nounPlural.charAt(0).toUpperCase() + pillarProfile.nounPlural.slice(1)} are changed one at a time with the ${pillarProfile.noun} card.` }
                 : await resolveSetupFieldProposal(db, orgId, session.aiAssistantId, setupReq, { allowOthers: isMentor });
             if ('error' in card) {
                 uiElement = null;
@@ -4322,7 +4329,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             // An action card on an existing article was already checked and rebuilt above — keep it.
             uiElement = blogDraft ? { type: BLOG_POST_DRAFT_TYPE, ...blogDraft }
                 : blogBatch ? { ...blogBatch, assistantId: session.aiAssistantId }
-                : blogAction ?? blogBlockEdit ?? profileCard;
+                : blogAction ?? blogBlockEdit ?? pillarCard ?? profileCard;
         }
 
         // Same contract for the newsletter route, and the same reason: uiElementJson is persisted
@@ -4351,7 +4358,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 : formDraft ? { type: AUDIENCE_FORM_DRAFT_TYPE, ...formDraft }
                 // An action card on an existing email, or an Audience card, was already checked and
                 // rebuilt above — keep it.
-                : emailAction ?? emailPartCard ?? audienceCard ?? reviewsCard ?? profileCard;
+                : emailAction ?? emailPartCard ?? audienceCard ?? reviewsCard ?? pillarCard ?? profileCard;
         }
 
         if (supportCard) uiElement = supportCard;
@@ -4383,7 +4390,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // A post-action turn is not a drafting turn: "approve it and it's scheduled" describes the
         // card, and the card is the backing — the user's click is what does it.
-        if (route === ROUTES.social_media_manager && !postActionReq && !postPartCard && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.social_media_manager && !postActionReq && !postPartCard && !profileCard && !pillarCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             let breach: DraftClaimFailure | null = null;
             if (draftTarget) breach = 'not_saved_here';                      // saving here is wrong by design
             else if (persistedPosts?.length === 0) breach = 'persist_failed'; // valid draft, the write threw
@@ -4402,7 +4409,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // persists), so the only unbacked claim available to it is claiming an article it did not
         // write — which is the identical bug: a confident reply about a post that does not exist.
         // An action card is the thing a "scheduled" reply is about, so it is not an unbacked claim.
-        if (route === ROUTES.blog_writer && !blogDraft && !blogBatch && !blogAction && !blogBlockEdit && !profileCard && replyClaimsPostSaved(content) && !alreadyApologised) {
+        if (route === ROUTES.blog_writer && !blogDraft && !blogBatch && !blogAction && !blogBlockEdit && !profileCard && !pillarCard && replyClaimsPostSaved(content) && !alreadyApologised) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked blog draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );
@@ -4444,7 +4451,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // unbacked claim available to it is claiming an issue it did not write.
         // !emailAction / !audienceCard: a "booked for Tuesday" or "here's the segment" reply describes
         // its card, not an unbacked claim.
-        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !emailPartCard && !audienceCard && !reviewsCard && !profileCard) {
+        if (route === ROUTES.newsletter_editor && !newsletterDraft && !campaignDraft && !formDraft && replyClaimsPostSaved(content) && !alreadyApologised && !emailAction && !emailPartCard && !audienceCard && !reviewsCard && !profileCard && !pillarCard) {
             console.warn(
                 `[chat-orchestrator] suppressed unbacked newsletter draft claim — assistant ${session.aiAssistantId}, session ${session.id}`,
             );

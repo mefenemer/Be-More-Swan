@@ -111,12 +111,12 @@ redraft-upcoming, onboarding summary) then keep working untouched. They can move
 
 ## 7. Phase 3 plan: Blog and Email topics as records (2026-11-11)
 
-Status: **phase 3a built 2026-11-11** to the §7.2 recommendations (branch feat/topics-3a): profiles in
-src/utils/pillar-profiles.ts, role-aware store, the settings list in Operational Setup, Blog ideation and
-the Email autopilot balancing by topic (src/utils/topic-balance.ts), backfill for Blog/Email,
-db/z-content-topics.sql (BOTH DBs before deploy). Until phase 3b, the Blog/Email chats and the Mentor still
-change topics through the set-up answer card (text, reconciled to the rows server-side); that card's
-200-character limit can refuse a long list. Phase 3b not started.
+Status: **phase 3a LIVE-ready** (on staging; SQL + backfill on both DBs, 2026-11-11). **Phase 3b built
+2026-11-11** (branch feat/topics-3b): the Blog and Email chats get the one-topic card (kept through their
+uiElement rebuilds; their set-up answers leave the topics out and refuse them), Results ▸ Posts by topic /
+Emails by topic over 90 days, and the help section db/z-content-topics-help-2026-11-11.sql (not applied).
+Found on staging: the model quoted names inside its JSON reply and the whole reply was lost; prompt names
+are now in curly quotes and model-json.ts escapes stray quotes as a last-resort parse.
 
 ### 7.1 Where things are today
 
