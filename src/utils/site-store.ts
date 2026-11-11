@@ -24,6 +24,13 @@ import { loadBookingSetup } from './bookings';
 import { describeHours } from './booking-settings';
 import { MEETING_LOCATION_LABEL, meetingLocationOf } from './booking-meeting';
 import { bookingLinkFor } from './site-booking-page';
+/** "Outlook, Google" — which calendars are signed in (for the chat's meetingProvider choice). Never throws. */
+async function calendarsSignedIn(db: Db, orgId: number): Promise<string> {
+    const out: string[] = [];
+    try { if ((await (await import('./calendar-microsoft')).microsoftConnected(db, orgId)).connected) out.push('Outlook'); } catch { /* unknown */ }
+    try { if ((await (await import('./calendar-google')).googleConnected(db, orgId)).connected) out.push('Google'); } catch { /* unknown */ }
+    return out.join(', ');
+}
 import { gatewayGenerate } from '../lib/ai-gateway';
 import { gatewayRoleModel } from './assistant-model';
 import { loadAssistantRulesBlock } from './assistant-rules-prompt';
@@ -516,7 +523,7 @@ export async function buildSiteSnapshot(db: Db, orgId: number, assistantId: numb
     const bk = await loadBookingSetup(db, orgId).catch(() => null);
     if (bk) {
         lines.push(Object.keys(bk.settings.weeklyHours).length
-            ? `Bookings: opening hours ${describeHours(bk.settings.weeklyHours)} (${bk.settings.timezone}); ${bk.settings.mode === 'instant' ? 'confirmed straight away' : 'they confirm each booking'}; bookable services (with a length): ${bk.services.length ? bk.services.map((x) => `${x.name} (serviceId ${x.id}, ${x.durationMinutes} min, ${MEETING_LOCATION_LABEL[meetingLocationOf(x.meetingLocation)].toLowerCase()}${depositLabel(x) ? `, ${depositLabel(x)}` : ''})`).join(', ') : 'none yet'}; who/what can be booked: ${bk.resources.length ? bk.resources.map((r) => `${r.name} (resourceId ${r.id}, ${r.kind}${r.meetingUrl ? ', has their own video link' : ''})`).join(', ') : 'just them'}; video call link: ${bk.settings.meetingUrl ?? 'none set'}.`
+            ? `Bookings: opening hours ${describeHours(bk.settings.weeklyHours)} (${bk.settings.timezone}); ${bk.settings.mode === 'instant' ? 'confirmed straight away' : 'they confirm each booking'}; bookable services (with a length): ${bk.services.length ? bk.services.map((x) => `${x.name} (serviceId ${x.id}, ${x.durationMinutes} min, ${MEETING_LOCATION_LABEL[meetingLocationOf(x.meetingLocation)].toLowerCase()}${depositLabel(x) ? `, ${depositLabel(x)}` : ''})`).join(', ') : 'none yet'}; who/what can be booked: ${bk.resources.length ? bk.resources.map((r) => `${r.name} (resourceId ${r.id}, ${r.kind}${r.meetingUrl ? ', has their own video link' : ''})`).join(', ') : 'just them'}; video call link: ${bk.settings.meetingUrl ?? 'none set'}; video links made: ${bk.settings.meetingProvider === 'teams' ? 'a Teams meeting per booking' : bk.settings.meetingProvider === 'meet' ? 'a Google Meet per booking' : 'their pasted link'}${bk.settings.meetingProviderError ? ` (last problem: ${bk.settings.meetingProviderError})` : ''}; calendars signed in: ${(await calendarsSignedIn(db, orgId)) || 'none'}.`
             : 'Bookings: not set up (no opening hours yet).');
         // The booking link (site-booking-page.ts) — theirs to share; it works before the site is published.
         const link = await bookingLinkFor(db, orgId).catch(() => null);

@@ -9,13 +9,20 @@
 // booking alone. The customer is given the link only once the booking is confirmed: a request that
 // is declined never had it.
 //
-// When the owner changes a link, refreshMeetingLinks puts the new one on upcoming video bookings.
-// (B step 2 — a Teams meeting made per booking — will need a source column so that refresh leaves
-// generated links alone.)
+// When the owner changes a link, refreshMeetingLinks puts the new one on upcoming video bookings —
+// never on a meeting made for one booking (meeting_source 'teams' | 'meet') or a class place.
+//
+// B step 2 (db/z-booking-meeting-providers.sql): booking_settings.meeting_provider 'teams' makes a
+// Teams meeting for each video booking through the signed-in Outlook calendar (calendar-microsoft.ts),
+// 'meet' a Google Meet through the signed-in Google calendar (calendar-google.ts). ensureMeetingLink
+// runs when a booking becomes confirmed, BEFORE the customer is emailed, and falls back to the pasted
+// link (saying why on Business Information) whenever one can't be made.
 
-import { sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
+import { bookings, bookingSettings } from '../../db/schema';
 import { esc } from './site-render';
+import type { BookingRow } from './bookings';
 
 type Db = ReturnType<typeof getDb>;
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -110,11 +117,55 @@ export async function refreshMeetingLinks(db: Db, orgId: number, now: Date): Pro
             FROM bookings bk
             LEFT JOIN bookable_resources r ON r.id = bk.resource_id AND r.organisation_id = bk.organisation_id
             LEFT JOIN booking_settings s ON s.organisation_id = bk.organisation_id
-            WHERE bk.organisation_id = ${orgId} AND bk.meeting_location = 'video'
+            WHERE bk.organisation_id = ${orgId} AND bk.meeting_location = 'video' AND bk.kind <> 'class'
+              AND (bk.meeting_source IS NULL OR bk.meeting_source = 'link')
               AND bk.status IN ('pending', 'confirmed', 'awaiting_payment') AND bk.starts_at > ${now.toISOString()}
         ) want
         WHERE b.id = want.id AND b.organisation_id = ${orgId} AND b.meeting_url IS DISTINCT FROM want.url
         RETURNING b.id`);
     const rows = (res as unknown as { rows?: unknown[] }).rows ?? (Array.isArray(res) ? res : []);
     return rows.length;
+}
+
+// ── A meeting made for each booking (B step 2) ──────────────────────────────────────────────────
+
+export type OnlineMeetingResult = { ok: true; url: string } | { ok: false; error: string };
+export const ONLINE_MEETING_TIMEOUT_MS = 8000;
+
+/** Whether this booking should get a meeting of its own now. Pure. */
+export function wantsOwnMeeting(b: Pick<BookingRow, 'meetingLocation' | 'status' | 'meetingSource' | 'kind'>, provider: string | null | undefined): provider is 'teams' | 'meet' {
+    return b.meetingLocation === 'video' && b.status === 'confirmed' && b.kind !== 'class'
+        && (provider === 'teams' || provider === 'meet') && b.meetingSource !== 'teams' && b.meetingSource !== 'meet';
+}
+
+/**
+ * A confirmed video booking gets its own Teams / Meet link when the business chose that and the
+ * calendar is signed in. Call it BEFORE emailing the customer. Returns the booking as it now is; on
+ * any problem the pasted link stays and the reason is kept for Business Information. Never throws.
+ */
+export async function ensureMeetingLink(db: Db, b: BookingRow): Promise<BookingRow> {
+    try {
+        const [st] = await db.select({ provider: bookingSettings.meetingProvider }).from(bookingSettings).where(eq(bookingSettings.organisationId, b.organisationId)).limit(1);
+        const provider = st?.provider;
+        if (!wantsOwnMeeting(b, provider)) return b;
+        const make = provider === 'teams'
+            ? async () => { const m = await import('./calendar-microsoft'); return (await m.microsoftConnected(db, b.organisationId)).connected ? m.teamsMeetingFor(db, b) : null; }
+            : async () => { const m = await import('./calendar-google'); return (await m.googleConnected(db, b.organisationId)).connected ? m.meetMeetingFor(db, b) : null; };
+        const r: OnlineMeetingResult | null = await Promise.race([
+            make(),
+            new Promise<OnlineMeetingResult>((res) => setTimeout(() => res({ ok: false, error: `The ${provider === 'teams' ? 'Teams' : 'Google Meet'} meeting took too long to make, so your own video link was sent.` }), ONLINE_MEETING_TIMEOUT_MS)),
+        ]);
+        if (!r) return b;   // not signed in: the pasted link, as before
+        if (!r.ok) {
+            await db.update(bookingSettings).set({ meetingProviderError: r.error.slice(0, 300) }).where(eq(bookingSettings.organisationId, b.organisationId));
+            return b;
+        }
+        const [row] = await db.update(bookings).set({ meetingUrl: r.url, meetingSource: provider })
+            .where(and(eq(bookings.id, b.id), eq(bookings.organisationId, b.organisationId))).returning();
+        await db.update(bookingSettings).set({ meetingProviderError: null }).where(eq(bookingSettings.organisationId, b.organisationId));
+        return row ?? b;
+    } catch (err) {
+        console.error('[booking-meeting] meeting not made — the pasted link stays', { bookingId: b.id, message: err instanceof Error ? err.message : String(err) });
+        return b;
+    }
 }

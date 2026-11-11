@@ -7,11 +7,14 @@ import type { AvailabilitySettings, Interval, WeeklyHours } from './booking-avai
 import { isValidTimezone } from './newsletter-schedule';
 import { cleanMeetingUrl } from './booking-meeting';
 
-export const BOOKING_DEFAULTS: AvailabilitySettings & { mode: 'instant' | 'request'; cancellationPolicy: string | null; visitAddress: string | null; whatsapp: string | null; meetingUrl: string | null } = {
+export const BOOKING_DEFAULTS: AvailabilitySettings & { mode: 'instant' | 'request'; cancellationPolicy: string | null; visitAddress: string | null; whatsapp: string | null; meetingUrl: string | null; meetingProvider: MeetingProvider; meetingProviderError: string | null } = {
     timezone: 'Europe/London', weeklyHours: {}, closures: [], mode: 'request',
     minNoticeMinutes: 120, maxAdvanceDays: 60, slotIntervalMinutes: 30, bufferMinutes: 0, tableMinutes: 90, maxPartySize: 8,
-    cancellationPolicy: null, visitAddress: null, whatsapp: null, meetingUrl: null,
+    cancellationPolicy: null, visitAddress: null, whatsapp: null, meetingUrl: null, meetingProvider: 'link', meetingProviderError: null,
 };
+/** How video links are made (booking-meeting.ts ensureMeetingLink): the pasted link, or one made per booking. */
+export type MeetingProvider = 'link' | 'teams' | 'meet';
+export const MEETING_PROVIDERS: readonly MeetingProvider[] = ['link', 'teams', 'meet'];
 export const SLOT_INTERVALS = [5, 10, 15, 20, 30, 45, 60, 90, 120] as const;
 export const MAX_INTERVALS_PER_DAY = 3;
 export const MAX_CLOSURES = 100;
@@ -115,6 +118,12 @@ export function cleanBookingSettings(raw: Record<string, unknown>): Result<Recor
     }
     // The business's video link for video services (booking-meeting.ts).
     if (has('meetingUrl')) { const r = cleanMeetingUrl(raw.meetingUrl); if (!r.ok) return r; out.meetingUrl = r.value; }
+    if (has('meetingProvider')) {
+        const v = raw.meetingProvider === null || raw.meetingProvider === '' ? 'link' : raw.meetingProvider;
+        if (!(MEETING_PROVIDERS as readonly unknown[]).includes(v)) return { ok: false, error: 'Choose how video call links are made.' };
+        out.meetingProvider = v === 'link' ? null : v;
+        out.meetingProviderError = null;   // a fresh choice starts with a clean slate
+    }
     return { ok: true, value: out };
 }
 
@@ -172,6 +181,8 @@ export function settingsFromRow(row: Partial<Record<string, unknown>> | null | u
         visitAddress: typeof row.visitAddress === 'string' && row.visitAddress.trim() ? row.visitAddress : null,
         whatsapp: typeof row.whatsapp === 'string' && row.whatsapp.trim() ? row.whatsapp : null,
         meetingUrl: typeof row.meetingUrl === 'string' && row.meetingUrl.trim() ? row.meetingUrl : null,
+        meetingProvider: row.meetingProvider === 'teams' || row.meetingProvider === 'meet' ? row.meetingProvider : 'link',
+        meetingProviderError: typeof row.meetingProviderError === 'string' && row.meetingProviderError ? row.meetingProviderError : null,
     };
 }
 

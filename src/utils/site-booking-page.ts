@@ -174,3 +174,18 @@ export function describeBookingLink(link: string | null): string {
         ? `Online booking link: ${link} — where customers book. When a post, email or follow-up asks people to book, use exactly this address; never make up another booking address.`
         : '';
 }
+
+/**
+ * The booking link as a QR code (SVG, black on white, a quiet border) — for a counter card, a flyer,
+ * a shop window. Null when it can't be drawn. Never throws.
+ */
+export async function bookingQrSvg(link: string): Promise<string | null> {
+    try {
+        const QR = await import('qrcode');
+        const toString = (QR as unknown as { toString: typeof import('qrcode').toString }).toString ?? (QR as unknown as { default: typeof import('qrcode') }).default.toString;
+        return await toString(link, { type: 'svg', margin: 2, errorCorrectionLevel: 'M', color: { dark: '#000000', light: '#ffffff' } });
+    } catch (err) {
+        console.error('[site-booking-page] QR code not drawn', err instanceof Error ? err.message : err);
+        return null;
+    }
+}
