@@ -10,6 +10,8 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { mentorCardFromUiElement } from '../src/utils/mentor-cards';
+import { resolveDraftRequest } from '../src/utils/mentor-draft-request';
 import { WORKSPACE_RULE_FORBIDDEN, canManageWorkspaceRules, parseRuleScope, ruleScopeOf } from '../src/utils/workspace-rules';
 import { MENTOR_RULE_NOT_SHARED, buildRulesListBlock, mentorRulesPromptBlock, refreshRuleCards, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock } from '../src/utils/chat-rules';
 
@@ -117,6 +119,19 @@ async function main() {
         assert.ok(o.includes("route === ROUTES.business_mentor ? mentorRulesPromptBlock() : null;"));
         assert.ok(o.includes("workspaceOnly: route === ROUTES.business_mentor });"));
         assert.ok(o.includes('const offersOwnCards = route !== defaultRoute && route !== ROUTES.business_mentor;'), 'its other own-card exclusions stay');
+    });
+
+    await check('a Mentor rule card survives the Mentor branch and reaches the rule block (staging 2026-11-11, chat 92)', async () => {
+        const ui = { type: 'rule_proposal', action: 'add', scope: 'workspace', ruleText: 'Never reference a testimonials page in any material' };
+        assert.strictEqual(mentorCardFromUiElement(ui, 31), null, 'not mistaken for a Mentor card');
+        assert.strictEqual(await resolveDraftRequest({} as any, 1, ui), null, 'not mistaken for a draft request');
+        const o = read('netlify/functions/chat-orchestrator.ts');
+        const branch = o.indexOf('} else if (route === ROUTES.business_mentor) {');
+        const guard = o.indexOf('} else if (!goalProposalFromUiElement(uiElement) && !ruleProposalFromUiElement(uiElement)) {');
+        const ruleBlock = o.indexOf('const ruleReq = route !== defaultRoute && !settingsReq ? ruleProposalFromUiElement(uiElement) : null;');
+        assert.ok(branch > 0 && guard > branch, 'the Mentor branch exempts rule cards from its "never another route\'s card" drop');
+        assert.ok(ruleBlock > guard, 'and the rule block runs after it');
+        assert.ok(!o.slice(branch, ruleBlock).includes('} else if (!goalProposalFromUiElement(uiElement)) {'), 'no older goal-only drop left');
     });
 
     console.log('\nThe endpoint (content-rules.ts)');

@@ -207,7 +207,8 @@ async function main() {
         // The Mentor's own card check runs first and drops any shape it doesn't own; it must let a goal
         // card through to the goal block, or every "here it is" arrives with no card (prod chat 2026-10-26).
         const mentorBranch = orch.slice(orch.indexOf('} else if (route === ROUTES.business_mentor) {'), orch.indexOf('if (goalReq && route === ROUTES.business_mentor) {'));
-        assert.ok(mentorBranch.includes('} else if (!goalProposalFromUiElement(uiElement)) {'), 'the Mentor branch keeps a goal_proposal card');
+        // FR#10: rule cards are exempted beside goal cards (tests/workspace-rules.test.ts).
+        assert.ok(mentorBranch.includes('} else if (!goalProposalFromUiElement(uiElement) && !ruleProposalFromUiElement(uiElement)) {'), 'the Mentor branch keeps a goal_proposal card');
         assert.ok(!mentorBranch.includes("} else {\n                uiElement = null; // never another route's card shape"), 'no unconditional drop');
         const reg = read('src/components/disruptive-ui-registry.js');
         assert.ok(reg.includes("${who ? `${esc(who)}’s ` : ''}Results tab"), 'the card names whose goal it is');

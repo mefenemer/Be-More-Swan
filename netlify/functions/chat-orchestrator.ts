@@ -3932,9 +3932,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 }
             } else if ((uiElement as { type?: unknown } | null)?.type === 'mentor_take_me_there') {
                 // Built and checked above (buildTakeMeThereCard). Not a suggestion: no cap, no proposal row.
-            } else if (!goalProposalFromUiElement(uiElement)) {
+            } else if (!goalProposalFromUiElement(uiElement) && !ruleProposalFromUiElement(uiElement)) {
                 // Never another route's card shape — except a goal card, which the goal block below checks
-                // (resolveTeamGoalProposal). Dropping it here is why "here it is" came with no card.
+                // (resolveTeamGoalProposal), and a rule card for every assistant, which the rule block below
+                // checks with workspaceOnly (FR#10; staging 2026-11-11, chat 92: the Mentor's rule card was
+                // dropped here and the reply got "No card came with this reply"). Dropping a card here is why
+                // "here it is" came with no card.
                 uiElement = null;
             }
         }
