@@ -8,7 +8,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { missingCardReply, NO_CARD_NOTE, replyPointsAtCard } from '../src/utils/confirm-card-reply';
+import { DROPPED_CARD_TAG, droppedCardRecord, missingCardReply, NO_CARD_NOTE, replyPointsAtCard } from '../src/utils/confirm-card-reply';
 import { EDIT_NOTE_MAX } from '../src/config/template-feedback';
 
 let passed = 0;
@@ -75,6 +75,30 @@ check('deliverable=1 is ordered by created_at, not updated_at', () => {
     const src = read('netlify/functions/assistant-records.ts');
     assert.ok(src.includes('? [desc(assistantRecords.createdAt), desc(assistantRecords.id)]'));
     assert.ok(src.includes('.orderBy(...(deliverableOnly'));
+});
+
+console.log('A lost card is kept for diagnosis (#33)');
+check('a refused card keeps its type and body', () => {
+    const r = droppedCardRecord({ route: 'blog_writer', roleKey: 'blog_writer', sentUiElement: { type: 'site_directory', action: 'exclude', path: '/blog' }, raw: '{"reply":"The card below…"}' });
+    assert.ok(r.content.startsWith(`${DROPPED_CARD_TAG} blog_writer / blog_writer: sent site_directory`));
+    assert.strictEqual(r.uiElementJson.sentType, 'site_directory');
+    assert.ok(String(r.uiElementJson.sentCard).includes('"/blog"'));
+    assert.strictEqual(r.uiElementJson.replyWasJson, true);
+});
+check('no card, and prose instead of JSON, say which', () => {
+    assert.ok(droppedCardRecord({ route: 'r', roleKey: null, sentUiElement: null, raw: '{"reply":"x"}' }).content.endsWith('no card in the reply'));
+    assert.ok(droppedCardRecord({ route: 'r', roleKey: null, sentUiElement: undefined, raw: 'The card below.' }).content.endsWith('reply was prose, not JSON'));
+});
+check('capped so one turn cannot write a huge row', () => {
+    const r = droppedCardRecord({ route: 'r', roleKey: 'x', sentUiElement: { type: 't', big: 'a'.repeat(20000) }, raw: 'b'.repeat(20000) });
+    assert.ok(String(r.uiElementJson.sentCard).length <= 4000);
+    assert.ok(String(r.uiElementJson.rawEnd).length <= 1500);
+});
+check('the orchestrator stores it as a hidden system row in the reply transaction', () => {
+    const src = read('netlify/functions/chat-orchestrator.ts');
+    const at = src.indexOf("droppedCard = droppedCardRecord({");
+    assert.ok(at > 0 && at < src.indexOf('const [assistantMessage] = await db.transaction('));
+    assert.ok(src.includes("await tx.insert(chatMessages).values({ chatSessionId: session.id, role: 'system', content: droppedCard.content, uiElementJson: droppedCard.uiElementJson });"));
 });
 
 console.log(`\n${passed}/${total} passed`);
