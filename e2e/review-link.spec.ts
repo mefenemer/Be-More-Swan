@@ -145,3 +145,31 @@ test('the subscriber shares a post, sees the response, and nothing acts until th
     await expect(share.getByRole('button', { name: 'Ignore' })).toBeVisible();
     expect(pageErrors).toEqual([]);
 });
+
+// A shared Video Producer video (src/utils/video-review-links.ts): comments pinned to a moment, then a decision.
+test('a shared video takes a comment on a moment, then an approval', async ({ page, api }) => {
+    api.set('review-link-public', {
+        kind: 'video', workspaceName: 'Acme Bakery', title: 'Fresh bread', trialOffer: true,
+        video: { url: '/no-such-video.mp4', shape: '16:9', durationS: 30 },
+        chapters: [{ startS: 0, title: 'Intro' }, { startS: 12, title: 'Our bread' }],
+    });
+    await page.goto(`/r/${TOKEN}`);
+    await expect(page.getByRole('heading', { name: 'Comment on a moment' })).toBeVisible();
+    await expect(page.getByRole('button', { name: /0:12\s*Our bread/ })).toBeVisible();
+    await expect(page.getByText('Instagram words')).toBeHidden();
+
+    await page.getByLabel('Name to put on your comments').fill('Sarah');
+    await page.getByLabel(/Your comment at/).fill('Show the loaf longer');
+    api.set('review-link-public', { ok: true });
+    await page.waitForTimeout(1600);
+    await page.getByRole('button', { name: 'Add comment' }).click();
+    await expect(page.getByRole('list', { name: 'Your comments' })).toContainText('Show the loaf longer');
+    const comment = api.called('review-link-public').find((c) => (c.body as { decision?: string }).decision === 'comment');
+    expect(comment?.body).toMatchObject({ token: TOKEN, name: 'Sarah', body: 'Show the loaf longer', atS: 0 });
+
+    // The name carries over to the decision box.
+    await expect(page.getByLabel('Your name', { exact: true })).toHaveValue('Sarah');
+    await page.getByRole('button', { name: 'Approve' }).click();
+    await expect(page.getByRole('heading', { name: 'Thank you' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Start your free trial' })).toHaveAttribute('href', /cmp=video/);
+});
