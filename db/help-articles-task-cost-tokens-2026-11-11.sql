@@ -139,11 +139,21 @@ RETURNING title;
 UPDATE plan_features SET description = replace(description, '— 1 task each', '— {{tasks.ai_image}} each'), updated_at = now()
 WHERE key = 'ai_image_generation' AND description LIKE '%— 1 task each%'
 RETURNING key;
-UPDATE plan_features SET description = replace(description, '— 20 tasks each', '— {{tasks.ai_video}} each'), updated_at = now()
+-- Not "{{tasks.ai_video}} each": once AI video is priced by length that reads "4 tasks a second each".
+UPDATE plan_features SET description = replace(description, '— 20 tasks each', '— an AI clip uses {{tasks.ai_video}}'), updated_at = now()
 WHERE key = 'ai_video_generation' AND description LIKE '%— 20 tasks each%'
 RETURNING key;
-UPDATE plan_features SET description = replace(description, 'AI clips use 20 tasks each', 'AI clips use {{tasks.ai_video}} each'), updated_at = now()
+UPDATE plan_features SET description = replace(description, 'AI clips use 20 tasks each', 'An AI clip uses {{tasks.ai_video}}'), updated_at = now()
 WHERE key = 'video_producer' AND description LIKE '%AI clips use 20 tasks each%'
+RETURNING key;
+
+-- Staging ran an earlier version of this file on 2026-11-11, which wrote "{{tasks.ai_video}} each". These
+-- correct that wording where it is still there, and do nothing on a database that ran this version.
+UPDATE plan_features SET description = replace(description, '— {{tasks.ai_video}} each', '— an AI clip uses {{tasks.ai_video}}'), updated_at = now()
+WHERE key = 'ai_video_generation' AND description LIKE '%— {{tasks.ai_video}} each%'
+RETURNING key;
+UPDATE plan_features SET description = replace(description, 'AI clips use {{tasks.ai_video}} each', 'An AI clip uses {{tasks.ai_video}}'), updated_at = now()
+WHERE key = 'video_producer' AND description LIKE '%AI clips use {{tasks.ai_video}} each%'
 RETURNING key;
 
 COMMIT;
