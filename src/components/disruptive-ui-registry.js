@@ -1651,6 +1651,7 @@
   const VIDEO_MUSIC = { auto: 'Made to suit the video', upbeat: 'Upbeat', chill: 'Chilled', inspiring: 'Inspiring', ambient: 'Calm, in the background', none: 'No music' };
   const VIDEO_LOOKS = { natural: 'Natural (no grade)', brand: 'Your brand colours', warm: 'Warm', cool: 'Cool', punchy: 'Bright and punchy', mono: 'Black and white' };
   const VIDEO_LOWER_THIRDS = { bar: 'Brand-colour bar, left', clean: 'Plain white words, left', boxed: 'White box, centred' };
+  const VIDEO_MUSIC_LEVELS = { quiet: 'Quiet', normal: 'Normal', loud: 'Loud' };
   const VIDEO_SHAPE_NAMES = { '9:16': 'Vertical 9:16', '1:1': 'Square 1:1', '16:9': 'Wide 16:9' };
 
   /**
@@ -1706,7 +1707,7 @@
       button: 'Approve the script', body: id ? { action: 'approve_script', id } : null, done: 'Approved. Check the pictures on the Videos tab, then press “Make the video”.',
     });
   }
-  // { type: 'video_options_proposal', projectId, musicMood?, musicAssetId?, musicTitle?, anotherTrack?, look?, lowerThird?, summary? }
+  // { type: 'video_options_proposal', projectId, musicMood?, musicAssetId?, musicTitle?, anotherTrack?, musicLevel?, voiceMode?, look?, lowerThird?, summary? }
   // musicAssetId: a track of the owner's own from My Content; the server checks it is theirs.
   function renderVideoOptionsProposalCard(ui, esc) {
     const id = videoId(ui);
@@ -1715,6 +1716,8 @@
     if (Number.isInteger(trackId) && trackId > 0) body.musicAssetId = trackId;
     else if (VIDEO_MUSIC[ui.musicMood]) body.musicMood = ui.musicMood;
     if (ui.anotherTrack === true) body.anotherTrack = true;
+    if (VIDEO_MUSIC_LEVELS[ui.musicLevel]) body.musicLevel = ui.musicLevel;
+    if (ui.voiceMode === 'own' || ui.voiceMode === 'ai') body.voiceMode = ui.voiceMode;
     if (VIDEO_LOOKS[ui.look]) body.look = ui.look;
     if (VIDEO_LOWER_THIRDS[ui.lowerThird]) body.lowerThird = ui.lowerThird;
     const any = Object.keys(body).length > 2;
@@ -1725,6 +1728,8 @@
         body.musicAssetId ? ['Music', ui.musicTitle ? `“${String(ui.musicTitle).slice(0, 80)}” from My Content` : `Your track #${body.musicAssetId} from My Content`] : null,
         body.musicMood ? ['Music', VIDEO_MUSIC[body.musicMood]] : null,
         body.anotherTrack ? ['Music', 'A new track, same mood (made when you press “Make the video”)'] : null,
+        body.voiceMode ? ['Voice', body.voiceMode === 'own' ? 'Your own — you record each line on the Videos tab (no voiceover charged)' : 'An AI voice (made when you press “Make the video”)'] : null,
+        body.musicLevel ? ['Music volume', `${VIDEO_MUSIC_LEVELS[body.musicLevel]} (it still goes quiet when someone speaks)`] : null,
         body.look ? ['Colour look', VIDEO_LOOKS[body.look]] : null,
         body.lowerThird ? ['Name captions', VIDEO_LOWER_THIRDS[body.lowerThird]] : null,
       ],
@@ -1937,6 +1942,28 @@
   register('video_replan_proposal', renderVideoReplanProposalCard);
   register('video_script_proposal', renderVideoScriptProposalCard);
   register('video_options_proposal', renderVideoOptionsProposalCard);
+
+  // { type: 'video_tidy_proposal', action: 'archive' | 'restore' | 'delete', projectIds: [...], titles?: [...] }
+  // The chat twin of the Videos tab's bulk bar (video-projects.ts archive / restore / delete). Free.
+  function renderVideoTidyProposalCard(ui, esc) {
+    const ids = [...new Set((Array.isArray(ui.projectIds) ? ui.projectIds : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 100);
+    const action = ['archive', 'restore', 'delete'].includes(ui.action) ? ui.action : null;
+    const titles = (Array.isArray(ui.titles) ? ui.titles : []).filter((t) => typeof t === 'string').map((t) => t.slice(0, 80)).slice(0, 8);
+    const n = ids.length;
+    const word = n === 1 ? 'video' : 'videos';
+    const COPY = {
+      archive: { kicker: `Archive ${n} ${word}`, note: 'They move to the Archived pill on the Videos tab, and Restore brings them back. Finished files stay in My Content.', button: `Archive ${n}`, done: 'Archived. They’re on the Archived pill of the Videos tab.' },
+      restore: { kicker: `Restore ${n} ${word}`, note: 'They go back to their stage on the Videos tab.', button: `Restore ${n}`, done: 'Restored to the Videos tab.' },
+      delete: { kicker: `Delete ${n} ${word}`, note: 'Removed from the Videos tab for good, with their storyboards and notes. This can’t be undone. Finished files stay in My Content until you delete them there.', button: `Delete ${n}`, done: 'Deleted.' },
+    };
+    const c = COPY[action] || { kicker: 'Tidy videos', note: 'Nothing to do.', button: 'Go', done: '' };
+    return videoActionCard(esc, {
+      ...c,
+      rows: [titles.length ? ['Videos', titles.join(', ') + (n > titles.length ? ` and ${n - titles.length} more` : '')] : null],
+      body: action && n ? { action, ids } : null,
+    });
+  }
+  register('video_tidy_proposal', renderVideoTidyProposalCard);
   register('video_note_proposal', renderVideoNoteProposalCard);
   register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
   register('video_reshape_proposal', renderVideoReshapeProposalCard);
@@ -3991,6 +4018,23 @@
   // preview shows a placeholder where it will go (site:pictureWorking).
   function renderSitePictureCard(ui, esc) {
     const str = (v, n) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
+    // Several sections on one card (FR#9, site-picture-card.ts): a picker per section, each on its own,
+    // worked through in any order. Same kind and source to start with; each can switch.
+    if (Array.isArray(ui.sections) && ui.sections.length > 1) {
+      const items = ui.sections.slice(0, 6)
+        .map((s) => (s && typeof s === 'object' ? renderSitePictureCard({ type: 'site_picture', kind: ui.kind, source: ui.source, ...s, sections: null }, esc) : null))
+        .filter(Boolean);
+      if (items.length > 1) {
+        const wrap = document.createElement('div');
+        wrap.className = 'w-full max-w-md space-y-3';
+        wrap.setAttribute('data-sp-multi', '');
+        wrap.innerHTML = `<p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">${esc(`${ui.kind === 'video' ? 'Videos' : 'Pictures'} for ${items.length} sections`)}</p>
+          <p class="text-xs text-gray-600">Each one has its own options below — do them in any order. Nothing is added until you choose one.</p>`;
+        items.forEach((it) => wrap.appendChild(it));
+        return wrap;
+      }
+      if (items.length === 1) return items[0];
+    }
     const pageId = str(ui.pageId, 80);
     const sectionId = str(ui.sectionId, 80);
     if (!pageId || !sectionId) return null;
@@ -4917,7 +4961,7 @@
     const el = document.createElement('div');
     el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 w-full max-w-md';
     el.innerHTML = `
-      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change to a text box</p>
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">Change to the words on the picture</p>
       ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
       <p class="text-xs font-bold text-gray-500 mt-3">Now</p>
       <p class="text-sm text-gray-500 bg-white border border-gray-200 rounded-lg px-3 py-2 mt-1 line-through decoration-gray-300 whitespace-pre-line">${esc(find)}</p>
@@ -4936,9 +4980,9 @@
       if (!e.target.closest('[data-pt-go]')) return;
       setBusy(true);
       say('Changing it…');
-      const detail = { postId, find, replace, handled: false, respond({ ok, error }) {
+      const detail = { postId, find, replace, handled: false, respond({ ok, error, message }) {
         if (!ok) { setBusy(false); say(error || 'That couldn\'t be changed.', 'error'); return; }
-        say('Done — the text box is changed.');
+        say(message || 'Done — the text box is changed.');
       } };
       document.dispatchEvent(new CustomEvent('post:textEdit', { detail }));
       if (!detail.handled) detail.respond({ ok: false, error: 'Open the post to use this.' });
@@ -4990,6 +5034,13 @@
   // One scene of a storyboard. It only changes the plan: making the video stays the button on the video,
   // which states its cost. chat-session.js → video-projects.ts `edit_scene`, as "Change" on the scene.
   const VIDEO_SCENE_SOURCES = { stock_video: 'Stock footage', stock_photo: 'Stock photo', brand_card: 'Branded card', ai_image: 'AI picture', ai_video: 'AI clip' };
+  // The words' place, timing, look and entrance (src/lib/scene-text.ts labels).
+  const VIDEO_TEXT_LABELS = {
+    textPos: ['Where the words sit', { top: 'Top', middle: 'Middle', bottom: 'Bottom' }],
+    textWhen: ['When they show', { scene: 'The whole scene', first: 'The first 3 seconds', last: 'The last 3 seconds', words: 'While its words are said' }],
+    textStyle: ['How they look', { dark: 'Dark box', plain: 'Plain (light backing)', brand: 'Brand-colour box' }],
+    textAnim: ['How they appear', { none: 'Cut', fade: 'Fade', rise: 'Rise', pop: 'Pop' }],
+  };
   function renderVideoSceneEditCard(ui, esc) {
     const patch = ui.patch && typeof ui.patch === 'object' ? ui.patch : null;
     if (!patch || !Number.isInteger(Number(ui.projectId)) || !ui.sceneId || !Object.keys(patch).length) return null;
@@ -5007,6 +5058,7 @@
       ${patch.onScreenText != null ? change('On-screen text', now.onScreenText, patch.onScreenText) : ''}
       ${patch.source != null ? change('Picture from', '', VIDEO_SCENE_SOURCES[patch.source] || patch.source) : ''}
       ${words != null ? change('What to show', '', words) : ''}
+      ${Object.entries(VIDEO_TEXT_LABELS).filter(([k]) => patch[k] && VIDEO_TEXT_LABELS[k][1][patch[k]]).map(([k, [label, names]]) => change(label, '', names[patch[k]])).join('')}
       ${'nameCaption' in patch ? change('Name caption', '', patch.nameCaption ? `${patch.nameCaption.name}${patch.nameCaption.role ? ` · ${patch.nameCaption.role}` : ''}` : '(none)') : ''}
       <p class="text-xs text-gray-600 mt-2">This only changes the plan. Nothing is made until you press “Make the video”, which says what it uses.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
@@ -5338,7 +5390,11 @@
   };
 
   function renderBlogActionProposalCard(ui, esc) {
-    const copy = BLOG_ACTION_COPY[ui.action];
+    // A picture the user selected, to be swapped in the same place (issue 35).
+    const replaceAsset = ui.action === 'pictures' && Number.isInteger(Number(ui.replaceAsset)) && Number(ui.replaceAsset) > 0 ? Number(ui.replaceAsset) : null;
+    const copy = replaceAsset
+      ? { head: 'Replace this picture', button: 'Replace the picture', busy: 'Finding the new picture — about a minute…' }
+      : BLOG_ACTION_COPY[ui.action];
     const postId = Number(ui.postId);
     if (!copy || !Number.isInteger(postId)) return null;
     const fmt = (iso) => {
@@ -5368,13 +5424,15 @@
         <textarea id="bap-instruction-${postId}" data-bap-instruction rows="3" maxlength="500" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
         <p class="text-xs text-gray-600 mt-2">The article is rewritten and saved in place, using your Business Knowledge for anything new — no invented facts. Pictures and links stay. The title, SEO and schedule don’t change.</p>` : ''}
       ${!blocked && ui.action === 'pictures' ? `
-        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">Anything in particular? (optional)</label>
-        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="2" maxlength="500" placeholder="Leave blank and your assistant decides" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
+        <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-instruction-${postId}">${replaceAsset ? 'What the new picture should show' : 'Anything in particular? (optional)'}</label>
+        <textarea id="bap-instruction-${postId}" data-bap-instruction rows="2" maxlength="500" placeholder="${replaceAsset ? 'e.g. a woman listening, happily engaged' : 'Leave blank and your assistant decides'}" class="mt-1 w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700">${esc(ui.instruction || '')}</textarea>
         <div class="flex flex-wrap gap-3 mt-2 text-xs text-gray-700">
           <label class="flex items-center gap-1.5"><input type="radio" name="bap-source-${postId}" data-bap-source value="stock" ${ui.source === 'ai' ? '' : 'checked'}> Stock photos (free)</label>
           <label class="flex items-center gap-1.5"><input type="radio" name="bap-source-${postId}" data-bap-source value="ai" ${ui.source === 'ai' ? 'checked' : ''}> AI images (uses tasks for each)</label>
         </div>
-        <p class="text-xs text-gray-600 mt-2">Up to 3 pictures, placed where they help the reader. The words aren’t changed; move or remove any picture in Blog Studio.</p>` : ''}
+        <p class="text-xs text-gray-600 mt-2">${replaceAsset
+          ? 'The picture you selected is swapped for the new one, in the same place. The words aren’t changed, and the old picture stays in your library.'
+          : 'Up to 3 pictures, placed where they help the reader. The words aren’t changed; move or remove any picture in Blog Studio.'}</p>` : ''}
       ${!blocked && ui.action === 'remove' ? '<p class="text-xs text-gray-600 mt-3">It moves to Archived. Nothing is learned from it and no replacement is written.</p>' : ''}
       ${!blocked && ui.action === 'reject' ? `
         <label class="block text-xs font-bold text-gray-700 mt-3" for="bap-reason-${postId}">What’s wrong with it</label>
@@ -5416,6 +5474,7 @@
         detail: {
           action: ui.action, postId, scheduleAt: ui.scheduleAt || null, timezone: ui.timezone || null, reason, instruction,
           source: el.querySelector('[data-bap-source]:checked')?.value === 'ai' ? 'ai' : 'stock',
+          replaceAsset,
           applyAsRule: !!el.querySelector('[data-bap-rule]')?.checked,
           redraft: !!el.querySelector('[data-bap-redraft]')?.checked,
           respond({ ok, message, error }) {

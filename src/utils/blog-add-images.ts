@@ -25,6 +25,9 @@ import { BLOG_MODEL } from './blog-generate';
 import { sourceBlogImages } from './blog-media-source';
 import { generateAndPersistImage } from '../lib/media-persist';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from './ai-credits';
+import { bodyHasPicture, swapPicture } from './blog-picture-swap';
+
+export { bodyHasPicture, swapPicture };
 
 type Db = ReturnType<typeof getDb>;
 
@@ -111,6 +114,8 @@ export function insertPictures(blocks: BodyBlock[], pics: { after: number; asset
 
 export interface AddImagesResult {
     added: number;
+    /** Replace: true when the selected picture was swapped (added is then 1). */
+    replaced?: boolean;
     /** Why nothing (or less than asked) was added — shown to the owner when added is 0. */
     note?: string;
 }
@@ -122,7 +127,7 @@ export interface AddImagesResult {
  */
 export async function addImagesToBlog(
     db: Db,
-    opts: { blogPostId: number; organisationId: number; userId: number; source: BlogImageSource; instruction?: string },
+    opts: { blogPostId: number; organisationId: number; userId: number; source: BlogImageSource; instruction?: string; replaceAssetId?: number },
 ): Promise<AddImagesResult> {
     const [post] = await db
         .select({ id: blogPosts.id, title: blogPosts.title, body: blogPosts.bodyMarkdown, assistantId: blogPosts.assistantId })
@@ -130,6 +135,8 @@ export async function addImagesToBlog(
         .where(and(eq(blogPosts.id, opts.blogPostId), eq(blogPosts.organisationId, opts.organisationId)))
         .limit(1);
     if (!post) throw new Error('Blog post not found.');
+
+    if (opts.replaceAssetId) return replacePicture(db, post, { ...opts, replaceAssetId: opts.replaceAssetId });
 
     const blocks = splitBlocks(post.body || '');
     const prose = blocks.filter((b) => b.placeable);
@@ -176,35 +183,7 @@ export async function addImagesToBlog(
             : 'Your assistant did not find a good place for a picture. Say what you want in the box and try again.' };
     }
 
-    let assetIds: (number | null)[];
-    let unpaid = 0;
-    if (opts.source === 'stock') {
-        assetIds = await sourceBlogImages(db, {
-            blogPostId: post.id, organisationId: opts.organisationId, userId: opts.userId,
-            queries: placements.map((p) => p.query),
-        });
-    } else {
-        assetIds = [];
-        for (const p of placements) {
-            const hold = await holdCredits(db, { orgId: opts.organisationId, amount: IMAGE_CREDIT_COST });
-            if (!hold.ok) { unpaid++; assetIds.push(null); continue; }
-            try {
-                const id = await generateAndPersistImage(db, {
-                    orgId: opts.organisationId, userId: opts.userId, prompt: p.scene, aspectRatio: '16:9',
-                });
-                await settleHold(db, { orgId: opts.organisationId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: opts.userId, assistantId: post.assistantId });
-                const existingPos = await db.select({ position: blogPostAssets.position })
-                    .from(blogPostAssets).where(eq(blogPostAssets.blogPostId, post.id));
-                const nextPos = existingPos.reduce((max, r) => Math.max(max, r.position + 1), 0);
-                await db.insert(blogPostAssets).values({ blogPostId: post.id, contentAssetId: id, position: nextPos }).onConflictDoNothing();
-                assetIds.push(id);
-            } catch (err) {
-                await settleHold(db, { orgId: opts.organisationId, amount: IMAGE_CREDIT_COST, success: false, mediaType: 'image', userId: opts.userId }).catch(() => {});
-                console.error('[blog-add-images] an AI image failed — skipped', { blogPostId: post.id }, err);
-                assetIds.push(null);
-            }
-        }
-    }
+    const { assetIds, unpaid } = await sourcePictures(db, post, opts, placements);
 
     const pics = placements
         .map((p, i) => ({ after: p.after, assetId: assetIds[i], alt: p.alt }))
@@ -221,4 +200,108 @@ export async function addImagesToBlog(
         .set({ bodyMarkdown: insertPictures(blocks, pics), updatedAt: new Date() })
         .where(and(eq(blogPosts.id, post.id), eq(blogPosts.organisationId, opts.organisationId)));
     return { added: pics.length, note: unpaid ? `${unpaid} more would have needed tasks you don’t have left this month.` : undefined };
+}
+
+type PostRow = { id: number; title: string | null; body: string | null; assistantId: number | null };
+
+/** Find (stock) or make (AI, held and settled per image) one picture per placement. */
+async function sourcePictures(
+    db: Db, post: PostRow,
+    opts: { organisationId: number; userId: number; source: BlogImageSource },
+    placements: { query: string; scene: string }[],
+): Promise<{ assetIds: (number | null)[]; unpaid: number }> {
+    if (opts.source === 'stock') {
+        const assetIds = await sourceBlogImages(db, {
+            blogPostId: post.id, organisationId: opts.organisationId, userId: opts.userId,
+            queries: placements.map((p) => p.query),
+        });
+        return { assetIds, unpaid: 0 };
+    }
+    const assetIds: (number | null)[] = [];
+    let unpaid = 0;
+    for (const p of placements) {
+        const hold = await holdCredits(db, { orgId: opts.organisationId, amount: IMAGE_CREDIT_COST });
+        if (!hold.ok) { unpaid++; assetIds.push(null); continue; }
+        try {
+            const id = await generateAndPersistImage(db, {
+                orgId: opts.organisationId, userId: opts.userId, prompt: p.scene, aspectRatio: '16:9',
+            });
+            await settleHold(db, { orgId: opts.organisationId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: opts.userId, assistantId: post.assistantId });
+            const existingPos = await db.select({ position: blogPostAssets.position })
+                .from(blogPostAssets).where(eq(blogPostAssets.blogPostId, post.id));
+            const nextPos = existingPos.reduce((max, r) => Math.max(max, r.position + 1), 0);
+            await db.insert(blogPostAssets).values({ blogPostId: post.id, contentAssetId: id, position: nextPos }).onConflictDoNothing();
+            assetIds.push(id);
+        } catch (err) {
+            await settleHold(db, { orgId: opts.organisationId, amount: IMAGE_CREDIT_COST, success: false, mediaType: 'image', userId: opts.userId }).catch(() => {});
+            console.error('[blog-add-images] an AI image failed — skipped', { blogPostId: post.id }, err);
+            assetIds.push(null);
+        }
+    }
+    return { assetIds, unpaid };
+}
+
+/**
+ * Replace ONE picture the owner selected with a new one matching their words, in the same place.
+ * The model only writes the search / scene / alt for that one picture; the body is changed by
+ * swapPicture, so no words move. The old picture stays in the library.
+ */
+async function replacePicture(
+    db: Db, post: PostRow,
+    opts: { organisationId: number; userId: number; source: BlogImageSource; instruction?: string; replaceAssetId: number },
+): Promise<AddImagesResult> {
+    const body = post.body || '';
+    if (!bodyHasPicture(body, opts.replaceAssetId)) {
+        return { added: 0, note: 'That picture is no longer in the article — select it again in Blog Studio and ask once more.' };
+    }
+    const instruction = (opts.instruction || '').trim().slice(0, 500);
+    // The words around the picture, so a blank instruction still gets a picture that fits there.
+    const blocks = splitBlocks(body);
+    const at = blocks.findIndex((b) => b.media && bodyHasPicture(b.text, opts.replaceAssetId));
+    const around = blocks.slice(Math.max(0, at - 2), at + 2).filter((b) => b.placeable).map((b) => b.text.slice(0, 500)).join('\n\n');
+
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const response = await anthropic.messages.create({
+        model: BLOG_MODEL,
+        max_tokens: 600,
+        system: 'You choose a replacement picture for one spot in a blog article. Respond with valid JSON only.',
+        messages: [{ role: 'user', content:
+            `Article title: ${post.title || '(untitled)'}\n\n`
+            + `The words around the picture being replaced:\n"""\n${around || '(none)'}\n"""\n\n`
+            + (instruction
+                ? `The owner wants the new picture to be: "${instruction.replace(/"/g, "'")}". Follow that exactly.\n\n`
+                : 'Choose a picture that suits those words better.\n\n')
+            + 'Return ONLY: {"query":"<3-6 word stock photo search>",'
+            + '"scene":"<one or two sentences describing a photograph to make: subject, setting, light; no words, signs or text in it>",'
+            + '"alt":"<short alt text for a screen reader>"}',
+        }],
+    });
+    void logAiUsage({
+        userId: opts.userId, workspaceId: opts.organisationId, model: BLOG_MODEL,
+        inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
+    });
+    const parsed = parseModelJson<{ query?: unknown; scene?: unknown; alt?: unknown }>(
+        stripCodeFences(((response.content[0] as { text?: string })?.text ?? '').trim()));
+    if (!parsed) throw new Error('The assistant’s answer could not be read. Try again.');
+    const query = String(parsed.query ?? '').trim().slice(0, 100) || instruction.slice(0, 100);
+    const scene = String(parsed.scene ?? '').trim().slice(0, 600) || instruction || query;
+    const alt = String(parsed.alt ?? '').replace(/["\n]/g, ' ').trim().slice(0, 140);
+    if (!query && !scene) return { added: 0, note: 'Say what the new picture should show and try again.' };
+
+    const { assetIds, unpaid } = await sourcePictures(db, post, opts, [{ query: query || scene.slice(0, 80), scene }]);
+    const newId = assetIds[0];
+    if (typeof newId !== 'number') {
+        return { added: 0, note: unpaid
+            ? 'Your monthly tasks are used up, so no AI image was made — try a stock photo, or wait for the reset on the 1st.'
+            : opts.source === 'stock'
+                ? 'No suitable stock photo was found. Try describing it differently, or use an AI image.'
+                : 'The AI image could not be made just now. Nothing was charged — please try again.' };
+    }
+
+    const next = swapPicture(body, opts.replaceAssetId, newId, alt);
+    if (next === null) return { added: 0, note: 'That picture is no longer in the article — select it again in Blog Studio and ask once more.' };
+    await db.update(blogPosts)
+        .set({ bodyMarkdown: next, updatedAt: new Date() })
+        .where(and(eq(blogPosts.id, post.id), eq(blogPosts.organisationId, opts.organisationId)));
+    return { added: 1, replaced: true };
 }

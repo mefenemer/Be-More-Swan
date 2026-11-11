@@ -19,6 +19,21 @@
 
 import type { AudioOverlay } from './audio-overlays';
 
+/**
+ * How loud the music sits, chosen by the owner (docs/video-producer-manual-controls-plan.md §2, 2026-11-10).
+ * Three words, not a slider: every video is levelled to −14 LUFS, so a percentage would look precise
+ * and mean nothing. The gain multiplies the levelled bed AND its ducked level, so the dip under speech
+ * stays the same size. The build still caps it at the track's own peak room.
+ */
+export const MUSIC_LEVELS = ['quiet', 'normal', 'loud'] as const;
+export type MusicLevel = typeof MUSIC_LEVELS[number];
+export const isMusicLevel = (v: unknown): v is MusicLevel => typeof v === 'string' && (MUSIC_LEVELS as readonly string[]).includes(v);
+/** About −6 / 0 / +4 dB. Anything unknown (every brief before 2026-11-10) is Normal. Pure. */
+export function musicLevelGain(level: unknown): number {
+    return level === 'quiet' ? 0.5 : level === 'loud' ? 1.6 : 1;
+}
+export const MUSIC_LEVEL_LABELS: Record<MusicLevel, string> = { quiet: 'Quiet', normal: 'Normal', loud: 'Loud' };
+
 export const MUSIC_MOODS = ['chill', 'upbeat', 'ambient', 'inspiring'] as const;
 export type MusicMood = typeof MUSIC_MOODS[number];
 /**

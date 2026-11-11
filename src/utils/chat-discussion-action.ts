@@ -15,7 +15,7 @@
 
 import type { getDb } from '../../db/client';
 import {
-    MAX_OWN_FORUMS, MAX_TOPICS, normaliseTopics, sitesFromChat, sourceInfo, type DiscussionSource,
+    DISCUSSIONS_ENABLED, MAX_OWN_FORUMS, MAX_TOPICS, normaliseTopics, sitesFromChat, sourceInfo, type DiscussionSource,
 } from '../config/discussion-sites';
 import { discussionView, loadDiscussion, loadWatch, watchView } from './discussions';
 
@@ -82,6 +82,9 @@ export interface DiscussionActionCard {
 export async function resolveDiscussionActionProposal(
     db: Db, organisationId: number, assistantId: number, req: DiscussionActionRequest,
 ): Promise<DiscussionActionCard | null> {
+    // Paused (DISCUSSIONS_ENABLED): a stray card is still recognised here so the orchestrator drops it
+    // rather than rendering it raw.
+    if (!DISCUSSIONS_ENABLED) return null;
     try {
         const base = { type: DISCUSSION_ACTION_PROPOSAL_TYPE, action: req.action, assistantId } as const;
 

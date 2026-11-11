@@ -21,6 +21,7 @@ import type { CaptionStyle } from './captions';
 import { isStillMotion, type StillMotion } from './still-motion';
 import { readNameCaption, type LowerThirdStyle, type NameCaption } from './lower-third';
 import type { VideoLook } from './video-look';
+import { readSceneText, type TextAnim, type TextPos, type TextStyle, type TextWhen } from './scene-text';
 
 export const SCENE_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_image', 'brand_card', 'product_photo', 'own_video'] as const;
 export type SceneSource = typeof SCENE_SOURCES[number];
@@ -91,6 +92,10 @@ export interface VideoBrief {
     goal?: string | null;
     /** A colour look over every scene (src/lib/video-look.ts). Absent = natural. */
     look?: VideoLook | null;
+    /** The voiceover is the owner's own recordings, not an AI voice (src/utils/own-voice.ts). Never both. */
+    ownVoice?: boolean | null;
+    /** How loud the music sits: 'quiet' | 'normal' | 'loud' (src/lib/video-music.ts). Absent = normal. */
+    musicLevel?: 'quiet' | 'normal' | 'loud' | null;
     /** How name captions look (src/lib/lower-third.ts). Absent = 'bar'. */
     lowerThird?: LowerThirdStyle | null;
     /** This video is another shape of video N (one click "Make it in the other shapes"). */
@@ -128,6 +133,17 @@ export interface Scene {
     tighten?: boolean;
     /** Who is on screen, as a lower-third name caption (src/lib/lower-third.ts). */
     nameCaption?: NameCaption;
+    /** The words' place, timing, look and entrance (src/lib/scene-text.ts). Absent = as before 2026-11-10. */
+    textPos?: TextPos;
+    textWhen?: TextWhen;
+    textStyle?: TextStyle;
+    textAnim?: TextAnim;
+    /**
+     * The owner's own recording of this scene's line (src/utils/own-voice.ts), and its length. Set only
+     * by the server from an upload; a scene keeps it while its words stay the same (keepRecordings).
+     */
+    voiceAssetId?: number;
+    voiceS?: number;
     targetS: number;
 }
 
@@ -260,7 +276,7 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
             if (ownSound) scene.targetS = round1(segment.outS - segment.inS);
         }
         const text = clip(o.onScreenText, 60);
-        if (text) scene.onScreenText = text;
+        if (text) { scene.onScreenText = text; Object.assign(scene, readSceneText(o as Record<string, unknown>)); }
         const prompt = clip(o.prompt, 600);
         if (prompt) scene.prompt = prompt;
         const keywords = clip(o.keywords, 60);

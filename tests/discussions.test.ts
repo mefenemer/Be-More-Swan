@@ -17,8 +17,10 @@ import path from 'node:path';
 import {
     DISCUSSION_SITE_KEYS, MAX_TOPICS, discussionDisclosure, discussionQuery, hasDisclosure, looksLikeThread,
     normaliseSites, normaliseThreadUrl, normaliseTopics, plainForSite, postedAgeDays, siteForUrl, withDisclosure,
-    MAX_OWN_FORUMS, normaliseForumAddress, sitesFromChat, sourceInfo,
+    MAX_OWN_FORUMS, normaliseForumAddress, sitesFromChat, sourceInfo, DISCUSSIONS_ENABLED,
 } from '../src/config/discussion-sites';
+import { buildDiscussionsChatBlock, dispatchDueScans, startScan } from '../src/utils/discussions';
+import { TEAM_FEATURES } from '../src/config/team-features';
 import { discussionActionFromUiElement } from '../src/utils/chat-discussion-action';
 import { SITE_PAGES_IN_DISCUSSIONS, businessBlock, discussionAudienceBlock, topicSuggestionsFromModel } from '../src/lib/discussion-triage';
 import { renderMentorSnapshot, renderTeamFeatures } from '../src/utils/mentor-snapshot';
@@ -181,7 +183,9 @@ check('a proposal is shape-checked; ids accept "#12"', () => {
 check('the chat card is rebuilt server-side and the prompt names the tab', () => {
     const o = read('netlify/functions/chat-orchestrator.ts');
     assert.match(o, /resolveDiscussionActionProposal\(db, orgId, session\.aiAssistantId, discussionReq\)/);
-    assert.match(o, /"Discussions" tab — public forum threads/);
+    // Paused 2026-11-10: the prompt no longer describes the tab (see DISCUSSIONS_ENABLED).
+    if (DISCUSSIONS_ENABLED) assert.match(o, /"Discussions" tab — public forum threads/);
+    else assert.doesNotMatch(o, /"Discussions" tab — /);
     assert.match(o, /buildDiscussionsChatBlock\(db, orgId, session\.aiAssistantId\)/);
 });
 check('the chat may not claim a card’s action has happened, and sends one card at a time', () => {
@@ -315,12 +319,19 @@ check('the chat proposes improve_topics; its card calls the same action and save
 
 console.log('\n──── Business Mentor ────');
 
-check('the Mentor is told about the Discussions tab and where it stands, as counts only', () => {
+check('the Mentor is told about the Discussions tab and where it stands, as counts only (only while it is on)', () => {
     const base = {
         business: { description: 'Bookkeeping', industry: null, website: null }, products: [], productCount: 0,
         offerKinds: ['services'], introOfferAnswered: true, goals: [], plan: { status: 'active' as const, freeSlots: 1 },
         team: [{ id: 7, name: 'Lena', role: 'Lead Generator', state: 'active' as const, roleKey: 'lead_qualifier' }],
     };
+    if (!DISCUSSIONS_ENABLED) {
+        // Paused: no feature line, and buildMentorSnapshot passes discussions: undefined.
+        assert.ok(!TEAM_FEATURES.lead_qualifier);
+        assert.deepStrictEqual(renderTeamFeatures({ ...base, discussions: undefined }), []);
+        assert.match(read('src/utils/mentor-snapshot.ts'), /!DISCUSSIONS_ENABLED \? undefined/);
+        return;
+    }
     const off = renderTeamFeatures({ ...base, discussions: [] }).join('\n');
     assert.match(off, /Lena — Discussions tab \(new 2026-10-30\)/);
     assert.match(off, /the USER posts it/);
@@ -335,7 +346,9 @@ check('the Mentor is told about the Discussions tab and where it stands, as coun
 console.log('\n──── wiring ────');
 
 check('the tab is declared, placed and loaded', () => {
-    assert.match(read('src/components/assistant-dashboard-registry.js'), /discussionsTab: \{\s*label: 'Discussions',/);
+    const reg = read('src/components/assistant-dashboard-registry.js');
+    if (DISCUSSIONS_ENABLED) assert.match(reg, /^\s*discussionsTab: \{\s*label: 'Discussions',/m);
+    else assert.doesNotMatch(reg, /^\s*discussionsTab:/m, 'paused: the registry entry must stay commented out');
     const html = read('assistant-detail.html');
     assert.match(html, /id="maintab-btn-discussions" data-maintab="discussions"/);
     assert.match(html, /<div id="discussions-host"><\/div>/);
@@ -343,6 +356,11 @@ check('the tab is declared, placed and loaded', () => {
     const js = read('assistants.js');
     assert.match(js, /if \(name === 'discussions'\) window\.AssistantDiscussions\?\.activate\(\);/);
     assert.match(js, /window\.AssistantDiscussions\?\.init\(\{ assistantId: data\.id, assistantName: data\.name \}\);/);
+});
+check('paused: the endpoint answers 410 and chat cards are dropped', () => {
+    if (DISCUSSIONS_ENABLED) return;
+    assert.match(read('netlify/functions/discussions.ts'), /if \(!DISCUSSIONS_ENABLED\) return json\(410/);
+    assert.match(read('src/utils/chat-discussion-action.ts'), /if \(!DISCUSSIONS_ENABLED\) return null;/);
 });
 check('the daily scan is scheduled, and staging pokes it', () => {
     assert.match(read('netlify.toml'), /\[functions\.dispatch-discussion-scans\]\n {2}schedule = "50 6 \* \* \*"/);
@@ -358,5 +376,19 @@ check('the SQL and the Drizzle mirror agree on the checks', () => {
     }
 });
 
-console.log(`\n${passed}/${total} passed`);
-if (passed !== total) process.exit(1);
+// Paused: no scan starts (daily or "Scan now") and chat gets no Discussions block — checked against a DB
+// that throws if touched.
+(async () => {
+    if (!DISCUSSIONS_ENABLED) {
+        total++;
+        try {
+            const fakeDb = new Proxy({}, { get() { throw new Error('paused code must not touch the DB'); } }) as any;
+            assert.deepStrictEqual(await dispatchDueScans(fakeDb), { considered: 0, queued: 0, alreadyRunning: 0, failedToStart: 0, deferred: 0 });
+            assert.strictEqual(((await startScan(fakeDb, 1, 1)) as { code?: string }).code, 'paused');
+            assert.strictEqual(await buildDiscussionsChatBlock(fakeDb, 1, 1), null);
+            passed++; console.log('  ✓ paused: no scan starts and chat gets no Discussions block');
+        } catch (err) { console.error(`  ✗ paused: no scan starts\n    ${(err as Error).message}`); }
+    }
+    console.log(`\n${passed}/${total} passed`);
+    if (passed !== total) process.exit(1);
+})();

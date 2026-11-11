@@ -225,7 +225,7 @@ check('approval survives an edit check, a changed line clears it, and Make the v
     assert.ok(ep.includes('if (voiceChanged) sb.scriptApprovedAt = null;'));
     assert.ok(ep.includes("wakeVideoWorker({ projectId: row.id, action: 'plan', feedback, mode: 'script' }"));
     const ui = read('src/components/assistant-videos.js');
-    assert.ok(ui.includes('Approve the script — free') && ui.includes('&& !needsScript;'));
+    assert.ok(ui.includes('Approve the script — free') && ui.includes('&& !needsScript && !needsRecording;'));
     assert.ok(ui.includes('<p class="text-[10px] font-bold uppercase tracking-wide text-gray-400">Words</p>') && ui.includes('>Picture</p>'), 'words and pictures side by side');
 });
 
@@ -381,7 +381,7 @@ check('chat cards exist for each new action, and the chat can only send those ac
         assert.ok(read('netlify/functions/chat-orchestrator.ts').includes(`"type": "${t}"`), `the prompt teaches ${t}`);
     }
     const cs = read('src/components/chat-session.js');
-    assert.ok(cs.includes("const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'notes_to_version', 'reshape'];"));
+    assert.ok(cs.includes("const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete'];"));
     assert.ok(!cs.slice(cs.indexOf('VIDEO_CARD_ACTIONS')).slice(0, 300).includes("'build'"), 'no card can make (spend on) a video');
     const snap = read('src/utils/video-producer.ts');
     assert.ok(snap.includes("' · script APPROVED'") && snap.includes('their note at ${mmss(n.atS)}'));

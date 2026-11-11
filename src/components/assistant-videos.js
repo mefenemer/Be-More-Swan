@@ -39,6 +39,16 @@
   const MUSIC = [['auto', 'Made to suit the video'], ['upbeat', 'Upbeat'], ['chill', 'Chilled'], ['inspiring', 'Inspiring'], ['ambient', 'Calm, in the background'], ['mine', 'A track from My Content'], ['none', 'No music']];
   const LOOKS = [['natural', 'Natural (no grade)'], ['brand', 'Your brand colours'], ['warm', 'Warm'], ['cool', 'Cool'], ['punchy', 'Bright and punchy'], ['mono', 'Black and white']];
   const LOWER_THIRDS = [['bar', 'Brand-colour bar, left'], ['clean', 'Plain white words, left'], ['boxed', 'White box, centred']];
+  // How loud the music sits (src/lib/video-music.ts MUSIC_LEVELS) — three words, as every video is levelled.
+  const MUSIC_LEVELS = [['normal', 'Normal'], ['quiet', 'Quiet'], ['loud', 'Loud']];
+  // The words on a scene (src/lib/scene-text.ts — the same keys and labels the build reads). One line per
+  // scene; the font is the brand's when the render has it, otherwise Impact (owner decisions, 2026-11-10).
+  const TEXT_POS = [['top', 'Top'], ['middle', 'Middle'], ['bottom', 'Bottom']];
+  const TEXT_WHEN = [['scene', 'The whole scene'], ['first', 'The first 3 seconds'], ['last', 'The last 3 seconds'], ['words', 'While its words are said']];
+  const TEXT_STYLE = [['dark', 'Dark box'], ['plain', 'Plain (light backing)'], ['brand', 'Brand-colour box']];
+  const TEXT_ANIM = [['rise', 'Rise'], ['fade', 'Fade'], ['pop', 'Pop'], ['none', 'Cut']];
+  const TEXT_Y = { top: 20, middle: 50, bottom: 70 };
+  const MOVING = ['stock_video', 'ai_video', 'own_video'];
   const labelOf = (list, v) => (list.find((x) => x[0] === v) || list[0])[1];
   const options = (list, v) => list.map(([k, l]) => `<option value="${k}"${k === v ? ' selected' : ''}>${esc(l)}</option>`).join('');
   // Voices come from src/public/voice-catalogue.json through voice-picker.js — the list the server
@@ -78,6 +88,14 @@
     // The workspace's own tracks for "A track from My Content" (GET ?tracks=1), and the videos whose
     // Music picker is showing that list before a track is chosen.
     tracks: null, mineOpen: new Set(),
+    // Videos ticked for the bulk bar (Archive / Restore / Delete), cleared when the stage changes.
+    selected: new Set(), bulkBusy: false, bulkNote: null,
+    // The brand colour and render font for the scene text preview (GET returns it with the videos).
+    brand: { accent: null, font: 'Impact' },
+    // "Your recording says something different from this line" — `${videoId}:${sceneId|'whole'}` → true.
+    voiceWarn: {},
+    // Which line the hidden file input is for (Upload on a line, or the whole script).
+    voicePick: null,
   };
 
   // Stages as pills, like the Brand Designer's Briefs (owner, 2026-11-06: the Briefs tab's patterns on
@@ -88,10 +106,15 @@
     // 'built' = made the old way, before 2026-11-09: its post is in the Review Queue.
     { key: 'made', label: 'Ready', statuses: ['ready', 'built'] },
     { key: 'cancelled', label: 'Cancelled', statuses: ['cancelled'] },
+    // Archived by the owner (video_projects.archived_at), whatever its status. Restore puts it back.
+    { key: 'archived', label: 'Archived', statuses: [] },
   ];
+  // A video being made can't be archived or deleted: a hold and a worker are on it (video-projects.ts BULK_BUSY).
+  const MAKING = ['reviewing', 'planning', 'building', 'rendering'];
   const inStage = (key) => {
     const st = STAGES.find((x) => x.key === key) || STAGES[0];
-    return state.videos.filter((v) => st.statuses.includes(v.status));
+    if (st.key === 'archived') return state.videos.filter((v) => v.archivedAt);
+    return state.videos.filter((v) => !v.archivedAt && st.statuses.includes(v.status));
   };
   // Videos start closed; the ones opened are remembered per assistant in this browser (as the Briefs are).
   // A new key: the old one listed the ones hidden.
@@ -145,6 +168,7 @@
     try {
       const data = await call('GET', null, `?assistantId=${encodeURIComponent(state.assistantId)}`);
       state.videos = (data.projects || []).filter((p) => p.aiAssistantId == null || p.aiAssistantId === state.assistantId);
+      if (data.brand) state.brand = data.brand;
       state.loadError = null;
       // A note about work in progress ("Making the video…") is stale once the video has finished,
       // one way or the other; errors stay until the next action.
@@ -166,7 +190,7 @@
   }
 
   function updateBadge() {
-    const waits = (v) => v.status === 'planned' || v.status === 'reviewed';
+    const waits = (v) => !v.archivedAt && (v.status === 'planned' || v.status === 'reviewed');
     const n = state.videos.filter(waits).length;
     // The page's "Needs you" strip counts the same storyboards (assistants.js _renderNeedsYou 'videos').
     window._setNeedsYouCount?.(n);
@@ -270,6 +294,7 @@
               <button type="button" data-vid-act="voice-choose" class="shrink-0 text-xs font-bold text-indigo-700 hover:underline cursor-pointer">Change</button>
             </div>
             <label class="mt-1 inline-flex items-center gap-1.5 text-xs text-gray-600"><input type="checkbox" name="noVoice"> No voiceover — on-screen text only</label>
+            <label class="mt-0.5 flex items-start gap-1.5 text-xs text-gray-600"><input type="checkbox" name="ownVoice" class="mt-0.5"> <span>I’ll record it in my own voice <span class="text-gray-500">— you record each line once the script is approved, and no voiceover is charged</span></span></label>
             <p class="text-[11px] text-gray-500 mt-0.5">The script is written in your voice's language.</p></div>
           <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">Pictures from</span>
             <select name="allowAi" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-2"><option value="stock_and_ai"${sel(d.allowAi === 'stock_and_ai')}>Stock first, AI where it fits</option><option value="stock_only"${sel(d.allowAi === 'stock_only')}>Stock and my own pictures only</option><option value="ai_first"${sel(d.allowAi === 'ai_first')}>Lean on AI</option></select></label>
@@ -369,6 +394,8 @@
         <div class="flex flex-wrap items-center gap-2">
           <label class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg cursor-pointer">Add a video
             <input type="file" accept="video/mp4,video/quicktime,video/webm" multiple hidden data-vid-footage-file></label>
+          ${/* Film it here (video-recorder.js), into the library like any upload (owner, 2026-11-10). */ ''}
+          <button type="button" data-vid-act="record-video" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg">● Record a video</button>
           <span class="text-xs text-gray-500">or tick videos already in your library:</span>
         </div>
         <div data-vid-footage-list>${footageListHtml()}</div>
@@ -501,13 +528,116 @@
     return fresh ? body : `<details class="mt-2"><summary class="text-xs text-gray-500 cursor-pointer">Your footage: what ${who()} saw and the edits you chose</summary>${body}</details>`;
   }
 
+  /** Where the captions sit on this video, and whether it has any (the words keep clear of them). */
+  function captionsOf(v) {
+    const b = v.brief || {};
+    return { on: b.captions !== false, pos: (b.captionStyle && b.captionStyle.position) || 'bottom' };
+  }
+  const textPosOf = (v, s) => s.textPos || (captionsOf(v).pos === 'top' ? 'bottom' : 'top');
+  const textWhenOf = (s) => s.textWhen || (s.source === 'own_video' ? 'first' : 'scene');
+
+  /** " · top · first 3 s · brand box" — only what differs from the plain default. */
+  function textSummary(v, s) {
+    if (s.source === 'brand_card') return '';
+    const bits = [];
+    if (s.textPos) bits.push(labelOf(TEXT_POS, s.textPos).toLowerCase());
+    if (s.textWhen) bits.push(labelOf(TEXT_WHEN, s.textWhen).toLowerCase());
+    if (s.textStyle && s.textStyle !== 'dark') bits.push(labelOf(TEXT_STYLE, s.textStyle).toLowerCase());
+    if (s.textAnim && s.textAnim !== 'rise') bits.push(labelOf(TEXT_ANIM, s.textAnim).toLowerCase());
+    return bits.length ? ` <span class="text-gray-500">· ${esc(bits.join(' · '))}</span>` : '';
+  }
+
+  /** The look of the words in the preview — the same choices as scene-text.ts textLook (a guide, not the render). */
+  function previewBoxCss(style) {
+    const accent = /^#?[0-9a-f]{6}$/i.test(String(state.brand.accent || '')) ? (String(state.brand.accent).startsWith('#') ? state.brand.accent : `#${state.brand.accent}`) : null;
+    if (style === 'plain') return 'background:rgba(0,0,0,0.25);color:#fff';
+    if (style === 'brand' && accent) {
+      const n = parseInt(accent.slice(1), 16);
+      const lum = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+      return `background:${accent};color:${lum > 0.6 ? '#000' : '#fff'}`;
+    }
+    return 'background:rgba(0,0,0,0.55);color:#fff';
+  }
+
+  /** The scene's picture with the words drawn where and how they'll be. Repainted as the form changes. */
+  function textPreviewHtml(v, s, thumb, isVideo, o) {
+    const shape = (v.brief && v.brief.shape) || '9:16';
+    const ratio = shape === '16:9' ? '16 / 9' : shape === '1:1' ? '1 / 1' : '9 / 16';
+    const width = shape === '16:9' ? 224 : shape === '1:1' ? 144 : 112;   // px: the prebuilt CSS has no w-56 / w-36
+    const bg = thumb ? (isVideo ? `<video src="${esc(thumb)}" muted playsinline loop autoplay preload="metadata" class="absolute inset-0 w-full h-full object-cover"></video>` : `<img src="${esc(thumb)}" alt="" class="absolute inset-0 w-full h-full object-cover">`) : '';
+    const cap = captionsOf(v);
+    const words = (o.text || '').trim();
+    const font = state.brand.font === 'Impact' ? `'Anton', Impact, 'Arial Narrow Bold', sans-serif` : `${state.brand.font}, sans-serif`;
+    return `<div data-vid-text-preview class="relative shrink-0 rounded-md overflow-hidden bg-gray-800" style="width:${width}px;aspect-ratio:${ratio}">
+        ${bg}
+        ${cap.on ? `<span class="absolute text-center font-bold" style="left:4px;right:4px;font-size:7px;color:#fef08a;top:${TEXT_Y[cap.pos] || 70}%;transform:translateY(-50%)">captions</span>` : ''}
+        ${words ? `<span class="absolute left-1/2 px-1 rounded leading-tight text-center" style="font-size:9px;top:${TEXT_Y[o.pos]}%;transform:translate(-50%,-50%);max-width:90%;font-family:${font};${previewBoxCss(o.style)}">${esc(words)}</span>` : ''}
+      </div>`;
+  }
+
+  /** The Text group on a scene's Change form: the words, then where / when / look / appears, beside a preview. */
+  function textGroupHtml(v, s, thumb, isVideo) {
+    const card = s.source === 'brand_card';
+    const input = `<label class="block"><span class="block text-[11px] font-bold text-gray-600">On-screen text (optional)</span>
+        <input name="onScreenText" maxlength="60" value="${esc(s.onScreenText || '')}" data-vid-text-input class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>`;
+    if (card) return `${input}<p class="text-[11px] text-gray-500">On a branded card the words are the card’s headline, drawn into the picture.</p>`;
+    const o = { text: s.onScreenText || '', pos: textPosOf(v, s), style: s.textStyle || 'dark' };
+    const sel = (name, list, val) => `<select name="${name}" data-vid-text-opt class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(list, val)}</select>`;
+    return `
+      <fieldset class="border border-gray-200 rounded-lg p-2 bg-white">
+        <legend class="px-1 text-[11px] font-bold text-gray-600">Text on the video</legend>
+        <div class="flex flex-col sm:flex-row gap-3">
+          <div class="flex-1 min-w-0 space-y-2">
+            ${input}
+            <div class="grid grid-cols-2 gap-2">
+              <label class="block"><span class="block text-[11px] font-bold text-gray-600">Where</span>${sel('textPos', TEXT_POS, o.pos)}</label>
+              <label class="block"><span class="block text-[11px] font-bold text-gray-600">When</span>${sel('textWhen', TEXT_WHEN, textWhenOf(s))}</label>
+              <label class="block"><span class="block text-[11px] font-bold text-gray-600">Look</span>${sel('textStyle', TEXT_STYLE, o.style)}</label>
+              <label class="block"><span class="block text-[11px] font-bold text-gray-600">Appears</span>${sel('textAnim', TEXT_ANIM, s.textAnim || 'rise')}</label>
+            </div>
+            <p data-vid-text-clash class="${captionsOf(v).on && o.pos === captionsOf(v).pos ? '' : 'hidden'} text-[11px] font-semibold text-amber-800">That’s where the captions are — the two would overlap. Choose another place.</p>
+            <p class="text-[11px] text-gray-500">The preview is a guide. “While its words are said” needs a voiceover line in this scene.</p>
+          </div>
+          ${textPreviewHtml(v, s, thumb, isVideo, o)}
+        </div>
+      </fieldset>`;
+  }
+
+  /**
+   * The text choices that differ from what the scene would get anyway. Saving a scene untouched must not
+   * pin today's defaults onto it (moving the captions later should still move the words).
+   */
+  function textPatch(f, fd) {
+    if (!fd.has('textPos')) return {};
+    const v = state.videos.find((x) => x.id === Number(f.dataset.id));
+    const s = v && v.storyboard && v.storyboard.scenes.find((x) => x.id === f.dataset.scene);
+    if (!s) return {};
+    const shown = { textPos: textPosOf(v, s), textWhen: textWhenOf(s), textStyle: s.textStyle || 'dark', textAnim: s.textAnim || 'rise' };
+    const out = {};
+    Object.keys(shown).forEach((k) => { const val = String(fd.get(k)); if (val !== shown[k] || s[k]) out[k] = val; });
+    return out;
+  }
+
+  /** Repaint a Change form's preview and overlap warning from what's chosen now. */
+  function paintTextPreview(f) {
+    const v = state.videos.find((x) => x.id === Number(f.dataset.id));
+    const s = v && v.storyboard && v.storyboard.scenes.find((x) => x.id === f.dataset.scene);
+    const old = f.querySelector('[data-vid-text-preview]');
+    if (!v || !s || !old || !f.elements.textPos) return;
+    const thumb = v.sceneThumbs && v.sceneThumbs[s.id];
+    const o = { text: f.elements.onScreenText.value, pos: f.elements.textPos.value, style: f.elements.textStyle.value };
+    old.outerHTML = textPreviewHtml(v, s, thumb, MOVING.includes(s.source), o);
+    const cap = captionsOf(v);
+    f.querySelector('[data-vid-text-clash]')?.classList.toggle('hidden', !(cap.on && o.pos === cap.pos));
+  }
+
   function sceneHtml(v, s, i) {
     const editable = v.status === 'planned' || v.status === 'failed';
     const thumb = v.sceneThumbs && v.sceneThumbs[s.id];
     const isVideo = s.source === 'stock_video' || s.source === 'ai_video' || s.source === 'own_video';
     const at = s.source === 'own_video' && s.inS != null ? `#t=${Number(s.inS)}` : '';
     const media = thumb
-      ? (isVideo ? `<video src="${esc(thumb)}${at}" muted playsinline preload="metadata" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0"></video>` : `<img src="${esc(thumb)}" alt="" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0">`)
+      ? (isVideo ? `<video src="${esc(thumb)}${at}" muted playsinline loop preload="metadata" data-vid-hoverplay title="Moving footage — point at it, or tap, to play" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0 cursor-pointer"></video>` : `<img src="${esc(thumb)}" alt="" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0">`)
       : `<div class="w-14 h-24 rounded-md bg-gray-100 shrink-0 flex items-center justify-center text-[10px] text-gray-400 text-center px-1">${esc(SOURCE[s.source] || s.source)}</div>`;
     const editing = state.editing && state.editing.id === v.id && state.editing.sceneId === s.id;
     if (editing) {
@@ -517,8 +647,7 @@
             <p class="text-xs font-bold text-gray-700">Scene ${i + 1} · ${esc(BEAT[s.beat] || s.beat)}</p>
             <label class="block"><span class="block text-[11px] font-bold text-gray-600">Voiceover</span>
               <textarea name="voiceover" rows="2" maxlength="240" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${esc(s.voiceover)}</textarea></label>
-            <label class="block"><span class="block text-[11px] font-bold text-gray-600">On-screen text (optional)</span>
-              <input name="onScreenText" maxlength="60" value="${esc(s.onScreenText || '')}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5"></label>
+            ${textGroupHtml(v, s, thumb, isVideo)}
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <label class="block"><span class="block text-[11px] font-bold text-gray-600">Picture from</span>
                 <select name="source" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${Object.entries(SOURCE).filter(([k]) => (k !== 'product_photo' || s.source === 'product_photo') && (k !== 'own_video' || s.source === 'own_video')).map(([k, l]) => `<option value="${k}" ${k === s.source ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>
@@ -552,7 +681,7 @@
           <div class="min-w-0">
             <p class="text-[10px] font-bold uppercase tracking-wide text-gray-400">Words</p>
             ${s.voiceover ? `<p class="text-sm text-gray-900 mt-0.5 break-words">“${esc(s.voiceover)}”</p>` : '<p class="text-xs text-gray-500 mt-0.5">No voiceover in this scene.</p>'}
-            ${s.onScreenText ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">On screen:</span> ${esc(s.onScreenText)}</p>` : ''}
+            ${s.onScreenText ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">On screen:</span> ${esc(s.onScreenText)}${textSummary(v, s)}</p>` : ''}
             ${s.nameCaption ? `<p class="text-xs text-gray-600 mt-0.5 break-words"><span class="font-bold">Name caption:</span> ${esc(s.nameCaption.name)}${s.nameCaption.role ? ` · ${esc(s.nameCaption.role)}` : ''}</p>` : ''}
           </div>
           <div class="flex gap-2 min-w-0">
@@ -560,6 +689,8 @@
             <div class="min-w-0">
               <p class="text-[10px] font-bold uppercase tracking-wide text-gray-400">Picture</p>
               <p class="text-xs text-gray-700 mt-0.5">${esc(SOURCE[s.source] || s.source)}${s.source === 'own_video' && s.inS != null ? ` ${esc(ownName(v, s.assetId))} ${mmss(s.inS)}–${mmss(s.outS)}` : ''}</p>
+              ${/* Moving or still — a paused first frame looked exactly like a picture (owner, 2026-11-10). */ ''}
+              <span class="inline-block mt-0.5 text-[10px] font-bold rounded px-1.5 py-0.5 ${MOVING.includes(s.source) ? 'bg-indigo-50 text-indigo-700' : 'bg-gray-100 text-gray-600'}">${MOVING.includes(s.source) ? '▶ Moving' : 'Still'}</span>
               ${s.keywords || s.prompt ? `<p class="text-xs text-gray-500 mt-0.5 break-words">${esc(s.keywords || s.prompt)}</p>` : ''}
               ${tightenHtml(v, s, editable)}
             </div>
@@ -582,15 +713,16 @@
     const busy = state.busy.has(v.id);
     const rewriting = state.rewriting === v.id;
     if (sb.scriptApprovedAt) {
-      return `<p class="mt-3 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1">✓ Script approved. Check the pictures beside each line, then press “Make the video”.
+      return `${voiceLineHtml(v)}<p class="mt-2 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-md px-2 py-1">✓ Script approved. ${isOwn(v) ? 'Record each line below, check the pictures, then press “Make the video”.' : 'Check the pictures beside each line, then press “Make the video”.'}
         <button type="button" data-vid-act="rewrite" data-id="${v.id}" class="ml-1 font-bold text-indigo-700 hover:underline">Rewrite the words</button></p>
-        ${rewriting ? rewriteFormHtml(v) : ''}`;
+        ${rewriting ? rewriteFormHtml(v) : ''}
+        ${isOwn(v) ? recordPanelHtml(v) : ''}`;
     }
     const words = (sb.scenes || []).map((x) => x.voiceover).filter(Boolean).join(' ');
     const n = words.split(/\s+/).filter(Boolean).length;
     return `
       <div class="mt-3 border border-indigo-200 bg-indigo-50/40 rounded-lg p-3">
-        <p class="text-xs font-bold text-indigo-800">Step 1 of 2 — the words</p>
+        <p class="text-xs font-bold text-indigo-800">Step 1 of 2 — the words${isOwn(v) ? ' (you’ll record them next)' : ''}</p>
         <p class="text-sm text-gray-900 mt-1 whitespace-pre-line break-words">${esc(words)}</p>
         <p class="text-[11px] text-gray-500 mt-1">${n} words · about ${Math.round(n / 2.5)} seconds spoken. Approving is free and makes nothing yet — the pictures come next.</p>
         <div class="flex flex-wrap gap-2 mt-2">
@@ -598,8 +730,134 @@
           ${rewriting ? '' : `<button type="button" data-vid-act="rewrite" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Rewrite the words</button>`}
         </div>
         ${rewriting ? rewriteFormHtml(v) : ''}
+      </div>
+      ${voiceLineHtml(v)}`;
+  }
+
+  // ── Your own voice (src/utils/own-voice.ts; plan Phase 3) ─────────────────────────────────────────
+  const isOwn = (v) => !!(v.brief && v.brief.voiceover !== false && v.brief.ownVoice === true);
+  /** Lines still to record — none when one recording covers the whole script. */
+  const unrecorded = (v) => (v.voiceoverAssetId ? [] : ((v.storyboard && v.storyboard.scenes) || []).filter((s) => (s.voiceover || '').trim() && !s.voiceAssetId));
+
+  /** Who speaks, and the switch to the other (never both in one video). */
+  function voiceLineHtml(v) {
+    if (!(v.brief && v.brief.voiceover)) return '';
+    const busy = state.busy.has(v.id) ? 'disabled' : '';
+    return isOwn(v)
+      ? `<p class="mt-2 text-xs text-gray-600"><span class="font-bold">Voice:</span> your own. <button type="button" data-vid-act="voice-mode" data-mode="ai" data-id="${v.id}" ${busy} class="font-bold text-indigo-700 hover:underline disabled:opacity-50">Use an AI voice instead</button></p>`
+      : `<p class="mt-2 text-xs text-gray-600"><span class="font-bold">Voice:</span> ${esc(window.VoicePicker?.describe(v.brief.voice) || 'AI voice')}. <button type="button" data-vid-act="voice-mode" data-mode="own" data-id="${v.id}" ${busy} class="font-bold text-indigo-700 hover:underline disabled:opacity-50">Record it in my own voice instead</button></p>`;
+  }
+
+  /** Each line with Record / Upload, or its recording with Play / Redo / Remove; or one whole-script recording. */
+  function recordPanelHtml(v) {
+    const sb = v.storyboard;
+    const urls = v.voiceUrls || {};
+    const busy = state.busy.has(v.id) ? 'disabled' : '';
+    const warn = (key) => (state.voiceWarn[key] ? `<p class="text-[11px] font-semibold text-amber-800 mt-0.5">Your recording says something different from this line. Keep it if that’s what you meant, or record it again.</p>` : '');
+    const btn = 'btn-secondary border px-2.5 py-1 text-[11px] font-bold rounded-lg disabled:opacity-50';
+    if (v.voiceoverAssetId) {
+      return `<div class="mt-2 border border-indigo-200 bg-white rounded-lg p-3" data-vid-record="${v.id}">
+          <p class="text-xs font-bold text-gray-800">Your voice — one recording of the whole script</p>
+          ${urls.whole ? `<audio controls preload="none" src="${esc(urls.whole)}" class="w-full mt-1.5" style="height:32px"></audio>` : ''}
+          ${warn(`${v.id}:whole`)}
+          <p class="text-[11px] text-gray-500 mt-1">Scenes change where its words reach each line. Recording lines one by one times them exactly.</p>
+          <button type="button" data-vid-act="voice-whole-remove" data-id="${v.id}" ${busy} class="${btn} mt-1.5">Remove it and record line by line</button>
+        </div>`;
+    }
+    const left = unrecorded(v).length;
+    const rows = sb.scenes.map((s, i) => {
+      if (!(s.voiceover || '').trim()) return '';
+      const key = `${v.id}:${s.id}`;
+      const done = !!s.voiceAssetId;
+      return `<li class="border border-gray-200 rounded-lg p-2">
+          <p class="text-[11px] font-bold text-gray-500">Scene ${i + 1}${done ? ` · <span class="text-emerald-700">✓ recorded${s.voiceS ? `, ${esc(Number(s.voiceS).toFixed(1))}s` : ''}</span>` : ''}</p>
+          <p class="text-sm text-gray-900 break-words">“${esc(s.voiceover)}”</p>
+          ${done && urls[s.id] ? `<audio controls preload="none" src="${esc(urls[s.id])}" class="w-full mt-1" style="height:32px"></audio>` : ''}
+          ${warn(key)}
+          <div class="flex flex-wrap gap-2 mt-1.5">
+            <button type="button" data-vid-act="voice-record" data-id="${v.id}" data-scene="${esc(s.id)}" ${busy} class="${done ? btn : 'btn-primary px-2.5 py-1 text-[11px] font-bold rounded-lg disabled:opacity-50'}">${done ? 'Record again' : '● Record'}</button>
+            <button type="button" data-vid-act="voice-upload" data-id="${v.id}" data-scene="${esc(s.id)}" ${busy} class="${btn}">Upload</button>
+            ${done ? `<button type="button" data-vid-act="voice-remove" data-id="${v.id}" data-scene="${esc(s.id)}" ${busy} class="text-[11px] font-bold text-gray-500 hover:text-red-700 disabled:opacity-50">Remove</button>` : ''}
+          </div>
+        </li>`;
+    }).join('');
+    return `<div class="mt-2 border border-indigo-200 bg-white rounded-lg p-3" data-vid-record="${v.id}">
+        <p class="text-xs font-bold text-gray-800">Your voice — ${left ? `${left} line${left === 1 ? '' : 's'} to record` : 'every line recorded'}</p>
+        <p class="text-[11px] text-gray-500 mt-0.5">Each scene lasts as long as your recording of its line. Free — no voiceover is made.</p>
+        <ol class="mt-2 space-y-2">${rows}</ol>
+        <p class="text-[11px] text-gray-500 mt-2">Recorded it somewhere else? <button type="button" data-vid-act="voice-whole-upload" data-id="${v.id}" ${busy} class="font-bold text-indigo-700 hover:underline disabled:opacity-50">Upload one recording of the whole script</button></p>
+        <input type="file" accept="audio/*" data-vid-voice-file data-id="${v.id}" hidden>
       </div>`;
   }
+
+  /**
+   * A recording as a small mono WAV (24 kHz, 16-bit): the server can level it like the AI voice (it reads
+   * WAV and MP3 only) and the transcriber takes it whole. Browsers record WebM or MP4, and uploads vary.
+   */
+  async function toWav(blob) {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    let decoded;
+    try { decoded = await ctx.decodeAudioData(await blob.arrayBuffer()); } finally { ctx.close?.().catch(() => {}); }
+    const rate = 24000;
+    const off = new OfflineAudioContext(1, Math.max(1, Math.ceil(decoded.duration * rate)), rate);
+    const src = off.createBufferSource();
+    src.buffer = decoded; src.connect(off.destination); src.start();
+    const pcm = (await off.startRendering()).getChannelData(0);
+    const buf = new ArrayBuffer(44 + pcm.length * 2);
+    const dv = new DataView(buf);
+    const str = (o, t) => { for (let i = 0; i < t.length; i++) dv.setUint8(o + i, t.charCodeAt(i)); };
+    str(0, 'RIFF'); dv.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVE'); str(12, 'fmt ');
+    dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, rate, true);
+    dv.setUint32(28, rate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); str(36, 'data'); dv.setUint32(40, pcm.length * 2, true);
+    for (let i = 0; i < pcm.length; i++) dv.setInt16(44 + i * 2, Math.max(-1, Math.min(1, pcm[i])) * 0x7fff, true);
+    return { file: new File([buf], 'voice.wav', { type: 'audio/wav' }), durationS: decoded.duration };
+  }
+
+  /** Into My Content as audio — the same path as any upload (content-upload-url → PUT → content-assets). */
+  async function uploadVoice(blob, name) {
+    let wav;
+    try { wav = await toWav(blob); } catch { throw new Error('That file couldn’t be read as audio. Try an MP3, M4A or WAV.'); }
+    const file = new File([wav.file], `${name}.wav`.replace(/[^\w .·()-]/g, '').slice(0, 100) || 'voice.wav', { type: 'audio/wav' });
+    const r = await fetch('/.netlify/functions/content-upload-url', {
+      credentials: 'same-origin', method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: file.name, mimeType: file.type, fileSize: file.size }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'Could not start the upload.');
+    if (!j.mock) {
+      const put = await fetch(j.uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+      if (!put.ok) throw new Error('The upload failed. Please try again.');
+    }
+    const c = await fetch('/.netlify/functions/content-assets', {
+      credentials: 'same-origin', method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: file.name, assetType: 'audio', mimeType: file.type, fileSize: file.size, storageKey: j.storageKey, storageUrl: j.storageUrl, durationS: Math.round(wav.durationS * 100) / 100 }),
+    });
+    const d = await c.json().catch(() => ({}));
+    if (!c.ok) throw new Error(d.error || 'The upload failed. Please try again.');
+    if (d.rejected) throw new Error((d.asset && d.asset.rejectionReason) || 'That recording was flagged and can’t be used.');
+    return d.asset.id;
+  }
+
+  /** Upload a recording and attach it: one scene's line, or (sceneId null) the whole script. */
+  async function attachVoice(id, sceneId, blob) {
+    const v = state.videos.find((x) => x.id === id);
+    const s = sceneId && v && v.storyboard.scenes.find((x) => x.id === sceneId);
+    state.busy.add(id);
+    state.notes[id] = { text: 'Saving your recording…' };
+    render();
+    try {
+      const assetId = await uploadVoice(blob, s ? `Your voice · ${v.title} · scene ${v.storyboard.scenes.indexOf(s) + 1}` : `Your voice · ${v.title}`);
+      const data = await call('POST', sceneId ? { action: 'set_line_voice', id, sceneId, assetId } : { action: 'set_voice_file', id, assetId });
+      state.voiceWarn[`${(data.project && data.project.id) || id}:${sceneId || 'whole'}`] = !!data.differs;
+      state.notes[id] = { text: 'Recording saved.' };
+    } catch (err) {
+      state.notes[id] = { text: err.message, error: true };
+    }
+    state.busy.delete(id);
+    await load();
+  }
+
   function rewriteFormHtml(v) {
     return `<form data-vid-rewrite-form data-id="${v.id}" class="mt-2 space-y-2">
         <label class="block"><span class="block text-xs font-bold text-gray-600 mb-1">How should the words change? (optional)</span>
@@ -623,7 +881,7 @@
         : (sb && sb.music ? `“${sb.music.title}” (${labelOf(MUSIC, sb.music.mood).toLowerCase()})` : labelOf(MUSIC, b.musicMood || 'auto'));
       const retry = mix.musicNote && b.musicMood && !['none', 'mine'].includes(b.musicMood)
         ? ` <button type="button" data-vid-act="another-track" data-id="${v.id}" class="font-bold text-indigo-700 hover:underline">Try the music again</button>` : '';
-      return `${mix.musicNote ? `<p class="text-xs text-amber-800 mt-2">${esc(mix.musicNote)}${retry}</p>` : ''}<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Music:</span> ${esc(music)} · <span class="font-bold">Look:</span> ${esc(labelOf(LOOKS, b.look || 'natural'))}${b.audience ? ` · <span class="font-bold">For:</span> ${esc(b.audience)}` : ''}${b.goal ? ` · <span class="font-bold">They should:</span> ${esc(b.goal)}` : ''}</p>`;
+      return `${mix.musicNote ? `<p class="text-xs text-amber-800 mt-2">${esc(mix.musicNote)}${retry}</p>` : ''}<p class="text-xs text-gray-600 mt-2"><span class="font-bold">Music:</span> ${esc(music)}${b.musicLevel && b.musicLevel !== 'normal' && b.musicMood !== 'none' ? ` (${esc(labelOf(MUSIC_LEVELS, b.musicLevel).toLowerCase())})` : ''} · <span class="font-bold">Look:</span> ${esc(labelOf(LOOKS, b.look || 'natural'))}${b.audience ? ` · <span class="font-bold">For:</span> ${esc(b.audience)}` : ''}${b.goal ? ` · <span class="font-bold">They should:</span> ${esc(b.goal)}` : ''}</p>`;
     }
     const mine = b.musicMood === 'mine' || state.mineOpen.has(v.id);
     const mood = mine ? 'mine' : (MUSIC.some((x) => x[0] === b.musicMood) ? b.musicMood : 'auto');
@@ -631,11 +889,14 @@
       ? `<select data-vid-opt="musicAssetId" data-id="${v.id}" class="mt-1 w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5" aria-label="Your track">${trackOptions(b.musicMood === 'mine' ? b.musicAssetId : null)}</select>`
       : `<span class="block mt-1 text-[11px] text-amber-800">${esc(NO_TRACKS)}</span>`;
     return `
-      <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2" data-vid-options="${v.id}">
+      <div class="mt-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2" data-vid-options="${v.id}">
         <label class="block"><span class="block text-[11px] font-bold text-gray-600">Music${sb.music && mood !== 'none' && mood !== 'mine' ? ` — “${esc(sb.music.title)}”` : ''}</span>
           <select data-vid-opt="musicMood" data-id="${v.id}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(MUSIC, mood)}</select>
           ${minePick}
           ${sb.music && mood !== 'none' && mood !== 'mine' ? `<button type="button" data-vid-act="another-track" data-id="${v.id}" class="text-[11px] font-bold text-indigo-700 hover:underline">Another track</button>` : ''}</label>
+        <label class="block"><span class="block text-[11px] font-bold text-gray-600">Music volume</span>
+          <select data-vid-opt="musicLevel" data-id="${v.id}" ${mood === 'none' ? 'disabled title="No music on this video"' : ''} class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5 disabled:opacity-50">${options(MUSIC_LEVELS, b.musicLevel || 'normal')}</select>
+          <span class="block text-[11px] text-gray-500">It still goes quiet whenever someone speaks.</span></label>
         <label class="block"><span class="block text-[11px] font-bold text-gray-600">Colour look</span>
           <select data-vid-opt="look" data-id="${v.id}" class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1.5">${options(LOOKS, b.look || 'natural')}</select></label>
         <label class="block"><span class="block text-[11px] font-bold text-gray-600">Name captions</span>
@@ -731,7 +992,9 @@
     const minScenes = v.brief && v.brief.footageAssetIds && v.brief.footageAssetIds.length ? 1 : 3;
     // Script first: a voiceover video's words are approved before anything is made.
     const needsScript = !!(v.brief && v.brief.voiceover) && sb && !sb.scriptApprovedAt;
-    const canMake = (v.status === 'planned' || v.status === 'failed') && sb && sb.scenes && sb.scenes.length >= minScenes && !needsScript;
+    // Your own voice: every line recorded first (own-voice.ts linesToRecord; the server checks it too).
+    const needsRecording = isOwn(v) && !!sb && unrecorded(v).length > 0;
+    const canMake = (v.status === 'planned' || v.status === 'failed') && sb && sb.scenes && sb.scenes.length >= minScenes && !needsScript && !needsRecording;
     // The same figure the hold takes, in the workspace's unit (video-producer.ts buildEstimate).
     const unit = v.unit === 'credits' ? 'credit' : 'task';
     const cost = v.estimate == null ? '' : (v.estimate === 0 ? ' — free' : ` — uses ${v.estimate} ${unit}${v.estimate === 1 ? '' : 's'}`);
@@ -742,7 +1005,10 @@
     return `
       <article data-no-fold class="bg-white border border-gray-200 rounded-xl p-4" data-video="${v.id}">
         <div class="flex items-start justify-between gap-3">
-          <div class="min-w-0">
+          ${/* Ticked for Archive / Restore / Delete (the bar above the list). Not while it is being made: a hold and a worker are on it. */ ''}
+          <input type="checkbox" data-vid-pick="${v.id}" ${state.selected.has(v.id) ? 'checked' : ''} ${MAKING.includes(v.status) ? 'disabled title="Being made — cancel it or wait until it’s done"' : ''}
+            aria-label="Select “${esc(v.title)}”" class="mt-1 w-4 h-4 shrink-0 rounded border-gray-300 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40">
+          <div class="min-w-0 flex-1">
             <button type="button" data-vid-act="fold" data-id="${v.id}" aria-expanded="${folded ? 'false' : 'true'}" title="${folded ? 'Show this video' : 'Hide this video'}"
               class="flex items-start gap-1.5 text-left text-sm font-bold text-gray-900 break-words cursor-pointer hover:text-gray-700">
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
@@ -751,7 +1017,8 @@
             ${v.note ? `<p class="text-xs ${v.status === 'ready' ? 'text-emerald-800 bg-emerald-50 border-emerald-200' : 'text-amber-800 bg-amber-50 border-amber-200'} border rounded-md px-2 py-1 mt-1.5 break-words" style="overflow-wrap:anywhere">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
-          ${chatPaneAvailable() ? `<button type="button" data-vid-act="talk" data-id="${v.id}" class="text-xs font-bold text-indigo-700 hover:underline shrink-0 whitespace-nowrap">Talk it through</button>` : ''}
+          ${/* "🎯 Select", as on every assistant's items (Campaigns, Briefs, Mentor plan, this tab's scenes) — owner 2026-11-10: "Talk it through" was this tab's own wording. */
+            chatPaneAvailable() ? `<button type="button" data-vid-act="talk" data-id="${v.id}" title="Ask ${who()} about this video" class="text-xs font-bold text-indigo-700 hover:underline shrink-0 whitespace-nowrap">🎯 Select</button>` : ''}
           ${v.status === 'built' ? `<button type="button" data-vid-act="open-review" class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg shrink-0">Open Review</button>` : ''}
         </div>
         ${folded ? '' : `<div data-vid-body>
@@ -773,6 +1040,7 @@
           <div class="flex flex-wrap gap-2 mt-3">
             ${canMake ? `<button type="button" data-vid-act="build" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-primary px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Make the video${esc(cost)}</button>` : ''}
             ${needsScript && (v.status === 'planned' || v.status === 'failed') ? '<span class="self-center text-xs text-gray-500">Approve the script above, then “Make the video”.</span>' : ''}
+            ${!needsScript && needsRecording && (v.status === 'planned' || v.status === 'failed') ? '<span class="self-center text-xs text-gray-500">Record every line above, then “Make the video”.</span>' : ''}
             ${!replanning && v.status !== 'reviewed' ? `<button type="button" data-vid-act="replan" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-secondary border px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Plan it again</button>` : ''}
             <button type="button" data-vid-act="cancel" data-id="${v.id}" ${busy ? 'disabled' : ''} class="btn-utility px-4 py-2 text-sm font-bold rounded-lg disabled:opacity-50">Cancel</button>
           </div>` : ''}
@@ -787,6 +1055,47 @@
     if (name && window.VoicePicker) name.textContent = window.VoicePicker.describe(f.elements.voice.value);
   }
 
+  /** The bar over the list once anything is ticked: Archive (or Restore on Archived) and Delete. */
+  function bulkBarHtml(picked) {
+    const n = picked.length;
+    const note = state.bulkNote ? `<p class="text-xs font-semibold px-4 pt-2 ${state.bulkNote.error ? 'text-red-600' : 'text-gray-700'}" role="status">${esc(state.bulkNote.text)}</p>` : '';
+    if (!n) return note;
+    const dis = state.bulkBusy ? 'disabled' : '';
+    const archived = state.stage === 'archived';
+    return `${note}
+      <div data-vid-bulkbar class="mx-4 mt-2 flex flex-wrap items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+        <span class="text-sm font-bold text-gray-800 mr-auto">${n} selected</span>
+        <button type="button" data-vid-act="${archived ? 'bulk-restore' : 'bulk-archive'}" ${dis} class="btn-secondary border min-h-[44px] sm:min-h-0 px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">${archived ? 'Restore' : 'Archive'} ${n}</button>
+        <button type="button" data-vid-act="bulk-delete" ${dis} class="btn-destructive border min-h-[44px] sm:min-h-0 px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Delete ${n}</button>
+        <button type="button" data-vid-act="pick-none" ${dis} class="tab-link">Clear</button>
+      </div>`;
+  }
+
+  /** Archive, restore or delete the ticked videos — video-projects.ts, the same action as the chat card. */
+  async function bulk(action) {
+    const ids = inStage(state.stage).filter((v) => state.selected.has(v.id) && !MAKING.includes(v.status)).map((v) => v.id);
+    if (!ids.length) return;
+    const n = ids.length, them = n === 1 ? 'this video' : `these ${n} videos`;
+    if (action === 'delete') {
+      const ok = await window.confirmModal(`${n === 1 ? 'It is' : 'They are'} removed from the Videos tab for good, with ${n === 1 ? 'its' : 'their'} storyboard, notes and versions list. This can’t be undone. Any finished video file stays in My Content until you delete it there.`, {
+        title: `Delete ${them}?`, confirmLabel: `Delete ${n}`, cancelLabel: 'Keep them',
+      });
+      if (!ok) return;
+    }
+    state.bulkBusy = true; state.bulkNote = { text: 'Working…' }; render();
+    try {
+      const data = await call('POST', { action, ids });
+      const done = (data.done || []).length, skipped = data.skipped || [];
+      const verb = action === 'archive' ? 'Archived' : action === 'restore' ? 'Restored' : 'Deleted';
+      state.bulkNote = { text: `${verb} ${done} ${done === 1 ? 'video' : 'videos'}.${skipped.length ? ` ${skipped.length} left as ${skipped.length === 1 ? 'it was' : 'they were'}: ${skipped[0].reason}` : ''}`, error: !done && skipped.length > 0 };
+      state.selected.clear();
+    } catch (err) {
+      state.bulkNote = { text: err.message, error: true };
+    }
+    state.bulkBusy = false;
+    await load();
+  }
+
   function render() {
     const el = host();
     if (!el) return;
@@ -798,6 +1107,10 @@
     const visible = inStage(state.stage);
     const stageLabel = (STAGES.find((st) => st.key === state.stage) || STAGES[0]).label;
     const anyOpen = visible.some((v) => state.opened.has(v.id));
+    // Only what is on this stage counts as selected (a video can move stage while ticked).
+    const pickable = visible.filter((v) => !MAKING.includes(v.status));
+    const picked = pickable.filter((v) => state.selected.has(v.id));
+    const allPicked = pickable.length > 0 && picked.length === pickable.length;
     const pills = STAGES.map((st) => {
       const n = inStage(st.key).length;
       const on = st.key === state.stage;
@@ -806,6 +1119,7 @@
     }).join('');
     const empty = state.stage === 'check'
       ? `No videos to check. Press “New video”, or tell ${who()} in chat what you’d like a video about.`
+      : state.stage === 'archived' ? 'Nothing archived. Tick videos on any stage, then press “Archive”.'
       : `No videos ${esc(stageLabel.toLowerCase())}.`;
     // The standard tab header and card (owner, 2026-11-07). Full screen, then "+ New video" right beside
     // it (e2e/full-screen-buttons.spec.ts), then "Use my own footage".
@@ -817,8 +1131,9 @@
       <div class="tab-card">
         <div class="tab-pillbar">
           <div role="tablist" aria-label="Videos by stage" class="stage-pills tab-scroller">${pills}</div>
-          <div class="tab-pillbar-actions">${visible.length > 1 ? `<button type="button" data-vid-act="fold-all" class="tab-link">${anyOpen ? 'Hide all' : 'Show all'}</button>` : ''}</div>
+          <div class="tab-pillbar-actions">${pickable.length > 1 ? `<button type="button" data-vid-act="pick-all" class="tab-link">${allPicked ? 'Clear selection' : 'Select all'}</button>` : ''}${visible.length > 1 ? `<button type="button" data-vid-act="fold-all" class="tab-link">${anyOpen ? 'Hide all' : 'Show all'}</button>` : ''}</div>
         </div>
+        ${bulkBarHtml(picked)}
         <div class="px-4 pb-4 pt-2">
         ${!state.loaded ? '<p class="text-sm text-gray-500">Loading your videos…</p>'
           : state.loadError ? `<p class="text-sm text-red-600">Your videos couldn’t be loaded: ${esc(state.loadError)}</p>`
@@ -916,7 +1231,7 @@
   document.addEventListener('click', (e) => {
     const pill = e.target.closest('[data-vid-stage]');
     if (pill && host() && host().contains(pill)) {
-      state.stage = pill.dataset.vidStage; state.userStage = true; render();
+      state.stage = pill.dataset.vidStage; state.userStage = true; state.selected.clear(); state.bulkNote = null; render();
       host()?.querySelector(`[data-vid-stage="${state.stage}"]`)?.focus();
       return;
     }
@@ -989,6 +1304,44 @@
         break;
       }
       case 'full': setFull(!state.full); break;
+      case 'pick-all': {
+        const pickable = inStage(state.stage).filter((v) => !MAKING.includes(v.status));
+        const all = pickable.every((v) => state.selected.has(v.id));
+        state.selected.clear();
+        if (!all) pickable.forEach((v) => state.selected.add(v.id));
+        state.bulkNote = null; render();
+        break;
+      }
+      case 'pick-none': state.selected.clear(); state.bulkNote = null; render(); break;
+      case 'record-video': {
+        if (!window.VideoRecorder) break;
+        const shape = host()?.querySelector('[data-vid-footage-form] [name="shape"]:checked, [data-vid-footage-form] select[name="shape"]')?.value || '9:16';
+        window.VideoRecorder.open({ shape, onDone: (file) => { if (file) addFootageFiles([file]); } });
+        break;
+      }
+      case 'voice-mode': {
+        const own = b.dataset.mode === 'own';
+        act(id, { action: 'set_options', id, voiceMode: own ? 'own' : 'ai' }, own ? 'Your own voice. Approve the script, then record each line.' : 'An AI voice reads it — made when you press “Make the video”, which shows what it uses.');
+        break;
+      }
+      case 'voice-record': {
+        const v = state.videos.find((x) => x.id === id);
+        const s = v && v.storyboard.scenes.find((x) => x.id === b.dataset.scene);
+        if (!s) break;
+        if (!window.AudioRecorder) { state.notes[id] = { text: 'The recorder didn’t load. Upload a recording instead.', error: true }; render(); break; }
+        window.AudioRecorder.open({ title: `Scene ${v.storyboard.scenes.indexOf(s) + 1} — read this line`, script: s.voiceover, onDone: (file) => { if (file) attachVoice(id, s.id, file); } });
+        break;
+      }
+      case 'voice-upload': case 'voice-whole-upload': {
+        state.voicePick = { id, sceneId: b.dataset.vidAct === 'voice-upload' ? b.dataset.scene : null };
+        host()?.querySelector(`[data-vid-voice-file][data-id="${id}"]`)?.click();
+        break;
+      }
+      case 'voice-remove': act(id, { action: 'set_line_voice', id, sceneId: b.dataset.scene, assetId: null }, 'Recording removed — it stays in My Content.'); break;
+      case 'voice-whole-remove': act(id, { action: 'set_voice_file', id, assetId: null }, 'Removed. Record each line below.'); break;
+      case 'bulk-archive': bulk('archive'); break;
+      case 'bulk-restore': bulk('restore'); break;
+      case 'bulk-delete': bulk('delete'); break;
       case 'talk': {
         const v = state.videos.find((x) => x.id === id);
         if (v) getChatDock()?.refer({ label: `Video “${v.title}”`, message: `About my video ${v.id} “${v.title}”.` });
@@ -1044,8 +1397,41 @@
   });
 
   // Ticking a video in the footage form; adding files to it.
+  // The scene text preview follows the form as it's typed and chosen.
+  document.addEventListener('input', (e) => {
+    const f = e.target.closest && e.target.closest('[data-vid-scene-form]');
+    if (f && host() && host().contains(f) && (e.target.matches('[data-vid-text-input]') || e.target.matches('[data-vid-text-opt]'))) paintTextPreview(f);
+  });
+  // Moving scenes play while pointed at (and on a tap), so they don't read as still pictures.
+  document.addEventListener('mouseover', (e) => {
+    const vid = e.target.closest && e.target.closest('video[data-vid-hoverplay]');
+    if (vid && host() && host().contains(vid)) vid.play().catch(() => {});
+  });
+  document.addEventListener('mouseout', (e) => {
+    const vid = e.target.closest && e.target.closest('video[data-vid-hoverplay]');
+    if (vid && host() && host().contains(vid) && !vid.contains(e.relatedTarget)) vid.pause();
+  });
+  document.addEventListener('click', (e) => {
+    const vid = e.target.closest && e.target.closest('video[data-vid-hoverplay]');
+    if (vid && host() && host().contains(vid)) { if (vid.paused) vid.play().catch(() => {}); else vid.pause(); }
+  });
+
   document.addEventListener('change', (e) => {
     const t = e.target;
+    if (host() && host().contains(t) && t.matches('[data-vid-voice-file]')) {
+      const file = t.files && t.files[0];
+      const pick = state.voicePick;
+      t.value = '';
+      if (file && pick) attachVoice(pick.id, pick.sceneId, file);
+      return;
+    }
+    if (host() && host().contains(t) && t.matches('[data-vid-pick]')) {
+      const id = Number(t.dataset.vidPick);
+      if (t.checked) state.selected.add(id); else state.selected.delete(id);
+      state.bulkNote = null; render();
+      host()?.querySelector(`[data-vid-pick="${id}"]`)?.focus();
+      return;
+    }
     if (host() && host().contains(t) && t.matches('[data-vid-music-mood]')) {
       // The brief form: the track list shows only for "A track from My Content".
       const pick = t.closest('label')?.querySelector('[data-vid-mine-pick]');
@@ -1096,6 +1482,7 @@
       const brief = {
         message: String(fd.get('message') || ''), lengthS: Number(fd.get('lengthS')), cta: String(fd.get('cta') || ''),
         voiceover: !!voice, voice: voice || undefined, allowAi: String(fd.get('allowAi') || 'stock_and_ai'),
+        ...(voice && fd.get('ownVoice') ? { ownVoice: true } : {}),
         captions: !!fd.get('captions'), ...(captionStyle ? { captionStyle } : {}),
         shape: String(fd.get('shape') || '9:16'), ...briefExtras(fd),
       };
@@ -1119,6 +1506,8 @@
         ...(source === 'ai_image' || source === 'ai_video' ? { prompt: words } : { keywords: words }),
         ...(fd.has('inS') && source === 'own_video' ? { inS: Number(fd.get('inS')), outS: Number(fd.get('outS')) } : {}),
         nameCaption: String(fd.get('ncName') || '').trim() ? { name: String(fd.get('ncName')), role: String(fd.get('ncRole') || '') } : null,
+        // A branded card draws its words into the picture: only the words apply there.
+        ...textPatch(f, fd),
       };
       const id = Number(f.dataset.id);
       state.editing = null;

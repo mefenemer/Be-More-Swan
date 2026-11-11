@@ -28,7 +28,7 @@ import { loadCommitments, renderCommitmentsForMentor } from './mentor-commitment
 import { loadTrackRecord, renderTrackRecordForMentor } from './mentor-outcomes';
 import { loadCustomers, renderCustomersForMentor } from './mentor-customers';
 import { TEAM_FEATURES } from '../config/team-features';
-import { isDiscussionSource, sourceInfo } from '../config/discussion-sites';
+import { DISCUSSIONS_ENABLED, isDiscussionSource, sourceInfo } from '../config/discussion-sites';
 import { loadSiteDirectoryGaps } from './site-directory-store';
 import { normalizeBrandKit } from './brand-kit';
 import { guidelinesPromptLines, hasGuidelines, normaliseGuidelines } from './brand-guidelines';
@@ -443,7 +443,8 @@ export async function loadMentorSnapshotData(db: Db, orgId: number, userId: numb
     // The Lead Generators' Discussions tabs, as counts (db/z-discussions.sql). Only the watch and a
     // count per status are read — the threads and drafted replies stay the Lead Generator's.
     const leadIds = team.filter((t: any) => t.roleKey === 'lead_qualifier').map((t: any) => t.id as number);
-    const discussionState = !leadIds.length ? [] : await optional(async () => {
+    // Paused: undefined = the Mentor is told nothing about Discussions (DISCUSSIONS_ENABLED).
+    const discussionState = !DISCUSSIONS_ENABLED ? undefined : !leadIds.length ? [] : await optional(async () => {
         const [watches, counts] = await Promise.all([
             db.select({ assistantId: discussionWatches.aiAssistantId, topics: discussionWatches.topics, sites: discussionWatches.sites, enabled: discussionWatches.enabled, lastScannedAt: discussionWatches.lastScannedAt })
                 .from(discussionWatches).where(and(eq(discussionWatches.organisationId, orgId), inArray(discussionWatches.aiAssistantId, leadIds))),

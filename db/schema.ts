@@ -5435,6 +5435,8 @@ export const videoProjects = pgTable("video_projects", {
   // db/z-video-producer-seven.sql — notes on moments of a Ready video, and storyboard edits before it was made.
   momentNotes: jsonb("moment_notes").notNull().default([]),
   editCount: integer("edit_count").notNull().default(0),
+  // db/z-video-archive.sql — when the owner archived it (Videos tab "Archived" pill). NULL = not archived.
+  archivedAt: timestamp("archived_at"),
   startedAt: timestamp("started_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

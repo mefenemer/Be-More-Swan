@@ -6233,6 +6233,7 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/voice-picker.js"></script>
 <script src="/src/components/caption-style.js"></script>
 <script src="/src/components/footage-reader.js"></script>
+<script src="/src/components/video-recorder.js"></script>
 <script src="/src/components/assistant-videos.js"></script>
 <script src="/src/components/assistant-mentor-overview.js"></script>
 <script src="/src/components/assistant-mentor-plan.js"></script>
@@ -21664,7 +21665,14 @@ function _pceChatPick(ev) {
         ref = { label: text ? `Caption “${short(text)}”` : 'The caption', message: `About this part of my post #${post.id}: the caption “${text.slice(0, 2500)}”.` };
     } else {
         const noun = _rqMediaIsVideo(post) ? 'video' : 'picture';
-        ref = { label: `The ${noun}`, message: `About this part of my post #${post.id}: the ${noun}.` };
+        // Its words go with it (FR#6/7, 2026-11-10): told only "the picture", the assistant could not see
+        // or change the words on it. A branded card's words are its own; a photo's are its text boxes.
+        const boxes = (post.overlays || []).map((o) => String(o?.text || '').trim()).filter(Boolean);
+        const words = post.brandCard
+            ? ` It is a branded card; its words are “${String(post.brandCard.headline || '').trim()}”.`
+            : boxes.length ? ` Its text boxes: ${boxes.map((t) => `“${t}”`).join('; ')}.`
+            : ` It has no text boxes; any words in it are part of the ${noun} itself.`;
+        ref = { label: `The ${noun}`, message: `About this part of my post #${post.id}: the ${noun}.${words}` };
     }
     if (!_pceChatIsOn()) { try { localStorage.setItem(_PCE_CHAT_ON_KEY, '1'); } catch { /* private window */ } }
     _pceChatSync().then(() => _pceChat?.pane?.setReference(ref));
@@ -21693,10 +21701,31 @@ document.addEventListener('post:textEdit', async (e) => {
     d.handled = true;
     const post = _rqPostCache[_rqReviewPostId];
     const ov = (post.overlays || []).find((o) => o && _pceChatSameText(o.text, d.find));
+    // A branded card's own words (FR#6/7): redrawn by the card editor's own save (edit-brand-card), so the
+    // card and the stored image stay one thing. The card editor is mounted for the open post.
+    const head = _pceEl('pce-headline');
+    if (!ov && post.brandCard && head && Number(_pceState.postId) === Number(post.id)
+        && (_pceChatSameText(head.value, d.find) || _pceChatSameText(post.brandCard.headline, d.find))) {
+        if (d.replace.length > 120) { d.respond({ ok: false, error: 'A card’s words can be at most 120 characters — ask for something shorter.' }); return; }
+        const before = head.value;
+        head.value = d.replace;
+        _pceScheduleCardSave();
+        await _pceFlushCardSave();
+        if (_pceEl('pce-msg')?.dataset.tone === 'error') {
+            const h = _pceEl('pce-headline'); if (h) h.value = before;
+            d.respond({ ok: false, error: _pceEl('pce-msg')?.textContent || 'The card couldn’t be saved just now.' });
+            return;
+        }
+        d.respond({ ok: true, message: 'Done — the card’s words are changed.' });
+        return;
+    }
     if (!ov) { d.respond({ ok: false, error: 'That text box has changed since — select it again and ask once more.' }); return; }
     const before = ov.text;
     ov.text = d.replace;
     _rqRenderCanvasOverlays(post);
+    // The styling panel's Wording box is built once per box; rebuilt now, or it keeps the old words and
+    // typing there puts them back (staging check, 2026-11-10).
+    if (_pceStyleMountedFor === ov.id) { _pceStyleMountedFor = null; _pceRenderTextStyle(); }
     if (await _rqPersistOverlays(_rqReviewPostId)) { d.respond({ ok: true }); return; }
     ov.text = before;
     _rqRenderCanvasOverlays(post);

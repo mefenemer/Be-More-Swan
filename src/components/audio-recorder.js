@@ -3,7 +3,9 @@
  *
  * Record a voice note in the browser and hand back the bytes.
  *
- *   window.AudioRecorder.open({ onDone: (file|null) => {} })   // modal recorder
+ *   window.AudioRecorder.open({ onDone: (file|null) => {}, title?, script? })   // modal recorder
+ *     title: the heading (default "Record a voice note"); script: words to read, shown above the button
+ *     (the Video Producer's own-voice lines, 2026-11-10).
  *   window.AudioRecorder.supported()                            // boolean
  *
  * A plain IIFE on window, like image-overlay-editor.js, because workspace.html is a static page
@@ -62,8 +64,9 @@
     back.style.cssText = 'position:fixed;inset:0;z-index:120;background:rgba(17,24,39,.7);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:16px;';
     back.innerHTML = `
       <div style="background:#fff;border-radius:16px;max-width:380px;width:100%;padding:20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-        <p style="font-size:15px;font-weight:800;color:#111827;margin:0 0 2px;">Record a voice note</p>
+        <p data-title style="font-size:15px;font-weight:800;color:#111827;margin:0 0 2px;"></p>
         <p data-hint style="font-size:12px;color:#9ca3af;margin:0 0 16px;">Your browser will ask for microphone access.</p>
+        <p data-script style="display:none;font-size:14px;line-height:1.45;color:#111827;background:#eef2ff;border-radius:10px;padding:10px 12px;margin:0 0 14px;"></p>
         <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
           <div data-meter style="width:100%;height:44px;border-radius:10px;background:#f3f4f6;overflow:hidden;display:flex;align-items:flex-end;gap:2px;padding:4px;box-sizing:border-box;"></div>
           <p data-time style="font-size:22px;font-weight:800;color:#111827;margin:2px 0;font-variant-numeric:tabular-nums;">0:00</p>
@@ -81,6 +84,9 @@
     document.body.appendChild(back);
 
     const q = (s) => back.querySelector(s);
+    // Set as text, never HTML: the script is the owner's words.
+    q('[data-title]').textContent = (opts && opts.title) || 'Record a voice note';
+    if (opts && opts.script) { const sc = q('[data-script]'); sc.textContent = opts.script; sc.style.display = 'block'; }
     const meter = q('[data-meter]');
     const timeEl = q('[data-time]');
     const statusEl = q('[data-status]');

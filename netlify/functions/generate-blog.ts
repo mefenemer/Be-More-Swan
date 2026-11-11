@@ -20,7 +20,7 @@
 //        like the social post editor's same two buttons.
 //   POST { blogPostId, revise: '<instruction>' }       → 202 { jobId, … } — the same rewrite, to the
 //        owner's words (the chat's "Revise" card, Blog Studio's "Ask … to improve"). Same price.
-//   POST { blogPostId, addImages: { source: 'stock'|'ai', instruction? } } → 202 { jobId, … } — "Add
+//   POST { blogPostId, addImages: { source: 'stock'|'ai', instruction?, replaceAsset? } } → 202 { jobId, … } — "Add
 //        pictures" (src/utils/blog-add-images.ts): pictures placed in the body, words untouched.
 //        A helper, plus each AI image held at the usual image price.
 //   GET  ?jobId=<uuid>                                   → 200 { status, resultBlogPostId, errorMessage }
@@ -175,6 +175,8 @@ export default withLambda(async (event: HandlerEvent) => {
         ? {
             source: (addImagesRaw.source === 'ai' ? 'ai' : 'stock') as 'stock' | 'ai',
             instruction: typeof addImagesRaw.instruction === 'string' && addImagesRaw.instruction.trim() ? addImagesRaw.instruction.trim().slice(0, 500) : undefined,
+            // Replace the one picture the owner selected (asset id), in the same place, instead of adding.
+            replaceAsset: Number.isInteger(Number(addImagesRaw.replaceAsset)) && Number(addImagesRaw.replaceAsset) > 0 ? Number(addImagesRaw.replaceAsset) : undefined,
         }
         : undefined;
     const rewrite = !!(resize || revise || addImages);

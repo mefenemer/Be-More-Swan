@@ -15,6 +15,15 @@
 // has no public API; LinkedIn has no post search. One `site:` search through the provider the Lead
 // Generator already pays for covers all of them, and reads only what Google already shows.
 
+// ── PAUSED (owner, 2026-11-10) ───────────────────────────────────────────────────────────────────
+// Hidden on staging and prod: copying a drafted reply into a forum by hand is a step backwards from
+// assistants that do the work, and anonymous forum posters rarely become leads. With this false:
+// the tab is gone (the registry has no `discussionsTab`), no scan starts (daily or "Scan now"), the
+// endpoint answers 410, chat neither describes the tab nor shows its cards, and the Business Mentor
+// isn't told it exists. The tables, rows and code stay, so turning it back on is this line plus the
+// registry entry (src/components/assistant-dashboard-registry.js) and re-publishing the help article.
+export const DISCUSSIONS_ENABLED = false;
+
 export const DISCUSSION_SITE_KEYS = ['reddit', 'ukbf', 'quora', 'linkedin'] as const;
 export type DiscussionSiteKey = typeof DISCUSSION_SITE_KEYS[number];
 

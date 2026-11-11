@@ -9,7 +9,7 @@
 // Archived assistants are left out: their work waits on nobody (archived-assistant-drafts.ts). A table that
 // doesn't exist on this database yet costs that source only, never the whole list.
 
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import {
     aiAssistants, assistantRecords, bookings, siteAuditFixes, siteAudits, siteEnquiries, sites, videoProjects,
@@ -121,7 +121,7 @@ export async function loadReviewWaiting(db: Db, orgId: number, now = new Date())
 
     // Video Producer: storyboards to check. A finished video waits as a post, which Review already lists.
     const videos = await optional(() => db.select({ assistantId: videoProjects.aiAssistantId, id: videoProjects.id, title: videoProjects.title, at: videoProjects.updatedAt })
-        .from(videoProjects).where(and(eq(videoProjects.organisationId, orgId), inArray(videoProjects.aiAssistantId, ids), eq(videoProjects.status, 'planned'))).limit(MAX_ROWS), []);
+        .from(videoProjects).where(and(eq(videoProjects.organisationId, orgId), inArray(videoProjects.aiAssistantId, ids), eq(videoProjects.status, 'planned'), isNull(videoProjects.archivedAt))).limit(MAX_ROWS), []);
     add({ kind: 'video', label: 'Video storyboards to check', tab: 'videos' }, videos);
 
     // Mystery Shopper: suggested fixes on "To review".
