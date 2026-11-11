@@ -17,6 +17,9 @@
  *   8. Fill the generated half of llms.txt.
  *   9. Bake published reviews of Be More Swan into the home and pricing pages, with their
  *      Review / AggregateRating JSON-LD (markup in scripts/seo/reviews.mjs).
+ *  10. Bake today's task costs into every data-task-cost span, and fill {{tasks.<key>}} in
+ *      hand-written JSON-LD (scripts/seo/task-costs.mjs). Runs before Jobs 2 and 9b, so the FAQ
+ *      JSON-LD they generate from the page text carries the live figures too.
  *
  * Jobs 5–8 build their markup in scripts/seo/ai-readability.mjs (pure, tested in
  * tests/ai-readability.test.ts); this file does the fetching, the checks and the writes.
@@ -51,6 +54,7 @@ import {
     sitemapEntries, llmsGeneratedSections,
 } from './seo/ai-readability.mjs';
 import { testimonialsHtml, reviewsJsonLd, llmsReviewsLine } from './seo/reviews.mjs';
+import { bakeTaskCostSpans, fillJsonLdTaskTokens } from './seo/task-costs.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SITE_ORIGIN = 'https://bemoreswan.com';
@@ -750,7 +754,50 @@ function buildHomeFaqJsonLd() {
     log('FAQPage JSON-LD → index.html');
 }
 
+// ── Job 10: today's task costs in the published HTML ──────────────────────────────────────────
+//
+// /task-costs.js fills <span data-task-cost> after load, so a crawler without JavaScript — and the FAQ
+// JSON-LD built from faq.html and index.html below — only ever saw the fallback in the span. JSON-LD can
+// hold no span at all, so hand-written blocks say {{tasks.<key>}}. Both are filled here from /task-costs
+// (Admin → Money → Task costs). A cost changed later reaches this HTML at the next deploy; visitors with
+// JavaScript get it at once from /task-costs.js.
+//
+// No placeholder is ever published: with /task-costs unreachable (and SEO_ALLOW_STALE=1) a token takes the
+// text the page already shows for that key, and one nothing can fill is a failure.
+async function bakeTaskCosts() {
+    let figures = null;
+    try {
+        figures = await fetchJson(`${SITE_ORIGIN}/.netlify/functions/task-costs`);
+        if (!figures || typeof figures.weights !== 'object') throw new Error('no weights in the response');
+    } catch (err) {
+        figures = null;
+        handleFetchFailure('task costs', err);
+    }
+    const pages = ['index.html', 'faq.html', 'pricing.html', 'checkout.html', 'terms_of_service.html',
+        'be-more-swan-vs-website-builders.html', 'website-builder-for-small-business.html'];
+    for (const page of pages) {
+        const path = join(ROOT, page);
+        if (!existsSync(path)) continue;
+        let html = readFileSync(path, 'utf8');
+        const before = html;
+        let spans = 0;
+        if (figures) {
+            const b = bakeTaskCostSpans(html, figures);
+            if (b.unknown.length) fail(`${page}: data-task-cost key(s) /task-costs doesn't know: ${[...new Set(b.unknown)].join(', ')}`);
+            html = b.html; spans = b.count;
+        }
+        const ld = fillJsonLdTaskTokens(html, figures);
+        if (ld.unresolved.length) fail(`${page}: JSON-LD {{tasks.*}} left unfilled: ${[...new Set(ld.unresolved)].join(', ')}`);
+        html = ld.html;
+        if (html !== before) {
+            writeFileSync(path, html);
+            log(`task costs → ${page} (${spans} span${spans === 1 ? '' : 's'}, ${ld.count} in JSON-LD${figures ? '' : ', page fallback'})`);
+        }
+    }
+}
+
 inlineFooters();
+await bakeTaskCosts();
 buildFaqJsonLd();
 await inlineBlogPosts();
 await inlineHelpArticles();

@@ -42,6 +42,10 @@ const load = (Module as any)._load;
         return { ...load.call(this, request, parent, ...rest), ...stub };
     }
     if (fromFunction && /db\/client$/.test(request)) return { getDb: () => ({}) };
+    // A shared video is tried only when the token isn't a post link (tests/video-next-steps.test.ts covers it).
+    if (fromFunction && /utils\/video-review-links$/.test(request)) {
+        return { resolveVideoReviewLink: async () => null, videoGuestView: async () => ({}), recordVideoResponse: async () => ({ ok: true }), validateVideoResponse: () => ({ ok: false, error: 'x' }) };
+    }
     if (fromFunction && /utils\/rate-limit$/.test(request)) {
         return { getClientIp: () => '1.2.3.4', checkRateLimit: async () => ({ allowed: !limited, retryAfterSecs: 0 }) };
     }

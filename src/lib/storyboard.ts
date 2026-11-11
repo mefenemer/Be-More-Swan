@@ -26,6 +26,18 @@ import { readSceneText, type TextAnim, type TextPos, type TextStyle, type TextWh
 export const SCENE_SOURCES = ['stock_video', 'stock_photo', 'ai_video', 'ai_image', 'brand_card', 'product_photo', 'own_video'] as const;
 export type SceneSource = typeof SCENE_SOURCES[number];
 export const BEATS = ['hook', 'problem', 'value', 'proof', 'cta'] as const;
+
+/** The owner's struck-out words, kept to the segment, at most 400, rounded to 0.01 s. Pure. */
+export function readCutWords(raw: unknown, inS: number, outS: number): Array<{ start: number; end: number }> {
+    if (!Array.isArray(raw)) return [];
+    const out: Array<{ start: number; end: number }> = [];
+    for (const w of raw.slice(0, 400)) {
+        const start = Number((w as { start?: unknown })?.start), end = Number((w as { end?: unknown })?.end);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || start < inS - 0.05 || end > outS + 0.05) continue;
+        out.push({ start: Math.round(start * 100) / 100, end: Math.round(end * 100) / 100 });
+    }
+    return out.sort((a, b) => a.start - b.start);
+}
 export type Beat = typeof BEATS[number];
 
 export const VIDEO_LENGTHS = [15, 30, 60] as const;
@@ -136,6 +148,11 @@ export interface Scene {
     tightened?: { pauses: number; fillers: number; retakes: number; savedS: number };
     /** false = the owner chose "Keep as filmed" for this scene. */
     tighten?: boolean;
+    /**
+     * Words the owner struck out on the Videos tab ("Edit the words"), by their times in the source video.
+     * Cut whether or not the scene is tightened. Only from the owner's own edit (video-projects edit_scene).
+     */
+    cutWords?: Array<{ start: number; end: number }>;
     /** Who is on screen, as a lower-third name caption (src/lib/lower-third.ts). */
     nameCaption?: NameCaption;
     /** The words' place, timing, look and entrance (src/lib/scene-text.ts). Absent = as before 2026-11-10. */
@@ -277,6 +294,8 @@ export function enforceStoryboard(raw: unknown, brief: VideoBrief, library: Libr
             scene.inS = segment.inS;
             scene.outS = segment.outS;
             if (o.tighten === false) scene.tighten = false;
+            const cw = readCutWords(o.cutWords, segment.inS, segment.outS);
+            if (cw.length) scene.cutWords = cw;
             // Its own sound: the scene IS the segment. Under a voiceover the voice sets the cut.
             if (ownSound) scene.targetS = round1(segment.outS - segment.inS);
         }

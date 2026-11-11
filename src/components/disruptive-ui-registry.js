@@ -1766,6 +1766,20 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       done: 'Renamed. It’s on the video on the Videos tab.',
     });
   }
+  // { type: 'video_caption_remove_proposal', projectId, language, languageName? } — remove one translated
+  // caption file ('remove_translation'). Free. Adding a translation spends a task, so it is the Translate
+  // button on the Videos tab, never a card.
+  function renderVideoCaptionRemoveProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const code = typeof ui.language === 'string' && /^[a-zA-Z-]{2,8}$/.test(ui.language) ? ui.language : null;
+    const name = typeof ui.languageName === 'string' ? ui.languageName.trim().slice(0, 40) : code;
+    return videoActionCard(esc, {
+      kicker: 'Remove translated captions', rows: [name ? ['Language', name] : null],
+      note: 'Free. The video and its English captions stay as they are. You can translate it again later.',
+      button: 'Remove them', body: id && code ? { action: 'remove_translation', id, language: code } : null,
+      done: 'Removed from the video’s caption files.',
+    });
+  }
   // { type: 'video_notes_version_proposal', projectId }
   function renderVideoNotesVersionProposalCard(ui, esc) {
     const id = videoId(ui);
@@ -2035,6 +2049,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
   register('video_reshape_proposal', renderVideoReshapeProposalCard);
   register('video_chapter_proposal', renderVideoChapterProposalCard);
+  register('video_caption_remove_proposal', renderVideoCaptionRemoveProposalCard);
 
   // ── Built-ins: Mystery Shopper cards (docs/mystery-shopper-plan.md §4.6) ──────────────────────
   // The chat twins of the Website tab's buttons — same server actions (site-audits.ts), handled in
@@ -5196,6 +5211,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       ${words != null ? change('What to show', '', words) : ''}
       ${Object.entries(VIDEO_TEXT_LABELS).filter(([k]) => patch[k] && VIDEO_TEXT_LABELS[k][1][patch[k]]).map(([k, [label, names]]) => change(label, '', names[patch[k]])).join('')}
       ${'nameCaption' in patch ? change('Name caption', '', patch.nameCaption ? `${patch.nameCaption.name}${patch.nameCaption.role ? ` · ${patch.nameCaption.role}` : ''}` : '(none)') : ''}
+      ${typeof patch.cutPhrase === 'string' && patch.cutPhrase ? change('Cut from your clip', patch.cutPhrase, '(cut)') : ''}
       <p class="text-xs text-gray-600 mt-2">This only changes the plan. Nothing is made until you press “Make the video”, which says what it uses.</p>
       <div class="flex flex-wrap items-center gap-2 mt-3">
         <button type="button" data-vse-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">Change the scene</button>
@@ -5563,6 +5579,33 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       </div>
       <div data-rl-card-result class="hidden mt-3 text-xs"></div>`;
     el.querySelector('[data-rl-card-create]').addEventListener('click', () => window.ReviewLinks?.shareCard(postId, el));
+    return el;
+  });
+
+  // { type: 'video_share_review_proposal', projectId, title?, summary? } — the Video Producer's twin of the
+  // card above: a private link for a finished video, where a guest comments on moments and approves it or
+  // asks for changes (video-review-links.ts). Free; nothing is made or sent until the click.
+  register('video_share_review_proposal', (ui, esc) => {
+    const projectId = Number(ui.projectId);
+    if (!Number.isInteger(projectId) || projectId <= 0) return null;
+    const el = document.createElement('div');
+    el.className = 'bg-white border-2 border-emerald-200 rounded-xl shadow-sm p-4 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">Share a video for review</p>
+      ${ui.title ? `<p class="text-sm font-semibold text-gray-900 mt-1">${esc(String(ui.title).slice(0, 200))}</p>` : ''}
+      ${ui.summary ? `<p class="text-sm text-gray-800 mt-1">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <div data-rl-card-form class="mt-3 space-y-2 text-xs">
+        <label class="block font-semibold text-gray-700">Who's it for? <span class="font-normal text-gray-500">(optional, only you see this)</span>
+          <input type="text" data-rl-label maxlength="80" value="${esc(String(ui.label || '').slice(0, 80))}" class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 font-normal">
+        </label>
+        <label class="block font-semibold text-gray-700">Email it to <span class="font-normal text-gray-500">(optional)</span>
+          <input type="email" data-rl-email maxlength="200" class="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 font-normal">
+        </label>
+        <button type="button" data-rl-card-create class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition">Create link</button>
+        <p class="text-[11px] text-gray-500">Anyone with the link can watch this video, comment on moments and approve it or ask for changes, for 30 days. Nothing they do changes the video.</p>
+      </div>
+      <div data-rl-card-result class="hidden mt-3 text-xs"></div>`;
+    el.querySelector('[data-rl-card-create]').addEventListener('click', () => window.ReviewLinks?.shareCard({ videoProjectId: projectId }, el));
     return el;
   });
 

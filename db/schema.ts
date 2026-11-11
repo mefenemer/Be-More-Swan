@@ -6987,7 +6987,7 @@ export const reviewLinks = pgTable("review_links", {
   id: serial("id").primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
-  itemKind: text("item_kind").notNull(), // 'social_post' | 'design_brief'
+  itemKind: text("item_kind").notNull(), // 'social_post' | 'design_brief' | 'video_project'
   itemId: integer("item_id").notNull(),
   tokenHash: text("token_hash").notNull().unique(),
   label: text("label"),
@@ -7015,6 +7015,8 @@ export const reviewLinkResponses = pgTable("review_link_responses", {
   resolution: text("resolution"),
   resolvedAt: timestamp("resolved_at"),
   resolvedBy: integer("resolved_by").references(() => users.id, { onDelete: "set null" }),
+  // Seconds into the video a guest's comment is about, for a shared video (db/z-review-link-video.sql). NULL otherwise.
+  atS: real("at_s"),
 }, (t) => [
   index("review_link_responses_link").on(t.linkId, t.createdAt),
 ]);

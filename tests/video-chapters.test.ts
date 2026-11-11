@@ -112,7 +112,7 @@ check('wired through: Videos tab, API, YouTube publish, chat card', () => {
     assert.ok(vp.includes('...chaptersOf(row, sb, outputDurationS)') && vp.includes('timeline.chapterTitles = chapterTitles'), 'view + names kept on a new version');
     assert.ok(read('src/components/disruptive-ui-registry.js').includes("register('video_chapter_proposal'"));
     assert.ok(read('netlify/functions/chat-orchestrator.ts').includes('"type": "video_chapter_proposal"'));
-    assert.ok(read('src/components/chat-session.js').includes("'add_note', 'rename_chapter',"));
+    assert.ok(read('src/components/chat-session.js').includes("'add_note', 'rename_chapter', 'remove_translation',"));
 });
 
 console.log(`\nvideo chapters: ${passed} passed`);

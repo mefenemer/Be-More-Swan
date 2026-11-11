@@ -44,6 +44,7 @@ export const DEFAULT_TASK_WEIGHTS = {
     // read by AI plus the sound transcribed. Charged once per review that analyses a new video;
     // suggesting again from the same analysis is free (src/utils/footage-review.ts).
     footage_review: 2,
+    caption_translation: 1,
     // Behind basicWorkCharged below (docs/basic-work-charging.md).
     chat_messages: 1,
     editing_helper: 1,
@@ -129,6 +130,7 @@ export const WORK_KIND_LABELS: Record<WorkKind, string> = {
     flyer_words: 'Flyer words',
     background_removal: 'Background removals',
     footage_review: 'Footage reviews',
+    caption_translation: 'Caption translations',
     // No "every 10 messages" here: how often chat is charged is now a setting (chat_messages_per_task).
     chat_messages: 'Chat',
     editing_helper: 'Editing helpers',

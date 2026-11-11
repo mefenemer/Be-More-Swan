@@ -911,7 +911,7 @@
     }
     // The Video Producer's other cards (2026-11-10): script, options, notes, other shapes — each the same
     // video-projects.ts action as its button on the Videos tab. Only these actions; none spends.
-    const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'rename_chapter', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete', 'clip_create'];
+    const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'rename_chapter', 'remove_translation', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete', 'clip_create'];
     function onVideoAction(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};

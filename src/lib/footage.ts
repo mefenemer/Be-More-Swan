@@ -116,6 +116,21 @@ export function mmss(s: number): string {
     return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`;
 }
 
+/**
+ * The words of `phrase`, as said, within `words` (case and punctuation ignored): the first exact run, or []
+ * when it isn't there. For a chat card's "cut these words" (video-projects edit_scene cutPhrase). Pure.
+ */
+export function findPhrase(words: SpokenWord[], phrase: string): SpokenWord[] {
+    const n = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}']+/gu, '');
+    const want = String(phrase ?? '').split(/\s+/).map(n).filter(Boolean);
+    if (!want.length) return [];
+    const have = words.map((w) => n(w.word));
+    for (let i = 0; i + want.length <= have.length; i++) {
+        if (want.every((x, k) => have[i + k] === x)) return words.slice(i, i + want.length);
+    }
+    return [];
+}
+
 /** The words spoken between two times, as text. Pure. */
 export function wordsBetween(words: SpokenWord[], inS: number, outS: number): string {
     return words.filter((w) => w.start >= inS - 0.05 && w.end <= outS + 0.05).map((w) => w.word).join(' ').replace(/\s+/g, ' ').trim();
@@ -293,7 +308,7 @@ export function footagePlannerBlock(videos: FootageVideo[]): string {
 // the same file; only the pieces play. Words are never moved or invented, only left out.
 
 export interface Piece { inS: number; outS: number }
-export interface TightenStats { pauses: number; fillers: number; retakes: number; savedS: number }
+export interface TightenStats { pauses: number; fillers: number; retakes: number; savedS: number; /** Words the owner struck out. */ removed?: number }
 
 /** A pause longer than this is cut down to the padding either side of it. */
 export const MAX_PAUSE_S = 0.5;
@@ -348,15 +363,19 @@ export function retakeIndexes(words: SpokenWord[]): { drop: Set<number>; retakes
  * One segment of the owner's video → the pieces that play. Silent footage (no words in it) plays as
  * it is: a shot of the shop with no one speaking has no pauses to cut. Pure.
  */
-export function tightenSegment(inS: number, outS: number, words: SpokenWord[], loudness?: number[]): { pieces: Piece[]; stats: TightenStats } {
+export function tightenSegment(inS: number, outS: number, words: SpokenWord[], loudness?: number[], opts: { cutWords?: Array<{ start: number; end: number }>; auto?: boolean } = {}): { pieces: Piece[]; stats: TightenStats } {
     const whole = { pieces: [{ inS, outS }], stats: { pauses: 0, fillers: 0, retakes: 0, savedS: 0 } };
     const inside = words.filter((w) => w.start >= inS - 0.02 && w.end <= outS + 0.02 && w.end > w.start);
     if (!inside.length) return whole;
-    const { drop, retakes } = retakeIndexes(inside);
-    let fillers = 0;
+    // auto = the automatic tightening (pauses, "um"s, repeated takes). Off, only the owner's struck-out words go.
+    const auto = opts.auto !== false;
+    const struck = (w: SpokenWord) => (opts.cutWords ?? []).some((c) => Math.abs(c.start - w.start) < 0.03 && Math.abs(c.end - w.end) < 0.03);
+    const { drop, retakes } = auto ? retakeIndexes(inside) : { drop: new Set<number>(), retakes: 0 };
+    let fillers = 0, removed = 0;
     const kept = inside.filter((w, i) => {
+        if (struck(w)) { removed++; return false; }
         if (drop.has(i)) return false;
-        if (isFiller(w.word)) { fillers++; return false; }
+        if (auto && isFiller(w.word)) { fillers++; return false; }
         return true;
     });
     if (!kept.length) return whole;   // nothing but "um"s: leave it to the owner, never an empty scene
@@ -381,6 +400,13 @@ export function tightenSegment(inS: number, outS: number, words: SpokenWord[], l
         inS: Math.max(inS, r.from.start - PAD_BEFORE_S),
         outS: Math.min(outS, r.to.end + PAD_AFTER_S),
     }));
+    // The padding around kept words never reaches into a word the owner struck out.
+    for (const w of opts.cutWords ?? []) {
+        for (const pc of pieces) {
+            if (w.start > pc.inS && w.start < pc.outS) pc.outS = w.start;
+            if (w.end > pc.inS && w.end < pc.outS && w.start <= pc.inS) pc.inS = w.end;
+        }
+    }
     // Padding can make neighbours touch: join them. Then fold flashes into a neighbour.
     pieces = joinPieces(pieces, 0.05);
     // The safety net: a stretch about to be cut that is LOUD for longer than the words left out of it
@@ -391,11 +417,11 @@ export function tightenSegment(inS: number, outS: number, words: SpokenWord[], l
         pieces = restoreLoudGaps(pieces, inS, outS, loudness, kept, dropped);
         pauses = Math.min(pauses, Math.max(0, pieces.length - 1));
     }
-    pieces = foldShortPieces(pieces);
+    pieces = foldShortPieces(pieces, opts.cutWords);
     const kept2 = pieces.reduce((a, p) => a + (p.outS - p.inS), 0);
     const savedS = Math.max(0, (outS - inS) - kept2);
-    if (savedS < 0.3) return whole;   // nothing worth a cut
-    return { pieces: pieces.map((p) => ({ inS: round2(p.inS), outS: round2(p.outS) })), stats: { pauses, fillers, retakes, savedS: round1(savedS) } };
+    if (savedS < 0.3 && !removed) return whole;   // nothing worth a cut (a word the owner struck out always goes)
+    return { pieces: pieces.map((p) => ({ inS: round2(p.inS), outS: round2(p.outS) })), stats: { pauses, fillers, retakes, savedS: round1(savedS), ...(removed ? { removed } : {}) } };
 }
 
 /** Seconds of [a, b) that are louder than `level`. Pure. */
@@ -446,14 +472,18 @@ function joinPieces(pieces: Piece[], within: number): Piece[] {
     return out;
 }
 
-function foldShortPieces(pieces: Piece[]): Piece[] {
+function foldShortPieces(pieces: Piece[], struck: Array<{ start: number; end: number }> = []): Piece[] {
     let out = pieces.map((p) => ({ ...p }));
+    // A gap holding a word the owner struck out is never filled back in.
+    const holdsStruck = (a: number, b: number) => struck.some((w) => w.start < b && w.end > a);
+    const fixed = new Set<Piece>();
     for (let guard = 0; guard < 50; guard++) {
-        const i = out.findIndex((p) => p.outS - p.inS < MIN_PIECE_S);
+        const i = out.findIndex((p) => p.outS - p.inS < MIN_PIECE_S && !fixed.has(p));
         if (i < 0 || out.length === 1) break;
         // Merge into whichever neighbour is nearer in the source.
-        const left = i > 0 ? out[i].inS - out[i - 1].outS : Infinity;
-        const right = i < out.length - 1 ? out[i + 1].inS - out[i].outS : Infinity;
+        const left = i > 0 && !holdsStruck(out[i - 1].outS, out[i].inS) ? out[i].inS - out[i - 1].outS : Infinity;
+        const right = i < out.length - 1 && !holdsStruck(out[i].outS, out[i + 1].inS) ? out[i + 1].inS - out[i].outS : Infinity;
+        if (left === Infinity && right === Infinity) { fixed.add(out[i]); continue; }
         if (left <= right) { out[i - 1].outS = out[i].outS; out.splice(i, 1); }
         else { out[i + 1].inS = out[i].inS; out.splice(i, 1); }
     }
@@ -506,14 +536,18 @@ export function tightenStoryboard(sb: Storyboard, brief: VideoBrief, videos: Foo
         return c;
     });
     const on = keepsOwnSound(brief) && brief.tighten !== false;
-    if (!on) return { storyboard: { ...sb, scenes }, changes: [] };
+    // Words the owner struck out are cut in their own sound whether or not tightening is on.
+    const anyStruck = keepsOwnSound(brief) && scenes.some((s) => s.cutWords?.length);
+    if (!on && !anyStruck) return { storyboard: { ...sb, scenes }, changes: [] };
     const words = new Map(videos.map((v) => [v.id, v.words]));
     const tight: Array<{ i: number; pieces: Piece[]; stats: TightenStats; segS: number }> = [];
     scenes.forEach((s, i) => {
-        if (s.source !== 'own_video' || s.tighten === false || s.inS == null || s.outS == null || !s.assetId) return;
+        if (s.source !== 'own_video' || s.inS == null || s.outS == null || !s.assetId) return;
+        const auto = on && s.tighten !== false;
+        if (!auto && !s.cutWords?.length) return;
         const v = videos.find((x) => x.id === s.assetId);
-        const { pieces, stats } = tightenSegment(s.inS, s.outS, words.get(s.assetId) ?? [], v?.analysis?.loudness);
-        if (stats.savedS > 0) tight.push({ i, pieces, stats, segS: s.outS - s.inS });
+        const { pieces, stats } = tightenSegment(s.inS, s.outS, words.get(s.assetId) ?? [], v?.analysis?.loudness, { cutWords: s.cutWords, auto });
+        if (stats.savedS > 0 || stats.removed) tight.push({ i, pieces, stats, segS: s.outS - s.inS });
     });
     if (!tight.length) return { storyboard: { ...sb, scenes }, changes: [] };
     // Every scene that isn't tightened is one clip (a still too); the rest share the limit.

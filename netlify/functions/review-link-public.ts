@@ -20,11 +20,14 @@ import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import {
     guestView, recordOpened, recordResponse, recordTrialClick, resolveReviewLink, validateResponse,
 } from '../../src/utils/review-links';
+import { recordVideoResponse, resolveVideoReviewLink, validateVideoResponse, videoGuestView } from '../../src/utils/video-review-links';
 
 /** Faster than this and a person can't have read the post. */
 const MIN_RESPOND_MS = 1500;
 const IP_LIMIT = { maxAttempts: 60, windowSecs: 60 };
 const RESPOND_LIMIT = { maxAttempts: 10, windowSecs: 600 };
+/** A video's guest leaves a comment per moment, so more of them, still capped per link and address. */
+const VIDEO_RESPOND_LIMIT = { maxAttempts: 30, windowSecs: 600 };
 
 // Netlify's [[headers]] skip function responses, so this function sets its own.
 const HEADERS: Record<string, string> = {
@@ -49,7 +52,32 @@ export default withLambda(async (event) => {
     if (!perIp.allowed) return json(429, { error: 'Please wait a moment and try again.' });
 
     const resolved = await resolveReviewLink(db, body.token);
-    if (!resolved) return DEAD();
+    // A shared video (video-review-links.ts): its own view, and comments pinned to a moment.
+    if (!resolved) {
+        const video = await resolveVideoReviewLink(db, body.token);
+        if (!video) return DEAD();
+        const vLinkId = video.link.id;
+        switch (body.action) {
+            case 'view': {
+                const locked = await isRegistrationLocked().catch(() => true);
+                return json(200, { ...(await videoGuestView(db, video)), trialOffer: !locked });
+            }
+            case 'opened': await recordOpened(db, vLinkId); return json(200, { ok: true });
+            case 'trial_click': await recordTrialClick(db, vLinkId); return json(200, { ok: true });
+            case 'respond': {
+                const elapsed = Number(body.ms);
+                const looksLikeBot = !!body.hp || (Number.isFinite(elapsed) && elapsed >= 0 && elapsed < MIN_RESPOND_MS);
+                const checked = validateVideoResponse({ name: body.name, decision: body.decision, body: body.body, atS: body.atS }, video.project.durationS);
+                if (!checked.ok) return json(400, { error: checked.error });
+                if (looksLikeBot) return json(200, { ok: true });
+                const perLink = await checkRateLimit(db, 'review_link_respond', `${vLinkId}:${ip}`, VIDEO_RESPOND_LIMIT);
+                if (!perLink.allowed) return json(429, { error: 'Please wait a moment and try again.' });
+                const saved = await recordVideoResponse(db, video, { name: checked.name, decision: checked.decision, body: checked.body, atS: checked.atS });
+                return saved.ok ? json(200, { ok: true }) : json(409, { error: saved.error });
+            }
+            default: return json(400, { error: 'Invalid request.' });
+        }
+    }
     const linkId = resolved.link.id;
 
     switch (body.action) {

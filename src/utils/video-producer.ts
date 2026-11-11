@@ -68,6 +68,8 @@ import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
 import { defaultTextPos, plannedClearOfCaptions, textFont, textLook, textWindow, textY } from '../lib/scene-text';
 import { isOwnVoice, keepRecordings, linesToRecord, recordedDurations } from './own-voice';
 import { chaptersFor } from '../lib/video-chapters';
+import { translationsOf } from './youtube-video';
+import { biggestDrop, CAPTION_LANGUAGES } from '../lib/youtube-extras';
 import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
 import { makeVideoTrack, ownMusicTrack, ownMusicTracks, storedFileExists } from './video-music-asset';
 
@@ -1252,6 +1254,10 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         sceneTimes: row.timeline ? sceneTimesOf(row.timeline) : [],
         // Its chapters (runs of scenes with one beat) and, when YouTube would show them, the description lines.
         ...chaptersOf(row, sb, outputDurationS),
+        // Caption files: whether it has spoken captions (English is free to download) and its translations.
+        hasSpokenCaptions: hasCaptionedVoice(row.timeline),
+        captionTranslations: Object.keys(translationsOf(row.timeline)),
+        youtubeCached: !!(row.timeline as { youtube?: unknown } | null)?.youtube,
         mix: (row.timeline as ProjectTimeline | null)?.mix ?? null,
         editCount: row.editCount,
         sourceFiles: row.status === 'ready' ? await sourceFilesOf(db, orgId, row) : [],
@@ -1297,6 +1303,12 @@ async function ownVoiceUrls(db: Db, orgId: number, row: typeof videoProjects.$in
     const out: Record<string, string> = {};
     for (const r of rows) if (r.storageKey) { const u = await presignR2Get(r.storageKey, 3600, { stableWindowSec: 1800 }).catch(() => null); if (u) out[want.get(r.id)!] = u; }
     return out;
+}
+
+/** Does this timeline have a voiceover with captions on (so caption files can be made)? Its tracks are vp_vo_… (voice) and vp_cap_… (words of own footage). Pure. */
+export function hasCaptionedVoice(timeline: unknown): boolean {
+    const audio = (timeline as { audio?: unknown } | null)?.audio;
+    return Array.isArray(audio) && audio.some((a) => a && typeof a === 'object' && (a as { captions?: unknown }).captions !== false && /^vp_(vo|cap)_/.test(String((a as { id?: unknown }).id ?? '')));
 }
 
 /** A finished video's chapters for the Videos tab and the chat, and its YouTube lines (src/lib/video-chapters.ts chaptersFor). */
@@ -1410,7 +1422,18 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         const chapterLines = chapters.length
             ? `\n    chapters (${youtubeChapters ? 'added to the description when it is posted to YouTube' : chaptersWhyNot === 'not_wide' ? 'Videos tab only — YouTube makes a vertical or square video a Short, and Shorts have no chapters' : 'Videos tab only — YouTube needs at least 3 chapters of 10 seconds or more'}): ${chapters.map((c, i) => `${i + 1}. ${mmss(c.startS)} "${c.title}"${c.named ? '' : ' (its own name)'}`).join('; ')}`
             : '';
-        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${shapeTxt}${from}${own}) — ${WAITING[r.status] ?? r.status}${cost}${script}${note}${extras ? `\n    ${extras}` : ''}${seen}${lines}${noteLines}${chapterLines}`;
+        // Caption files and how it's doing on YouTube (youtube-video.ts) — the last figures read, never a fresh call here.
+        const tr = r.status === 'ready' ? Object.keys(translationsOf(r.timeline)) : [];
+        const captionLine = r.status === 'ready' && hasCaptionedVoice(r.timeline)
+            ? `\n    caption files: English${tr.length ? `, ${tr.map((c) => `${CAPTION_LANGUAGES[c] ?? c} (${c})`).join(', ')}` : ''}`
+            : '';
+        const yt = r.status === 'ready' ? (r.timeline as { youtube?: { at: string; posts: Array<{ stats: { views: number } | null }>; retention: Array<{ at: number; watching: number }> | null; averageViewS: number | null } } | null)?.youtube : null;
+        const ytViews = yt ? yt.posts.reduce((n, p) => n + (p.stats?.views ?? 0), 0) : 0;
+        const ytDrop = yt?.retention ? biggestDrop(yt.retention, Number((r.timeline as { durationS?: number }).durationS) || 0) : null;
+        const ytLine = yt
+            ? `\n    on YouTube (checked ${yt.at.slice(0, 10)}): ${ytViews} views${yt.averageViewS != null ? `, watched ${Math.round(yt.averageViewS)} s on average` : ''}${ytDrop ? `; most viewers leave at ${mmss(ytDrop.atS)} (${ytDrop.lostPct}% of those still watching)` : ''}`
+            : '';
+        return `- id ${r.id}: "${r.title.slice(0, 80)}" (${brief.lengthS}s${scenes}${shapeTxt}${from}${own}) — ${WAITING[r.status] ?? r.status}${cost}${script}${note}${extras ? `\n    ${extras}` : ''}${seen}${lines}${noteLines}${chapterLines}${captionLine}${ytLine}`;
     }), '', footage].join('\n');
 }
 

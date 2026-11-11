@@ -17,6 +17,7 @@
 
 import { postHasAiVideo } from '../../src/utils/ai-disclosure';
 import { postVideoChapterLines } from '../../src/utils/video-chapter-lines';
+import { afterYouTubeUpload } from '../../src/utils/youtube-video';
 import { withChapterLines } from '../../src/lib/video-chapters';
 import { HandlerEvent } from '@netlify/functions';
 import { eq } from 'drizzle-orm';
@@ -130,6 +131,10 @@ export default withLambda(async (event: HandlerEvent) => {
             youtubeUploadState: null,
             updatedAt: new Date(),
         }).where(eq(scheduledPosts.id, post.id));
+
+        // The thumbnail and caption tracks (youtube-video.ts). Best-effort: the video is already live.
+        const extras = await afterYouTubeUpload(db, { orgId: post.organisationId!, videoId: outcome.id, token: creds.token, contentAssetIds: post.contentAssetIds });
+        if (extras.thumbnail !== 'none' || extras.captions.length) console.log(`[publish-youtube-background] post ${post.id}: thumbnail ${extras.thumbnail}; captions ${extras.captions.join(', ') || 'none'}`);
 
         await recordPostedAssets(db, { orgId: post.organisationId!, userId: post.userId, scheduledPostId: post.id })
             .catch(e => console.warn(`[publish-youtube-background] recordPostedAssets failed for post ${post.id}:`, e?.message || e));

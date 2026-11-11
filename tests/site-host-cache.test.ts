@@ -21,7 +21,8 @@ check('every site-serve response varies by the site address', () => {
 });
 check('the sites host puts the address in the URL it requests, too', () => {
     const edge = read('sites-host/edge-functions/serve.ts');
-    assert.ok(edge.includes('/.netlify/functions/site-serve?host=${encodeURIComponent(url.host)}&path='));
+    assert.ok(edge.includes('const sent = [`host=${encodeURIComponent(url.host)}`, `path=${encodeURIComponent(url.pathname)}`'));
+    assert.ok(edge.includes('/.netlify/functions/site-serve?${sent.join(\'&\')}'));
     assert.ok(edge.includes("'x-site-host': url.host"));
 });
 

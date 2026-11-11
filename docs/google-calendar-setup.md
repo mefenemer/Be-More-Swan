@@ -11,8 +11,7 @@ so a calendar review can never touch the approved YouTube project or the Gmail p
 | Thing | Value |
 | --- | --- |
 | Permissions (scopes) | `openid`, `.../auth/userinfo.email`, `https://www.googleapis.com/auth/calendar.events` |
-| Redirect URI — prod | `https://bemoreswan.com/api/oauth/google_calendar/callback` |
-| Redirect URI — staging | `https://staging--bemoreswan.netlify.app/api/oauth/google_calendar/callback` |
+| Redirect URI | `https://bemoreswan.com/api/oauth/google_calendar/callback` (prod ONLY — see the staging note) |
 | Netlify settings | `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET` |
 | Authorised domain | `bemoreswan.com` |
 
@@ -67,9 +66,14 @@ scopes" if it isn't listed):
 - Application type: **Web application**
 - Name: `Be More Swan — booking calendar`
 - Authorised JavaScript origins: leave empty
-- Authorised redirect URIs: add **both**
-  - `https://bemoreswan.com/api/oauth/google_calendar/callback`
-  - `https://staging--bemoreswan.netlify.app/api/oauth/google_calendar/callback`
+- Authorised redirect URIs: **only** `https://bemoreswan.com/api/oauth/google_calendar/callback`
+
+⚠️ **Never add the staging address to this client or its Authorised domains.** Google verifies only domains you can
+prove you own in Search Console, and nobody can own a `*.netlify.app` address — leaving it in blocks verification
+(found 2026-11-11; Google also refuses to delete the domain while a client still uses it, so remove the redirect URI
+first). For Google sign-in on staging, make a SECOND project, `Be More Swan Calendar (staging)`, left in Testing, whose
+client has only `https://staging--bemoreswan.netlify.app/api/oauth/google_calendar/callback`, and put its two keys on
+Netlify under the **Branch deploys** context (prod keeps this project's keys).
 - **Create**, then copy the **Client ID** and **Client secret**. (The secret is shown once in full — download the
   JSON if offered, and keep it somewhere safe. Don't paste it into a chat.)
 
@@ -85,8 +89,8 @@ we stop reading and delete the busy times we stored (events already added stay i
 
 ## 6. Switch it on (Netlify)
 
-Netlify ▸ site **bemoreswan** ▸ **Site configuration ▸ Environment variables** ▸ **Add a variable** (all deploy
-contexts — staging is a branch deploy of the same site, so it uses the same values):
+Netlify ▸ site **bemoreswan** ▸ **Site configuration ▸ Environment variables** ▸ **Add a variable** (Production
+context — or all contexts until a staging project exists; staging only works with the staging project's keys):
 - `GOOGLE_CALENDAR_CLIENT_ID` = the Client ID
 - `GOOGLE_CALENDAR_CLIENT_SECRET` = the Client secret (mark it secret)
 
@@ -94,7 +98,8 @@ Then **Deploys ▸ Trigger deploy ▸ Deploy site** (and redeploy `staging`) so 
 
 ## 7. Try it (with a test user)
 
-On staging, in a workspace that takes bookings (Marmalade, org 58, has a test setup):
+Done on staging 2026-11-11 (Marmalade, org 58) before the staging address was removed. Now, on prod (or on staging
+with the staging project's keys), in a workspace that takes bookings:
 1. Business Information ▸ Bookings ▸ Your calendar: the **Use Google Calendar?** box now shows. If Outlook is
    connected, disconnect it first — one calendar at a time.
 2. **Connect Google calendar** ▸ choose a test-user account ▸ Google warns "Google hasn't verified this app" while
@@ -114,7 +119,8 @@ Tell Claude what happened at each step if anything looks wrong.
    - **Why each scope is needed** — for `calendar.events`: "Business owners connect their Google calendar so
      bookings made on their Be More Swan website appear in it, times they're busy can't be booked, and video
      bookings can get a Google Meet link. We read only event start and end times, and only change events we created."
-   - **A demo video** (YouTube, unlisted is fine) showing, in English: the Be More Swan screen with **Connect Google
+   - The scope justification and the video link go on **Data access** (the Verification centre only summarises them).
+   - **A demo video** recorded on **bemoreswan.com** (the client only knows the prod address), showing, in English: the Be More Swan screen with **Connect Google
      calendar**; the Google consent screen with the app name and the **calendar.events** permission visible and the
      browser address bar showing the client ID; connecting; a busy time blocking a booking slot; a booking appearing
      in Google Calendar; a Google Meet link being made; disconnecting. Same scopes in the video as in the console.

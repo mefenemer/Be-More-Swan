@@ -20,6 +20,9 @@
 //        name-caption style, changed without re-planning (free; a ready video gets a new version first)
 //   POST { action:'add_note', id, atS, text }           → a note on a moment of a ready video, tied to its scene
 //   POST { action:'rename_chapter', id, chapter | sceneId, title } → rename a ready video's chapter ('' = its own name)
+//   POST { action:'translate_captions', id, language } → translated captions (1 task; caption-translate.ts)
+//   POST { action:'remove_translation', id, language }
+//   GET  ?id&youtube=1[&fresh=1] → how it's doing on YouTube · ?id&captions=en|<code>&format=srt|vtt → a caption file
 //   POST { action:'delete_note', id, noteId }
 //   POST { action:'notes_to_version', id }              → a new version that turns those notes into scene edits (free)
 //   POST { action:'reshape', id, shapes? }              → the same video in the other shapes (free when nothing
@@ -52,9 +55,13 @@ import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { startClip, holdBuild, projectView, readBrief, libraryPictures, sweepStuckProjects, withSetupDefaults, startProject, wakeVideoWorker, wakeRenderWorker, newVersion, sceneLooks, makeOtherShapes, videoResultsFor, type ProjectTimeline } from '../../src/utils/video-producer';
-import { enforceStoryboard, isVideoShape, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
+import { enforceStoryboard, isVideoShape, readCutWords, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
+import { CAPTION_LANGUAGES, toSrt, toVtt, YT_EXTENDED_SCOPES_FLAG } from '../../src/lib/youtube-extras';
+import { isFeatureEnabled } from '../../src/utils/feature-flags';
+import { translationsOf, videoCaptionLines, youtubeResultsFor } from '../../src/utils/youtube-video';
+import { removeTranslation, translateCaptions } from '../../src/utils/caption-translate';
 import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
 import { ownMusicTrack, ownMusicTracks } from '../../src/utils/video-music-asset';
 import { isVideoLook } from '../../src/lib/video-look';
@@ -70,7 +77,7 @@ import { randomUUID } from 'crypto';
 import { activeVideoProducer, videoFromPost } from '../../src/utils/video-handoff';
 import { asOwnVideos, canAffordReview, footageStatus, loadFootage } from '../../src/utils/footage-review';
 import { getTaskCosts } from '../../src/utils/task-costs';
-import { tightenStoryboard, type FootageReview } from '../../src/lib/footage';
+import { findPhrase, tightenStoryboard, type FootageReview } from '../../src/lib/footage';
 import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -132,6 +139,38 @@ export default withLambda(async (event) => {
         }
         await sweepStuckProjects(db, orgId).catch((err) => console.error('[video-projects] sweep failed:', err));
         const id = Number(event.queryStringParameters?.id);
+        // How a finished video is doing on YouTube (youtube-video.ts): views, likes, comments, and the
+        // drop-off curve once that permission is granted. Read from YouTube at most every six hours.
+        if (Number.isInteger(id) && id > 0 && qs.youtube) {
+            const row = await load(id);
+            if (!row) return json(404, { error: 'Video not found.' });
+            // Whether a reconnect would now ask for the drop-off permission (the switch is on for this workspace).
+            const canAsk = await isFeatureEnabled(orgId, YT_EXTENDED_SCOPES_FLAG).catch(() => false);
+            return json(200, { youtube: await youtubeResultsFor(db, orgId, row, { fresh: qs.fresh === '1' }), canAskPermission: canAsk });
+        }
+        // "Edit the words" on one of the owner's own clips: the words said in that scene's part of their
+        // video, each with its times and whether it's struck out (footage review words; nothing is charged).
+        if (Number.isInteger(id) && id > 0 && qs.sceneWords) {
+            const row = await load(id);
+            const scene = (row?.storyboard as Storyboard | null)?.scenes?.find((s) => s.id === qs.sceneWords);
+            if (!row || !scene || scene.source !== 'own_video' || !scene.assetId || scene.inS == null || scene.outS == null) return json(404, { error: 'That scene isn’t one of your own clips.' });
+            const [video] = await loadFootage(db, orgId, [scene.assetId]);
+            const struck = scene.cutWords ?? [];
+            const words = (video?.words ?? []).filter((w) => w.start >= scene.inS! - 0.02 && w.end <= scene.outS! + 0.02 && w.end > w.start)
+                .slice(0, 600)
+                .map((w) => ({ word: w.word, start: w.start, end: w.end, cut: struck.some((c) => Math.abs(c.start - w.start) < 0.03 && Math.abs(c.end - w.end) < 0.03) }));
+            return json(200, { words, inS: scene.inS, outS: scene.outS });
+        }
+        // A caption file: ?captions=en (as spoken) or a translation's code, &format=srt|vtt.
+        if (Number.isInteger(id) && id > 0 && qs.captions) {
+            const row = await load(id);
+            if (!row || row.status !== 'ready') return json(404, { error: 'Video not found.' });
+            const lines = qs.captions === 'en' ? await videoCaptionLines(db, orgId, row.timeline) : translationsOf(row.timeline)[qs.captions] ?? [];
+            if (!lines.length) return json(404, { error: 'No captions in that language yet.' });
+            const vtt = qs.format === 'vtt';
+            const name = `${(row.title || 'video').replace(/[^\w\- ]+/g, '').trim().slice(0, 60) || 'video'}-${qs.captions}.${vtt ? 'vtt' : 'srt'}`;
+            return { statusCode: 200, headers: { 'Content-Type': vtt ? 'text/vtt; charset=utf-8' : 'application/x-subrip; charset=utf-8', 'Content-Disposition': `attachment; filename="${name}"`, 'Cache-Control': 'private, no-store' }, body: vtt ? toVtt(lines) : toSrt(lines) };
+        }
         if (Number.isInteger(id) && id > 0) {
             const row = await load(id);
             return row ? json(200, { project: await projectView(db, orgId, row) }) : json(404, { error: 'Video not found.' });
@@ -155,6 +194,8 @@ export default withLambda(async (event) => {
             brand: { accent: kit.primaryColor, font: textFont(kit.fontFamily) },
             // Which AI clip styles can have sound with the model each uses now (fal-gateway clipSoundAvailable).
             clipSound: Object.fromEntries(CLIP_STYLES.map((st) => [st, clipSoundAvailable(i2vModel(new Date(), st))])),
+            // The languages captions can be translated into (youtube-extras.ts), for the Translate picker.
+            captionLanguages: CAPTION_LANGUAGES,
         });
     }
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -341,6 +382,16 @@ export default withLambda(async (event) => {
         await db.update(videoProjects).set({ timeline: { ...tl, chapterTitles: done.titles }, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
         return json(200, { chapter: done.chapter, project: await projectView(db, orgId, (await load(row.id))!) });
     }
+    // ── Translated captions (caption-translate.ts): 1 task a language, charged once it's saved ──
+    if (action === 'translate_captions') {
+        const r = await translateCaptions(db, row, body.language);
+        if (!r.ok) return json(r.status, { error: r.error, ...(r.cost != null ? { unit: 'tasks', cost: r.cost } : {}) });
+        return json(200, { translated: r, project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+    if (action === 'remove_translation') {
+        await removeTranslation(db, row, body.language);
+        return json(200, { project: await projectView(db, orgId, (await load(row.id))!) });
+    }
     if (action === 'notes_to_version') {
         if (row.status !== 'ready' || !row.storyboard) return json(409, { error: 'Notes become a new version of a finished video.' });
         const notes = readNotes(row.momentNotes);
@@ -515,6 +566,11 @@ export default withLambda(async (event) => {
         if (typeof patch.tighten === 'boolean') { if (patch.tighten) delete scene.tighten; else scene.tighten = false; }
         if (patch.inS != null) scene.inS = Number(patch.inS);
         if (patch.outS != null) scene.outS = Number(patch.outS);
+        // "Edit the words": the words the owner struck out, by their times in the source ([] puts them all back).
+        if (Array.isArray(patch.cutWords) && scene.source === 'own_video' && scene.inS != null && scene.outS != null) {
+            const cw = readCutWords(patch.cutWords, scene.inS, scene.outS);
+            if (cw.length) scene.cutWords = cw; else delete scene.cutWords;
+        }
         // A name caption on the scene ({ name, role }), or null / an empty name to take it off.
         // The words' place, timing, look and entrance (scene-text.ts). null clears one back to the default.
         for (const k of ['textPos', 'textWhen', 'textStyle', 'textAnim'] as const) {
@@ -532,6 +588,13 @@ export default withLambda(async (event) => {
         }
         const brief = row.brief as VideoBrief;
         const footage = await loadFootage(db, orgId, brief.footageAssetIds ?? []);
+        // A chat card names words to cut as they were said: found in the scene's part of the video, then struck out.
+        if (typeof patch.cutPhrase === 'string' && patch.cutPhrase.trim() && scene.source === 'own_video' && scene.assetId && scene.inS != null && scene.outS != null) {
+            const words = footage.find((f) => f.id === scene.assetId)?.words ?? [];
+            const hit = findPhrase(words.filter((w) => w.start >= scene.inS! - 0.02 && w.end <= scene.outS! + 0.02), patch.cutPhrase);
+            if (!hit.length) return json(400, { error: 'Those words aren’t said in that scene. Use “Edit the words” on the Videos tab to pick them.' });
+            scene.cutWords = readCutWords([...(scene.cutWords ?? []), ...hit.map((w) => ({ start: w.start, end: w.end }))], scene.inS, scene.outS);
+        }
         const enforced = enforceStoryboard(sb, brief, await libraryPictures(db, orgId), asOwnVideos(footage));
         // A changed cut, or "Keep as filmed", is tightened again from the review's words.
         const tightened = footage.length ? tightenStoryboard(enforced.storyboard, brief, footage) : { storyboard: enforced.storyboard, changes: [] };
