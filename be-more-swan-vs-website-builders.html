@@ -121,6 +121,51 @@
         .vs-cost.vs-cost-us .vs-num { color: var(--color-emerald-700); }
         .vs-note { font-size:.9rem; color:#6b7280; line-height:1.6; margin-top:1.5rem; text-align:center; }
 
+        /* At a glance: marks, not sentences (2026-11-11). Fits a phone without scrolling. */
+        .vs-glance-box { margin-top: 2.5rem; border:1px solid #f0ebe0; border-radius:1.25rem; background:#fff; overflow:hidden; }
+        .vs-glance { width:100%; border-collapse:collapse; table-layout:fixed; font-size:.92rem; }
+        .vs-glance th, .vs-glance td { padding:.75rem .35rem; border-bottom:1px solid #f3efe6; text-align:center; vertical-align:middle; line-height:1.3; }
+        .vs-glance tr:last-child th, .vs-glance tr:last-child td { border-bottom:0; }
+        .vs-glance tbody th { text-align:left; font-weight:600; color:#111827; width:30%; padding-left:1rem; }
+        .vs-glance thead th { font-size:.75rem; font-weight:700; color:#6b7280; background:#fcfbf8; overflow-wrap:anywhere; }
+        .vs-glance .vs-us { background: var(--color-emerald-50); }
+        .vs-glance thead .vs-us { color: var(--color-emerald-700); }
+        .vs-mark { display:inline-block; width:1.35rem; height:1.35rem; border-radius:9999px; vertical-align:middle; position:relative; }
+        .vs-y { background: var(--color-emerald-700); }
+        .vs-y::after { content:''; position:absolute; left:.45rem; top:.24rem; width:.35rem; height:.65rem; border:solid #fff; border-width:0 .16rem .16rem 0; transform:rotate(45deg); }
+        .vs-h { border:.16rem solid #d97706; background: linear-gradient(90deg, #d97706 50%, #fff 50%); }
+        .vs-n { background:#f3f4f6; }
+        .vs-n::after { content:''; position:absolute; left:.38rem; right:.38rem; top:50%; height:.14rem; margin-top:-.07rem; background:#9ca3af; border-radius:1px; }
+        .vs-cap { display:block; font-size:.72rem; color:#6b7280; margin-top:.3rem; }
+        .vs-price-row th, .vs-price-row td { font-weight:800; color:#111827; font-size:1rem; }
+        .vs-legend { display:flex; flex-wrap:wrap; gap:1rem; justify-content:center; margin-top:1rem; font-size:.85rem; color:#6b7280; }
+        .vs-legend .vs-mark { width:1rem; height:1rem; margin-right:.3rem; }
+        .vs-legend .vs-y::after { left:.33rem; top:.15rem; width:.25rem; height:.5rem; }
+        .vs-legend .vs-n::after { left:.25rem; right:.25rem; }
+        .vs-import { margin:1.5rem auto 0; max-width:46rem; text-align:center; font-size:1rem; color:#4b5563; line-height:1.6; }
+        .vs-import strong { color:#111827; }
+        .vs-more { margin-top:2rem; }
+        .vs-more > summary { cursor:pointer; list-style:none; text-align:center; font-weight:700; color: var(--color-emerald-700); }
+        .vs-more > summary::-webkit-details-marker { display:none; }
+        .vs-more > summary::after { content:' +'; }
+        .vs-more[open] > summary::after { content:' \2212'; }
+        /* Phone: each feature's name goes on its own line above its five marks, so the marks get the full width. */
+        @media (max-width: 640px) {
+            .vs-glance, .vs-glance thead, .vs-glance tbody { display:block; }
+            .vs-glance tr { display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); }
+            .vs-glance thead th:first-child { display:none; }
+            .vs-glance tbody th { grid-column:1 / -1; width:auto; padding:.7rem .75rem .1rem; border-bottom:0; font-size:.85rem; background:#fff; }
+            .vs-glance td { padding:.35rem .15rem .7rem; }
+            .vs-glance thead th { font-size:.62rem; letter-spacing:0; padding:.6rem .15rem; }
+            .vs-cap { font-size:.66rem; }
+        }
+        /* Wins: four one-liners */
+        .vs-wins { display:grid; grid-template-columns:1fr; gap:1rem; margin-top:2rem; }
+        @media (min-width: 768px) { .vs-wins { grid-template-columns:repeat(2,1fr); } }
+        .vs-win { background:#fff; border:1px solid #f0ebe0; border-radius:1rem; padding:1.25rem 1.5rem; display:flex; gap:.9rem; align-items:flex-start; }
+        .vs-win .vs-mark { flex:none; margin-top:.15rem; }
+        .vs-win h3 { font-size:1.05rem; font-weight:800; color:#111827; margin:0 0 .25rem; }
+        .vs-win p { margin:0; color:#4b5563; line-height:1.55; }
         /* Promise cards */
         .vs-cards { display:grid; grid-template-columns:1fr; gap:1rem; margin-top:2.5rem; }
         @media (min-width: 768px) { .vs-cards { grid-template-columns:repeat(2,1fr); } }
@@ -199,9 +244,31 @@
     <section class="vs-section vs-section-white">
         <div class="vs-wrap">
             <div class="vs-narrow vs-center">
-                <h2 class="vs-h2">Features side by side</h2>
-                <p class="vs-lead">Five ways to get a small business website, compared on the things that decide how much of the work is yours.</p>
+                <h2 class="vs-h2">At a glance</h2>
+                <p class="vs-lead">Five ways to get a small business website, compared on how much of the work is yours.</p>
             </div>
+            <div class="vs-glance-box">
+                <table class="vs-glance">
+                    <thead><tr><th scope="col"><span class="sr-only">Feature</span></th><th scope="col" class="vs-us">Be More Swan</th><th scope="col">Square&shy;space</th><th scope="col">Wix</th><th scope="col">Webador</th><th scope="col">Lovable</th></tr></thead>
+                    <tbody>
+                        <tr><th scope="row">Writes your pages</th><td class="vs-us"><span class="vs-mark vs-y" role="img" aria-label="Built in"></span><span class="vs-cap">never makes up facts</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">starter text</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">starter text</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">first draft</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">from prompts</span></td></tr>
+                        <tr><th scope="row">Free changes</th><td class="vs-us"><span class="vs-mark vs-y" role="img" aria-label="Built in"></span></td><td><span class="vs-mark vs-y" role="img" aria-label="Built in"></span></td><td><span class="vs-mark vs-y" role="img" aria-label="Built in"></span></td><td><span class="vs-mark vs-y" role="img" aria-label="Built in"></span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">uses credits</span></td></tr>
+                        <tr><th scope="row">Online shop</th><td class="vs-us"><span class="vs-mark vs-y" role="img" aria-label="Built in"></span><span class="vs-cap">no fee from us</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">2% fee on Basic</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">Core plan and up</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">Pro or Business</span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span><span class="vs-cap">build it yourself</span></td></tr>
+                        <tr><th scope="row">Bookings</th><td class="vs-us"><span class="vs-mark vs-y" role="img" aria-label="Built in"></span><span class="vs-cap">incl. video calls and stays</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">extra subscription</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">Core plan and up</span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span><span class="vs-cap">build it yourself</span></td></tr>
+                        <tr><th scope="row">Review requests</th><td class="vs-us"><span class="vs-mark vs-y" role="img" aria-label="Built in"></span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">add-on</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">app</span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span></td></tr>
+                        <tr><th scope="row">Blog written for you</th><td class="vs-us"><span class="vs-mark vs-y" role="img" aria-label="Built in"></span><span class="vs-cap">Blog Assistant</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">you write it</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">you write it</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">you write it</span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span></td></tr>
+                        <tr><th scope="row">Weekly competitor check</th><td class="vs-us"><span class="vs-mark vs-y" role="img" aria-label="Built in"></span><span class="vs-cap">Mystery Shopper</span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span></td></tr>
+                        <tr><th scope="row">Business help</th><td class="vs-us"><span class="vs-mark vs-y" role="img" aria-label="Built in"></span><span class="vs-cap">Business Mentor</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">marketing add-ons</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">marketing suite</span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span></td><td><span class="vs-mark vs-n" role="img" aria-label="Not included"></span></td></tr>
+                        <tr><th scope="row">Design freedom</th><td class="vs-us"><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">layout done for you</span></td><td><span class="vs-mark vs-y" role="img" aria-label="Built in"></span></td><td><span class="vs-mark vs-y" role="img" aria-label="Built in"></span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">fewer designs</span></td><td><span class="vs-mark vs-y" role="img" aria-label="Built in"></span></td></tr>
+                        <tr><th scope="row">Free plan</th><td class="vs-us"><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">14-day trial</span></td><td><span class="vs-mark vs-h" role="img" aria-label="Partly, or costs extra"></span><span class="vs-cap">trial only</span></td><td><span class="vs-mark vs-y" role="img" aria-label="Built in"></span><span class="vs-cap">with Wix ads</span></td><td><span class="vs-mark vs-y" role="img" aria-label="Built in"></span><span class="vs-cap">no own domain</span></td><td><span class="vs-mark vs-y" role="img" aria-label="Built in"></span><span class="vs-cap">daily credits</span></td></tr>
+                        <tr class="vs-price-row"><th scope="row">From, a month</th><td class="vs-us"><span data-plan-prices-ready hidden><span data-plan-price="saver"></span></span></td><td>£12</td><td>£9</td><td>£4.50</td><td>$21</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="vs-legend"><span><span class="vs-mark vs-y" aria-hidden="true"></span>Built in</span><span><span class="vs-mark vs-h" aria-hidden="true"></span>Partly, or costs extra</span><span><span class="vs-mark vs-n" aria-hidden="true"></span>Not included</span></div>
+            <p class="vs-import"><strong>Already have a site?</strong> Bring it over from Wix, Squarespace, WordPress, Webflow, Shopify, Lovable or almost any other builder, with your words, pictures, colours and fonts.</p>
+            <details class="vs-more">
+            <summary>Compare in detail</summary>
             <div class="vs-table-box">
                 <table class="vs-table">
                     <thead>
@@ -339,6 +406,7 @@
                 </table>
             </div>
             <span class="vs-scroll-hint">Swipe the table to see every builder</span>
+            </details>
         </div>
     </section>
 
@@ -353,7 +421,7 @@
                 <div class="vs-cost vs-cost-us">
                     <strong>Be More Swan</strong>
                     <span class="vs-num"><span data-plan-prices-ready hidden><span data-plan-price="saver"></span> <small>a month</small></span></span>
-                    <p>Your Website Assistant and Business Mentor on The Workflow Saver. Hosting, shop, bookings, forms and reviews included, and no plan limits your pages.</p>
+                    <p>The Workflow Saver: Website Assistant and Business Mentor, with hosting, shop, bookings, forms and reviews.</p>
                     <p><span data-plan-prices-ready hidden>Add your Mystery Shopper, Blog Assistant and every other assistant: <span data-plan-price="buster"></span> a month.</span> Prices exclude VAT; save 20% when you pay annually.</p>
                 </div>
                 <div class="vs-cost">
@@ -391,43 +459,11 @@
             <div class="vs-narrow vs-center">
                 <h2 class="vs-h2">Where Be More Swan wins</h2>
             </div>
-            <div class="vs-cards">
-                <div class="vs-card">
-                    <h3>The words are done for you</h3>
-                    <p>The hard part of a website is knowing what to say. Your Website Assistant drafts every page from what it already knows about your business: headings, wording, the questions buyers ask and a clear next step, in plain British English.</p>
-                </div>
-                <div class="vs-card">
-                    <h3>It never makes things up</h3>
-                    <p>It only states what&rsquo;s in your business details and products. Where a page needs a fact only you know, like a customer quote or how long you&rsquo;ve been trading, it leaves a clear [placeholder], and the editor lists every one left before you publish.</p>
-                </div>
-                <div class="vs-card">
-                    <h3>Changes don&rsquo;t cost you credits</h3>
-                    <p>Edit the words yourself, or ask in chat and see exactly what will change before anything is saved. Editing and approving changes is free. A whole-site draft or an import uses <span data-task-cost="site_draft">1 task</span> from your monthly allowance.</p>
-                </div>
-                <div class="vs-card">
-                    <h3>Bring your current site with you</h3>
-                    <p>Already on Squarespace, Wix, WordPress, Webflow, Shopify or almost any other builder, or built your site with Lovable? Give the Website Assistant the address and it brings your home page and menu pages into a draft, with your own words as they are, your pictures, and your colours and fonts. You compare it with your current site and choose whether to use it.</p>
-                </div>
-                <div class="vs-card">
-                    <h3>Shop, bookings, forms and reviews, without add-ons</h3>
-                    <p>Sell your products with checkout on your own Stripe account, and we take no cut. Take bookings for appointments, classes, events and holiday-let stays, with deposits, reminders and calendar sync. Collect enquiries and sign-ups, and ask happy customers for a review. All part of your Website Assistant, with no extra apps to buy.</p>
-                </div>
-                <div class="vs-card">
-                    <h3>A Mystery Shopper that gets things fixed</h3>
-                    <p>Every week your Mystery Shopper reads your site the way buyers do, scores it against up to three competitors and suggests what to change, with the wording written. Hand a change to your Website Assistant and it makes it once you approve. After you publish, the Mystery Shopper checks the change is live.</p>
-                </div>
-                <div class="vs-card">
-                    <h3>A blog that writes itself, on your own site</h3>
-                    <p>Articles from your Blog Assistant appear on your website at /blog, in your voice and only once you&rsquo;ve approved them. No copying and pasting between tools.</p>
-                </div>
-                <div class="vs-card">
-                    <h3>A website, and someone in your corner</h3>
-                    <p>Every plan includes a Business Mentor that tells you what it would sort out first, helps you plan and checks your week with you. It makes at most 3 suggestions a week, and nothing changes without your click.</p>
-                </div>
-                <div class="vs-card">
-                    <h3>Room to grow beyond the website</h3>
-                    <p>When you&rsquo;re ready, The Busywork Buster adds assistants for social media, blog, email and leads. They share your products, your brand and each other&rsquo;s work, so your site and your marketing say the same thing.</p>
-                </div>
+            <div class="vs-wins">
+                <div class="vs-win"><span class="vs-mark vs-y" aria-hidden="true"></span><div><h3>The words are done for you</h3><p>Every page drafted from your business, with a clear [placeholder] wherever only you know the fact.</p></div></div>
+                <div class="vs-win"><span class="vs-mark vs-y" aria-hidden="true"></span><div><h3>Shop, bookings and reviews built in</h3><p>Checkout on your own Stripe with no cut to us, bookings with deposits and reminders, and review requests after each sale.</p></div></div>
+                <div class="vs-win"><span class="vs-mark vs-y" aria-hidden="true"></span><div><h3>A Mystery Shopper that gets things fixed</h3><p>It scores your site against up to three competitors each week and hands the changes to your Website Assistant to make once you approve.</p></div></div>
+                <div class="vs-win"><span class="vs-mark vs-y" aria-hidden="true"></span><div><h3>A Mentor and a team behind you</h3><p>A Business Mentor on every plan, and assistants for social media, blog, email and leads when you&rsquo;re ready.</p></div></div>
             </div>
         </div>
     </section>
