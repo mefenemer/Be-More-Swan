@@ -222,7 +222,7 @@ check('an AI clip covers the scene\'s spoken length, with the stock margin, in l
     // Hailuo text-to-video (image-to-video off): 6 or 10.
     assert.strictEqual(aiClipSeconds(5.7, 'off'), 6);
     assert.strictEqual(aiClipSeconds(5.8, 'off'), 10);
-    assert.match(read('src/utils/video-producer.ts'), /durationSeconds: aiClipSeconds\(scene\.targetS\),/);
+    assert.match(read('src/utils/video-producer.ts'), /durationSeconds: aiClipSeconds\(scene\.targetS, i2vModel\(new Date\(\), args\.clip\?\.style\)\),/);
 });
 
 check('a build makes its AI clips at the same time, with the other scenes alongside', () => {

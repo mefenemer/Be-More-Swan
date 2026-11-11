@@ -29,6 +29,11 @@
 //   FAL_I2V_MODEL_FROM    — optional date (YYYY-MM-DD, src/config/dated-switch.ts): FAL_I2V_MODEL is
 //                           used from that day, the default before it. Production: Kling 3 from
 //                           2026-12-03, the date in the notice, alongside per-second pricing.
+//   FAL_I2V_MODEL_<STYLE> — optional, per AI clip style (REALISTIC, CINEMATIC, ANIMATED3D, CARTOON2D,
+//                           PRODUCT; src/lib/ai-clip.ts): that style's image-to-video model, used
+//                           whenever it is set; unset = FAL_I2V_MODEL as above. Picking per style is
+//                           bake-off round 2's job (docs/ai-video-bakeoff-2026-11-01.md) — a better model
+//                           is then a configuration change, not a release.
 //   FAL_SAFETY_TOLERANCE  — FLUX safety level 1 (strictest) … 6 (most permissive); default 2
 //   FAL_OUTPUT_FORMAT     — 'png' (default, lossless — best for crisp text overlays) or 'jpeg'
 
@@ -45,7 +50,10 @@ export const VIDEO_MODEL = process.env.FAL_VIDEO_MODEL ?? 'fal-ai/minimax/hailuo
 const DEFAULT_I2V_MODEL = 'fal-ai/kling-video/v2.5-turbo/pro/image-to-video';
 
 /** The image-to-video model in use now. Read per call, so a dated switch takes effect on its day. */
-export function i2vModel(now: Date = new Date()): string {
+export function i2vModel(now: Date = new Date(), style?: string | null): string {
+    // A style's own model (an AI clip on its own), when one is set for it.
+    const forStyle = style && /^[a-z0-9]+$/i.test(style) ? process.env[`FAL_I2V_MODEL_${style.toUpperCase()}`] : undefined;
+    if (forStyle && forStyle !== 'off') return forStyle;
     const chosen = process.env.FAL_I2V_MODEL;
     if (!chosen) return DEFAULT_I2V_MODEL;
     const from = process.env.FAL_I2V_MODEL_FROM;
@@ -394,14 +402,20 @@ export function billedSecondsFor(durationSeconds: number, model: string = i2vMod
 }
 
 /** Kling v3/o3 take any whole length from 3 to 15 s; the v2.x family only 5 or 10. */
+/** Can this model make sound with the picture? The Kling v3 family can (generate_audio); older models can't. */
+export function clipSoundAvailable(model: string): boolean {
+    return takesAnyLength(model);
+}
+
 export function takesAnyLength(model: string): boolean {
     return /\/(v3|o3)\//.test(model);
 }
 
-export function imageToVideoInput(model: string, opts: { imageUrl: string; prompt: string; durationSeconds: number }): { input: Record<string, unknown>; billedSeconds: number } {
+export function imageToVideoInput(model: string, opts: { imageUrl: string; prompt: string; durationSeconds: number; withSound?: boolean }): { input: Record<string, unknown>; billedSeconds: number } {
     if (takesAnyLength(model)) {
         const d = Math.min(Math.max(Math.round(opts.durationSeconds), 3), 15);
-        return { input: { prompt: opts.prompt, start_image_url: opts.imageUrl, duration: String(d), generate_audio: false }, billedSeconds: d };
+        // Sound with the picture (an AI clip "with sound"): ambient only — the prompt asks for no speech.
+        return { input: { prompt: opts.prompt, start_image_url: opts.imageUrl, duration: String(d), generate_audio: opts.withSound === true }, billedSeconds: d };
     }
     const d = opts.durationSeconds > 7 ? 10 : 5;
     return { input: { prompt: opts.prompt, image_url: opts.imageUrl, duration: String(d) }, billedSeconds: d };
@@ -413,6 +427,8 @@ export interface FramedVideoSubmit extends FalSubmitResult {
     billedSeconds: number;
     /** The still the clip starts from (null on the text-to-video fallback). */
     frameUrl: string | null;
+    /** Made with sound (asked for AND the model can) — what the clip is priced by. */
+    withSound?: boolean;
 }
 
 /**
@@ -429,18 +445,23 @@ export async function submitFramedVideo(opts: {
     /** Seconds wanted. Each model makes the nearest length it can (imageToVideoInput, submitVideo). */
     durationSeconds: number;
     usage?: { workspaceId?: number | null; userId?: number | null; assistantId?: number | null };
+    /** An AI clip's style, for its own model when one is set (i2vModel). */
+    style?: string | null;
+    /** Make sound with the picture, where the model can (clipSoundAvailable). */
+    withSound?: boolean;
 }): Promise<FramedVideoSubmit> {
     if (!imageToVideoEnabled()) {
         const d: VideoDurationSeconds = opts.durationSeconds > 6 ? 10 : 6;
         const sub = await submitVideo({ prompt: opts.prompt, durationSeconds: d });
-        return { ...sub, model: VIDEO_MODEL, billedSeconds: d, frameUrl: null };
+        return { ...sub, model: VIDEO_MODEL, billedSeconds: d, frameUrl: null, withSound: false };
     }
     const frameUrl = opts.startImageUrl
         || (await generateImages({ prompt: opts.imagePrompt || opts.prompt, aspectRatio: opts.aspectRatio, numImages: 1, usage: opts.usage }))[0].url;
-    const model = i2vModel();
-    const { input, billedSeconds } = imageToVideoInput(model, { imageUrl: frameUrl, prompt: opts.prompt, durationSeconds: opts.durationSeconds });
+    const model = i2vModel(new Date(), opts.style);
+    const withSound = opts.withSound === true && clipSoundAvailable(model);
+    const { input, billedSeconds } = imageToVideoInput(model, { imageUrl: frameUrl, prompt: opts.prompt, durationSeconds: opts.durationSeconds, withSound });
     const sub = await submit(model, input);
-    return { ...sub, model, billedSeconds, frameUrl };
+    return { ...sub, model, billedSeconds, frameUrl, withSound };
 }
 
 /** Extract the mp4 video URL from a COMPLETED Hailuo job result payload. */

@@ -1967,7 +1967,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('video_tidy_proposal', renderVideoTidyProposalCard);
 
-  // { type: 'video_clip_proposal', description, style, lengthS, shape }
+  // { type: 'video_clip_proposal', description, style, lengthS, shape, sound? }
   // An AI clip on its own (src/lib/ai-clip.ts): saving it is free. The first frame (1 task) and the clip
   // itself are buttons on the Videos tab, which say what they use — a chat card never spends.
   const CLIP_STYLE_NAMES = { realistic: 'Realistic', cinematic: 'Cinematic', animated3d: '3D animated', cartoon2d: '2D cartoon', product: 'Product close-up' };
@@ -1978,9 +1978,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const shape = VIDEO_SHAPE_NAMES[ui.shape] ? ui.shape : '9:16';
     return videoActionCard(esc, {
       kicker: 'New AI clip',
-      rows: [['Shows', description || '(nothing yet)'], ['Style', CLIP_STYLE_NAMES[style]], ['Length', `${lengthS} seconds`], ['Shape', VIDEO_SHAPE_NAMES[shape]]],
+      rows: [['Shows', description || '(nothing yet)'], ['Style', CLIP_STYLE_NAMES[style]], ['Length', `${lengthS} seconds`], ['Shape', VIDEO_SHAPE_NAMES[shape]], ui.sound === true ? ['Sound', 'Natural background sound, no speech (1.5× the clip’s tasks, where the model can make it)'] : null],
       note: 'Free to save. On the Videos tab you see its first frame (1 task) before the clip is made, and “Make the clip” says what it uses. Made-up people only.',
-      button: 'Save the clip', body: description.length >= 8 ? { action: 'clip_create', description, style, lengthS, shape } : null,
+      button: 'Save the clip', body: description.length >= 8 ? { action: 'clip_create', description, style, lengthS, shape, sound: ui.sound === true } : null,
       done: 'Saved. Press “See the first frame” on the Videos tab.',
     });
   }

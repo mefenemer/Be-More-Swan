@@ -143,7 +143,7 @@ check('the pricing row (live 2026-10-31) is in the migrations and the seed, on t
     const faq = read('faq.html');
     assert.ok(faq.includes('What does the Video Producer make?') && faq.includes('Does making a video use my tasks?'));
     // Today's flat price (filled in live by /task-costs.js), and the per-second price from the date in the 30 days' notice.
-    assert.match(faq, new RegExp(`${DEFAULT_TASK_WEIGHTS.ai_video} tasks</span> for an AI clip \\(at most ${MAX_AI_CLIPS} in a video; from 3 December 2026, ${DEFAULT_TASK_COSTS.videoTasksPerSecond} tasks for each second of clip\\)`));
+    assert.match(faq, new RegExp(`${DEFAULT_TASK_WEIGHTS.ai_video} tasks</span> for an AI clip \\(at most ${MAX_AI_CLIPS} in a video; from 3 December 2026, ${DEFAULT_TASK_COSTS.videoTasksPerSecond} tasks for each second of clip; one and a half times that for a single AI clip with sound\\)`));
 });
 
 check('the Mentor recommends it only when Live, on a plan with video, with someone posting', () => {

@@ -15,6 +15,7 @@
 // (db/youtube-upload-resume.sql). This worker then re-triggers itself to carry on. A video too big
 // for one invocation therefore completes across several, instead of restarting from zero forever.
 
+import { postHasAiVideo } from '../../src/utils/ai-disclosure';
 import { HandlerEvent } from '@netlify/functions';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -84,10 +85,13 @@ export default withLambda(async (event: HandlerEvent) => {
         // post is unaffected — that person chose the video themselves.
         const isAutonomousShort = isYoutubeShortFormat(post.formatKey) && post.triggerType !== 'manual';
 
+        // AI-made footage is declared to YouTube as altered or synthetic content (ai-disclosure.ts).
+        const synthetic = await postHasAiVideo(db, post.organisationId!, post.contentAssetIds);
         const outcome = await publishYouTubeResumable(meta, creds.token, video, {
             deadlineMs: Date.now() + UPLOAD_BUDGET_MS,
             resume: prior ?? undefined,
             ...(isAutonomousShort ? { privacyStatus: 'unlisted' as const } : {}),
+            ...(synthetic ? { containsSyntheticMedia: true } : {}),
         });
 
         if (outcome.kind === 'incomplete') {

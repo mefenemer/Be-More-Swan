@@ -58,7 +58,8 @@ import { ownMusicTrack, ownMusicTracks } from '../../src/utils/video-music-asset
 import { isVideoLook } from '../../src/lib/video-look';
 import { isLowerThirdStyle, readNameCaption } from '../../src/lib/lower-third';
 import { readSceneText } from '../../src/lib/scene-text';
-import { clipPrompt, clipRefusal, clipTargetS, isClipLength, isClipStyle, type ClipLength } from '../../src/lib/ai-clip';
+import { clipPrompt, clipRefusal, clipTargetS, isClipLength, isClipStyle, CLIP_STYLES, type ClipLength } from '../../src/lib/ai-clip';
+import { clipSoundAvailable, i2vModel } from '../../src/lib/fal-gateway';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { isOwnVoice, keepRecordings, linesToRecord, MAX_LINE_S, MAX_WHOLE_S, prepareOwnRecording } from '../../src/utils/own-voice';
@@ -150,6 +151,8 @@ export default withLambda(async (event) => {
         return json(200, {
             projects: await Promise.all([...live, ...archived].map((r) => projectView(db, orgId, r))),
             brand: { accent: kit.primaryColor, font: textFont(kit.fontFamily) },
+            // Which AI clip styles can have sound with the model each uses now (fal-gateway clipSoundAvailable).
+            clipSound: Object.fromEntries(CLIP_STYLES.map((st) => [st, clipSoundAvailable(i2vModel(new Date(), st))])),
         });
     }
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -238,7 +241,9 @@ export default withLambda(async (event) => {
         if (blocked) return blocked;
         const brief = {
             message: description, lengthS: 15, voiceover: false, allowAi: 'ai_first', musicMood: 'none', captions: false,
-            shape, platforms: ['instagram'], clip: { style, lengthS, description },
+            shape, platforms: ['instagram'],
+            // Sound only where this style's model can make it — otherwise it would be promised and never made.
+            clip: { style, lengthS, description, ...(body.sound === true && clipSoundAvailable(i2vModel(new Date(), style)) ? { sound: true } : {}) },
         } as unknown as VideoBrief;
         const storyboard: Storyboard = {
             title: `AI clip — ${description.slice(0, 50)}`, caption: '',

@@ -96,7 +96,7 @@ export interface VideoBrief {
      * An AI clip on its own (src/lib/ai-clip.ts): one ai_video scene, no voiceover, music or captions. The
      * owner sees its first frame (the scene's assetId, an AI picture) before the clip is made from it.
      */
-    clip?: { style: string; lengthS: number; description: string } | null;
+    clip?: { style: string; lengthS: number; description: string; sound?: boolean } | null;
     /** The voiceover is the owner's own recordings, not an AI voice (src/utils/own-voice.ts). Never both. */
     ownVoice?: boolean | null;
     /** How loud the music sits: 'quiet' | 'normal' | 'loud' (src/lib/video-music.ts). Absent = normal. */
