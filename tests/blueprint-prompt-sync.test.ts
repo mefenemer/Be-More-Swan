@@ -163,7 +163,8 @@ test('every content-rule mutation recompiles the blueprint', () => {
         assert.match(
             rulesFn,
             // [^;]* not [^)]* — the create call passes Number(assistantId), parens and all.
-            new RegExp(`recompileAfterRuleChange\\([^;]*'${mutation}'\\)`),
+            // recompileForRule = the same, widened to every assistant when a workspace-wide rule (FR#10) is touched.
+            new RegExp(`recompile(?:AfterRuleChange|ForRule)\\([^;]*'${mutation}'\\)`),
             `the ${mutation} path must recompile`,
         );
     }

@@ -910,7 +910,7 @@
     }
     // The Video Producer's other cards (2026-11-10): script, options, notes, other shapes — each the same
     // video-projects.ts action as its button on the Videos tab. Only these actions; none spends.
-    const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete', 'clip_create'];
+    const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'rename_chapter', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete', 'clip_create'];
     function onVideoAction(e) {
       const d = e.detail || {};
       const respond = typeof d.respond === 'function' ? d.respond : () => {};
@@ -1340,19 +1340,20 @@
       try {
         let message = 'Saved.';
         if (d.action === 'add') {
-          const r = await call('content-rules', 'POST', { assistantId: Number(d.assistantId), ruleText: d.ruleText, platform: d.platform || null });
-          message = r.rule?.id
-            ? `Saved as rule #${r.rule.id} — your assistant follows it from now on.`
-            : 'Saved — your assistant follows it from now on.';
+          const everyone = d.scope === 'workspace';
+          const r = await call('content-rules', 'POST', { assistantId: Number(d.assistantId), ruleText: d.ruleText, platform: everyone ? null : (d.platform || null), ...(everyone ? { scope: 'workspace' } : {}) });
+          const who = everyone ? 'every one of your assistants follows it' : 'your assistant follows it';
+          message = r.rule?.id ? `Saved as rule #${r.rule.id} — ${who} from now on.` : `Saved — ${who} from now on.`;
         } else if (d.action === 'edit') {
           await call('content-rules', 'PATCH', { id, ruleText: d.ruleText });
-          message = 'Reworded — it follows the new wording from now on.';
+          message = d.scope === 'workspace' ? 'Reworded for every assistant, from now on.' : 'Reworded — it follows the new wording from now on.';
         } else if (d.action === 'turn_off' || d.action === 'turn_on') {
           await call('content-rules', 'PATCH', { id, isActive: d.action === 'turn_on' });
           message = d.action === 'turn_on' ? 'Switched back on.' : 'Switched off — it’s kept, and you can switch it back on any time.';
+          if (d.scope === 'workspace') message += ' This applies to every assistant.';
         } else if (d.action === 'delete') {
           await call(`content-rules?id=${id}`, 'DELETE');
-          message = 'Deleted.';
+          message = d.scope === 'workspace' ? 'Deleted for every assistant.' : 'Deleted.';
         } else {
           throw new Error('Unknown change.');
         }

@@ -93,7 +93,8 @@ import { DISCUSSIONS_ENABLED } from '../../src/config/discussion-sites';
 import {
     assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
 } from '../../src/utils/chat-assistant-settings';
-import { RULE_TEXT_MAX, buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, shortenRuleText, type RuleCard } from '../../src/utils/chat-rules';
+import { canManageWorkspaceRules } from '../../src/utils/workspace-rules';
+import { RULE_TEXT_MAX, buildRulesListBlock, mentorRulesPromptBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, shortenRuleText, type RuleCard } from '../../src/utils/chat-rules';
 import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, resolveTeamGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
 import { introOfferCardFromUiElement, introOfferPromptBlock, type IntroOfferCard } from '../../src/utils/intro-offer';
@@ -824,7 +825,7 @@ function brandDesignerSurfaces(): string {
 function videoProducerSurfaces(): string {
     return `YOUR OWN DASHBOARD — tabs and buttons on YOUR page inside this platform, never outside tools:
 - "Videos" tab — the tab the user lands on. "New video" at the top writes a brief without chatting (what it should say, "Who it's for", "What should they do?", length, call to action, voice, "Music", "Colour look", "Name captions", captions and shape). Each video shows one sentence on what it is waiting for. A planned video with a voiceover first shows "Step 1 of 2 — the words": the whole script, with "Approve the script — free" and "Rewrite the words". Below it, the storyboard shows every scene's words and its picture side by side, with "Change" on each scene (which also sets a scene's name caption), and the "Music" (with "Another track"), "Colour look" and "Name captions" choices; then "Make the video" (it states the tasks first, and only appears once the script is approved), "Plan it again" (with notes) and "Cancel".
-- A finished ("Ready") video plays on the "Videos" tab with a strip of its scenes under the player: clicking a moment on the strip, or "📝 Note on this moment", leaves a note on that scene. Their notes are listed beside it with "Make a new version from my notes — free". It also has "Download", "Change it", "Make it … too — free" (the same video in the shapes it isn't in yet) and "Source files for this version" (every file it was made from, to download).
+- A finished ("Ready") video plays on the "Videos" tab with skip buttons under the player (back 10 s, back 5 s, forward 5 s, forward 10 s) and a strip of its scenes: clicking a moment on the strip, or "📝 Note on this moment", leaves a note on that scene. Their notes are listed beside it with "Make a new version from my notes — free". It also has "Download", "Change it", "Make it … too — free" (the same video in the shapes it isn't in yet) and "Source files for this version" (every file it was made from, to download).
 - "My Content" tab — the library every finished video is saved to (it opens on videos; the filter shows their pictures and other files too). They play, download or delete a video there, and their other assistants use it from there.
 - "Results" tab — "Videos Made", "Made Without Changes" (the share of storyboards made exactly as planned), and "Average Turnaround" (brief to finished video, last 90 days). You never post, so there are no views or likes here.
 - "Calendar" tab — each video on the day it was started and the day it was finished. You post nothing, so there are no posting days.
@@ -904,7 +905,7 @@ function socialSurfaces(): string {
 - "My Content" tab — the pictures and videos the user has uploaded or approved, which posts can use.
 - "Results" tab — how this assistant is doing: progress towards its goals, its performance figures, the "Autopilot" card (whether it is drafting on a schedule, with "Adjust schedule"; how many posts are created, scheduled and published; posts per platform; and audience size), and the goals themselves (set or change one here).
 - "Activity" tab — a log of what this assistant has done.
-- "Assistant Settings" (the menu down the right of the page; a button at the top on a phone) — this assistant's settings, as cards: "What I do" (the job it was hired for), "When and how I post" (how posts are triggered, where content comes from, and the posting schedule), "What I post about" (objective, audience, voice and content pillars), "Your brand" (the brand style, picture guidelines, files and links — shared by every assistant and the same as Business Information ▸ Brand Assets, so a change there or here changes both), "Connections" (the social accounts it posts to — reconnect an account here), "Do’s and don’ts" (its rules), "Safety and legal" (AI disclosure and brand safety) and "Notifications".
+- "Assistant Settings" (the menu down the right of the page; a button at the top on a phone) — this assistant's settings, as cards: "What I do" (the job it was hired for), "When and how I post" (how posts are triggered, where content comes from, and the posting schedule), "What I post about" (objective, audience, voice and content pillars), "Your brand" (the brand style, picture guidelines, files and links — shared by every assistant and the same as Business Information ▸ Brand Assets, so a change there or here changes both), "Connections" (the social accounts it posts to — reconnect an account here), "Do’s and don’ts" (its rules), "Safety and legal" (AI disclosure and brand safety) and "Notifications". Separately, a workspace setting adds "Made with AI" after the caption, as it publishes, to any post whose video contains realistic AI footage (on by default; 3D animated and cartoon clips are never labelled; YouTube is always told through its own AI setting) — it's in Settings ▸ "Made with AI" on AI videos, and you can change it with { "type": "ai_video_label_setting", "enabled": true | false } when they ask.
 
 NAMING PLACES — when the user asks where something is or how to change a setting, answer with a name from the list above. Never name a tab, section, button or setting that is not listed, and never tell the user a section does not exist. If you are not sure where something lives, say that plainly instead of guessing.
 
@@ -1884,11 +1885,15 @@ THEIR OWN VOICE. A voiceover can be an AI voice or their own voice — never bot
 
 AN AI CLIP ON ITS OWN. Besides whole videos you make single AI clips (5 or 10 seconds, vertical, square or wide) saved to My Content — for "make me a clip of…". Emit { "type": "video_clip_proposal", "description": "<what it shows, in plain words, no text or signs in it>", "style": "realistic" | "cinematic" | "animated3d" | "cartoon2d" | "product", "lengthS": 5 | 10, "shape": "9:16" | "1:1" | "16:9", "sound": true | false (natural background sound with the picture, no speech — off unless they ask; it uses 1.5× the clip's tasks, and only some styles can have it right now) }. Saving is free; on the "Videos" tab they press "See the first frame" (1 task) and then "Make the clip", which says what it uses — you never press either. Made-up people only: never a real, famous or look-alike person, no realistic children, and never their own product (use their own photos or footage for that). The list marks these as AI CLIP.
 
+"MADE WITH AI". When a post whose video contains realistic AI footage publishes on Facebook, Instagram, LinkedIn, X or Threads, "Made with AI" is added after its caption — a workspace setting, on by default (Settings ▸ "Made with AI" on AI videos). 3D animated and 2D cartoon clips are never labelled. On YouTube such a video is always marked as altered or synthetic content. To change the setting when they ask, emit { "type": "ai_video_label_setting", "enabled": true | false }.
+
 TEXT ON A SCENE. Each scene has at most one line of on-screen text (60 characters). They choose where it sits, when it shows, how it looks and how it appears, on the scene's "Change" form or through you: add any of "textPos": "top" | "middle" | "bottom", "textWhen": "scene" | "first" | "last" | "words" (the whole scene, the first 3 seconds, the last 3 seconds, or while that scene's voiceover line is said), "textStyle": "dark" | "plain" | "brand" (dark box, plain with a light backing, brand-colour box) and "textAnim": "none" | "fade" | "rise" | "pop" to a video_scene_edit. Keep the words clear of the captions (the list says where captions sit only when they've been moved; by default they're at the bottom). The font is their brand font when the video can use it, otherwise a bold condensed one — there's no font choice. Free; on a finished video it makes a new version.
 
 NOTES ON A FINISHED VIDEO. The list shows their notes on moments of a READY video ("their note at 0:07 (scene 2)"). To add one for them, emit { "type": "video_note_proposal", "projectId": <id>, "atS": <seconds> or "scene": <number>, "note": "<what should change>" }. When they want the notes acted on, emit { "type": "video_notes_version_proposal", "projectId": <id> }: a new version where only the noted scenes change and everything already made is kept. Both are free.
 
 OTHER SHAPES. A READY video can be made in the shapes it isn't in yet in one go: emit { "type": "video_reshape_proposal", "projectId": <id>, "shapes": ["1:1", "16:9"] } (leave "shapes" out for every other shape). The voiceover and every clip and picture are kept (cropped to each shape) and only branded cards are drawn again, so it is free; each lands in My Content.
+CHAPTERS. A READY video has chapters — each a run of scenes with one story beat (opening, problem, how it helps, proof, call to action), named from its words. They are listed beside the player on the "Videos" tab: clicking one plays from there, ✎ renames it, and "Copy for YouTube" copies them. When the video is wide and has at least 3 chapters of 10 seconds or more, they are added to the description when it is posted to YouTube; a vertical or square video becomes a Short there, and Shorts have no chapters. The list above gives each video's chapters by number. To rename one for them, emit { "type": "video_chapter_proposal", "projectId": <id>, "chapter": <its number>, "title": "<the new name, at most 60 characters>" } ("" puts its own name back). Free; nothing is made again. You can't add, remove or move a chapter — they follow the scenes; for different chapters the video needs different scenes (a new version).
+
 
 TIDYING VIDEOS. To archive, restore or delete videos when they ask, emit { "type": "video_tidy_proposal", "action": "archive" | "restore" | "delete", "projectIds": [<ids>], "titles": ["<their titles>"] } — only ids from the lists above (restore uses ARCHIVED VIDEOS). Archived videos move to the "Archived" pill on the "Videos" tab and Restore brings them back; delete is for good and can't be undone. Either way any finished file stays in My Content. A video being made can't be archived or deleted. Free. On the tab itself they tick videos and use "Archive" or "Delete" in the bar above the list.
 
@@ -3461,8 +3466,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // (src/utils/chat-rules.ts) — the rules block above is what it FOLLOWS; this is what it can CHANGE.
     // Plus the workspace's plan and this month's task balance (src/utils/chat-plan-snapshot.ts), the
     // same figures as the usage bar. Both every turn, every role; both never throw.
-    const rulesListBlock = offersOwnCards ? await buildRulesListBlock(db, orgId, session.aiAssistantId) : null;
-    const rulesCardBlock = offersOwnCards ? rulesPromptBlock(assistantRow.roleKey) : null;
+    // The Business Mentor offers none of its own cards, but it IS where a rule for every assistant is set
+    // (FR#10): it sees and changes only the workspace-wide rules.
+    const rulesListBlock = offersOwnCards ? await buildRulesListBlock(db, orgId, session.aiAssistantId)
+        : route === ROUTES.business_mentor ? await buildRulesListBlock(db, orgId, session.aiAssistantId, { workspaceOnly: true }) : null;
+    const rulesCardBlock = offersOwnCards ? rulesPromptBlock(assistantRow.roleKey)
+        : route === ROUTES.business_mentor ? mentorRulesPromptBlock() : null;
     const planBlock = await buildPlanSnapshot(db, orgId);
     // Its goals by id with the metrics on offer (src/utils/chat-goals.ts) — every role reads them;
     // structured routes can propose a goal card. And, for the roles with a Posting Schedule card, the
@@ -3930,9 +3939,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                 }
             } else if ((uiElement as { type?: unknown } | null)?.type === 'mentor_take_me_there') {
                 // Built and checked above (buildTakeMeThereCard). Not a suggestion: no cap, no proposal row.
-            } else if (!goalProposalFromUiElement(uiElement)) {
+            } else if (!goalProposalFromUiElement(uiElement) && !ruleProposalFromUiElement(uiElement)) {
                 // Never another route's card shape — except a goal card, which the goal block below checks
-                // (resolveTeamGoalProposal). Dropping it here is why "here it is" came with no card.
+                // (resolveTeamGoalProposal), and a rule card for every assistant, which the rule block below
+                // checks with workspaceOnly (FR#10; staging 2026-11-11, chat 92: the Mentor's rule card was
+                // dropped here and the reply got "No card came with this reply"). Dropping a card here is why
+                // "here it is" came with no card.
                 uiElement = null;
             }
         }
@@ -3994,7 +4006,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (shorter) ruleReq.ruleText = shorter;
         }
         if (ruleReq) {
-            ruleCard = await resolveRuleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, ruleReq);
+            // A rule for every assistant (FR#10) is owners' and admins' only; the card says so before the click.
+            ruleCard = await resolveRuleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, ruleReq, { canManageWorkspaceRules: canManageWorkspaceRules(ctx.role), workspaceOnly: route === ROUTES.business_mentor });
             uiElement = ruleCard;
             if (!ruleCard) {
                 content = 'I couldn’t read your Do’s and don’ts just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Settings.';

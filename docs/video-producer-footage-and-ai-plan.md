@@ -15,8 +15,10 @@ on publish, go-live samples strip) were not started then.
 tasks, offered per style only where that style's model can make it — not on production's Kling 2.5 before
 3 Dec 2026); FAL_I2V_MODEL_<STYLE> per style (i2vModel(now, style)); YouTube uploads of posts with AI video set
 status.containsSyntheticMedia (src/utils/ai-disclosure.ts). The samples strip already existed on the Video
-Producer page (five Kling 3 clips from the bake-off); its intro now mentions New AI clip. ⚠️ Still open: D-F4,
-a visible "Made with AI" caption line where the platform has no field (Meta) — the owner's decision. Owner decisions
+Producer page (five Kling 3 clips from the bake-off); its intro now mentions New AI clip. **D-F4 decided 2026-11-11 (owner): realistic posts only, a workspace setting** — "Made with AI" is added after
+the caption at publish (Facebook, Instagram, LinkedIn, X, Threads) when a video looks real (not a 3D animated
+or 2D cartoon clip); organisations.ai_video_label_enabled, default on (db/z-ai-video-label.sql); Settings and
+the ai_video_label_setting chat card. Owner decisions
 2026-11-09: D-F1 2 tasks per review, D-F3 every plan with the Video Producer, D-F5 5 min / 500 MB / 10.
 ⚠️ `db/z-video-producer-footage.sql` on BOTH databases before the code deploys (every project read
 selects `video_projects.footage_review`). See §11 for how it was built and what differs from this plan.

@@ -15,6 +15,7 @@
 // the project terminal or still 'rendering' with a render in flight; the stuck sweep (video-producer.ts)
 // turns a dead one into render_failed after 20 minutes. Never charges: the build already settled.
 
+import { isRealisticStyle } from '../lib/ai-clip';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { contentAssets, videoProjects } from '../../db/schema';
@@ -42,6 +43,14 @@ export function outputName(title: string, version: number): string {
 /** Does this storyboard use AI for any scene? Shown as "Contains AI" (owner decision D-S6). Pure. */
 export function containsAi(sb: Storyboard | null): boolean {
     return !!sb?.scenes.some((s) => s.source === 'ai_video' || s.source === 'ai_image');
+}
+
+/**
+ * Does it contain AI that looks real? An AI clip on its own in the 3D animated or 2D cartoon style doesn't;
+ * every other AI scene does. What the "Made with AI" caption line reads (ai-disclosure.ts). Pure.
+ */
+export function containsRealisticAi(sb: Storyboard | null, brief: { clip?: { style?: string } | null } | null): boolean {
+    return containsAi(sb) && !(brief?.clip && !isRealisticStyle(brief.clip.style));
 }
 
 export async function renderProject(db: Db, projectId: number): Promise<void> {
@@ -133,7 +142,7 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
             aspectRatio: props.targetRatio, provider: 'video_producer',
             // What My Content and the hand-offs read: who made it, which project, and "Contains AI".
             // sourceAssetIds: the files this version was made from, kept with it (listed on the Videos tab).
-            renderParams: { kind: 'video_producer', projectId, version: p.version, containsAi: containsAi(sb), suggestedWords: sb?.caption ?? null, sourceAssetIds: tl.sourceAssetIds ?? [] },
+            renderParams: { kind: 'video_producer', projectId, version: p.version, containsAi: containsAi(sb), containsRealisticAi: containsRealisticAi(sb, p.brief as { clip?: { style?: string } | null } | null), suggestedWords: sb?.caption ?? null, sourceAssetIds: tl.sourceAssetIds ?? [] },
             status: 'pending',
         }).returning({ id: contentAssets.id });
         // Made FOR a post — "Make a video version", or a campaign — it goes back to it (Phase 5, D-S4).

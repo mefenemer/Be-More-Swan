@@ -10,10 +10,10 @@
 //
 // ── How ──────────────────────────────────────────────────────────────────────────────────────────
 // Same contract as chat-assistant-settings.ts. The model never acts. It proposes a `rule_proposal`;
-// this module checks it against content_rules — an existing rule must be THIS assistant's own (a
-// workspace-wide rule, assistant_id NULL, applies to every assistant and is not changed from one
-// assistant's chat), the text must fit the page's 300-character limit — and rebuilds the card from
-// the row. The click (chat-session.js) calls content-rules.ts, the endpoint the Do's and don'ts card
+// this module checks it against content_rules — an existing rule must be THIS assistant's own, or a
+// workspace-wide one (assistant_id NULL, followed by every assistant), which only an owner or admin
+// may add or change (FR#10, src/utils/workspace-rules.ts); the text must fit the page's
+// 300-character limit — and rebuilds the card from the row. The click (chat-session.js) calls content-rules.ts, the endpoint the Do's and don'ts card
 // uses (POST create, PATCH edit / toggle, DELETE), which recompiles the brief so a change reaches
 // autopilot too. Nothing here writes.
 //
@@ -22,6 +22,7 @@
 import { and, desc, eq, isNull, or } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { contentRules } from '../../db/schema';
+import { WORKSPACE_RULE_FORBIDDEN, type RuleScope } from './workspace-rules';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -48,8 +49,9 @@ const oneLine = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
 
 // ── Read ─────────────────────────────────────────────────────────────────────────────────────────
 
-/** The rules by id, for this turn's prompt. Never throws. */
-export async function buildRulesListBlock(db: Db, organisationId: number, aiAssistantId: number): Promise<string> {
+/** The rules by id, for this turn's prompt. Never throws.
+ *  workspaceOnly (the Business Mentor): only the workspace-wide rules, which are the only ones it changes. */
+export async function buildRulesListBlock(db: Db, organisationId: number, aiAssistantId: number, opts: { workspaceOnly?: boolean } = {}): Promise<string> {
     try {
         const rows = await db.select({
             id: contentRules.id, ruleText: contentRules.ruleText, isActive: contentRules.isActive,
@@ -70,10 +72,16 @@ export async function buildRulesListBlock(db: Db, organisationId: number, aiAssi
         };
         const own = rows.filter((r) => r.assistantId === aiAssistantId);
         const shared = rows.filter((r) => r.assistantId == null);
+        if (opts.workspaceOnly) {
+            return [
+                'WORKSPACE-WIDE DO’S AND DON’TS — every one of their assistants follows these, by "#" number, read this turn. ON rules are followed; OFF rules are kept but switched off:',
+                shared.length ? shared.map(line).join('\n') : '- none yet',
+            ].join('\n');
+        }
         return [
             'YOUR DO’S AND DON’TS (Assistant Settings ▸ Do’s and don’ts), by "#" number, read this turn. ON rules are the ones you follow; OFF rules are kept but switched off:',
             own.length ? own.map(line).join('\n') : '- none yet',
-            shared.length ? `Workspace-wide rules (they apply to every assistant, and are not changed from this chat):\n${shared.map(line).join('\n')}` : '',
+            shared.length ? `Workspace-wide rules (every one of their assistants follows these; changing one changes it for all of them):\n${shared.map(line).join('\n')}` : '',
         ].filter(Boolean).join('\n');
     } catch (err) {
         console.error('[chat-rules] rules list read failed (non-fatal)', err);
@@ -88,9 +96,24 @@ export function rulesPromptBlock(roleKey: string | null | undefined): string {
         : '';
     return `CHANGING YOUR DO’S AND DON’TS — when the user asks you to remember something for the future ("from now on…", "never…", "always…", "stop doing…"), to reword a rule, to switch one off or back on, or to delete one, put this in "uiElement" instead of anything else (one change per reply):
 { "type": "rule_proposal", "action": "add", "ruleText": "<the rule, short and general, in the user's terms — one or two sentences, well under ${RULE_TEXT_MAX} characters>"${platformLine} }
+Add "scope": "workspace" to an "add" ONLY when the user says it should apply to all their assistants, every assistant or the whole team; then every one of their assistants follows it, and it has no platform. Without it, the rule is yours alone.
 { "type": "rule_proposal", "action": "edit", "ruleId": <# number>, "ruleText": "<the new wording>" }
 { "type": "rule_proposal", "action": "turn_off" | "turn_on" | "delete", "ruleId": <# number> }
-A rule is one point, not a brief: when they give you longer guidance (for a content pillar, say), propose its most important point as this rule and offer to add the others one at a time. Name a rule only by a # number listed under YOUR DO’S AND DON’TS, and only one of your own (not a workspace-wide one). Prefer "turn_off" when they want to stop a rule for now; "delete" only when they say to remove it for good. A request that is only about the reply in front of you ("make this one shorter") is not a rule — just do it. You never change a rule yourself: the user confirms on the card, and only that click saves it. So never say a rule HAS been saved, changed or removed — say the card is there to confirm. If they ask what your rules are, list them from above.`;
+A rule is one point, not a brief: when they give you longer guidance (for a content pillar, say), propose its most important point as this rule and offer to add the others one at a time. Name a rule only by a # number listed under YOUR DO’S AND DON’TS — your own or a workspace-wide one. Changing a workspace-wide rule changes it for every assistant: say so. Only the workspace owner or an admin can add or change a workspace-wide rule; the card says so if this user can't. Prefer "turn_off" when they want to stop a rule for now; "delete" only when they say to remove it for good. A request that is only about the reply in front of you ("make this one shorter") is not a rule — just do it. You never change a rule yourself: the user confirms on the card, and only that click saves it. So never say a rule HAS been saved, changed or removed — say the card is there to confirm. If they ask what your rules are, list them from above.`;
+}
+
+/**
+ * The Business Mentor's version (FR#10, owner 2026-11-11: "I expected to be able to set a
+ * workspace-wide rule from one place, ideally by asking the Business Mentor"). It changes ONLY rules
+ * every assistant follows — never a rule of its own or of one assistant — so every card it makes is
+ * scope "workspace" (resolveRuleProposal with workspaceOnly enforces that, whatever the model writes).
+ */
+export function mentorRulesPromptBlock(): string {
+    return `SETTING A RULE FOR EVERY ASSISTANT — you are where the user sets one Do’s and don’ts rule that ALL their assistants follow. When they ask for something to apply to all their assistants, everywhere, in any material, across everything you all make, or for the whole team ("never reference a testimonials page in any material", "always use British spelling everywhere"), put this in "uiElement" (one change per reply — this rule_proposal card is one of your CARDS):
+{ "type": "rule_proposal", "action": "add", "scope": "workspace", "ruleText": "<the rule, short and general, in the user's terms — one or two sentences, well under ${RULE_TEXT_MAX} characters>" }
+{ "type": "rule_proposal", "action": "edit", "ruleId": <# number>, "ruleText": "<the new wording>" }
+{ "type": "rule_proposal", "action": "turn_off" | "turn_on" | "delete", "ruleId": <# number> }
+Name a rule only by a # number listed under WORKSPACE-WIDE DO’S AND DON’TS. You never set a rule for one assistant only: if they want a rule for just one, tell them to ask that assistant in its chat or use its Do’s and don’ts. A rule is one point, not a brief: propose its most important point and offer the others one at a time. Prefer "turn_off" when they want to stop a rule for now; "delete" only when they say to remove it for good. Only the workspace owner or an admin can set these; the card says so if this user can't. You never change a rule yourself: the user confirms on the card, and only that click saves it — so never say a rule HAS been saved, changed or removed, say the card is there to confirm.`;
 }
 
 // ── Propose ──────────────────────────────────────────────────────────────────────────────────────
@@ -100,6 +123,8 @@ export interface RuleRequest {
     ruleId: number | null;
     ruleText: string | null;
     platform: string | null;
+    /** add only: 'workspace' = every assistant (FR#10). Everything else is 'assistant'. */
+    scope?: RuleScope;
 }
 
 /** Shape check on the model's output. Pure. Null when it is not a usable proposal. */
@@ -112,7 +137,12 @@ export function ruleProposalFromUiElement(uiElement: unknown): RuleRequest | nul
     const text = typeof ui.ruleText === 'string' ? oneLine(ui.ruleText) : '';
     const id = Number(String(ui.ruleId ?? '').replace(/^#/, ''));
     const platform = RULE_PLATFORMS.find((p) => p === ui.platform) ?? null;
-    if (action === 'add') return text ? { action, ruleId: null, ruleText: text, platform } : null;
+    if (action === 'add') {
+        if (!text) return null;
+        return ui.scope === 'workspace'
+            ? { action, ruleId: null, ruleText: text, platform: null, scope: 'workspace' }
+            : { action, ruleId: null, ruleText: text, platform };
+    }
     if (!Number.isInteger(id) || id <= 0) return null;
     if (action === 'edit') return text ? { action, ruleId: id, ruleText: text, platform: null } : null;
     return { action, ruleId: id, ruleText: null, platform: null };
@@ -160,9 +190,21 @@ export interface RuleCard {
     platform: string | null;
     platformLabel: string | null;
     isActive: boolean | null;
+    /** 'workspace' = every assistant follows it (a new one, or the existing row is shared). */
+    scope: RuleScope;
     blocked: string | null;
     settled?: boolean;
 }
+
+/** What the caller knows about the user. canManageWorkspaceRules undefined = not known (a reload):
+ *  the permission is then left to the endpoint, which checks it again on the click. */
+export interface RuleCardOptions {
+    canManageWorkspaceRules?: boolean;
+    /** The Business Mentor: every card is for every assistant; an assistant's own rule is refused. */
+    workspaceOnly?: boolean;
+}
+
+export const MENTOR_RULE_NOT_SHARED = 'I only set rules that every assistant follows. To change a rule for one assistant, ask that assistant in its chat or use its Do’s and don’ts.';
 
 interface RuleRow { id: number; ruleText: string; isActive: boolean; platform: string | null; assistantId: number | null }
 
@@ -177,8 +219,11 @@ async function readRule(db: Db, organisationId: number, ruleId: number): Promise
     return row ?? null;
 }
 
-function buildRuleCard(aiAssistantId: number, roleKey: string | null | undefined, req: RuleRequest, row: RuleRow | null): RuleCard {
-    const platform = roleKey === 'social_media_manager' ? req.platform : null;
+function buildRuleCard(aiAssistantId: number, roleKey: string | null | undefined, req: RuleRequest, row: RuleRow | null, opts: RuleCardOptions = {}): RuleCard {
+    const scope: RuleScope = req.action === 'add'
+        ? (req.scope === 'workspace' || opts.workspaceOnly ? 'workspace' : 'assistant')
+        : (row && row.assistantId == null ? 'workspace' : 'assistant');
+    const platform = roleKey === 'social_media_manager' && scope !== 'workspace' ? req.platform : null;
     const card: RuleCard = {
         type: RULE_PROPOSAL_TYPE,
         action: req.action,
@@ -189,6 +234,7 @@ function buildRuleCard(aiAssistantId: number, roleKey: string | null | undefined
         platform: req.action === 'add' ? platform : (row?.platform ?? null),
         platformLabel: null,
         isActive: row ? row.isActive : null,
+        scope,
         blocked: null,
     };
     const p = oneLine(card.platform).toLowerCase();
@@ -197,10 +243,11 @@ function buildRuleCard(aiAssistantId: number, roleKey: string | null | undefined
         card.blocked = `A rule can be at most ${RULE_TEXT_MAX} characters, and I couldn’t shorten this one without losing something. Split it into a few shorter rules, one point each.`;
         return card;
     }
+    if (scope === 'workspace' && opts.canManageWorkspaceRules === false) { card.blocked = WORKSPACE_RULE_FORBIDDEN; return card; }
     if (req.action === 'add') return card;
     if (!row) { card.blocked = 'That rule no longer exists.'; return card; }
-    if (row.assistantId == null) { card.blocked = 'That is a workspace-wide rule for every assistant, so it isn’t changed from this chat.'; return card; }
-    if (row.assistantId !== aiAssistantId) { card.blocked = 'That rule belongs to a different assistant.'; return card; }
+    if (opts.workspaceOnly && row.assistantId != null) { card.blocked = MENTOR_RULE_NOT_SHARED; return card; }
+    if (row.assistantId != null && row.assistantId !== aiAssistantId) { card.blocked = 'That rule belongs to a different assistant.'; return card; }
     if (req.action === 'turn_off' && !row.isActive) card.blocked = 'That rule is already switched off.';
     if (req.action === 'turn_on' && row.isActive) card.blocked = 'That rule is already on.';
     if (req.action === 'edit' && oneLine(row.ruleText) === req.ruleText) card.blocked = 'That rule already says exactly that.';
@@ -210,10 +257,11 @@ function buildRuleCard(aiAssistantId: number, roleKey: string | null | undefined
 /** Check a proposal against content_rules and return the card. Null when the read fails. */
 export async function resolveRuleProposal(
     db: Db, organisationId: number, aiAssistantId: number, roleKey: string | null | undefined, req: RuleRequest,
+    opts: RuleCardOptions = {},
 ): Promise<RuleCard | null> {
     try {
         const row = req.ruleId ? await readRule(db, organisationId, req.ruleId) : null;
-        return buildRuleCard(aiAssistantId, roleKey, req, row);
+        return buildRuleCard(aiAssistantId, roleKey, req, row, opts);
     } catch (err) {
         console.error('[chat-rules] could not resolve the proposal (non-fatal)', err);
         return null;
@@ -237,7 +285,11 @@ export async function refreshRuleCards<M extends { uiElement: unknown }>(
         try {
             if (req.action === 'add') {
                 const [saved] = await db.select({ id: contentRules.id }).from(contentRules)
-                    .where(and(eq(contentRules.workspaceId, organisationId), eq(contentRules.assistantId, aiAssistantId), eq(contentRules.ruleText, req.ruleText!)))
+                    .where(and(
+                        eq(contentRules.workspaceId, organisationId),
+                        req.scope === 'workspace' ? isNull(contentRules.assistantId) : eq(contentRules.assistantId, aiAssistantId),
+                        eq(contentRules.ruleText, req.ruleText!),
+                    ))
                     .limit(1);
                 return saved ? { ...m, uiElement: { ...ui, ruleId: saved.id, settled: true, blocked: `Saved — it’s rule #${saved.id}.` } } : m;
             }

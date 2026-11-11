@@ -16,6 +16,8 @@
 // for one invocation therefore completes across several, instead of restarting from zero forever.
 
 import { postHasAiVideo } from '../../src/utils/ai-disclosure';
+import { postVideoChapterLines } from '../../src/utils/video-chapter-lines';
+import { withChapterLines } from '../../src/lib/video-chapters';
 import { HandlerEvent } from '@netlify/functions';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -23,7 +25,7 @@ import { scheduledPosts } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import {
-    resolvePostVideo, resolveSocialCredentials, publishYouTubeResumable, youtubeMetaFromCaption, describeNetworkError,
+    resolvePostVideo, resolveSocialCredentials, publishYouTubeResumable, youtubeMetaFromCaption, describeNetworkError, YOUTUBE_DESCRIPTION_MAX,
     type YouTubeResumeState,
 } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
@@ -75,6 +77,12 @@ export default withLambda(async (event: HandlerEvent) => {
             post.caption ?? '', post.hashtags ?? '', post.postFormat ?? undefined,
             postLinkLine({ caption: post.caption, linkUrl: post.linkUrl, ctaText: post.ctaText }),
         );
+        // A wide Video Producer video carries its chapters into the description (video-chapters.ts), unless
+        // the caption already has its own "0:00" lines. Never on a Short — Shorts have no chapters.
+        if (!isYoutubeShortFormat(post.formatKey) && String(post.postFormat ?? '').toLowerCase() !== 'shorts') {
+            const chapterLines = await postVideoChapterLines(db, post.organisationId!, post.contentAssetIds);
+            meta.description = withChapterLines(meta.description, chapterLines, YOUTUBE_DESCRIPTION_MAX);
+        }
 
         // An autonomously drafted Short lands UNLISTED regardless of the platform default.
         //

@@ -3,6 +3,7 @@
 // Handles: two-step Graph API publish, video polling, retry + exponential backoff,
 // rate-limit state table, permanent-error classification, push notifications, cron log.
 
+import { aiVideoLabelFor } from '../../src/utils/ai-disclosure';
 import { Handler } from '@netlify/functions';
 import { heldOrganisationIds, heldOrgsClause } from '../../src/utils/beta-ending';
 import { and, eq, lte, or, isNull, sql, desc } from 'drizzle-orm';
@@ -302,10 +303,11 @@ export default withLambda(async () => {
             // clickable — it publishes as plain text — but it is still the address the user chose
             // to put in front of readers, so it is sent rather than silently dropped. The composer
             // says so at the point the link is typed (PLATFORM_FORMATS.linksClickable).
+            // "Made with AI" for realistic AI video, while the workspace's setting is on (ai-disclosure.ts).
             const fullCaption = composePostText({
                 caption: post.caption, hashtags: post.hashtags,
                 linkUrl: post.link_url, ctaText: post.cta_text,
-            });
+            }, { aiLabel: await aiVideoLabelFor(db, post.organisation_id, post.content_asset_ids) });
             const isVideo = ['reel', 'video'].includes(post.post_format?.toLowerCase() ?? '');
             const mediaProxyBase = `${process.env.BASE_URL || 'https://bemoreswan.com'}/.netlify/functions/media-proxy?postId=${post.id}`;
 

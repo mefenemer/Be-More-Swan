@@ -39,6 +39,9 @@ export const organisations = pgTable('organisations', {
   // US-LEGAL-3.1: EU AI Act Art.50 — outbound AI content footer
   aiDisclosureFooterEnabled: boolean('ai_disclosure_footer_enabled').notNull().default(false),
   aiDisclosureFooterText: text('ai_disclosure_footer_text'),
+  // db/z-ai-video-label.sql — add "Made with AI" to the caption of posts with realistic AI video when
+  // they publish (src/utils/ai-disclosure.ts; owner 2026-11-11). On by default; the workspace can turn it off.
+  aiVideoLabelEnabled: boolean('ai_video_label_enabled').notNull().default(true),
   // US3 AC3.3: opt-in "Photo by … on Pexels" attribution line appended to drafts sourced from Pexels.
   pexelsAttributionEnabled: boolean('pexels_attribution_enabled').notNull().default(false),
   // Epic 3 US8: AI approvals email digest cadence — 'off' | 'daily' | 'weekly'. db/ai-digest.sql.
