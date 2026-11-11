@@ -87,8 +87,8 @@ check('decisions are conditional on the status that was read (two admins cannot 
 
 console.log('the screen');
 
-check('Revenue nav entry, router line and section all exist', () => {
-    assert.ok(html.includes("{ view: 'partners',       icon: '🤝', label: 'Partners',              perm: 'manage_partners' },"));
+check('Money nav entry, router line and section all exist', () => {
+    assert.ok(html.includes("{ view: 'partners',       icon: '🤝', label: 'Partners',              perm: 'manage_partners',     group: 'Partners' },"));
     assert.ok(html.includes("if (view === 'partners')        loadPartners();"));
     assert.ok(html.includes('<section id="view-partners" class="admin-view hidden'));
 });

@@ -157,7 +157,7 @@ check('the nav entry, view section and dispatch all exist', () => {
     assert.ok(/view: 'send-notification'/.test(adminHtml), 'nav entry missing');
     assert.ok(/id="view-send-notification"/.test(adminHtml), 'view section missing');
     assert.ok(/if \(view === 'send-notification'\)/.test(adminHtml), 'view dispatch missing');
-    assert.ok(/'send-notification': 'Send a Message'/.test(adminHtml), 'page title missing');
+    assert.ok(/'send-notification': 'Message one person'/.test(adminHtml), 'page title missing');
 });
 
 check('the nav entry carries the same permission as the endpoint', () => {
