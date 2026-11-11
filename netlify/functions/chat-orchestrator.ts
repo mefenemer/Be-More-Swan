@@ -93,6 +93,7 @@ import { DISCUSSIONS_ENABLED } from '../../src/config/discussion-sites';
 import {
     assistantSettingsPromptBlock, buildAssistantSettingsSnapshot, resolveSettingsProposal, settingsProposalFromUiElement, type SettingsCard,
 } from '../../src/utils/chat-assistant-settings';
+import { canManageWorkspaceRules } from '../../src/utils/workspace-rules';
 import { RULE_TEXT_MAX, buildRulesListBlock, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock, shortenRuleText, type RuleCard } from '../../src/utils/chat-rules';
 import { buildPlanSnapshot } from '../../src/utils/chat-plan-snapshot';
 import { buildGoalsBlock, goalProposalFromUiElement, goalsPromptBlock, resolveGoalProposal, resolveTeamGoalProposal, type GoalCard } from '../../src/utils/chat-goals';
@@ -3989,7 +3990,8 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             if (shorter) ruleReq.ruleText = shorter;
         }
         if (ruleReq) {
-            ruleCard = await resolveRuleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, ruleReq);
+            // A rule for every assistant (FR#10) is owners' and admins' only; the card says so before the click.
+            ruleCard = await resolveRuleProposal(db, orgId, session.aiAssistantId, assistantRow.roleKey, ruleReq, { canManageWorkspaceRules: canManageWorkspaceRules(ctx.role) });
             uiElement = ruleCard;
             if (!ruleCard) {
                 content = 'I couldn’t read your Do’s and don’ts just now, so I haven’t set anything up. Please try again in a moment, or use the Assistant Settings.';

@@ -6,7 +6,8 @@
 // WHY THIS EXISTS. The chat followed the rules but was told never to mention them, and could not save
 // one: "from now on never use exclamation marks" lasted one reply. And the Email Marketing chat did
 // not read them at all. These pin: proposals are checked against content_rules and rebuilt from the
-// row; a workspace-wide rule, another assistant's rule, or a no-op change is refused on the card; a
+// row; another assistant's rule, a no-op change, or a workspace-wide rule for a user who isn't an owner
+// or admin (FR#10) is refused on the card; a
 // stored add card closes once the rule exists, so a reload cannot save it twice; and the click goes
 // through content-rules.ts with the page's methods.
 //
@@ -64,9 +65,14 @@ async function main() {
         assert.strictEqual(card?.currentText, 'Never use exclamation marks');
         assert.strictEqual(card?.blocked, null);
     });
-    await check('a workspace-wide rule, another assistant\'s, or a missing one is refused', async () => {
-        const shared = await resolveRuleProposal(fakeDb([rule({ assistantId: null })]), 1, 5, 'blog_writer', { action: 'delete', ruleId: 9, ruleText: null, platform: null });
-        assert.match(shared?.blocked ?? '', /workspace-wide/);
+    await check('a workspace-wide rule is refused only for a user who can\'t manage them; another assistant\'s, or a missing one, is refused', async () => {
+        // FR#10 (2026-11-11): owners and admins change workspace-wide rules from chat; others are told why.
+        const shared = await resolveRuleProposal(fakeDb([rule({ assistantId: null })]), 1, 5, 'blog_writer', { action: 'delete', ruleId: 9, ruleText: null, platform: null }, { canManageWorkspaceRules: false });
+        assert.match(shared?.blocked ?? '', /owner or an admin/);
+        assert.strictEqual(shared?.scope, 'workspace');
+        const allowed = await resolveRuleProposal(fakeDb([rule({ assistantId: null })]), 1, 5, 'blog_writer', { action: 'delete', ruleId: 9, ruleText: null, platform: null }, { canManageWorkspaceRules: true });
+        assert.strictEqual(allowed?.blocked, null);
+        assert.strictEqual(allowed?.scope, 'workspace');
         const other = await resolveRuleProposal(fakeDb([rule({ assistantId: 6 })]), 1, 5, 'blog_writer', { action: 'delete', ruleId: 9, ruleText: null, platform: null });
         assert.match(other?.blocked ?? '', /different assistant/);
         const gone = await resolveRuleProposal(fakeDb([]), 1, 5, 'blog_writer', { action: 'delete', ruleId: 9, ruleText: null, platform: null });

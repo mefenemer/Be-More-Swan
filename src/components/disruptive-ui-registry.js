@@ -6278,7 +6278,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   // ── Built-in: Rule Proposal Card (every structured chat) ──────────────────
   // { type: 'rule_proposal', action: 'add'|'edit'|'turn_off'|'turn_on'|'delete', assistantId, ruleId,
-  //   currentText, ruleText, platform, platformLabel, isActive, blocked, settled? }
+  //   currentText, ruleText, platform, platformLabel, isActive, scope: 'assistant'|'workspace', blocked, settled? }
+  // scope 'workspace' (FR#10) = every assistant follows the rule; the card says so on every line.
   // A change to the assistant's Do's and don'ts, checked against content_rules by the orchestrator
   // (src/utils/chat-rules.ts). The click dispatches `rule:change`; chat-session.js calls
   // content-rules.ts — the endpoint the Do's and don'ts card uses.
@@ -6296,17 +6297,23 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     if (!copy || !Number.isInteger(assistantId)) return null;
     const blocked = typeof ui.blocked === 'string' && ui.blocked ? ui.blocked : '';
     const ruleNo = Number.isInteger(Number(ui.ruleId)) && ui.ruleId ? `#${Number(ui.ruleId)}` : '';
+    const everyone = ui.scope === 'workspace';
+    const afterNote = {
+      add: everyone ? 'Every one of your assistants follows it from your next message.' : 'Your assistant follows it in everything it does from your next message.',
+      edit: everyone ? 'This changes it for every assistant, from your next message.' : 'Your assistant follows it in everything it does from your next message.',
+      turn_off: everyone ? 'It switches off for every assistant. It is kept, and can be switched back on any time.' : 'It is kept, and can be switched back on any time.',
+      turn_on: everyone ? 'Every one of your assistants follows it again.' : '',
+      delete: everyone ? 'This removes it for good, for every assistant. To stop it for now instead, switch it off.' : 'This removes it for good. To stop it for now instead, switch it off.',
+    }[ui.action] || '';
     const el = document.createElement('div');
     el.className = 'bg-white border-2 border-emerald-100 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
       <p class="text-xs font-bold text-emerald-800 tracking-wider uppercase">${esc(copy.head)} · ${ui.settled ? 'Earlier request' : blocked ? 'Can’t be done' : 'Needs your OK'}</p>
-      <p class="text-xs text-gray-500 mt-2">Do’s and don’ts${ruleNo ? ` · rule ${ruleNo}` : ''}${ui.platformLabel ? ` · only for ${esc(ui.platformLabel)}` : ''}</p>
+      <p class="text-xs text-gray-500 mt-2">Do’s and don’ts${ruleNo ? ` · rule ${ruleNo}` : ''}${everyone ? ' · <span class="font-bold text-sky-800">every assistant</span>' : ''}${ui.platformLabel ? ` · only for ${esc(ui.platformLabel)}` : ''}</p>
       ${ui.currentText ? `<p class="text-sm text-gray-700 mt-2 break-words"><span class="font-bold">${ui.action === 'edit' ? 'Now:' : 'Rule:'}</span> ${esc(ui.currentText)}</p>` : ''}
       ${ui.ruleText && (ui.action === 'add' || ui.action === 'edit') ? `<p class="text-sm text-gray-900 mt-1 break-words"><span class="font-bold">${ui.action === 'edit' ? 'After:' : 'Rule:'}</span> ${esc(ui.ruleText)}</p>` : ''}
       ${blocked ? `<p class="text-sm ${ui.settled ? 'text-gray-600' : 'text-amber-800'} mt-3">${esc(blocked)}</p>` : ''}
-      ${!blocked && ui.action === 'turn_off' ? '<p class="text-xs text-gray-600 mt-3">It is kept, and can be switched back on any time.</p>' : ''}
-      ${!blocked && ui.action === 'delete' ? '<p class="text-xs text-gray-600 mt-3">This removes it for good. To stop it for now instead, switch it off.</p>' : ''}
-      ${!blocked && (ui.action === 'add' || ui.action === 'edit') ? '<p class="text-xs text-gray-600 mt-3">Your assistant follows it in everything it does from your next message.</p>' : ''}
+      ${!blocked && afterNote ? `<p class="text-xs text-gray-600 mt-3">${esc(afterNote)}</p>` : ''}
       <div class="flex flex-wrap items-center gap-2 mt-3">
         ${blocked ? '' : `<button type="button" data-rp-go class="${copy.danger ? 'btn-destructive' : 'btn-primary'} min-h-[44px] sm:min-h-0 px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">${esc(copy.button)}</button>
         <button type="button" data-rp-cancel class="btn-secondary min-h-[44px] sm:min-h-0 px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>`}
@@ -6324,6 +6331,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         bubbles: true,
         detail: {
           action: ui.action, assistantId, ruleId: ui.ruleId ?? null, ruleText: ui.ruleText ?? null, platform: ui.platform ?? null,
+          scope: everyone ? 'workspace' : 'assistant',
           respond({ ok, message, error }) {
             if (ok) { say(message || 'Done.'); return; }
             setBusy(false);
