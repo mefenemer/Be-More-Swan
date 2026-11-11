@@ -109,7 +109,9 @@ export async function resolveDiscussionActionProposal(
             const sites = req.sites ?? w.sites;
             const enabled = req.enabled ?? w.enabled;
             const bad = req.rejectedSites?.[0];
-            const blocked = bad ? `“${bad}” isn’t a forum address I can watch. Ask again with the forum’s web address, like contractortalk.com.`
+            const blocked = bad ? (MAX_OWN_FORUMS > 0
+                    ? `“${bad}” isn’t a forum address I can watch. Ask again with the forum’s web address, like contractortalk.com.`
+                    : `I can only watch Reddit and LinkedIn, so I can’t add “${bad}”.`)
                 : req.tooManyForums ? `You can watch up to ${MAX_OWN_FORUMS} forums of your own — say which to drop.`
                 : !topics.length ? `Give at least one topic (up to ${MAX_TOPICS}).`
                 : !sites.length ? 'Choose at least one site to watch.'

@@ -250,7 +250,7 @@ export async function improveTopicWording(
 
 ${businessBlock(sender)}
 
-The forums searched: ${siteLabels.join(', ') || 'Reddit, UK Business Forums, Quora'}.
+The forums searched: ${siteLabels.join(', ') || 'Reddit, LinkedIn'}.
 
 ${TOPIC_WORDING_RULES}
 

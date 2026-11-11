@@ -75,8 +75,9 @@ export default withLambda(async (event) => {
         if (action === 'save_watch') {
             // An own forum that can't be watched is said out loud, not silently dropped.
             const own = Array.isArray(body.sites) ? body.sites.filter((v): v is string => typeof v === 'string' && v.startsWith('forum:')) : [];
+            if (own.length && MAX_OWN_FORUMS === 0) return json(422, { error: 'Discussions watches Reddit and LinkedIn only.' });
             const bad = own.find((v) => !normaliseForumAddress(v));
-            if (bad) return json(422, { error: `“${bad.slice(6)}” isn’t a forum address we can watch. Paste the forum’s web address, like contractortalk.com. Reddit, UK Business Forums, Quora and LinkedIn are ticked above instead.` });
+            if (bad) return json(422, { error: `“${bad.slice(6)}” isn’t a forum address we can watch. Paste the forum’s web address, like contractortalk.com. Reddit and LinkedIn are ticked above instead.` });
             if (new Set(own.map((v) => normaliseForumAddress(v))).size > MAX_OWN_FORUMS) return json(422, { error: `You can watch up to ${MAX_OWN_FORUMS} forums of your own.` });
             return json(200, { watch: await saveWatch(db, orgId, assistantId, { topics: body.topics, sites: body.sites, enabled: body.enabled }) });
         }

@@ -1057,11 +1057,11 @@
       // own account — nothing here posts anywhere (src/config/discussion-sites.ts says why). Sits
       // after Searches: both are where prospects are found, before they are leads.
       // ⚠️ The chat-orchestrator system prompt names this tab and its buttons; rename both together.
-      // ⏸ PAUSED 2026-11-10 (owner): hidden on staging and prod — see DISCUSSIONS_ENABLED in
-      // src/config/discussion-sites.ts. Restore this entry (and the prompt line) to bring it back.
-      // discussionsTab: {
-      //   label: 'Discussions',
-      // },
+      // Back on 2026-11-11, Reddit and LinkedIn only (paused 2026-11-10). To hide it again, comment
+      // this out AND set DISCUSSIONS_ENABLED false in src/config/discussion-sites.ts.
+      discussionsTab: {
+        label: 'Discussions',
+      },
       // No conversationsTab (retired 2026-10-27): the conversations are the Outreach tab's
       // Following up / Replied / Finished stages — see reviewQueue.staged above.
       // Strategy tab (assistant-strategy.js → strategy-proposals.ts). Phase 5a §7: changes the
