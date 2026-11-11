@@ -126,7 +126,7 @@ export default withLambda(async (event) => {
                 changes: decorated,
                 earliest: { rise: earliestStart(true, now), reduction: earliestStart(false, now) },
                 minNoticeDays: MIN_NOTICE_DAYS_FOR_RISE,
-                emailsGoToCustomers: emailsGoToCustomers(),
+                emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>),
                 you: admin.email,
             });
         }
@@ -229,8 +229,8 @@ export default withLambda(async (event) => {
                 clearTaskCostCache();
                 return json(502, { error: `${failed} Nothing was announced, and the change is still a draft.` });
             }
-            await audit('task_cost_announced', String(id), { items: checked.items, effectiveDate: change.effectiveDate, waiting, emailsGoToCustomers: emailsGoToCustomers() });
-            return json(202, { started: true, waiting, emailsGoToCustomers: emailsGoToCustomers() });
+            await audit('task_cost_announced', String(id), { items: checked.items, effectiveDate: change.effectiveDate, waiting, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>) });
+            return json(202, { started: true, waiting, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>) });
         }
 
         if (resource === 'resend') {
@@ -241,7 +241,7 @@ export default withLambda(async (event) => {
             const failed = await startSend(id, 'announced');
             if (failed) return json(502, { error: failed });
             await audit('task_cost_resent', String(id), { waiting });
-            return json(202, { started: true, waiting, emailsGoToCustomers: emailsGoToCustomers() });
+            return json(202, { started: true, waiting, emailsGoToCustomers: emailsGoToCustomers(event.headers as Record<string, string | undefined>) });
         }
 
         if (resource === 'cancel') {

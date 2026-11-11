@@ -13,6 +13,7 @@
 //   · Real emails go out only from the production deploy. Anywhere else (staging, branch deploys,
 //     local) the in-app notices are written but the email goes only to the admin who pressed the
 //     button — staging's database holds real people's addresses.
+import { isProductionDeploy } from './deploy-context';
 import { sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 
@@ -41,9 +42,22 @@ export function broadcastDef(key: unknown): BroadcastDef | null {
 /** Plan statuses that still have a running subscription (and so are bound by the terms). */
 export const LIVE_PLAN_STATUSES = ['active', 'past_due', 'cancelling', 'downgrading'] as const;
 
-/** Real customer emails only from the production deploy (Netlify sets CONTEXT). */
-export function emailsGoToCustomers(): boolean {
-    return process.env.CONTEXT === 'production';
+/**
+ * Real customer emails only from the production deploy.
+ *
+ * ⚠️ Not `process.env.CONTEXT` alone: that is a Netlify BUILD variable and is absent at function runtime
+ * on this site, so production read as "not live" and the 2026-11-02 AI video notice reached 8 customers
+ * in-app with 0 emails. The request's host is always there (src/utils/deploy-context.ts explains).
+ *
+ * Fails CLOSED the other way from isProductionDeploy(): no host means we can't tell, and a guess must
+ * never email real customers from staging. Every caller here is an HTTP request, so a host is present.
+ */
+export function emailsGoToCustomers(headers: Record<string, string | undefined> | undefined | null): boolean {
+    if (process.env.CONTEXT === 'production') return true;
+    if (process.env.CONTEXT === 'branch-deploy' || process.env.CONTEXT === 'deploy-preview') return false;
+    const host = String(headers?.host || headers?.['x-forwarded-host'] || '').trim();
+    if (!host) return false;
+    return isProductionDeploy(headers);
 }
 
 export interface Recipient { id: number; email: string; firstName: string | null }

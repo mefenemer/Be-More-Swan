@@ -38,7 +38,8 @@ import { aiVideoTasks, type TaskCosts } from '../config/task-weights';
 import { getTaskCosts } from './task-costs';
 import { createPexelsAsset, searchUniqueImages, searchUniqueVideos, type PexelsVideoCandidate } from './pexels';
 import { generateAndPersistImage, persistBufferToR2, persistRemoteMediaToR2, r2IsConfigured, renderAndPersistBrandCard } from '../lib/media-persist';
-import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, i2vModel } from '../lib/fal-gateway';
+import { submitFramedVideo, status as falStatus, result as falResult, cancel as falCancel, extractVideo, falConfigured, imageToVideoEnabled, takesAnyLength, billedSecondsFor, i2vModel, clipSoundAvailable } from '../lib/fal-gateway';
+import { clipTasksWithSound, CLIP_SOUND_PROMPT } from '../lib/ai-clip';
 import { logMediaCost } from './ai-usage';
 import { makeVoiceoverAsset } from './voiceover-asset';
 import { DEFAULT_VOICE, isVoiceId, cleanScript, languageLabel, voiceLanguage } from '../lib/tts';
@@ -430,7 +431,11 @@ export function buildTasks(storyboard: Storyboard, brief: VideoBrief, costs: Tas
     let n = musicToMake(storyboard, brief) ? costs.weights.ai_music : 0;
     for (const s of todo.scenes) {
         if (s.source === 'ai_image') n += costs.weights.ai_image;
-        if (s.source === 'ai_video') n += aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS)), costs);
+        if (s.source === 'ai_video') {
+            // An AI clip on its own may have its style's own model, and sound (1.5×) where that model can make it.
+            const model = i2vModel(new Date(), brief.clip?.style);
+            n += clipTasksWithSound(aiVideoTasks(billedSecondsFor(aiClipSeconds(s.targetS, model), model), costs), brief.clip?.sound === true && clipSoundAvailable(model));
+        }
     }
     // The owner's own voice is never made, so never charged (own-voice.ts).
     if (brief.voiceover && !isOwnVoice(brief) && scriptOf(storyboard) && todo.voiceover) n += costs.weights.ai_voiceover;
@@ -644,6 +649,8 @@ export function timesOf(scenes: Scene[], durations: number[]): SceneTime[] {
 async function sourceScene(db: Db, args: {
     scene: Scene; orgId: number; userId: number; assistantId: number | null; brandName: string; exclude: string[];
     kit: ReturnType<typeof normalizeBrandKit>; seed: number; shape?: VideoShape;
+    /** An AI clip on its own (ai-clip.ts): its style (own model when set) and whether it has sound. */
+    clip?: { style?: string | null; sound?: boolean } | null;
 }): Promise<{ assetId: number; mediaKind?: MediaKind; cost?: number; tasks?: number; asStill?: boolean } | null> {
     const { scene, orgId, userId } = args;
     const shape: VideoShape = args.shape ?? '9:16';
@@ -710,10 +717,11 @@ async function sourceScene(db: Db, args: {
             let sub: Awaited<ReturnType<typeof submitFramedVideo>> | null = null;
             for (let attempt = 1; attempt <= AI_CLIP_ATTEMPTS && !sub; attempt++) {
                 const tried = await submitFramedVideo({
-                    prompt: `${scene.prompt || context}. Slow, steady camera movement; one continuous shot.`,
+                    prompt: `${scene.prompt || context}. Slow, steady camera movement; one continuous shot.${args.clip?.sound ? ` ${CLIP_SOUND_PROMPT}` : ''}`,
                     imagePrompt: scene.prompt || context, startImageUrl: frameUrl, aspectRatio: shape,
-                    durationSeconds: aiClipSeconds(scene.targetS),
+                    durationSeconds: aiClipSeconds(scene.targetS, i2vModel(new Date(), args.clip?.style)),
                     usage: { workspaceId: orgId, userId, assistantId: args.assistantId },
+                    style: args.clip?.style ?? null, withSound: args.clip?.sound === true,
                 });
                 frameUrl ??= tried.frameUrl;   // a retry animates the same picture, not a new one
                 const deadline = Date.now() + AI_CLIP_ATTEMPT_MS;
@@ -736,8 +744,11 @@ async function sourceScene(db: Db, args: {
                 userId, organisationId: orgId, name: `AI scene — ${(scene.prompt || context).slice(0, 60)}`,
                 assetType: 'video', mimeType: 'video/mp4', fileSize: stored.fileSize, storageKey: stored.storageKey,
                 durationS: sub.billedSeconds, provider: 'fal', prompt: scene.prompt || context, aspectRatio: shape, status: 'pending',
+                // Its look, for the "Made with AI" caption line (ai-disclosure.ts): a clip's style, or a scene in a whole video.
+                renderParams: { aiStyle: args.clip?.style ?? 'scene' },
             }).returning({ id: contentAssets.id });
-            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: aiVideoTasks(sub.billedSeconds, await getTaskCosts()) };
+            // A clip made with sound costs 1.5× (ai-clip.ts) — only when it really was made with sound.
+            return { assetId: asset.id, mediaKind: 'video', cost: VIDEO_CREDIT_COST, tasks: clipTasksWithSound(aiVideoTasks(sub.billedSeconds, await getTaskCosts()), sub.withSound === true) };
         }
     }
     return null;
@@ -865,7 +876,7 @@ export async function buildProject(db: Db, projectId: number): Promise<void> {
             let made: Awaited<ReturnType<typeof sourceScene>> = null;
             const paid = scene.source === 'ai_image' ? IMAGE_CREDIT_COST : scene.source === 'ai_video' ? VIDEO_CREDIT_COST : 0;
             try {
-                made = await sourceScene(db, { scene: { ...scene, targetS: durations[i] }, orgId, userId, assistantId: p.aiAssistantId ?? null, brandName: org?.name ?? '', exclude, kit, seed: projectId * 10 + i, shape: brief.shape ?? '9:16' });
+                made = await sourceScene(db, { scene: { ...scene, targetS: durations[i] }, orgId, userId, assistantId: p.aiAssistantId ?? null, brandName: org?.name ?? '', exclude, kit, seed: projectId * 10 + i, shape: brief.shape ?? '9:16', clip: brief.clip ? { style: brief.clip.style, sound: brief.clip.sound === true } : null });
             } catch (err) {
                 console.error(`[video-producer] build ${projectId} scene ${scene.id} failed:`, err);
             }

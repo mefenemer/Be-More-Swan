@@ -9,6 +9,7 @@
 // (social-publish-selftest.ts) runs the exact same code. Facebook is excluded here: it has its own
 // publisher (publish-facebook.ts) sharing the same driver module.
 
+import { aiVideoLabelFor } from '../../src/utils/ai-disclosure';
 import { livePostUrl } from '../../src/utils/post-live-url';
 import { heldOrganisationIds, heldOrgsClause } from '../../src/utils/beta-ending';
 import { Handler } from '@netlify/functions';
@@ -162,10 +163,12 @@ export default withLambda(async () => {
 
             // Caption + hashtags + the post's link, in that order. Composed BEFORE the X credit
             // hold below, which prices the string it is given — see composePostText.
+            // "Made with AI" for realistic AI video, while the workspace's setting is on (ai-disclosure.ts).
+            // Composed before the X hold, so the label is priced with the rest of the text.
             const text = composePostText({
                 caption: post.caption, hashtags: post.hashtags,
                 linkUrl: post.link_url, ctaText: post.cta_text,
-            });
+            }, { aiLabel: await aiVideoLabelFor(db, post.organisation_id, post.content_asset_ids) });
             if (!text) throw new Error('Post has no text to publish.');
 
             // EVERY attachment, in slide order — a carousel is the same post with more media, so

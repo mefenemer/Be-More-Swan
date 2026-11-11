@@ -10,7 +10,15 @@ on the Videos tab and the video_clip_proposal chat card → first frame for 1 ta
 src/config/task-weights.ts aiVideoTasks; src/lib/ai-clip.ts). As built, differently from §5.2: a style is a
 prompt preset only, and every style uses the configured image-to-video model (Kling 3.0 Pro won four styles
 of five in the bake-off); FAL_I2V_MODEL_<STYLE> waits for bake-off round 2. Phases 6–8 (sound, labelling
-on publish, go-live samples strip) not started; the FAQ and help already describe the clip. Owner decisions
+on publish, go-live samples strip) were not started then.
+**Phases 6–8 built 2026-11-11:** "With sound" on an AI clip (Kling v3 generate_audio, ambient only, 1.5× the clip's
+tasks, offered per style only where that style's model can make it — not on production's Kling 2.5 before
+3 Dec 2026); FAL_I2V_MODEL_<STYLE> per style (i2vModel(now, style)); YouTube uploads of posts with AI video set
+status.containsSyntheticMedia (src/utils/ai-disclosure.ts). The samples strip already existed on the Video
+Producer page (five Kling 3 clips from the bake-off); its intro now mentions New AI clip. **D-F4 decided 2026-11-11 (owner): realistic posts only, a workspace setting** — "Made with AI" is added after
+the caption at publish (Facebook, Instagram, LinkedIn, X, Threads) when a video looks real (not a 3D animated
+or 2D cartoon clip); organisations.ai_video_label_enabled, default on (db/z-ai-video-label.sql); Settings and
+the ai_video_label_setting chat card. Owner decisions
 2026-11-09: D-F1 2 tasks per review, D-F3 every plan with the Video Producer, D-F5 5 min / 500 MB / 10.
 ⚠️ `db/z-video-producer-footage.sql` on BOTH databases before the code deploys (every project read
 selects `video_projects.footage_review`). See §11 for how it was built and what differs from this plan.

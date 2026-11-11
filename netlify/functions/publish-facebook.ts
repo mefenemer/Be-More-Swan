@@ -15,6 +15,7 @@
 // The Graph API driver + Page-credential resolution live in src/utils/social-publish.ts, shared
 // with the self-test harness (social-publish-selftest.ts) so a green self-test proves this path.
 
+import { aiVideoLabelFor } from '../../src/utils/ai-disclosure';
 import { livePostUrl } from '../../src/utils/post-live-url';
 import { heldOrganisationIds, heldOrgsClause } from '../../src/utils/beta-ending';
 import { Handler } from '@netlify/functions';
@@ -105,10 +106,11 @@ export default withLambda(async () => {
                 connectionId: post.connection_id,
             });
 
+            // "Made with AI" for realistic AI video, while the workspace's setting is on (ai-disclosure.ts).
             const text = composePostText({
                 caption: post.caption, hashtags: post.hashtags,
                 linkUrl: post.link_url, ctaText: post.cta_text,
-            });
+            }, { aiLabel: await aiVideoLabelFor(db, post.organisation_id, post.content_asset_ids) });
             if (!text) throw new Error('Post has no text to publish.');
 
             // EVERY attachment, in slide order: more than one becomes a multi-photo post.

@@ -1,9 +1,10 @@
 // netlify/functions/content-pillars.ts
-// A Social Media assistant's content pillars, one record each (src/utils/content-pillars-store.ts,
-// db/z-content-pillars.sql). The ONE server path for the profile's pillar list (and, in phase 2, the
-// chat's pillar cards). Each change rewrites the derived onboarding_context.content_pillars.
+// A Social Media assistant's content pillars, and a Blog or Email assistant's topics, one record each
+// (src/utils/content-pillars-store.ts, db/z-content-pillars.sql, src/utils/pillar-profiles.ts). The ONE
+// server path for the settings list and the chat's pillar card. Each change rewrites the role's derived
+// onboarding_context key (content_pillars / blogTopics / newsletterTopics).
 //
-// GET  ?assistantId=N                                   → { pillars, archived, maxActive, maxName, maxDescription }
+// GET  ?assistantId=N                                   → { pillars, archived, maxActive, maxName, maxDescription, noun, nounPlural }
 // GET  ?assistantId=N&usage=1                           → { usage: [{ pillarId, name, isActive, archived, posts }], days }
 // POST { action: 'add', assistantId, name, description?, isActive? }       → { pillars }
 // POST { action: 'update', assistantId, pillarId, name?, description?, isActive? } → { pillars }
@@ -17,17 +18,20 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, masterAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { SMM_ROLE_KEYS } from '../../src/constants/roles';
+import { pillarProfileFor, type PillarProfile } from '../../src/utils/pillar-profiles';
 import {
     addPillar, archivePillar, ensurePillarRecords, listRestorablePillars, pillarUsage, PILLAR_USAGE_DAYS, reorderPillars, restorePillar, updatePillar,
-    MAX_ACTIVE_PILLARS, MAX_PILLAR_DESCRIPTION, MAX_PILLAR_NAME, type Pillar, type PillarResult,
+    MAX_PILLAR_DESCRIPTION, MAX_PILLAR_NAME, type Pillar, type PillarResult,
 } from '../../src/utils/content-pillars-store';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-const LIMITS = { maxActive: MAX_ACTIVE_PILLARS, maxName: MAX_PILLAR_NAME, maxDescription: MAX_PILLAR_DESCRIPTION };
+/** The limits and words the settings list shows, from the assistant's role. */
+const limitsFor = (p: PillarProfile) => ({
+    maxActive: p.maxActive, maxName: MAX_PILLAR_NAME, maxDescription: MAX_PILLAR_DESCRIPTION, noun: p.noun, nounPlural: p.nounPlural,
+});
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET' && event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -49,10 +53,14 @@ export default withLambda(async (event) => {
         .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
         .limit(1);
     if (!asst) return json(404, { error: 'Assistant not found.' });
-    if (!SMM_ROLE_KEYS.includes(asst.roleKey ?? '')) return json(400, { error: 'Only a Social Media assistant has content pillars.' });
+    const profile = pillarProfileFor(asst.roleKey);
+    if (!profile) return json(400, { error: 'Only a Social Media, Blog Writing or Email Marketing assistant has pillars or topics.' });
+    const LIMITS = limitsFor(profile);
 
     if (event.httpMethod === 'GET' && event.queryStringParameters?.usage === '1') {
         // The Results tab's "Posts by pillar" (src/components/pillar-list.js renderUsage). Never seeds rows.
+        // Social only for now: Blog and Email count by topic in phase 3b (docs/pillar-records-plan.md §7).
+        if (profile.contextKey !== 'content_pillars') return json(200, { usage: null, days: profile.balanceDays });
         return json(200, { usage: await pillarUsage(db, orgId, assistantId), days: PILLAR_USAGE_DAYS });
     }
     if (event.httpMethod === 'GET') {

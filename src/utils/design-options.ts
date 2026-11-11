@@ -12,6 +12,7 @@ import { FLYER_SOURCE } from '../config/visual-brief-vocab';
 import { designPixels, flyerDesign, imageDesign, imageSize, renderDesign, renderDesignDownload, renderDesignPdf, renderDesignPreview } from '../lib/design-render';
 import { falConfigured, FalServiceError, removeImageBackground } from '../lib/fal-gateway';
 import { qrToDataURL } from '../lib/render-libs';
+import { cleanQrUrl, suggestedQrLink } from './qr-link';
 import { persistBufferToR2 } from '../lib/media-persist';
 import { DESIGN_LIMITS, FIRST_PHOTO_ID, applyDesignEdit, designForChat, normaliseDesign, photoAsPicture, resizeDesign, resizeTarget, sideOf, withBack, type Design, type DesignEditCard, type DesignLayer, type DesignPhotoRef, type HeldLayer, type PictureLayer } from './design-doc';
 import { fetchDesignPictures, fetchFlyerPhoto, type FlyerRenderParams } from './flyer-briefs';
@@ -97,7 +98,7 @@ async function withElements(db: Db, orgId: number, o: OptionRow, stored: Design)
         const n = normaliseFlyerContent((p as unknown as FlyerRenderParams).content);
         if (n.ok && n.content.qr) {
             const src = await qrToDataURL(n.content.qr.url, { errorCorrectionLevel: 'M', margin: 4, width: 400, color: { dark: '#000000', light: '#ffffff' } });
-            add.push({ id: 'qr', kind: 'qr', role: 'qr', x: 0.73, y: 0.95 - 0.17 * across, w: 0.17, h: 0.17 * across, src });
+            add.push({ id: 'qr', kind: 'qr', role: 'qr', x: 0.73, y: 0.95 - 0.17 * across, w: 0.17, h: 0.17 * across, src, url: n.content.qr.url });
         }
     }
     if (!has('logo')) {
@@ -125,6 +126,29 @@ async function libraryPicture(db: Db, orgId: number, assetId: number): Promise<D
 }
 
 /** The option's design, made the first time it is opened. */
+/**
+ * Point the design's QR code at a link (owner 2026-11-11: their own link, starting from the suggested one). The picture is
+ * drawn here, never sent by a browser. The QR code on the page is redrawn where it is; one on the shelf comes back; a
+ * design without one gets one in the bottom-right corner.
+ */
+export async function withQrLink(design: Design, rawUrl: unknown): Promise<{ ok: true; design: Design; id: string } | Refused> {
+    const url = cleanQrUrl(rawUrl);
+    if (!url) return { ok: false as const, status: 400, error: 'That doesn\'t look like a web address. Try something like yourshop.co.uk or https://yourshop.co.uk/offer.' };
+    const src = await qrToDataURL(url, { errorCorrectionLevel: 'M', margin: 4, width: 400, color: { dark: '#000000', light: '#ffffff' } });
+    const on = design.layers.find((l) => l.kind === 'qr');
+    if (on) return { ok: true as const, id: on.id, design: { ...design, layers: design.layers.map((l) => (l === on ? { ...l, src, url } as DesignLayer : l)) } };
+    if (design.layers.length >= DESIGN_LIMITS.layers) return { ok: false as const, status: 409, error: 'This design is full. Remove something to add a QR code.' };
+    const shelved = design.removed?.layers.find((l) => l.kind === 'qr');
+    const across = design.pageW / design.pageH;
+    const layer: HeldLayer = shelved && shelved.kind === 'qr'
+        ? { ...shelved, src, url }
+        : { id: 'qr', kind: 'qr', role: 'qr', x: 0.78, y: Math.max(0, 0.96 - 0.17 * across), w: 0.17, h: 0.17 * across, src, url };
+    return { ok: true as const, id: layer.id, design: {
+        ...design, layers: [...design.layers, layer as DesignLayer],
+        removed: design.removed ? { ...design.removed, layers: design.removed.layers.filter((l) => l !== shelved) } : design.removed,
+    } };
+}
+
 export async function openDesign(db: Db, orgId: number, optionId: number): Promise<Opened | Refused> {
     const o = await loadOption(db, orgId, optionId);
     if ('ok' in o) return o;
@@ -240,7 +264,7 @@ export async function downloadDesignPdf(db: Db, args: { orgId: number; optionId:
 }
 
 /** Save what the studio sent. `finish` also redraws the preview: leaving the design, not every keystroke. */
-export async function saveDesign(db: Db, args: { orgId: number; optionId: number; design: unknown; finish?: boolean; usePhotoFromOption?: number | null; addPicture?: number | null; replacePicture?: { assetId: number; target: string } | null; side?: 'back' | null }) {
+export async function saveDesign(db: Db, args: { orgId: number; optionId: number; design: unknown; finish?: boolean; usePhotoFromOption?: number | null; addPicture?: number | null; replacePicture?: { assetId: number; target: string } | null; side?: 'back' | null; qrUrl?: string | null }) {
     const opened = await openDesign(db, args.orgId, args.optionId);
     if (!opened.ok) return opened;
     const o = opened.option;
@@ -283,6 +307,13 @@ export async function saveDesign(db: Db, args: { orgId: number; optionId: number
         if (!swapped) return { ok: false as const, status: 400, error: 'That picture is not on this design any more.' };
         design = swapped.design;
         addedId = swapped.newId;
+    }
+    // The QR code's link: on the side that is open (withQrLink).
+    if (args.qrUrl) {
+        const r = await withQrLink(design, args.qrUrl);
+        if (!r.ok) return r;
+        design = r.design;
+        addedId = r.id;
     }
     if (onBack) design = withBack(whole, design);
     const next: Record<string, unknown> = { ...params(o), design };
@@ -350,19 +381,31 @@ export async function applyDesignCard(db: Db, args: { orgId: number; card: Desig
         const used = await useTemplate(db, { orgId: args.orgId, optionId: args.card.optionId, name: args.card.useTemplate });
         if (!used.ok) return used;
         const { useTemplate: _used, ...rest } = args.card;
-        const anythingElse = rest.changes.length || rest.add.length || rest.shapes || rest.pageColor || rest.pageOpacity !== undefined || rest.font || rest.saveTemplate;
+        const anythingElse = rest.changes.length || rest.add.length || rest.shapes || rest.pageColor || rest.pageOpacity !== undefined || rest.font || rest.saveTemplate || rest.qrUrl;
         return anythingElse ? applyDesignCard(db, { orgId: args.orgId, card: rest }) : used;
     }
     if (args.card.saveTemplate) {
         const { saveTemplate: name, ...rest } = args.card;
-        const anythingElse = rest.changes.length || rest.add.length || rest.shapes || rest.putBack || rest.group || rest.ungroup || rest.setBackground || rest.detachBackground || rest.addBack || rest.removeBack || rest.removeBackground || rest.resizeCopy || rest.pageColor || rest.pageOpacity !== undefined || rest.photoOpacity !== undefined || rest.photoCrop !== undefined || rest.font;
+        const anythingElse = rest.changes.length || rest.add.length || rest.shapes || rest.putBack || rest.group || rest.ungroup || rest.setBackground || rest.detachBackground || rest.addBack || rest.removeBack || rest.removeBackground || rest.resizeCopy || rest.pageColor || rest.pageOpacity !== undefined || rest.photoOpacity !== undefined || rest.photoCrop !== undefined || rest.font || rest.qrUrl;
         const after = anythingElse ? await applyDesignCard(db, { orgId: args.orgId, card: rest }) : opened;
         if (!after.ok) return after;
         const kept = await saveDesignTemplate(db, { orgId: args.orgId, userId: null, name, design: after.design });
         if (!kept.ok) return kept;
         return { ok: true as const, design: after.design, photoUrl: after.photoUrl, pictureUrls: after.pictureUrls };
     }
-    const { design, applied } = applyDesignEdit(opened.design, args.card, { fromChat: true });
+    const edited = applyDesignEdit(opened.design, args.card, { fromChat: true });
+    let design = edited.design;
+    let applied = edited.applied;
+    // The QR code's link from the chat: one the user gave, or "suggested" — the business's own (qr-link.ts).
+    if (args.card.qrUrl) {
+        const want = /^suggested$/i.test(args.card.qrUrl) ? (await suggestedQrLink(db, args.orgId))?.url ?? null : args.card.qrUrl;
+        if (!want) return { ok: false as const, status: 409, error: 'There is no link to suggest yet — tell me the link the QR code should open.' };
+        const onBack = args.card.side === 'back' && !!design.back;
+        const r = await withQrLink(onBack ? sideOf(design, 'back') : design, want);
+        if (!r.ok) return r;
+        design = onBack ? withBack(design, r.design) : r.design;
+        applied += 1;
+    }
     // Only a cut-out was asked for: that is its own step, and the design changes only by it.
     if (!applied && args.card.removeBackground) return removePictureBackground(db, { orgId: args.orgId, userId: null, optionId: args.card.optionId, target: args.card.removeBackground, side: args.card.side });
     // Only a copy was asked for: this design stays exactly as it is.

@@ -35,6 +35,23 @@ const STYLE_PROMPT: Record<ClipStyle, string> = {
     product: 'macro close-up, shallow depth of field, rich texture, studio lighting',
 };
 
+/**
+ * "With sound" (plan §5.3 / Phase 6): ambient sound made with the picture, no speech. Off by default — a
+ * voiceover or music usually goes over it. Kling 3 charges 50% more for it (bake-off round 1), so the
+ * clip's tasks are 1.5×, rounded up. Only offered while the model in use can make it (clipSoundAvailable).
+ */
+export const CLIP_SOUND_PRICE = 1.5;
+export const clipTasksWithSound = (tasks: number, sound: boolean) => (sound ? Math.ceil(tasks * CLIP_SOUND_PRICE) : tasks);
+/** What the motion prompt adds when the clip has sound: ambience, never voices (no speech in v1). */
+export const CLIP_SOUND_PROMPT = 'Natural ambient sound that fits the scene; no speech, no singing, no music.';
+
+/**
+ * Styles that don't look real: their clips never carry the "Made with AI" caption line (src/utils/ai-disclosure.ts),
+ * which is for realistic AI video (owner, 2026-11-11). Everything else — and an AI scene in a whole video — counts as realistic.
+ */
+export const NON_REALISTIC_STYLES: readonly ClipStyle[] = ['animated3d', 'cartoon2d'];
+export const isRealisticStyle = (style: unknown) => !(NON_REALISTIC_STYLES as readonly unknown[]).includes(style);
+
 /** Seconds a clip can be. The model bills by the second, so the button shows the price for the length. */
 export const CLIP_LENGTHS = [5, 10] as const;
 export type ClipLength = typeof CLIP_LENGTHS[number];

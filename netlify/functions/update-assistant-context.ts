@@ -3,8 +3,8 @@ import { eq, and } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, auditLogs, masterAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { syncPillarsFromNames } from '../../src/utils/content-pillars-store';
-import { parsePillars } from '../../src/public/content-pillars.js';
+import { pillarProfileForAssistant, syncPillarsFromNames } from '../../src/utils/content-pillars-store';
+import { parsePillarsUpTo } from '../../src/public/content-pillars.js';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
 import { assembleBlueprint } from '../../src/utils/blueprint';
@@ -94,9 +94,10 @@ export default withLambda(async (event) => {
             // so a partial save from any other surface must not erase them.
             // allowed_post_shapes / allowed_article_types (profile ▸ Content mix) for the same reason:
             // re-running the setup wizard must not quietly reset which kinds of content are allowed.
-            // content_pillars too: it is DERIVED from the pillar records (src/utils/content-pillars-store.ts)
-            // and the profile no longer sends it, so a whole-context save must not drop it.
-            const CARRY_ACROSS = ['content_pillars', 'publishPolicy', 'trigger_type', 'content_source', 'allowed_post_shapes', 'allowed_article_types', 'voice'];
+            // content_pillars, blogTopics and newsletterTopics too: they are DERIVED from the pillar / topic
+            // records (src/utils/content-pillars-store.ts) and the settings page no longer sends them, so a
+            // whole-context save must not drop them.
+            const CARRY_ACROSS = ['content_pillars', 'blogTopics', 'newsletterTopics', 'publishPolicy', 'trigger_type', 'content_source', 'allowed_post_shapes', 'allowed_article_types', 'voice'];
             const mergedContext = { ...newContext };
             const existingCtx = (existingAssistant.onboardingContext as Record<string, unknown> | null) ?? {};
             for (const key of CARRY_ACROSS) {
@@ -106,14 +107,18 @@ export default withLambda(async (event) => {
                 }
             }
 
-            // Content pillars are RECORDS. A caller that still sends them as text (the chat set-up
-            // card, an older open profile tab) changes the records to match, keeping each matching
-            // pillar's row, description and post history; the text written is then the derived one.
+            // Content pillars (Social) and topics (Blog, Email) are RECORDS, kept under the role's key
+            // (src/utils/pillar-profiles.ts). A caller that still sends them as text (the chat set-up card,
+            // the set-up wizard, an older open settings tab) changes the records to match, keeping each
+            // matching row, description and post history; the value written is then the derived one.
             // Unchanged text is left alone, so an unrelated save never touches the records.
-            if (Object.prototype.hasOwnProperty.call(newContext ?? {}, 'content_pillars')
-                && JSON.stringify(parsePillars(mergedContext.content_pillars)) !== JSON.stringify(parsePillars(existingCtx.content_pillars))) {
-                const names = await syncPillarsFromNames(tx, orgId, assistantId, mergedContext.content_pillars);
-                if (names) mergedContext.content_pillars = names;
+            const pillarProfile = await pillarProfileForAssistant(tx, orgId, assistantId);
+            const pillarKey = pillarProfile.contextKey;
+            if (Object.prototype.hasOwnProperty.call(newContext ?? {}, pillarKey)
+                && JSON.stringify(parsePillarsUpTo(mergedContext[pillarKey], pillarProfile.maxActive))
+                    !== JSON.stringify(parsePillarsUpTo(existingCtx[pillarKey], pillarProfile.maxActive))) {
+                const synced = await syncPillarsFromNames(tx, orgId, assistantId, mergedContext[pillarKey]);
+                if (synced) mergedContext[synced.key] = synced.value;
             }
 
             // Perform the Update

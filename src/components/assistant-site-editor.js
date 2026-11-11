@@ -1481,6 +1481,26 @@
   // The booking link of its own (site-booking-page.ts; docs/booking-calendly-gaps-plan.md A): this
   // site's address + /book, live even before the site is published. Links per service and per
   // person, and a button for any other website (a plain link — no embed, no script).
+  // A QR code to print, for a link THEY choose (qr-link.ts; owner 2026-11-11): the booking link by default
+  // (else the suggested link — their offer or website), and any other link they type instead.
+  function qrBlock() {
+    const q = (state.data.booking || {}).qr;
+    if (!q) return '';
+    const drawn = state.qrDrawn || { url: q.defaultUrl, svg: q.svg, png: q.png };
+    const isDefault = drawn.url === q.defaultUrl;
+    const svgHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(drawn.svg)}`;
+    return `<details class="mt-2" ${state.qrOpen ? 'open' : ''} data-site-qr-details><summary class="text-xs font-bold text-gray-700 cursor-pointer">A QR code to print</summary>
+      <p class="text-xs text-gray-500 mt-1">For your counter, a flyer or the window. It opens ${isDefault ? esc(q.defaultLabel) : 'the link below'} — change the link if you want it to open something else.</p>
+      <label class="block text-xs font-bold text-gray-700 mt-2">Link the QR code opens
+        <span class="flex flex-wrap items-center gap-2 mt-1"><input data-site-qr-url type="url" maxlength="500" value="${esc(state.qrTyped != null ? state.qrTyped : drawn.url)}" class="${inputCls} flex-1 min-w-0" aria-label="Link the QR code opens">
+        ${btn('data-site-qr-make', 'Make QR code', true)}</span></label>
+      ${!isDefault ? `<p class="text-xs text-gray-500 mt-1">${btn('data-site-qr-reset', `Use ${esc(q.defaultLabel)} again`)}</p>` : ''}
+      <img src="${svgHref}" alt="QR code for ${esc(drawn.url)}" width="160" height="160" class="mt-2 border border-gray-200 rounded">
+      <p class="text-xs text-gray-500 mt-1 break-all">Opens ${esc(drawn.url)}</p>
+      <div class="flex flex-wrap gap-2 mt-2"><a class="btn-secondary border sb-tap px-3 py-1.5 text-xs font-bold rounded-lg inline-block" download="qr-code.svg" href="${svgHref}">Download for print (SVG)</a>
+        ${drawn.png ? `<a class="btn-secondary border sb-tap px-3 py-1.5 text-xs font-bold rounded-lg inline-block" download="qr-code.png" href="${esc(drawn.png)}">Download as a picture (PNG)</a>` : ''}</div></details>`;
+  }
+
   function bookingLinkCard() {
     const b = state.data.booking || {};
     const site = state.data.site || {};
@@ -1488,7 +1508,7 @@
       const why = b.needsAddress ? 'Choose your website\'s address on the Website tab (under Publish) — your booking link uses it. You don\'t need to publish.'
         : !b.ready ? 'Set your opening hours first.'
         : 'Add a service with a length in Products &amp; Services, a table under Bookings, or a class date below.';
-      return card(`<p class="text-sm font-black text-gray-900">Your booking link</p><p class="text-xs text-gray-500 mt-1">A link to share anywhere — your email signature, Instagram bio, messages. ${why}</p>`);
+      return card(`<p class="text-sm font-black text-gray-900">Your booking link</p><p class="text-xs text-gray-500 mt-1">A link to share anywhere — your email signature, Instagram bio, messages. ${why}</p>${qrBlock()}`);
     }
     const link = b.link;
     const services = (b.services || []);
@@ -1504,10 +1524,7 @@
         ${btn(`data-site-copy="${esc(link)}"`, 'Copy link', true)}<a class="btn-secondary border sb-tap px-3 py-1.5 text-xs font-bold rounded-lg" href="${esc(link)}" target="_blank" rel="noopener">Open</a></div>
       ${videoNoLink ? `<p class="text-xs text-amber-800 font-semibold mt-2">Some services are video calls but there's no video call link yet. Add yours in Business Information ▸ Bookings, or customers are told you'll send one. ${btn('data-site-open-bookings', 'Add it')}</p>` : ''}
       ${perService}
-      ${b.qrSvg ? `<details class="mt-2"><summary class="text-xs font-bold text-gray-700 cursor-pointer">A QR code to print</summary>
-        <p class="text-xs text-gray-500 mt-1">For your counter, a flyer or the window — scanning it opens your booking link.</p>
-        <img src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(b.qrSvg)}" alt="QR code for your booking link" width="160" height="160" class="mt-2 border border-gray-200 rounded">
-        <div class="mt-2"><a class="btn-secondary border sb-tap px-3 py-1.5 text-xs font-bold rounded-lg inline-block" download="booking-link-qr.svg" href="data:image/svg+xml;charset=utf-8,${encodeURIComponent(b.qrSvg)}">Download QR code</a></div></details>` : ''}
+      ${qrBlock()}
       <details class="mt-2"><summary class="text-xs font-bold text-gray-700 cursor-pointer">A "Book now" button for another website</summary>
         <p class="text-xs text-gray-500 mt-1">Paste this where your other website lets you add HTML. It's a plain link, so it works anywhere.</p>
         <textarea readonly rows="3" class="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-xs font-mono bg-gray-50">${esc(snippet)}</textarea>
@@ -2859,6 +2876,26 @@
     if (openStays) { const v = openStays.dataset.siteOpenStays; openFacts('stays', v === 'whole' || v === 'room' ? { newType: v } : {}); return; }
     if (t('[data-site-open-reviews]')) { window._audienceInitialTab = 'reviews'; if (typeof window.loadView === 'function') window.loadView('audience'); return; }
     if (t('[data-site-open-hours]')) { window._bizinfoInitialTab = 'hours'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
+    // The QR code's link (qrBlock): drawn by qr-code.ts, never in the browser.
+    const qrMake = t('[data-site-qr-make]');
+    if (qrMake) {
+      const input = qrMake.closest('[data-site-qr-details]')?.querySelector('[data-site-qr-url]');
+      const url = input ? input.value.trim() : '';
+      state.qrOpen = true; state.qrTyped = url;
+      if (!url) { say('Type the link the QR code should open.', 'error'); return; }
+      qrMake.disabled = true;
+      try {
+        const res = await fetch('/.netlify/functions/qr-code', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'The QR code couldn\'t be made.');
+        state.qrDrawn = d; state.qrTyped = null; state.note = null;
+      } catch (err) { state.note = { text: err.message, tone: 'error' }; }
+      rerender();
+      return;
+    }
+    if (t('[data-site-qr-reset]')) { state.qrDrawn = null; state.qrTyped = null; state.qrOpen = true; rerender(); return; }
+    const qrDetails = e.target.closest && e.target.closest('[data-site-qr-details] > summary');
+    if (qrDetails) { state.qrOpen = !qrDetails.parentElement.open; }
     if (t('[data-site-open-bookings]')) { window._bizinfoInitialTab = 'bookings'; if (typeof window.loadView === 'function') window.loadView('assets'); return; }
     const sAdd = t('[data-session-add]');
     if (sAdd) {

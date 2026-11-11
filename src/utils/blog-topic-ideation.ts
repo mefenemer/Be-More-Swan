@@ -23,6 +23,8 @@ import { buildBlueprintGuardrailsBlock } from './blog-generate';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { parseModelJson } from './model-json';
 import { loadProductsBlock } from './org-products';
+import { pickBalancedTopic, topicLine } from './topic-balance';
+import { PILLAR_PROFILES } from './pillar-profiles';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -39,6 +41,9 @@ export interface BlogTopicIdea {
     topic: string;
     /** Comma-separated target keywords, or '' when the model offered none. */
     keywords: string;
+    /** The topic record this post was written under (docs/pillar-records-plan.md §7), saved on the post. */
+    pillarId?: number | null;
+    pillar?: string | null;
 }
 
 export interface IdeateBlogTopicOptions {
@@ -110,12 +115,20 @@ export async function ideateBlogTopic(
     // "Topics & themes" from the Blog Writer's own setup (assistant-onboarding-schemas.js blogTopics).
     // It was asked at hire and read by NOTHING — the user named their subjects and autopilot ignored
     // them. It is the most direct statement of what this blog is about, so it leads the brief.
-    const setupTopics = str((asst?.onboardingContext as Record<string, unknown> | null)?.blogTopics, 500);
     // A job that carries its own direction (a rejection's reason, a campaign brief) is ABOUT that;
     // an Inspo topic would compete with it, so it only applies to an undirected slot.
     const inspoTopic = guidance ? null : await pickInspoTopic(db, {
         assistantId, organisationId, slot, configuration: asst?.configuration ?? null, artifact: 'blog post',
     });
+    // The topics are RECORDS now (src/utils/topic-balance.ts): an undirected slot is written under the
+    // topic used least lately, and the post records it. A directed slot (guidance, Inspo) is about that
+    // instead and sees the topics only as background. Before records exist this reads the old text.
+    const topicChoice = await pickBalancedTopic(db, {
+        organisationId, assistantId, onboardingContext: asst?.onboardingContext ?? null,
+        table: 'blog_posts', days: PILLAR_PROFILES.blog_writer.balanceDays, slot,
+    });
+    const chosenTopic = guidance || inspoTopic ? null : topicChoice.chosen;
+    const setupTopics = str(topicChoice.all.map((t) => t.name).join(', '), 500);
     if (inspoTopic) console.log(`ideateBlogTopic: assistant ${assistantId} slot built around inspo item ${inspoTopic.itemId}`);
 
     const inspoBlock = await buildInspoBlock(db, { assistantId, organisationId, topic: inspoTopic?.retrievalQuery ?? null });
@@ -134,7 +147,9 @@ export async function ideateBlogTopic(
         org?.name ? `Business: ${org.name}` : '',
         org?.businessDescription ? `What they do: ${org.businessDescription}` : '',
         org?.targetAudience ? `Audience: ${org.targetAudience}` : '',
-        setupTopics ? `Topics they want this blog to cover (pick one of these, or something squarely within them): ${setupTopics}` : '',
+        chosenTopic
+            ? `Topic for THIS post (write squarely within it; the title and angle are yours): ${topicLine(chosenTopic)}`
+            : (setupTopics ? `Topics they want this blog to cover (pick one of these, or something squarely within them): ${setupTopics}` : ''),
         productsBlock ?? '',
         recent.length
             ? `Already written (choose something genuinely different):\n${recent.map(r => `- ${r.title}`).join('\n')}`
@@ -184,7 +199,10 @@ export async function ideateBlogTopic(
         const title = str(parsed.title, 200);
         if (!title) return null; // the title becomes blog_posts.title, which is NOT NULL
 
-        return { title, topic: str(parsed.topic, 300), keywords: str(parsed.keywords, 300) };
+        return {
+            title, topic: str(parsed.topic, 300), keywords: str(parsed.keywords, 300),
+            pillarId: chosenTopic?.id ?? null, pillar: chosenTopic?.name ?? null,
+        };
     } catch (err) {
         // ⚠️ RE-THROWN, not swallowed. The caller can tell an outage from an ungroundable assistant
         // only if the two arrive differently — and only the caller can decide whether to park the

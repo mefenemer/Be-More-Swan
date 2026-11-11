@@ -39,6 +39,9 @@ export const organisations = pgTable('organisations', {
   // US-LEGAL-3.1: EU AI Act Art.50 — outbound AI content footer
   aiDisclosureFooterEnabled: boolean('ai_disclosure_footer_enabled').notNull().default(false),
   aiDisclosureFooterText: text('ai_disclosure_footer_text'),
+  // db/z-ai-video-label.sql — add "Made with AI" to the caption of posts with realistic AI video when
+  // they publish (src/utils/ai-disclosure.ts; owner 2026-11-11). On by default; the workspace can turn it off.
+  aiVideoLabelEnabled: boolean('ai_video_label_enabled').notNull().default(true),
   // US3 AC3.3: opt-in "Photo by … on Pexels" attribution line appended to drafts sourced from Pexels.
   pexelsAttributionEnabled: boolean('pexels_attribution_enabled').notNull().default(false),
   // Epic 3 US8: AI approvals email digest cadence — 'off' | 'daily' | 'weekly'. db/ai-digest.sql.
@@ -3463,6 +3466,9 @@ export const blogPosts = pgTable("blog_posts", {
   publishedAt: timestamp("published_at"),
   isAutonomous: boolean("is_autonomous").notNull().default(false),
   generationReason: text("generation_reason"),
+  // The topic it was written under (db/z-content-topics.sql): a content_pillars row on this assistant.
+  pillarId: integer("pillar_id").references(() => contentPillars.id, { onDelete: "set null" }),
+  pillar: text("pillar"),
   // Why the last scheduled publish failed, for the owner (publish-blog-posts.ts); cleared when the
   // article is booked again or published. db/blog-failure-reason.sql — ⚠️ apply before deploying.
   failureReason: text("failure_reason"),
@@ -4931,6 +4937,9 @@ export const newsletterIssues = pgTable("newsletter_issues", {
   sentAt: timestamp("sent_at"),
   isAutonomous: boolean("is_autonomous").notNull().default(false),
   generationReason: text("generation_reason"),
+  // The topic it was written under (db/z-content-topics.sql): a content_pillars row on this assistant.
+  pillarId: integer("pillar_id").references(() => contentPillars.id, { onDelete: "set null" }),
+  pillar: text("pillar"),
   provenanceContentId: text("provenance_content_id"),
   confidenceScore: text("confidence_score"),
   factualClaims: jsonb("factual_claims"),

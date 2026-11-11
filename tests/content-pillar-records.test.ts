@@ -136,14 +136,16 @@ check('drafting reads the records and counts by pillar_id, then by name for olde
 
 check('the profile save carries pillars across, and text answers reconcile the records', () => {
     assert.match(ctxSave, /const CARRY_ACROSS = \['content_pillars', /);
-    assert.match(ctxSave, /const names = await syncPillarsFromNames\(tx, orgId, assistantId, mergedContext\.content_pillars\);/);
+    // Under the role's key since phase 3a (content_pillars for Social, blogTopics / newsletterTopics for Blog / Email).
+    assert.match(ctxSave, /const synced = await syncPillarsFromNames\(tx, orgId, assistantId, mergedContext\[pillarKey\]\);/);
     assert.match(onboarding, /await ensurePillarRecords\(db, orgId, newAssistant\.id, newAssistant\.onboardingContext\)/, 'the wizard creates records');
 });
 
 check('one server path, Social Media assistants only, tenant-checked', () => {
     assert.match(api, /requireTenant\(event, db\)/);
     assert.match(api, /eq\(aiAssistants\.organisationId, orgId\)/);
-    assert.match(api, /SMM_ROLE_KEYS\.includes/);
+    // Social, Blog and Email since phase 3a (src/utils/pillar-profiles.ts); any other role is refused.
+    assert.match(api, /const profile = pillarProfileFor\(asst\.roleKey\);\s+if \(!profile\) return json\(400/);
     for (const a of ['add', 'update', 'archive', 'reorder']) assert.ok(api.includes(`case '${a}':`), a);
 });
 
@@ -158,7 +160,7 @@ check('profile: a pillar list replaces the free-text box; the hidden carrier sta
     assert.match(assistants, /if \(!window\._pillarsTextDirty\) delete newContext\.content_pillars;/);
     assert.match(assistants, /\(k !== 'content_pillars' \|\| sentPillarText\)/, 'no redraft offer for pillars a save did not send');
     assert.match(assistants, /if \(sentPillarText\) \{ window\._pillarsTextDirty = false; window\.PillarList\?\.reload\(\); \}/);
-    assert.match(list, /window\._detailSetContextKey\?\.\('content_pillars', names\)/, 'the list hands its names back to the autosave');
+    assert.match(list, /window\._detailSetContextKey\?\.\(state\.contextKey, value\)/, 'the list hands its names back to the autosave');
     assert.match(list, /window\.offerRedraftUpcoming\?\./, 'a change offers to redraft upcoming posts');
 });
 

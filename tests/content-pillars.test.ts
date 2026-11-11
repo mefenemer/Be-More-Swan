@@ -39,7 +39,7 @@ check('the profile and the post writer use the same splitter', () => {
     // Drafting reads the pillar RECORDS (2026-11-08); until an assistant has rows, loadDraftPillars
     // falls back to this same splitter on the old text (tests/content-pillar-records.test.ts).
     assert.match(read('netlify/functions/process-content-jobs.ts'), /const pillarList = draftPillars\.map\(\(p\) => p\.name\);/);
-    assert.match(read('src/utils/content-pillars-store.ts'), /const fromText = \(\): DraftPillar\[\] => parsePillars\(/);
+    assert.match(read('src/utils/content-pillars-store.ts'), /const fromText = \(\): DraftPillar\[\] => parsePillarsUpTo\(/);
     assert.match(read('assistants.js'), /if \(window\.ContentPillars\) return window\.ContentPillars\.parsePillars\(raw\);/);
     const w = read('workspace.html');
     assert.ok(w.indexOf('/src/public/content-pillars.js') < w.indexOf('/assistants.js'), 'the splitter must load before assistants.js');

@@ -20,6 +20,8 @@ import { and, desc, eq, inArray, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, newsletterIssues } from '../../db/schema';
 import { generateIssueBody } from '../../src/utils/newsletter-generate';
+import { pickBalancedTopic, topicLine } from '../../src/utils/topic-balance';
+import { PILLAR_PROFILES } from '../../src/utils/pillar-profiles';
 import { createNotification } from '../../src/utils/notify';
 import { postsPerWeekFor } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -111,6 +113,16 @@ export default withLambda(async () => {
             // the model call exist, so a refusal leaves nothing half-made behind.
             if (!(await hasCapacity(a.organisationId))) { note('task_limit_reached'); continue; }
 
+            // The lead topic for this issue (src/utils/topic-balance.ts): the one used least lately, with
+            // the others as "may also mention" — a newsletter often rounds things up, but no longer is
+            // every issue "about" the whole list. Recorded on the issue so the next one balances.
+            const topicChoice = await pickBalancedTopic(db, {
+                organisationId: a.organisationId, assistantId: a.id, onboardingContext: actx,
+                table: 'newsletter_issues', days: PILLAR_PROFILES.newsletter_editor.balanceDays, slot: now,
+            });
+            const lead = topicChoice.chosen;
+            const others = topicChoice.all.filter((t) => t !== lead).map((t) => t.name);
+
             const [issue] = await db.insert(newsletterIssues).values({
                 organisationId: a.organisationId,
                 userId: a.userId,
@@ -121,15 +133,21 @@ export default withLambda(async () => {
                 // reason rather than overwriting it with the generic assistant_draft marker.
                 generationReason: 'newsletter_autopilot',
                 status: 'draft',
+                pillarId: lead?.id ?? null,
+                pillar: lead?.name ?? null,
             }).returning({ id: newsletterIssues.id });
 
-            const topic = typeof actx.newsletterTopics === 'string' ? actx.newsletterTopics : '';
+            // generateIssueBody frames it as "This email is about: …" (newsletter-generate.ts).
+            const topic = lead ? topicLine(lead) : '';
             await generateIssueBody(db, {
                 issueId: issue.id,
                 organisationId: a.organisationId,
                 userId: a.userId,
                 topic,
-                notes: typeof actx.newsletterAudience === 'string' ? `Who this is for: ${actx.newsletterAudience}` : '',
+                notes: [
+                    typeof actx.newsletterAudience === 'string' && actx.newsletterAudience ? `Who this is for: ${actx.newsletterAudience}` : '',
+                    others.length ? `It may also briefly mention: ${others.join(', ')}.` : '',
+                ].filter(Boolean).join('\n'),
             });
 
             // Waiting for a person, explicitly — not left as a bare 'draft' that looks like

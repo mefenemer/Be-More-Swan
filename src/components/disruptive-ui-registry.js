@@ -1967,7 +1967,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('video_tidy_proposal', renderVideoTidyProposalCard);
 
-  // { type: 'video_clip_proposal', description, style, lengthS, shape }
+  // { type: 'video_clip_proposal', description, style, lengthS, shape, sound? }
   // An AI clip on its own (src/lib/ai-clip.ts): saving it is free. The first frame (1 task) and the clip
   // itself are buttons on the Videos tab, which say what they use — a chat card never spends.
   const CLIP_STYLE_NAMES = { realistic: 'Realistic', cinematic: 'Cinematic', animated3d: '3D animated', cartoon2d: '2D cartoon', product: 'Product close-up' };
@@ -1978,13 +1978,46 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const shape = VIDEO_SHAPE_NAMES[ui.shape] ? ui.shape : '9:16';
     return videoActionCard(esc, {
       kicker: 'New AI clip',
-      rows: [['Shows', description || '(nothing yet)'], ['Style', CLIP_STYLE_NAMES[style]], ['Length', `${lengthS} seconds`], ['Shape', VIDEO_SHAPE_NAMES[shape]]],
+      rows: [['Shows', description || '(nothing yet)'], ['Style', CLIP_STYLE_NAMES[style]], ['Length', `${lengthS} seconds`], ['Shape', VIDEO_SHAPE_NAMES[shape]], ui.sound === true ? ['Sound', 'Natural background sound, no speech (1.5× the clip’s tasks, where the model can make it)'] : null],
       note: 'Free to save. On the Videos tab you see its first frame (1 task) before the clip is made, and “Make the clip” says what it uses. Made-up people only.',
-      button: 'Save the clip', body: description.length >= 8 ? { action: 'clip_create', description, style, lengthS, shape } : null,
+      button: 'Save the clip', body: description.length >= 8 ? { action: 'clip_create', description, style, lengthS, shape, sound: ui.sound === true } : null,
       done: 'Saved. Press “See the first frame” on the Videos tab.',
     });
   }
   register('video_clip_proposal', renderVideoClipProposalCard);
+
+  // { type: 'ai_video_label_setting', enabled }
+  // The workspace's "Made with AI" caption line for realistic AI video (src/utils/ai-disclosure.ts): the same
+  // switch as Settings ▸ "Made with AI" on AI videos, saved through the same endpoint (ai-video-label.ts).
+  function renderAiVideoLabelSettingCard(ui, esc) {
+    const on = ui.enabled !== false;
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">“Made with AI” on AI videos · Approval needed</p>
+      <p class="text-sm text-gray-900 mt-2">${on ? 'Turn it ON: posts whose video contains realistic AI footage get “Made with AI” after the caption when they publish.' : 'Turn it OFF: posts with realistic AI video publish without the “Made with AI” line.'}</p>
+      <p class="text-xs text-gray-600 mt-2">For the whole workspace. 3D animated and cartoon clips are never labelled, and YouTube is always told through its own setting.</p>
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-avl-go class="btn-primary px-4 py-2 text-sm font-bold rounded-lg transition disabled:opacity-50">${on ? 'Turn it on' : 'Turn it off'}</button>
+        <button type="button" data-avl-cancel class="btn-secondary px-4 py-2 border text-sm font-bold rounded-lg transition disabled:opacity-50">Not now</button>
+      </div>
+      <p class="hidden mt-2 text-xs font-semibold text-indigo-700" data-avl-status role="status"></p>`;
+    const status = el.querySelector('[data-avl-status]');
+    const say = (t, bad) => { status.textContent = t; status.className = `mt-2 text-xs font-semibold ${bad ? 'text-red-600' : 'text-indigo-700'}`; };
+    const busy = (b) => el.querySelectorAll('button').forEach((x) => { x.disabled = b; });
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-avl-cancel]')) { busy(true); say('Left as it is.'); return; }
+      if (!e.target.closest('[data-avl-go]')) return;
+      busy(true); say('Saving…');
+      try {
+        const r = await fetch('/.netlify/functions/ai-video-label', { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: on }) });
+        if (!r.ok) throw new Error();
+        say(on ? 'On. Posts with realistic AI video will say “Made with AI”.' : 'Off. Posts with AI video publish without the line.');
+      } catch { busy(false); say('That didn’t save — try the switch in Settings.', true); }
+    });
+    return el;
+  }
+  register('ai_video_label_setting', renderAiVideoLabelSettingCard);
   register('video_note_proposal', renderVideoNoteProposalCard);
   register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
   register('video_reshape_proposal', renderVideoReshapeProposalCard);
@@ -3837,6 +3870,66 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     return el;
   }
   register('class_sessions', renderClassSessionsCard);
+
+  // { type: 'qr_code', summary, url | "suggested", label? } — a QR code for a link the user chooses (qr-link.ts,
+  // qr-code.ts). The chat suggests a link; the card shows it with the link in a box to change, and draws the code
+  // on the server. Downloading costs nothing, so nothing needs approving.
+  function renderQrCodeCard(ui, esc) {
+    const el = document.createElement('div');
+    el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm p-5 max-w-md';
+    const start = typeof ui.url === 'string' && !/^suggested$/i.test(ui.url.trim()) ? ui.url.trim().slice(0, 500) : '';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-gray-500 tracking-wider uppercase">QR code</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <label class="block text-xs font-bold text-gray-700 mt-3">Link the QR code opens
+        <span class="flex flex-wrap items-center gap-2 mt-1"><input data-qr-url type="url" maxlength="500" class="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm" value="${esc(start)}" placeholder="yourshop.co.uk">
+        <button type="button" data-qr-make class="btn-primary px-3 py-2 text-xs font-bold rounded-lg disabled:opacity-50">Make QR code</button></span></label>
+      <p class="text-xs text-gray-500 mt-1" data-qr-note></p>
+      <div class="hidden mt-3" data-qr-out>
+        <img data-qr-img alt="QR code" width="160" height="160" class="border border-gray-200 rounded">
+        <p class="text-xs text-gray-500 mt-1 break-all" data-qr-opens></p>
+        <div class="flex flex-wrap gap-2 mt-2"><a data-qr-svg class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg inline-block" download="qr-code.svg">Download for print (SVG)</a>
+          <a data-qr-png class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg inline-block" download="qr-code.png">Download as a picture (PNG)</a></div>
+      </div>`;
+    const input = el.querySelector('[data-qr-url]');
+    const note = el.querySelector('[data-qr-note]');
+    const say = (t, bad) => { note.textContent = t || ''; note.className = `text-xs mt-1 ${bad ? 'text-red-600 font-semibold' : 'text-gray-500'}`; };
+    async function make() {
+      const url = input.value.trim();
+      if (!url) { say('Type the link the QR code should open.', true); return; }
+      const btn = el.querySelector('[data-qr-make]');
+      btn.disabled = true;
+      try {
+        const res = await fetch('/.netlify/functions/qr-code', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'The QR code couldn\'t be made.');
+        const svgHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(d.svg)}`;
+        el.querySelector('[data-qr-img]').src = svgHref;
+        el.querySelector('[data-qr-svg]').href = svgHref;
+        el.querySelector('[data-qr-png]').href = d.png;
+        el.querySelector('[data-qr-opens]').textContent = `Opens ${d.url}`;
+        el.querySelector('[data-qr-out]').classList.remove('hidden');
+        input.value = d.url;
+        say('Change the link and press Make QR code again to point it somewhere else.');
+      } catch (err) { say(err.message, true); }
+      btn.disabled = false;
+    }
+    el.addEventListener('click', (e) => { if (e.target.closest('[data-qr-make]')) make(); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); make(); } });
+    // The suggested link when the chat didn't give one: the business's own, read on the server.
+    (async () => {
+      if (!start) {
+        try {
+          const d = await fetch('/.netlify/functions/qr-code', { credentials: 'same-origin' }).then((r) => r.json());
+          if (d && d.suggestion) { input.value = d.suggestion.url; say(`Suggested: ${d.suggestion.label}. Change it if you want it to open something else.`); }
+          else { say('Type the link the QR code should open.'); return; }
+        } catch { say('Type the link the QR code should open.'); return; }
+      }
+      make();
+    })();
+    return el;
+  }
+  register('qr_code', renderQrCodeCard);
 
   // { type: 'review_decisions', summary, decisions: [{ reviewId, decision: approve|decline, reason }] }
   // Approve / decline reviews customers sent in — org-reviews.ts PATCH { id, decision }, the same as

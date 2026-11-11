@@ -38,7 +38,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
     const db = getDb();
     const startedAt = Date.now();
-    const live = emailsGoToCustomers();
+    const live = emailsGoToCustomers(event.headers as Record<string, string | undefined>);
 
     // What this run sends: the template, the once-each mark, what merges in, and who still needs it.
     let templateKey: string;
