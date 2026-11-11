@@ -231,10 +231,10 @@ check('site-reports: bots are turned away before anything is written, and it is 
     assert.ok(page.includes('noindex'));
 });
 
-check('admin: Hosted Sites under Trust, platform_config, reason required to take a site down, audit-logged', () => {
+check('admin: Hosted sites under Customers, platform_config, reason required to take a site down, audit-logged', () => {
     const html = read('admin.html');
     assert.ok(html.includes('id="view-hosted-sites"'));
-    assert.ok(html.includes("{ view: 'hosted-sites',    icon: '🌐', label: 'Hosted Sites',     perm: 'platform_config',"));
+    assert.ok(html.includes("{ view: 'hosted-sites',   icon: '🌐', label: 'Hosted sites',     perm: 'platform_config',"));
     assert.ok(html.includes("if (view === 'hosted-sites')   loadHostedSites();"));
     const fn = read('netlify/functions/admin-sites.ts');
     assert.ok(fn.includes("hasPermission(row?.role, 'platform_config')"));

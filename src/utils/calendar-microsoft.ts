@@ -22,7 +22,8 @@ import { getFreshAccessToken, IntegrationError } from './workspace-integrations'
 import { settingsFromRow } from './booking-settings';
 import { setBusyCalendar } from './calendar-sync';
 import { formatPounds } from './product-price';
-import { ownerMeetingLine } from './booking-meeting';
+import { ownerMeetingLine, type OnlineMeetingResult } from './booking-meeting';
+import type { BookingRow } from './bookings';
 
 type Db = ReturnType<typeof getDb>;
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -64,19 +65,23 @@ export function busyFromGraph(events: GraphEventLite[]): Array<{ start: Date; en
 
 // ── What should be in their calendar ────────────────────────────────────────────────────────────
 
-export interface WantedEvent { key: string; subject: string; body: string; start: Date; end: Date; tentative: boolean; }
+/** `online`: a Teams meeting is part of the event (a video booking given its own meeting — booking-meeting.ts). */
+export interface WantedEvent { key: string; subject: string; body: string; start: Date; end: Date; tentative: boolean; online?: boolean; }
 
-export const wantedHash = (w: WantedEvent) => createHash('sha256').update(JSON.stringify([w.subject, w.body, w.start.toISOString(), w.end.toISOString(), w.tentative])).digest('hex').slice(0, 32);
+export const wantedHash = (w: WantedEvent) => createHash('sha256').update(JSON.stringify([w.subject, w.body, w.start.toISOString(), w.end.toISOString(), w.tentative, ...(w.online ? ['online'] : [])])).digest('hex').slice(0, 32);
 
 /** The event for a booking (not a class place — the class date carries those). Pure. */
-export function eventForBooking(b: { id: number; status: string; startsAt: Date; endsAt: Date; customerName: string; customerEmail: string; customerPhone: string | null; notes: string | null; partySize: number; kind: string; depositPence: number | null; paymentStatus: string | null; meetingLocation?: string | null; meetingUrl?: string | null }, what: string): WantedEvent {
+export function eventForBooking(b: { id: number; status: string; startsAt: Date; endsAt: Date; customerName: string; customerEmail: string; customerPhone: string | null; notes: string | null; partySize: number; kind: string; depositPence: number | null; paymentStatus: string | null; meetingLocation?: string | null; meetingUrl?: string | null; meetingSource?: string | null }, what: string): WantedEvent {
     const pending = b.status === 'pending';
     const money = b.depositPence && b.paymentStatus === 'paid' ? `${formatPounds(b.depositPence)} deposit paid` : '';
+    // A Teams meeting of its own: Outlook shows the Join button; the line never carries the link, so
+    // storing the link after the event is made doesn't change the event again.
+    const online = b.meetingLocation === 'video' && b.meetingSource === 'teams';
     return {
-        key: `b:${b.id}`, start: new Date(b.startsAt), end: new Date(b.endsAt), tentative: pending,
+        key: `b:${b.id}`, start: new Date(b.startsAt), end: new Date(b.endsAt), tentative: pending, ...(online ? { online: true } : {}),
         subject: `${what} — ${b.customerName}${pending ? ' (to confirm)' : ''}`,
         body: [b.customerName, b.customerEmail, b.customerPhone, b.kind === 'table' ? `Party of ${b.partySize}` : '',
-            ownerMeetingLine({ status: b.status, meetingLocation: b.meetingLocation ?? null, meetingUrl: b.meetingUrl ?? null, customerPhone: b.customerPhone }), money, b.notes ? `Notes: ${b.notes}` : '',
+            online ? 'Video call: the Teams meeting in this event' : ownerMeetingLine({ status: b.status, meetingLocation: b.meetingLocation ?? null, meetingUrl: b.meetingUrl ?? null, customerPhone: b.customerPhone }), money, b.notes ? `Notes: ${b.notes}` : '',
             pending ? 'Confirm or decline it on the Bookings tab.' : '', 'Booked on your website (Be More Swan).'].filter(Boolean).join('\n'),
     };
 }
@@ -90,7 +95,7 @@ export function eventForSession(s: { id: number; title: string; resourceName: st
     };
 }
 
-async function wantedFor(db: Db, orgId: number, now: Date): Promise<WantedEvent[]> {
+export async function wantedFor(db: Db, orgId: number, now: Date): Promise<WantedEvent[]> {
     const [row] = await db.select().from(bookingSettings).where(eq(bookingSettings.organisationId, orgId)).limit(1);
     const st = settingsFromRow(row as Record<string, unknown> | undefined);
     const from = new Date(now.getTime() - 86_400_000);
@@ -124,6 +129,7 @@ const eventJson = (w: WantedEvent, orgId: number) => ({
     subject: w.subject, body: { contentType: 'text', content: w.body },
     start: graphWhen(w.start), end: graphWhen(w.end),
     showAs: w.tentative ? 'tentative' : 'busy', isReminderOn: false,
+    ...(w.online ? { isOnlineMeeting: true, onlineMeetingProvider: 'teamsForBusiness' } : {}),
     transactionId: `bms-${orgId}-${w.key}`,
 });
 
@@ -162,6 +168,47 @@ export async function reconcileOut(db: Db, orgId: number, token: string, now: Da
     }
     if (plan.forget.length) await db.delete(calendarEvents).where(and(eq(calendarEvents.organisationId, orgId), inArray(calendarEvents.itemKey, plan.forget.map((f) => f.itemKey))));
     return writes;
+}
+
+/**
+ * A Teams meeting for one confirmed video booking (booking-meeting.ts ensureMeetingLink): its event in
+ * their Outlook calendar is made — or changed — with a Teams meeting, and the join link read back.
+ * Calendars.ReadWrite is enough (no extra permission). A personal Microsoft account that can't host
+ * Teams meetings gets no link: that is reported, and the pasted link is used instead.
+ */
+export async function teamsMeetingFor(db: Db, b: BookingRow): Promise<OnlineMeetingResult> {
+    const { accessToken } = await getFreshAccessToken(db, b.organisationId, 'outlook_calendar');
+    const [st] = await db.select().from(bookingSettings).where(eq(bookingSettings.organisationId, b.organisationId)).limit(1);
+    const tz = settingsFromRow(st as Record<string, unknown> | undefined).timezone;
+    const { describeBooking } = await import('./bookings');
+    const w = eventForBooking({ ...b, startsAt: new Date(b.startsAt), endsAt: new Date(b.endsAt), meetingSource: 'teams' }, describeBooking(b, tz).what);
+    const [have] = await db.select().from(calendarEvents)
+        .where(and(eq(calendarEvents.organisationId, b.organisationId), eq(calendarEvents.provider, 'microsoft'), eq(calendarEvents.itemKey, w.key))).limit(1);
+    let ev: { id?: string; onlineMeeting?: { joinUrl?: string | null } | null } | null = null;
+    if (have) {
+        const { transactionId: _t, ...patch } = eventJson(w, b.organisationId);
+        const res = await graph(accessToken, `/me/events/${encodeURIComponent(have.externalId)}`, { method: 'PATCH', body: JSON.stringify(patch) });
+        if (res.ok) ev = await res.json();
+        else if (res.status === 404) await db.delete(calendarEvents).where(eq(calendarEvents.id, have.id));
+        else return { ok: false, error: `Outlook didn't make the Teams meeting (it answered ${res.status}), so your own video link was sent.` };
+    }
+    if (!ev) {
+        const res = await graph(accessToken, '/me/events', { method: 'POST', body: JSON.stringify(eventJson(w, b.organisationId)) });
+        if (!res.ok) return { ok: false, error: `Outlook didn't make the Teams meeting (it answered ${res.status}), so your own video link was sent.` };
+        ev = await res.json();
+    }
+    if (!ev?.id) return { ok: false, error: 'Outlook didn\'t make the Teams meeting, so your own video link was sent.' };
+    await db.insert(calendarEvents).values({ organisationId: b.organisationId, provider: 'microsoft', itemKey: w.key, externalId: ev.id, contentHash: wantedHash(w), endsAt: w.end })
+        .onConflictDoUpdate({ target: [calendarEvents.organisationId, calendarEvents.provider, calendarEvents.itemKey], set: { externalId: ev.id, contentHash: wantedHash(w), endsAt: w.end, updatedAt: new Date() } });
+    let url = ev.onlineMeeting?.joinUrl ?? null;
+    if (!url) {
+        // Graph sometimes fills the meeting in a moment after the event is made.
+        const again = await graph(accessToken, `/me/events/${encodeURIComponent(ev.id)}?$select=onlineMeeting`);
+        if (again.ok) url = ((await again.json()) as { onlineMeeting?: { joinUrl?: string | null } | null }).onlineMeeting?.joinUrl ?? null;
+    }
+    return url && /^https:\/\//.test(url)
+        ? { ok: true, url }
+        : { ok: false, error: 'Your Microsoft account didn\'t make a Teams meeting — Teams meetings need a work or school Microsoft 365 account. Your own video link was sent instead.' };
 }
 
 /** Read their busy times into calendar_busy (the business's), replacing whatever was there. */

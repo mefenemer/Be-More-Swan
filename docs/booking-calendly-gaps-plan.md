@@ -17,20 +17,29 @@ Owner request 2026-11-08, after a Calendly comparison. Decisions made 2026-11-08
    customer confirms. Design A's `/book` + deep links so that chat can hand off to them.
 4. **"Powered by Be More Swan" on the booking page: yes, on every plan.** Alternatives later.
 
-## Status (2026-11-08)
-- **A — BUILT** on the working tree (not committed): `/book` + per-service/person links, booking-only
-  address for unpublished sites, "Your booking link" card on the Bookings tab (copy, open, per-service
-  links, "Book now" button snippet), link in the Website chat snapshot and in every drafting prompt
-  (`loadProductsBlock`). Respects "Bookings" switched off and archived Website Assistants.
-  NOT done: the QR code (no QR generator in the codebase — `/card` is a QR *target*, not a maker).
-- **B step 1 — BUILT**: `meeting_location` per service, the business's / a person's video link,
-  copied onto bookings, shown only once confirmed (emails, .ics LOCATION/URL, reminder, manage page),
-  owner email + Bookings tab + Outlook event + subscribe feed show it, phone calls require a number,
-  chat `booking_setup` card sets `meetingUrl` + `serviceLocations`. NOT done: online classes
-  (`class_sessions.meeting_url`).
-- Release needs, in order: `db/z-booking-meeting-links.sql` on BOTH DBs BEFORE the deploy, then
-  `db/help-articles-booking-link-2026-11-08.sql` with the release.
-- B step 2 (Teams) and C (Google) not started.
+## Status (2026-11-11)
+- **A — LIVE on prod** (dab72fe3, 2026-11-08; verified with a real booking on staging): `/book` +
+  per-service/person links, booking-only address for unpublished sites, "Your booking link" card,
+  link in the Website chat and every drafting prompt. **QR code** added 2026-11-11 (download as SVG).
+- **B step 1 — LIVE on prod** (dab72fe3): where each service happens, pasted video links, shown once
+  confirmed everywhere. **Online classes** added 2026-11-11 (`class_sessions.meeting_url`, copied onto
+  each place, "online" on the public timetable — never the link itself).
+- **B step 2 — BUILT 2026-11-11** (staging): "How video call links are made" — a Teams meeting per
+  confirmed video booking via the signed-in Outlook calendar (`teamsMeetingFor`, Calendars.ReadWrite
+  is enough), made BEFORE the customer's email; falls back to the pasted link with the reason on
+  Business Information (`meeting_provider_error`). `bookings.meeting_source` keeps made meetings safe
+  from the pasted-link refresh. Not tested against a real Microsoft 365 account.
+- **C — BUILT 2026-11-11, OFF until configured** (staging): `calendar-google.ts` — busy times in
+  (events.list, start/end only), bookings out (same reconcile plan as Outlook), a Google Meet per
+  booking. Integration `google_calendar`, scopes `openid email https://www.googleapis.com/auth/calendar.events`.
+  Offered only when `GOOGLE_CALENDAR_CLIENT_ID` + `_SECRET` are set. One signed-in calendar at a time.
+  **Needs the owner:** create the new Google Cloud project, consent screen with EXACTLY those scopes,
+  redirect URIs `https://bemoreswan.com/api/oauth/google_calendar/callback` and
+  `https://staging--bemoreswan.netlify.app/api/oauth/google_calendar/callback`, the two env vars on
+  Netlify, then verification. Not on the public /connections page until Google approves.
+- Also 2026-11-11: the Website "Needs you" banner names what waits ("Bookings"), not always "Enquiries".
+- Release needs: `db/z-booking-meeting-providers.sql` on BOTH DBs BEFORE the deploy, then
+  `db/help-articles-booking-meetings-2026-11-11.sql` with the release.
 
 The three gaps, in the order to build them:
 

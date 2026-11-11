@@ -111,7 +111,7 @@ check('wiring: site-serve, the Website tab, chat, drafting', () => {
     assert.ok(serve.includes("creditUrl: site.credit || bookingOnly"), 'credit on every plan');
     assert.ok(serve.includes("!definition.pages.some((p) => p.slug === 'book')"), 'a page of their own at /book wins');
     assert.ok(serve.includes("if (isPost && path !== BOOK_PATH) return { statusCode: 405"), 'booking-only takes only booking posts');
-    assert.ok(read('netlify/functions/sites.ts').includes('link: origin && kinds.length'), 'the Website tab gets the link');
+    assert.ok(read('netlify/functions/sites.ts').includes('const bookLinkUrl = origin && kinds.length'), 'the Website tab gets the link');
     assert.ok(read('src/components/assistant-site-editor.js').includes('function bookingLinkCard()'));
     assert.ok(read('src/utils/site-store.ts').includes('bookingLinkFor(db, orgId)'), 'the Website chat sees it');
     assert.ok(read('src/utils/org-products.ts').includes("import('./site-booking-page')"), 'every drafting assistant reads it, never fatally');

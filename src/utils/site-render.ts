@@ -84,7 +84,7 @@ export function timetableHtml(sessions: SessionView[], sectionId: string, opts: 
             : s.left > 0
                 ? `<a class="btn s" href="${esc(sessionLink(sectionId, s.id))}">Book</a>`
                 : `<a href="${esc(sessionLink(sectionId, s.id))}">Join the waitlist</a>`;
-        return `<li><div class="mi"><span class="mn">${esc(s.timeText)} · ${esc(s.title)}${s.resourceName ? ` <span class="mt">with ${esc(s.resourceName)}</span>` : ''}</span><span class="ml" aria-hidden="true"></span>${s.price ? `<span class="mp">${esc(s.price)}</span>` : ''}</div>
+        return `<li><div class="mi"><span class="mn">${esc(s.timeText)} · ${esc(s.title)}${s.resourceName ? ` <span class="mt">with ${esc(s.resourceName)}</span>` : ''}${s.online ? ' <span class="mt">· online</span>' : ''}</span><span class="ml" aria-hidden="true"></span>${s.price ? `<span class="mp">${esc(s.price)}</span>` : ''}</div>
 <p class="md">${opts.preview ? '' : `${esc(placesText(s.left))} · `}${action}</p></li>`;
     }).join('')}</ul>`).join('');
 }

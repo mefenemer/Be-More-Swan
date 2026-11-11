@@ -98,7 +98,9 @@ check('reminder: confirmed, within 24 hours, booked more than a day ahead, claim
     const fn = read('netlify/functions/send-booking-reminders.ts');
     assert.ok(fn.includes("eq(bookings.status, 'confirmed'), isNull(bookings.reminderSentAt)"));
     assert.ok(fn.includes("sql`${bookings.createdAt} < ${bookings.startsAt} - interval '24 hours'`"));
-    assert.ok(fn.indexOf('.set({ reminderSentAt: new Date() })') < fn.indexOf("emailCustomer(b as BookingRow, 'reminder'"), 'claimed first: two runs cannot both send');
+    const send = fn.indexOf("emailCustomer(withLink, 'reminder'");
+    assert.ok(send > -1 && fn.indexOf('.set({ reminderSentAt: new Date() })') < send, 'claimed first: two runs cannot both send');
+    assert.ok(fn.indexOf('.set({ reminderSentAt: new Date() })') < fn.indexOf('ensureMeetingLink(db, b as BookingRow)'), 'and before any Teams / Meet link is made');
     assert.ok(read('netlify.toml').includes('[functions.send-booking-reminders]\n  schedule = "20 * * * *"'));
     assert.ok(read('db/z-bookings-changes.sql').includes('ADD COLUMN IF NOT EXISTS reminder_sent_at'));
 });
