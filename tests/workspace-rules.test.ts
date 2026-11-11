@@ -134,6 +134,13 @@ async function main() {
         assert.ok(!o.slice(branch, ruleBlock).includes('} else if (!goalProposalFromUiElement(uiElement)) {'), 'no older goal-only drop left');
     });
 
+    await check('"I\'ll set that up…" over a card is a claim, so the reply is replaced (staging 2026-11-11)', async () => {
+        const { replyClaimsChange } = await import('../src/utils/confirm-card-reply');
+        assert.strictEqual(replyClaimsChange('I\'ll set that up as a rule across your whole team.'), true);
+        assert.strictEqual(replyClaimsChange('I will set that up for every assistant.'), true);
+        assert.strictEqual(replyClaimsChange('I can set that up for every assistant — the card below is ready.'), false, 'an offer stays');
+    });
+
     console.log('\nThe endpoint (content-rules.ts)');
     const fn = read('netlify/functions/content-rules.ts');
     await check('GET lists this assistant\'s rules AND the workspace\'s, inside this workspace, and says who may manage', () => {
@@ -164,6 +171,7 @@ async function main() {
         assert.ok(page.includes('<option value="workspace"${shared ? \' selected\' : \'\'}>Every assistant</option>'));
         assert.ok(page.includes("tr.querySelector('.ar-toggle')?.remove();"));
         assert.ok(page.includes('Set by a workspace owner or admin'));
+        assert.ok(page.includes('aria-label="Delete this rule"'), 'the bin button has a name for screen readers');
     });
     await check('a new row saves with its scope; a saved one moves only after a confirm', () => {
         assert.ok(page.includes("...(tr.dataset.scope === 'workspace' ? { scope: 'workspace' } : {})"));
