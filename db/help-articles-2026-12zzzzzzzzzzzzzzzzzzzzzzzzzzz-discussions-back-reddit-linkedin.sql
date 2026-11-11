@@ -59,7 +59,7 @@ Your Lead Generator can do these from chat too. Ask it to redraft a reply, mark 
 
 ## Good to know
 
-- Discussions watches Reddit and LinkedIn only.
+- Discussions watches Reddit and LinkedIn only. Want another site? Ask your Lead Generator in chat and it can send the request to the Be More Swan team.
 - One scan costs one task, whether you press Scan now or it runs in the morning. Redrafting a reply doesn't use a task.
 - The same thread is never shown twice.
 - On Reddit, read the subreddit's rules before you reply. Many ban self-promotion or only allow a little. On LinkedIn, a short, useful comment works better than a pitch.

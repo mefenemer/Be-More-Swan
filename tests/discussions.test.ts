@@ -84,8 +84,17 @@ check('chat asking for any other site or forum is refused out loud, not swapped'
     assert.deepStrictEqual(r.rejected, ['ukbf', 'https://www.quora.com/', 'contractortalk.com']);
     assert.strictEqual(r.tooMany, false);
     assert.deepStrictEqual(sitesFromChat(['quora']).sites, [], 'no fallback for a chat request');
-    assert.match(read('src/utils/chat-discussion-action.ts'), /I can only watch Reddit and LinkedIn, so I can’t add/);
-    assert.match(read('netlify/functions/discussions.ts'), /Discussions watches Reddit and LinkedIn only\./);
+    assert.match(read('src/utils/chat-discussion-action.ts'), /I can only watch Reddit and LinkedIn, so I can’t add “\$\{bad\}”\. If you’d like it added, ask me here in chat and I’ll send the request to the Be More Swan team\./);
+    assert.match(read('netlify/functions/discussions.ts'), /Discussions watches Reddit and LinkedIn only\. To ask for another site, ask your Lead Generator in chat\./);
+});
+check('asking for another site points the user to a request in chat, sent by the support card', () => {
+    for (const f of ['src/utils/discussions.ts', 'netlify/functions/chat-orchestrator.ts']) {
+        const src = read(f);
+        assert.match(src, /request (it|more sites) right here in chat/, `${f} must offer the request`);
+        assert.match(src, /mentor_support_request card/, `${f} must name the card that sends it`);
+    }
+    assert.match(read('src/constants/assistant-shared-prompts.ts'), /"type":"mentor_support_request"/, 'the card every route keeps');
+    assert.match(read('db/help-articles-2026-12zzzzzzzzzzzzzzzzzzzzzzzzzzz-discussions-back-reddit-linkedin.sql'), /Want another site\? Ask your Lead Generator in chat/);
 });
 check('threads already found on retired sites are not listed or counted', () => {
     const s = read('src/utils/discussions.ts');
