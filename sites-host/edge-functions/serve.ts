@@ -51,6 +51,20 @@ async function countVisit(app: string, key: string, request: Request, url: URL, 
     }).catch(() => {});
 }
 
+// ⚠️ Netlify copies the query string of the request onto a redirect that has none of its own, so the
+// app's plain `Location: /book` reached visitors as `/book?host=…&path=%2F` — the address of OUR call
+// to the app, not theirs (found 2026-11-11). Take back off exactly the pairs this function sent, and
+// only when host AND path are both there (Netlify's copy) — a visitor's own ?q=… is never touched.
+export function cleanLocation(location: string, sent: string[]): string {
+    const qAt = location.indexOf('?');
+    if (qAt < 0) return location;
+    const hashAt = location.indexOf('#', qAt);
+    const pairs = location.slice(qAt + 1, hashAt < 0 ? undefined : hashAt).split('&');
+    if (!sent.slice(0, 2).every((p) => pairs.includes(p))) return location;
+    const kept = pairs.filter((pair) => pair && !sent.includes(pair));
+    return location.slice(0, qAt) + (kept.length ? `?${kept.join('&')}` : '') + (hashAt < 0 ? '' : location.slice(hashAt));
+}
+
 export default async (request: Request, context?: { ip?: string; waitUntil?: (p: Promise<unknown>) => void }): Promise<Response> => {
     const url = new URL(request.url);
     const isForm = request.method === 'POST' && FORM_PATHS.has(url.pathname);
@@ -68,7 +82,8 @@ export default async (request: Request, context?: { ip?: string; waitUntil?: (p:
     }
     // ⚠️ The host is in the URL as well as the header, so no cache between here and the app can ever
     // hand one site's page to another site's address (site-serve also sends Netlify-Vary on X-Site-Host).
-    const target = `${app}/.netlify/functions/site-serve?host=${encodeURIComponent(url.host)}&path=${encodeURIComponent(url.pathname)}${url.search ? `&q=${encodeURIComponent(url.search.slice(1))}` : ''}`;
+    const sent = [`host=${encodeURIComponent(url.host)}`, `path=${encodeURIComponent(url.pathname)}`, ...(url.search ? [`q=${encodeURIComponent(url.search.slice(1))}`] : [])];
+    const target = `${app}/.netlify/functions/site-serve?${sent.join('&')}`;
     const upstream = await fetch(target, {
         method: request.method,
         headers: {
@@ -84,6 +99,8 @@ export default async (request: Request, context?: { ip?: string; waitUntil?: (p:
     // Pass the page and its headers through; drop anything that would tie it to the app's origin.
     const headers = new Headers(upstream.headers);
     headers.delete('set-cookie');
+    const location = headers.get('location');
+    if (location) headers.set('location', cleanLocation(location, sent));
     // A person read a page: count it after answering (waitUntil keeps it alive past the response).
     const purpose = `${request.headers.get('sec-purpose') || ''} ${request.headers.get('purpose') || ''}`;
     if (request.method === 'GET' && upstream.status === 200 && (headers.get('content-type') || '').startsWith('text/html')
