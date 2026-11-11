@@ -110,7 +110,7 @@ import { buildLibraryBlock, libraryProposalFromUiElement, resolveLibraryProposal
 import { buildMyContentBlock } from '../../src/utils/chat-my-content';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
-import { confirmCardReply, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
+import { confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { normaliseSitePictureCard, SITE_PICTURE_TYPE, MAX_PICTURE_SECTIONS } from '../../src/utils/site-picture-card';
 import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
@@ -4385,9 +4385,12 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // No reply points at a card that isn't there (confirm-card-reply.ts, rubric W6). Mentor-only until
         // prod 2026-11-07 (org 40, Social Media): "confirm on the card below", no card, then "Sorry, it
         // didn't come through last time. Here it is now" — still none. Every route now.
+        let droppedCard: ReturnType<typeof droppedCardRecord> | null = null;
         {
             const fixed = missingCardReply(content, !!uiElement);
             if (fixed !== content) {
+                // Kept as a hidden system row in the transaction below (Fix pipeline #33): the log line alone was gone before anyone looked.
+                droppedCard = droppedCardRecord({ route: String(route), roleKey: assistantRow.roleKey ?? null, sentUiElement: parsed.uiElement, raw });
                 // Which way the card was lost: the model sent none, sent a shape the server refused, or wrote prose, not JSON.
                 const sent = (parsed.uiElement as { type?: unknown } | null)?.type;
                 console.warn('[chat-orchestrator] reply points at a card that was not drawn', { role: assistantRow.roleKey, sentType: typeof sent === 'string' ? sent : null, replyWasJson: raw.trimStart().startsWith('{'), length: raw.length, end: raw.slice(-200) });
@@ -4418,6 +4421,11 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                     role: 'system',
                     content: `[suppressed:${suppressed}] ${modelReply}`,
                 });
+            }
+            if (droppedCard) {
+                // Role 'system' like the row above: out of the transcript and the LLM window, there only
+                // so a lost card can be diagnosed (src/utils/confirm-card-reply.ts droppedCardRecord).
+                await tx.insert(chatMessages).values({ chatSessionId: session.id, role: 'system', content: droppedCard.content, uiElementJson: droppedCard.uiElementJson });
             }
             return tx
                 .insert(chatMessages)

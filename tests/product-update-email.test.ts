@@ -177,9 +177,9 @@ check('public routes are wired in netlify.toml', () => {
 });
 
 const A = read('admin.html');
-check('admin: the view exists, is in Comms, loads its data, and approve is blocked while unsaved', () => {
+check('admin: the view exists, is in Growth, loads its data, and approve is blocked while unsaved', () => {
     assert.match(A, /<section id="view-product-updates" class="admin-view hidden/);
-    assert.match(A, /\{ view: 'product-updates',\s+icon: '🆕', label: "What's New Emails",\s+perm: 'manage_comms_templates' \}/);
+    assert.match(A, /\{ view: 'product-updates',\s+icon: '🆕', label: "What's New emails",\s+perm: 'manage_comms_templates',\s+group: 'Messages' \}/);
     assert.match(A, /if \(view === 'product-updates'\) loadProductUpdates\(\);/);
     assert.match(A, /approve\.disabled = _puDirty;/);
     assert.match(A, /async function puApprove\(\) \{\n  if \(_puDirty\) return;/);

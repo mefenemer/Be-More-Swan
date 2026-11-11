@@ -80,6 +80,28 @@ export function missingCardReply(content: string, hasCard: boolean): string {
 }
 
 /**
+ * What to keep when a reply points at a card that was not drawn (Fix pipeline #33, prod 2026-11-10).
+ * Three Blog Writer replies said "the card below…" over nothing, and the card the model sent (if any)
+ * was only console.warn'd, gone by the time anyone looked. This is stored as a hidden role 'system'
+ * chat message beside the reply, like the [suppressed:…] row, so the cause can be read afterwards:
+ * no card sent, a card the server refused (sentType set), or a reply that was prose, not JSON.
+ * Capped so one bad turn can't write a huge row. Pure.
+ */
+export const DROPPED_CARD_TAG = '[card-dropped]';
+export function droppedCardRecord(input: { route: string; roleKey: string | null; sentUiElement: unknown; raw: string }): { content: string; uiElementJson: Record<string, unknown> } {
+    const sent = input.sentUiElement && typeof input.sentUiElement === 'object' ? input.sentUiElement as Record<string, unknown> : null;
+    const sentType = typeof sent?.type === 'string' ? sent.type : null;
+    let sentJson: string | null = null;
+    if (sent) { try { sentJson = JSON.stringify(sent).slice(0, 4000); } catch { sentJson = null; } }
+    const replyWasJson = input.raw.trimStart().startsWith('{');
+    const why = sentType ? `sent ${sentType}, not drawn` : replyWasJson ? 'no card in the reply' : 'reply was prose, not JSON';
+    return {
+        content: `${DROPPED_CARD_TAG} ${input.route} / ${input.roleKey ?? '?'}: ${why}`,
+        uiElementJson: { route: input.route, roleKey: input.roleKey, sentType, sentCard: sentJson, replyWasJson, rawLength: input.raw.length, rawEnd: input.raw.slice(-1500) },
+    };
+}
+
+/**
  * Pictures (staging 2026-11-05): asked for a picture, the Website Assistant replied "I'm generating a
  * dramatic film scene for that section now. Once it's created, I'll add it to your site" — with no
  * card, and nothing ever came. A reply cannot make, find or place a picture; only a site_picture card

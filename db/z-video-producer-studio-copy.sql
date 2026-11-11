@@ -9,6 +9,6 @@
 -- Dollar-quoted, so it pastes into a web SQL editor as it is.
 
 UPDATE master_assistants
-   SET description = $$Makes short videos from what you want to say, or from your own footage — it writes the script from your business details, picks the footage and pictures, adds a voiceover and captions, and cuts out pauses and ums. You check the storyboard before anything is made. The finished video is saved to My Content, to download or use with any of your assistants.$$
+   SET description = $$Makes short videos from what you want to say, or from your own footage — it writes the script from your business details, picks the footage and pictures, adds a voiceover (an AI voice or your own) and captions, and cuts out pauses and ums. You check the storyboard before anything is made. The finished video is saved to My Content, to download or use with any of your assistants.$$
  WHERE role_key = 'video_producer'
 RETURNING role_key, left(description, 80);

@@ -64,7 +64,7 @@ import { LIMIT_CEILING_DB } from '../lib/loudness-measure';
 import { levelledVoiceover, measureAsset } from './audio-levelling';
 import { isVideoLook, lookStyle, type LookStyle } from '../lib/video-look';
 import { isLowerThirdStyle, lowerThirdOverlays } from '../lib/lower-third';
-import { defaultTextPos, textFont, textLook, textWindow, textY } from '../lib/scene-text';
+import { defaultTextPos, plannedClearOfCaptions, textFont, textLook, textWindow, textY } from '../lib/scene-text';
 import { isOwnVoice, keepRecordings, linesToRecord, recordedDurations } from './own-voice';
 import { mergeNotedScenes, mergeScript, mmss, notesByScene, readNotes, sceneTimes as sceneTimesFrom, type SceneTime } from '../lib/video-notes';
 import { makeVideoTrack, ownMusicTrack, ownMusicTracks, storedFileExists } from './video-music-asset';
@@ -365,7 +365,10 @@ export async function planProject(db: Db, projectId: number, opts: { feedback?: 
             if (current.music) storyboard = { ...storyboard, music: current.music };
         }
         // The owner's recordings stay on lines whose words didn't change; ids the model wrote are dropped.
+        // Words the planner placed on the captions fall back to the default place (scene-text.ts).
+        // (Only a fresh plan: a words-only rewrite keeps the owner's own placements as they set them.)
         storyboard = keepRecordings(current, storyboard);
+        if (!mode) storyboard = plannedClearOfCaptions(storyboard, brief);
         await db.update(videoProjects).set({
             status: 'planned', storyboard, changes, title: storyboard.title, note: null, updatedAt: new Date(), ...kept,
         }).where(eq(videoProjects.id, projectId));
@@ -697,7 +700,13 @@ async function sourceScene(db: Db, args: {
             };
         case 'ai_video': {
             if (!falConfigured()) return null;
+            // A first frame the owner already saw and kept (an AI clip on its own, ai-clip.ts): animate THAT picture.
             let frameUrl: string | null = null;
+            if (scene.assetId) {
+                const [f] = await db.select({ storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl }).from(contentAssets)
+                    .where(and(eq(contentAssets.id, scene.assetId), eq(contentAssets.organisationId, orgId), eq(contentAssets.assetType, 'image'), isNull(contentAssets.purgedAt))).limit(1);
+                frameUrl = f?.storageKey ? await presignR2Get(f.storageKey, 3600).catch(() => null) : (f?.externalUrl ?? null);
+            }
             let sub: Awaited<ReturnType<typeof submitFramedVideo>> | null = null;
             for (let attempt = 1; attempt <= AI_CLIP_ATTEMPTS && !sub; attempt++) {
                 const tried = await submitFramedVideo({
@@ -1216,12 +1225,35 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
         mix: (row.timeline as ProjectTimeline | null)?.mix ?? null,
         editCount: row.editCount,
         sourceFiles: row.status === 'ready' ? await sourceFilesOf(db, orgId, row) : [],
+        // An AI clip on its own: the first frame the owner is shown before the clip is made (ai-clip.ts).
+        clipFrameUrl: (row.brief as VideoBrief).clip ? await clipFrameUrl(db, orgId, sb) : null,
         sceneThumbs: Object.fromEntries(Object.entries((row.sceneAssets ?? {}) as Record<string, number>).map(([k, v]) => [k, thumbs[v] ?? null])),
         archivedAt: row.archivedAt ?? null,
         // The owner's own recordings, to play back on the tab (own-voice.ts): scene id → URL, and 'whole'.
         voiceUrls: isOwnVoice(row.brief as VideoBrief) ? await ownVoiceUrls(db, orgId, row) : {},
         createdAt: row.createdAt, updatedAt: row.updatedAt,
     };
+}
+
+/**
+ * An AI clip on its own (ai-clip.ts): saved straight as a planned one-scene project — no planner and no
+ * setup defaults to apply (it has no voice, music or captions). The one other way a project begins,
+ * beside startProject. Free.
+ */
+export async function startClip(db: Db, args: { organisationId: number; assistantId: number; createdBy: number; brief: VideoBrief; storyboard: Storyboard }) {
+    const [row] = await db.insert(videoProjects).values({
+        organisationId: args.organisationId, aiAssistantId: args.assistantId, createdBy: args.createdBy, title: args.storyboard.title.slice(0, 120),
+        status: 'planned', brief: args.brief, storyboard: args.storyboard, changes: [], origin: 'user',
+    }).returning();
+    return row;
+}
+
+async function clipFrameUrl(db: Db, orgId: number, sb: Storyboard | null): Promise<string | null> {
+    const id = sb?.scenes?.[0]?.assetId;
+    if (!id) return null;
+    const [f] = await db.select({ storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl }).from(contentAssets)
+        .where(and(eq(contentAssets.id, id), eq(contentAssets.organisationId, orgId), isNull(contentAssets.purgedAt))).limit(1);
+    return f?.storageKey ? await presignR2Get(f.storageKey, 3600, { stableWindowSec: 1800 }).catch(() => null) : (f?.externalUrl ?? null);
 }
 
 async function ownVoiceUrls(db: Db, orgId: number, row: typeof videoProjects.$inferSelect): Promise<Record<string, string>> {
@@ -1299,6 +1331,14 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
     return ['YOUR VIDEOS (newest first; use only these ids):', ...rows.map((r) => {
         const sb = r.storyboard as Storyboard | null;
         const brief = r.brief as VideoBrief;
+        // An AI clip on its own (ai-clip.ts): no storyboard to talk through — its frame, then the clip.
+        if (brief.clip) {
+            const framed = !!sb?.scenes?.[0]?.assetId;
+            const at = r.status === 'planned' || r.status === 'failed'
+                ? (framed ? 'first frame made — waiting for them to press "Make the clip" (or "Try another frame")' : 'saved — waiting for them to press "See the first frame" (1 task)')
+                : (WAITING[r.status] ?? r.status);
+            return `- id ${r.id}: AI CLIP "${brief.clip.description.slice(0, 100)}" (${brief.clip.style}, ${brief.clip.lengthS}s) — ${at}`;
+        }
         const scenes = sb ? ` · ${sb.scenes.length} scenes` : '';
         const n = sb ? (tasks ? buildTasks(sb, brief, costs, r) : buildCredits(sb, brief, r)) : 0;
         const unit = tasks ? (n === 1 ? 'task' : 'tasks') : (n === 1 ? 'credit' : 'credits');

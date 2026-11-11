@@ -86,7 +86,7 @@ check('a send needs the count the admin saw, the secret, super-admin and the liv
 check('the admin page sends only after the number waiting is typed', () => {
     const html = read('admin.html');
     assert.ok(html.includes('id="view-broadcast"'));
-    assert.match(html, /\{ view: 'broadcast', +icon: '📣', label: 'Broadcast', +perm: 'manage_comms_templates' \}/);
+    assert.match(html, /\{ view: 'broadcast', +icon: '📣', label: 'Broadcast', +perm: 'manage_comms_templates', +group: 'Messages' \}/);
     assert.match(html, /send\.disabled = input\.value\.trim\(\) !== String\(b\.waiting\) \|\| b\.waiting === 0;/);
     assert.match(html, /runBroadcast\(e\.currentTarget, 'send', \{ key: b\.key, expected: b\.waiting \}\)/);
 });

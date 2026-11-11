@@ -385,7 +385,7 @@ check('chat cards exist for each new action, and the chat can only send those ac
         assert.ok(read('netlify/functions/chat-orchestrator.ts').includes(`"type": "${t}"`), `the prompt teaches ${t}`);
     }
     const cs = read('src/components/chat-session.js');
-    assert.ok(cs.includes("const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete'];"));
+    assert.ok(cs.includes("const VIDEO_CARD_ACTIONS = ['approve_script', 'rewrite_script', 'set_options', 'add_note', 'notes_to_version', 'reshape', 'archive', 'restore', 'delete', 'clip_create'];"));
     assert.ok(!cs.slice(cs.indexOf('VIDEO_CARD_ACTIONS')).slice(0, 300).includes("'build'"), 'no card can make (spend on) a video');
     const snap = read('src/utils/video-producer.ts');
     assert.ok(snap.includes("' · script APPROVED'") && snap.includes('their note at ${mmss(n.atS)}'));

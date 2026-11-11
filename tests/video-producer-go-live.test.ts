@@ -17,7 +17,7 @@ import assert from 'node:assert';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DEFAULT_TASK_WEIGHTS } from '../src/config/task-weights';
+import { DEFAULT_TASK_COSTS, DEFAULT_TASK_WEIGHTS } from '../src/config/task-weights';
 import { MAX_AI_CLIPS, MAX_SCENES, MIN_SCENES, VIDEO_LENGTHS } from '../src/lib/storyboard';
 import { spacingDays, MAX_WAITING, MAX_PER_WEEK } from '../src/utils/video-autopilot';
 import { ORDER_ACTION_SPECS } from '../src/config/campaign-vocab';
@@ -142,7 +142,8 @@ check('the pricing row (live 2026-10-31) is in the migrations and the seed, on t
     assert.match(seed, /key: 'video_producer'[\s\S]{0,400}values: \{ saver: DASH, buster: CHECK, employee: CHECK \}/);
     const faq = read('faq.html');
     assert.ok(faq.includes('What does the Video Producer make?') && faq.includes('Does making a video use my tasks?'));
-    assert.match(faq, new RegExp(`${DEFAULT_TASK_WEIGHTS.ai_video} tasks</span> for an AI clip \\(at most ${MAX_AI_CLIPS} in a video\\)`));
+    // Today's flat price (filled in live by /task-costs.js), and the per-second price from the date in the 30 days' notice.
+    assert.match(faq, new RegExp(`${DEFAULT_TASK_WEIGHTS.ai_video} tasks</span> for an AI clip \\(at most ${MAX_AI_CLIPS} in a video; from 3 December 2026, ${DEFAULT_TASK_COSTS.videoTasksPerSecond} tasks for each second of clip\\)`));
 });
 
 check('the Mentor recommends it only when Live, on a plan with video, with someone posting', () => {
