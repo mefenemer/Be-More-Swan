@@ -333,6 +333,7 @@ window.promptModal = function(message, opts = {}) {
       <h3 style="font-size:1.05rem;font-weight:700;color:#111827;margin:0 0 .5rem;">${title}</h3>
       <p style="font-size:.875rem;color:#4b5563;margin:0 0 .85rem;line-height:1.5;">${message}</p>
       ${field}
+      ${opts.multiline && opts.enterSubmits ? '<p style="font-size:.75rem;color:#6b7280;margin:-1rem 0 1rem;">Press Enter to send · Shift+Enter for a new line</p>' : ''}
       <div style="display:flex;gap:.5rem;justify-content:flex-end;">
         <button id="apm-cancel" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#1f1e1b;background:#f6f3eb;border:1px solid #eae4d7;padding:.5rem .9rem;border-radius:.6rem;">${cancel}</button>
         <button id="apm-confirm" style="cursor:pointer;font-size:.875rem;font-weight:600;color:#fff;background:#d6006b;border:none;padding:.5rem .9rem;border-radius:.6rem;">${confirm}</button>
@@ -364,9 +365,13 @@ window.promptModal = function(message, opts = {}) {
     overlay.querySelector('#apm-cancel').addEventListener('click', () => done(null));
     okBtn.addEventListener('click', () => { if (!okBtn.disabled) done(input.value); });
     // Enter submits a single-line box, as it would in a browser prompt. A textarea keeps Enter
-    // for new lines — the note fields here are the reason it is a textarea in the first place.
+    // for new lines — the note fields here are the reason it is a textarea in the first place —
+    // unless the caller passes `enterSubmits` (a short instruction, like "Improve it" on a lead's
+    // email), where Enter sends and Shift+Enter adds a line, as in the chat box. `isComposing`
+    // leaves Enter alone while an input method is still choosing characters.
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !opts.multiline && !okBtn.disabled) { e.preventDefault(); done(input.value); }
+      if (e.key !== 'Enter' || e.isComposing || okBtn.disabled) return;
+      if (!opts.multiline || (opts.enterSubmits && !e.shiftKey)) { e.preventDefault(); done(input.value); }
     });
     input.focus();
   });

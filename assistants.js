@@ -4156,7 +4156,7 @@ window._detailRqRecordAct = async function (btn, action) {
         const nameHtml = _rqEsc(name);   // the dialog renders title and message as HTML
         const instruction = await window.promptModal(
             `${nameHtml} will rewrite this email and save the new version here for you to read. Nothing is sent. Say what you’d like changed, or leave it blank to let ${nameHtml} improve it generally.`,
-            { title: `Ask ${nameHtml} to improve this email`, confirmLabel: 'Improve it', multiline: true,
+            { title: `Ask ${nameHtml} to improve this email`, confirmLabel: 'Improve it', multiline: true, enterSubmits: true,
               placeholder: 'e.g. shorter, mention our free trial, less formal' },
         );
         if (instruction === null) return;
