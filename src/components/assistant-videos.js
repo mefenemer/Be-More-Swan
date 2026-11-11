@@ -739,6 +739,13 @@
       </form>`;
   }
 
+  /** What a clip is waiting for, in its own words (a clip has no storyboard or script to approve). */
+  function clipStatus(v) {
+    if (v.status === 'planned' || v.status === 'failed') return v.clipFrameUrl ? 'First frame ready — make the clip from it, or try another.' : 'Saved. See its first frame before the clip is made.';
+    if (v.status === 'building') return 'Making the clip — a few minutes. You can leave this page.';
+    return WAITING[v.status] || v.status;
+  }
+
   /** The clip's card: what it shows, its first frame, and the two presses that spend (each says what it uses). */
   function clipHtml(v) {
     const c = v.brief.clip;
@@ -1072,7 +1079,8 @@
               class="flex items-start gap-1.5 text-left text-sm font-bold text-gray-900 break-words cursor-pointer hover:text-gray-700">
               <svg class="w-4 h-4 mt-0.5 shrink-0 text-gray-400 transition-transform ${folded ? '-rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
               <span>${esc(v.title)}</span></button>
-            <p class="text-xs text-gray-600 mt-0.5">${v.version > 1 ? `Version ${esc(v.version)} · ` : ''}${v.brief && v.brief.shapeOf ? `${esc((SHAPES.find((x) => x[0] === v.brief.shape) || ['', ''])[1])} copy · ` : ''}${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
+            ${v.brief && v.brief.clip ? `<p class="text-xs text-gray-600 mt-0.5">AI clip · ${esc(v.brief.clip.lengthS)}s · ${esc(clipStatus(v))}</p>` : ''}
+            <p class="text-xs text-gray-600 mt-0.5${v.brief && v.brief.clip ? ' hidden' : ''}">${v.version > 1 ? `Version ${esc(v.version)} · ` : ''}${v.brief && v.brief.shapeOf ? `${esc((SHAPES.find((x) => x[0] === v.brief.shape) || ['', ''])[1])} copy · ` : ''}${ORIGIN[v.origin] ? `${esc(ORIGIN[v.origin])} · ` : ''}${esc((v.brief && v.brief.lengthS) || '')}s · ${esc(WAITING[v.status === 'built' && v.postRenderStatus === 'failed' ? 'post_render_failed' : v.status === 'built' && (v.postRenderStatus === 'pending' || v.postRenderStatus === 'rendering') ? 'post_rendering' : v.status] || v.status)}</p>
             ${v.note ? `<p class="text-xs ${v.status === 'ready' ? 'text-emerald-800 bg-emerald-50 border-emerald-200' : 'text-amber-800 bg-amber-50 border-amber-200'} border rounded-md px-2 py-1 mt-1.5 break-words" style="overflow-wrap:anywhere">${esc(v.note)}</p>` : ''}
             ${note ? `<p class="text-xs font-semibold mt-1.5 ${note.error ? 'text-red-600' : 'text-gray-700'}">${esc(note.text)}</p>` : ''}
           </div>
