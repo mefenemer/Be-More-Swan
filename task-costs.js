@@ -26,6 +26,12 @@
 
   function apply(root) {
     if (!figures) return;
+    // Hand-written JSON-LD says {{tasks.<key>}} (it can hold no span). The deploy build fills it
+    // (scripts/seo/task-costs.mjs); this covers a page served without that step.
+    if (!root) document.querySelectorAll('script[type="application/ld+json"]').forEach(function (s) {
+      if (s.textContent.indexOf('{{') === -1) return;
+      s.textContent = s.textContent.replace(/\{\{\s*tasks\.([a-z_]+)\s*\}\}/g, function (tok, k) { return label(k, tok); });
+    });
     (root || document).querySelectorAll('[data-task-cost]').forEach(function (el) {
       // <span data-task-cost="ai_video_per_second" data-task-seconds="5">20 tasks</span>: a clip of that length.
       var secs = Number(el.getAttribute('data-task-seconds'));
