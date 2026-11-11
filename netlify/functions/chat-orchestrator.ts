@@ -116,7 +116,7 @@ import { buildMyContentBlock } from '../../src/utils/chat-my-content';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { LEAD_EMAIL_WORDING_BUDGET, LEAD_EMAIL_WORDING_RULE, LEAD_SENT_EMAILS_SHOWN, quoteLeadEmails, type LeadEmailLine } from '../../src/utils/lead-email-wording';
-import { confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
+import { CARD_FORMAT_RETRY, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { normaliseSitePictureCard, SITE_PICTURE_TYPE, MAX_PICTURE_SECTIONS } from '../../src/utils/site-picture-card';
 import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
@@ -3726,6 +3726,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
         // The role's model from Admin ▸ Assistants ▸ Model & rules (src/utils/assistant-model.ts);
         // none chosen = route.model, exactly as before. Held at low thinking: a 26s request.
+        const replyStartedAt = Date.now();
         const { response, model: chatModel } = await withRoleModel(
             await loadRoleModel(db, assistantRow.roleKey), route.model,
             async (model, thinking) => ({ model, response: await anthropic.messages.create(adaptForModel({
@@ -3750,11 +3751,34 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         });
 
         // A bug or gap the assistant noticed goes to our queues, and never reaches the user or the transcript.
-        const { text: raw, note: assistantNote } = extractAssistantNote(replyText(response.content));
+        const first = extractAssistantNote(replyText(response.content));
+        let raw = first.text;
+        const assistantNote = first.note;
         if (assistantNote) await recordAssistantNote(db, { note: assistantNote, organisationId: orgId, assistantId: session.aiAssistantId, role: assistantRow.roleKey, names: [orgRow?.name, assistantRow.name] });
         // `content` is not final: the reconciliation guard below replaces it when the model
         // claims a post was saved and no row was actually written.
-        const parsed = route.parseResponse(raw);
+        let parsed = route.parseResponse(raw);
+        // Issue #39: prose saying "the card below" with no envelope and no card → asked once more, as JSON
+        // (confirm-card-reply.ts proseReplyLostItsCard). Kept only if the second reply brings a card; a
+        // failed retry leaves the first reply exactly as it was, and the missing-card note below still applies.
+        // Only with time to spare inside the 26s request: the reply above took under 10s, and the retry gets 10s at most.
+        if (route.parseResponse === parseStructuredReply && Date.now() - replyStartedAt < 10_000 && proseReplyLostItsCard(raw, parsed)) {
+            try {
+                const retry = await anthropic.messages.create(adaptForModel({
+                    model: chatModel,
+                    max_tokens: route.maxTokens,
+                    system: sanitizeForModel(system),
+                    messages: sanitizeForModel([...llmMessages, { role: 'assistant' as const, content: raw }, { role: 'user' as const, content: CARD_FORMAT_RETRY }]),
+                }, chatModel, 'off') as Anthropic.MessageCreateParamsNonStreaming, { timeout: 10_000, maxRetries: 0 });
+                void logAiUsage({ workspaceId: orgId, userId, assistantId: assistantRow.id, model: chatModel, inputTokens: retry.usage.input_tokens, outputTokens: retry.usage.output_tokens, sessionId: `chat:${session.id}:card-retry`, dataCategories: ['business_context'] });
+                const again = extractAssistantNote(replyText(retry.content)).text;
+                const reparsed = route.parseResponse(again);
+                console.warn('[chat-orchestrator] prose reply pointed at a card it did not send — asked again as JSON', { role: assistantRow.roleKey, sessionId: session.id, recovered: !!reparsed.uiElement });
+                if (reparsed.uiElement) { raw = again; parsed = reparsed; }
+            } catch (err) {
+                console.warn('[chat-orchestrator] card format retry failed', { role: assistantRow.roleKey, error: String(err) });
+            }
+        }
         // Not final either: the blog route replaces it with a normalised draft (or nothing) below.
         let uiElement = parsed.uiElement;
         let content = parsed.content;
@@ -4485,7 +4509,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             const fixed = missingCardReply(content, !!uiElement);
             if (fixed !== content) {
                 // Kept as a hidden system row in the transaction below (Fix pipeline #33): the log line alone was gone before anyone looked.
-                droppedCard = droppedCardRecord({ route: String(route), roleKey: assistantRow.roleKey ?? null, sentUiElement: parsed.uiElement, raw });
+                droppedCard = droppedCardRecord({ route: assistantRow.roleKey && ROUTES[assistantRow.roleKey] ? assistantRow.roleKey : 'default', roleKey: assistantRow.roleKey ?? null, sentUiElement: parsed.uiElement, raw });
                 // Which way the card was lost: the model sent none, sent a shape the server refused, or wrote prose, not JSON.
                 const sent = (parsed.uiElement as { type?: unknown } | null)?.type;
                 console.warn('[chat-orchestrator] reply points at a card that was not drawn', { role: assistantRow.roleKey, sentType: typeof sent === 'string' ? sent : null, replyWasJson: raw.trimStart().startsWith('{'), length: raw.length, end: raw.slice(-200) });
