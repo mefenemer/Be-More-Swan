@@ -59,6 +59,8 @@ import {
 import { forgetMicrosoft, syncMicrosoft } from '../../src/utils/calendar-microsoft';
 import { forgetGoogle, GOOGLE_CALENDAR_SCOPE, syncGoogle } from '../../src/utils/calendar-google';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { isFeatureEnabled } from '../../src/utils/feature-flags';
+import { YT_EXTENDED_SCOPES_FLAG, youtubeScopes } from '../../src/lib/youtube-extras';
 
 const CSRF_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -389,7 +391,11 @@ export default withLambda(async (event) => {
             authUrl = `https://www.tiktok.com/v2/auth/authorize/?response_type=code&client_key=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.tiktok)}&state=${state}`;
         } else if (provider === 'youtube') {
             // Same Google consent flow as Gmail — offline + consent forces a refresh token.
-            authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.youtube)}&access_type=offline&prompt=consent&state=${state}`;
+            // Caption tracks and the drop-off curve need two more permissions (src/lib/youtube-extras.ts),
+            // asked for only once 'youtube_extended_scopes' is on — Google must approve them first.
+            const ytExtended = await isFeatureEnabled(Number(organisationId), YT_EXTENDED_SCOPES_FLAG).catch(() => false);
+            const ytScope = ytExtended ? youtubeScopes(true) : SCOPES.youtube;
+            authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(ytScope)}&access_type=offline&prompt=consent${ytExtended ? '&include_granted_scopes=true' : ''}&state=${state}`;
         } else if (provider === 'wordpresscom') {
             // No scope param → the consent screen lets the user pick which blog to authorise.
             authUrl = `https://public-api.wordpress.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;

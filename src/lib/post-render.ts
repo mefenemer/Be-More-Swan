@@ -254,15 +254,19 @@ const AUDIO_URL_TTL_SEC = 3600;
  * The accent is the brand's primary colour when it reads over footage (captionAccent), read here so
  * the composition stays free of database knowledge.
  */
-export async function resolveCaptionTrack(db: Db, raw: unknown, orgId: number): Promise<CaptionTrack | null> {
+/**
+ * The captioned voiceovers on a timeline and their words (as resolveCaptionTrack reads them): what the
+ * burned-in captions show, and what a caption file or a translation is made from (src/lib/youtube-extras.ts).
+ */
+export async function resolveCaptionSources(db: Db, raw: unknown, orgId: number): Promise<{ sources: CaptionSource[]; overlays: ReturnType<typeof renderableAudio>; wordsById: Map<number, SpokenWordLike[]> }> {
     const overlays = renderableAudio(raw).filter(a => a.captions !== false);
-    if (!overlays.length) return null;
+    const wordsById = new Map<number, SpokenWordLike[]>();
+    if (!overlays.length) return { sources: [], overlays, wordsById };
     const ids = [...new Set(overlays.map(a => a.assetId))];
     const rows = await db
         .select({ id: contentAssets.id, assetType: contentAssets.assetType, renderParams: contentAssets.renderParams })
         .from(contentAssets)
         .where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
-    const wordsById = new Map<number, SpokenWordLike[]>();
     for (const r of rows) {
         const p = r.renderParams as { kind?: unknown; words?: unknown; script?: unknown } | null;
         if ((r.assetType ?? '').toLowerCase() !== 'audio' || p?.kind !== 'voiceover' || !Array.isArray(p.words)) continue;
@@ -272,6 +276,12 @@ export async function resolveCaptionTrack(db: Db, raw: unknown, orgId: number): 
     const sources: CaptionSource[] = overlays
         .filter(a => wordsById.has(a.assetId))
         .map(a => ({ startS: a.startS, endS: a.endS, words: wordsById.get(a.assetId)! }));
+    return { sources, overlays, wordsById };
+}
+
+export async function resolveCaptionTrack(db: Db, raw: unknown, orgId: number): Promise<CaptionTrack | null> {
+    const { sources, overlays, wordsById } = await resolveCaptionSources(db, raw, orgId);
+    if (!sources.length) return null;
     // One look for the whole video: the first captioned voiceover's style (captions.ts CaptionStyle).
     const style = normalizeCaptionStyle(overlays.find(a => wordsById.has(a.assetId) && a.captionStyle)?.captionStyle);
     const cues = buildCaptionCues(sources, style.mode, style.size);

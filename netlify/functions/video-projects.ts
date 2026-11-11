@@ -20,6 +20,9 @@
 //        name-caption style, changed without re-planning (free; a ready video gets a new version first)
 //   POST { action:'add_note', id, atS, text }           → a note on a moment of a ready video, tied to its scene
 //   POST { action:'rename_chapter', id, chapter | sceneId, title } → rename a ready video's chapter ('' = its own name)
+//   POST { action:'translate_captions', id, language } → translated captions (1 task; caption-translate.ts)
+//   POST { action:'remove_translation', id, language }
+//   GET  ?id&youtube=1[&fresh=1] → how it's doing on YouTube · ?id&captions=en|<code>&format=srt|vtt → a caption file
 //   POST { action:'delete_note', id, noteId }
 //   POST { action:'notes_to_version', id }              → a new version that turns those notes into scene edits (free)
 //   POST { action:'reshape', id, shapes? }              → the same video in the other shapes (free when nothing
@@ -55,6 +58,10 @@ import { startClip, holdBuild, projectView, readBrief, libraryPictures, sweepStu
 import { enforceStoryboard, isVideoShape, scriptOf, SCENE_SOURCES, type Storyboard, type VideoBrief } from '../../src/lib/storyboard';
 import { addNote, readNotes, sceneTimes } from '../../src/lib/video-notes';
 import { renameChapter, videoChapters } from '../../src/lib/video-chapters';
+import { CAPTION_LANGUAGES, toSrt, toVtt, YT_EXTENDED_SCOPES_FLAG } from '../../src/lib/youtube-extras';
+import { isFeatureEnabled } from '../../src/utils/feature-flags';
+import { translationsOf, videoCaptionLines, youtubeResultsFor } from '../../src/utils/youtube-video';
+import { removeTranslation, translateCaptions } from '../../src/utils/caption-translate';
 import { isMusicChoice, isMusicLevel } from '../../src/lib/video-music';
 import { ownMusicTrack, ownMusicTracks } from '../../src/utils/video-music-asset';
 import { isVideoLook } from '../../src/lib/video-look';
@@ -132,6 +139,25 @@ export default withLambda(async (event) => {
         }
         await sweepStuckProjects(db, orgId).catch((err) => console.error('[video-projects] sweep failed:', err));
         const id = Number(event.queryStringParameters?.id);
+        // How a finished video is doing on YouTube (youtube-video.ts): views, likes, comments, and the
+        // drop-off curve once that permission is granted. Read from YouTube at most every six hours.
+        if (Number.isInteger(id) && id > 0 && qs.youtube) {
+            const row = await load(id);
+            if (!row) return json(404, { error: 'Video not found.' });
+            // Whether a reconnect would now ask for the drop-off permission (the switch is on for this workspace).
+            const canAsk = await isFeatureEnabled(orgId, YT_EXTENDED_SCOPES_FLAG).catch(() => false);
+            return json(200, { youtube: await youtubeResultsFor(db, orgId, row, { fresh: qs.fresh === '1' }), canAskPermission: canAsk });
+        }
+        // A caption file: ?captions=en (as spoken) or a translation's code, &format=srt|vtt.
+        if (Number.isInteger(id) && id > 0 && qs.captions) {
+            const row = await load(id);
+            if (!row || row.status !== 'ready') return json(404, { error: 'Video not found.' });
+            const lines = qs.captions === 'en' ? await videoCaptionLines(db, orgId, row.timeline) : translationsOf(row.timeline)[qs.captions] ?? [];
+            if (!lines.length) return json(404, { error: 'No captions in that language yet.' });
+            const vtt = qs.format === 'vtt';
+            const name = `${(row.title || 'video').replace(/[^\w\- ]+/g, '').trim().slice(0, 60) || 'video'}-${qs.captions}.${vtt ? 'vtt' : 'srt'}`;
+            return { statusCode: 200, headers: { 'Content-Type': vtt ? 'text/vtt; charset=utf-8' : 'application/x-subrip; charset=utf-8', 'Content-Disposition': `attachment; filename="${name}"`, 'Cache-Control': 'private, no-store' }, body: vtt ? toVtt(lines) : toSrt(lines) };
+        }
         if (Number.isInteger(id) && id > 0) {
             const row = await load(id);
             return row ? json(200, { project: await projectView(db, orgId, row) }) : json(404, { error: 'Video not found.' });
@@ -155,6 +181,8 @@ export default withLambda(async (event) => {
             brand: { accent: kit.primaryColor, font: textFont(kit.fontFamily) },
             // Which AI clip styles can have sound with the model each uses now (fal-gateway clipSoundAvailable).
             clipSound: Object.fromEntries(CLIP_STYLES.map((st) => [st, clipSoundAvailable(i2vModel(new Date(), st))])),
+            // The languages captions can be translated into (youtube-extras.ts), for the Translate picker.
+            captionLanguages: CAPTION_LANGUAGES,
         });
     }
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -340,6 +368,16 @@ export default withLambda(async (event) => {
         if ('error' in done) return json(400, { error: done.error });
         await db.update(videoProjects).set({ timeline: { ...tl, chapterTitles: done.titles }, updatedAt: new Date() }).where(eq(videoProjects.id, row.id));
         return json(200, { chapter: done.chapter, project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+    // ── Translated captions (caption-translate.ts): 1 task a language, charged once it's saved ──
+    if (action === 'translate_captions') {
+        const r = await translateCaptions(db, row, body.language);
+        if (!r.ok) return json(r.status, { error: r.error, ...(r.cost != null ? { unit: 'tasks', cost: r.cost } : {}) });
+        return json(200, { translated: r, project: await projectView(db, orgId, (await load(row.id))!) });
+    }
+    if (action === 'remove_translation') {
+        await removeTranslation(db, row, body.language);
+        return json(200, { project: await projectView(db, orgId, (await load(row.id))!) });
     }
     if (action === 'notes_to_version') {
         if (row.status !== 'ready' || !row.storyboard) return json(409, { error: 'Notes become a new version of a finished video.' });

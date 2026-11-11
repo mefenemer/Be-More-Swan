@@ -1766,6 +1766,20 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       done: 'Renamed. It’s on the video on the Videos tab.',
     });
   }
+  // { type: 'video_caption_remove_proposal', projectId, language, languageName? } — remove one translated
+  // caption file ('remove_translation'). Free. Adding a translation spends a task, so it is the Translate
+  // button on the Videos tab, never a card.
+  function renderVideoCaptionRemoveProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const code = typeof ui.language === 'string' && /^[a-zA-Z-]{2,8}$/.test(ui.language) ? ui.language : null;
+    const name = typeof ui.languageName === 'string' ? ui.languageName.trim().slice(0, 40) : code;
+    return videoActionCard(esc, {
+      kicker: 'Remove translated captions', rows: [name ? ['Language', name] : null],
+      note: 'Free. The video and its English captions stay as they are. You can translate it again later.',
+      button: 'Remove them', body: id && code ? { action: 'remove_translation', id, language: code } : null,
+      done: 'Removed from the video’s caption files.',
+    });
+  }
   // { type: 'video_notes_version_proposal', projectId }
   function renderVideoNotesVersionProposalCard(ui, esc) {
     const id = videoId(ui);
@@ -2035,6 +2049,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
   register('video_reshape_proposal', renderVideoReshapeProposalCard);
   register('video_chapter_proposal', renderVideoChapterProposalCard);
+  register('video_caption_remove_proposal', renderVideoCaptionRemoveProposalCard);
 
   // ── Built-ins: Mystery Shopper cards (docs/mystery-shopper-plan.md §4.6) ──────────────────────
   // The chat twins of the Website tab's buttons — same server actions (site-audits.ts), handled in

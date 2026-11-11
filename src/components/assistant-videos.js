@@ -86,7 +86,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
 
   const state = {
     assistantId: null, assistantName: null, setup: {}, videos: [], loaded: false, loadError: null,
-    rendered: false, form: false, editing: null, replanning: null, rewriting: null, noting: null, renamingChapter: null, notes: {}, busy: new Set(), pollTimer: null,
+    rendered: false, form: false, editing: null, replanning: null, rewriting: null, noting: null, renamingChapter: null, yt: {}, captionLanguages: {}, notes: {}, busy: new Set(), pollTimer: null,
     stage: null, userStage: false, opened: new Set(), full: false,
     // "Use my own footage": the form, the library's own videos, what is ticked, and files just added.
     footage: null,
@@ -179,6 +179,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       state.videos = (data.projects || []).filter((p) => p.aiAssistantId == null || p.aiAssistantId === state.assistantId);
       if (data.brand) state.brand = data.brand;
       if (data.clipSound) state.clipSound = data.clipSound;
+      if (data.captionLanguages) state.captionLanguages = data.captionLanguages;
       state.loadError = null;
       // A note about work in progress ("Making the video…") is stale once the video has finished,
       // one way or the other; errors stay until the next action.
@@ -1025,6 +1026,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
           <p class="text-[11px] text-gray-500">Saved in My Content. Download it, or pick it from My Content wherever you want to use it.</p>
           ${shapesLeft.length ? `<button type="button" data-vid-act="reshape" data-id="${v.id}" ${state.busy.has(v.id) ? 'disabled' : ''} title="Keeps the voiceover and every clip and picture, cropped to the new shape; branded cards are drawn again." class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg disabled:opacity-50">Make it ${esc(shapesLeft.map((x) => (SHAPES.find((y) => y[0] === x) || [x, x])[1].toLowerCase()).join(' and '))} too — free</button>` : ''}
           ${chaptersHtml(v)}
+          ${captionsHtml(v)}
+          ${youtubeHtml(v)}
           ${notes.length ? `<div class="border border-amber-200 bg-amber-50 rounded-lg p-2">
               <p class="text-xs font-bold text-amber-900">Your notes (${notes.length})</p>
               <ul class="mt-1 space-y-0.5">${notes.map((n) => `<li class="text-xs text-amber-900 flex items-start gap-1"><button type="button" data-vid-act="seek" data-id="${v.id}" data-at="${esc(n.atS)}" class="font-bold hover:underline shrink-0">${mmss(n.atS)}</button><span class="min-w-0 break-words">${n.sceneId ? `scene ${esc(n.sceneId.slice(1))}: ` : ''}${esc(n.text)}</span><button type="button" data-vid-act="delete-note" data-id="${v.id}" data-note="${esc(n.id)}" aria-label="Delete this note" class="ml-auto shrink-0 text-amber-700 hover:text-red-700">×</button></li>`).join('')}</ul>
@@ -1340,6 +1343,78 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       </div>`;
   }
 
+  /**
+   * Caption files (youtube-extras.ts): the words as spoken, free to download, and translations at
+   * 1 task a language (caption-translate.ts). They go on YouTube as caption tracks when it's posted
+   * there, once that permission is granted; the captions burned into the video stay as they are.
+   */
+  function captionsHtml(v) {
+    if (!v.hasSpokenCaptions) return '';
+    const langs = state.captionLanguages || {};
+    const done = (v.captionTranslations || []).filter((c) => langs[c]);
+    const left = Object.keys(langs).filter((c) => !done.includes(c));
+    const file = (code, fmt) => `${API}?id=${encodeURIComponent(v.id)}&captions=${encodeURIComponent(code)}&format=${fmt}`;
+    const links = (code) => `<a href="${file(code, 'srt')}" class="font-bold text-indigo-700 hover:underline">SRT</a> · <a href="${file(code, 'vtt')}" class="font-bold text-indigo-700 hover:underline">VTT</a>`;
+    const cost = window.taskCost ? window.taskCost('caption_translation', '1 task') : '1 task';
+    return `<div class="border border-gray-200 rounded-lg p-2" data-vid-captions="${v.id}">
+        <p class="text-xs font-bold text-gray-800">Caption files</p>
+        <ul class="mt-1 space-y-0.5 text-xs text-gray-800">
+          <li class="flex items-center gap-2"><span>English (as spoken)</span><span class="ml-auto shrink-0">${links('en')}</span></li>
+          ${done.map((c) => `<li class="flex items-center gap-2"><span>${esc(langs[c])}</span><span class="ml-auto shrink-0">${links(c)}</span>
+            <button type="button" data-vid-act="remove-translation" data-id="${v.id}" data-lang="${esc(c)}" aria-label="Remove the ${esc(langs[c])} captions" class="shrink-0 text-gray-400 hover:text-red-700">×</button></li>`).join('')}
+        </ul>
+        ${left.length && done.length < 10 ? `<div class="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <label class="sr-only" for="vid-lang-${v.id}">Language</label>
+            <select id="vid-lang-${v.id}" data-vid-lang="${v.id}" class="text-xs border border-gray-300 rounded-md px-1.5 py-1">${left.map((c) => `<option value="${esc(c)}">${esc(langs[c])}</option>`).join('')}</select>
+            <button type="button" data-vid-act="translate" data-id="${v.id}" ${state.busy.has(v.id) ? 'disabled' : ''} class="btn-secondary border px-2 py-1 text-xs font-bold rounded-md disabled:opacity-50">Translate — ${esc(cost)}</button>
+          </div>` : ''}
+        <p class="text-[11px] text-gray-500 mt-1">For YouTube, Vimeo or your own site. When this video is posted to YouTube, these are added as caption tracks${state.yt[v.id]?.data?.retentionNote === 'needs_permission' || !state.yt[v.id] ? ' once YouTube is reconnected with caption access' : ''}. The captions in the video itself stay in the language spoken.</p>
+      </div>`;
+  }
+
+  /** How it's doing on YouTube (youtube-video.ts): loaded once per visit, refreshable. */
+  function loadYouTube(id, fresh) {
+    const cur = state.yt[id];
+    if (cur && cur.loading) return;
+    state.yt[id] = { ...(cur || {}), loading: true };
+    call('GET', null, `?id=${encodeURIComponent(id)}&youtube=1${fresh ? '&fresh=1' : ''}`)
+      .then((d) => { state.yt[id] = { data: d.youtube || null, canAsk: !!d.canAskPermission, loaded: true }; })
+      .catch((err) => { state.yt[id] = { error: err.message, loaded: true }; })
+      .finally(() => { if (state.rendered) render(); });
+  }
+
+  /** The drop-off curve as a small line, with chapter starts marked. */
+  function retentionSvg(points, chapters, durationS) {
+    if (!points || points.length < 2) return '';
+    const W = 260, H = 60, top = Math.max(1, ...points.map((p) => p.watching));
+    const xy = points.map((p) => `${(p.at * W).toFixed(1)},${(H - (Math.min(p.watching, top) / top) * (H - 4) - 2).toFixed(1)}`).join(' ');
+    const ticks = durationS > 0 ? (chapters || []).slice(1).map((c) => { const x = ((c.startS / durationS) * W).toFixed(1); return `<line x1="${x}" x2="${x}" y1="0" y2="${H}" stroke="currentColor" stroke-opacity="0.25" stroke-dasharray="2 2"/>`; }).join('') : '';
+    return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-14 text-gray-500 mt-1" role="img" aria-label="Share of viewers still watching across the video">${ticks}<polyline points="${xy}" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linejoin="round"/></svg>`;
+  }
+
+  function youtubeHtml(v) {
+    const st = state.yt[v.id];
+    if (!st) { setTimeout(() => loadYouTube(v.id, false), 0); return ''; }
+    const d = st.data;
+    if (!d) return '';   // not posted to YouTube (or it couldn't be read and there's nothing saved)
+    const n = (x) => (x == null ? '—' : Number(x).toLocaleString('en-GB'));
+    const dur = v.outputDurationS || 0;
+    const chapterAt = (s) => (v.chapters || []).filter((c) => c.startS <= s).pop();
+    const drop = d.drop ? (() => { const c = chapterAt(d.drop.atS); return `Most viewers leave at ${mmss(d.drop.atS)}${c ? `, in “${esc(c.title)}”` : ''} (${d.drop.lostPct}% of those still watching).`; })() : '';
+    const note = d.retentionNote === 'needs_permission'
+      ? (st.canAsk ? 'To see where viewers stop watching, reconnect YouTube on the Connections page and allow analytics.' : 'Where viewers stop watching needs a YouTube permission we’ve asked Google for. It appears here once it’s approved.')
+      : d.retentionNote === 'too_new' ? 'Where viewers stop watching shows once YouTube has enough views, usually a day or two after posting.' : '';
+    return `<div class="border border-gray-200 rounded-lg p-2" data-vid-youtube="${v.id}">
+        <div class="flex items-center gap-2"><p class="text-xs font-bold text-gray-800">On YouTube</p>
+          <button type="button" data-vid-act="yt-refresh" data-id="${v.id}" class="ml-auto text-[11px] font-bold text-indigo-700 hover:underline" ${st.loading ? 'disabled' : ''}>${st.loading ? 'Checking…' : 'Check again'}</button></div>
+        <p class="text-xs text-gray-800 mt-1"><b>${n(d.totals.views)}</b> views · <b>${n(d.totals.likes)}</b> likes · <b>${n(d.totals.comments)}</b> comments${d.averageViewS != null && dur ? ` · watched for ${Math.round(d.averageViewS)} s on average (${Math.min(100, Math.round((d.averageViewS / dur) * 100))}%)` : ''}</p>
+        ${d.retention ? retentionSvg(d.retention, v.chapters, dur) : ''}
+        ${drop ? `<p class="text-xs text-gray-800">${drop}${d.toEndPct != null ? ` ${d.toEndPct}% watch to the end.` : ''}</p>` : ''}
+        ${note ? `<p class="text-[11px] text-gray-500 mt-1">${note}</p>` : ''}
+        <p class="text-[11px] text-gray-500 mt-1">${d.posts.length > 1 ? `Across ${d.posts.length} posts. ` : ''}${d.posts[0]?.url ? `<a href="${esc(d.posts[0].url)}" target="_blank" rel="noopener" class="font-bold text-indigo-700 hover:underline">Open on YouTube</a> · ` : ''}checked ${esc(new Date(d.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }))}</p>
+      </div>`;
+  }
+
   // The chapter playing is marked as the video plays (timeupdate doesn't bubble, so it's caught on the way down).
   document.addEventListener('timeupdate', (e) => {
     const p = e.target;
@@ -1529,6 +1604,15 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         host()?.querySelector('[data-vid-chapter-form] input')?.focus();
         break;
       case 'cancel-chapter': state.renamingChapter = null; render(); break;
+      case 'translate': {
+        const sel = host()?.querySelector(`[data-vid-lang="${id}"]`);
+        const code = sel ? sel.value : '';
+        const name = (state.captionLanguages || {})[code] || code;
+        if (code) act(id, { action: 'translate_captions', id, language: code }, `${name} captions are ready to download.`);
+        break;
+      }
+      case 'remove-translation': act(id, { action: 'remove_translation', id, language: b.dataset.lang }, null); break;
+      case 'yt-refresh': loadYouTube(id, true); render(); break;
       case 'copy-chapters': {
         const v = state.videos.find((x) => x.id === id);
         if (!v || !v.youtubeChapters) break;
