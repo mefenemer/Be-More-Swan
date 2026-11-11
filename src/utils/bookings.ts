@@ -24,7 +24,7 @@ import { depositNote, holdsTime, holdUntil, refundDeposit } from './booking-depo
 import { connectAccountFor } from './site-shop';
 import { loadBusy } from './calendar-sync';
 import { depositLabel } from './product-price';
-import { customerMeetingHtml, icsMeeting, meetingForNewBooking, ownerMeetingLine } from './booking-meeting';
+import { customerMeetingHtml, ensureMeetingLink, icsMeeting, meetingForNewBooking, ownerMeetingLine } from './booking-meeting';
 
 type Db = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -290,12 +290,16 @@ export interface BookingNoticeContext {
 }
 
 /** After a booking is made: the owner is told (card + email); the customer gets a receipt. */
-/** Their signed-in Outlook calendar, brought up to date now (calendar-microsoft.ts). Never throws. */
+/** Their signed-in Outlook / Google calendar, brought up to date now (calendar-microsoft.ts, calendar-google.ts). Never throws. */
 async function calendarSoon(db: Db, orgId: number): Promise<void> {
     try { await (await import('./calendar-microsoft')).reconcileSoon(db, orgId); } catch { /* the 15-minute sync catches up */ }
+    // And a signed-in Google calendar (calendar-google.ts).
+    try { await (await import('./calendar-google')).reconcileGoogleSoon(db, orgId); } catch { /* the 15-minute sync catches up */ }
 }
 
 export async function announceNewBooking(db: Db, b: BookingRow, ctx: BookingNoticeContext): Promise<void> {
+    // Confirmed at once: its own Teams / Meet link first, so the confirmation email carries it (booking-meeting.ts).
+    b = await ensureMeetingLink(db, b);
     await calendarSoon(db, b.organisationId);
     const { when, what } = describeBooking(b, ctx.timezone);
     const owner = await ownerOf(db, ctx.assistantId);
@@ -357,9 +361,11 @@ export async function emailCustomer(b: BookingRow, notice: CustomerNotice, ctx: 
 export async function decideBooking(db: Db, orgId: number, id: number, action: 'confirm' | 'decline' | 'cancel', ctx: BookingNoticeContext): Promise<{ ok: true; booking: BookingRow } | { ok: false; error: string }> {
     const from: Record<typeof action, string[]> = { confirm: ['pending'], decline: ['pending'], cancel: ['pending', 'confirmed'] };
     const to = { confirm: 'confirmed', decline: 'declined', cancel: 'cancelled' }[action];
-    const [row] = await db.update(bookings).set({ status: to, decidedAt: new Date(), ...(action === 'cancel' ? { cancelledBy: 'owner' } : {}) })
+    let [row] = await db.update(bookings).set({ status: to, decidedAt: new Date(), ...(action === 'cancel' ? { cancelledBy: 'owner' } : {}) })
         .where(and(eq(bookings.id, id), eq(bookings.organisationId, orgId), inArray(bookings.status, from[action]))).returning();
     if (!row) return { ok: false, error: 'That booking has already been dealt with.' };
+    // Confirmed: its own Teams / Meet link first, so the confirmation email carries it (booking-meeting.ts).
+    if (action === 'confirm') row = await ensureMeetingLink(db, row);
     // Declined or cancelled by the business: a deposit always goes back, before they're told.
     if (action !== 'confirm' && row.paymentStatus === 'paid') row.paymentStatus = await refundDeposit(db, row) === 'refunded' ? 'refunded' : 'refund_failed';
     // A stay may also have taken its balance and a damage deposit: all of it goes back, and nothing more is asked for.

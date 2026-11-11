@@ -6083,6 +6083,9 @@ export const bookingSettings = pgTable("booking_settings", {
   busyCount: integer("busy_count"),
   // The business's reusable video link for video services (db/z-booking-meeting-links.sql).
   meetingUrl: text("meeting_url"),
+  // How video links are made: 'link' (NULL) | 'teams' | 'meet', and why the last one failed (db/z-booking-meeting-providers.sql).
+  meetingProvider: text("meeting_provider"),
+  meetingProviderError: text("meeting_provider_error"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [
   uniqueIndex("booking_settings_org_uq").on(t.organisationId),
@@ -6149,6 +6152,8 @@ export const bookings = pgTable("bookings", {
   // Where it happens and the video link, copied when made (db/z-booking-meeting-links.sql; booking-meeting.ts).
   meetingLocation: text("meeting_location"),
   meetingUrl: text("meeting_url"),
+  // 'link' (NULL, the pasted link) | 'teams' | 'meet' — made for this booking (db/z-booking-meeting-providers.sql).
+  meetingSource: text("meeting_source"),
   // Stays — holiday lets and B&B rooms (db/z-stays.sql, docs/holiday-lets-plan.md). party_size = guests.
   stayTypeId: integer("stay_type_id").references((): any => stayTypes.id, { onDelete: "set null" }),
   checkIn: date("check_in"),
@@ -6217,6 +6222,8 @@ export const classSessions = pgTable("class_sessions", {
   status: text().notNull().default("scheduled"),
   seriesKey: text("series_key"),
   notes: text(),
+  // An online class or event: its video link, copied onto each place booked (db/z-booking-meeting-providers.sql).
+  meetingUrl: text("meeting_url"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [

@@ -1504,6 +1504,10 @@
         ${btn(`data-site-copy="${esc(link)}"`, 'Copy link', true)}<a class="btn-secondary border sb-tap px-3 py-1.5 text-xs font-bold rounded-lg" href="${esc(link)}" target="_blank" rel="noopener">Open</a></div>
       ${videoNoLink ? `<p class="text-xs text-amber-800 font-semibold mt-2">Some services are video calls but there's no video call link yet. Add yours in Business Information ▸ Bookings, or customers are told you'll send one. ${btn('data-site-open-bookings', 'Add it')}</p>` : ''}
       ${perService}
+      ${b.qrSvg ? `<details class="mt-2"><summary class="text-xs font-bold text-gray-700 cursor-pointer">A QR code to print</summary>
+        <p class="text-xs text-gray-500 mt-1">For your counter, a flyer or the window — scanning it opens your booking link.</p>
+        <img src="data:image/svg+xml;charset=utf-8,${encodeURIComponent(b.qrSvg)}" alt="QR code for your booking link" width="160" height="160" class="mt-2 border border-gray-200 rounded">
+        <div class="mt-2"><a class="btn-secondary border sb-tap px-3 py-1.5 text-xs font-bold rounded-lg inline-block" download="booking-link-qr.svg" href="data:image/svg+xml;charset=utf-8,${encodeURIComponent(b.qrSvg)}">Download QR code</a></div></details>` : ''}
       <details class="mt-2"><summary class="text-xs font-bold text-gray-700 cursor-pointer">A "Book now" button for another website</summary>
         <p class="text-xs text-gray-500 mt-1">Paste this where your other website lets you add HTML. It's a plain link, so it works anywhere.</p>
         <textarea readonly rows="3" class="w-full mt-1 px-2 py-1 border border-gray-300 rounded text-xs font-mono bg-gray-50">${esc(snippet)}</textarea>
@@ -1582,6 +1586,7 @@
         <label class="text-xs font-bold text-gray-700">Places<input type="number" min="1" max="500" data-sf="capacity" class="${inputCls} mt-1" value="${esc(f.capacity || 12)}"></label>
         <label class="text-xs font-bold text-gray-700">Repeat<select data-sf="repeatWeeks" class="${inputCls} mt-1">${[[0, 'Just this date (an event)'], [3, 'Weekly for 4 weeks'], [7, 'Weekly for 8 weeks'], [11, 'Weekly for 12 weeks'], [25, 'Weekly for 26 weeks']].map(([v, l]) => opt(v, l, f.repeatWeeks ?? 0)).join('')}</select></label>
         <label class="text-xs font-bold text-gray-700 md:col-span-2">Note for customers <span class="font-normal text-gray-500">(optional — e.g. bring a mat)</span><input data-sf="notes" maxlength="300" class="${inputCls} mt-1" value="${esc(f.notes || '')}"></label>
+        <label class="text-xs font-bold text-gray-700 md:col-span-2">Video call link <span class="font-normal text-gray-500">(only for an online class — sent once a place is confirmed)</span><input data-sf="meetingUrl" type="url" maxlength="500" placeholder="https://zoom.us/j/…" class="${inputCls} mt-1" value="${esc(f.meetingUrl || '')}"></label>
         <div class="md:col-span-2">${btn('data-session-add', 'Add these dates', true)}</div></div>`
       : `<p class="text-xs text-gray-500 mt-2">First add your classes or events, with their prices. ${btn('data-site-open-products="new"', '+ Add a class or event')}</p>`;
     const now = Date.now();
@@ -1591,7 +1596,7 @@
           const past = new Date(x.endsAt).getTime() < now;
           const off = x.status === 'cancelled';
           return `<li class="border border-gray-200 rounded-lg p-3 ${past || off ? 'opacity-60' : ''}">
-            <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-xs font-bold text-gray-900">${esc(x.dateText)}, ${esc(x.timeText)} · ${esc(x.title)}${x.resourceName ? ` with ${esc(x.resourceName)}` : ''}</p>
+            <div class="flex flex-wrap items-center justify-between gap-2"><p class="text-xs font-bold text-gray-900">${esc(x.dateText)}, ${esc(x.timeText)} · ${esc(x.title)}${x.resourceName ? ` with ${esc(x.resourceName)}` : ''}${x.online ? ' · <span class="text-gray-600">Online</span>' : ''}</p>
               <span class="text-xs font-bold ${off ? 'text-gray-500' : x.left === 0 ? 'text-amber-700' : 'text-green-700'}">${off ? 'Cancelled' : `${esc(x.taken)} of ${esc(x.capacity)} booked${x.waiting ? ` · ${esc(x.waiting)} waiting` : ''}`}</span></div>
             ${x.people.length ? `<p class="text-xs text-gray-600 mt-1">${x.people.map((p) => `${esc(p.name)}${p.places > 1 ? ` ×${esc(p.places)}` : ''}${p.status === 'pending' ? ' (to confirm)' : ''}`).join(', ')}</p>` : ''}
             ${!past && !off ? `<div class="flex flex-wrap gap-2 mt-2">${btn(`data-session-cancel="${esc(x.id)}"`, 'Cancel this date')}${x.seriesKey ? btn(`data-session-cancel="${esc(x.id)}" data-series="1"`, 'Cancel this and later dates') : ''}</div>` : ''}

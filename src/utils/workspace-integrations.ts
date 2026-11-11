@@ -28,9 +28,9 @@ import { singleFlight } from './single-flight';
 type Db = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'outlook' | 'outlook_calendar' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana' | 'canva';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'outlook' | 'outlook_calendar' | 'google_calendar' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana' | 'canva';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'outlook', 'outlook_calendar', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana', 'canva'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'outlook', 'outlook_calendar', 'google_calendar', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana', 'canva'];
 
 /**
  * Providers that carry an offline refresh token and are renewed silently by
@@ -44,7 +44,7 @@ export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 
  * Keep this in sync with the refresh_token branches in refreshAccessToken() below.
  */
 export const AUTO_REFRESH_PROVIDERS: ReadonlySet<IntegrationProvider> = new Set<IntegrationProvider>([
-    'hubspot', 'xero', 'salesforce', 'zendesk', 'quickbooks', 'gmail', 'outlook', 'outlook_calendar',
+    'hubspot', 'xero', 'salesforce', 'zendesk', 'quickbooks', 'gmail', 'outlook', 'outlook_calendar', 'google_calendar',
     'threads', 'tiktok', 'youtube', 'searchconsole', 'jira', 'asana', 'canva',
 ]);
 
@@ -374,6 +374,24 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         return { accessToken: data.access_token, refreshToken: null, expiresInSec: data.expires_in ?? null };
     }
 
+    if (provider === 'google_calendar') {
+        // The booking calendar's own Google Cloud project (calendar-google.ts). Same scope as authorize.
+        const res = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_id: process.env.GOOGLE_CALENDAR_CLIENT_ID ?? '',
+                client_secret: process.env.GOOGLE_CALENDAR_CLIENT_SECRET ?? '',
+                refresh_token: refreshToken,
+            }),
+        });
+        const data: { access_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Google calendar token refresh was rejected.', 401);
+        // Google does not rotate the refresh token on use — keep the stored one.
+        return { accessToken: data.access_token, refreshToken: null, expiresInSec: data.expires_in ?? null };
+    }
+
     if (provider === 'searchconsole') {
         const res = await fetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
@@ -604,6 +622,7 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
     gmail: 'Gmail',
     outlook: 'Outlook',
     outlook_calendar: 'Outlook calendar',
+    google_calendar: 'Google calendar',
     threads: 'Threads',
     tiktok: 'TikTok',
     youtube: 'YouTube',

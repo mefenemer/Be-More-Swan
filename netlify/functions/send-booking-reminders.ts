@@ -11,6 +11,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { bookingSettings, bookings, organisations, sites } from '../../db/schema';
 import { emailCustomer, type BookingRow } from '../../src/utils/bookings';
+import { ensureMeetingLink } from '../../src/utils/booking-meeting';
 import { settingsFromRow } from '../../src/utils/booking-settings';
 import { siteOrigin } from '../../src/utils/site-hosting';
 import { sweepExpiredHolds } from '../../src/utils/booking-deposits';
@@ -42,10 +43,13 @@ export async function sendDueReminders(db: ReturnType<typeof getDb>, now: Date):
         if (!claimed) continue;
         const settings = settingsFromRow(settingsRows.find((r) => r.organisationId === b.organisationId) as Record<string, unknown> | undefined);
         const site = siteRows.find((s) => s.id === b.siteId);
-        await emailCustomer(b as BookingRow, 'reminder', {
+        // A Teams / Meet link that couldn't be made at confirmation gets one more try (booking-meeting.ts).
+        const withLink = await ensureMeetingLink(db, b as BookingRow);
+        await emailCustomer(withLink, 'reminder', {
             business: orgRows.find((o) => o.id === b.organisationId)?.name || 'Your booking',
             timezone: settings.timezone, assistantId: site?.aiAssistantId ?? null, cancellationPolicy: settings.cancellationPolicy,
-            siteOrigin: site?.slug && site.status === 'published' ? siteOrigin(site.slug) : null,
+            // A booking-only address (not published) still serves the manage page (site-booking-page.ts).
+            siteOrigin: site?.slug && site.status !== 'suspended' ? siteOrigin(site.slug) : null,
         }, null);
         sent++;
     }

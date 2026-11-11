@@ -26,13 +26,17 @@ import { loadBookingSetup } from '../../src/utils/bookings';
 import { feedUrl, newFeedToken, webcalUrl } from '../../src/utils/booking-calendar-feed';
 import { setBusyCalendar, syncOne } from '../../src/utils/calendar-sync';
 import { microsoftConnected } from '../../src/utils/calendar-microsoft';
+import { googleCalendarAvailable, googleConnected } from '../../src/utils/calendar-google';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { refreshMeetingLinks } from '../../src/utils/booking-meeting';
 
 /** A video link changed: upcoming video bookings get the new one, and a signed-in Outlook calendar follows. */
 async function relink(db: ReturnType<typeof getDb>, orgId: number): Promise<void> {
     try {
-        if (await refreshMeetingLinks(db, orgId, new Date())) await (await import('../../src/utils/calendar-microsoft')).reconcileSoon(db, orgId);
+        if (await refreshMeetingLinks(db, orgId, new Date())) {
+            await (await import('../../src/utils/calendar-microsoft')).reconcileSoon(db, orgId);
+            await (await import('../../src/utils/calendar-google')).reconcileGoogleSoon(db, orgId);
+        }
     } catch (err) { console.error('[booking-settings] meeting links not refreshed', err); }
 }
 
@@ -50,11 +54,14 @@ async function calendarInfo(db: ReturnType<typeof getDb>, orgId: number, event: 
     const base = resolveBaseUrl((event.headers || {}) as Record<string, string | undefined>) || 'https://bemoreswan.com';
     const url = feedUrl(base, row.calendarFeedToken!);
     const ms = await microsoftConnected(db, orgId);
+    const gg = await googleConnected(db, orgId);
     return {
         feedUrl: url, webcalUrl: webcalUrl(url),
         busy: { host: row.busyCalendarHost ?? null, source: row.busySource ?? null, syncedAt: row.busySyncedAt ?? null, error: row.busySyncError ?? null, count: row.busyCount ?? null },
         // Signed-in Outlook (calendar-microsoft.ts): offered only where the Azure app is configured.
         microsoft: { available: !!process.env.OUTLOOK_CLIENT_ID, connected: ms.connected, account: ms.account, needsReconnect: ms.status === 'expired' },
+        // Signed-in Google (calendar-google.ts): offered only where its own Google Cloud project is configured.
+        google: { available: googleCalendarAvailable(), connected: gg.connected, account: gg.account, needsReconnect: gg.status === 'expired' },
     };
 }
 

@@ -75,6 +75,7 @@ check('tab and chat: New AI clip, frame then make, a card that never spends', ()
     const tab = read('src/components/assistant-videos.js');
     assert.ok(tab.includes('data-vid-act="clip-new"') && tab.includes('data-vid-clip-form'));
     assert.ok(tab.includes("'Try another frame — 1 task' : 'See the first frame — 1 task'"));
+    assert.ok(tab.includes('AI clip · ${esc(v.brief.clip.lengthS)}s · ${esc(clipStatus(v))}'), 'a clip never says "Approve the words"');
     assert.ok(tab.includes('${v.clipFrameUrl ? `<button type="button" data-vid-act="build"'), 'Make the clip only once there is a frame');
     const reg = read('src/components/disruptive-ui-registry.js');
     assert.ok(reg.includes("register('video_clip_proposal', renderVideoClipProposalCard);"));

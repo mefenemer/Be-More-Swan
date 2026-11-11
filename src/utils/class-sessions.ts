@@ -13,6 +13,7 @@ import { loadBookingSetup, type BookingRow } from './bookings';
 import { sendEmail } from './email';
 import { holdsTime, holdUntil } from './booking-deposits';
 import { esc } from './site-render';
+import { cleanMeetingUrl } from './booking-meeting';
 
 type Db = ReturnType<typeof getDb>;
 type Result<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -24,6 +25,8 @@ export type SessionRow = typeof classSessions.$inferSelect;
 export interface SessionView {
     id: number; title: string; serviceId: number | null; resourceName: string | null; startsAt: string; endsAt: string;
     date: string; dateText: string; timeText: string; capacity: number; taken: number; left: number; status: string; seriesKey: string | null; price: string | null;
+    /** An online class (it has a video link — the link itself is only ever in a confirmed booking). */
+    online: boolean;
 }
 
 // ── Adding sessions ─────────────────────────────────────────────────────────────────────────────
@@ -31,6 +34,8 @@ export interface SessionView {
 export interface NewSessions {
     serviceId: number; date: string; start: string; end: string; capacity: number;
     resourceId: number | null; repeatWeeks: number; notes: string | null;
+    /** An online class: its video link (booking-meeting.ts cleanMeetingUrl). */
+    meetingUrl: string | null;
 }
 
 /** What the owner (or the chat's card) sent, checked. `repeatWeeks` 0 = a one-off (an event). */
@@ -52,7 +57,9 @@ export function cleanNewSessions(raw: Record<string, unknown>, today: string): R
     const repeat = raw.repeatWeeks === undefined || raw.repeatWeeks === null || raw.repeatWeeks === '' ? 0 : Number(raw.repeatWeeks);
     if (!Number.isInteger(repeat) || repeat < 0 || repeat > CLASS_LIMITS.repeatWeeks) return { ok: false, error: `Repeat for up to ${CLASS_LIMITS.repeatWeeks} weeks.` };
     const notes = typeof raw.notes === 'string' && raw.notes.trim() ? raw.notes.trim().slice(0, CLASS_LIMITS.notes) : null;
-    return { ok: true, value: { serviceId, date, start, end, capacity, resourceId: res, repeatWeeks: repeat, notes } };
+    const link = cleanMeetingUrl(raw.meetingUrl);
+    if (!link.ok) return { ok: false, error: link.error };
+    return { ok: true, value: { serviceId, date, start, end, capacity, resourceId: res, repeatWeeks: repeat, notes, meetingUrl: link.value } };
 }
 
 /** The dates a new class falls on: the first, then the same weekday for `repeatWeeks` more weeks. */
@@ -73,7 +80,7 @@ export async function addSessions(db: Db, orgId: number, n: NewSessions): Promis
     const seriesKey = n.repeatWeeks > 0 ? randomUUID() : null;
     const rows = await db.insert(classSessions).values(sessionDates(n.date, n.repeatWeeks).map((d) => ({
         organisationId: orgId, serviceId: svc.id, title: svc.name, resourceId: res?.id ?? null, resourceName: res?.name ?? null,
-        startsAt: zonedToUtc(d, n.start, tz), endsAt: zonedToUtc(d, n.end, tz), capacity: n.capacity, seriesKey, notes: n.notes,
+        startsAt: zonedToUtc(d, n.start, tz), endsAt: zonedToUtc(d, n.end, tz), capacity: n.capacity, seriesKey, notes: n.notes, meetingUrl: n.meetingUrl ?? null,
     }))).returning();
     return { ok: true, value: rows };
 }
@@ -105,6 +112,7 @@ export function viewOf(s: SessionRow, taken: number, tz: string, price: string |
         startsAt: new Date(s.startsAt).toISOString(), endsAt: new Date(s.endsAt).toISOString(),
         date: a.date, dateText: formatDate(a.date), timeText: `${formatTime(a.time)}–${formatTime(b.time)}`,
         capacity: s.capacity, taken, left: Math.max(0, s.capacity - taken), status: s.status, seriesKey: s.seriesKey, price,
+        online: !!s.meetingUrl,
     };
 }
 
@@ -178,6 +186,8 @@ export async function bookSession(db: Db, orgId: number, b: NewClassBooking): Pr
             startsAt: s.startsAt, endsAt: s.endsAt, partySize: b.places,
             customerName: b.customerName, customerEmail: b.customerEmail, customerPhone: b.customerPhone, notes: b.notes,
             serviceName: s.title, resourceName: s.resourceName,
+            // An online class: its link goes with each place (shown once confirmed — booking-meeting.ts).
+            ...(s.meetingUrl ? { meetingLocation: 'video', meetingUrl: s.meetingUrl } : {}),
             status: b.deposit ? 'awaiting_payment' : instant ? 'confirmed' : 'pending', decidedAt: !b.deposit && instant ? new Date() : null,
             ...(b.deposit ? { depositPence: b.deposit, paymentStatus: 'unpaid', holdExpiresAt: holdUntil(b.now) } : {}),
         }).returning();

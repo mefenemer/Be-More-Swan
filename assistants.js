@@ -5579,10 +5579,14 @@ window._renderNeedsYou = function() {
     const boards = source === 'videos' ? (window._detailNeedsYouOverride || 0) : 0;
     const own = source === 'module' ? window._detailNeedsYouModule : null;
     const n = source === 'briefs' || own ? (window._detailNeedsYouOverride || 0) : source === 'videos' ? boards + reviewN : reviewN;
-    const where = own ? own.where : source === 'briefs' ? 'Briefs'
+    // A module role names what is actually waiting (Website: "Bookings", "Enquiries and Orders"), not
+    // a fixed tab — a booking waiting used to read "waiting in Enquiries" (2026-11-11).
+    const ownItems = own ? (window._detailNeedsYouItems || []).filter((x) => x && x.label && x.count) : [];
+    const ownWhere = ownItems.length ? ownItems.map((x) => x.label).reduce((acc, l, i, all) => acc + (i === 0 ? l : i === all.length - 1 ? ` and ${l}` : `, ${l}`), '') : null;
+    const where = own ? (ownWhere || own.where) : source === 'briefs' ? 'Briefs'
         : source === 'videos' ? (boards && reviewN ? `Videos and ${reviewLabel}` : boards ? 'Videos' : reviewLabel)
         : reviewLabel;
-    const targetTab = own ? own.tab : source === 'briefs' ? 'briefs' : (source === 'videos' && boards) ? 'videos' : 'review-queue';
+    const targetTab = own ? (ownItems.length === 1 && ownItems[0].tab ? ownItems[0].tab : own.tab) : source === 'briefs' ? 'briefs' : (source === 'videos' && boards) ? 'videos' : 'review-queue';
     const text = document.getElementById('needs-you-text');
     const go = document.getElementById('needs-you-go');
     const next = document.getElementById('next-up-text');
