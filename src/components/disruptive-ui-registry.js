@@ -3838,6 +3838,66 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   }
   register('class_sessions', renderClassSessionsCard);
 
+  // { type: 'qr_code', summary, url | "suggested", label? } — a QR code for a link the user chooses (qr-link.ts,
+  // qr-code.ts). The chat suggests a link; the card shows it with the link in a box to change, and draws the code
+  // on the server. Downloading costs nothing, so nothing needs approving.
+  function renderQrCodeCard(ui, esc) {
+    const el = document.createElement('div');
+    el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm p-5 max-w-md';
+    const start = typeof ui.url === 'string' && !/^suggested$/i.test(ui.url.trim()) ? ui.url.trim().slice(0, 500) : '';
+    el.innerHTML = `
+      <p class="text-xs font-bold text-gray-500 tracking-wider uppercase">QR code</p>
+      ${ui.summary ? `<p class="text-sm font-bold text-gray-900 mt-2">${esc(String(ui.summary).slice(0, 300))}</p>` : ''}
+      <label class="block text-xs font-bold text-gray-700 mt-3">Link the QR code opens
+        <span class="flex flex-wrap items-center gap-2 mt-1"><input data-qr-url type="url" maxlength="500" class="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm" value="${esc(start)}" placeholder="yourshop.co.uk">
+        <button type="button" data-qr-make class="btn-primary px-3 py-2 text-xs font-bold rounded-lg disabled:opacity-50">Make QR code</button></span></label>
+      <p class="text-xs text-gray-500 mt-1" data-qr-note></p>
+      <div class="hidden mt-3" data-qr-out>
+        <img data-qr-img alt="QR code" width="160" height="160" class="border border-gray-200 rounded">
+        <p class="text-xs text-gray-500 mt-1 break-all" data-qr-opens></p>
+        <div class="flex flex-wrap gap-2 mt-2"><a data-qr-svg class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg inline-block" download="qr-code.svg">Download for print (SVG)</a>
+          <a data-qr-png class="btn-secondary border px-3 py-1.5 text-xs font-bold rounded-lg inline-block" download="qr-code.png">Download as a picture (PNG)</a></div>
+      </div>`;
+    const input = el.querySelector('[data-qr-url]');
+    const note = el.querySelector('[data-qr-note]');
+    const say = (t, bad) => { note.textContent = t || ''; note.className = `text-xs mt-1 ${bad ? 'text-red-600 font-semibold' : 'text-gray-500'}`; };
+    async function make() {
+      const url = input.value.trim();
+      if (!url) { say('Type the link the QR code should open.', true); return; }
+      const btn = el.querySelector('[data-qr-make]');
+      btn.disabled = true;
+      try {
+        const res = await fetch('/.netlify/functions/qr-code', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'The QR code couldn\'t be made.');
+        const svgHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(d.svg)}`;
+        el.querySelector('[data-qr-img]').src = svgHref;
+        el.querySelector('[data-qr-svg]').href = svgHref;
+        el.querySelector('[data-qr-png]').href = d.png;
+        el.querySelector('[data-qr-opens]').textContent = `Opens ${d.url}`;
+        el.querySelector('[data-qr-out]').classList.remove('hidden');
+        input.value = d.url;
+        say('Change the link and press Make QR code again to point it somewhere else.');
+      } catch (err) { say(err.message, true); }
+      btn.disabled = false;
+    }
+    el.addEventListener('click', (e) => { if (e.target.closest('[data-qr-make]')) make(); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); make(); } });
+    // The suggested link when the chat didn't give one: the business's own, read on the server.
+    (async () => {
+      if (!start) {
+        try {
+          const d = await fetch('/.netlify/functions/qr-code', { credentials: 'same-origin' }).then((r) => r.json());
+          if (d && d.suggestion) { input.value = d.suggestion.url; say(`Suggested: ${d.suggestion.label}. Change it if you want it to open something else.`); }
+          else { say('Type the link the QR code should open.'); return; }
+        } catch { say('Type the link the QR code should open.'); return; }
+      }
+      make();
+    })();
+    return el;
+  }
+  register('qr_code', renderQrCodeCard);
+
   // { type: 'review_decisions', summary, decisions: [{ reviewId, decision: approve|decline, reason }] }
   // Approve / decline reviews customers sent in — org-reviews.ts PATCH { id, decision }, the same as
   // Audience ▸ Reviews. Decline is only for a review that isn't genuine, is offensive or

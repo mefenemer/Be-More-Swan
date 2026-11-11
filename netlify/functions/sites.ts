@@ -87,7 +87,8 @@ import { decideBooking, describeBooking, emailCustomer, listBookings, loadBookin
 import { cleanKeep, settleDamageDeposit, stayMoneyView } from '../../src/utils/stay-charges';
 import { damageEmail, whoFor } from '../../src/utils/stay-jobs';
 import { cleanBookingSettings, describeHours } from '../../src/utils/booking-settings';
-import { bookableKinds, bookingQrSvg, bookingsSwitchedOff } from '../../src/utils/site-booking-page';
+import { bookableKinds, bookingsSwitchedOff } from '../../src/utils/site-booking-page';
+import { drawQr, suggestedQrLink } from '../../src/utils/qr-link';
 import { sectionForKind } from '../../src/utils/site-booking';
 import { cleanMeetingLocation, meetingLocationOf, ownerMeetingLine, refreshMeetingLinks } from '../../src/utils/booking-meeting';
 import { purgeCache } from '@netlify/functions';
@@ -238,8 +239,13 @@ export default withLambda(async (event) => {
                     services: b.services.map((x) => ({ id: x.id, name: x.name, durationMinutes: x.durationMinutes, price: x.price, meetingLocation: meetingLocationOf(x.meetingLocation) })),
                     resources: b.resources.map((r) => ({ id: r.id, name: r.name, kind: r.kind, hasMeetingUrl: !!r.meetingUrl })), waiting: Number(n),
                     link: bookLinkUrl,
-                    // The same link as a QR code to print (site-booking-page.ts).
-                    qrSvg: bookLinkUrl ? await bookingQrSvg(bookLinkUrl) : null,
+                    // A QR code to print: the booking link by default, else the suggested link (qr-link.ts);
+                    // the card lets them type any other link (qr-code.ts).
+                    qr: await (async () => {
+                        const sug = bookLinkUrl ? { url: bookLinkUrl, label: 'your booking link' } : await suggestedQrLink(db, orgId, 'booking');
+                        const drawn = sug ? await drawQr(sug.url) : null;
+                        return drawn ? { defaultUrl: drawn.url, defaultLabel: sug!.label, svg: drawn.svg, png: drawn.png } : null;
+                    })(),
                     kinds, needsAddress: !s.slug, meetingUrl: b.settings.meetingUrl,
                 };
             })(),

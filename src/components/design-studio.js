@@ -493,6 +493,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         <label class="ds-tool">Transparency <input type="range" data-ds-page-op min="0" max="100" value="${pct(d.pageOpacity == null ? 1 : d.pageOpacity)}"></label>
         <button type="button" class="ds-btn" data-ds-add>+ Add words</button>
         ${canPick() ? '<button type="button" class="ds-btn" data-ds-add-picture>+ Add picture</button>' : ''}
+        <button type="button" class="ds-btn" data-ds-qr>${d.layers.some((l) => l.kind === 'qr') ? 'QR code link' : '+ QR code'}</button>
         <label class="ds-tool"><span class="sr-only">Add a shape</span><select data-ds-add-shape aria-label="Add a shape"><option value="">+ Add shape</option><option value="rectangle">Rectangle</option><option value="circle">Circle</option><option value="line">Line</option></select></label>
         <label class="ds-tool"><span class="sr-only">Resize a copy</span><select data-ds-resize aria-label="Resize a copy"><option value="">Resize a copy</option>${d.kind === 'flyer' ? '<option value="A4">A4 print</option><option value="A5">A5 print</option><option value="A6">A6 print</option><option value="DL">DL print</option>' : ''}<option value="1:1">Square post</option><option value="4:5">Portrait post</option><option value="9:16">Story</option><option value="16:9">Landscape</option></select></label>
         <label class="ds-tool"><span class="sr-only">Download</span><select data-ds-download aria-label="Download"><option value="">Download</option><option value="page">PNG</option><option value="clear">PNG, see-through background</option><option value="pdf">PDF</option>${d.kind === 'flyer' ? '<option value="shop">PDF for a print shop (with bleed)</option>' : ''}</select></label>
@@ -877,6 +878,17 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       if (t('[data-ds-bg]')) { setAsBackground(); return; }
       if (t('[data-ds-unbg]')) { detachBackground(); return; }
       if (t('[data-ds-add-picture]')) { pickPicture((asset) => pictureFromLibrary({ addPicture: asset.id }), 'Add a picture'); return; }
+      // The QR code's link: theirs to choose, starting from the one it has or the suggested one (qr-link.ts). The server draws it.
+      if (t('[data-ds-qr]')) {
+        const on = st.design.layers.find((l) => l.kind === 'qr');
+        const sug = st.qrSuggestion;
+        const current = (on && on.url) || (sug && sug.url) || '';
+        const hint = on && on.url ? 'It opens this link now. Change it to open something else.'
+          : sug ? `Suggested: ${sug.label}. Change it to open something else.` : 'Type the web address it should open.';
+        const url = window.promptModal ? await window.promptModal(hint, { title: on ? 'Link the QR code opens' : 'Add a QR code', value: current, confirmLabel: on ? 'Change link' : 'Add QR code', placeholder: 'yourshop.co.uk' }) : null;
+        if (url && url.trim()) { await pictureFromLibrary({ qrUrl: url.trim() }); }
+        return;
+      }
       if (t('[data-ds-replace]')) { const target = st.selected; pickPicture((asset) => pictureFromLibrary({ replacePicture: { assetId: asset.id, target } }), 'Replace this picture'); return; }
       const back = t('[data-ds-putback]');
       if (back) { putBack(back.dataset.dsPutback); return; }
@@ -1222,6 +1234,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       try {
         const r = await o.post({ action: 'open_design', optionId });
         if (destroyed) return;
+        st.qrSuggestion = r.qrSuggestion || null;
         adopt(r, true);
         showSaved('');
         showError('');

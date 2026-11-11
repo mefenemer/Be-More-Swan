@@ -83,8 +83,8 @@ export function offerLine(intro: IntroOffer | null): string | null {
 }
 
 /**
- * Contact details and QR link from data: the workspace's most recent flyer (what the user typed last
- * time), else the website. Never a model.
+ * Contact details and QR link from data: the offer's link, the workspace's most recent flyer (what the
+ * user typed last time), the online booking link, else the website. Never a model.
  */
 export async function contactDefaults(db: Db, orgId: number, intro: IntroOffer | null): Promise<{ contact: FlyerContact; qr: FlyerContent['qr'] }> {
     const [[last], [org]] = await Promise.all([
@@ -100,8 +100,11 @@ export async function contactDefaults(db: Db, orgId: number, intro: IntroOffer |
         : { phone: null, email: null, website: website ? website.slice(0, FLYER_LIMITS.website) : null, address: null };
     const offerUrl = intro && intro.has ? cleanQrUrl(intro.url) : null;
     const prevQr = prev && prev.ok ? prev.content.qr : null;
-    const qrUrl = offerUrl || prevQr?.url || cleanQrUrl(website);
-    return { contact, qr: qrUrl ? { url: qrUrl, label: offerUrl ? 'Scan to claim' : prevQr?.label ?? null } : null };
+    // Then the online booking link, when bookings are set up (qr-link.ts order: offer, booking, website) —
+    // the user can change it on the "Edit flyer" form.
+    const bookingUrl = offerUrl || prevQr?.url ? null : cleanQrUrl(await import('./site-booking-page').then((m) => m.bookingLinkFor(db, orgId)).catch(() => null));
+    const qrUrl = offerUrl || prevQr?.url || bookingUrl || cleanQrUrl(website);
+    return { contact, qr: qrUrl ? { url: qrUrl, label: offerUrl ? 'Scan to claim' : prevQr?.label ?? (bookingUrl ? 'Scan to book' : null) } : null };
 }
 
 export type DraftResult = { ok: true; content: FlyerContent } | { ok: false; status: number; error: string; code?: string };
