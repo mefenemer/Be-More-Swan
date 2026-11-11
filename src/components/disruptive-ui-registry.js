@@ -1753,6 +1753,19 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       done: 'Noted. It’s on the video on the Videos tab.',
     });
   }
+  // { type: 'video_chapter_proposal', projectId, chapter, title } — rename a finished video's chapter
+  // ("" puts its own name back): the same 'rename_chapter' action as ✎ on the Videos tab. Free.
+  function renderVideoChapterProposalCard(ui, esc) {
+    const id = videoId(ui);
+    const n = Number.isInteger(Number(ui.chapter)) && Number(ui.chapter) > 0 ? Number(ui.chapter) : null;
+    const title = typeof ui.title === 'string' ? ui.title.replace(/\s+/g, ' ').trim().slice(0, 60) : null;
+    return videoActionCard(esc, {
+      kicker: 'Rename a chapter', rows: [n ? ['Chapter', String(n)] : null, title != null ? ['New name', title || 'Its own name back'] : null],
+      note: 'Free. Nothing is made again: the name shows on the Videos tab, and goes in the description when the video is posted to YouTube.',
+      button: 'Rename it', body: id && n && title != null ? { action: 'rename_chapter', id, chapter: n, title } : null,
+      done: 'Renamed. It’s on the video on the Videos tab.',
+    });
+  }
   // { type: 'video_notes_version_proposal', projectId }
   function renderVideoNotesVersionProposalCard(ui, esc) {
     const id = videoId(ui);
@@ -2021,6 +2034,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   register('video_note_proposal', renderVideoNoteProposalCard);
   register('video_notes_version_proposal', renderVideoNotesVersionProposalCard);
   register('video_reshape_proposal', renderVideoReshapeProposalCard);
+  register('video_chapter_proposal', renderVideoChapterProposalCard);
 
   // ── Built-ins: Mystery Shopper cards (docs/mystery-shopper-plan.md §4.6) ──────────────────────
   // The chat twins of the Website tab's buttons — same server actions (site-audits.ts), handled in

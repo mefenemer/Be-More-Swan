@@ -49,8 +49,9 @@ const oneLine = (s: unknown) => String(s ?? '').replace(/\s+/g, ' ').trim();
 
 // ── Read ─────────────────────────────────────────────────────────────────────────────────────────
 
-/** The rules by id, for this turn's prompt. Never throws. */
-export async function buildRulesListBlock(db: Db, organisationId: number, aiAssistantId: number): Promise<string> {
+/** The rules by id, for this turn's prompt. Never throws.
+ *  workspaceOnly (the Business Mentor): only the workspace-wide rules, which are the only ones it changes. */
+export async function buildRulesListBlock(db: Db, organisationId: number, aiAssistantId: number, opts: { workspaceOnly?: boolean } = {}): Promise<string> {
     try {
         const rows = await db.select({
             id: contentRules.id, ruleText: contentRules.ruleText, isActive: contentRules.isActive,
@@ -71,6 +72,12 @@ export async function buildRulesListBlock(db: Db, organisationId: number, aiAssi
         };
         const own = rows.filter((r) => r.assistantId === aiAssistantId);
         const shared = rows.filter((r) => r.assistantId == null);
+        if (opts.workspaceOnly) {
+            return [
+                'WORKSPACE-WIDE DO’S AND DON’TS — every one of their assistants follows these, by "#" number, read this turn. ON rules are followed; OFF rules are kept but switched off:',
+                shared.length ? shared.map(line).join('\n') : '- none yet',
+            ].join('\n');
+        }
         return [
             'YOUR DO’S AND DON’TS (Assistant Settings ▸ Do’s and don’ts), by "#" number, read this turn. ON rules are the ones you follow; OFF rules are kept but switched off:',
             own.length ? own.map(line).join('\n') : '- none yet',
@@ -93,6 +100,20 @@ Add "scope": "workspace" to an "add" ONLY when the user says it should apply to 
 { "type": "rule_proposal", "action": "edit", "ruleId": <# number>, "ruleText": "<the new wording>" }
 { "type": "rule_proposal", "action": "turn_off" | "turn_on" | "delete", "ruleId": <# number> }
 A rule is one point, not a brief: when they give you longer guidance (for a content pillar, say), propose its most important point as this rule and offer to add the others one at a time. Name a rule only by a # number listed under YOUR DO’S AND DON’TS — your own or a workspace-wide one. Changing a workspace-wide rule changes it for every assistant: say so. Only the workspace owner or an admin can add or change a workspace-wide rule; the card says so if this user can't. Prefer "turn_off" when they want to stop a rule for now; "delete" only when they say to remove it for good. A request that is only about the reply in front of you ("make this one shorter") is not a rule — just do it. You never change a rule yourself: the user confirms on the card, and only that click saves it. So never say a rule HAS been saved, changed or removed — say the card is there to confirm. If they ask what your rules are, list them from above.`;
+}
+
+/**
+ * The Business Mentor's version (FR#10, owner 2026-11-11: "I expected to be able to set a
+ * workspace-wide rule from one place, ideally by asking the Business Mentor"). It changes ONLY rules
+ * every assistant follows — never a rule of its own or of one assistant — so every card it makes is
+ * scope "workspace" (resolveRuleProposal with workspaceOnly enforces that, whatever the model writes).
+ */
+export function mentorRulesPromptBlock(): string {
+    return `SETTING A RULE FOR EVERY ASSISTANT — you are where the user sets one Do’s and don’ts rule that ALL their assistants follow. When they ask for something to apply to all their assistants, everywhere, in any material, across everything you all make, or for the whole team ("never reference a testimonials page in any material", "always use British spelling everywhere"), put this in "uiElement" (one change per reply — this rule_proposal card is one of your CARDS):
+{ "type": "rule_proposal", "action": "add", "scope": "workspace", "ruleText": "<the rule, short and general, in the user's terms — one or two sentences, well under ${RULE_TEXT_MAX} characters>" }
+{ "type": "rule_proposal", "action": "edit", "ruleId": <# number>, "ruleText": "<the new wording>" }
+{ "type": "rule_proposal", "action": "turn_off" | "turn_on" | "delete", "ruleId": <# number> }
+Name a rule only by a # number listed under WORKSPACE-WIDE DO’S AND DON’TS. You never set a rule for one assistant only: if they want a rule for just one, tell them to ask that assistant in its chat or use its Do’s and don’ts. A rule is one point, not a brief: propose its most important point and offer the others one at a time. Prefer "turn_off" when they want to stop a rule for now; "delete" only when they say to remove it for good. Only the workspace owner or an admin can set these; the card says so if this user can't. You never change a rule yourself: the user confirms on the card, and only that click saves it — so never say a rule HAS been saved, changed or removed, say the card is there to confirm.`;
 }
 
 // ── Propose ──────────────────────────────────────────────────────────────────────────────────────
@@ -177,7 +198,13 @@ export interface RuleCard {
 
 /** What the caller knows about the user. canManageWorkspaceRules undefined = not known (a reload):
  *  the permission is then left to the endpoint, which checks it again on the click. */
-export interface RuleCardOptions { canManageWorkspaceRules?: boolean }
+export interface RuleCardOptions {
+    canManageWorkspaceRules?: boolean;
+    /** The Business Mentor: every card is for every assistant; an assistant's own rule is refused. */
+    workspaceOnly?: boolean;
+}
+
+export const MENTOR_RULE_NOT_SHARED = 'I only set rules that every assistant follows. To change a rule for one assistant, ask that assistant in its chat or use its Do’s and don’ts.';
 
 interface RuleRow { id: number; ruleText: string; isActive: boolean; platform: string | null; assistantId: number | null }
 
@@ -193,7 +220,9 @@ async function readRule(db: Db, organisationId: number, ruleId: number): Promise
 }
 
 function buildRuleCard(aiAssistantId: number, roleKey: string | null | undefined, req: RuleRequest, row: RuleRow | null, opts: RuleCardOptions = {}): RuleCard {
-    const scope: RuleScope = req.action === 'add' ? (req.scope === 'workspace' ? 'workspace' : 'assistant') : (row && row.assistantId == null ? 'workspace' : 'assistant');
+    const scope: RuleScope = req.action === 'add'
+        ? (req.scope === 'workspace' || opts.workspaceOnly ? 'workspace' : 'assistant')
+        : (row && row.assistantId == null ? 'workspace' : 'assistant');
     const platform = roleKey === 'social_media_manager' && scope !== 'workspace' ? req.platform : null;
     const card: RuleCard = {
         type: RULE_PROPOSAL_TYPE,
@@ -217,6 +246,7 @@ function buildRuleCard(aiAssistantId: number, roleKey: string | null | undefined
     if (scope === 'workspace' && opts.canManageWorkspaceRules === false) { card.blocked = WORKSPACE_RULE_FORBIDDEN; return card; }
     if (req.action === 'add') return card;
     if (!row) { card.blocked = 'That rule no longer exists.'; return card; }
+    if (opts.workspaceOnly && row.assistantId != null) { card.blocked = MENTOR_RULE_NOT_SHARED; return card; }
     if (row.assistantId != null && row.assistantId !== aiAssistantId) { card.blocked = 'That rule belongs to a different assistant.'; return card; }
     if (req.action === 'turn_off' && !row.isActive) card.blocked = 'That rule is already switched off.';
     if (req.action === 'turn_on' && row.isActive) card.blocked = 'That rule is already on.';

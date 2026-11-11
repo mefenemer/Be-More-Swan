@@ -12417,7 +12417,7 @@ function _buildRuleRow(catId, placeholder, rule) {
     tr.dataset.scope = shared ? 'workspace' : 'assistant';
     const canEdit = !shared || _rulesCanManageWorkspace;
     const scopeHtml = _rulesCanManageWorkspace
-        ? `<label class="flex items-center gap-2 px-3 mt-1 text-xs text-gray-500">Who follows it
+        ? `<label class="flex flex-wrap items-center gap-2 px-3 mt-1 text-xs text-gray-500">Who follows it
              <select class="ar-scope px-2 py-1 rounded-lg border border-gray-300 text-xs bg-white text-gray-700">
                <option value="assistant"${shared ? '' : ' selected'}>Just this assistant</option>
                <option value="workspace"${shared ? ' selected' : ''}>Every assistant</option>
@@ -12434,7 +12434,7 @@ function _buildRuleRow(catId, placeholder, rule) {
         <button type="button" aria-checked="${active}" class="ar-toggle relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-1 ${active ? 'bg-emerald-500' : 'bg-gray-300'}">
             <span class="${active ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"></span>
         </button>
-        <button type="button" class="ar-del text-gray-500 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5">
+        <button type="button" aria-label="Delete this rule" title="Delete this rule" class="ar-del text-gray-500 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100 mt-1.5">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </button>`;
 

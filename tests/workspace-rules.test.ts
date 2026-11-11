@@ -10,8 +10,10 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { mentorCardFromUiElement } from '../src/utils/mentor-cards';
+import { resolveDraftRequest } from '../src/utils/mentor-draft-request';
 import { WORKSPACE_RULE_FORBIDDEN, canManageWorkspaceRules, parseRuleScope, ruleScopeOf } from '../src/utils/workspace-rules';
-import { refreshRuleCards, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock } from '../src/utils/chat-rules';
+import { MENTOR_RULE_NOT_SHARED, buildRulesListBlock, mentorRulesPromptBlock, refreshRuleCards, resolveRuleProposal, ruleProposalFromUiElement, rulesPromptBlock } from '../src/utils/chat-rules';
 
 let passed = 0;
 let total = 0;
@@ -82,6 +84,63 @@ async function main() {
         assert.ok(!p.includes('not a workspace-wide one'));
     });
 
+    console.log('\nFrom the Business Mentor (workspace rules only)');
+    await check('every Mentor add is for every assistant, even if the model left scope out', async () => {
+        const r = await resolveRuleProposal(fakeDb(), 1, 31, 'business_mentor', { action: 'add', ruleId: null, ruleText: 'Never reference a testimonials page in any material', platform: null }, { canManageWorkspaceRules: true, workspaceOnly: true });
+        assert.strictEqual(r?.scope, 'workspace');
+        assert.strictEqual(r?.blocked, null);
+    });
+    await check('the Mentor changes workspace rules, never one assistant\'s, and members are refused', async () => {
+        const shared = await resolveRuleProposal(fakeDb([rule()]), 1, 31, 'business_mentor', { action: 'turn_off', ruleId: 9, ruleText: null, platform: null }, { canManageWorkspaceRules: true, workspaceOnly: true });
+        assert.strictEqual(shared?.blocked, null);
+        const own = await resolveRuleProposal(fakeDb([rule({ assistantId: 4 })]), 1, 31, 'business_mentor', { action: 'turn_off', ruleId: 9, ruleText: null, platform: null }, { canManageWorkspaceRules: true, workspaceOnly: true });
+        assert.strictEqual(own?.blocked, MENTOR_RULE_NOT_SHARED);
+        const member = await resolveRuleProposal(fakeDb(), 1, 31, 'business_mentor', { action: 'add', ruleId: null, ruleText: 'x', platform: null }, { canManageWorkspaceRules: false, workspaceOnly: true });
+        assert.strictEqual(member?.blocked, WORKSPACE_RULE_FORBIDDEN);
+    });
+    await check('the Mentor\'s list shows only workspace-wide rules', async () => {
+        const db = { select: () => { const c: any = { from: () => c, where: () => c, orderBy: () => c, limit: () => Promise.resolve([
+            { id: 1, ruleText: 'Shared one', isActive: true, platform: null, origin: 'manual', assistantId: null },
+            { id: 2, ruleText: 'Mentor own', isActive: true, platform: null, origin: 'manual', assistantId: 31 },
+        ]) }; return c; } } as any;
+        const block = await buildRulesListBlock(db, 1, 31, { workspaceOnly: true });
+        assert.ok(block.startsWith('WORKSPACE-WIDE DO’S AND DON’TS'));
+        assert.ok(block.includes('#1 ON: Shared one'));
+        assert.ok(!block.includes('Mentor own'));
+    });
+    await check('the Mentor\'s prompt treats "all my assistants", "everywhere", "in any material" as every assistant', () => {
+        const p = mentorRulesPromptBlock();
+        for (const w of ['all their assistants', 'everywhere', 'in any material', 'never reference a testimonials page in any material', '"scope": "workspace"', 'one of your CARDS']) assert.ok(p.includes(w), w);
+        assert.ok(p.includes('You never set a rule for one assistant only'));
+    });
+    await check('the orchestrator gives the Mentor the workspace list, its prompt, and workspaceOnly checking', () => {
+        const o = read('netlify/functions/chat-orchestrator.ts');
+        assert.ok(o.includes("route === ROUTES.business_mentor ? await buildRulesListBlock(db, orgId, session.aiAssistantId, { workspaceOnly: true }) : null;"));
+        assert.ok(o.includes("route === ROUTES.business_mentor ? mentorRulesPromptBlock() : null;"));
+        assert.ok(o.includes("workspaceOnly: route === ROUTES.business_mentor });"));
+        assert.ok(o.includes('const offersOwnCards = route !== defaultRoute && route !== ROUTES.business_mentor;'), 'its other own-card exclusions stay');
+    });
+
+    await check('a Mentor rule card survives the Mentor branch and reaches the rule block (staging 2026-11-11, chat 92)', async () => {
+        const ui = { type: 'rule_proposal', action: 'add', scope: 'workspace', ruleText: 'Never reference a testimonials page in any material' };
+        assert.strictEqual(mentorCardFromUiElement(ui, 31), null, 'not mistaken for a Mentor card');
+        assert.strictEqual(await resolveDraftRequest({} as any, 1, ui), null, 'not mistaken for a draft request');
+        const o = read('netlify/functions/chat-orchestrator.ts');
+        const branch = o.indexOf('} else if (route === ROUTES.business_mentor) {');
+        const guard = o.indexOf('} else if (!goalProposalFromUiElement(uiElement) && !ruleProposalFromUiElement(uiElement)) {');
+        const ruleBlock = o.indexOf('const ruleReq = route !== defaultRoute && !settingsReq ? ruleProposalFromUiElement(uiElement) : null;');
+        assert.ok(branch > 0 && guard > branch, 'the Mentor branch exempts rule cards from its "never another route\'s card" drop');
+        assert.ok(ruleBlock > guard, 'and the rule block runs after it');
+        assert.ok(!o.slice(branch, ruleBlock).includes('} else if (!goalProposalFromUiElement(uiElement)) {'), 'no older goal-only drop left');
+    });
+
+    await check('"I\'ll set that up…" over a card is a claim, so the reply is replaced (staging 2026-11-11)', async () => {
+        const { replyClaimsChange } = await import('../src/utils/confirm-card-reply');
+        assert.strictEqual(replyClaimsChange('I\'ll set that up as a rule across your whole team.'), true);
+        assert.strictEqual(replyClaimsChange('I will set that up for every assistant.'), true);
+        assert.strictEqual(replyClaimsChange('I can set that up for every assistant — the card below is ready.'), false, 'an offer stays');
+    });
+
     console.log('\nThe endpoint (content-rules.ts)');
     const fn = read('netlify/functions/content-rules.ts');
     await check('GET lists this assistant\'s rules AND the workspace\'s, inside this workspace, and says who may manage', () => {
@@ -112,6 +171,7 @@ async function main() {
         assert.ok(page.includes('<option value="workspace"${shared ? \' selected\' : \'\'}>Every assistant</option>'));
         assert.ok(page.includes("tr.querySelector('.ar-toggle')?.remove();"));
         assert.ok(page.includes('Set by a workspace owner or admin'));
+        assert.ok(page.includes('aria-label="Delete this rule"'), 'the bin button has a name for screen readers');
     });
     await check('a new row saves with its scope; a saved one moves only after a confirm', () => {
         assert.ok(page.includes("...(tr.dataset.scope === 'workspace' ? { scope: 'workspace' } : {})"));
@@ -141,7 +201,7 @@ async function main() {
         assert.ok(sess.includes("platform: everyone ? null : (d.platform || null), ...(everyone ? { scope: 'workspace' } : {})"));
     });
     await check('the orchestrator tells the card whether this user may manage shared rules', () => {
-        assert.ok(orch.includes('{ canManageWorkspaceRules: canManageWorkspaceRules(ctx.role) }'));
+        assert.ok(orch.includes('{ canManageWorkspaceRules: canManageWorkspaceRules(ctx.role), workspaceOnly: route === ROUTES.business_mentor }'));
     });
 
     console.log(`\n${passed}/${total} passed`);
