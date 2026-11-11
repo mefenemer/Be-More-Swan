@@ -85,9 +85,9 @@ check('archive and restore name real rows only', () => {
 check('the prompt lists pillars with ids, archived ones, and the card shape', () => {
     const block = pillarPromptBlock(20, LIVE, ARCHIVED)!;
     assert.match(block, /2 of 5 switched on/);
-    assert.match(block, /#1 "Time saving" — hours back/);
-    assert.match(block, /#3 "Food" \(switched off\)/);
-    assert.match(block, /#9 "Customer stories"/);
+    assert.match(block, /#1 “Time saving” — hours back/);
+    assert.match(block, /#3 “Food” \(switched off\)/);
+    assert.match(block, /#9 “Customer stories”/);
     assert.match(block, /"type":"pillar_proposal"/);
     assert.match(block, /Never say a pillar has been changed/);
     assert.strictEqual(pillarPromptBlock(20, null, []), null, 'no card before the SQL');
@@ -131,10 +131,11 @@ const assistants = read('assistants.js');
 const help = read('db/z-content-pillars-help-2026-11-11.sql');
 
 check('orchestrator: pillar block on the Social route, card rebuilt from rows, set-up card refuses pillars', () => {
-    assert.match(orch, /assistantRow\.roleKey === 'social_media_manager'\s*\? await buildPillarChatBlock\(db, orgId, session\.aiAssistantId\)/);
+    // Social, Blog and Email since phase 3b (any role with a pillar profile).
+    assert.match(orch, /const pillarsBlock = offersOwnCards && pillarProfile\s*\? await buildPillarChatBlock\(db, orgId, session\.aiAssistantId\)/);
     assert.match(orch, /scheduleBlock, setupFieldBlock, pillarsBlock, platformsBlock,/);
     assert.match(orch, /await resolvePillarProposal\(db, orgId, session\.aiAssistantId, pillarReq\)/);
-    assert.match(orch, /!isMentor && pillarsBlock && setupReq\.key === 'content_pillars'/);
+    assert.match(orch, /!isMentor && pillarsBlock && pillarProfile && setupReq\.key === pillarProfile\.contextKey/);
 });
 
 check('endpoint: restore, archived list, and usage', () => {
@@ -156,7 +157,7 @@ check('profile: archived pillars with "Bring back"; Results: posts by pillar', (
     assert.match(list, /data-act="restore"/);
     assert.match(list, /run\(\{ action: 'restore', pillarId: id \}\)/);
     assert.match(detail, /<div id="autopilot-pillars" class="mt-4 pt-4 border-t border-gray-100 hidden">/);
-    assert.match(assistants, /if \(currentData\.roleKey === 'social_media_manager'\) window\.PillarList\?\.renderUsage\(assistantId\);/);
+    assert.match(assistants, /\['social_media_manager', 'blog_writer', 'newsletter_editor'\]\.includes\(currentData\.roleKey\)\) window\.PillarList\?\.renderUsage\(assistantId\);/);
 });
 
 check('help article: upserted, $$-quoted, no semicolons in the body', () => {

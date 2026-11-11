@@ -167,7 +167,7 @@ check('the orchestrator still calls the guard on the social route', () => {
     assert.ok(
         // `!postActionReq` exempts a post-action turn, whose reply describes a confirm card
         // (src/utils/chat-post-action.ts) rather than a draft; every drafting turn is still guarded.
-        /route === ROUTES\.social_media_manager && !postActionReq && !postPartCard && !profileCard && replyClaimsPostSaved/.test(orchestrator),
+        /route === ROUTES\.social_media_manager && !postActionReq && !postPartCard && !profileCard && !pillarCard && replyClaimsPostSaved/.test(orchestrator),
         'the guard is no longer scoped to the social route',
     );
     assert.ok(orchestrator.includes('honestDraftReply(breach)'), 'the false reply is no longer replaced');

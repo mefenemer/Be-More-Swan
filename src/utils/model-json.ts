@@ -69,9 +69,45 @@ export function parseModelJson<T = Record<string, unknown>>(raw: string): T | nu
         try {
             const parsed = JSON.parse(escapeControlCharsInStrings(c));
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as T;
+        } catch { /* try the stray-quote repair */ }
+    }
+    // And with stray double quotes inside a string escaped. Models quote names inside their own JSON
+    // strings ("summary": "Restore the topic "Behind the camera"."), and the whole chat reply was lost
+    // to the retry line (staging 2026-11-11, Blog Writer). Only reached when everything above failed.
+    for (const c of candidates) {
+        if (!c) continue;
+        try {
+            const parsed = JSON.parse(escapeStrayQuotesInStrings(escapeControlCharsInStrings(c)));
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as T;
         } catch { /* nothing recoverable */ }
     }
     return null;
+}
+
+/**
+ * Escape a `"` inside a JSON string that cannot be its closing quote: one NOT followed (after spaces)
+ * by `,` `}` `]` `:` or the end of the text. Escape aware. A heuristic for a last-resort parse only:
+ * a quoted phrase followed directly by a comma (`"A", then`) still reads as a close.
+ */
+export function escapeStrayQuotesInStrings(text: string): string {
+    let out = '';
+    let inStr = false, escaped = false;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (escaped) { escaped = false; out += ch; continue; }
+        if (ch === '\\') { escaped = inStr; out += ch; continue; }
+        if (ch === '"') {
+            if (!inStr) { inStr = true; out += ch; continue; }
+            let j = i + 1;
+            while (j < text.length && /\s/.test(text[j])) j++;
+            const next = text[j];
+            if (next === undefined || next === ',' || next === '}' || next === ']' || next === ':') { inStr = false; out += ch; }
+            else out += '\\"';
+            continue;
+        }
+        out += ch;
+    }
+    return out;
 }
 
 /**

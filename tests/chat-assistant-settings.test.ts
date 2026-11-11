@@ -179,8 +179,8 @@ async function main() {
         assert.ok(src.includes("const offersOwnCards = route !== defaultRoute && route !== ROUTES.business_mentor;"));
         assert.ok(src.includes("route !== defaultRoute ? settingsProposalFromUiElement(uiElement) : null"));
         // The blog and newsletter routes rebuild uiElement after the action cards — a settings card must survive.
-        assert.ok(src.includes('blogAction ?? blogBlockEdit ?? profileCard'));
-        assert.ok(src.includes('emailAction ?? emailPartCard ?? audienceCard ?? reviewsCard ?? profileCard'));
+        assert.ok(src.includes('blogAction ?? blogBlockEdit ?? pillarCard ?? profileCard'));
+        assert.ok(src.includes('emailAction ?? emailPartCard ?? audienceCard ?? reviewsCard ?? pillarCard ?? profileCard'));
     });
     await check('reloading a conversation re-checks stored settings cards', () => {
         assert.ok(read('src/utils/chat-card-refresh.ts').includes('refreshSettingsCards(db, organisationId, aiAssistantId, roleKey, out)'));

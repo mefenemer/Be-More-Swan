@@ -6,7 +6,7 @@
 // Run:  npx tsx tests/model-json.test.ts
 
 import assert from 'node:assert';
-import { parseModelJson, salvageStringField, toCaptionText, displayCaption, stripCodeFences } from '../src/utils/model-json';
+import { parseModelJson, salvageStringField, toCaptionText, displayCaption, stripCodeFences, escapeStrayQuotesInStrings } from '../src/utils/model-json';
 
 let passed = 0;
 function check(name: string, fn: () => void) { fn(); console.log(`  ✓ ${name}`); passed++; }
@@ -85,6 +85,29 @@ check('handles null / empty', () => {
 });
 check('unrecoverable JSON falls back to the stored text rather than blanking', () => {
     assert.equal(displayCaption('{"hashtags":"#a"}'), '{"hashtags":"#a"}');
+});
+
+check('a name quoted inside a JSON string no longer loses the whole reply (staging 2026-11-11)', () => {
+    const raw = `{
+  "reply": "I'll restore "Behind the camera" so it's back in your active topics.",
+  "uiElement": {
+    "type": "pillar_proposal",
+    "action": "restore",
+    "pillarId": 32,
+    "summary": "Restore the archived topic "Behind the camera"."
+  }
+}`;
+    const parsed = parseModelJson<{ reply: string; uiElement: { pillarId: number; summary: string } }>(raw)!;
+    assert.ok(parsed, 'parsed');
+    assert.equal(parsed.reply, 'I\'ll restore "Behind the camera" so it\'s back in your active topics.');
+    assert.equal(parsed.uiElement.pillarId, 32);
+    assert.equal(parsed.uiElement.summary, 'Restore the archived topic "Behind the camera".');
+});
+
+check('the stray-quote repair leaves valid JSON and escaped quotes alone', () => {
+    const ok = '{"a":"x \\"y\\" z","b":[1,"c"],"d":{"e":""}}';
+    assert.equal(escapeStrayQuotesInStrings(ok), ok);
+    assert.deepEqual(JSON.parse(escapeStrayQuotesInStrings(ok)), JSON.parse(ok));
 });
 
 console.log(`\n${passed} checks passed.`);
