@@ -4,6 +4,8 @@
 -- ⚠️ Run at RELEASE, on prod with the code (and after db/help-articles-booking-meetings-2026-11-11.sql, which adds the
 -- booking article's QR line). Staging can take it now. Each statement runs once (the NOT LIKE guard) and reports ok.
 -- Bodies are dollar-quoted: apostrophes stay single. No semicolons inside the bodies.
+-- 2026-11-11: the design editor line ("If you remove your logo or QR code…") is in 'Briefs and Your Brand Style',
+-- not 'Making a Printed Flyer', so that statement now names it. Re-running the whole file is safe: each one is guarded.
 
 BEGIN;
 
@@ -21,7 +23,7 @@ $$- If you remove your **logo** or **QR code**, a button appears to put it back.
 $$- If you remove your **logo** or **QR code**, a button appears to put it back.
 - **QR code link** shows the link your QR code opens and lets you change it. On a design without one, **+ QR code** adds one, starting from a suggested link: your introductory offer's link, else your booking link, else your website.$$),
     updated_at = now()
-WHERE title = 'Making a Printed Flyer' AND content_md NOT LIKE '%**QR code link** shows the link%'
+WHERE title = 'Briefs and Your Brand Style' AND content_md NOT LIKE '%**QR code link** shows the link%'
 RETURNING title, content_md LIKE '%**QR code link** shows the link%' AS ok;
 
 UPDATE help_articles SET
