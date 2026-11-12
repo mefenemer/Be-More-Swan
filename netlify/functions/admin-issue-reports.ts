@@ -29,6 +29,8 @@ import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } f
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { issueScreenshotUrl } from '../../src/utils/issue-screenshot-link';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { ensureStagingSql, proofColumnsReady, loadProofRow, productionChecklist, approveForProduction, syncStagingProof, importProofImages } from '../../src/utils/issue-fix-proof';
+import { pipelineDbUrls, sqlHash } from '../../src/utils/issue-sql';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -256,6 +258,14 @@ export default withLambda(async (event) => {
             devSqlRanAt: new Date(),
             updatedAt: new Date(),
         }).where(eq(issueReports.id, id));
+        // Counts as "SQL on staging" for the production checklist only if it is the fix's own SQL.
+        if (exec.ok && await proofColumnsReady(db)) {
+            await db.execute(sql`
+                UPDATE issue_reports SET dev_staging_sql_status = 'applied', dev_staging_sql_result = ${exec.outcome},
+                       dev_staging_sql_hash = ${sqlHash(sqlText)}, dev_staging_sql_ran_at = now(),
+                       dev_sql_hash = ${sqlHash(sqlText)}
+                 WHERE id = ${id}`);
+        }
 
         await db.insert(issueReportMessages).values({
             issueId: id,
@@ -274,6 +284,24 @@ export default withLambda(async (event) => {
         return json(200, { ok: exec.ok, outcome: exec.outcome, status: advanced ? 'fixed_ready_to_test' : issue.status });
     }
 
+    // ── POST ?action=approve-production: the owner's final approval ─────────────────
+    // Super-admin only. Re-checks the "Ready for production?" checklist server side, runs the SQL that
+    // passed on staging (same hash) on the prod DB, then starts the one-fix hotfix with auto-merge
+    // (src/utils/issue-fix-proof.ts approveForProduction). Body { confirm: true } after a warning.
+    if (event.httpMethod === 'POST' && action === 'approve-production' && id) {
+        if (!hasPermission(admin.role, 'run_migration_sql') || !hasPermission(admin.role, 'deploy_code')) {
+            return json(403, { error: 'Approving for production requires super-admin privilege.' });
+        }
+        let body: any = {};
+        try { body = event.body ? JSON.parse(event.body) : {}; } catch { /* optional */ }
+        const r = await approveForProduction(db, id, admin.id, {
+            confirmWarnings: body?.confirm === true,
+            dispatch: (o) => dispatchHotfix(o),
+        });
+        if (!r.ok) return json(r.status || 400, { error: r.error, ...(r.needsConfirm ? { needsConfirm: true } : {}) });
+        return json(200, { ok: true, message: r.message });
+    }
+
     // ── POST ?action=request-merge: merge the fix PR to staging ───────────────────
     // Super-admin only. Starts .github/workflows/merge-to-staging.yml (src/utils/issue-cloud-merge.ts);
     // syncCloudMerge records the merge and advances the issue, as the laptop runner's report used to.
@@ -288,7 +316,10 @@ export default withLambda(async (event) => {
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
         if (!issue.devPrUrl) return json(400, { error: 'This issue has no pull request to merge.' });
-        if (issue.devSqlStatus === 'pending') {
+        // Before db/z-issue-fix-proof.sql: the old gate (Run SQL by hand first). After it, ensureStagingSql
+        // below runs additive SQL on the staging DB itself, just before the merge starts.
+        const proofReady = await proofColumnsReady(db);
+        if (!proofReady && issue.devSqlStatus === 'pending') {
             return json(400, { error: 'Run the database migration for this fix before merging to staging.' });
         }
         if (issue.devMergeStatus === 'merged') {
@@ -307,6 +338,12 @@ export default withLambda(async (event) => {
 
         const prNum = parsePrNumber(issue.devPrUrl);
         if (!prNum) return json(400, { error: 'This issue\'s pull request is not in this repository, so it cannot be merged from here.' });
+
+        // The fix's SQL goes on the STAGING DB before its code merges (docs/fix-pipeline-proof-plan.md).
+        if (proofReady) {
+            const sqlWait = await ensureStagingSql(db, id);
+            if (sqlWait) return json(400, { error: sqlWait });
+        }
 
         // Claim first (compare-and-swap on the status we just read), so a double click or a stale
         // force starts one merge, and a result landing meanwhile isn't overwritten. The heartbeat is
@@ -458,10 +495,22 @@ export default withLambda(async (event) => {
             inArray(issueReports.devMergeStatus, ['ready', 'failed']),
             or(isNull(issueReports.devSqlStatus), ne(issueReports.devSqlStatus, 'pending')),
         );
+        // After db/z-issue-fix-proof.sql, fixes waiting on SQL are picked too: ensureStagingSql runs their
+        // additive SQL on staging first (it sets dev_sql_status 'applied', so `eligible` then holds).
+        const proofReady = await proofColumnsReady(db);
+        const candidates = proofReady
+            ? and(isNotNull(issueReports.devPrUrl), inArray(issueReports.devMergeStatus, ['ready', 'failed']))
+            : eligible;
         const picked = await db.select({ id: issueReports.id }).from(issueReports)
-            .where(eligible).orderBy(asc(issueReports.devHandoffAt)).limit(MERGE_BULK_MAX + 1);
-        const ids = picked.slice(0, MERGE_BULK_MAX).map((p) => p.id);
-        if (ids.length === 0) return json(200, { ok: true, queued: 0 });
+            .where(candidates).orderBy(asc(issueReports.devHandoffAt)).limit(MERGE_BULK_MAX + 1);
+        const ids: number[] = [];
+        const sqlErrors: string[] = [];
+        for (const p of picked.slice(0, MERGE_BULK_MAX)) {
+            const wait = proofReady ? await ensureStagingSql(db, p.id) : null;
+            if (wait) sqlErrors.push(`#${p.id}: ${wait.split('\n')[0]}`);
+            else ids.push(p.id);
+        }
+        if (ids.length === 0) return json(200, { ok: true, queued: 0, ...(sqlErrors.length ? { failed: sqlErrors.length, error: sqlErrors.join('\n') } : {}) });
 
         const claimed = await db.update(issueReports).set({
             devMergeStatus: 'merging',
@@ -473,7 +522,7 @@ export default withLambda(async (event) => {
           .returning({ id: issueReports.id, devPrUrl: issueReports.devPrUrl });
 
         const started: number[] = [];
-        const errors: string[] = [];
+        const errors: string[] = [...sqlErrors];
         for (const c of claimed) {
             const prNum = parsePrNumber(c.devPrUrl);
             const err = prNum ? await dispatchCloudMerge({ issueId: c.id, pr: prNum }) : 'The pull request is not in this repository.';
@@ -525,10 +574,31 @@ export default withLambda(async (event) => {
         const [reporter] = issue.userId == null ? [] : await db
             .select({ email: users.email, firstName: users.firstName, lastName: users.lastName })
             .from(users).where(eq(users.id, issue.userId)).limit(1);
-        const messages = await db.select().from(issueReportMessages)
-            .where(eq(issueReportMessages.issueId, id))
-            .orderBy(asc(issueReportMessages.createdAt));
+        // Proof before production: follow staging CI / deploy and pull in the repro screenshots now.
+        let proof: ReturnType<typeof productionChecklist> & { row: Awaited<ReturnType<typeof loadProofRow>>; onProdSite: boolean } | null = null;
+        let proofRow = await loadProofRow(db, id);
+        if (proofRow) {
+            let again = false;
+            if (proofRow.devMergeStatus === 'merged' && !proofRow.devProdApprovedAt && (proofRow.devStagingCiStatus !== 'passed' || !proofRow.devStagingLiveAt)) {
+                again = await syncStagingProof(db, proofRow) || again;
+            }
+            if (proofRow.devProofRunId && !proofRow.devProofImagesAt) {
+                again = await importProofImages(db, id, proofRow.devProofRunId) || again;
+            }
+            if (again) proofRow = await loadProofRow(db, id);
+            if (proofRow) proof = { ...productionChecklist(proofRow), row: proofRow, onProdSite: pipelineDbUrls().onProdSite };
+        }
+        const messages = proofRow
+            ? (await db.execute(sql`
+                SELECT id, issue_id AS "issueId", author_type AS "authorType", author_id AS "authorId", body, status,
+                       created_at AS "createdAt",
+                       CASE WHEN image_data IS NOT NULL THEN 'data:' || image_mime || ';base64,' || image_data END AS "imageUrl"
+                  FROM issue_report_messages WHERE issue_id = ${id} ORDER BY created_at ASC`) as unknown[])
+            : await db.select().from(issueReportMessages)
+                .where(eq(issueReportMessages.issueId, id))
+                .orderBy(asc(issueReportMessages.createdAt));
         return json(200, {
+            proof,
             issue: {
                 ...issue,
                 statusLabel: ISSUE_STATUS_LABEL[issue.status as IssueStatus] || issue.status,
@@ -725,8 +795,10 @@ export default withLambda(async (event) => {
  * so this matches the manual apply exactly. Never throws; returns the DB's outcome as text.
  */
 async function runMigrationSql(sqlText: string): Promise<{ ok: boolean; outcome: string }> {
-    const url = process.env.MIGRATION_DATABASE_URL || process.env.NETLIFY_DATABASE_URL;
-    if (!url) return { ok: false, outcome: 'No database URL configured (MIGRATION_DATABASE_URL / NETLIFY_DATABASE_URL).' };
+    // The STAGING DB, wherever this is clicked: on the prod site that is STAGING_DATABASE_URL. It used to
+    // fall back to the site's own DB, so on bemoreswan.com it ran on PROD while saying "staging".
+    const url = pipelineDbUrls().staging;
+    if (!url) return { ok: false, outcome: 'No staging database is configured here (set STAGING_DATABASE_URL in Netlify, production context).' };
 
     const notices: string[] = [];
     const client = postgres(url, {

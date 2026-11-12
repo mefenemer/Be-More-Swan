@@ -25,6 +25,7 @@
 // fall back to GITHUB_FIX_CHECK_TOKEN.
 
 import { sql } from 'drizzle-orm';
+import { saveFixProof, parseProof, rootCauseStatus } from './issue-fix-proof';
 import type { getDb } from '../../db/client';
 
 type Db = ReturnType<typeof getDb>;
@@ -229,7 +230,7 @@ export function parseAiFixPrBody(body: string | null | undefined): { summary: st
 }
 
 export type AiFixNext =
-    | { kind: 'completed'; branch: string; prUrl: string; summary: string; sql: string | null }
+    | { kind: 'completed'; branch: string; prUrl: string; summary: string; sql: string | null; body?: string }
     | { kind: 'failed'; result: string }
     | { kind: 'running'; result: string };
 
@@ -253,7 +254,7 @@ export function nextAiFixState(input: {
 
     if (pr && (pr.state === 'open' || pr.merged)) {
         const { summary, sql: sqlText } = parseAiFixPrBody(pr.body);
-        return { kind: 'completed', branch: pr.branch, prUrl: pr.url, summary: summary || 'A fix has been produced.', sql: sqlText };
+        return { kind: 'completed', branch: pr.branch, prUrl: pr.url, summary: summary || 'A fix has been produced.', sql: sqlText, body: pr.body };
     }
     if (pr && pr.state === 'closed') {
         return { kind: 'failed', result: `The AI fix PR was closed without merging: ${pr.url}\nPass it to the developer again to retry.` };
@@ -311,9 +312,16 @@ export async function applyAiFixState(db: Db, row: AiFixRow, next: AiFixNext): P
                dev_runner_id = NULL, dev_runner_heartbeat = NULL, status = 'merge', updated_at = now()
          WHERE ${claim} RETURNING id`) as unknown[];
     if (!r.length) return false;
-    const prLine = `\n\nPull request: ${next.prUrl}\nBranch: ${next.branch}`;
+    // Root cause, repro result, SQL safety (docs/fix-pipeline-proof-plan.md). A redo clears the later stages.
+    await saveFixProof(db, row.id, next.body, next.sql).catch((e) => console.error('[issue-ai-fix] saving the proof failed:', e instanceof Error ? e.message : e));
+    const proof = parseProof(next.body);
+    const rc = rootCauseStatus(proof);
+    const proofLine = proof
+        ? `\n\nRoot cause: ${rc === 'confirmed' ? 'CONFIRMED (its repro test failed before the fix and passes after)' : rc === 'guessed' ? 'GUESSED (not reproduced)' : 'NOT FOUND'}.`
+        : '';
+    const prLine = `${proofLine}\n\nPull request: ${next.prUrl}\nBranch: ${next.branch}`;
     const body = needsSql
-        ? `✅ AI auto-fix complete — but it needs a DATABASE MIGRATION and a merge to staging.\n\n${next.summary}${prLine}\n\n⚠️ Review and run the SQL in this ticket, then merge the pull request to staging.`
+        ? `✅ AI auto-fix complete — it needs a DATABASE CHANGE and a merge to staging.\n\n${next.summary}${prLine}\n\n⚠️ Review the SQL in this ticket. Additive SQL runs on staging automatically at Merge to staging; anything else must be run by hand first.`
         : `✅ AI auto-fix complete — review the pull request and merge it to staging when ready.\n\n${next.summary}${prLine}`;
     // The reporter is not told here: only once the fix is live (issue-fix-live.ts).
     await db.execute(sql`

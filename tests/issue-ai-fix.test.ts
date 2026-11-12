@@ -123,7 +123,10 @@ async function main() {
     const base = { current: 'in_progress', runnerId: CLOUD_RUNNER_ID, startedAt: mins(5), pr: null, run: null, now };
 
     await check('state machine: an open PR completes the fix with branch, PR, summary and SQL', () => {
-        assert.deepStrictEqual(nextAiFixState({ ...base, pr: pr('open', false, body('SELECT 1;')) }), { kind: 'completed', branch: 'ai-fix/issue-42', prUrl: PR_URL, summary: 'Root cause: X.\nChanged a.ts.', sql: 'SELECT 1;' });
+        // body: the PR body, so the proof block can be saved (src/utils/issue-fix-proof.ts).
+        const { body: prBody, ...done } = nextAiFixState({ ...base, pr: pr('open', false, body('SELECT 1;')) }) as any;
+        assert.deepStrictEqual(done, { kind: 'completed', branch: 'ai-fix/issue-42', prUrl: PR_URL, summary: 'Root cause: X.\nChanged a.ts.', sql: 'SELECT 1;' });
+        assert.strictEqual(prBody, body('SELECT 1;'));
         assert.strictEqual(nextAiFixState({ ...base, pr: pr('closed', true) })?.kind, 'completed');
         assert.strictEqual(nextAiFixState({ ...base, pr: pr('closed', false) })?.kind, 'failed');
     });
@@ -171,11 +174,14 @@ async function main() {
         const fetchImpl = async (u: string) => res(200, u.includes('/pulls?') ? [{ number: 801, html_url: PR_URL, state: 'open', created_at: mins(1).toISOString(), updated_at: mins(1).toISOString(), merged_at: null, body: body('SELECT 1;'), head: { ref: 'ai-fix/issue-42' } }] : {});
         const changed = await syncAiFix(db, { id: 42, devHandoffStatus: 'in_progress', devRunnerId: CLOUD_RUNNER_ID, devHandoffAt: mins(5) }, { token: 't', fetchImpl, now });
         assert.strictEqual(changed, true);
-        assert.strictEqual(calls.length, 2);
+        // completed UPDATE, the proof columns check + proof UPDATE (issue-fix-proof.ts), the thread message.
+        assert.strictEqual(calls.length, 4);
+        assert.match(calls[2].sql, /dev_root_cause_status/);
+        calls.splice(1, 2);
         assert.match(calls[0].sql, /UPDATE issue_reports[\s\S]*dev_handoff_status = 'completed'[\s\S]*dev_merge_status = 'ready'[\s\S]*status = 'merge'[\s\S]*WHERE id = \$\d+ AND dev_handoff_status = 'in_progress' AND dev_runner_id = \$\d+/);
         assert.ok(calls[0].params.includes(PR_URL) && calls[0].params.includes('SELECT 1;') && calls[0].params.includes('pending') && calls[0].params.includes(CLOUD_RUNNER_ID));
         assert.match(calls[1].sql, /INSERT INTO issue_report_messages/);
-        assert.ok(String(calls[1].params.find((p) => typeof p === 'string' && p.includes('DATABASE MIGRATION'))).includes(PR_URL));
+        assert.ok(String(calls[1].params.find((p) => typeof p === 'string' && p.includes('DATABASE CHANGE'))).includes(PR_URL));
     });
 
     await check('sync: a failed run records the workflow’s own reason; lost CAS writes no thread message', async () => {
@@ -213,7 +219,8 @@ async function main() {
     });
 
     await check('workflow: inputs reach scripts only through env, and the id is checked as a number', () => {
-        const runBlocks = wf.split(/\n\s+run: \|/).slice(1).map((b) => b.split(/\n\s{6}- /)[0]);
+        // A run block ends at the next step, or at the next job (the prove / publish jobs follow).
+        const runBlocks = wf.split(/\n\s+run: \|/).slice(1).map((b) => b.split(/\n\s{6}- |\n {2}[#a-z]/)[0]);
         assert.ok(runBlocks.length >= 6, String(runBlocks.length));
         for (const b of runBlocks) assert.ok(!b.includes('${{'), `no expression inside a script:\n${b.slice(0, 120)}`);
         assert.ok(wf.includes('ISSUE_ID: ${{ inputs.issue_id }}'));
@@ -264,7 +271,8 @@ async function main() {
     });
 
     await check('workflow: SQL is written into the PR body, never run', () => {
-        assert.ok(wf.includes('echo "---SQL-MIGRATION-START---"') && wf.includes('## Database change (not run)'));
+        // Never run in the workflow: the app runs it on staging at Merge to staging, on prod at Approve.
+        assert.ok(wf.includes('echo "---SQL-MIGRATION-START---"') && wf.includes('## Database change (not run yet)'));
         assert.ok(!/\bpsql\b|DATABASE_URL|NEON/i.test(wf));
     });
 
