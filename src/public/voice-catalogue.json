@@ -1,5 +1,5 @@
 {
-  "_about": "Every voiceover voice. ONE list, read by src/lib/tts.ts (server) and src/components/voice-picker.js (browser, fetched from /src/public/voice-catalogue.json). ElevenLabs library voices picked 2026-11-02 from the most-used voices per language and gender (free_users_allowed only); the owner chose Pepper, Beth and the London man by ear. `speaker` is the OpenAI voice used only if ElevenLabs fails. `legacy` voices stay valid for saved settings but are not offered. Samples: /audio/voices/<id>.mp3, made by scripts/make-voice-samples.mjs.",
+  "_about": "Every voiceover voice. ONE list, read by src/lib/tts.ts (server) and src/components/voice-picker.js (browser, fetched from /src/public/voice-catalogue.json). ElevenLabs library voices picked 2026-11-02 from the most-used voices per language and gender (free_users_allowed only); the owner chose Pepper, Beth and the London man by ear. `speaker` is the OpenAI voice, used only by a voice with no `elevenlabs` id (no fallback since 2026-11-12). `legacy` voices (the original OpenAI six) stay valid for saved settings but are not offered; since 2026-11-12 each is spoken by an ElevenLabs voice of the same gender (coral, sage, alloy → Pepper; shimmer → Beth; verse → Archer; onyx → Adam), because OpenAI retires gpt-4o-mini-tts on 6 Jan 2027. Samples: /audio/voices/<id>.mp3, made by scripts/make-voice-samples.mjs.",
   "languages": [
     { "code": "en", "label": "English" },
     { "code": "fr", "label": "French" },
@@ -55,11 +55,11 @@
     { "id": "hi_raju", "name": "Raju", "label": "Hindi, clear and warm (man)", "gender": "male", "lang": "hi", "region": "Hindi", "elevenlabs": "zT03pEAEi0VHKciJODfn", "speaker": "ash" },
     { "id": "ja_kyoko", "name": "Kyoko", "label": "Japanese, warm and clear (woman)", "gender": "female", "lang": "ja", "region": "Japanese", "elevenlabs": "4lOQ7A2l7HPuG7UIHiKA", "speaker": "coral" },
     { "id": "ja_otani", "name": "Otani", "label": "Japanese, inviting and clear (man)", "gender": "male", "lang": "ja", "region": "Japanese", "elevenlabs": "3JDquces8E8bkmvbh6Bc", "speaker": "ash" },
-    { "id": "coral", "name": "Coral", "label": "Warm and friendly", "gender": "female", "lang": "en", "region": "American", "speaker": "coral", "legacy": true },
-    { "id": "sage", "name": "Sage", "label": "Calm and clear", "gender": "female", "lang": "en", "region": "American", "speaker": "sage", "legacy": true },
-    { "id": "verse", "name": "Verse", "label": "Bright and upbeat", "gender": "male", "lang": "en", "region": "American", "speaker": "verse", "legacy": true },
-    { "id": "alloy", "name": "Alloy", "label": "Neutral and steady", "gender": "female", "lang": "en", "region": "American", "speaker": "alloy", "legacy": true },
-    { "id": "onyx", "name": "Onyx", "label": "Deep and confident", "gender": "male", "lang": "en", "region": "American", "speaker": "onyx", "legacy": true },
-    { "id": "shimmer", "name": "Shimmer", "label": "Light and lively", "gender": "female", "lang": "en", "region": "American", "speaker": "shimmer", "legacy": true }
+    { "id": "coral", "name": "Coral", "label": "Warm and friendly", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "6vIP9mPY4dr6w8krUg01", "speaker": "coral", "legacy": true },
+    { "id": "sage", "name": "Sage", "label": "Calm and clear", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "6vIP9mPY4dr6w8krUg01", "speaker": "sage", "legacy": true },
+    { "id": "verse", "name": "Verse", "label": "Bright and upbeat", "gender": "male", "lang": "en", "region": "British", "elevenlabs": "Fahco4VZzobUeiPqni1S", "speaker": "verse", "legacy": true },
+    { "id": "alloy", "name": "Alloy", "label": "Neutral and steady", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "6vIP9mPY4dr6w8krUg01", "speaker": "alloy", "legacy": true },
+    { "id": "onyx", "name": "Onyx", "label": "Deep and confident", "gender": "male", "lang": "en", "region": "British", "elevenlabs": "NFG5qt843uXKj4pFvR7C", "speaker": "onyx", "legacy": true },
+    { "id": "shimmer", "name": "Shimmer", "label": "Light and lively", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "zH7TN9vEZAsEway9xWev", "speaker": "shimmer", "legacy": true }
   ]
 }

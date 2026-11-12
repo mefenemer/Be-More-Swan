@@ -52,11 +52,22 @@ async function withKeys<T>(keys: Record<string, string | undefined>, fn: () => P
     try { return await fn(); } finally { for (const k of Object.keys(was)) { if (was[k] === undefined) delete process.env[k]; else process.env[k] = was[k]; } }
 }
 
-await check('Pepper and Beth are ElevenLabs; the London man and the legacy six stay OpenAI', () => {
+await check('Pepper and Beth are ElevenLabs; the London man is the only voice left on OpenAI', () => {
     assert.strictEqual(elevenLabsVoice('british_woman'), '6vIP9mPY4dr6w8krUg01');
     assert.strictEqual(elevenLabsVoice('british_woman_playful'), 'zH7TN9vEZAsEway9xWev');
     assert.strictEqual(elevenLabsVoice('london_man'), null);
-    for (const v of VOICES) if (v.legacy) assert.strictEqual(elevenLabsVoice(v.id), null, v.id);
+    assert.deepStrictEqual(VOICES.filter((v) => !v.elevenlabs).map((v) => v.id), ['london_man'], 'gpt-4o-mini-tts shuts down 6 Jan 2027 — every other voice needs an ElevenLabs id');
+});
+
+await check('the legacy six (old saved settings) are spoken by an offered ElevenLabs voice of the same gender', () => {
+    const want: Record<string, string> = { coral: 'british_woman', sage: 'british_woman', alloy: 'british_woman', shimmer: 'british_woman_playful', verse: 'en_gb_archer', onyx: 'en_gb_adam' };
+    for (const [legacy, offered] of Object.entries(want)) {
+        const l = VOICES.find((v) => v.id === legacy)!, o = VOICES.find((v) => v.id === offered)!;
+        assert.ok(l.legacy && !o.legacy, legacy);
+        assert.strictEqual(l.elevenlabs, o.elevenlabs, `${legacy} should speak as ${offered}`);
+        assert.strictEqual(l.gender, o.gender, `${legacy}: same gender`);
+        assert.strictEqual(l.region, 'British', `${legacy}: it sounds British now`);
+    }
 });
 
 await check('the catalogue: unique ids, real languages, a woman and a man per language, a sample per offered voice', () => {
