@@ -30,6 +30,7 @@ import { issueReportMessages } from '../../db/schema';
 import { BUILD_COMMIT } from '../generated/build-commit';
 import { notifyIssueUser } from './issue-reports';
 import { syncOpenHotfixes, hotfixPrFromResult } from './issue-hotfix';
+import { syncOpenAiFixes } from './issue-ai-fix';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -162,6 +163,8 @@ export interface FixLiveResult {
     autoClosed: number;
     /** Hotfix PRs whose GitHub state changed this run (issue-hotfix.ts). */
     hotfixesSynced?: number;
+    /** Cloud AI fixes whose run or PR changed this run (issue-ai-fix.ts). */
+    aiFixesSynced?: number;
 }
 
 /**
@@ -182,6 +185,9 @@ export async function runFixLiveCheck(db: Db, opts: {
     const deployedSha = opts.deployedSha ?? BUILD_COMMIT;
     const token = opts.token ?? process.env.GITHUB_FIX_CHECK_TOKEN ?? '';
     const repo = opts.repo || process.env.GITHUB_REPO || DEFAULT_REPO;
+
+    // AI fixes running in GitHub Actions: record finished runs and their PRs (uses its own token).
+    result.aiFixesSynced = await syncOpenAiFixes(db, { repo, fetchImpl: opts.fetchImpl, ...(opts.token ? { token: opts.token } : {}) });
 
     // Follow hotfix PRs first, so one merged since the last run is checked against this deploy now.
     if (token) result.hotfixesSynced = await syncOpenHotfixes(db, { repo, fetchImpl: opts.fetchImpl, ...(opts.token ? { token: opts.token } : {}) });

@@ -6628,8 +6628,8 @@ async function submitIssueDescription(id) {
 }
 
 // ── "Pass to Developer" AI auto-fix handoff ──────────────────────────────────
-// Renders the handoff state and, when actionable, the button that queues the
-// issue for the local Claude Code runner (scripts/dev-issue-fixer.mjs).
+// Renders the handoff state and, when actionable, the button that starts the AI fix:
+// Claude Code in GitHub Actions (.github/workflows/ai-fix.yml, src/utils/issue-ai-fix.ts).
 function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function _irHandoffCard(i) {
   const s = i.devHandoffStatus || null;
@@ -6646,14 +6646,19 @@ function _irHandoffCard(i) {
   if (s === 'queued') {
     inner = `<div class="flex items-center gap-2 text-sm font-semibold text-violet-700"><span class="animate-pulse">●</span> Queued for AI auto-fix… a developer runner will pick this up.</div>`;
   } else if (s === 'in_progress') {
-    const stalled = _irRunnerStalled(i);
-    const who = i.devRunnerId
+    // 'GitHub Actions' = the cloud workflow (src/utils/issue-ai-fix.ts): the app follows the run and
+    // marks a stuck one failed itself, so there is no runner to re-queue from.
+    const cloud = i.devRunnerId === 'GitHub Actions';
+    const stalled = !cloud && _irRunnerStalled(i);
+    const who = cloud
+      ? `<div class="text-xs text-violet-600">☁️ Running in <b>GitHub Actions</b> · usually 5–20 minutes. Reopen the issue to refresh.</div>`
+      : i.devRunnerId
       ? `<div class="text-xs ${stalled ? 'text-red-700' : 'text-violet-600'}">🖥 Runner <b>${_esc(i.devRunnerId)}</b> · working for ${_irRunnerElapsed(i) || 'a moment'}</div>` : '';
     const stall = stalled
       ? `<div class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">⚠ This is far longer than a normal fix — the runner may have stopped. Re-queue with “Pass to Developer”.</div>${passBtn('Re-queue for another runner')}` : '';
     inner = `<div class="space-y-2">
         <div class="flex items-center gap-2 text-sm font-semibold text-violet-700"><span class="animate-pulse">●</span> The AI developer is working on a fix…</div>
-        ${who}${stall}
+        ${who}${cloud ? resultBlock : ''}${stall}
       </div>`;
   } else if (s === 'completed') {
     inner = `<div class="space-y-2">
@@ -6669,7 +6674,7 @@ function _irHandoffCard(i) {
       </div>`;
   } else {
     inner = `<div class="space-y-2">
-        <p class="text-xs text-gray-500">Hand this issue to an AI developer (Claude Code). It will fix it on a branch, open a pull request, and move the status to “Fixed &amp; Ready to Test”.</p>
+        <p class="text-xs text-gray-500">Hand this issue to an AI developer (Claude Code, running in GitHub Actions). It fixes it on a branch and opens a pull request into staging for you to review and merge.</p>
         ${passBtn('Pass to Developer')}
       </div>`;
   }
@@ -6722,12 +6727,14 @@ function _updatePassAllBtn(issues) {
 async function passAllToDeveloper() {
   const btn = document.getElementById('ir-pass-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (!(await window.confirmModal(`Each will be fixed on its own branch with a pull request opened for review.`, { title: `Pass all ${window.escapeHtml(n)} reported issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
-  if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
+  if (!(await window.confirmModal(`Each is fixed by Claude Code in GitHub Actions on its own branch, with a pull request opened for review. Up to 10 start per click.`, { title: `Pass all ${window.escapeHtml(n)} reported issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
+  if (btn) { btn.disabled = true; btn.textContent = '🤖 Starting…'; }
   try {
-    await api(`${IR_API}?action=handoff-all`, {
+    const r = await api(`${IR_API}?action=handoff-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
+    // Up to 10 start per click; a partial failure names the first reason.
+    if (r && (r.error || r.note)) window.showToast?.(r.error ? `${r.queued} started. ${r.error}` : r.note, { icon: r.error ? '⚠️' : '🤖' });
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { loadIssueReports(); }
 }
@@ -6781,12 +6788,14 @@ function _updateMoveAllToDeveloperBtn(issues) {
 async function moveBacklogAllToDeveloper() {
   const btn = document.getElementById('ir-backlog-dev-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (!(await window.confirmModal(`Each will be fixed on its own branch with a pull request opened for review.`, { title: `Pass all ${window.escapeHtml(n)} backlog issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
-  if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
+  if (!(await window.confirmModal(`Each is fixed by Claude Code in GitHub Actions on its own branch, with a pull request opened for review. Up to 10 start per click.`, { title: `Pass all ${window.escapeHtml(n)} backlog issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
+  if (btn) { btn.disabled = true; btn.textContent = '🤖 Starting…'; }
   try {
-    await api(`${IR_API}?action=handoff-backlog-all`, {
+    const r = await api(`${IR_API}?action=handoff-backlog-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
+    // Up to 10 start per click; a partial failure names the first reason.
+    if (r && (r.error || r.note)) window.showToast?.(r.error ? `${r.queued} started. ${r.error}` : r.note, { icon: r.error ? '⚠️' : '🤖' });
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { loadIssueReports(); }
 }

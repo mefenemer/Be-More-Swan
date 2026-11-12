@@ -20,6 +20,7 @@ import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { hasPermission } from '../../src/utils/rbac';
 import { stampFixedAt, loadFixLiveFields, parsePrNumber } from '../../src/utils/issue-fix-live';
 import { dispatchHotfix, syncHotfix } from '../../src/utils/issue-hotfix';
+import { dispatchAiFix, buildAiFixIssueText, syncAiFix, syncOpenAiFixes, CLOUD_RUNNER_ID, AI_FIX_BULK_MAX } from '../../src/utils/issue-ai-fix';
 import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, reclaimStaleMerges, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -36,6 +37,90 @@ const json = (statusCode: number, body: unknown) => ({
 async function notSuspected(db: Parameters<typeof incidentColumnsReady>[0]) {
     return (await incidentColumnsReady(db)) ? [sql`${issueReports}.source <> 'suspected'`] : [];
 }
+
+const HANDOFF_THANKS = "Thanks for reporting this — we've passed it to the developer and a fix is now underway.";
+
+/** The claim written before the workflow is started: the cloud now holds the issue. */
+const cloudClaim = () => ({
+    devHandoffStatus: 'in_progress',
+    devHandoffAt: new Date(),
+    devRunnerId: CLOUD_RUNNER_ID,
+    devRunnerHeartbeat: new Date(),
+    devResult: 'Starting the AI fix workflow on GitHub…',
+    status: 'fix_in_progress',
+    updatedAt: new Date(),
+});
+
+/** Start .github/workflows/ai-fix.yml for one claimed issue. Returns an error for the admin, or null. */
+async function dispatchForIssue(db: ReturnType<typeof getDb>, issue: typeof issueReports.$inferSelect): Promise<string | null> {
+    const thread = await db
+        .select({ authorType: issueReportMessages.authorType, body: issueReportMessages.body, createdAt: issueReportMessages.createdAt })
+        .from(issueReportMessages)
+        .where(eq(issueReportMessages.issueId, issue.id))
+        .orderBy(asc(issueReportMessages.createdAt))
+        .limit(50);
+    const issueText = buildAiFixIssueText({
+        id: issue.id, description: issue.description, sourceLocation: issue.sourceLocation,
+        sourceUrl: issue.sourceUrl, hasImage: !!issue.imageMime,
+    }, thread);
+    return dispatchAiFix({ issueId: issue.id, issueText });
+}
+
+/** The workflow didn't start: release the claim and put the visible status back. */
+async function releaseCloudClaim(db: ReturnType<typeof getDb>, id: number, prevStatus: string, err: string) {
+    await db.update(issueReports).set({
+        devHandoffStatus: 'failed', devResult: err, devRunnerId: null, devRunnerHeartbeat: null,
+        status: prevStatus, updatedAt: new Date(),
+    }).where(and(eq(issueReports.id, id), eq(issueReports.devHandoffStatus, 'in_progress'), eq(issueReports.devRunnerId, CLOUD_RUNNER_ID)));
+}
+
+/**
+ * The bulk passes: claim up to AI_FIX_BULK_MAX eligible issues in one status (compare-and-swap, so a
+ * double click claims each once), start a workflow for each, then thread + notify the ones that started.
+ * Suspected incidents are never included: they only reach the AI developer by a person's hand.
+ */
+async function bulkHandoff(db: ReturnType<typeof getDb>, fromStatus: 'reported' | 'backlog', adminId: number, headers: Record<string, string | undefined>) {
+    const eligible = and(
+        eq(issueReports.status, fromStatus),
+        or(isNull(issueReports.devHandoffStatus), notInArray(issueReports.devHandoffStatus, ['queued', 'in_progress'])),
+        ...(await notSuspected(db)), // §6.2: a suspected issue is only ever passed on by hand
+    );
+    const picked = await db.select({ id: issueReports.id }).from(issueReports)
+        .where(eligible).orderBy(asc(issueReports.createdAt)).limit(AI_FIX_BULK_MAX + 1);
+    const ids = picked.slice(0, AI_FIX_BULK_MAX).map((p) => p.id);
+    if (!ids.length) return { claimed: [] as Array<typeof issueReports.$inferSelect>, started: [] as number[], errors: [] as string[], more: false };
+
+    const claimed = await db.update(issueReports).set(cloudClaim())
+        .where(and(inArray(issueReports.id, ids), eligible)).returning();
+    const started: number[] = [];
+    const errors: string[] = [];
+    for (const issue of claimed) {
+        const err = await dispatchForIssue(db, issue);
+        if (err) { errors.push(err); await releaseCloudClaim(db, issue.id, fromStatus, err); }
+        else started.push(issue.id);
+    }
+    const ok = claimed.filter((c) => started.includes(c.id));
+    if (ok.length) {
+        await db.insert(issueReportMessages).values(ok.map((u) => ({
+            issueId: u.id, authorType: 'admin', authorId: adminId, body: HANDOFF_THANKS, status: 'fix_in_progress',
+        })));
+        await Promise.allSettled(ok.map((u) =>
+            notifyIssueUser(db, { userId: u.userId, issueId: u.id, status: 'fix_in_progress', headers })
+                .catch((e) => console.error('[admin-issue-reports] bulk handoff notify failed:', e?.message || e)),
+        ));
+    }
+    return { claimed, started, errors, more: picked.length > AI_FIX_BULK_MAX };
+}
+
+const bulkReply = (r: Awaited<ReturnType<typeof bulkHandoff>>) => {
+    if (!r.claimed.length) return json(200, { ok: true, queued: 0 });
+    if (!r.started.length) return json(502, { error: r.errors[0] || 'The AI fix workflow could not be started.' });
+    return json(200, {
+        ok: true, queued: r.started.length, ids: r.started, failed: r.errors.length,
+        ...(r.errors.length ? { error: r.errors[0] } : {}),
+        ...(r.more ? { more: true, note: `Started ${r.started.length}. Press again for the next ${AI_FIX_BULK_MAX}.` } : {}),
+    });
+};
 
 async function requireAdmin(event: any): Promise<{ id: number; role: string } | null> {
     if (!jwtSecret) return null;
@@ -58,9 +143,11 @@ export default withLambda(async (event) => {
     const id = qs.id ? Number(qs.id) : null;
     const action = qs.action || '';
 
-    // ── POST ?action=handoff: queue the issue for AI auto-fix ────────────────────
-    // Flags the issue for a local Claude Code runner (see scripts/dev-issue-fixer.mjs),
-    // moves the user-visible status to "Fix In Progress", and notifies the reporter.
+    // ── POST ?action=handoff: start the AI fix for this issue ─────────────────────
+    // Claims the issue for the cloud (compare-and-swap, so a double click starts one run), starts
+    // .github/workflows/ai-fix.yml (src/utils/issue-ai-fix.ts), moves the visible status to
+    // "Fix In Progress" and notifies the reporter. syncAiFix follows the run and the PR. By hand,
+    // so a suspected incident may be passed on here.
     if (event.httpMethod === 'POST' && action === 'handoff' && id) {
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
@@ -68,95 +155,41 @@ export default withLambda(async (event) => {
             return json(409, { error: 'This issue has already been passed to a developer.' });
         }
 
-        await db.update(issueReports).set({
-            devHandoffStatus: 'queued',
-            devHandoffAt: new Date(),
-            devResult: null,
-            status: 'fix_in_progress',
-            updatedAt: new Date(),
-        }).where(eq(issueReports.id, id));
+        const claimed = await db.update(issueReports).set(cloudClaim()).where(and(
+            eq(issueReports.id, id),
+            issue.devHandoffStatus == null ? isNull(issueReports.devHandoffStatus) : eq(issueReports.devHandoffStatus, issue.devHandoffStatus),
+        )).returning({ id: issueReports.id });
+        if (!claimed.length) return json(409, { error: 'Someone else just passed this on — refresh the issue.' });
+
+        const err = await dispatchForIssue(db, issue);
+        if (err) {
+            await releaseCloudClaim(db, id, issue.status, err);
+            return json(502, { error: err });
+        }
 
         await db.insert(issueReportMessages).values({
             issueId: id,
             authorType: 'admin',
             authorId: admin.id,
-            body: "Thanks for reporting this — we've passed it to the developer and a fix is now underway.",
+            body: HANDOFF_THANKS,
             status: 'fix_in_progress',
         });
 
         await notifyIssueUser(db, { userId: issue.userId, issueId: id, status: 'fix_in_progress', headers: event.headers })
             .catch((e) => console.error('[admin-issue-reports] handoff notify failed:', e?.message || e));
 
-        return json(200, { ok: true, devHandoffStatus: 'queued' });
+        return json(200, { ok: true, devHandoffStatus: 'in_progress' });
     }
 
-    // ── POST ?action=handoff-all: queue every eligible Reported issue at once ─────
-    // Bulk version of ?action=handoff. Queues every issue still in "Reported" that
-    // isn't already queued or being fixed, posts the same thread message on each,
-    // and notifies each reporter.
+    // ── POST ?action=handoff-all: start the AI fix for Reported issues in bulk ───
+    // Up to AI_FIX_BULK_MAX per click, never a suspected incident.
     if (event.httpMethod === 'POST' && action === 'handoff-all') {
-        const updated = await db.update(issueReports).set({
-            devHandoffStatus: 'queued',
-            devHandoffAt: new Date(),
-            devResult: null,
-            status: 'fix_in_progress',
-            updatedAt: new Date(),
-        }).where(and(
-            eq(issueReports.status, 'reported'),
-            or(isNull(issueReports.devHandoffStatus), notInArray(issueReports.devHandoffStatus, ['queued', 'in_progress'])),
-            ...(await notSuspected(db)), // §6.2: a suspected issue is only ever passed on by hand
-        )).returning({ id: issueReports.id, userId: issueReports.userId });
-
-        if (updated.length === 0) return json(200, { ok: true, queued: 0 });
-
-        await db.insert(issueReportMessages).values(updated.map((u) => ({
-            issueId: u.id,
-            authorType: 'admin',
-            authorId: admin.id,
-            body: "Thanks for reporting this — we've passed it to the developer and a fix is now underway.",
-            status: 'fix_in_progress',
-        })));
-
-        await Promise.allSettled(updated.map((u) =>
-            notifyIssueUser(db, { userId: u.userId, issueId: u.id, status: 'fix_in_progress', headers: event.headers })
-                .catch((e) => console.error('[admin-issue-reports] handoff-all notify failed:', e?.message || e)),
-        ));
-
-        return json(200, { ok: true, queued: updated.length, ids: updated.map((u) => u.id) });
+        return bulkReply(await bulkHandoff(db, 'reported', admin.id, event.headers));
     }
 
-    // ── POST ?action=handoff-backlog-all: queue every eligible Backlog issue at once ─
-    // Bulk version of ?action=handoff, scoped to the Backlog tab — lets an admin hand off
-    // a batch of previously-deferred issues to the AI developer in one click.
+    // ── POST ?action=handoff-backlog-all: the same for the Backlog tab ───────────
     if (event.httpMethod === 'POST' && action === 'handoff-backlog-all') {
-        const updated = await db.update(issueReports).set({
-            devHandoffStatus: 'queued',
-            devHandoffAt: new Date(),
-            devResult: null,
-            status: 'fix_in_progress',
-            updatedAt: new Date(),
-        }).where(and(
-            eq(issueReports.status, 'backlog'),
-            or(isNull(issueReports.devHandoffStatus), notInArray(issueReports.devHandoffStatus, ['queued', 'in_progress'])),
-            ...(await notSuspected(db)),
-        )).returning({ id: issueReports.id, userId: issueReports.userId });
-
-        if (updated.length === 0) return json(200, { ok: true, queued: 0 });
-
-        await db.insert(issueReportMessages).values(updated.map((u) => ({
-            issueId: u.id,
-            authorType: 'admin',
-            authorId: admin.id,
-            body: "Thanks for reporting this — we've passed it to the developer and a fix is now underway.",
-            status: 'fix_in_progress',
-        })));
-
-        await Promise.allSettled(updated.map((u) =>
-            notifyIssueUser(db, { userId: u.userId, issueId: u.id, status: 'fix_in_progress', headers: event.headers })
-                .catch((e) => console.error('[admin-issue-reports] handoff-backlog-all notify failed:', e?.message || e)),
-        ));
-
-        return json(200, { ok: true, queued: updated.length, ids: updated.map((u) => u.id) });
+        return bulkReply(await bulkHandoff(db, 'backlog', admin.id, event.headers));
     }
 
     // ── POST ?action=backlog-all: move every Reported issue to the Backlog at once ─
@@ -423,6 +456,10 @@ export default withLambda(async (event) => {
         if (await syncHotfix(db, issue)) {
             [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         }
+        // An AI fix running in GitHub Actions: pick up its PR, failure or progress now.
+        if (await syncAiFix(db, issue)) {
+            [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        }
         // No reporter on an automatic incident (source 'system' | 'suspected').
         const [reporter] = issue.userId == null ? [] : await db
             .select({ email: users.email, firstName: users.firstName, lastName: users.lastName })
@@ -446,6 +483,8 @@ export default withLambda(async (event) => {
     if (event.httpMethod === 'GET') {
         // Self-heal merges stranded by a dead runner so the list reflects true state.
         await reclaimStaleMerges(db).catch((e) => console.error('[issue-reports] merge reclaim failed:', e?.message || e));
+        // Cloud AI fixes in flight: record finished ones so the list and board are current (capped).
+        await syncOpenAiFixes(db, { limit: 5 });
 
         const status = qs.status && isIssueStatus(qs.status) ? qs.status : null;
         const where = status ? eq(issueReports.status, status) : undefined;
