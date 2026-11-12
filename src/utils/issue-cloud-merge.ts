@@ -5,14 +5,14 @@
 //      starts .github/workflows/merge-to-staging.yml with the issue id and the fix PR number.
 //   2. The workflow checks the PR is this issue's fix branch into staging and merges it.
 //   3. syncCloudMerge follows the PR and the run — when the admin opens the issue, when the list
-//      loads, and on every hourly live-check run — and does what the runner's merge report did:
+//      loads, and on every hourly live-check run — and records the outcome:
 //      dev_merge_status 'merged' (or 'failed' with GitHub's reason), a thread message,
 //      maybeAdvanceToReadyToTest, and the staging rebuild once no merge is left in flight.
 //
 // The heartbeat is NOT refreshed while a cloud merge runs: it is the start time this module and the
-// panel read. reclaimStaleMerges skips cloud rows; this module reports a stuck run itself.
-// 'queued' stays the laptop runner's merge queue, which nothing sets any more. A failed merge is
-// redone by the AI fix workflow on the latest staging (?action=redo-fix), not resolved on a laptop.
+// panel read; this module reports a stuck run itself, and a super-admin can force a restart after
+// STALE_MERGE_MINS. A failed merge is redone by the AI fix workflow on the latest staging
+// (?action=redo-fix). The old laptop runner's 'queued' state is no longer set by anything.
 //
 // Tokens: as issue-ai-fix.ts (GITHUB_AI_FIX_TOKEN or GITHUB_HOTFIX_TOKEN: Actions read/write,
 // Pull requests read, Checks read optional).

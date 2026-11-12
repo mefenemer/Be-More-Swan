@@ -90,6 +90,9 @@ END $$;
 -- runs on a dev machine. The cloud only orchestrates: it queues the issue, a local
 -- watcher claims it, fixes it on a branch, opens a PR and writes the result back.
 --
+-- ⚠️ 2026-11-12: the laptop runner is retired. Fixes and merges run in GitHub Actions
+-- (src/utils/issue-ai-fix.ts, issue-cloud-merge.ts); 'queued' is no longer set. Kept for history.
+--
 --   dev_handoff_status: null      → never handed off
 --                       queued    → admin pressed "Pass to Developer"; awaiting a runner
 --                       in_progress → a runner has claimed it and is working

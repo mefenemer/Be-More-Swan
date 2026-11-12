@@ -297,13 +297,13 @@ async function main() {
     await check('endpoint: Redo fix (after a failed merge) claims before it dispatches, with a note; old action name kept', () => {
         const block = api.slice(api.indexOf("action === 'redo-fix'"), api.indexOf("action === 'request-merge-all'"));
         assert.ok(block.startsWith("action === 'redo-fix' || action === 'request-conflict-fix')"));
-        assert.ok(block.includes("if (issue.devMergeStatus !== 'failed')"));
+        assert.ok(block.includes("['failed', 'conflict_queued', 'conflict_resolving'].includes(issue.devMergeStatus)"), 'failed merges, and conflict fixes the retired laptop left');
         assert.ok(block.includes(".set({ ...cloudClaim(), devMergeStatus: null, devMergeResult: null })"));
-        assert.ok(block.includes("eq(issueReports.devMergeStatus, 'failed')"), 'compare-and-swap on the failed merge');
+        assert.ok(block.includes("eq(issueReports.devMergeStatus, issue.devMergeStatus)"), 'compare-and-swap on the merge state read');
         assert.ok(block.indexOf('.returning(') < block.indexOf('await dispatchForIssue(db, issue, note)'));
         assert.ok(block.includes("devMergeStatus: 'failed', devMergeResult: issue.devMergeResult"), 'a refused dispatch puts the failed merge back');
         assert.ok(!block.includes('notifyIssueUser'), 'an engineering step: the reporter is not told');
-        assert.ok(!/conflict_queued/.test(block), 'nothing queues the laptop conflict fix');
+        assert.ok(!block.includes("devMergeStatus: 'conflict_queued'"), 'nothing queues the laptop conflict fix');
     });
 
     await check('panel: the failed-merge card offers Redo fix, not the laptop conflict fix', () => {
@@ -317,17 +317,16 @@ async function main() {
         assert.ok(api.includes('await syncOpenAiFixes(db, { limit: 5 })'));
     });
 
-    await check('the laptop runner never reclaims a fix the cloud holds; the hourly live check follows cloud fixes', () => {
-        const h = read('netlify/functions/admin-issue-handoff.ts');
-        assert.ok(h.includes('or(isNull(issueReports.devRunnerId), ne(issueReports.devRunnerId, CLOUD_RUNNER_ID))'));
+    await check('the hourly live check follows cloud fixes', () => {
         assert.ok(read('src/utils/issue-fix-live.ts').includes('result.aiFixesSynced = await syncOpenAiFixes('));
     });
 
     await check('panel: a cloud fix shows GitHub Actions and its run link, not a re-queue prompt', () => {
         const html = read('admin.html');
-        assert.ok(html.includes("const cloud = i.devRunnerId === 'GitHub Actions';"));
+        const card = html.slice(html.indexOf('function _irHandoffCard'), html.indexOf('function _irSourceChip'));
         assert.strictEqual(CLOUD_RUNNER_ID, 'GitHub Actions');
-        assert.ok(html.includes("${who}${cloud ? resultBlock : ''}${stall}"));
+        assert.ok(card.includes('☁️ Running in <b>GitHub Actions</b>') && card.includes('${resultBlock}'));
+        assert.ok(!/Re-queue/.test(card));
     });
 
     console.log(`\n${passed} passed`);
