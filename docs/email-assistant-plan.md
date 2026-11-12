@@ -1,6 +1,6 @@
-# Inbox Assistant: Read, Sort, Clean Up and Draft Replies in Gmail and Outlook: Plan
+# Email Assistant: Read, Sort, Clean Up and Draft Replies in Gmail and Outlook: Plan
 
-2026-11-12. **Nothing built.** Written at the owner's request, in the same conversation as
+2026-11-12. **Nothing built. All owner decisions taken 2026-11-12** (see Decisions). Written at the owner's request, in the same conversation as
 `docs/outreach-email-verification-plan.md` Part B (reading mailboxes for outreach bounces and missed
 replies). This plan and Part B share one mailbox reader, one Google review and one yearly security
 audit (§6).
@@ -31,9 +31,9 @@ everything else quietly put away.
 | Token refresh | `workspace-integrations.ts` `refreshAccessToken()` | Gmail: refresh token kept (Google doesn't rotate). Outlook: **rotates** on use; scope string must be re-sent identically or Microsoft narrows the grant. | Reuse the logic, keyed by mailbox id, with a lock (§4.4). |
 | Sending | `src/utils/gmail.ts` `sendGmailMessage`, `src/utils/outlook.ts` `sendOutlookMessage` | Send a new message. Gmail returns `id` + `threadId` (thrown away); Graph `sendMail` returns 202 with no id. No reply-in-thread support. | Reply in thread (Gmail `threadId` + `In-Reply-To`/`References`; Graph `createReply` → `send`). |
 | Reading | — | Nothing reads any mailbox. Replies to outreach arrive only via SendGrid Inbound Parse on our Reply-To address (`inbound-email.ts`). | The shared reader (§4). |
-| Assistant page | `assistant-dashboard-registry.js`, `tab-head.js`, `chat-pane.js` (`cfg.tabChat`), Review tab (`reviewQueue`), Results tab | Patterns every assistant follows. | New `inbox_assistant` entry (§5). |
+| Assistant page | `assistant-dashboard-registry.js`, `tab-head.js`, `chat-pane.js` (`cfg.tabChat`), Review tab (`reviewQueue`), Results tab | Patterns every assistant follows. | New `email_assistant` entry (§5). |
 | Notifications | Inbox + bell + Team Chat (`notify.ts`, "Needs you / Messages") | Workspace-visible feeds. | ⚠️ Team Chat is shared; email content must not land there (§7.3). |
-| Morning summary | `mentor-morning.ts`, morning summary (live 2026-11-02) | Daily summary to the owner. | An "Inbox" section (§2.3). |
+| Morning summary | `mentor-morning.ts`, morning summary (live 2026-11-02) | Daily summary to the owner. | An "Email" section (§2.3). |
 | Metering | `getTaskCosts()`, `src/config/task-weights.ts` | Weighted tasks, chat free under fair use. | New keys (§8). |
 | Export / erasure | `src/utils/workspace-export.ts`, `prospect-erasure.ts` | Workspace rows exported whole minus secret columns; prospects erasable. | Personal mailbox data exported **only to its owner**; disconnect = hard delete (§7). |
 
@@ -41,10 +41,11 @@ everything else quietly put away.
 
 ## 1. Name
 
-⚠️ "Inbox" is already taken twice: the notifications **Inbox** (bell, "Needs you") and the Meeting
-Note Taker's Review tab is labelled "Inbox". "Your Inbox Assistant put 3 things in your Inbox" will
-confuse people. Options in Decision D1. Until decided, this plan says **Inbox Assistant** and
-`roleKey: inbox_assistant`.
+**Decided (owner, 2026-11-12): Email Assistant**, `roleKey: email_assistant`. Not "Inbox Assistant",
+because "Inbox" is already the notifications Inbox (bell, "Needs you") and the Meeting Note Taker's
+Review tab label. For the same reason the assistant's own email list tab is called **Emails**, not
+"Inbox". "Email Marketing" (Email Flows, newsletters) stays a separate assistant; copy must keep the
+two apart: Email Marketing *sends to your audience*, the Email Assistant *looks after your mailbox*.
 
 ---
 
@@ -76,10 +77,10 @@ Starting categories (the user can rename, add, merge or remove; stored per mailb
 - **Learning from corrections:** when the user moves an email to another category, that sender
   (or domain) goes to a per-mailbox sender rule, and future mail from it sorts without AI. The
   rules are listed and editable in Settings.
-- **Where the sorting shows:** always in our Inbox tab. **Writing it into the mailbox** (a Gmail
+- **Where the sorting shows:** always in the Emails tab. **Writing it into the mailbox** (a Gmail
   label `Swan/Needs a reply`, an Outlook category) is a setting, on by default for the business
   mailbox, so the user's own mail app shows the same order. Labels and categories are reversible
-  and never move or remove anything, so they need no approval. Decision D4.
+  and never move or remove anything, so they need no approval (D4, decided).
 - ⚠️ Outlook: setting a category name on a message works with `Mail.ReadWrite`, but adding it to the
   user's colour list (master categories) needs `MailboxSettings.ReadWrite`. Plan: don't ask for it;
   the category shows without a colour until the user picks one in Outlook.
@@ -96,7 +97,7 @@ about check-in tomorrow". The user can change it, and the change teaches the sam
 
 ### 2.3 Summaries
 
-- **Each email:** one line under the subject in our Inbox tab.
+- **Each email:** one line under the subject in the Emails tab.
 - **Each thread:** "where it stands" when opened: who said what, what's still open, what the user
   promised.
 - **The daily picture:** a section in the existing morning summary: *"4 emails need you (1 now),
@@ -144,11 +145,11 @@ about check-in tomorrow". The user can change it, and the change teaches the sam
 - **Permanent delete is not offered.** Gmail permanent delete needs the full-mailbox scope
   `https://mail.google.com/`, which Google treats as the widest possible access and expects a strong
   reason for; "move to trash" does what users mean by delete, and Gmail empties trash after 30 days
-  anyway. On Outlook we likewise never call `permanentDelete`. Decision D3 (recommended: never).
+  anyway. On Outlook we likewise never call `permanentDelete`. Decided (D3): never.
 - **Rules (standing approval):** the user can turn a clean-up into a rule: *"Archive Stripe
   receipts after 7 days"*. A rule is written and shown in plain words, and only works once the user
-  approves it. Rules may **label and archive** without asking each time. Decision D5: whether a rule
-  may also **move to trash** without asking (recommended: not in v1; trash always asks, in batches).
+  approves it. Rules may **label and archive** without asking each time. Decided (D5): a rule
+  may **not** move to trash in v1; trash always asks, in batches.
 - Every action the assistant takes (by click or by rule) is in an **Activity** log on the assistant,
   with Undo where it applies.
 
@@ -175,7 +176,7 @@ There is no level that sends or deletes without asking. Same table in Settings a
   | Scope | Class | Used by |
   | --- | --- | --- |
   | `gmail.readonly` | restricted | Lead Generator replies & bounces (Part B), for customers who want only that |
-  | `gmail.modify` | restricted | Inbox Assistant: read, labels, archive, trash/untrash, drafts, **and send** |
+  | `gmail.modify` | restricted | Email Assistant: read, labels, archive, trash/untrash, drafts, **and send** |
   | `userinfo.email` / `openid` | non-sensitive | which address was connected |
 
   ⚠️ **No separate send scope is needed:** Gmail's `messages.send` and `drafts.create` accept
@@ -183,7 +184,7 @@ There is no level that sends or deletes without asking. Same table in Settings a
   this against Google's API reference page for `users.messages.send` before submitting. If a later
   feature needs only sending, it already has the old project.
 - **Incremental consent:** a customer who only wants Part B grants `gmail.readonly`; switching on the
-  Inbox Assistant later asks for `gmail.modify` with `include_granted_scopes=true`. One grant per
+  Email Assistant later asks for `gmail.modify` with `include_granted_scopes=true`. One grant per
   mailbox, widened in place, so the mailbox has one token, not two.
 - **Not requested:** `https://mail.google.com/` (permanent delete, §2.5); `gmail.settings.*`
   (filters, forwarding). We create no Gmail filters; our rules run on our side.
@@ -195,7 +196,7 @@ There is no level that sends or deletes without asking. Same table in Settings a
     admin ("add Be More Swan Mail as a trusted app", with our client id).
 - **Until Google approves:** max 100 test users, "unverified app" warning screen. We test with our own
   mailboxes only. Gmail is not offered to customers before approval (feature flag).
-- **App passwords + IMAP:** not used (Decision D7). They don't work on many Workspace accounts since
+- **App passwords + IMAP:** not used (D7, decided). They don't work on many Workspace accounts since
   May 2025, and storing one is a password to the whole mailbox.
 
 ### 3.2 Outlook (Microsoft 365 and Outlook.com)
@@ -229,7 +230,7 @@ inbox is one person's. New table **`mailboxes`** (SQL file `db/z-mailboxes.sql`,
 | `id`, `organisation_id`, `user_id` (owner) | The mailbox belongs to a person in a workspace. |
 | `provider` (`gmail` / `outlook`), `address`, `display_name` | |
 | `kind` (`business` / `personal`) | Drives privacy (§7.3) and defaults (§2.6). |
-| `grant_level` (`replies` / `inbox`) | Part B only, or full Inbox Assistant. |
+| `grant_level` (`replies` / `inbox`) | Part B only, or full Email Assistant. |
 | `vault_ref_key` | ⚠️ **One vault key per mailbox id**, never per org+provider. Lesson from `meta-vault-key-collides-per-org`: a shared key let one connection overwrite another's token. |
 | `scopes` | What the provider actually granted (read from the token response, never our constant). |
 | `status` (`active` / `needs_reconnect` / `admin_blocked` / `disconnected`) | |
@@ -244,7 +245,7 @@ business and a personal Gmail.
 - The **outreach send connection** stays in `workspace_integrations` (old Google project). When the
   same address is also a mailbox here, the Lead Generator reads replies through the mailbox (Part B)
   and keeps sending through its own grant. Later, outreach could send via the mailbox grant and the
-  old one retired (Decision D8; not in this plan).
+  old one retired (D8: not in this plan; revisit after Gmail approval).
 - `refreshAccessToken()` gets a mailbox variant that takes the mailbox's own client (new Google
   project's `GMAIL_MAIL_CLIENT_ID` / `_SECRET`; Outlook's existing ids) and scope string, and saves
   Microsoft's rotated refresh token to that mailbox's vault key.
@@ -271,7 +272,7 @@ business and a personal Gmail.
 
 One watcher per mailbox. Each change is handed to the **consumers switched on for that mailbox**:
 1. **Outreach** (Part B): keeps only threads we started and bounce notices; ignores the rest.
-2. **Inbox Assistant**: everything in the Inbox (not Sent, Spam, Trash, Drafts).
+2. **Email Assistant**: everything in the Inbox (not Sent, Spam, Trash, Drafts).
 
 So a mailbox with both on has one subscription, one cursor, one fetch per message.
 
@@ -315,7 +316,7 @@ So a mailbox with both on has one subscription, one cursor, one fetch per messag
   `x-refresh-double-run-2026-11-11`: two overlapping runs refreshed the same token and one was
   rejected. Token refresh happens inside the lock.
 - Bursts (e.g. first connect, a 2,000-email inbox): first connect sorts **only the last 14 days**
-  of the Inbox (Decision D6), in pages, resuming from a saved position if a run hits its limit.
+  of the Inbox (D6, decided), in pages, resuming from a saved position if a run hits its limit.
   Older mail is offered as a one-off "tidy my old mail" job the user starts and sees the task cost of.
 - Provider quotas: Gmail 250 quota units/user/second (`messages.get` = 5, `history.list` = 2);
   Graph throttles at ~10,000 requests per 10 minutes per mailbox. Back off on 429 with the
@@ -327,17 +328,17 @@ So a mailbox with both on has one subscription, one cursor, one fetch per messag
 
 ## 5. How it fits the assistant patterns
 
-### 5.1 Registry entry (`inbox_assistant`)
+### 5.1 Registry entry (`email_assistant`)
 
 - `modules`: all social flags false; `hasPostingSchedule: false`.
 - `primaryAction: { label: 'Tidy my inbox', kind: 'chat' }`.
-- `hubTab: { kind: 'mailbox', label: 'Inbox' }`: a **new hub kind** (sorted email list, not
+- `hubTab: { kind: 'mailbox', label: 'Emails' }`: a **new hub kind** (sorted email list, not
   `assistant_records`). Pills along the top (one card, grey counts including 0, per `tab-head.js`):
   Needs you · Now · each category · Waiting on others. Mailbox switcher when the user has two.
 - `reviewQueue: { kind: 'records', recordType: 'email_action', label: … }`: drafted replies,
   clean-up batches, unsubscribe requests, rules waiting for approval.
-- `tabChat`: one docked chat across Inbox, Review and Clean-up (`chat-pane.js`).
-- Tabs: **Inbox · Review · Clean-up · Results · Activity · Settings** (mailboxes, categories,
+- `tabChat`: one docked chat across Emails, Review and Clean-up (`chat-pane.js`).
+- Tabs: **Emails · Review · Clean-up · Results · Activity · Settings** (mailboxes, categories,
   sender rules, autonomy level, rules, private senders, "Your brand").
 - `metricsSource: 'records'` with Results cards that are measured, not invented:
   **Inbox zero days**, **Replies sent through drafts**, **Emails tidied away**, **Average time to
@@ -349,14 +350,14 @@ So a mailbox with both on has one subscription, one cursor, one fetch per messag
 
 | Action | GUI | Chat | Server action |
 | --- | --- | --- | --- |
-| Find / summarise emails | Inbox tab, search, open thread | "what needs me today?", "anything from Jo?" | `inbox-read` (read only, free) |
-| Change category / priority | drag or menu on the email | "put Jo's emails under Suppliers" → settings card | `inbox-sort` |
-| Draft a reply | Review, or **Draft reply** on any email | "reply to Jo saying yes" → reply card | `inbox-draft` (metered) |
-| Send a reply | **Send** on the draft | card's **Send** button (user presses it) | `inbox-send` |
-| Archive / trash a batch | Clean-up tab | "clear old newsletters" → batch card listing them | `inbox-cleanup` |
-| Restore | Activity → Undo | "undo that clean-up" → card | `inbox-restore` |
-| Unsubscribe | Clean-up | card | `inbox-unsubscribe` |
-| Rules | Settings → Rules | "always archive Stripe receipts after a week" → rule card | `inbox-rules` |
+| Find / summarise emails | Emails tab, search, open thread | "what needs me today?", "anything from Jo?" | `email-read` (read only, free) |
+| Change category / priority | drag or menu on the email | "put Jo's emails under Suppliers" → settings card | `email-sort` |
+| Draft a reply | Review, or **Draft reply** on any email | "reply to Jo saying yes" → reply card | `email-draft` (metered) |
+| Send a reply | **Send** on the draft | card's **Send** button (user presses it) | `email-send` |
+| Archive / trash a batch | Clean-up tab | "clear old newsletters" → batch card listing them | `email-cleanup` |
+| Restore | Activity → Undo | "undo that clean-up" → card | `email-restore` |
+| Unsubscribe | Clean-up | card | `email-unsubscribe` |
+| Rules | Settings → Rules | "always archive Stripe receipts after a week" → rule card | `email-rules` |
 | Connect / disconnect | Connections → Mailboxes | explains + **Connect** button opening the same consent (chat can't finish OAuth) | `oauth-integrations` |
 
 Chat cards POST the same body as the GUI. The server, not the prompt, decides the wording of what
@@ -382,7 +383,7 @@ returns success). Dropped cards are saved as `[card-dropped]` rows as today.
   only their own. `member-assistant-access` (assistant ids on `user_organisations`) decides who can
   use the assistant at all.
 - **Shared business mailboxes** (info@, bookings@) that several people answer: later phase, opt-in
-  per member, business kind only, with "who's handling this" on each thread. Decision D9.
+  per member, business kind only, with "who's handling this" on each thread. (D9, decided: yes.)
 
 ---
 
@@ -391,21 +392,23 @@ returns success). Dropped cards are saved as `[card-dropped]` rows as today.
 | Shared | How |
 | --- | --- |
 | Google project | One "Be More Swan Mail" project for both. |
-| Google review | **One** restricted-scope verification listing `gmail.readonly` + `gmail.modify`. Two use cases in the submission, each with its own demo video section: (1) outreach replies & bounces, (2) Inbox Assistant. |
+| Google review | **One** restricted-scope verification listing `gmail.readonly` + `gmail.modify`. Two use cases in the submission, each with its own demo video section: (1) outreach replies & bounces, (2) Email Assistant. |
 | CASA Tier 2 | **One yearly assessment** covers the project, whichever scopes it holds. TAC Security around $540–720/year at Google's negotiated rate; other labs up to ~$3,000. |
 | Privacy page | One Limited Use statement covering both uses (§7.1). |
 | Microsoft | Same Azure app; verified-publisher check done once. |
 | Code | `mail-reader/` adapters, `mailboxes` table, watchers, advisory lock, token refresh. |
 | Grant per mailbox | `replies` level (readonly / `Mail.Read`) or `inbox` level (modify / `Mail.ReadWrite` + `Mail.Send`), widened in place. |
 
-**What this changes in Part B:** B5 currently plans `gmail.readonly` only and its own reader. Instead:
+**What this changes in Part B** (Part B updated to match, 2026-11-12):
 - Part B Phase 1 groundwork (message ids, `X-BMS-Ref`, halt reasons) is unchanged and can ship now.
 - Part B's Outlook and Gmail reading phases build on `mailboxes` + `mail-reader/` from this plan,
   rather than a separate store. Outlook first (no audit), for both features.
-- The Google submission waits until the Inbox Assistant's Gmail flow can be demonstrated, so it is
+- The Google submission waits until the Email Assistant's Gmail flow can be demonstrated, so it is
   reviewed once. Reviews of a project with new restricted scopes can take several weeks; a second
   submission later would mean a second review cycle and a re-scoped CASA.
-- Trade-off: Part B's Gmail reading lands later than it would alone. Decision D2.
+- Trade-off: Part B's Gmail reading lands later than it would alone. Accepted (D2).
+- Part B keeps its own app-password fallback (B5.2, personal Gmail, only if customers ask), stored
+  under the mailbox's own vault key. The Email Assistant doesn't use it (D7).
 
 ---
 
@@ -485,13 +488,13 @@ returns success). Dropped cards are saved as `[card-dropped]` rows as today.
   as above (cascade on `user_id` and `organisation_id`, plus the revoke job).
 - **Export (`workspace-export.ts`):** business mailboxes' derived data (categories, rules, summaries)
   in the workspace export for owners/admins **only if the mailbox owner is the requester or the
-  mailbox is business kind** (Decision D10); personal mailboxes only in that user's own export.
+  mailbox is business kind** (D10, decided); personal mailboxes only in that user's own export.
   `vault_ref_key`, cursors and subscription ids are secret columns, never exported.
 - **Erasure request from a third party** (someone who emailed the customer): handled by the customer
   as controller; we provide "delete everything stored from this address" per mailbox, and extend
   `prospect-erasure.ts` to cover mailbox rows by address.
 - **Retention:** derived data for mail older than 90 days is pruned unless the email is still in a
-  category view (Decision D6).
+  category view (D6, decided).
 
 ---
 
@@ -505,17 +508,17 @@ Proposed task costs (new keys in `task-weights.ts`, set in Admin → Money → T
 
 | Key | Proposed | Why |
 | --- | --- | --- |
-| `inbox_sort_per_emails` (a rate, like `chat_messages_per_task`) | 1 task per 50 emails sorted **by AI** | A busy small business gets 50–150 real emails a day; header-sorted mail is free. ~1–3 tasks/day. |
-| `inbox_reply_draft` | 1 | Same as `outreach_email`. Redrafts / shorter / longer: free for the first two, as blog. |
-| `inbox_old_mail_tidy` | 1 per 500 emails | The one-off "tidy my old mail" job, quoted before it starts. |
+| `email_sort_per_emails` (a rate, like `chat_messages_per_task`) | 1 task per 50 emails sorted **by AI** | A busy small business gets 50–150 real emails a day; header-sorted mail is free. ~1–3 tasks/day. |
+| `email_reply_draft` | 1 | Same as `outreach_email`. Redrafts / shorter / longer: free for the first two, as blog. |
+| `email_old_mail_tidy` | 1 per 500 emails | The one-off "tidy my old mail" job, quoted before it starts. |
 | Summaries, priority, clean-up, send, restore, unsubscribe, rules | free | Cheap or no AI; charging for "send" or "trash" would feel wrong. |
 | Chat | free under fair use | As every assistant. |
 
 - Before setting these, **measure**: run the triage prompt on our own mailboxes for two weeks and
   log real cost per email (`ai_usage_log`), then set the rate so the median business stays within
   their plan.
-- Plan placement (Decision D11): recommended on every paid plan with the task meter doing the
-  limiting; the personal mailbox add-on on the higher plans only, or a flat add-on.
+- Plan placement (D11, decided): every paid plan, with the task meter doing the limiting; the
+  personal mailbox add-on on the higher plans only.
 - If the free work charging switch (`free-work-charging-decision-2026-11-06`) is still off, sorting
   is background work and counts like other background work; check what `unified_task_metering` does
   with a rate key before building.
@@ -523,12 +526,12 @@ Proposed task costs (new keys in `task-weights.ts`, set in Admin → Money → T
 ### Public pages (only once live on prod)
 
 - Assistant page (`/ai-…`), pricing page task table, FAQ, terms, `llms.txt`.
-- `/connections`: Gmail and Outlook entries say "reads and sorts email (Inbox Assistant)" only when
+- `/connections`: Gmail and Outlook entries say "reads and sorts email (Email Assistant)" only when
   live; until then, the Live/Coming-soon list must not claim reading (it's a public claim list).
 - Help articles (SQL both DBs at release): connecting a mailbox, what we read and store, categories
   and rules, undo, disconnecting, the Workspace/365 admin guide.
 - ⚠️ The **privacy policy** is the one exception: Google requires the Limited Use statement to be
-  live before it reviews the app. Word it as "if you connect a mailbox to the Inbox Assistant…" so it
+  live before it reviews the app. Word it as "if you connect a mailbox to the Email Assistant…" so it
   is accurate before launch.
 
 ---
@@ -557,12 +560,12 @@ Proposed task costs (new keys in `task-weights.ts`, set in Admin → Money → T
 - Azure verified-publisher check; fix if not verified.
 - Create the "Be More Swan Mail" Google project, consent screen, scopes; get two CASA quotes.
 - DPIA draft; privacy policy wording (Limited Use); DPA wording.
-- Owner decisions below.
+- Owner decisions: all taken 2026-11-12 (end of this doc).
 
-**Phase 1: Outlook, read-only (staging, flag `inbox_assistant`)**
+**Phase 1: Outlook, read-only (staging, flag `email_assistant`)**
 - `mailboxes` table, `OUTLOOK_MAILBOX_SCOPE` grant, connect/disconnect (with full deletion).
 - `mail-reader/` Graph adapter, delta polling every 10 min (no push yet), advisory lock.
-- Sorting (headers + AI), priority, one-line summaries, Inbox tab, registry entry, docked chat
+- Sorting (headers + AI), priority, one-line summaries, Emails tab, registry entry, docked chat
   (read-only questions), morning summary section. Nothing written to the mailbox.
 - Measure AI cost per email on our own mailboxes.
 
@@ -574,12 +577,12 @@ Proposed task costs (new keys in `task-weights.ts`, set in Admin → Money → T
 
 **Phase 3: Gmail**
 - Gmail adapter on the new project, with test users. Record the demo video for both uses
-  (Inbox Assistant + Part B), submit the restricted-scope review, do CASA.
+  (Email Assistant + Part B), submit the restricted-scope review, do CASA.
 - Pub/Sub push for Gmail; Graph change notifications for Outlook; daily renewals; polling safety net.
 
 **Phase 4: Lead Generator reading on the same reader (Part B B4–B5)**
 - Outreach consumer: replies and bounces from mailboxes at either grant level. Outlook can come
-  right after Phase 1 if the owner wants Part B sooner (Decision D2).
+  right after Phase 1 if Part B is wanted sooner (D2).
 
 **Phase 5: personal mailbox and shared mailboxes**
 - Second mailbox per person (personal kind, private, Just show me default), mailbox switcher.
@@ -592,32 +595,34 @@ Proposed task costs (new keys in `task-weights.ts`, set in Admin → Money → T
 
 ---
 
-## Decisions for the owner
+## Decisions (all taken 2026-11-12)
 
-1. **D1. Name.** "Inbox" clashes with the notifications Inbox and the Note Taker's "Inbox" tab.
-   Options: (a) **Email Assistant** (recommended: plain, and "Email Marketing" is clearly different),
-   (b) Inbox Assistant and rename the notifications Inbox, (c) Mailbox Assistant.
-2. **D2. One Google review for both features.** Recommended: yes, submit once with `gmail.readonly` +
-   `gmail.modify`, accepting that Part B's Gmail reading waits for the Inbox Assistant's Gmail demo.
-   Outlook reading for Part B can still ship early.
-3. **D3. Permanent delete.** Recommended: never; "move to trash" only, and don't request
-   `https://mail.google.com/`.
-4. **D4. Write categories into the mailbox** (Gmail labels / Outlook categories). Recommended: on by
-   default for business mailboxes, off for personal.
-5. **D5. Can a rule move to trash without asking?** Recommended: not in v1 (rules may label and
-   archive only).
-6. **D6. How far back.** Recommended: first sort covers 14 days; old-mail tidy is a separate quoted
-   job; derived data pruned after 90 days.
-7. **D7. App passwords + IMAP fallback.** Recommended: no.
-8. **D8. Retire the old send-only Gmail grant** in favour of the mailbox grant, later. Recommended:
-   decide after Gmail approval; not part of this plan.
-9. **D9. Shared business mailboxes** (info@ answered by several people). Recommended: yes, Phase 5.
-10. **D10. Workspace export of business mailbox data** by owners/admins when they didn't connect it.
-    Recommended: derived data (categories, rules) yes; summaries and drafts only for the mailbox owner.
-11. **D11. Plans and price.** Task rates in §8 after measuring; which plans get the personal
-    mailbox add-on.
-12. **D12. CASA lab.** Recommended: TAC Security at Google's rate if the quote holds; the cost is
-    shared with Part B.
+The owner chose the name, then said "go with your recommendations on D2–D12".
+
+1. **D1. Name.** ✅ **Email Assistant** (tab: Emails).
+2. **D2. One Google review for both features.** ✅ Yes: submit once with `gmail.readonly` +
+   `gmail.modify`. Part B's Gmail reading waits for the Email Assistant's Gmail demo; Outlook reading
+   for Part B can still ship early.
+3. **D3. Permanent delete.** ✅ Never. "Move to trash" only; `https://mail.google.com/` is not requested.
+4. **D4. Write categories into the mailbox** (Gmail labels / Outlook categories). ✅ On by default for
+   business mailboxes, off for personal.
+5. **D5. Can a rule move to trash without asking?** ✅ Not in v1. Rules may label and archive only;
+   trash always asks, in batches.
+6. **D6. How far back.** ✅ First sort covers 14 days; old-mail tidy is a separate job, quoted before
+   it starts; derived data pruned after 90 days.
+7. **D7. App passwords + IMAP fallback.** ✅ No.
+8. **D8. Retire the old send-only Gmail grant.** ✅ Not part of this plan; revisit after Gmail approval.
+9. **D9. Shared business mailboxes** (info@ answered by several people). ✅ Yes, Phase 5.
+10. **D10. Workspace export of business mailbox data** by owners/admins who didn't connect it.
+    ✅ Derived data (categories, rules) yes; summaries and drafts only to the mailbox owner.
+11. **D11. Plans and price.** ✅ On every paid plan, limited by the task meter; task rates set after the
+    Phase 1 cost measurement (§8 figures are the starting proposal). The personal mailbox add-on is on
+    the higher plans only.
+12. **D12. CASA lab.** ✅ TAC Security at Google's negotiated rate, if the quote holds (about
+    $540–720/year); still get a second quote to compare. Cost shared with Part B.
+
+**Still open:** none of the owner's. Phase 0 checks remain: Azure verified publisher, and confirming
+on Google's API reference that `gmail.modify` covers `messages.send` and `drafts.create`.
 
 ---
 
@@ -637,7 +642,7 @@ Proposed task costs (new keys in `task-weights.ts`, set in Admin → Money → T
       derived from it). Outlook client ids already set.
 - [ ] `db/z-mailboxes.sql` (and the task-cost rows) applied to **both** DBs before deploy; help
       article SQL on both DBs at release.
-- [ ] Feature flag `inbox_assistant` per org; Gmail behind its own flag until approval.
+- [ ] Feature flag `email_assistant` per org; Gmail behind its own flag until approval.
 - [ ] Scheduled function for watch/subscription renewal and the polling safety net deployed and seen
       running on staging.
 - [ ] Tests in §9 pass; a real Outlook.com and a real Microsoft 365 mailbox, and a real @gmail.com

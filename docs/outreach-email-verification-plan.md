@@ -2,7 +2,9 @@
 
 2026-11-12. Nothing built yet. Came out of comparing the Lead Generator with a list of lead tools
 (Hunter's verifier was the item we pay for but don't use). Part B (reading Gmail and Outlook)
-added the same day at the owner's request.
+added the same day at the owner's request. Part B updated 2026-11-12 to build on the Email
+Assistant's shared mailbox reader and its single Google review (`docs/email-assistant-plan.md` §3–§6,
+owner decisions taken 2026-11-12).
 
 **Goals:**
 - **Part A:** never send a first outreach email to an address that doesn't exist.
@@ -218,16 +220,20 @@ before Google will review the app.
 
 ## B4. Outlook (Microsoft Graph) — likely first, no audit
 
-- Permission: **`Mail.Read`** (delegated), added to the Outlook mailbox grant as a separate,
-  optional step: "Let Be More Swan see replies and bounces". Customers who don't take it keep
-  sending exactly as today.
+- Permission: **`Mail.Read`** (delegated), as a separate, optional step: "Let Be More Swan see
+  replies and bounces". Customers who don't take it keep sending exactly as today.
+- **Where the grant lives:** a row in the Email Assistant's per-person `mailboxes` table
+  (`docs/email-assistant-plan.md` §3.3) at grant level `replies`, not in `workspace_integrations`.
+  If the same mailbox later turns on the Email Assistant, the grant is widened in place to
+  `Mail.ReadWrite` + `Mail.Send` (level `inbox`): one token, one watcher per mailbox. The outreach
+  send connection (`OUTLOOK_SCOPE`) stays where it is.
 - After each send (no id from `sendMail`): look up the message in Sent Items by recipient, subject
   and time, then store its `internetMessageId` and `conversationId`.
-- Watching: Graph **delta query** on the Inbox every 10 minutes for mailboxes with live
-  conversations (and only those). Later, change notifications (subscriptions last about 3 days,
-  then renew) if polling proves slow.
+- Watching: the shared reader (`mail-reader/`, Email Assistant plan §4): Graph **delta query** on
+  the Inbox every 10 minutes for mailboxes with live conversations (and only those), then change
+  notifications. Part B is one consumer of that reader: it keeps only our threads and bounces (B2).
 - ⚠️ To check before building:
-  - whether our Azure app is a **verified publisher**. Many work tenants only let users consent
+  - whether our Azure app is a **verified publisher** (one check, shared with the Email Assistant). Many work tenants only let users consent
     to apps from verified publishers, and some require an admin to approve any mail-reading app.
     Both affect how many customers can switch this on;
   - personal Outlook.com accounts vs work accounts behave differently. Test both.
@@ -243,11 +249,11 @@ too. The only way round the audit is a password the customer creates (an app pas
 - **Works for every Google account type:** personal (@gmail.com, @googlemail.com, Workspace
   Individual) and business (Google Workspace on their own domain), unless a Workspace admin has
   blocked outside apps.
-- **Scopes, shared with the Inbox Assistant** (`docs/inbox-assistant-plan.md` §3.1 and §6):
+- **Scopes, shared with the Email Assistant** (`docs/email-assistant-plan.md` §3.1 and §6):
   - `gmail.readonly` — Part B only (replies and bounces);
-  - `gmail.modify` — the Inbox Assistant (read, labels, archive, trash, drafts and send).
+  - `gmail.modify` — the Email Assistant (read, labels, archive, trash, drafts and send).
   Both go in **one** review, so one yearly audit covers both features. A customer who only wants
-  Part B grants `gmail.readonly`; turning on the Inbox Assistant later asks for `gmail.modify`
+  Part B grants `gmail.readonly`; turning on the Email Assistant later asks for `gmail.modify`
   (incremental consent). Not requested: `https://mail.google.com/` (permanent delete) and
   `gmail.settings.*`.
 - **Separate Google Cloud project for reading**, as a second, optional grant. The send app's
@@ -256,10 +262,10 @@ too. The only way round the audit is a password the customer creates (an app pas
 - **Steps, in order:**
   1. Create the reading project; consent screen with both scopes; test users only (Google caps
      unverified apps at 100 users and shows a warning screen), so we test with our own mailboxes.
-  2. Privacy page updated with the Limited Use statement (B2) and the Inbox Assistant's use,
+  2. Privacy page updated with the Limited Use statement (B2) and the Email Assistant's use,
      **before** submitting.
   3. Submit restricted-scope verification: what each scope is for, and a demo video with one
-     section per feature (outreach replies and bounces; Inbox Assistant).
+     section per feature (outreach replies and bounces; Email Assistant).
   4. **CASA Tier 2** security assessment through an approved lab. TAC Security, the lab Google
      points to, is reported at about **$540–720 a year** per app at Google's negotiated rate
      (other labs up to about $3,000). The lab runs a security scan of the app; fixing what it finds
@@ -267,14 +273,22 @@ too. The only way round the audit is a password the customer creates (an app pas
   5. Google issues approval (Letter of Assessment). **Renew every 12 months**: re-assessment and
      re-verification; calendar it from the approval date and put the yearly fee in Admin → System
      fixed costs.
-- **Timeline:** submit early, because the review sets the date. Part B's Gmail reading waits for
-  it (the Inbox Assistant plan's decision D2 covers whether Part B goes ahead alone first with
-  `gmail.readonly`, at the price of a second review later).
+- **Timeline (decided 2026-11-12, Email Assistant plan D2):** one submission for both features.
+  Part B's Gmail reading **waits for the shared review**, which is submitted once the Email
+  Assistant's Gmail flow can be demonstrated. Part B does not go ahead alone with `gmail.readonly`
+  (that would mean a second review and a re-scoped CASA later). Outlook reading (B4) is not held
+  back by this.
+- **CASA lab (decided, Email Assistant plan D12):** TAC Security at Google's rate if the quote holds;
+  get a second quote to compare. One yearly fee covers both features.
 - Watching: Gmail `history.list` from the last `historyId` every 10 minutes for mailboxes with live
-  conversations. Later, Gmail push (`users.watch` + Pub/Sub, renewed every 7 days). Shared reader
-  with the Inbox Assistant (`mail-reader/` in that plan).
+  conversations, then Gmail push (`users.watch` + Pub/Sub, renewed every 7 days). Same shared reader
+  and `mailboxes` row as Outlook (grant level `replies` = `gmail.readonly`, widened to
+  `gmail.modify` when the Email Assistant is turned on).
 
 ### B5.2 Fallback: IMAP with an app password (personal Gmail only, if customers ask)
+
+Part B only. The Email Assistant does **not** offer app passwords (its decision D7): it needs to
+write to the mailbox, and a stored full-mailbox password for that is not acceptable.
 
 An app password is a 16-character password the customer creates in their Google security settings
 and pastes into another app. With it we can read mail over IMAP (`imap.gmail.com:993`) with no
@@ -293,8 +307,9 @@ Google".
     Verification.
 - **If built:**
   - offered only for @gmail.com / @googlemail.com addresses, behind "Can't use Google sign-in?";
-  - the password is encrypted in the vault (same as OAuth tokens: one key per workspace + service,
-    see `meta-vault-key-collides-per-org`), never logged, never shown again;
+  - the password is encrypted in the vault under **one key per mailbox** (the `mailboxes` row's own
+    key, never one per workspace + service: that sharing is what `meta-vault-key-collides-per-org`
+    warns about), never logged, never shown again;
   - read-only use: we never send through it (outreach keeps `gmail.send`);
   - an IMAP login failure pauses reading and tells the user once ("Your Gmail app password stopped
     working — create a new one or switch to Google sign-in");
@@ -317,15 +332,19 @@ account (the domain's mail servers point to Google, or Google's `hd` claim if we
 
 ## B6. How the user turns it on — GUI and chat
 
-- The mailbox card (Connections, and the Outreach tab's "connect your inbox") gains a second
-  switch: **"See replies and bounces"**, explaining exactly what is read (B2) in one paragraph.
+- The **Mailboxes** card (Connections → Mailboxes, from the Email Assistant plan §3.3; the
+  Outreach tab's "connect your inbox" points to it) gains a switch per mailbox: **"See replies and
+  bounces"** (grant level `replies`), explaining exactly what is read (B2) in one paragraph. A
+  mailbox that already has the Email Assistant switched on has this at no extra consent.
 - Off for every existing workspace until they turn it on. Offered once, at the moment it would
   have helped: "A follow-up went to someone who had already replied — turn on reply reading so
   this can't happen again." (Only shown when we actually know that happened.)
 - Chat can explain it and hand over a "Turn on" button that opens the same consent step. Chat
   can't complete an OAuth sign-in itself.
-- Disconnecting the reading grant stops reading at once and deletes the stored history position.
-  Messages already recorded on leads stay, as SendGrid replies do today.
+- Disconnecting the reading grant stops reading at once and deletes the stored history position
+  (same disconnect path as the Email Assistant, §7.5 there). Messages already recorded on leads stay,
+  as SendGrid replies do today. Turning off only "See replies and bounces" on a mailbox that keeps
+  the Email Assistant stops the outreach consumer, not the reader.
 
 ## B7. Privacy and paperwork
 
@@ -335,6 +354,8 @@ account (the domain's mail servers point to Google, or Google's `hd` claim if we
   today, plus the new message fields).
 - `workspace-export.ts` includes the new message fields.
 - No new subprocessor: Google and Microsoft are already the customer's own providers.
+- One privacy-page section, Limited Use statement, DPIA and DPA wording for both features
+  (Email Assistant plan §7).
 
 ## B8. Tests
 
@@ -352,26 +373,35 @@ account (the domain's mail servers point to Google, or Google's `hd` claim if we
 1. **Groundwork** (B3): store message ids, add the reference header, new halt reasons. No new
    permission. Can ship with Part A Phase 1.
 2. **Outlook reading** (B4) after the publisher check.
-3. **Gmail reading** (B5.1): start the Google review and the CASA booking early, because they set
-   the timeline; build alongside, on the reader shared with the Inbox Assistant.
-5. **App-password fallback** (B5.2) — only if personal-Gmail customers ask.
+   Builds on the Email Assistant's Phase 1 (`mailboxes` table, `mail-reader/` Graph adapter); can
+   follow it straight away.
+3. **Gmail reading** (B5.1): after the shared Google review approves (Email Assistant plan Phase 3).
+   Built against test users meanwhile, on the shared reader.
 4. **Out-of-office, "left the company", bounce rate on Results** (B1 points 3–5).
+5. **App-password fallback** (B5.2) — only if personal-Gmail customers ask.
 
 ## Decisions for the owner (Part B)
 
 1. **Gmail route** — ✅ owner 2026-11-12: Google sign-in + review + yearly CASA (B5.1), one review
-   shared with the Inbox Assistant. App passwords (B5.2) as a personal-Gmail fallback only, built
+   shared with the Email Assistant. App passwords (B5.2) as a personal-Gmail fallback only, built
    only if customers ask.
-2. **Separate Google project for reading** — recommended (protects the approved send app). Open.
-3. **Off by default, offered when it would have helped** — recommended. Open.
-4. **Ship Part B's Gmail reading alone first, or wait for the shared review** — see
-   `docs/inbox-assistant-plan.md` decision D2. Open.
+2. **Separate Google project for reading** — ✅ settled 2026-11-12 by the Email Assistant
+   decisions: the shared review (D2) is in the separate "Be More Swan Mail" project; the approved
+   send app is never touched.
+3. **Off by default, offered when it would have helped** — ✅ owner 2026-11-12: off for every
+   workspace until the user turns it on; offered once, only when we know a follow-up went to someone
+   who had already replied (B6).
+4. **Ship Part B's Gmail reading alone first, or wait for the shared review** — ✅ owner
+   2026-11-12 (Email Assistant plan D2): wait for the shared review. Outlook reading isn't held back.
 
 ## Release checklist
 
 - `HUNTER_API_KEY` already set on both sites (same key).
 - 30-day count of first emails done (A6) before Part A Phase 2 goes live.
 - Help article SQL on both DBs at release (Part A, and again for Part B).
-- Part B: Azure `Mail.Read` added to the app registration; the new Google project's consent screen
-  and verification approved; privacy page updated **before** the Gmail review is submitted.
+- Part B: Azure `Mail.Read` (and the Email Assistant's `Mail.ReadWrite` + `Mail.Send`) added to the
+  app registration; the shared "Be More Swan Mail" Google project's consent screen and verification
+  approved (one review, both features); privacy page updated **before** the Gmail review is
+  submitted. Shared items (`db/z-mailboxes.sql`, env vars, Pub/Sub) are in the Email Assistant plan's
+  release checklist.
 - Do not mention reading on public pages or `/connections` until it is live on prod.
