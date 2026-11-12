@@ -268,10 +268,16 @@ export const REMOTION_USAGE_MODEL = 'remotion-lambda';
 export const WHISPER_USD_PER_MINUTE = 0.006;
 export const SPEECH_USD_PER_MINUTE = 0.015;
 
-/** Whisper cost for `durationS` seconds of audio, billed to the second with a 1 s floor. Pure. */
-export function transcriptionCostUsd(durationS: number | null | undefined): string {
+/** ElevenLabs Scribe, $0.20 an hour (elevenlabs.io/pricing/api, 2026-11-12) — the usual transcriber since then. */
+export const SCRIBE_USD_PER_MINUTE = 0.2 / 60;
+
+/** Who transcribed: ElevenLabs Scribe or OpenAI whisper-1 (src/lib/tts.ts Transcript.provider). */
+export type Transcriber = 'elevenlabs' | 'openai';
+
+/** Transcription cost for `durationS` seconds of audio, billed to the second with a 1 s floor. Pure. */
+export function transcriptionCostUsd(durationS: number | null | undefined, by: Transcriber = 'openai'): string {
     const s = Number.isFinite(durationS as number) && (durationS as number) > 0 ? (durationS as number) : 1;
-    return ((s / 60) * WHISPER_USD_PER_MINUTE).toFixed(6);
+    return ((s / 60) * (by === 'elevenlabs' ? SCRIBE_USD_PER_MINUTE : WHISPER_USD_PER_MINUTE)).toFixed(6);
 }
 
 /** Speech cost estimated from the text: 150 spoken words a minute. Pure. */
@@ -287,6 +293,6 @@ export function logRenderCost(costUsd: number | null | undefined, ctx: Omit<AiUs
 }
 
 /** Record one whisper transcription. Never throws; AWAIT it. */
-export function logTranscriptionCost(durationS: number | null | undefined, ctx: Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens' | 'costUsdOverride'> = {}): Promise<void> {
-    return logAiUsage({ ...ctx, model: 'whisper-1', inputTokens: 0, outputTokens: 0, costUsdOverride: transcriptionCostUsd(durationS) });
+export function logTranscriptionCost(durationS: number | null | undefined, ctx: Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens' | 'costUsdOverride'> = {}, by: Transcriber = 'openai'): Promise<void> {
+    return logAiUsage({ ...ctx, model: by === 'elevenlabs' ? 'eleven_scribe' : 'whisper-1', inputTokens: 0, outputTokens: 0, costUsdOverride: transcriptionCostUsd(durationS, by) });
 }

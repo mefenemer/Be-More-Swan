@@ -1,9 +1,11 @@
 // netlify/functions/tour-narration.ts — Issue #161: real neural voice for the guided tour.
 //
 // The tour previously relied solely on the browser's free SpeechSynthesis API, which sounds
-// robotic on most systems no matter how pitch/rate are tuned. This endpoint synthesizes the
-// step's narration with OpenAI's TTS API (a genuinely human, expressive voice) and returns it
-// as base64 audio for tour.js to play.
+// robotic on most systems no matter how pitch/rate are tuned. This endpoint speaks the step's
+// narration with the ElevenLabs Pepper voice (the voiceover default) and returns it as base64 audio
+// for tour.js to play. It was OpenAI gpt-4o-mini-tts ("shimmer") until 2026-11-12: that model shuts
+// down on 6 Jan 2027 (docs/openai-audio-retirement-plan.md). The new voice is part of the cache key,
+// so each step is spoken once more in Pepper and cached again.
 //
 // TOUR_STEPS copy is static platform content, not user data, so each distinct (text, voice) pair
 // is generated once and cached forever in tour_narration_cache — after the first user hears a
@@ -13,7 +15,7 @@
 // narration is identical for every tenant, so no tenant-scoping is needed beyond "logged in".
 //
 // POST { text }  →  { audio: base64 string, mimeType }
-// No OPENAI_API_KEY configured, or the OpenAI call fails → 503, and tour.js falls back to the
+// No ELEVENLABS_API_KEY configured, or the ElevenLabs call fails → 503, and tour.js falls back to the
 // browser's built-in SpeechSynthesis voice.
 
 import { HandlerEvent } from '@netlify/functions';
@@ -24,12 +26,11 @@ import { tourNarrationCache } from '../../db/schema';
 import { requireSession } from '../../src/utils/session';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { logAiUsage, speechCostFromTextUsd } from '../../src/utils/ai-usage';
+import { logAiUsage } from '../../src/utils/ai-usage';
+import { DEFAULT_VOICE, ELEVENLABS_MODEL, elevenLabsVoice, elevenLabsSpeechCostUsd, synthesizeElevenLabs } from '../../src/lib/tts';
 
-// "shimmer" reads as warm and animated rather than flat — the closest built-in match to the
-// "more human and excited" quality the user asked for.
-const VOICE = 'shimmer';
-const MODEL = 'gpt-4o-mini-tts';
+// Pepper, the British woman the owner picked by ear for voiceovers (2026-11-02).
+const VOICE = DEFAULT_VOICE;
 const MAX_TEXT_LEN = 2000;
 
 export default withLambda(async (event: HandlerEvent) => {
@@ -42,8 +43,8 @@ export default withLambda(async (event: HandlerEvent) => {
         return { statusCode: 503, body: JSON.stringify({ error: 'AI services are temporarily unavailable.' }) };
     }
 
-    const openaiKey = process.env.OPENAI_API_KEY;
-    if (!openaiKey) {
+    const elevenVoice = elevenLabsVoice(VOICE);
+    if (!process.env.ELEVENLABS_API_KEY || !elevenVoice) {
         return { statusCode: 503, body: JSON.stringify({ error: 'Voice narration is not configured.' }) };
     }
 
@@ -67,29 +68,9 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     try {
-        const res = await fetch('https://api.openai.com/v1/audio/speech', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${openaiKey}`,
-            },
-            body: JSON.stringify({
-                model: MODEL,
-                voice: VOICE,
-                input: text,
-                instructions: 'Speak warmly, upbeat and genuinely excited, like a friendly guide showing off something they love — natural conversational pace, not a monotone.',
-                response_format: 'mp3',
-            }),
-        });
-
-        if (!res.ok) {
-            console.error('[tour-narration] OpenAI TTS error:', res.status, await res.text());
-            return { statusCode: 503, body: JSON.stringify({ error: 'Voice narration is temporarily unavailable.' }) };
-        }
-
-        const audioBuffer = Buffer.from(await res.arrayBuffer());
+        const audioBuffer = await synthesizeElevenLabs(text, elevenVoice);
         // A cache miss is the only time this costs anything; every later run serves the stored clip.
-        await logAiUsage({ model: MODEL, inputTokens: 0, outputTokens: 0, costUsdOverride: speechCostFromTextUsd(text), sessionId: 'tour-narration' });
+        await logAiUsage({ model: ELEVENLABS_MODEL, inputTokens: 0, outputTokens: 0, costUsdOverride: elevenLabsSpeechCostUsd(text.length), sessionId: 'tour-narration' });
         const audioBase64 = audioBuffer.toString('base64');
         const mimeType = 'audio/mpeg';
 

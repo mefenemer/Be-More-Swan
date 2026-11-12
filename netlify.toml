@@ -355,6 +355,14 @@
   to = "/.netlify/functions/oauth-integrations"
   status = 200
 
+# The Email Assistant's mailbox connect (docs/email-assistant-plan.md §3). Separate from /api/oauth/*
+# because a mailbox is one person's, not the workspace's. ⚠️ The callback URL
+# <site>/api/mailbox-oauth/outlook/callback must be on the Azure app's redirect URI list.
+[[redirects]]
+  from = "/api/mailbox-oauth/*"
+  to = "/.netlify/functions/mailbox-oauth"
+  status = 200
+
 [[redirects]]
   from = "/api/actions/sync"
   to = "/.netlify/functions/sync-action"

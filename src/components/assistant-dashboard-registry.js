@@ -1326,6 +1326,60 @@
         importColumns: ['meeting title', 'date', 'summary', 'action items'],
       },
     },
+
+    // Email Assistant (docs/email-assistant-plan.md §5.1). Phase 1: Outlook, read-only — it sorts,
+    // prioritises and sums up the owner's email; nothing is written to the mailbox. Its workspace tab is
+    // the sorted email list (hubTab kind 'mailbox', src/components/assistant-mailbox.js), not
+    // assistant_records. ⚠️ Only the mailbox's owner sees its email, so the tab reads
+    // netlify/functions/mailboxes.ts for the signed-in person, never the workspace.
+    email_assistant: {
+      // Results cards from mailboxes.ts `stats` (assistants.js _loadMailboxMetrics), the owner's own mailboxes only.
+      metricsSource: 'mailbox',
+      kpis: [
+        {
+          label: 'Needs You',
+          title: 'Emails Waiting for You',
+          desc: 'Emails sorted as Now or Today — a person is waiting, or it is time-critical.',
+        },
+        {
+          label: 'Sorted',
+          title: 'Emails Sorted',
+          desc: 'New emails put into a category with a one-line summary.',
+        },
+        {
+          label: 'Without AI',
+          title: 'Sorted by Your Rules',
+          desc: 'Emails sorted by a sender you sorted before, or recognised as a newsletter or notification — no AI needed.',
+        },
+        {
+          label: 'Private',
+          title: 'Private Senders',
+          desc: 'Senders whose email is never sent to AI, not even the subject.',
+        },
+      ],
+      modules: {
+        hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
+      },
+      primaryAction: { label: 'What needs me today?', kind: 'chat' },
+      tabChat: { tabs: ['datahub'], placeholder: 'Ask about your email — "what needs me today?", "anything from Jo?"' },
+      // Phase 2 fills this with drafted replies and clean-up batches waiting for approval.
+      reviewQueue: {
+        kind: 'records',
+        recordType: 'email_action',
+        subtitle: 'Drafted replies and clean-ups waiting for your approval. Coming next: for now your Email Assistant sorts and sums up your email, and changes nothing in your mailbox.',
+      },
+      hubTab: {
+        id: 'datahub',
+        kind: 'mailbox',
+        label: 'Emails',
+        // No recordType: this tab reads netlify/functions/mailboxes.ts, never assistant-records.
+        description: 'Your email, sorted: what needs you first, everything else put away. Only you can see it.',
+        columns: [],
+      },
+    },
   };
 
   /**

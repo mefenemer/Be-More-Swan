@@ -670,6 +670,61 @@ export const workspaceIntegrations = pgTable("workspace_integrations", {
   index("workspace_integrations_org_idx").on(t.organisationId),
 ]);
 
+// The Email Assistant's mailboxes (db/z-mailboxes.sql, docs/email-assistant-plan.md §3.3). One row per
+// PERSON's mailbox, not per workspace: only `userId` ever sees it. Its token lives in the vault under
+// its own `vaultRefKey`. Disconnecting deletes the row and, by cascade, every mailboxMessages row.
+export const mailboxes = pgTable("mailboxes", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),                       // 'outlook' | 'gmail'
+  address: text("address").notNull(),
+  displayName: text("display_name"),
+  kind: text("kind").notNull().default("business"),          // 'business' | 'personal'
+  grantLevel: text("grant_level").notNull().default("inbox"), // 'replies' | 'inbox'
+  vaultRefKey: text("vault_ref_key").notNull().unique(),
+  scopes: text("scopes"),
+  status: text("status").notNull().default("active"),        // 'active' | 'needs_reconnect' | 'admin_blocked' | 'disconnected'
+  syncCursor: text("sync_cursor"),
+  lastSyncAt: timestamp("last_sync_at"),
+  lastError: text("last_error"),
+  syncLockUntil: timestamp("sync_lock_until"),
+  settings: jsonb("settings").notNull().default({}),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("mailboxes_owner_address_unique").on(t.organisationId, t.userId, t.provider, sql`lower(${t.address})`),
+  index("mailboxes_org_user_idx").on(t.organisationId, t.userId),
+  index("mailboxes_status_idx").on(t.status),
+]);
+
+// What the Email Assistant knows about each email: headers and what it derived. ⚠️ NO BODY and no
+// attachments, ever — the body is fetched from the mailbox when the user opens the email.
+export const mailboxMessages = pgTable("mailbox_messages", {
+  id: serial().primaryKey(),
+  mailboxId: integer("mailbox_id").notNull().references(() => mailboxes.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  providerMessageId: text("provider_message_id").notNull(),
+  threadId: text("thread_id"),
+  fromName: text("from_name"),
+  fromAddress: text("from_address"),
+  subject: text("subject"),
+  receivedAt: timestamp("received_at"),
+  isRead: boolean("is_read").notNull().default(false),
+  webLink: text("web_link"),
+  category: text("category"),
+  priority: text("priority"),                                 // 'now' | 'today' | 'week' | 'whenever'
+  summary: text("summary"),
+  reason: text("reason"),
+  sortedBy: text("sorted_by").notNull().default("pending"),   // 'pending' | 'headers' | 'sender_rule' | 'ai' | 'user' | 'private'
+  removedAt: timestamp("removed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  unique("mailbox_messages_mailbox_id_provider_message_id_key").on(t.mailboxId, t.providerMessageId),
+  index("mailbox_messages_mailbox_received_idx").on(t.mailboxId, t.receivedAt),
+]);
+
 // Manually-entered, date-stamped follower counts. LinkedIn's member API does not expose a
 // personal-profile follower count, so the user types it in periodically; each entry is a new dated
 // row (history preserved), the latest is the current count. See save-follower-count.ts /

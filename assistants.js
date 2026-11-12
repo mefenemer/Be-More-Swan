@@ -1217,6 +1217,7 @@ window._activateMainTab = function(name) {
             window.AssistantDataHub?.focusRecord(focusPostId);
         }
         window.AssistantDataHub?.refresh();
+        window.AssistantMailbox?.refresh?.();
     }
     // Render the per-assistant Calendar on first open (component scopes calendar.js to this assistant).
     if (name === 'calendar') window.AssistantCalendar?.show();
@@ -7500,7 +7501,9 @@ function _applyDashboardRegistry(data) {
     toggle('maintab-btn-datahub', showDataHub);
     if (hub && showDataHub) {
         setText('datahub-tab-label', hub.label);
-        window.AssistantDataHub?.init({ hub, assistantId: data.id, assistantName: data.name });
+        // The Email Assistant's tab is the owner's sorted email, not assistant_records (assistant-mailbox.js).
+        if (hub.kind === 'mailbox') window.AssistantMailbox?.init({ hub, assistantId: data.id, assistantName: data.name });
+        else window.AssistantDataHub?.init({ hub, assistantId: data.id, assistantName: data.name });
     }
 
     // Calendar tab — a CORE tab on every assistant, scoped to just this assistant. Registered
@@ -11845,6 +11848,36 @@ async function _loadVideoMetrics(assistantId) {
     }
 }
 
+// ── Email Assistant KPI cards ────────────────────────────────────────────────
+// Routed here by `metricsSource: 'mailbox'`. Counts from mailboxes.ts `stats`, across the signed-in
+// person's OWN mailboxes (a mailbox is one person's — docs/email-assistant-plan.md §7.3). All time.
+async function _loadMailboxMetrics() {
+    const valEl   = (k) => document.getElementById(`metric-${k}-value`);
+    const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
+    const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
+    document.getElementById('metric-value-wins')?.classList.add('hidden');
+    try {
+        const res = await fetch('/.netlify/functions/mailboxes', { credentials: 'same-origin' });
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
+        const data = await res.json();
+        if (!data.available || !(data.mailboxes || []).length || !data.stats) { _setMetricsEmptyState('records-no-data'); return; }
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = 'All time · your own mailboxes';
+        const s = data.stats;
+        [['engagement', s.needsYou], ['reach', s.sorted], ['ctr', s.sortedWithoutAi], ['value', s.privateSenders]].forEach(([card, raw], i) => {
+            if (!valEl(card)) return;
+            const n = Number(raw ?? 0);
+            valEl(card).textContent = String(n);
+            _setKpiCard(card, { empty: !n });
+            if (trendEl(card)) trendEl(card).textContent = '—';
+            if (i === 0 && dotEl(card)) dotEl(card).className = 'w-2 h-2 rounded-full ' + (n ? 'bg-amber-400' : 'bg-gray-200');
+        });
+    } catch {
+        _setMetricsEmptyState('error');
+    }
+}
+
 // ── Website Assistant KPI cards ──────────────────────────────────────────────
 // Routed here by `metricsSource: 'site'`. From sites.ts `get`: pages built against the plan's cap,
 // the [placeholders] still to fill, sections, and whether the site is live (publishing is step 3).
@@ -12112,6 +12145,10 @@ async function _loadAssistantMetrics(assistantId, roleKey) {
     if (source === 'video') {
         _setMetricsEmptyState('pending');
         return _loadVideoMetrics(assistantId);
+    }
+    if (source === 'mailbox') {
+        _setMetricsEmptyState('pending');
+        return _loadMailboxMetrics();
     }
     if (source === 'site') {
         _setMetricsEmptyState('pending');

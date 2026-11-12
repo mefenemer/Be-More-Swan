@@ -33,7 +33,7 @@ const registryKeys = new Set([
 check('every priced model maps to a system', () => {
     const models = [
         ...Object.keys(LIST_PRICE_PER_1K), ...Object.keys(MEDIA_LIST_PRICE_USD), ...Object.keys(SERVICE_UNIT_PRICE_USD),
-        REMOTION_USAGE_MODEL, 'whisper-1', 'gpt-4o-mini-tts', 'eleven_multilingual_v2', 'omni-moderation-latest',
+        REMOTION_USAGE_MODEL, 'whisper-1', 'gpt-4o-mini-tts', 'eleven_multilingual_v2', 'eleven_scribe', 'scribe_v3', 'text-embedding-3-small', 'omni-moderation-latest',
     ];
     const orphans = models.filter((m) => !systemForUsageModel(m));
     assert.deepStrictEqual(orphans, [], `no system for: ${orphans.join(', ')} — add a rule in src/utils/system-map.ts`);
@@ -69,6 +69,7 @@ check('Remotion cost: USD only, finite, not negative', () => {
 check('whisper and speech prices', () => {
     assert.strictEqual(transcriptionCostUsd(60), '0.006000');
     assert.strictEqual(transcriptionCostUsd(null), '0.000100');      // 1 s floor
+    assert.strictEqual(transcriptionCostUsd(60, 'elevenlabs'), '0.003333');   // Scribe, $0.20 an hour
     assert.strictEqual(speechCostFromTextUsd(Array(150).fill('word').join(' ')), '0.015000');
 });
 
@@ -85,7 +86,10 @@ check('both render paths log the render cost, before the retry', () => {
 check('whisper callers and tour narration log their cost', () => {
     assert.ok(read('src/utils/own-voice.ts').includes('logTranscriptionCost('));
     assert.ok(read('src/utils/footage-review.ts').includes('logTranscriptionCost('));
-    assert.ok(read('netlify/functions/tour-narration.ts').includes('speechCostFromTextUsd(text)'));
+    assert.ok(read('netlify/functions/tour-narration.ts').includes('elevenLabsSpeechCostUsd(text.length)'));
+    // Charged to whoever transcribed: Scribe or whisper.
+    assert.ok(read('src/utils/own-voice.ts').includes("sessionId: 'own-voice' }, heard.provider)"));
+    assert.ok(read('src/utils/footage-review.ts').includes("sessionId: 'footage-review' }, heard.provider)"));
 });
 
 check('fixed bill: pro-rated by day and clipped to when it ran', () => {

@@ -54,6 +54,9 @@
     meeting_note_taker: {
       working: 'I’m ready to turn your meetings into clean, shareable notes and action items',
     },
+    email_assistant: {
+      working: 'I’m ready to sort your inbox so you can see what needs you first',
+    },
     tier1_support_agent: {
       working: 'I’m ready to help you answer customer questions calmly and consistently',
     },

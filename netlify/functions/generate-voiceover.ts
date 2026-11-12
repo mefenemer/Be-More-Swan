@@ -37,7 +37,7 @@ import { holdCredits, settleHold, VOICEOVER_CREDIT_COST } from '../../src/utils/
 import { r2IsConfigured } from '../../src/lib/media-persist';
 import { makeVoiceoverAsset } from '../../src/utils/voiceover-asset';
 import {
-    OFFERED_VOICES, VOICE_LANGUAGES, DEFAULT_VOICE, VOICEOVER_MAX_CHARS, TTS_MODEL, isVoiceId, cleanScript, TtsError,
+    OFFERED_VOICES, VOICE_LANGUAGES, DEFAULT_VOICE, VOICEOVER_MAX_CHARS, TTS_MODEL, isVoiceId, voiceConfigured, cleanScript, TtsError,
 } from '../../src/lib/tts';
 import { checkPostForVoiceover, attachVoiceover, setPostCaptions, timePostTextToVoice } from '../../src/utils/post-voiceover';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -82,7 +82,8 @@ export default withLambda(async (event) => {
     }
     if (body.action != null) return json(400, { error: 'Unknown action.' });
 
-    if (!process.env.OPENAI_API_KEY || !r2IsConfigured()) {
+    // Either speaker's key switches voiceovers on; a voice whose own provider has no key fails and is refunded.
+    if (!(process.env.ELEVENLABS_API_KEY || process.env.OPENAI_API_KEY) || !r2IsConfigured()) {
         return json(503, { error: 'not_configured', message: 'Voiceovers are not switched on yet.' });
     }
     if (await isGlobalAiDisabled()) return json(503, { error: 'AI services are temporarily unavailable.' });
@@ -93,6 +94,8 @@ export default withLambda(async (event) => {
         return json(400, { error: `Keep it under ${VOICEOVER_MAX_CHARS} characters — about 80 seconds of speech.` });
     }
     const voice = isVoiceId(body.voice) ? body.voice : DEFAULT_VOICE;
+    // No fallback voice (2026-11-12): refuse before holding a credit when this voice's own speaker has no key.
+    if (!voiceConfigured(voice)) return json(503, { error: 'not_configured', message: 'That voice is not available right now. Please pick another.' });
 
     if (!await orgHasAssistantFeature(db, orgId, 'ai_music_generation')) {
         return featureUnavailableResponse('None of your assistants can add sound to posts.');

@@ -124,6 +124,13 @@
       { title: 'The Messy Escalation', text: 'When a query does need a human, it gets handed over with no context, so my team has to re-read the whole thread before they can help.' },
     ],
 
+    email_assistant: [
+      { title: 'The Buried Customer', text: 'An important email from a customer gets lost under newsletters and notifications, and I only find it days later.' },
+      { title: 'The Inbox Dread', text: 'I put off opening my inbox because there is so much in it, so I never feel on top of things.' },
+      { title: 'The Forgotten Reply', text: 'I read an email, mean to answer it later, and then forget it completely.' },
+      { title: 'The Morning Scramble', text: 'Every morning I spend half an hour working out which emails actually need me today.' },
+    ],
+
     meeting_note_taker: [
       { title: 'The Lost Action Items', text: 'Great decisions get made in meetings, but nobody writes down who owns what, so half the action items are forgotten by the next day.' },
       { title: 'The Note-Taking Distraction', text: 'I’m so busy scribbling notes that I can’t actually focus on the conversation or contribute properly.' },

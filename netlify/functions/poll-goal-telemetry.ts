@@ -21,7 +21,7 @@ import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
     scheduledPosts, plans, masterPlans, assistantRecords, blogPosts,
-    audienceContacts, newsletterIssues, siteAudits, sites, visualBriefOptions, visualBriefs, manualFollowerCounts, mentorProposals, videoProjects } from '../../db/schema';
+    audienceContacts, newsletterIssues, siteAudits, sites, visualBriefOptions, visualBriefs, manualFollowerCounts, mentorProposals, videoProjects, mailboxes, mailboxMessages } from '../../db/schema';
 import { normaliseSiteDefinition } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { createNotification } from '../../src/utils/notify';
@@ -530,6 +530,21 @@ async function fetchMetric(
             return countRecords(db, goal, 'meeting');
         case 'invoices_chased':
             return countRecords(db, goal, 'invoice');
+        // Email Assistant: emails sorted, across the workspace's BUSINESS mailboxes only — a personal
+        // mailbox is one person's (docs/email-assistant-plan.md §7.3). A count, never any email.
+        case 'emails_sorted':
+            return countOrUnmeasured(async () => {
+                const [row] = await db
+                    .select({ v: sql<number>`count(*)::int` })
+                    .from(mailboxMessages)
+                    .innerJoin(mailboxes, eq(mailboxes.id, mailboxMessages.mailboxId))
+                    .where(and(
+                        eq(mailboxMessages.organisationId, goal.organisationId),
+                        eq(mailboxes.kind, 'business'),
+                        sql`${mailboxMessages.sortedBy} <> 'pending'`,
+                    ));
+                return Number(row?.v ?? 0);
+            });
         case 'tickets_resolved':
             return countRecords(db, goal, 'ticket', sql`status ILIKE '%resolv%'`);
         // Campaign Assistant. Loose ILIKE for the same reason as tickets above — `status` here

@@ -186,7 +186,14 @@ export async function probeAnthropic(
     }
 }
 
-export const OPENAI_SPEECH_URL = 'https://api.openai.com/v1/audio/speech';
+/**
+ * The OpenAI probe: one embedding of "." with text-embedding-3-small (a fraction of a cent). It used
+ * to be a gpt-4o-mini-tts request, but that model shuts down on 6 Jan 2027. An embedding is billed,
+ * so an empty account still answers 429 insufficient_quota (a free GET /v1/models would not), and
+ * the model is on no retirement list (developers.openai.com/api/docs/deprecations, 2026-11-12).
+ */
+export const OPENAI_PROBE_URL = 'https://api.openai.com/v1/embeddings';
+export const OPENAI_PROBE_MODEL = 'text-embedding-3-small';
 
 export type OpenAiProbe =
     | { status: 'ok' }
@@ -207,10 +214,10 @@ export async function probeOpenAi(fetchImpl: typeof fetch = fetch): Promise<Open
     const key = process.env.OPENAI_API_KEY;
     if (!key) return { status: 'not_configured' };
     try {
-        const res = await fetchImpl(OPENAI_SPEECH_URL, {
+        const res = await fetchImpl(OPENAI_PROBE_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-            body: JSON.stringify({ model: 'gpt-4o-mini-tts', voice: 'alloy', input: '.', response_format: 'mp3' }),
+            body: JSON.stringify({ model: OPENAI_PROBE_MODEL, input: '.' }),
             signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
         });
         if (res.ok) { await res.arrayBuffer().catch(() => null); return { status: 'ok' }; }

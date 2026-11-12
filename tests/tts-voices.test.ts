@@ -10,7 +10,7 @@ import assert from 'node:assert';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { VOICES, OFFERED_VOICES, VOICE_LANGUAGES, DEFAULT_VOICE, isVoiceId, voiceRequest, VOICEOVER_INSTRUCTIONS, synthesizeSpeech, speakVoiceover, elevenLabsVoice, voiceoverCostUsd, transcribeAudio, parseWords, spokenDuration, scribeKeyterms, TRANSCRIBE_USD_PER_MINUTE } from '../src/lib/tts';
+import { VOICES, OFFERED_VOICES, VOICE_LANGUAGES, DEFAULT_VOICE, isVoiceId, voiceRequest, VOICEOVER_INSTRUCTIONS, synthesizeSpeech, speakVoiceover, elevenLabsVoice, voiceoverCostUsd, transcribeAudio, parseWords, spokenDuration, scribeKeyterms, TRANSCRIBE_USD_PER_MINUTE, voiceConfigured, elevenLabsSpeechCostUsd } from '../src/lib/tts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -45,7 +45,7 @@ await check('the request body sends the OpenAI voice and the accent', async () =
     assert.match(body.instructions, /London accent/);
 });
 
-// ElevenLabs speaks the British woman (picked by ear 2026-11-02); OpenAI is only her fallback.
+// ElevenLabs speaks the British woman (picked by ear 2026-11-02); no fallback voice since 2026-11-12.
 async function withKeys<T>(keys: Record<string, string | undefined>, fn: () => Promise<T>): Promise<T> {
     const was: Record<string, string | undefined> = {};
     for (const k of Object.keys(keys)) { was[k] = process.env[k]; if (keys[k] === undefined) delete process.env[k]; else process.env[k] = keys[k]; }
@@ -88,18 +88,42 @@ await check('ElevenLabs speaks the British woman when its key is set', async () 
     assert.match(urls[0], /api\.elevenlabs\.io\/v1\/text-to-speech\/6vIP9mPY4dr6w8krUg01/);
 });
 
-await check('an ElevenLabs failure or missing key falls back to OpenAI coral with the accent', async () => {
-    const bodies: any[] = [];
-    const failing = (async (u: any, init: any) => {
+await check('no fallback voice: an ElevenLabs voice that fails or has no key throws, never OpenAI', async () => {
+    const urls: string[] = [];
+    const failing = (async (u: any) => {
+        urls.push(String(u));
         if (String(u).includes('elevenlabs')) return new Response('{"detail":{"status":"quota_exceeded"}}', { status: 401 });
-        bodies.push(JSON.parse(init.body)); return new Response(new Uint8Array([1]));
+        return new Response(new Uint8Array([1]));
     }) as typeof fetch;
-    const failed = await withKeys({ ELEVENLABS_API_KEY: 'el', OPENAI_API_KEY: 'oa' }, () => speakVoiceover('Hello', 'british_woman', failing));
-    const unset = await withKeys({ ELEVENLABS_API_KEY: undefined, OPENAI_API_KEY: 'oa' }, () => speakVoiceover('Hello', 'british_woman', failing));
-    assert.deepStrictEqual([failed.provider, unset.provider], ['openai', 'openai']);
-    assert.strictEqual(bodies.length, 2);
-    assert.strictEqual(bodies[0].voice, 'coral');
-    assert.match(bodies[0].instructions, /British English accent/);
+    await assert.rejects(() => withKeys({ ELEVENLABS_API_KEY: 'el', OPENAI_API_KEY: 'oa' }, () => speakVoiceover('Hello', 'british_woman', failing)),
+        (e: Error & { kind?: string }) => e.kind === 'key');
+    await assert.rejects(() => withKeys({ ELEVENLABS_API_KEY: undefined, OPENAI_API_KEY: 'oa' }, () => speakVoiceover('Hello', 'british_woman', failing)),
+        (e: Error & { kind?: string }) => e.kind === 'not_configured');
+    assert.ok(urls.every((u) => !u.includes('api.openai.com')), 'an ElevenLabs voice must never be read by OpenAI');
+    assert.ok(!read('src/lib/tts.ts').includes('speaking with OpenAI instead'));
+});
+
+await check('a voice counts as available only when its own speaker has a key; the endpoint refuses before holding a credit', async () => {
+    await withKeys({ ELEVENLABS_API_KEY: undefined, OPENAI_API_KEY: 'oa' }, async () => {
+        assert.strictEqual(voiceConfigured('british_woman'), false);
+        assert.strictEqual(voiceConfigured('london_man'), true);
+    });
+    await withKeys({ ELEVENLABS_API_KEY: 'el', OPENAI_API_KEY: undefined }, async () => {
+        assert.strictEqual(voiceConfigured('british_woman'), true);
+        assert.strictEqual(voiceConfigured('london_man'), false);
+    });
+    const fn = read('netlify/functions/generate-voiceover.ts');
+    const refuse = fn.indexOf('if (!voiceConfigured(voice))');
+    assert.ok(refuse > 0 && refuse < fn.indexOf('holdCredits(db'), 'refuse before the credit is held');
+});
+
+await check('tour narration speaks Pepper through ElevenLabs, never OpenAI, and logs the ElevenLabs cost', () => {
+    const fn = read('netlify/functions/tour-narration.ts');
+    assert.ok(fn.includes('const VOICE = DEFAULT_VOICE') && fn.includes('synthesizeElevenLabs(text, elevenVoice)'));
+    assert.ok(fn.includes('elevenLabsSpeechCostUsd(text.length)'));
+    const code = fn.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    assert.ok(!code.includes('api.openai.com') && !code.includes('OPENAI_API_KEY') && !code.includes('gpt-4o-mini-tts'));
+    assert.strictEqual(elevenLabsSpeechCostUsd(1000), '0.150000');
 });
 
 await check('OpenAI voices never call ElevenLabs, and ElevenLabs is costed per character', async () => {

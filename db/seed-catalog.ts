@@ -342,6 +342,18 @@ const CATALOG = [
         isActive: true,
     },
     {
+        // docs/email-assistant-plan.md — Phase 1 built 2026-11-12 (Outlook, read-only), behind the
+        // email_assistant flag. Same row as db/z-mailboxes.sql: HIDDEN until launch (a Coming-soon card is public).
+        roleKey: 'email_assistant',
+        name: 'Email Assistant',
+        description: 'Looks after your mailbox: sorts every new email into a category, says what needs you today, and sums each one up in a line. Works with Outlook; Gmail is coming soon. Nothing is sent or deleted unless you approve it.',
+        category: 'Administration',
+        iconKey: 'document',
+        iconColor: 'blue',
+        comingSoon: false,
+        isActive: false,
+    },
+    {
         roleKey: 'status_report_generator',
         name: 'Project Reporting Assistant',
         description: 'Pulls data from Jira, Asana, or Monday.com to create weekly executive summaries on project health — leadership always in the loop.',

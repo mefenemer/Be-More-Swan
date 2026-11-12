@@ -14,7 +14,7 @@ const RULES: Array<{ system: string; test: (model: string) => boolean }> = [
     { system: 'fal', test: (m) => m.startsWith('fal-ai/') },
     { system: 'stability', test: (m) => m.startsWith('stable-audio') },
     { system: 'embeddings', test: (m) => m.startsWith('voyage-') },
-    { system: 'elevenlabs', test: (m) => m.startsWith('eleven_') },
+    { system: 'elevenlabs', test: (m) => m.startsWith('eleven_') || m.startsWith('scribe_') },
     { system: 'openai', test: (m) => /^(gpt-|whisper-|omni-moderation|text-moderation|text-embedding-|tts-|o\d)/.test(m) },
     { system: 'gemini', test: (m) => m.startsWith('gemini-') },
     { system: 'serper', test: (m) => m.startsWith('serper-') },
