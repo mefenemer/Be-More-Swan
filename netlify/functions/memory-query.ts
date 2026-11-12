@@ -308,7 +308,7 @@ ${statsBlock}`;
         messages: [{ role: 'user', content: user }],
     }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-    void logAiUsage({
+    await logAiUsage({
         workspaceId: organisationId,
         userId,
         assistantId,

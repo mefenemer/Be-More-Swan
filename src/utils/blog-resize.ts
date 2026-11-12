@@ -147,7 +147,7 @@ export async function resizeBlogBody(
     });
 
     const raw = stripCodeFences(((response.content[0] as { text?: string })?.text ?? '').trim()).trim();
-    void logAiUsage({
+    await logAiUsage({
         userId: opts.userId, workspaceId: opts.organisationId, model: BLOG_MODEL,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });

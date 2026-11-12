@@ -82,7 +82,7 @@ export default withLambda(async (event: HandlerEvent) => {
             intro: String(v.intro || '').slice(0, 400),
         }));
 
-        void logAiUsage({
+        await logAiUsage({
             userId: ctx.userId, workspaceId: ctx.organisationId, model: MODEL,
             inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
         });

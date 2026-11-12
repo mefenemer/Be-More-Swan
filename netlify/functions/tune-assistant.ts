@@ -100,7 +100,7 @@ Respond with ONLY valid JSON: { "directive": "the instruction" }`;
             system: systemPrompt,
             messages: [{ role: 'user', content: userMessage }],
         }, 'claude-haiku-5-5', 'low') as Anthropic.MessageCreateParamsNonStreaming);
-        logMessageUsage(response, 'claude-haiku-5-5', { workspaceId: orgId, userId, assistantId: Number(assistantId) || null, sessionId: 'tune-assistant' });
+        await logMessageUsage(response, 'claude-haiku-5-5', { workspaceId: orgId, userId, assistantId: Number(assistantId) || null, sessionId: 'tune-assistant' });
         const rawText = replyText(response.content);
         const parsed = parseModelJson<{ directive?: string }>(rawText);
         if (parsed) directive = String(parsed.directive || '').trim();

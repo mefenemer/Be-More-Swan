@@ -105,7 +105,7 @@ ${caption}
         const durationMs = Date.now() - start;
         const content = replyText(response.content);
 
-        void logAiUsage({
+        await logAiUsage({
             model: SCORE_MODEL,
             inputTokens: response.usage.input_tokens,
             outputTokens: response.usage.output_tokens,

@@ -114,7 +114,7 @@ Do not mention check IDs. Do not use bullet points. Write naturally as if you're
             max_tokens: 200,
             messages: [{ role: 'user', content: prompt }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-        logMessageUsage(response, MODEL, { userId, sessionId: 'social-troubleshoot-chat' });
+        await logMessageUsage(response, MODEL, { userId, sessionId: 'social-troubleshoot-chat' });
         const message = replyText(response.content).trim();
         return {
             statusCode: 200,

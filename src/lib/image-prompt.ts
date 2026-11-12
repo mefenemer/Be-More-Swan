@@ -85,7 +85,7 @@ export async function visualisePrompts(
             adaptForModel({ model: MODEL, max_tokens: 900, system: SYSTEM_VARIANTS(n), messages: [{ role: 'user', content: request.slice(0, 1000) }] }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming,
             { timeout: VARIANTS_TIMEOUT_MS, maxRetries: 0 },
         );
-        void logAiUsage({
+        await logAiUsage({
             workspaceId: usage?.workspaceId ?? null, userId: usage?.userId ?? null, assistantId: usage?.assistantId ?? null,
             model: MODEL, inputTokens: resp.usage.input_tokens, outputTokens: resp.usage.output_tokens,
             sessionId: 'image-prompt', dataCategories: ['business_context'],
@@ -110,7 +110,7 @@ export async function visualisePrompt(
             adaptForModel({ model: MODEL, max_tokens: 300, system: SYSTEM, messages: [{ role: 'user', content: request.slice(0, 1000) }] }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming,
             { timeout: TIMEOUT_MS, maxRetries: 0 },
         );
-        void logAiUsage({
+        await logAiUsage({
             workspaceId: usage?.workspaceId ?? null, userId: usage?.userId ?? null, assistantId: usage?.assistantId ?? null,
             model: MODEL, inputTokens: resp.usage.input_tokens, outputTokens: resp.usage.output_tokens,
             sessionId: 'image-prompt', dataCategories: ['business_context'],
@@ -181,7 +181,7 @@ export async function planImage(
             adaptForModel({ model: MODEL, max_tokens: 450, system: SYSTEM_PLAN, messages: [{ role: 'user', content: request.slice(0, 1000) }] }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming,
             { timeout: TIMEOUT_MS, maxRetries: 0 },
         );
-        void logAiUsage({
+        await logAiUsage({
             workspaceId: usage?.workspaceId ?? null, userId: usage?.userId ?? null, assistantId: usage?.assistantId ?? null,
             model: MODEL, inputTokens: resp.usage.input_tokens, outputTokens: resp.usage.output_tokens,
             sessionId: 'image-prompt', dataCategories: ['business_context'],

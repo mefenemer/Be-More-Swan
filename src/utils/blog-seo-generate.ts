@@ -129,7 +129,7 @@ export async function generateBlogSeo(
         if (clash) urlSlug = `${urlSlug}-${id}`;
     }
 
-    void logAiUsage({
+    await logAiUsage({
         userId, workspaceId: organisationId, model: MODEL,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });

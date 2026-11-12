@@ -289,7 +289,7 @@ export async function removeImageBackground(opts: {
     const out = text ? JSON.parse(text) : {};
     const image = out?.image;
     if (!image?.url) throw new FalError('Fal returned no image.');
-    logMediaCost(BACKGROUND_MODEL, { images: [image] }, { ...opts.usage, sessionId: 'fal-background' });
+    await logMediaCost(BACKGROUND_MODEL, { images: [image] }, { ...opts.usage, sessionId: 'fal-background' });
     return { url: image.url, width: image.width ?? null, height: image.height ?? null, contentType: image.content_type ?? 'image/png' };
 }
 
@@ -327,7 +327,7 @@ export async function generateImages(opts: {
         if (s.status !== 'fulfilled') continue;
         const drawn: any[] = s.value.out?.images ?? [];
         // Here, not in each caller: every image path (editor, briefs, autopilot) comes through this one.
-        if (drawn.length) logMediaCost(s.value.model, { images: drawn }, { ...opts.usage, sessionId: 'fal-image' });
+        if (drawn.length) await logMediaCost(s.value.model, { images: drawn }, { ...opts.usage, sessionId: 'fal-image' });
         images.push(...drawn);
     }
     if (!images.length) {

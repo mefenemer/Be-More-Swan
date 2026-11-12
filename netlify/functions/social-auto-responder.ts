@@ -99,7 +99,7 @@ Rules:
                 max_tokens: 512,
                 messages: [{ role: 'user', content: prompt }],
             }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-            logMessageUsage(response, MODEL, { workspaceId: organisationId, assistantId: assistantId ?? null, sessionId: 'social-auto-responder' });
+            await logMessageUsage(response, MODEL, { workspaceId: organisationId, assistantId: assistantId ?? null, sessionId: 'social-auto-responder' });
             const raw = replyText(response.content).trim();
             const parsed = parseModelJson<AutoResponderDraft>(raw);
             if (parsed?.messengerGreeting && parsed?.messengerAutoReply && parsed?.instagramDmAutoReply) {

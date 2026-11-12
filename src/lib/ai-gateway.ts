@@ -188,7 +188,7 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
     }
 
     const text = replyText(response.content);
-    recordUsage(req, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0, usedFallback ? FALLBACK_MODEL : calledModel);
+    await recordUsage(req, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0, usedFallback ? FALLBACK_MODEL : calledModel);
     return {
         text,
         stopReason: response.stop_reason ?? null,
@@ -202,8 +202,9 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
 /**
  * Write one ai_usage_log row for a call that has just succeeded.
  *
- * Never awaited and never able to throw: a book-keeping failure must not turn a generated post into
- * a failed job. logAiUsage swallows its own errors; the void and the catch here cover the rest.
+ * Awaited (2026-11-12) but never able to throw: a book-keeping failure must not turn a generated post
+ * into a failed job. It used to be fire-and-forget, and a Netlify function frozen at its return lost
+ * the write (see logAiUsage). logAiUsage swallows its own errors; the catch here covers the rest.
  *
  * ⚠️ The model KEY WE INVOKED, not `response.model`. The API resolves a request for
  * `claude-sonnet-4-6` into a dated id, and `ai_model_pricing` is keyed on the undated constant —
@@ -212,10 +213,10 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
  * exact hole this change exists to close. Still accurate after a failover, because the caller passes
  * the model it actually called.
  */
-function recordUsage(req: GatewayRequest, inputTokens: number, outputTokens: number, modelKey: string): void {
+async function recordUsage(req: GatewayRequest, inputTokens: number, outputTokens: number, modelKey: string): Promise<void> {
     const u = req.usage ?? {};
     try {
-        void logAiUsage({
+        await logAiUsage({
             workspaceId:  u.workspaceId  ?? null,
             userId:       u.userId       ?? null,
             assistantId:  u.assistantId  ?? null,
@@ -234,8 +235,8 @@ function recordUsage(req: GatewayRequest, inputTokens: number, outputTokens: num
 /**
  * Claude's server-side web search is billed per search on top of the tokens, so a grounded call
  * records it as a second row ('anthropic-web-search', 0 tokens, priced per search). Recorded here,
- * once, for every grounded caller — callers must not log it again. Awaited, unlike the token row:
- * background callers (the System Map review) can be frozen as soon as they return, which would
+ * once, for every grounded caller — callers must not log it again. Awaited, like the token row since
+ * 2026-11-12: background callers (the System Map review) can be frozen as soon as they return, which would
  * lose a fire-and-forget write of a fee that was already paid. Never throws.
  */
 async function recordSearchFee(req: GatewayRequest, searches: number): Promise<void> {
@@ -406,7 +407,7 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
     const { urls, searches } = collectSearchedUrls(allContent);
     const text = allContent.filter(b => b.type === 'text').map(b => (b as any).text).join('\n').trim();
 
-    recordUsage(req, tokensIn, tokensOut, model);
+    await recordUsage(req, tokensIn, tokensOut, model);
     await recordSearchFee(req, searches);
     return {
         text,

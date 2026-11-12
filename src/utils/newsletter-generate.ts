@@ -456,7 +456,7 @@ export async function generateIssueBody(db: Db, opts: GenerateIssueOptions): Pro
     const raw = replyText(response.content).trim();
     if (!raw) throw new Error('Empty draft.');
 
-    void logAiUsage({
+    await logAiUsage({
         userId, workspaceId: organisationId, model: usedModel,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });
@@ -759,7 +759,7 @@ export async function refineEmailCopy(db: Db, args: {
     const raw = replyText(response.content).trim();
     if (!raw) throw new Error('The assistant returned nothing. Try again in a moment.');
 
-    void logAiUsage({
+    await logAiUsage({
         userId, workspaceId: organisationId, model: usedModel,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });
@@ -907,7 +907,7 @@ export async function draftSequenceEmail(db: Db, opts: SequenceDraftOptions): Pr
     const raw = replyText(response.content).trim();
     if (!raw) throw new Error('Empty draft.');
 
-    void logAiUsage({
+    await logAiUsage({
         userId, workspaceId: organisationId, model: usedModel,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });

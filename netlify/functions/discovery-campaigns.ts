@@ -525,7 +525,7 @@ export default withLambda(async (event) => {
             negativeKeywords,
             approvedQueries: prior,
         });
-        void logAiUsage({
+        await logAiUsage({
             workspaceId: orgId, assistantId: Number(body.assistantId) || 0,
             model: QUERY_GEN_MODEL, inputTokens: gen.inputTokens, outputTokens: gen.outputTokens,
             sessionId: `discovery:brief:${campaignId}`, dataCategories: ['business_context'],

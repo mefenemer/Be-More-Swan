@@ -245,7 +245,7 @@ Otherwise return STRICT JSON only (no markdown, no prose outside the JSON):
         }],
     }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-    void logAiUsage({
+    await logAiUsage({
         workspaceId: enrolment.organisation_id,
         userId: null,
         assistantId: enrolment.ai_assistant_id,

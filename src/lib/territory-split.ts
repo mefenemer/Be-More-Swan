@@ -126,7 +126,7 @@ export async function splitTerritories(idea: string, granularity: SplitGranulari
             messages: [{ role: 'user', content: `Who they want to find:\n${text.slice(0, 1000)}` }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
         // No workspace in scope here: counted in the platform total, unattributed.
-        logMessageUsage(resp, MODEL, { sessionId: 'territory-split' });
+        await logMessageUsage(resp, MODEL, { sessionId: 'territory-split' });
         const parsed = parseModelJson<Record<string, unknown>>(
             replyText(resp.content),
         );

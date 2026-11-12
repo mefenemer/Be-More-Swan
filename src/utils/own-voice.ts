@@ -68,7 +68,7 @@ export async function prepareOwnRecording(db: Db, args: { orgId: number; assetId
         const mime = (a.mimeType || 'audio/wav').split(';')[0];
         const ext = /wav/.test(mime) ? 'wav' : /mpeg|mp3/.test(mime) ? 'mp3' : /mp4|m4a|aac/.test(mime) ? 'm4a' : /ogg/.test(mime) ? 'ogg' : 'webm';
         ({ words, durationS: heardS } = await transcribeAudio(bytes, { filename: `voice.${ext}`, type: mime, timeoutMs: 18_000, ...(args.language ? { language: args.language } : {}) }));
-        logTranscriptionCost(heardS ?? a.durationS, { workspaceId: args.orgId, sessionId: 'own-voice' });
+        await logTranscriptionCost(heardS ?? a.durationS, { workspaceId: args.orgId, sessionId: 'own-voice' });
     } catch (err) {
         console.warn('[own-voice] transcription failed — keeping the recording without words:', err instanceof Error ? err.message : err);
     }

@@ -321,7 +321,7 @@ async function runStrategyDraft(db: Db, job: any): Promise<{ result: Record<stri
         }, m, thinking) as Anthropic.MessageCreateParamsNonStreaming, { timeout: 240_000 }) }),
         { label: 'mentor strategy draft' },
     );
-    void logAiUsage({
+    await logAiUsage({
         workspaceId: job.organisationId, userId: job.userId, assistantId: job.aiAssistantId, model,
         inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens,
         sessionId: `mentor:strategy:${job.id}`, dataCategories: ['business_context'],

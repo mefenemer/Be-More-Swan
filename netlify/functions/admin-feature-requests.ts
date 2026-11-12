@@ -98,7 +98,7 @@ export default withLambda(async (event) => {
             const enhanced = (replyText(response.content) || '').trim();
             if (!enhanced) throw new Error('Empty LLM response.');
 
-            void logAiUsage({
+            await logAiUsage({
                 userId: admin.id,
                 workspaceId: null,
                 model: MODEL,
@@ -136,7 +136,7 @@ export default withLambda(async (event) => {
             const brief = (replyText(response.content) || '').trim();
             if (!brief) throw new Error('Empty LLM response.');
 
-            void logAiUsage({
+            await logAiUsage({
                 userId: admin.id,
                 workspaceId: null,
                 model: MODEL,

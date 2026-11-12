@@ -166,7 +166,7 @@ async function lookupHunter(domain: string, timeoutMs: number, usage?: { workspa
         }
         // Hunter bills one credit per email a domain search RETURNS (none when it finds nothing),
         // whether or not we use them — so the units are the length of the list, not 1.
-        logServiceCost('hunter-domain-search', raw.length, { ...usage, sessionId: 'hunter' });
+        await logServiceCost('hunter-domain-search', raw.length, { ...usage, sessionId: 'hunter' });
 
         const rows = raw.filter((e): e is Record<string, unknown> => !!e && typeof e === 'object');
         const candidates = rows
@@ -270,7 +270,7 @@ export async function findPersonEmail(
         const email = typeof body.data.email === 'string' ? body.data.email.trim().toLowerCase() : '';
         // Answered with no address: a fact about this person at this company. Hunter does not bill it.
         if (!email.includes('@') || !email.endsWith(`@${host}`)) return { status: 'miss' };
-        logServiceCost('hunter-email-finder', 1, { ...opts.usage, sessionId: 'hunter' });
+        await logServiceCost('hunter-email-finder', 1, { ...opts.usage, sessionId: 'hunter' });
         return {
             status: 'hit',
             contact: {

@@ -211,7 +211,7 @@ export default withLambda(async (event) => {
                 messages,
             }, { timeout: remaining, maxRetries: 0 });
             const served = String(response.model || '').startsWith(FALLBACK_MODEL) ? FALLBACK_MODEL : SYSTEMS_CHAT_MODEL;
-            logMessageUsage(response, served, { userId: adminId, dataCategories: ['business_context'] });
+            await logMessageUsage(response, served, { userId: adminId, dataCategories: ['business_context'] });
 
             if (response.stop_reason === 'refusal') { reply = "I can't help with that one."; break; }
             const text = response.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();

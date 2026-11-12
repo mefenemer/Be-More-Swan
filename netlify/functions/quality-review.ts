@@ -208,7 +208,7 @@ export default withLambda(async (event) => {
 
         clearTimeout(timeoutId);
 
-        void logAiUsage({
+        await logAiUsage({
             userId,
             model:        REVIEW_MODEL,
             inputTokens:  response.usage.input_tokens,

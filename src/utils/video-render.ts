@@ -116,7 +116,7 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
         while (true) {
             const progress = await renderProgress(started);
             // Every render that ran spent AWS compute — a failed one before its retry included.
-            if (progress.done) logRenderCost(progress.costUsd, { workspaceId: orgId, userId: p.createdBy, assistantId: p.aiAssistantId ?? null, sessionId: 'video-producer-render' });
+            if (progress.done) await logRenderCost(progress.costUsd, { workspaceId: orgId, userId: p.createdBy, assistantId: p.aiAssistantId ?? null, sessionId: 'video-producer-render' });
             if (progress.error && shouldRetryRender(progress.error, retried, deadline - Date.now())) {
                 retried = true;
                 started = await startRender(props);

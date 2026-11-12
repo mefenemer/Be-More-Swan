@@ -102,7 +102,7 @@ export async function mentorDraftFeedback(db: Db, orgId: number, userId: number,
         }, m, thinking) as Anthropic.MessageCreateParamsNonStreaming) }),
         { requestPath: true, label: 'mentor feedback' },
     );
-    void logAiUsage({
+    await logAiUsage({
         workspaceId: orgId, userId, model,
         inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens,
         sessionId: 'mentor:feedback', dataCategories: ['business_context'],

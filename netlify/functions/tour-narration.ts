@@ -89,7 +89,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
         const audioBuffer = Buffer.from(await res.arrayBuffer());
         // A cache miss is the only time this costs anything; every later run serves the stored clip.
-        void logAiUsage({ model: MODEL, inputTokens: 0, outputTokens: 0, costUsdOverride: speechCostFromTextUsd(text), sessionId: 'tour-narration' });
+        await logAiUsage({ model: MODEL, inputTokens: 0, outputTokens: 0, costUsdOverride: speechCostFromTextUsd(text), sessionId: 'tour-narration' });
         const audioBase64 = audioBuffer.toString('base64');
         const mimeType = 'audio/mpeg';
 

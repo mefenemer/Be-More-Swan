@@ -169,7 +169,7 @@ export default withLambda(async (event: HandlerEvent) => {
         text = stripCodeFences(text);
         if (!text) throw new Error('Empty rewrite.');
 
-        void logAiUsage({
+        await logAiUsage({
             userId: ctx.userId,
             workspaceId: ctx.organisationId,
             model: MODEL,

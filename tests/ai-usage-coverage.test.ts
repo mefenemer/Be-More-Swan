@@ -147,7 +147,7 @@ check('every successful generation records its cost — once, where the provider
     assert.ok(/logMediaCost\(s\.value\.model, \{ images: drawn \}/.test(gen), 'generateImages no longer records image cost (per drawing model)');
     assert.ok(/logMediaCost\(job\.model, \{ durationSeconds/.test(read('netlify/functions/process-media-job-background.ts')), 'a completed video job records nothing');
     // Since image-to-video (2026-10-31) the brief logs the model actually billed (Kling or Hailuo).
-    assert.ok(/extractVideo\([\s\S]{0,120}\n\s*logMediaCost\(sub\.model, \{ durationSeconds: sub\.billedSeconds/.test(read('src/utils/visual-briefs.ts')), 'a brief video records nothing');
+    assert.ok(/extractVideo\([\s\S]{0,120}\n\s*(await )?logMediaCost\(sub\.model, \{ durationSeconds: sub\.billedSeconds/.test(read('src/utils/visual-briefs.ts')), 'a brief video records nothing');
     const music = read('netlify/functions/process-music-job-background.ts');
     assert.ok(/success: true[\s\S]{0,300}logMediaCost\(job\.model/.test(music), 'a finished music track records nothing (and it must be after the SUCCESS settle)');
     // Nothing reaches fal or Stability around these: a new direct caller would be unpriced.
@@ -160,7 +160,7 @@ console.log('\nSearch, contact lookups and embeddings');
 
 check('every Serper search, Hunter lookup and Voyage embedding records its cost', () => {
     const search = read('src/lib/discovery-search.ts');
-    assert.ok(/searchSerper\([^)]*\);\s*\/\/[^\n]*\n\s*logServiceCost\('serper-search', 1/.test(search), 'a Serper search is not recorded');
+    assert.ok(/searchSerper\([^)]*\);\s*\/\/[^\n]*\n\s*(await )?logServiceCost\('serper-search', 1/.test(search), 'a Serper search is not recorded');
     const hunter = read('src/lib/discovery-enrich-provider.ts');
     assert.ok(/logServiceCost\('hunter-domain-search', raw\.length/.test(hunter),
         'Hunter bills a credit per email RETURNED — record raw.length, not 1');

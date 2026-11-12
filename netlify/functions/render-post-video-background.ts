@@ -205,7 +205,7 @@ export default withLambda(async (event: HandlerEvent) => {
         while (true) {
             const progress = await renderProgress(started);
             // Every render that ran spent AWS compute — a failed one before its retry included.
-            if (progress.done) logRenderCost(progress.costUsd, { workspaceId: job.organisationId, userId: job.userId ?? null, sessionId: 'post-render' });
+            if (progress.done) await logRenderCost(progress.costUsd, { workspaceId: job.organisationId, userId: job.userId ?? null, sessionId: 'post-render' });
             if (progress.error && shouldRetryRender(progress.error, retried, deadline - Date.now())) {
                 // Remotion's "No frame found at position…" hit two of six renders on 2026-11-01, on
                 // intact Pexels clips (all frames present, probed locally), and both passed when the

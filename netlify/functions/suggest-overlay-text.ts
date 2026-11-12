@@ -168,7 +168,7 @@ export default withLambda(async (event: HandlerEvent) => {
         if (text.length > MAX_OVERLAY_CHARS) text = text.slice(0, MAX_OVERLAY_CHARS).trimEnd();
         if (!text) throw new Error('Empty suggestion.');
 
-        void logAiUsage({
+        await logAiUsage({
             userId: ctx.userId,
             workspaceId: ctx.organisationId,
             model: MODEL,

@@ -112,7 +112,7 @@ const PII_RULES: Array<{
  *   const { sanitised, dataCategories, blocked, blockReason } = sanitisePromptForTransfer(rawPrompt);
  *   if (blocked) return { statusCode: 422, body: JSON.stringify({ error: blockReason }) };
  *   // proceed with `sanitised` in the LLM call
- *   void logAiUsage({ ..., dataCategories });
+ *   await logAiUsage({ ..., dataCategories });
  */
 export function sanitisePromptForTransfer(prompt: string): SanitisedPrompt {
     let text = prompt;

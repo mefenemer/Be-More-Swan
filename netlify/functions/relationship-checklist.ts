@@ -194,7 +194,7 @@ Rules:
                 model: MODEL, max_tokens: 700,
                 messages: [{ role: 'user', content: prompt }],
             }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-            logMessageUsage(response, MODEL, { workspaceId: organisationId, sessionId: 'relationship-checklist' });
+            await logMessageUsage(response, MODEL, { workspaceId: organisationId, sessionId: 'relationship-checklist' });
             const raw = replyText(response.content).trim();
             const candidate = parseModelJsonArray<ChecklistItem>(raw);
             if (Array.isArray(candidate) && candidate.length) { parsed = candidate; break; }

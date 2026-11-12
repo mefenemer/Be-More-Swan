@@ -189,7 +189,7 @@ export async function ideateBlogTopic(
             messages: [{ role: 'user', content: brief }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-        void logAiUsage({
+        await logAiUsage({
             userId, workspaceId: organisationId, model: MODEL,
             inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
         });

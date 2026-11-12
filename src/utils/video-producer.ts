@@ -754,7 +754,7 @@ async function sourceScene(db: Db, args: {
             }
             if (!sub) throw new Error('An AI clip took too long and was abandoned.');
             const v = extractVideo(await falResult(sub.responseUrl));
-            logMediaCost(sub.model, { durationSeconds: sub.billedSeconds }, { workspaceId: orgId, userId, assistantId: args.assistantId, sessionId: 'fal-video' });
+            await logMediaCost(sub.model, { durationSeconds: sub.billedSeconds }, { workspaceId: orgId, userId, assistantId: args.assistantId, sessionId: 'fal-video' });
             const stored = await persistRemoteMediaToR2({ orgId, url: v.url, contentType: v.contentType || 'video/mp4', folder: 'video-producer', label: 'AI scene' });
             const [asset] = await db.insert(contentAssets).values({
                 userId, organisationId: orgId, name: `AI scene — ${(scene.prompt || context).slice(0, 60)}`,

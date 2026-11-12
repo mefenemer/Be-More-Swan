@@ -72,7 +72,7 @@ export async function assessMarket(idea: string, icp?: Record<string, unknown> |
             }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
         // No workspace in scope here: counted in the platform total, unattributed.
-        logMessageUsage(resp, MODEL, { sessionId: 'market-enumerability' });
+        await logMessageUsage(resp, MODEL, { sessionId: 'market-enumerability' });
         const raw = replyText(resp.content);
         const parsed = parseModelJson<Record<string, unknown>>(raw);
         if (!parsed || typeof parsed.enumerable !== 'boolean') return null;

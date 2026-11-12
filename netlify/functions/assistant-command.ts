@@ -205,7 +205,7 @@ ${mentor ? `- Business advice — what to focus on or do next for the BUSINESS, 
             ],
             messages: [{ role: 'user', content: command }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-        logMessageUsage(response, MODEL, { workspaceId: orgId, userId, sessionId: 'assistant-command' });
+        await logMessageUsage(response, MODEL, { workspaceId: orgId, userId, sessionId: 'assistant-command' });
 
         const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');
         const raw = (textBlock?.text ?? '').trim();

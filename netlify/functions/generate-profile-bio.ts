@@ -130,7 +130,7 @@ Rules:
                 max_tokens: 700,
                 messages: [{ role: 'user', content: prompt }],
             }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-            logMessageUsage(response, MODEL, { workspaceId: organisationId, assistantId: assistantId ?? null, sessionId: 'generate-profile-bio' });
+            await logMessageUsage(response, MODEL, { workspaceId: organisationId, assistantId: assistantId ?? null, sessionId: 'generate-profile-bio' });
             const raw = replyText(response.content).trim();
             const parsed = parseModelJson<BioDraft>(raw);
             if (parsed?.instagram && parsed?.facebook && parsed?.linkedin) {

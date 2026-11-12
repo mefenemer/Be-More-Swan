@@ -55,7 +55,7 @@ export async function embedTexts(
     const payload = await res.json() as { data?: { index: number; embedding: number[] }[]; usage?: { total_tokens?: number } };
     // Voyage reports the tokens it billed; priced via LIST_PRICE_PER_1K['voyage-3.5-lite'].
     const billed = Number(payload.usage?.total_tokens) || 0;
-    if (billed > 0) void logAiUsage({ ...usage, model: EMBEDDING_MODEL, inputTokens: billed, outputTokens: 0, sessionId: `embed:${inputType}` });
+    if (billed > 0) await logAiUsage({ ...usage, model: EMBEDDING_MODEL, inputTokens: billed, outputTokens: 0, sessionId: `embed:${inputType}` });
     if (!Array.isArray(payload.data) || payload.data.length !== texts.length) {
         throw new Error('Voyage embeddings response shape unexpected.');
     }

@@ -180,7 +180,11 @@ check('it records the model KEY WE INVOKED, not the dated id the API returns', (
 check('book-keeping can never fail a job', () => {
     const fn = gateway.slice(landmark(gateway, 'function recordUsage('),
                              landmark(gateway, 'export async function gatewayGenerateGrounded('));
-    assert.ok(fn.includes('void logAiUsage('), 'the usage write is awaited, so it can delay a draft');
+    // Awaited since 2026-11-12 (a fire-and-forget write was lost when the function froze at its return),
+    // but BOUNDED: logAiUsage waits at most USAGE_WRITE_WAIT_MS, so a slow database can't hold a draft.
+    assert.ok(fn.includes('await logAiUsage('), 'the usage write is fire-and-forget again, and can be lost');
+    const usage = readFileSync(join(root, 'src/utils/ai-usage.ts'), 'utf8');
+    assert.ok(/Promise\.race\(\[write, limit\]\)/.test(usage) && /USAGE_WRITE_WAIT_MS = 2_500/.test(usage), 'the awaited write is unbounded, so it can delay a draft');
     assert.ok(fn.includes('catch (err)'), 'a logging failure can still take the generated post down');
 });
 

@@ -109,7 +109,7 @@ export default withLambda(async (event: HandlerEvent) => {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
         // Lower temperature when rewriting the owner's words: fidelity matters more than flair there.
         const response = await anthropic.messages.create(adaptForModel({ model: MODEL, max_tokens: 700, temperature: own ? 0.4 : 0.9, system, messages: [{ role: 'user', content: user }] }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-        void logAiUsage({
+        await logAiUsage({
             userId: ctx.userId, workspaceId: ctx.organisationId, model: MODEL,
             inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
         });
@@ -178,7 +178,7 @@ async function checkRewrite(
             ].join('\n'),
             messages: [{ role: 'user', content: `<original>${original}</original>\n<rewrite>${rewrite}</rewrite>` }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-        void logAiUsage({
+        await logAiUsage({
             userId: ctx.userId, workspaceId: ctx.organisationId, model: MODEL,
             inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0,
         });
@@ -221,7 +221,7 @@ async function checkFresh(
             ].join('\n'),
             messages: [{ role: 'user', content: `<facts>${facts || '(none stated)'}</facts>\n<sample>${text}</sample>` }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-        void logAiUsage({
+        await logAiUsage({
             userId: ctx.userId, workspaceId: ctx.organisationId, model: MODEL,
             inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0,
         });

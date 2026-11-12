@@ -413,7 +413,7 @@ export async function generateBlogBody(
     const raw = replyText(response.content).trim();
     if (!raw) throw new Error('Empty draft.');
 
-    void logAiUsage({
+    await logAiUsage({
         userId, workspaceId: organisationId, model: usedModel,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });

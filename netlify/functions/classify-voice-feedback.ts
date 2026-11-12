@@ -112,7 +112,7 @@ Classify each piece of feedback.`;
             system: systemPrompt,
             messages: [{ role: 'user', content: userMessage }],
         }, 'claude-haiku-5-5', 'low') as Anthropic.MessageCreateParamsNonStreaming);
-        logMessageUsage(response, 'claude-haiku-5-5', { workspaceId: orgId ?? null, userId, assistantId: Number(assistantId) || null, sessionId: 'classify-voice-feedback' });
+        await logMessageUsage(response, 'claude-haiku-5-5', { workspaceId: orgId ?? null, userId, assistantId: Number(assistantId) || null, sessionId: 'classify-voice-feedback' });
 
         const rawText = replyText(response.content);
         const parsed = parseModelJson<{ items?: unknown }>(rawText);

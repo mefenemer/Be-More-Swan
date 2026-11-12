@@ -72,7 +72,7 @@ export default withLambda(async (event: HandlerEvent) => {
         if (!Array.isArray(names) || names.length === 0) throw new Error('Invalid LLM response format.');
 
         // US-ADM-3.1.1: fire-and-forget usage log
-        void logAiUsage({
+        await logAiUsage({
             userId:      decoded.userId,
             workspaceId: orgId,
             model:       MODEL,

@@ -127,7 +127,7 @@ export async function search(
     if (PROVIDER === 'serper') {
         const res = await searchSerper(query, limit, opts.recency, page, opts.country);
         // One billed query per call (each page is its own query). Recorded only once it answered.
-        logServiceCost('serper-search', 1, { ...opts.usage, sessionId: 'serper' });
+        await logServiceCost('serper-search', 1, { ...opts.usage, sessionId: 'serper' });
         return res;
     }
     throw new SearchNotConfiguredError(`Unknown DISCOVERY_SEARCH_PROVIDER "${PROVIDER}".`);

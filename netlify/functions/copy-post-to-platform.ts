@@ -93,7 +93,7 @@ async function fitCaption(args: {
         let text = stripCodeFences(replyText(response.content).trim());
         if (!text) return null;
 
-        void logAiUsage({
+        await logAiUsage({
             userId, workspaceId: orgId, model: MODEL,
             inputTokens: response.usage?.input_tokens ?? 0,
             outputTokens: response.usage?.output_tokens ?? 0,

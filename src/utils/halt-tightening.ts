@@ -152,7 +152,7 @@ export async function modelTightening(idea: string, cold: ColdLead[]): Promise<s
                 content: `Current description:\n${idea.slice(0, MAX_IDEA)}\n\nCompanies it found that were rated cold, with the scorer's reasons:\n${evidence.slice(0, 8000)}`,
             }],
         }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
-        logMessageUsage(resp, MODEL, { sessionId: 'halt-tightening' });
+        await logMessageUsage(resp, MODEL, { sessionId: 'halt-tightening' });
         const raw = replyText(resp.content);
         const parsed = parseModelJson<Record<string, unknown>>(raw);
         return usableIdea(parsed?.idea, idea);

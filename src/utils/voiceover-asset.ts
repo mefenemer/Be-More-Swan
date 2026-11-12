@@ -52,6 +52,6 @@ export async function makeVoiceoverAsset(db: Db, args: {
     }).returning({ id: contentAssets.id });
     await db.update(mediaGenerationJobs).set({ resultAssetIds: [asset.id], updatedAt: new Date() })
         .where(eq(mediaGenerationJobs.id, job.id)).catch(() => {});
-    void logAiUsage({ workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId ?? null, model, inputTokens: 0, outputTokens: 0, costUsdOverride: voiceoverCostUsd(durationS, { provider, chars: args.script.length }), sessionId: 'voiceover' });
+    await logAiUsage({ workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId ?? null, model, inputTokens: 0, outputTokens: 0, costUsdOverride: voiceoverCostUsd(durationS, { provider, chars: args.script.length }), sessionId: 'voiceover' });
     return { assetId: asset.id, jobId: job.id, storageKey: stored.storageKey, durationS, words };
 }

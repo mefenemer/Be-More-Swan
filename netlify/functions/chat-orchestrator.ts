@@ -3691,7 +3691,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
             // Shadow calls burn real tokens — same telemetry as a foreground turn, with a
             // :handoff session suffix so COGS reporting can split background work out.
-            void logAiUsage({
+            await logAiUsage({
                 workspaceId: orgId,
                 userId,
                 assistantId: shadowRow?.id ?? assistantRow.id,
@@ -3739,7 +3739,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             { requestPath: true, label: 'chat' },
         );
 
-        void logAiUsage({
+        await logAiUsage({
             workspaceId: orgId,
             userId,
             assistantId: assistantRow.id,
@@ -3770,7 +3770,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                     system: sanitizeForModel(system),
                     messages: sanitizeForModel([...llmMessages, { role: 'assistant' as const, content: raw }, { role: 'user' as const, content: CARD_FORMAT_RETRY }]),
                 }, chatModel, 'off') as Anthropic.MessageCreateParamsNonStreaming, { timeout: 10_000, maxRetries: 0 });
-                void logAiUsage({ workspaceId: orgId, userId, assistantId: assistantRow.id, model: chatModel, inputTokens: retry.usage.input_tokens, outputTokens: retry.usage.output_tokens, sessionId: `chat:${session.id}:card-retry`, dataCategories: ['business_context'] });
+                await logAiUsage({ workspaceId: orgId, userId, assistantId: assistantRow.id, model: chatModel, inputTokens: retry.usage.input_tokens, outputTokens: retry.usage.output_tokens, sessionId: `chat:${session.id}:card-retry`, dataCategories: ['business_context'] });
                 const again = extractAssistantNote(replyText(retry.content)).text;
                 const reparsed = route.parseResponse(again);
                 console.warn('[chat-orchestrator] prose reply pointed at a card it did not send — asked again as JSON', { role: assistantRow.roleKey, sessionId: session.id, recovered: !!reparsed.uiElement });
@@ -4032,7 +4032,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             // a refused card to ask again (shortenRuleText). If that fails the card still refuses it.
             const shorter = await shortenRuleText(ruleReq.ruleText, async (system, user) => {
                 const res = await anthropic.messages.create({ model: DEFAULT_MODEL, max_tokens: 300, system, messages: [{ role: 'user', content: user }] });
-                void logAiUsage({
+                await logAiUsage({
                     workspaceId: orgId, userId, assistantId: assistantRow.id, model: DEFAULT_MODEL,
                     inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens,
                     sessionId: `chat:${session.id}:rule-shorten`, dataCategories: ['business_context'],
