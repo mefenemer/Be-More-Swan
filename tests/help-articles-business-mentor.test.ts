@@ -52,7 +52,7 @@ check('the figures match the code', () => {
 
 check('the card text it quotes is the card text the app draws', () => {
     const ui = read('src/components/disruptive-ui-registry.js');
-    for (const s of ['Report a problem to Be More Swan', 'Message Be More Swan support', 'Help & Support ▸ Report an Issue', 'Send report']) {
+    for (const s of ['Report a problem to Be More Swan', 'Message Be More Swan support', 'where it shows as an issue', 'Send report']) {
         assert.ok(ui.includes(s), `card still says "${s}"`);
         assert.ok(SQL.includes(s), `article says "${s}"`);
     }

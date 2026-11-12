@@ -190,13 +190,70 @@
 
     // Area and screenshot only mean something for a fault — the helpdesk takes neither.
     function syncContactFields() {
-        const broken = (document.getElementById('cu-topic')?.value || 'broken') === 'broken';
+        const topic = document.getElementById('cu-topic')?.value || 'broken';
+        const broken = topic === 'broken';
+        // Security and billing: the direct route (src/utils/support-priority.ts) — say so, no articles.
+        const direct = topic === 'security' || topic === 'billing';
+        document.getElementById('cu-direct-note')?.classList.toggle('hidden', !direct);
+        if (direct) document.getElementById('cu-suggest')?.classList.add('hidden');
+        else suggestArticlesSoon();
         document.getElementById('cu-broken-fields')?.classList.toggle('hidden', !broken);
         document.getElementById('cu-image-fields')?.classList.toggle('hidden', !broken);
         const desc = document.getElementById('ri-description');
         if (desc) desc.placeholder = broken ? 'What happened, and what did you expect?' : 'Tell us as much as you can — we usually reply within 1–2 business days.';
     }
     document.addEventListener('change', (e) => { if (e.target && e.target.id === 'cu-topic') syncContactFields(); });
+
+    // ── "These articles might answer it" ─────────────────────────────────────────────────────────
+    // While they type in Contact us, the published Help Centre articles that match their words are
+    // offered under the box. A suggestion, never a gate: Send works as before. Not for security or
+    // billing (the direct route). Articles come from get-help-articles, read once per page load.
+    // HELP-SUGGEST-SCORE-START
+    const HELP_STOP = new Set('a an and are as at be but by can do does for from get got have how i if in is it its me my no not of on or so that the this to was we what when where which why will with you your cant dont doesnt isnt wont im ive just please help thanks hi hello'.split(' '));
+    function helpWords(text) {
+        return [...new Set(String(text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+            .filter((w) => w.length > 2 && !HELP_STOP.has(w)))];
+    }
+    /** Top `n` articles for this text: a title word counts 3, a body word 1; needs 2+ points. */
+    function scoreArticles(text, articles, n = 3) {
+        const words = helpWords(text);
+        if (words.length < 2) return [];
+        return (articles || []).map((a) => {
+            const title = String(a.title || '').toLowerCase();
+            const body = String(a.contentMd || '').toLowerCase();
+            let score = 0;
+            for (const w of words) { if (title.includes(w)) score += 3; else if (body.includes(w)) score += 1; }
+            return { a, score };
+        }).filter((x) => x.score >= 2).sort((x, y) => y.score - x.score).slice(0, n).map((x) => x.a);
+    }
+    // HELP-SUGGEST-SCORE-END
+    let _suggestArticles = null;
+    let _suggestTimer = null;
+    async function suggestArticles() {
+        const box = document.getElementById('cu-suggest');
+        const topic = document.getElementById('cu-topic')?.value || 'broken';
+        const text = document.getElementById('ri-description')?.value || '';
+        if (!box) return;
+        if (topic === 'security' || topic === 'billing' || text.trim().length < 12) { box.classList.add('hidden'); return; }
+        if (!_suggestArticles) {
+            try {
+                const res = await fetch('/.netlify/functions/get-help-articles');
+                _suggestArticles = res.ok ? ((await res.json()).articles || []) : [];
+            } catch { _suggestArticles = []; }
+        }
+        const hits = scoreArticles(text, _suggestArticles);
+        if (!hits.length) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+        box.innerHTML = `<p class="text-xs font-bold text-emerald-800 mb-1">These might answer it straight away:</p>
+            <ul class="space-y-1">${hits.map((a) => `<li><button type="button" data-suggest-title="${esc(a.title)}" class="text-left text-xs font-semibold text-emerald-700 hover:underline">${esc(a.title)} →</button></li>`).join('')}</ul>
+            <p class="text-[11px] text-emerald-700 mt-1">Still need us? Send as normal.</p>`;
+        box.classList.remove('hidden');
+    }
+    function suggestArticlesSoon() { clearTimeout(_suggestTimer); _suggestTimer = setTimeout(suggestArticles, 350); }
+    document.addEventListener('input', (e) => { if (e.target && e.target.id === 'ri-description') suggestArticlesSoon(); });
+    document.addEventListener('click', (e) => {
+        const b = e.target && e.target.closest && e.target.closest('[data-suggest-title]');
+        if (b) window.openHelpArticle?.(b.getAttribute('data-suggest-title'));
+    });
 
     async function submitTicket(category) {
         const descEl = document.getElementById('ri-description');
@@ -244,6 +301,8 @@
                     sourceLocation: AREA_LABEL(area) || area,
                     sourceUrl: window.location.href,
                     image: _pendingImage || undefined,
+                    // "How bad is it?" (src/utils/issue-severity.ts) — a paying customer's critical/high pages the team.
+                    severity: document.getElementById('ri-severity')?.value || 'normal',
                 }),
             });
             const d = await res.json().catch(() => ({}));
@@ -270,7 +329,7 @@
         _listErrors = [];
         const [issues, tickets] = await Promise.all([
             fetch('/.netlify/functions/issue-reports').then(async (r) => { const d = await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error); return d.issues || []; })
-                .catch(() => { _listErrors.push('reported problems'); return []; }),
+                .catch(() => { _listErrors.push('issues'); return []; }),
             fetch('/.netlify/functions/support-tickets').then(async (r) => { const d = await r.json().catch(() => ([])); if (!r.ok) throw new Error(); return Array.isArray(d) ? d : []; })
                 .catch(() => { _listErrors.push('questions'); return []; }),
         ]);
@@ -420,7 +479,7 @@
         return `<span class="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md text-xs font-bold border ${cls}">${esc(label)}</span>`;
     };
     const CATEGORY_LABEL = {
-        technical: 'How do I…? / Account help', assistant: 'Assistant behaviour', billing: 'Billing / Subscription',
+        technical: 'How do I…? / Account help', assistant: 'Assistant behaviour', billing: 'Billing / Subscription', security: 'Security & privacy',
         feature: 'Feature request', other: 'Something else', callback: 'Call back',
     };
 
@@ -441,7 +500,9 @@
                   <span class="text-gray-400"> · ${esc(new Date(r.createdAt).toLocaleString())}</span></p>
                 <p class="text-gray-800 whitespace-pre-wrap mt-1">${esc(r.body)}</p>
               </div>`).join('');
-            const closed = t.status === 'closed';
+            // A closed ticket takes a reply for 30 days after closing (ticket-auto-close.ts), which reopens it.
+            const closedAtMs = t.closedAt ? new Date(t.closedAt).getTime() : 0;
+            const closed = t.status === 'closed' && !(closedAtMs && Date.now() - closedAtMs <= 30 * 864e5);
             box.innerHTML = `
               <div class="flex items-start justify-between gap-3 mb-3">
                 <div class="min-w-0">

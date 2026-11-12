@@ -2,7 +2,7 @@
 -- docs/system-map-plan.md). Variable spend is already per call in ai_usage_log; this holds what no
 -- API call shows: Netlify, Neon, Resend, ElevenLabs Starter, Porkbun and the like.
 -- Code: src/utils/system-map.ts (system keys, monthly → period maths). Drizzle mirror: db/schema.ts (systemFixedCosts).
--- system_key matches a key in netlify/functions/admin-system-status.ts SERVICES.
+-- system_key matches a key in src/utils/system-registry.ts SERVICES.
 --
 -- APPLY MANUALLY as the DB owner, to BOTH environments. Idempotent: safe to re-run.
 --   npm run db:migrate:apply -- --only z-system-fixed-costs                              (staging)

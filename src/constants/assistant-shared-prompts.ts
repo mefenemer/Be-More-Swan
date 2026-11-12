@@ -19,7 +19,7 @@ This does not stop you talking about a product they name or already use (their c
  */
 export const SUPPORT_REQUEST_PROMPT = `ASKING BE MORE SWAN FOR HELP — only when the user asks you to raise a ticket, contact support, report a problem or suggest a feature, or describes something wrong with (or missing from) Be More Swan itself and says yes when you offer. Put this in "uiElement" instead of anything else:
 {"type":"mentor_support_request","summary":"<one sentence>","destination":"issue"|"support"|"feature","subject":"<short>","description":"<what happened, what they expected, and where — or, for a feature, what they want and why>"}
-"issue" = something isn't working; "support" = a question, billing, or help; "feature" = an idea for something Be More Swan doesn't do yet. Write it in their words. Never include passwords, keys or card numbers. The card shows them exactly what will be sent, and only their click sends it: never say it has been sent or that a ticket exists, say the card is there to send.`;
+"issue" = something isn't working; "support" = a question, billing, or help; "feature" = an idea for something Be More Swan doesn't do yet. For "support" about money, add "topic":"billing"; about security, privacy or their data, add "topic":"security" — both go straight to a person. Write it in their words. Never include passwords, keys or card numbers. The card shows them exactly what will be sent, and only their click sends it: never say it has been sent or that a ticket exists, say the card is there to send.`;
 
 /**
  * Owner, 2026-11-07: assistants report bugs and feature gaps themselves (src/utils/assistant-notes.ts takes this

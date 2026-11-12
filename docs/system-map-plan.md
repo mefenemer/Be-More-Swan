@@ -21,6 +21,25 @@ Status: **plan agreed 2026-11-12 ("write the plan doc then start phase 1").** **
   checked, so no guessed figure was written. The registry says so on the Gemini entry.
 - **Not verified live:** no real render, transcription or tour clip has written a row yet.
 
+**Phase 2 built 2026-11-12 on staging (not committed at time of writing).** SQL applied to both DBs (owner). As built:
+- **One registry:** `src/utils/system-registry.ts` (moved out of admin-system-status.ts, which is now a thin wrapper).
+  Adds `SYSTEM_VERSIONS` (API version we call + installed SDK version; a test fails on drift) and an Anthropic
+  health check (free `GET /v1/models`). Neon's Postgres version is read live.
+- **One loader:** `src/utils/system-map-data.ts` → `loadSystemMap()`; maths in `assembleSystemMap()` (pure). GBP at
+  platform_config `fx_rates_to_gbp` (the COGS rate), shown on the hub. Unmapped spend is flagged but counted.
+- **Endpoint** `admin-system-map.ts`: GET the map; POST `add_fixed` / `end_fixed` / `delete_fixed` (validated by
+  `validateFixedCostRequest`). Super admin; writes refused while impersonating.
+- **Chat** `admin-systems-chat.ts` ("Ask about systems", under the map): reads the same loader, never writes;
+  cards POST the page form's exact body to admin-system-map.ts. Model Opus 5.5, Opus 4.8 fallback.
+- **Page** `src/components/admin-system-map.js`: strip (spend 30 d / all time + since, tasks 30 d / all time,
+  cost per task, systems down), hub-and-spoke map with health-coloured curves, model chips under providers,
+  drawer (status, version, cost split, models with assistant names, monthly bills add/end/delete, links,
+  "Better options: not checked yet"). Phone: lines hidden, groups stack, drawer full screen.
+- **Checked** in the browser pane against a fixture (no DB): desktop + 375 px (no sideways scroll), drawer, bill
+  form, Escape + focus return, chat card confirm. **Not checked against staging data or a real chat answer.**
+- Decisions taken by default (owner's open questions): GBP with the rate shown; the owner enters bills in the drawer
+  (or via chat). Nothing seeded.
+
 ---
 
 ## 1. Where it stands today
@@ -82,6 +101,26 @@ Endpoint returns registry + health + 30-day/all-time spend per system (variable 
 ### Phase 3 — better options job
 Monthly job + stored results + drawer section + "decisions already taken" list per system.
 
+**Phase 3 built 2026-11-12 on staging (not committed at time of writing).** Committed 38adcb35. `db/z-system-reviews.sql` **applied to BOTH DBs
+(owner, 2026-11-12)**, which also seeded 5 decisions already on record. As built:
+- `src/utils/system-review.ts`: 16 reviewable systems (paid products — not our config, sub-entries, free data or
+  customer connectors); Opus 5.5 + server-side web search (`gatewayGenerateGrounded`), thinking low, 4 min budget.
+  Reply is JSON: verdict keep / consider / switch, summary, ≤3 alternatives (better for quality / features / price,
+  switching effort, price note). **A URL survives only if the search tool returned it**; "switch" with nothing to
+  show becomes "keep". Web searches are now priced (`anthropic-web-search`, $0.01) and logged.
+- Prompt carries purpose, version, models + assistants, 30-day spend, current bills, **decisions already taken**
+  (never re-suggest what was turned down unless something material changed) and the last check's summary.
+- `system-review-background.ts` (cron secret, 2 at a time, stops starting at 12 min); `system-review-monthly.ts`
+  scheduled **2nd of the month 05:00 UTC** (prod only). A check stuck > 20 min reads as stalled and can be re-run;
+  one that can't start is marked failed at once.
+- Endpoint actions `check_now` (one / `all`), `add_decision`, `retire_decision` — one validator for page and chat.
+- Drawer: verdict, date, summary, alternatives with "Not for us" (records "Turned down X: why"), sources, Check now,
+  decisions list + add/remove. Map: "Worth a look" / "Better option found" badge; "Check all" button; auto-refresh
+  every 20 s while a check runs. Chat: `better_options`, `propose_check_now`, `propose_add_decision`.
+- **Checked** on a fixture in the browser pane (desktop + phone). **No real check has run yet** — the first one will
+  show whether Opus returns clean JSON within budget. Other grounded callers (AI Visibility, Mentor) still don't log
+  their web searches.
+
 ## 5. Open questions for the owner
-- Currency on the page: costs are logged in USD; show GBP converted at a stated rate, or USD? (Recommend GBP, rate shown.)
-- Fixed costs: enter them yourself in Phase 2's form, or give me the current list to seed?
+- ~~Currency~~ — GBP at the COGS rate, shown (default taken 2026-11-12; say if you want USD).
+- ~~Fixed costs~~ — entered by the owner in the drawer or chat; nothing seeded.

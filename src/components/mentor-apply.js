@@ -106,7 +106,9 @@
       // Feature Requests. Title and description are capped there at 200 / 5000.
       await post('/.netlify/functions/feature-requests', { title: String(d.subject || '').slice(0, 200), description: String(d.description || '').slice(0, 5000), category: 'app_core' });
     } else {
-      await post('/.netlify/functions/support-tickets', { subject: d.subject, category: d.from || 'Business Mentor', description: d.description });
+      // Billing / security → that category, so support-tickets.ts gives it the direct route (support-priority.ts).
+      const category = d.topic === 'billing' || d.topic === 'security' ? d.topic : (d.from || 'Business Mentor');
+      await post('/.netlify/functions/support-tickets', { subject: d.subject, category, description: d.description });
     }
   }
 

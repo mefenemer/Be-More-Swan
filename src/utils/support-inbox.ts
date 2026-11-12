@@ -181,9 +181,9 @@ export function countWaitingOnUs(items: InboxItem[]): number {
 // ── Re-routing ──────────────────────────────────────────────────────────────────────────────
 
 const REROUTE_TICKET_NOTE = (issueId: number) =>
-    `We've passed this to the team that fixes problems — you can follow it as reported problem #${issueId} in Help & Support → Contact us. This conversation is closed so you only have one place to look.`;
+    `We've passed this to the team that fixes problems — you can follow it as issue #${issueId} in Help & Support → Contact us. This conversation is closed so you only have one place to look.`;
 const REROUTE_ISSUE_NOTE = (ticketId: number) =>
-    `This looks like a question rather than a fault, so we've moved it to support request #TK-${ticketId} in Help & Support → Contact us, where we'll answer it. This report is closed so you only have one place to look.`;
+    `This looks like a question rather than a fault, so we've moved it to support request #TK-${ticketId} in Help & Support → Contact us, where we'll answer it. This issue is closed so you only have one place to look.`;
 
 const REROUTE_FEATURE_NOTE = (featureId: number) =>
     `This is an idea for something new rather than a fault or a question, so we've passed it to the product team as feature request #${featureId}. You can follow it in Help & Support → Feature Requests → Your requests, and we'll let you know when its status changes. This conversation is closed so you only have one place to look.`;
@@ -244,7 +244,7 @@ export async function issueToTicket(db: Db, issueId: number, adminId: number): P
             RETURNING id`) as unknown as Array<{ id: number }>;
         await tx.execute(sql`
             INSERT INTO ticket_replies (ticket_id, author_id, body, is_internal)
-            VALUES (${ticket.id}, ${adminId}, ${`Moved here from reported problem #${issueId}.`}, true)`);
+            VALUES (${ticket.id}, ${adminId}, ${`Moved here from issue #${issueId}.`}, true)`);
         await tx.execute(sql`
             INSERT INTO issue_report_messages (issue_id, author_type, author_id, body, status)
             VALUES (${issueId}, 'admin', ${adminId}, ${REROUTE_ISSUE_NOTE(ticket.id)}, 'closed')`);

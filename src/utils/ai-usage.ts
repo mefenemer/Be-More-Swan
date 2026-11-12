@@ -211,6 +211,9 @@ export const SERVICE_UNIT_PRICE_USD: Record<string, { envVar: string; fallback: 
     'hunter-domain-search': { envVar: 'HUNTER_COST_USD_PER_CREDIT', fallback: 0.0285, unit: 'credit' },
     // Email Finder: 1 credit per address FOUND for a named person, none on a miss — the same credit.
     'hunter-email-finder': { envVar: 'HUNTER_COST_USD_PER_CREDIT', fallback: 0.0285, unit: 'credit' },
+    // Claude's server-side web search: $10 per 1,000 searches, on top of tokens (Anthropic pricing).
+    // Logged by the System Map's monthly review (src/utils/system-review.ts); other grounded callers don't yet.
+    'anthropic-web-search': { envVar: 'ANTHROPIC_WEB_SEARCH_USD', fallback: 0.01, unit: 'search' },
 };
 
 export function serviceUnitPriceUsd(service: string): number {

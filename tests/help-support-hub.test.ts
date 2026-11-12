@@ -74,14 +74,17 @@ check('the owner can read a ticket and its PUBLIC replies', () => {
     assert.match(ST, /eq\(ticketReplies\.isInternal, false\)/, 'internal notes must never reach the customer');
 });
 
-check('the owner can reply, which reopens the ticket, and a closed one refuses', () => {
+check('the owner can reply, which reopens the ticket; a closed one refuses once its 30 days are up', () => {
     assert.match(ST, /insert\(ticketReplies\)\.values\(\{ ticketId, authorId: userId, body, isInternal: false \}\)/);
-    assert.match(ST, /set\(\{ status: 'open', updatedAt: new Date\(\) \}\)/);
-    assert.match(ST, /ticket\.status === 'closed'\) return \{ statusCode: 409/);
+    assert.match(ST, /set\(\{ status: 'open', closedAt: null, updatedAt: new Date\(\) \}\)/);
+    // ticket-auto-close.ts: a reply within 30 days of closing reopens it; after that, 409.
+    assert.match(ST, /ticket\.status === 'closed' && !canReopenClosedTicket\(ticket\.closedAt\)\) return \{ statusCode: 409/);
 });
 
 check('the business inbox hears about new tickets, replies and feature ideas', () => {
-    assert.match(ST, /New \$\{newTicket\.category\} ticket/);
+    // The subject line lives in support-priority.ts now (security and billing stand out).
+    assert.match(ST, /inboxSubject\(newTicket\.id, newTicket\.category, newTicket\.subject\)/);
+    assert.match(read('src/utils/support-priority.ts'), /New \$\{category\} ticket/);
     assert.match(ST, /Customer replied/);
     assert.match(read('netlify/functions/feature-requests.ts'), /for \(const to of adminInbox\(\)\)/);
 });

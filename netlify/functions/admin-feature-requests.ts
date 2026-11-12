@@ -17,6 +17,7 @@
 // Admin-only. On any status change, notifies the submitter + voters (US06).
 // Replaces the old admin-feature-roadmap.ts (unified into feature_requests).
 
+import { loadFeatureRevenue } from '../../src/utils/feature-revenue';
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import jwt from 'jsonwebtoken';
@@ -351,14 +352,21 @@ export default withLambda(async (event) => {
                 createdAt: featureRequests.createdAt,
                 updatedAt: featureRequests.updatedAt,
                 submitterEmail: users.email,
+                organisationId: featureRequests.organisationId,
             })
             .from(featureRequests)
             .leftJoin(users, eq(users.id, featureRequests.submittedBy))
             .orderBy(asc(featureRequests.sortOrder), desc(featureRequests.createdAt));
 
+        // Revenue behind each idea (src/utils/feature-revenue.ts): the monthly list price of every
+        // distinct workspace that asked for it or voted for it. A signal next to votes, never instead.
+        const revenue = await loadFeatureRevenue(db, rows.map((r) => ({ id: r.id, organisationId: r.organisationId })));
+
         return json(200, {
             requests: rows.map((r) => ({
                 ...r,
+                revenueGbp: revenue.get(r.id)?.monthlyGbp ?? 0,
+                payingWorkspaces: revenue.get(r.id)?.payingWorkspaces ?? 0,
                 categoryLabel: FR_CATEGORY_LABEL[r.category as keyof typeof FR_CATEGORY_LABEL] || r.category,
                 statusLabel: FR_STATUS_LABEL[r.status as keyof typeof FR_STATUS_LABEL] || r.status,
                 priorityLabel: FR_PRIORITY_LABEL[r.priority as keyof typeof FR_PRIORITY_LABEL] || r.priority,

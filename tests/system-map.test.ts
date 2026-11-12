@@ -24,7 +24,7 @@ const read = (p: string) => readFileSync(join(root, p), 'utf8');
 
 console.log('\nSystem Map — costs group by system, every paid call logs');
 
-const registry = read('netlify/functions/admin-system-status.ts');
+const registry = read('src/utils/system-registry.ts');
 const registryKeys = new Set([
     ...[...registry.matchAll(/key: '([a-z0-9-]+)'/g)].map((m) => m[1]),
     ...[...registry.matchAll(/connector\('([a-z0-9]+)'/g)].map((m) => m[1]),
