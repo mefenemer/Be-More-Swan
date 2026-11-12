@@ -19,7 +19,7 @@
 # dispatch can become shell.
 
 name: Hotfix PR
-run-name: Hotfix PR for issue #${{ inputs.issue_id }}
+run-name: "Hotfix PR for issue #${{ inputs.issue_id }}"
 
 on:
   workflow_dispatch:

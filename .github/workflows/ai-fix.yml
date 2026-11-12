@@ -31,7 +31,7 @@
 # Repo variable AI_FIX_MODEL (optional): the model Claude Code uses. Default claude-opus-5-5.
 
 name: AI fix
-run-name: AI fix for issue #${{ inputs.issue_id }}
+run-name: "AI fix for issue #${{ inputs.issue_id }}"
 
 on:
   workflow_dispatch:

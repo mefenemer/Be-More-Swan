@@ -21,7 +21,7 @@
 # built-in GITHUB_TOKEN does not start other workflows (CI on staging) afterwards.
 
 name: Merge to staging
-run-name: Merge to staging for issue #${{ inputs.issue_id }}
+run-name: "Merge to staging for issue #${{ inputs.issue_id }}"
 
 on:
   workflow_dispatch:
