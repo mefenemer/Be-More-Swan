@@ -132,7 +132,7 @@ async function main() {
 
     await check('workflow: run-name matches; inputs reach scripts only through env and are numbers', () => {
         assert.strictEqual(mergeRunTitle(42), 'Merge to staging for issue #42');
-        assert.ok(wf.includes('run-name: Merge to staging for issue #${{ inputs.issue_id }}'));
+        assert.ok(wf.includes('run-name: "Merge to staging for issue #${{ inputs.issue_id }}"'));
         const runBlocks = wf.split(/\n\s+run: \|/).slice(1).map((b) => b.split(/\n\s{6}- /)[0]);
         assert.ok(runBlocks.length >= 5, String(runBlocks.length));
         for (const b of runBlocks) assert.ok(!b.includes('${{'), `no expression inside a script:\n${b.slice(0, 120)}`);
