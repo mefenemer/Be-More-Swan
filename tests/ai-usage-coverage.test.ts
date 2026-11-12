@@ -84,7 +84,10 @@ check('the gateway records every call, not only those that pass usage', () => {
 check('no file both calls the gateway and logs for itself (that double-counts)', () => {
     const both = sources.filter((f) => {
         if (f === 'src/lib/ai-gateway.ts') return false;
-        const s = read(f);
+        // Web search is billed per search, on top of tokens, and the gateway records only the tokens
+        // (src/utils/system-review.ts logSearches). A separate 'anthropic-web-search' line is a different
+        // charge, not the same call logged twice, so it doesn't count here.
+        const s = read(f).replace(/logAiUsage\(\{\s*model:\s*'anthropic-web-search'/g, '');
         return /gatewayGenerate(Grounded)?\(/.test(s) && /logAiUsage\(|logMessageUsage\(/.test(s) && !/messages\.(create|stream)\(/.test(s);
     });
     assert.deepStrictEqual(both, [], `these log a gateway call a second time:\n    ${both.join('\n    ')}`);
