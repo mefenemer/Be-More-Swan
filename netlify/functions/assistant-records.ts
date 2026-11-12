@@ -70,7 +70,12 @@ const RECORD_TYPES = new Set(['lead', 'enrichment', 'meeting', 'invoice', 'ticke
  * campaigns.ts `decide` (assistants.js routes them there).
  */
 const MIRROR_RECORD_TYPES = new Set(['campaign_order', 'campaign_decision']);
-const READ_RECORD_TYPES = new Set([...RECORD_TYPES, ...MIRROR_RECORD_TYPES]);
+/**
+ * The Email Assistant's Review tab (docs/email-assistant-plan.md §5.3). READ-only and empty in Phase 1;
+ * Phase 2 writes drafted replies and clean-up batches here through its own action, never a CSV import.
+ */
+const EMAIL_ACTION_RECORD_TYPES = new Set(['email_action']);
+const READ_RECORD_TYPES = new Set([...RECORD_TYPES, ...MIRROR_RECORD_TYPES, ...EMAIL_ACTION_RECORD_TYPES]);
 const SOURCES = new Set(['chat', 'csv_import', 'integration']);
 // Bulk-import ceiling per request — a CSV bigger than this should be split client-side.
 const MAX_BULK_RECORDS = 500;

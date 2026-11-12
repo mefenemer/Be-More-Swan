@@ -578,12 +578,44 @@ Proposed task costs (new keys in `task-weights.ts`, set in Admin → Money → T
   retention check (§3.4).
 - Owner decisions D1–D12: all taken 2026-11-12 (end of this doc).
 
-**Phase 1: Outlook, read-only (staging, flag `email_assistant`)**
-- `mailboxes` table, `OUTLOOK_MAILBOX_SCOPE` grant, connect/disconnect (with full deletion).
-- `mail-reader/` Graph adapter, delta polling every 10 min (no push yet), advisory lock.
-- Sorting (headers + AI), priority, one-line summaries, Emails tab, registry entry, docked chat
-  (read-only questions), morning summary section. Nothing written to the mailbox.
-- Measure AI cost per email on our own mailboxes.
+**Phase 1: Outlook, read-only (staging, flag `email_assistant`)** — ✅ BUILT 2026-11-12 on branch
+`claude/email-assistant-phase1` (typecheck + full suite pass; checked in the browser against a fixture
+page only — no real mailbox has been connected yet). As built:
+- `db/z-mailboxes.sql` (⚠️ apply to BOTH DBs before deploy): `mailboxes` (one person's; one vault key per
+  mailbox) and `mailbox_messages` (headers + derived only, no body column), the `email_assistant` flag
+  (off), and the catalogue row **hidden** (not Coming soon: a Coming-soon card is public, §8).
+- `src/utils/mailboxes.ts`: `OUTLOOK_MAILBOX_SCOPE` (Mail.ReadWrite + Mail.Send + offline_access +
+  User.Read, a third grant on the existing Azure app), owner-scoped reads, token refresh (single flight +
+  row lock, re-read under the lock), disconnect = vault secret + row deleted (messages cascade).
+- `netlify/functions/mailbox-oauth.ts` at `/api/mailbox-oauth/outlook/{connect,callback}`: server-side
+  CSRF, the person finishing must be the one who started, granted scope checked, "admin approval
+  needed" told apart from Cancel.
+- Reading: `src/utils/mail-reader/graph.ts` (delta on the Inbox, first read 14 days), `mailbox-sync.ts`
+  (lease on `sync_lock_until` instead of an advisory lock — the pool is max:1 and a lease survives
+  across instances), `mailbox-sync-background.ts`, `poll-mailboxes.ts` every 10 min (staging poked by
+  staging-crons.yml).
+- Sorting `src/utils/email-sort.ts`: private sender → sender rule → headers → AI (Haiku 5.5, batches of
+  10, email as data in `<email>` tags). Daily ceiling 300 AI-sorted emails per mailbox; **no tasks
+  charged in Phase 1** (cost logged by the gateway, session `email-sort`).
+- Emails tab `src/components/assistant-mailbox.js` (hubTab kind `mailbox`): Needs you / All / categories
+  with email, open an email (text fetched then, not stored), move to another category (our list only;
+  sender remembered), private senders, Refresh, Disconnect. Support view (impersonation): counts only.
+- Results cards from `mailboxes.ts` `stats`; goal metric `emails_sorted` (business mailboxes only).
+- Chat route `email_assistant` reads the person's own sorted mail per turn (private senders left out
+  entirely); it changes nothing and says where the buttons are.
+- Special-category: `buildSystemPrompt` takes the role's rule (`specialCategoryRuleFor`); admin-api
+  saves the role's own clause (`special-category-clause.ts`). tests/special-category-rule.test.ts
+  updated to hold "only email_assistant swaps it".
+- Tests: tests/mailbox-email-assistant.test.ts (30 checks).
+
+**Not done in Phase 1, on purpose or deferred (not silent):**
+- Chat cards for move / private senders / refresh / disconnect: Phase 1 chat is read-only and says so;
+  the cards come in Phase 2 on the same `mailboxes.ts` actions.
+- The morning summary "Email" section; matching senders against customers (bookings, Audience, CRM);
+  editable categories; a personal mailbox (Phase 5).
+- DPA 1.2 text: stays in `docs/email-assistant-phase0.md` §5 and goes into `get-dpa-content.ts` with the
+  version bump at launch, so a not-yet-agreed version is never served.
+- Measuring the real AI cost per email: needs a connected mailbox (owner's own, on staging).
 
 **Phase 2: actions with approval (Outlook)**
 - Drafted replies in Review, Send in thread, Save to Drafts, Shorter/Longer/Redraft.
@@ -660,6 +692,11 @@ on Google's API reference that `gmail.modify` covers `messages.send` and `drafts
 - [ ] `db/z-mailboxes.sql` (and the task-cost rows) applied to **both** DBs before deploy; help
       article SQL on both DBs at release.
 - [ ] Feature flag `email_assistant` per org; Gmail behind its own flag until approval.
+- [ ] Azure app: add redirect URIs `https://staging--bemoreswan.netlify.app/api/mailbox-oauth/outlook/callback`
+      and the prod equivalent, and the delegated `Mail.ReadWrite` permission (Phase 1).
+- [ ] To test Phase 1 on staging: apply `db/z-mailboxes.sql`, add the test workspace id to the
+      `email_assistant` flag's allowed list, set the Email Assistant to Beta in Admin → Assistants, hire it,
+      Emails tab → Connect Outlook.
 - [ ] Scheduled function for watch/subscription renewal and the polling safety net deployed and seen
       running on staging.
 - [ ] Tests in §9 pass; a real Outlook.com and a real Microsoft 365 mailbox, and a real @gmail.com

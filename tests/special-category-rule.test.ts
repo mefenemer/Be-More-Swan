@@ -9,7 +9,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SPECIAL_CATEGORY_RULE } from '../src/constants/special-category-rule';
+import { SPECIAL_CATEGORY_RULE, EMAIL_ASSISTANT_SPECIAL_CATEGORY_RULE, specialCategoryRuleFor } from '../src/constants/special-category-rule';
 import { senderIdentityBlock } from '../src/config/sender-identity';
 
 let passed = 0;
@@ -32,7 +32,7 @@ check('it is about identifiable PEOPLE, so a pharmacy or a church can still writ
 });
 
 const SEAMS: Array<[string, number]> = [
-    ['netlify/functions/chat-orchestrator.ts', 2],      // both branches of buildSystemPrompt (live + handoff)
+    // chat-orchestrator.ts: checked below — buildSystemPrompt carries `${rule}` (the general rule by default) on both branches.
     ['netlify/functions/process-content-jobs.ts', 1],
     ['src/utils/blog-generate.ts', 1],
     ['src/utils/newsletter-generate.ts', 2],            // an email, and an email campaign step
@@ -50,8 +50,20 @@ for (const [file, n] of SEAMS) {
 check('chat: buildSystemPrompt returns the rule on BOTH paths (with and without set-up answers)', () => {
     const fn = code('netlify/functions/chat-orchestrator.ts');
     const body = fn.slice(fn.indexOf('function buildSystemPrompt('), fn.indexOf('const defaultRoute'));
-    assert.ok(/if \(entries\.length === 0\) return `\$\{dated\}\\n\\n\$\{SPECIAL_CATEGORY_RULE\}`/.test(body));
-    assert.ok(/<\/strict_configuration>\s*\n\s*\n\$\{SPECIAL_CATEGORY_RULE\}`/.test(body));
+    // `rule` defaults to the general rule; only the Email Assistant passes its own (specialCategoryRuleFor).
+    assert.ok(/function buildSystemPrompt\([^)]*rule: string = SPECIAL_CATEGORY_RULE\)/.test(body), 'rule defaults to SPECIAL_CATEGORY_RULE');
+    assert.ok(/if \(entries\.length === 0\) return `\$\{dated\}\\n\\n\$\{rule\}`/.test(body));
+    assert.ok(/<\/strict_configuration>\s*\n\s*\n\$\{rule\}`/.test(body));
+});
+check('only the Email Assistant swaps the rule, and its own still refuses to infer or label', () => {
+    for (const k of ['social_media_manager', 'lead_qualifier', 'business_mentor', null, undefined, '']) {
+        assert.strictEqual(specialCategoryRuleFor(k as string), SPECIAL_CATEGORY_RULE, String(k));
+    }
+    assert.strictEqual(specialCategoryRuleFor('email_assistant'), EMAIL_ASSISTANT_SPECIAL_CATEGORY_RULE);
+    assert.ok(/Never infer a special category/.test(EMAIL_ASSISTANT_SPECIAL_CATEGORY_RULE));
+    assert.ok(/never use it to target, profile or personalise/.test(EMAIL_ASSISTANT_SPECIAL_CATEGORY_RULE));
+    const fn = code('netlify/functions/chat-orchestrator.ts');
+    assert.ok(/assistantRow\.onboardingContext,\s*\n\s*specialCategoryRuleFor\(assistantRow\.roleKey\),/.test(fn), 'the live turn passes the role\'s rule');
 });
 check('outreach: every sender block — named or not — carries the rule', () => {
     assert.ok(senderIdentityBlock({ businessName: 'Crumb & Co' }).includes(SPECIAL_CATEGORY_RULE));

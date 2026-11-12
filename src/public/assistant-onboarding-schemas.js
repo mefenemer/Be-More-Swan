@@ -1098,5 +1098,41 @@ function liveCost(kind) { return (typeof window !== 'undefined' && window.taskCo
         ],
       },
     ],
+
+    // Email Assistant (docs/email-assistant-plan.md). The mailbox itself is connected on the Emails tab
+    // (an OAuth sign-in can't happen inside a set-up form); these answers shape how it sorts.
+    email_assistant: [
+      {
+        title: 'What counts as urgent for you?',
+        description: 'Your Email Assistant puts emails that need you today at the top. Tell it what makes an email urgent in your business — it reads this when it sorts.',
+        fields: [
+          {
+            key: 'urgentMeans',
+            label: 'Urgent means…',
+            type: 'textarea',
+            required: false,
+            placeholder: 'e.g. anything from a guest arriving this week, a supplier saying a delivery is late, a payment that failed',
+          },
+        ],
+      },
+      {
+        title: 'Operational set-up',
+        description: 'After set-up, open the Emails tab and connect your Outlook mailbox (Microsoft 365 or Outlook.com). Gmail is coming soon. Only you will see your email in Be More Swan, and nothing in your mailbox is changed.',
+        operational: true,
+        fields: [
+          {
+            key: 'mailProvider',
+            label: 'Which email do you use for your business?',
+            type: 'dropdown',
+            required: true,
+            placeholder: 'Choose…',
+            options: [
+              { value: 'outlook', label: 'Outlook (Microsoft 365 or Outlook.com)' },
+              { value: 'gmail', label: 'Gmail (coming soon)' },
+            ],
+          },
+        ],
+      },
+    ],
   };
 }));

@@ -94,6 +94,9 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     client_onboarding_guide:   ['email', 'esign', 'knowledge'],
     standup_summarizer:        ['chat', 'project_mgmt'],
     meeting_note_taker:        ['calendar', 'knowledge'],
+    // Its mailbox is connected on its own Emails tab (mailbox-oauth.ts → mailboxes table), not a workspace
+    // connection, so it needs none of these; 'knowledge' lets it read Brand Assets like any assistant.
+    email_assistant:           ['knowledge'],
     status_report_generator:   ['project_mgmt', 'chat'],
     accounts_receivable_clerk: ['payments', 'accounting'],
     expense_categorizer:       ['accounting'],

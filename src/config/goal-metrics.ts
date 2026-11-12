@@ -472,6 +472,19 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         realism: { maxDailyDelta: 200 },
     },
     {
+        // docs/email-assistant-plan.md. Counts BUSINESS mailboxes only — a personal mailbox is one person's.
+        key: 'emails_sorted',
+        label: 'Emails Sorted',
+        unit: 'emails',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['email_assistant'],
+        description: 'New emails this assistant put into a category with a one-line summary.',
+        available: true,
+        realism: { maxDailyDelta: 2000 },
+    },
+    {
         key: 'invoices_chased',
         label: 'Invoices Chased',
         unit: 'invoices',
