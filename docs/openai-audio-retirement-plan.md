@@ -77,11 +77,15 @@ Tour narration (`tour-narration.ts`) should move with the same choice. It could 
 | Part | Now | After |
 | --- | --- | --- |
 | Word timings | whisper-1 $0.006 | Scribe ~$0.0033 |
-| Fallback voice (rare) | gpt-4o-mini-tts ~$0.015 | realtime-2.1-mini ~$0.025 (estimate) |
+| Fallback voice (rare) | gpt-4o-mini-tts ~$0.015 | none (owner chose D) — $0 |
 | Pepper voiceover (main path) | ElevenLabs chars + $0.006 | ElevenLabs chars + ~$0.0033, or + $0 with TTS timestamps |
 
 ## Decisions for the owner
 
-1. Move word timings to ElevenLabs Scribe? (recommended)
-2. Fallback voice: A (`gpt-realtime-2.1-mini`), B, C or D?
-3. Test ElevenLabs TTS-with-timestamps to skip transcription on our own voiceovers?
+1. Move word timings to ElevenLabs Scribe? (recommended) — **open**
+2. Fallback voice — **decided 2026-11-12: D, no fallback.** What that means when it's built:
+   - `synthesize()` in `src/lib/tts.ts` stops falling back to OpenAI. If ElevenLabs is off or fails, the voiceover fails with a clear message. `TTS_MODEL`, `synthesizeSpeech` and the OpenAI speech cost line go.
+   - `tour-narration.ts` uses OpenAI as its *main* voice, so "no fallback" there means moving it to the ElevenLabs Pepper voice, not just deleting a fallback.
+   - The `provider-balance.ts` OpenAI ping switches to `GET /v1/models` (still needed for whisper until step 1 lands).
+   - Timing: the OpenAI path keeps working until 6 Jan 2027, so this can be built any time before then. Building it in December keeps the current safety net for longest.
+3. Test ElevenLabs TTS-with-timestamps to skip transcription on our own voiceovers? — **open**
