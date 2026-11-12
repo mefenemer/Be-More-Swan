@@ -96,9 +96,11 @@ function fakeDb(reclaimedIds: number[]) {
         const queuedBranch = reqBlock.slice(reqBlock.indexOf("issue.devMergeStatus === 'queued'"));
         assert.ok(/canForce: false/.test(queuedBranch.slice(0, queuedBranch.indexOf('}'))));
     });
-    await check('request-merge re-queue clears the old claim and is compare-and-swapped', () => {
-        const upd = reqBlock.slice(reqBlock.indexOf("devMergeStatus: 'queued'"));
-        assert.ok(/devRunnerId: null/.test(upd) && /devRunnerHeartbeat: null/.test(upd));
+    await check('request-merge (and a forced restart) takes a fresh cloud claim, compare-and-swapped', () => {
+        // Since merges moved to GitHub Actions (issue-cloud-merge.ts) the claim replaces the old
+        // runner's identity and stamps a new start time instead of clearing them for a laptop queue.
+        const upd = reqBlock.slice(reqBlock.indexOf("devMergeStatus: 'merging'"));
+        assert.ok(/devRunnerId: CLOUD_RUNNER_ID/.test(upd) && /devRunnerHeartbeat: new Date\(\)/.test(upd));
         assert.ok(/eq\(issueReports\.devMergeStatus, issue\.devMergeStatus\)/.test(reqBlock));
     });
     await check('the issue list self-heals stranded merges', () => {

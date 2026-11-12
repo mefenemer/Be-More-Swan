@@ -2,8 +2,9 @@
 // "Pass to Developer" — machine-to-machine endpoint for the local AI auto-fix runner.
 //
 // Since 2026-11-12 the FIX job runs in GitHub Actions (.github/workflows/ai-fix.yml, started and
-// followed by src/utils/issue-ai-fix.ts), so nothing new is 'queued' for ?action=claim; it only
-// drains rows queued before that. Merges to staging and conflict fixes still come through here.
+// followed by src/utils/issue-ai-fix.ts), and so do merges to staging (merge-to-staging.yml,
+// src/utils/issue-cloud-merge.ts). Nothing new is 'queued' for ?action=claim or ?action=claim-merge;
+// they only drain rows queued before that. Conflict fixes still come through here.
 //
 // The admin portal queues an issue (POST /admin-issue-reports?action=handoff, cookie-auth).
 // A watcher running on a developer machine — where the repo + Claude Code live — then

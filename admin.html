@@ -6898,10 +6898,14 @@ function _irMergeCard(i) {
     // force a re-queue from here meanwhile.
     const stalled = _irRunnerStalled(i) || !i.devRunnerHeartbeat;
     const forceBtn = (isSuper && stalled)
-      ? `<button onclick="requestMerge(${i.id}, true)" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔁</span> Force re-queue (runner unresponsive)</button>`
+      ? `<button onclick="requestMerge(${i.id}, true)" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔁</span> Force restart (merge unconfirmed)</button>`
       : '';
     chip = stalled ? ['bg-amber-100 text-amber-800', 'Merging — stalled?'] : ['bg-indigo-100 text-indigo-700', 'Merging…'];
-    const who = i.devRunnerId ? `<div class="text-xs ${stalled ? 'text-amber-700' : 'text-indigo-600'}">🖥 Runner <b>${_esc(i.devRunnerId)}</b> ${stalled ? 'claimed the merge but has gone quiet' : 'is merging'}${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
+    // 'GitHub Actions' = .github/workflows/merge-to-staging.yml (src/utils/issue-cloud-merge.ts).
+    const cloudMerge = i.devRunnerId === 'GitHub Actions';
+    const who = cloudMerge
+      ? `<div class="text-xs ${stalled ? 'text-amber-700' : 'text-indigo-600'}">☁️ ${stalled ? 'GitHub Actions started this but nothing has confirmed it yet' : 'Merging in <b>GitHub Actions</b> · usually under 2 minutes. Reopen the issue to refresh.'}</div>`
+      : i.devRunnerId ? `<div class="text-xs ${stalled ? 'text-amber-700' : 'text-indigo-600'}">🖥 Runner <b>${_esc(i.devRunnerId)}</b> ${stalled ? 'claimed the merge but has gone quiet' : 'is merging'}${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
     inner = `<div class="flex items-center gap-2 text-sm font-semibold ${stalled ? 'text-amber-700' : 'text-indigo-700'}"><span class="animate-pulse">●</span> ${stalled ? 'Merge appears stuck' : 'Merging to staging…'}</div>${who}${prLink}${forceBtn}`;
   } else if (ms === 'conflict_queued') {
     chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
@@ -6982,11 +6986,11 @@ function _irProdCard(i) {
 
 async function requestMerge(id, force) {
   const ok = force
-    ? await window.confirmModal('The previous attempt looks stuck. This resets it and hands the pull request back to the developer runner — if it already merged, the runner just confirms it.', { title: 'Force re-queue this merge?' })
-    : await window.confirmModal('The developer runner will merge the pull request and the issue will move to “Fixed & Ready to Test”.', { title: 'Merge this fix to the staging branch now?' });
+    ? await window.confirmModal('The previous attempt looks stuck. This starts the merge again in GitHub Actions — if it already merged, that is simply confirmed.', { title: 'Restart this merge?' })
+    : await window.confirmModal('GitHub Actions will merge the pull request into staging. The issue moves on once the fix is live.', { title: 'Merge this fix to the staging branch now?' });
   if (!ok) return;
   const btn = event?.target?.closest('button');
-  if (btn) { btn.disabled = true; btn.textContent = force ? 'Re-queuing…' : 'Requesting…'; }
+  if (btn) { btn.disabled = true; btn.textContent = force ? 'Restarting…' : 'Starting…'; }
   try {
     await api(`${IR_API}?id=${id}&action=request-merge`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -7036,7 +7040,7 @@ async function requestConflictFix(id) {
 
 // ── "Merge all to staging" (super-admin only) ──────────────────────────────────
 // On the Merge tab, merge every ready fix PR in one go instead of opening each
-// ticket. The developer runner merges each PR in turn; once nothing is left in
+// ticket. GitHub Actions merges each PR (merge-to-staging.yml); once nothing is left in
 // flight, the backend itself rebuilds staging (see triggerStagingDeployIfDrained
 // in src/utils/issue-reports.ts) — there's no separate "commit"/deploy step here.
 let _irMergeAllTracking = false; // a bulk merge was queued this session and is draining
@@ -7068,14 +7072,15 @@ function _updateMergeAllBtns(issues) {
   // merge status until merged) — other filters would report a false "done".
   if (_irMergeAllTracking && (_irFilter === '' || _irFilter === 'merge')) {
     if (inFlight.length > 0) {
-      if (!_irMergePollTimer) _irMergePollTimer = setInterval(loadIssueReports, 5000);
+      // Each list load asks GitHub about up to 5 cloud merges, so poll gently.
+      if (!_irMergePollTimer) _irMergePollTimer = setInterval(loadIssueReports, 15000);
     } else {
       _irMergeAllTracking = false;
       if (_irMergePollTimer) { clearInterval(_irMergePollTimer); _irMergePollTimer = null; }
       // Failed merges pop back into the eligible list above — flag them; whatever did
       // merge has already been committed to staging automatically.
       if (eligible.length > 0) {
-        window.showToast?.(`${eligible.length} merge${eligible.length === 1 ? '' : 's'} failed — open the ticket${eligible.length === 1 ? '' : 's'} to see the runner output, or press “Merge all” to retry.`, { icon: '⚠️' });
+        window.showToast?.(`${eligible.length} merge${eligible.length === 1 ? '' : 's'} failed — open the ticket${eligible.length === 1 ? '' : 's'} to see why, or press “Merge all” to retry.`, { icon: '⚠️' });
       }
     }
   }
@@ -7084,13 +7089,13 @@ function _updateMergeAllBtns(issues) {
 async function requestMergeAll() {
   const btn = document.getElementById('ir-merge-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (!(await window.confirmModal(`The developer runner will merge each pull request in turn and staging will rebuild automatically once every merge has finished.`, { title: `Merge all ${window.escapeHtml(n)} ready fix${n === 1 ? '' : 'es'} to the staging branch now?` }))) return;
-  if (btn) { btn.disabled = true; btn.textContent = '🔀 Queuing…'; }
+  if (!(await window.confirmModal(`GitHub Actions will merge each pull request (up to 10 per click) and staging will rebuild automatically once every merge has finished.`, { title: `Merge all ${window.escapeHtml(n)} ready fix${n === 1 ? '' : 'es'} to the staging branch now?` }))) return;
+  if (btn) { btn.disabled = true; btn.textContent = '🔀 Starting…'; }
   try {
     const d = await api(`${IR_API}?action=request-merge-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
-    if ((d.queued || 0) > 0) { _irMergeAllTracking = true; }
+    if ((d.queued || 0) > 0) { _irMergeAllTracking = true; if (d.error || d.note) window.showToast?.(d.error ? `${d.queued} started. ${d.error}` : d.note, { icon: d.error ? '⚠️' : '🔀' }); }
     else window.showToast?.('Nothing to merge — no fix PRs are ready (fixes awaiting a database migration must be run from their ticket first).', { icon: '⚠️' });
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { loadIssueReports(); }

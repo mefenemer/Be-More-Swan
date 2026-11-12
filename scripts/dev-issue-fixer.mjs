@@ -4,9 +4,10 @@
 // "Pass to Developer" — local AI auto-fix runner.
 //
 // ⚠️ Since 2026-11-12 the FIX job runs in GitHub Actions instead (.github/workflows/ai-fix.yml,
-// started and followed by src/utils/issue-ai-fix.ts), so the app no longer queues fixes here.
-// This watcher is still what drains merges to staging and conflict fixes; its fix loop only picks
-// up rows queued before the switch.
+// started and followed by src/utils/issue-ai-fix.ts), and so do merges to staging
+// (.github/workflows/merge-to-staging.yml, src/utils/issue-cloud-merge.ts). The app no longer
+// queues either here. This watcher is still what drains conflict fixes; its fix and merge loops
+// only pick up rows queued before the switch.
 //
 // This watcher runs on a DEVELOPER MACHINE, where the repo and the Claude Code CLI
 // live. The cloud admin portal only queues work; this script does the actual fixing:

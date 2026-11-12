@@ -14,7 +14,7 @@
 //
 // 'queued' is no longer set by anything here: it is the laptop runner's queue. The laptop's claim
 // endpoint skips cloud rows (admin-issue-handoff.ts), so a laptop left running can't reclaim them.
-// Merging to staging and conflict fixes still go through the laptop runner.
+// Merging to staging is issue-cloud-merge.ts; conflict fixes still go through the laptop runner.
 //
 // The issue text is untrusted (a customer, or a model, wrote it). It travels only as a workflow
 // input that the workflow reads through an env var, and Claude is told it is data.
@@ -47,11 +47,11 @@ export const SQL_START = '---SQL-MIGRATION-START---';
 export const SQL_END = '---SQL-MIGRATION-END---';
 
 const DEFAULT_REPO = 'mefenemer/Be-More-Swan';
-const repoOf = (r?: string) => r || process.env.GITHUB_REPO || DEFAULT_REPO;
+export const repoOf = (r?: string) => r || process.env.GITHUB_REPO || DEFAULT_REPO;
 export const aiFixBranch = (issueId: number) => `ai-fix/issue-${issueId}`;
 export const aiFixRunTitle = (issueId: number) => `AI fix for issue #${issueId}`;
 
-function headers(token: string): Record<string, string> {
+export function ghHeaders(token: string): Record<string, string> {
     return {
         Authorization: `Bearer ${token}`,
         Accept: 'application/vnd.github+json',
@@ -59,8 +59,8 @@ function headers(token: string): Record<string, string> {
         'User-Agent': 'issue-ai-fix',
     };
 }
-const writeToken = () => process.env.GITHUB_AI_FIX_TOKEN || process.env.GITHUB_HOTFIX_TOKEN || '';
-const readToken = () => writeToken() || process.env.GITHUB_FIX_CHECK_TOKEN || '';
+export const writeToken = () => process.env.GITHUB_AI_FIX_TOKEN || process.env.GITHUB_HOTFIX_TOKEN || '';
+export const readToken = () => writeToken() || process.env.GITHUB_FIX_CHECK_TOKEN || '';
 
 /** Strip control characters (keeping newlines and tabs) and cap the length. */
 export function sanitiseIssueText(s: string | null | undefined, max = AI_FIX_TEXT_MAX): string {
@@ -113,7 +113,7 @@ export async function dispatchAiFix(opts: { issueId: number; issueText: string; 
     try {
         const res = await f(`https://api.github.com/repos/${repoOf(opts.repo)}/actions/workflows/${AI_FIX_WORKFLOW}/dispatches`, {
             method: 'POST',
-            headers: { ...headers(token), 'Content-Type': 'application/json' },
+            headers: { ...ghHeaders(token), 'Content-Type': 'application/json' },
             body: JSON.stringify({ ref: AI_FIX_BASE, inputs: { issue_id: String(opts.issueId), issue_text: sanitiseIssueText(opts.issueText) || `Issue #${opts.issueId}` } }),
         });
         if (res.status === 204 || res.ok) return null;
@@ -130,7 +130,7 @@ export interface AiFixPr { url: string; number: number; state: 'open' | 'closed'
 export interface AiFixRun { id: number; status: string; conclusion: string | null; url: string }
 
 const SLACK_MS = 2 * 60_000;
-const ms = (d: Date | string | null | undefined) => (d ? new Date(d).getTime() : 0);
+export const ms = (d: Date | string | null | undefined) => (d ? new Date(d).getTime() : 0);
 
 /**
  * This attempt's PR, found by its branch. A PR from an earlier attempt only counts if it was opened,
@@ -142,7 +142,7 @@ export async function findAiFixPr(opts: { issueId: number; since: Date | string 
     const f = opts.fetchImpl || (fetch as unknown as FetchLike);
     const since = ms(opts.since) - SLACK_MS;
     try {
-        const res = await f(`https://api.github.com/repos/${repo}/pulls?state=all&base=${AI_FIX_BASE}&head=${encodeURIComponent(`${owner}:${aiFixBranch(opts.issueId)}`)}&per_page=10`, { headers: headers(opts.token) });
+        const res = await f(`https://api.github.com/repos/${repo}/pulls?state=all&base=${AI_FIX_BASE}&head=${encodeURIComponent(`${owner}:${aiFixBranch(opts.issueId)}`)}&per_page=10`, { headers: ghHeaders(opts.token) });
         if (!res.ok) return 'error';
         const list = await res.json();
         if (!Array.isArray(list)) return 'error';
@@ -159,38 +159,44 @@ export async function findAiFixPr(opts: { issueId: number; since: Date | string 
     }
 }
 
-/** This attempt's workflow run, matched by its run-name and started no earlier than the dispatch. */
-export async function findAiFixRun(opts: { issueId: number; since: Date | string | null; token: string; repo?: string; fetchImpl?: FetchLike }): Promise<AiFixRun | null | 'error'> {
+/** A workflow's newest dispatch run with this run-name, started no earlier than `since` (less a little slack). */
+export async function findWorkflowRun(opts: { workflow: string; title: string; since: Date | string | null; token: string; repo?: string; fetchImpl?: FetchLike }): Promise<AiFixRun | null | 'error'> {
     const f = opts.fetchImpl || (fetch as unknown as FetchLike);
     const since = ms(opts.since) - SLACK_MS;
     try {
-        const res = await f(`https://api.github.com/repos/${repoOf(opts.repo)}/actions/workflows/${AI_FIX_WORKFLOW}/runs?event=workflow_dispatch&per_page=50`, { headers: headers(opts.token) });
+        const res = await f(`https://api.github.com/repos/${repoOf(opts.repo)}/actions/workflows/${opts.workflow}/runs?event=workflow_dispatch&per_page=50`, { headers: ghHeaders(opts.token) });
         if (!res.ok) return 'error';
         const runs = (await res.json())?.workflow_runs;
-        const run = Array.isArray(runs) ? runs.find((r: any) => r.display_title === aiFixRunTitle(opts.issueId) && ms(r.created_at) >= since) : null;
+        const run = Array.isArray(runs) ? runs.find((r: any) => r.display_title === opts.title && ms(r.created_at) >= since) : null;
         return run ? { id: Number(run.id), status: String(run.status), conclusion: run.conclusion ?? null, url: String(run.html_url) } : null;
     } catch {
         return 'error';
     }
 }
 
+/** This attempt's AI fix run. */
+export function findAiFixRun(opts: { issueId: number; since: Date | string | null; token: string; repo?: string; fetchImpl?: FetchLike }) {
+    return findWorkflowRun({ ...opts, workflow: AI_FIX_WORKFLOW, title: aiFixRunTitle(opts.issueId) });
+}
+
 /**
- * The workflow's own reason for failing (its "AI fix" error annotation), best-effort: needs Checks
- * read on the token. Model-written text may be in it, so it is only ever shown escaped.
+ * A run's own reason for failing: its error annotation with this title (the workflows' "Say why it
+ * failed" step). Best-effort: needs Checks read on the token. Model-written text may be in it, so it
+ * is only ever shown escaped.
  */
-export async function findAiFixFailureReason(opts: { runId: number; token: string; repo?: string; fetchImpl?: FetchLike }): Promise<string | null> {
+export async function findRunFailureReason(opts: { runId: number; title: string; token: string; repo?: string; fetchImpl?: FetchLike }): Promise<string | null> {
     const repo = repoOf(opts.repo);
     const f = opts.fetchImpl || (fetch as unknown as FetchLike);
     try {
-        const jr = await f(`https://api.github.com/repos/${repo}/actions/runs/${opts.runId}/jobs?per_page=5`, { headers: headers(opts.token) });
+        const jr = await f(`https://api.github.com/repos/${repo}/actions/runs/${opts.runId}/jobs?per_page=5`, { headers: ghHeaders(opts.token) });
         if (!jr.ok) return null;
         const job = (await jr.json())?.jobs?.[0];
         const checkRunId = job?.check_run_url ? String(job.check_run_url).split('/').pop() : job?.id;
         if (!checkRunId) return null;
-        const ar = await f(`https://api.github.com/repos/${repo}/check-runs/${checkRunId}/annotations?per_page=20`, { headers: headers(opts.token) });
+        const ar = await f(`https://api.github.com/repos/${repo}/check-runs/${checkRunId}/annotations?per_page=20`, { headers: ghHeaders(opts.token) });
         if (!ar.ok) return null;
         const notes = await ar.json();
-        const mine = Array.isArray(notes) ? notes.find((a: any) => a.title === 'AI fix' && a.message) : null;
+        const mine = Array.isArray(notes) ? notes.find((a: any) => a.title === opts.title && a.message) : null;
         return mine ? sanitiseIssueText(String(mine.message), 3000) : null;
     } catch {
         return null;
@@ -314,7 +320,7 @@ export async function syncAiFix(db: Db, row: AiFixRow, opts: { token?: string; r
         const run = pr ? null : await findAiFixRun(base);
         if (run === 'error') return false;
         const failureReason = run && run.status === 'completed'
-            ? await findAiFixFailureReason({ runId: run.id, token, repo: opts.repo, fetchImpl: opts.fetchImpl })
+            ? await findRunFailureReason({ runId: run.id, title: 'AI fix', token, repo: opts.repo, fetchImpl: opts.fetchImpl })
             : null;
         const next = nextAiFixState({ current: row.devHandoffStatus, runnerId: row.devRunnerId, startedAt: row.devHandoffAt, pr, run, failureReason, now: opts.now });
         if (!next) return false;

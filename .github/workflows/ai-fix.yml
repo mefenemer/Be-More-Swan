@@ -5,7 +5,8 @@
 # src/utils/issue-ai-fix.ts) through the workflow_dispatch API. The app follows this run and its PR
 # (syncAiFix) and fills in the issue's branch, PR, summary and any proposed SQL.
 #
-# Merging to staging and conflict fixing still run on the laptop runner for now.
+# Merging to staging is .github/workflows/merge-to-staging.yml. Conflict fixing still runs on the
+# laptop runner.
 #
 # ── Safety ───────────────────────────────────────────────────────────────────────────────────────
 # • Every input goes through env vars, never ${{ }} inside a script, so nothing typed into the
