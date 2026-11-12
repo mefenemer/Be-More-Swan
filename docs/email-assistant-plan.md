@@ -581,7 +581,7 @@ Proposed task costs (new keys in `task-weights.ts`, set in Admin → Money → T
 **Phase 1: Outlook, read-only (staging, flag `email_assistant`)** — ✅ BUILT 2026-11-12 on branch
 `claude/email-assistant-phase1` (typecheck + full suite pass; checked in the browser against a fixture
 page only — no real mailbox has been connected yet). As built:
-- `db/z-mailboxes.sql` (⚠️ apply to BOTH DBs before deploy): `mailboxes` (one person's; one vault key per
+- `db/z-mailboxes.sql` (✅ applied to BOTH DBs by the owner, 2026-11-12): `mailboxes` (one person's; one vault key per
   mailbox) and `mailbox_messages` (headers + derived only, no body column), the `email_assistant` flag
   (off), and the catalogue row **hidden** (not Coming soon: a Coming-soon card is public, §8).
 - `src/utils/mailboxes.ts`: `OUTLOOK_MAILBOX_SCOPE` (Mail.ReadWrite + Mail.Send + offline_access +
@@ -694,7 +694,7 @@ on Google's API reference that `gmail.modify` covers `messages.send` and `drafts
 - [ ] Feature flag `email_assistant` per org; Gmail behind its own flag until approval.
 - [ ] Azure app: add redirect URIs `https://staging--bemoreswan.netlify.app/api/mailbox-oauth/outlook/callback`
       and the prod equivalent, and the delegated `Mail.ReadWrite` permission (Phase 1).
-- [ ] To test Phase 1 on staging: apply `db/z-mailboxes.sql`, add the test workspace id to the
+- [ ] To test Phase 1 on staging (`db/z-mailboxes.sql` ✅ applied to both DBs 2026-11-12): add the test workspace id to the
       `email_assistant` flag's allowed list, set the Email Assistant to Beta in Admin → Assistants, hire it,
       Emails tab → Connect Outlook.
 - [ ] Scheduled function for watch/subscription renewal and the polling safety net deployed and seen
