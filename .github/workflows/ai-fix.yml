@@ -166,14 +166,23 @@ jobs:
             --permission-mode acceptEdits \
             --allowedTools "Read,Edit,Write,Glob,Grep" \
             --disallowedTools "Bash,WebFetch,WebSearch,Task,NotebookEdit" \
-            < "$OUT/prompt.txt" > "$OUT/claude.json" || status=$?
+            < "$OUT/prompt.txt" > "$OUT/claude.json" 2> "$OUT/claude.err" || status=$?
           if [[ $status -ne 0 ]]; then
             if [[ $status -eq 124 ]]; then echo "Claude Code ran out of time (25 minutes)." > "$OUT/reason.txt";
-            else echo "Claude Code exited with code $status." > "$OUT/reason.txt"; fi
+            else
+              # Say WHY (bad key, no credit, unknown model…): Claude's own message, from the JSON
+              # result or stderr. Neither contains the key.
+              detail=$(jq -r '.result // empty' "$OUT/claude.json" 2>/dev/null | head -c 1500)
+              [[ -z "$detail" ]] && detail=$(tail -c 1500 "$OUT/claude.err" 2>/dev/null)
+              [[ -z "$detail" ]] && detail=$(head -c 1500 "$OUT/claude.json" 2>/dev/null)
+              { echo "Claude Code exited with code $status."; [[ -n "$detail" ]] && echo "$detail"; } > "$OUT/reason.txt"
+              cat "$OUT/reason.txt"
+            fi
             exit 1
           fi
           if [[ "$(jq -r '.is_error // false' "$OUT/claude.json")" == "true" ]]; then
-            echo "Claude Code stopped early ($(jq -r '.subtype // "error"' "$OUT/claude.json"))." > "$OUT/reason.txt"
+            { echo "Claude Code stopped early ($(jq -r '.subtype // "error"' "$OUT/claude.json"))."; jq -r '.result // empty' "$OUT/claude.json" | head -c 1500; } > "$OUT/reason.txt"
+            cat "$OUT/reason.txt"
             exit 1
           fi
 
