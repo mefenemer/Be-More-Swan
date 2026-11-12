@@ -44,6 +44,11 @@ on:
         description: "The issue as the app sent it (untrusted, sanitised, capped)"
         required: true
         type: string
+      screenshot_url:
+        description: "Signed two-hour link to the reporter's screenshot on the app (optional)"
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: write
@@ -147,6 +152,31 @@ jobs:
             echo "${nonce} END"
           } > "$OUT/prompt.txt"
 
+      # The reporter's screenshot, so Claude can see what they saw (it reads images with Read). Only
+      # from the app's own hosts and only an image; any failure just means Claude works without it
+      # (the prompt already says so). Saved as .issue-screenshot.<ext> in the copy and never brought
+      # back (see the rsync excludes below), so it can't end up in the commit.
+      - name: Fetch the screenshot
+        if: inputs.screenshot_url != ''
+        env:
+          SHOT_URL: ${{ inputs.screenshot_url }}
+        run: |
+          set -uo pipefail
+          if ! [[ "$SHOT_URL" =~ ^https://(bemoreswan\.com|www\.bemoreswan\.com|bemoreswan\.netlify\.app|[a-z0-9-]+--bemoreswan\.netlify\.app)/api/issue-screenshot\?id=[0-9]+\&exp=[0-9]+\&t=[0-9a-f]+$ ]]; then
+            echo "::warning title=Screenshot::The screenshot link is not one of the app's own links, so it was not fetched."
+            exit 0
+          fi
+          type=$(curl -fsS --proto =https --max-time 30 --max-filesize 6000000 -o "$OUT/shot" -w '%{content_type}' "$SHOT_URL") || {
+            echo "::warning title=Screenshot::The screenshot could not be fetched, so Claude works without it."
+            exit 0
+          }
+          case "${type%%;*}" in
+            image/png) ext=png ;; image/jpeg) ext=jpg ;; image/gif) ext=gif ;; image/webp) ext=webp ;;
+            *) echo "::warning title=Screenshot::The app sent '$type', not an image."; exit 0 ;;
+          esac
+          mv "$OUT/shot" "$WORK/.issue-screenshot.$ext"
+          echo "Screenshot saved for Claude ($(wc -c < "$WORK/.issue-screenshot.$ext") bytes, $ext)."
+
       - name: Run Claude Code
         working-directory: ${{ runner.temp }}/work
         env:
@@ -215,7 +245,8 @@ jobs:
           KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -euo pipefail
-          rsync -a --delete --exclude=.git --exclude=.claude --exclude=.mcp.json "$WORK/" ./
+          # .issue-screenshot.* is the reporter's screenshot: input for Claude, never part of the fix.
+          rsync -a --delete --exclude=.git --exclude=.claude --exclude=.mcp.json --exclude='.issue-screenshot.*' "$WORK/" ./
           git add -A
           files=$(git diff --cached --name-only)
           if [[ -z "$files" ]]; then

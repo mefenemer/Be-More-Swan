@@ -27,6 +27,8 @@ import { loadOrgPlanValues } from '../../src/utils/org-plan-value';
 import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { issueScreenshotUrl } from '../../src/utils/issue-screenshot-link';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -55,18 +57,21 @@ const cloudClaim = () => ({
 });
 
 /** Start .github/workflows/ai-fix.yml for one claimed issue. Returns an error for the admin, or null. */
-async function dispatchForIssue(db: ReturnType<typeof getDb>, issue: typeof issueReports.$inferSelect, note?: string): Promise<string | null> {
+async function dispatchForIssue(db: ReturnType<typeof getDb>, issue: typeof issueReports.$inferSelect, headers: Record<string, string | undefined>, note?: string): Promise<string | null> {
     const thread = await db
         .select({ authorType: issueReportMessages.authorType, body: issueReportMessages.body, createdAt: issueReportMessages.createdAt })
         .from(issueReportMessages)
         .where(eq(issueReportMessages.issueId, issue.id))
         .orderBy(asc(issueReportMessages.createdAt))
         .limit(50);
+    // A signed two-hour link to the screenshot on THIS deployment (its DB holds the issue), so the
+    // AI fixer can look at what the reporter saw. Null (no secret/origin) → it is told it isn't there.
+    const screenshotUrl = issue.imageMime ? issueScreenshotUrl(resolveBaseUrl(headers), issue.id) : null;
     const issueText = buildAiFixIssueText({
         id: issue.id, description: issue.description, sourceLocation: issue.sourceLocation,
-        sourceUrl: issue.sourceUrl, hasImage: !!issue.imageMime, note,
+        sourceUrl: issue.sourceUrl, hasImage: !!issue.imageMime, screenshotSent: !!screenshotUrl, note,
     }, thread);
-    return dispatchAiFix({ issueId: issue.id, issueText });
+    return dispatchAiFix({ issueId: issue.id, issueText, screenshotUrl });
 }
 
 /** The workflow didn't start: release the claim and put the visible status back. */
@@ -98,7 +103,7 @@ async function bulkHandoff(db: ReturnType<typeof getDb>, fromStatus: 'reported' 
     const started: number[] = [];
     const errors: string[] = [];
     for (const issue of claimed) {
-        const err = await dispatchForIssue(db, issue);
+        const err = await dispatchForIssue(db, issue, headers);
         if (err) { errors.push(err); await releaseCloudClaim(db, issue.id, fromStatus, err); }
         else started.push(issue.id);
     }
@@ -166,7 +171,7 @@ export default withLambda(async (event) => {
         )).returning({ id: issueReports.id });
         if (!claimed.length) return json(409, { error: 'Someone else just passed this on — refresh the issue.' });
 
-        const err = await dispatchForIssue(db, issue);
+        const err = await dispatchForIssue(db, issue, event.headers);
         if (err) {
             await releaseCloudClaim(db, id, issue.status, err);
             return json(502, { error: err });
@@ -422,7 +427,7 @@ export default withLambda(async (event) => {
         if (!claimed.length) return json(409, { error: 'This issue changed while you were looking at it — reload it and try again.' });
 
         const note = `The previous fix (${issue.devPrUrl || 'its pull request'}) could not be merged into staging, most likely because staging changed underneath it. Write the fix again against the current code. The thread below includes the previous attempt and why its merge failed.`;
-        const err = await dispatchForIssue(db, issue, note);
+        const err = await dispatchForIssue(db, issue, event.headers, note);
         if (err) {
             await releaseCloudClaim(db, id, issue.status, err, { devMergeStatus: 'failed', devMergeResult: issue.devMergeResult, devHandoffStatus: issue.devHandoffStatus });
             return json(502, { error: err });

@@ -45,7 +45,7 @@ async function main() {
         const err = await dispatchAiFix({ issueId: 42, issueText: 'Button\u0000 broken\u202E', token: 't', fetchImpl: async (url, init) => { seen = { url, init }; return res(204); } });
         assert.strictEqual(err, null);
         assert.ok(seen.url.endsWith('/actions/workflows/ai-fix.yml/dispatches'), seen.url);
-        assert.deepStrictEqual(JSON.parse(seen.init.body), { ref: 'staging', inputs: { issue_id: '42', issue_text: 'Button broken' } });
+        assert.deepStrictEqual(JSON.parse(seen.init.body), { ref: 'staging', inputs: { issue_id: '42', issue_text: 'Button broken', screenshot_url: '' } });
     });
 
     await check('dispatch: no token, 404 and 403 each explain themselves', async () => {
@@ -209,7 +209,7 @@ async function main() {
 
     await check('workflow: the run-name the app matches is the one it sets', () => {
         assert.strictEqual(aiFixRunTitle(42), 'AI fix for issue #42');
-        assert.ok(wf.includes('run-name: AI fix for issue #${{ inputs.issue_id }}'));
+        assert.ok(wf.includes('run-name: "AI fix for issue #${{ inputs.issue_id }}"'));
     });
 
     await check('workflow: inputs reach scripts only through env, and the id is checked as a number', () => {
@@ -279,7 +279,7 @@ async function main() {
     await check('endpoint: Pass to Developer claims (compare-and-swap) before it dispatches, and no longer queues the laptop', () => {
         const block = api.slice(api.indexOf("action === 'handoff' && id"), api.indexOf("action === 'handoff-all'"));
         assert.ok(block.includes('.set(cloudClaim())'));
-        assert.ok(block.indexOf('.returning({ id: issueReports.id })') < block.indexOf('await dispatchForIssue(db, issue)'), 'claim before dispatch');
+        assert.ok(block.indexOf('.returning({ id: issueReports.id })') < block.indexOf('await dispatchForIssue(db, issue, event.headers)'), 'claim before dispatch');
         assert.ok(block.indexOf('await dispatchForIssue') < block.indexOf('notifyIssueUser'), 'the reporter hears only once it started');
         assert.ok(block.includes('releaseCloudClaim(db, id, issue.status, err)'));
         assert.ok(!/devHandoffStatus: 'queued'/.test(api), 'nothing sets the laptop queue');
@@ -300,7 +300,7 @@ async function main() {
         assert.ok(block.includes("['failed', 'conflict_queued', 'conflict_resolving'].includes(issue.devMergeStatus)"), 'failed merges, and conflict fixes the retired laptop left');
         assert.ok(block.includes(".set({ ...cloudClaim(), devMergeStatus: null, devMergeResult: null })"));
         assert.ok(block.includes("eq(issueReports.devMergeStatus, issue.devMergeStatus)"), 'compare-and-swap on the merge state read');
-        assert.ok(block.indexOf('.returning(') < block.indexOf('await dispatchForIssue(db, issue, note)'));
+        assert.ok(block.indexOf('.returning(') < block.indexOf('await dispatchForIssue(db, issue, event.headers, note)'));
         assert.ok(block.includes("devMergeStatus: 'failed', devMergeResult: issue.devMergeResult"), 'a refused dispatch puts the failed merge back');
         assert.ok(!block.includes('notifyIssueUser'), 'an engineering step: the reporter is not told');
         assert.ok(!block.includes("devMergeStatus: 'conflict_queued'"), 'nothing queues the laptop conflict fix');
