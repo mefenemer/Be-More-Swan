@@ -32,7 +32,7 @@ import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { isUpstreamBlocked } from '../../src/lib/ai-gateway';
 import { hasTaskCapacity, recordCompletedWork, TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
-import { recordPlatformIncident } from '../../src/utils/platform-incident';
+import { failureMessage, recordPlatformIncident } from '../../src/utils/platform-incident';
 import { chargeHelper } from '../../src/utils/basic-work';
 
 const BACKOFF_SECS = [30, 120, 300];
@@ -458,8 +458,9 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
             });
         }
     } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        console.error(`[process-blog-jobs] job ${job.job_id} failed`, err);
+        // The Postgres error, not drizzle's "Failed query: insert into …" wrapper — see failureMessage.
+        const message = failureMessage(err);
+        console.error(`[process-blog-jobs] job ${job.job_id} failed`, err, (err as { cause?: unknown })?.cause ?? '');
         // A throw AFTER the job completed is a failed follow-up, not a failed draft. Re-queuing here
         // is what let one content job write eight posts on prod (2026-09-03): the retry regenerates
         // an article that already exists, and on the interactive path it would overwrite the draft
