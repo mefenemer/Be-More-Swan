@@ -88,9 +88,19 @@
   // grey one-liners and alert()s so a failure actually reads as one.
   // The one place an OPEN failure (create or load) is shown — visible while bs-workspace is hidden.
   // msg '' hides it. retry runs when "Try again" is pressed.
+  // The opening line (msg '' hides it). Shown by startBlankPost / loadExistingPost; openWorkspace and
+  // showOpenError take it down, so it never sits beside the editor or the error.
+  function showOpening(msg) {
+    var box = el('bs-opening');
+    if (!box) return;
+    el('bs-opening-msg').textContent = msg || '';
+    box.classList.toggle('bs-hidden', !msg);
+  }
+
   function showOpenError(msg, retry) {
     var box = el('bs-open-error');
     if (!box) return;
+    if (msg) showOpening('');
     if (!msg) { box.classList.add('bs-hidden'); el('bs-open-retry').onclick = null; return; }
     el('bs-open-error-msg').textContent = msg;
     el('bs-open-retry').onclick = function () { showOpenError(''); if (retry) retry(); };
@@ -375,6 +385,11 @@
     + '.bs-banner{font-size:13px;border-radius:10px;padding:10px 12px;border:1px solid;margin-top:12px;}'
     + '.bs-banner-ok{background:#fdf2f8;color:#9d174d;border-color:#fbcfe8;}'
     + '.bs-banner-error{background:#fef2f2;color:#991b1b;border-color:#fecaca;}'
+    + '.bs-opening{display:flex;align-items:center;justify-content:center;gap:10px;padding:64px 16px;font-size:14px;color:#6b7280;}'
+    + '.bs-opening.bs-hidden{display:none;}'
+    + '.bs-opening-ring{width:18px;height:18px;border-radius:50%;border:2px solid #fbcfe8;border-top-color:#ec4899;animation:bs-opening-spin .8s linear infinite;}'
+    + '@keyframes bs-opening-spin{to{transform:rotate(360deg);}}'
+    + '@media (prefers-reduced-motion:reduce){.bs-opening-ring{animation:none;}}'
     + '.bs-textarea-wrap{position:relative;}'
     + '.bs-mic{position:absolute;bottom:8px;right:8px;background:none;border:0;padding:0;cursor:pointer;'
     + 'color:#9ca3af;line-height:0;}'
@@ -417,6 +432,10 @@
     // OUTSIDE bs-workspace, on purpose. The workspace stays hidden until a post is created or loaded,
     // so an error written into a banner inside it (bs-action-status) was invisible: when blog-posts
     // 502'd on prod (2026-11-12, columns missing), Blog Studio opened onto a blank panel.
+    // While a post is being created or loaded (a few seconds on prod) — the panel was blank until then.
+    + '  <div id="bs-opening" class="bs-opening bs-hidden" role="status" aria-live="polite">'
+    + '    <span class="bs-opening-ring" aria-hidden="true"></span><span id="bs-opening-msg"></span>'
+    + '  </div>'
     + '  <div id="bs-open-error" class="bs-banner bs-banner-error bs-hidden" role="alert">'
     + '    <span id="bs-open-error-msg"></span> <button type="button" id="bs-open-retry" class="bs-btn bs-btn-ghost bs-btn-sm" style="margin-left:8px;">Try again</button>'
     + '  </div>'
@@ -1057,6 +1076,7 @@
     state.contentChanged = false;   // a fresh post, and the list behind is current for it
     state.postId = postId;
     state.hasFeature = null;   // unknown until loadFeature() answers for THIS post
+    showOpening('');
     el('bs-workspace').classList.remove('bs-hidden');
     el('bs-title').value = title;
     if (state.editor && state.editor.destroy) state.editor.destroy();  // re-open safety: no leaked listeners
@@ -1110,7 +1130,8 @@
     el('bs-schedule-at').value = '';
     syncRejectButton(null);
     syncDecideBar(null);
-    setStatus('bs-save-status', 'Creating…');
+    setStatus('bs-save-status', '');   // the centred opening line says it; one spinner, not two
+    showOpening('Starting a new draft…');
     var video = state.pendingVideo;
     state.pendingVideo = null;
     var title = video && video.title ? String(video.title).slice(0, 200) : 'Untitled draft';
@@ -1484,7 +1505,8 @@
   }
 
   function loadExistingPost(id) {
-    setStatus('bs-save-status', 'Loading…');
+    setStatus('bs-save-status', '');   // the centred opening line says it; one spinner, not two
+    showOpening('Opening your article…');
     api('blog-posts?id=' + encodeURIComponent(id), { method: 'GET' }).then(function (res) {
       if (!res.ok || !res.body.post) {
         setStatus('bs-save-status', '');
@@ -3107,6 +3129,7 @@
   // reused, so status lines and the AI-draft form must not carry over between opens.
   function clearWorkspaceState() {
     showOpenError('');
+    showOpening('');
     // Disarm the widget autosave until loadWidget has repainted the panel. The DOM survives between
     // opens, so without this a change made during the reload would save the PREVIOUS session's
     // values back over whatever this one just fetched.
