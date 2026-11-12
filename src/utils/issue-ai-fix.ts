@@ -14,7 +14,8 @@
 //
 // 'queued' is no longer set by anything here: it is the laptop runner's queue. The laptop's claim
 // endpoint skips cloud rows (admin-issue-handoff.ts), so a laptop left running can't reclaim them.
-// Merging to staging is issue-cloud-merge.ts; conflict fixes still go through the laptop runner.
+// Merging to staging is issue-cloud-merge.ts. After a failed merge, ?action=redo-fix runs this
+// workflow again on the latest staging instead of the laptop's conflict fix.
 //
 // The issue text is untrusted (a customer, or a model, wrote it). It travels only as a workflow
 // input that the workflow reads through an env var, and Claude is told it is data.
@@ -80,16 +81,18 @@ export interface ThreadMessage { authorType: string; body: string | null; create
  * bug. On a retry the latest thread (the reporter's "it still doesn't work", the last attempt's
  * summary) matters most, so the newest messages are kept when the cap bites.
  */
-export function buildAiFixIssueText(issue: { id: number; description: string | null; sourceLocation?: string | null; sourceUrl?: string | null; hasImage?: boolean }, thread: ThreadMessage[] = []): string {
+export function buildAiFixIssueText(issue: { id: number; description: string | null; sourceLocation?: string | null; sourceUrl?: string | null; hasImage?: boolean; note?: string }, thread: ThreadMessage[] = []): string {
     const head = [
         `Issue #${issue.id}`,
+        // From the app, not the reporter: e.g. "redo this fix on the latest staging".
+        issue.note ? `Note from the team: ${sanitiseIssueText(issue.note, 600)}` : '',
         `Location in app: ${sanitiseIssueText(issue.sourceLocation, 200) || 'unknown'}`,
         issue.sourceUrl ? `Page: ${sanitiseIssueText(issue.sourceUrl, 300)}` : '',
         issue.hasImage ? '(The reporter attached a screenshot. It is not available here.)' : '',
         '',
         'Description:',
         sanitiseIssueText(issue.description, 4000) || '(no description provided)',
-    ].filter((l, i) => l !== '' || i === 4).join('\n');
+    ].filter((l, i, all) => l !== '' || all[i + 1] === 'Description:').join('\n');
 
     const msgs = thread.filter((m) => m && m.body).map((m) => `[${m.authorType === 'user' ? 'reporter' : 'team'}] ${sanitiseIssueText(m.body, 1200)}`);
     if (!msgs.length) return sanitiseIssueText(head);
@@ -126,7 +129,8 @@ export async function dispatchAiFix(opts: { issueId: number; issueText: string; 
     }
 }
 
-export interface AiFixPr { url: string; number: number; state: 'open' | 'closed'; merged: boolean; body: string; branch: string }
+/** `reused`: opened before this attempt (the workflow updates an open PR in place), so it only counts once this attempt's run succeeded. */
+export interface AiFixPr { url: string; number: number; state: 'open' | 'closed'; merged: boolean; body: string; branch: string; reused?: boolean }
 export interface AiFixRun { id: number; status: string; conclusion: string | null; url: string }
 
 const SLACK_MS = 2 * 60_000;
@@ -153,6 +157,7 @@ export async function findAiFixPr(opts: { issueId: number; since: Date | string 
         return {
             url: String(pr.html_url), number: Number(pr.number), state: pr.state === 'open' ? 'open' : 'closed',
             merged: !!pr.merged_at, body: String(pr.body || ''), branch: String(pr.head?.ref || aiFixBranch(opts.issueId)),
+            ...(ms(pr.created_at) < since ? { reused: true } : {}),
         };
     } catch {
         return 'error';
@@ -232,8 +237,11 @@ export function nextAiFixState(input: {
     failureReason?: string | null;
     now?: number;
 }): AiFixNext | null {
-    const { current, runnerId, pr, run } = input;
+    const { current, runnerId, run } = input;
     if (current !== 'in_progress' || runnerId !== CLOUD_RUNNER_ID) return null;
+    // A PR from an earlier attempt still holds the earlier fix until this run has pushed and
+    // rewritten its body, so it only counts once the run succeeded. Until then, follow the run.
+    const pr = input.pr && input.pr.reused && !(run && run.status === 'completed' && run.conclusion === 'success') ? null : input.pr;
     const now = input.now ?? Date.now();
     const age = now - ms(input.startedAt);
 
@@ -317,7 +325,7 @@ export async function syncAiFix(db: Db, row: AiFixRow, opts: { token?: string; r
         const base = { issueId: row.id, since: row.devHandoffAt, token, repo: opts.repo, fetchImpl: opts.fetchImpl };
         const pr = await findAiFixPr(base);
         if (pr === 'error') return false;
-        const run = pr ? null : await findAiFixRun(base);
+        const run = pr && !pr.reused ? null : await findAiFixRun(base);
         if (run === 'error') return false;
         const failureReason = run && run.status === 'completed'
             ? await findRunFailureReason({ runId: run.id, title: 'AI fix', token, repo: opts.repo, fetchImpl: opts.fetchImpl })

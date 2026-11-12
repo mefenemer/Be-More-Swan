@@ -55,7 +55,7 @@ const cloudClaim = () => ({
 });
 
 /** Start .github/workflows/ai-fix.yml for one claimed issue. Returns an error for the admin, or null. */
-async function dispatchForIssue(db: ReturnType<typeof getDb>, issue: typeof issueReports.$inferSelect): Promise<string | null> {
+async function dispatchForIssue(db: ReturnType<typeof getDb>, issue: typeof issueReports.$inferSelect, note?: string): Promise<string | null> {
     const thread = await db
         .select({ authorType: issueReportMessages.authorType, body: issueReportMessages.body, createdAt: issueReportMessages.createdAt })
         .from(issueReportMessages)
@@ -64,16 +64,16 @@ async function dispatchForIssue(db: ReturnType<typeof getDb>, issue: typeof issu
         .limit(50);
     const issueText = buildAiFixIssueText({
         id: issue.id, description: issue.description, sourceLocation: issue.sourceLocation,
-        sourceUrl: issue.sourceUrl, hasImage: !!issue.imageMime,
+        sourceUrl: issue.sourceUrl, hasImage: !!issue.imageMime, note,
     }, thread);
     return dispatchAiFix({ issueId: issue.id, issueText });
 }
 
 /** The workflow didn't start: release the claim and put the visible status back. */
-async function releaseCloudClaim(db: ReturnType<typeof getDb>, id: number, prevStatus: string, err: string) {
+async function releaseCloudClaim(db: ReturnType<typeof getDb>, id: number, prevStatus: string, err: string, restore: Partial<typeof issueReports.$inferInsert> = {}) {
     await db.update(issueReports).set({
         devHandoffStatus: 'failed', devResult: err, devRunnerId: null, devRunnerHeartbeat: null,
-        status: prevStatus, updatedAt: new Date(),
+        status: prevStatus, updatedAt: new Date(), ...restore,
     }).where(and(eq(issueReports.id, id), eq(issueReports.devHandoffStatus, 'in_progress'), eq(issueReports.devRunnerId, CLOUD_RUNNER_ID)));
 }
 
@@ -394,38 +394,50 @@ export default withLambda(async (event) => {
         return json(200, { ok: true, devProdStatus: 'hotfix_requested' });
     }
 
-    // ── POST ?action=request-conflict-fix: investigate + auto-resolve a failed merge ─
-    // Super-admin only. Only valid once a merge attempt has actually failed. The local
-    // watcher (see scripts/dev-issue-fixer.mjs) claims it, merges the base branch into
-    // the fix branch, resolves any conflicts with Claude Code, pushes, and retries the
-    // PR merge — same as a normal merge, success moves the issue on to "Fixed & Ready
-    // to Test".
-    if (event.httpMethod === 'POST' && action === 'request-conflict-fix' && id) {
+    // ── POST ?action=redo-fix: write the fix again on the latest staging ──────────
+    // Super-admin only, after a failed merge. Replaces "Investigate & fix conflicts", which the
+    // laptop runner did by merging staging into the fix branch and having Claude resolve markers.
+    // Instead this starts the AI fix workflow again (src/utils/issue-ai-fix.ts): it checks out
+    // current staging, rewrites the fix, force-pushes ai-fix/issue-<id> and updates its open PR, so
+    // the new PR has no conflict. The fix is rewritten, so the PR needs reviewing again.
+    // 'request-conflict-fix' is kept as an alias so older admin tabs reach the new behaviour.
+    if (event.httpMethod === 'POST' && (action === 'redo-fix' || action === 'request-conflict-fix') && id) {
         if (!hasPermission(admin.role, 'deploy_code')) {
-            return json(403, { error: 'Investigating a merge conflict requires the deploy_code privilege.' });
+            return json(403, { error: 'Redoing a fix requires the deploy_code privilege.' });
         }
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
-        if (!issue.devPrUrl) return json(400, { error: 'This issue has no pull request to merge.' });
         if (issue.devMergeStatus !== 'failed') {
-            return json(409, { error: 'Only a failed merge can be investigated.' });
+            return json(409, { error: 'Only a fix whose merge failed can be redone from here.' });
+        }
+        if (issue.devHandoffStatus === 'queued' || issue.devHandoffStatus === 'in_progress') {
+            return json(409, { error: 'The AI developer is already working on this issue.' });
         }
 
-        await db.update(issueReports).set({
-            devMergeStatus: 'conflict_queued',
-            devMergeResult: null,
-            updatedAt: new Date(),
-        }).where(eq(issueReports.id, id));
+        // Claim first (compare-and-swap on the merge state we just read). Clearing dev_merge_status
+        // moves the card back to "fixing"; syncAiFix sets it to 'ready' when the new PR is there.
+        const claimed = await db.update(issueReports).set({ ...cloudClaim(), devMergeStatus: null, devMergeResult: null })
+            .where(and(eq(issueReports.id, id), eq(issueReports.devMergeStatus, 'failed')))
+            .returning({ id: issueReports.id });
+        if (!claimed.length) return json(409, { error: 'This issue changed while you were looking at it — reload it and try again.' });
 
+        const note = `The previous fix (${issue.devPrUrl || 'its pull request'}) could not be merged into staging, most likely because staging changed underneath it. Write the fix again against the current code. The thread below includes the previous attempt and why its merge failed.`;
+        const err = await dispatchForIssue(db, issue, note);
+        if (err) {
+            await releaseCloudClaim(db, id, issue.status, err, { devMergeStatus: 'failed', devMergeResult: issue.devMergeResult, devHandoffStatus: issue.devHandoffStatus });
+            return json(502, { error: err });
+        }
+
+        const oldFixBranch = issue.devBranch && !issue.devBranch.startsWith('ai-fix/');
         await db.insert(issueReportMessages).values({
             issueId: id,
             authorType: 'admin',
             authorId: admin.id,
-            body: "🔧 We've queued an investigation into the merge conflict — the AI developer will resolve it and merge to staging.",
+            body: `🔁 The merge failed, so the AI developer is writing the fix again on the latest staging. The new version needs reviewing before it is merged.${oldFixBranch ? `\n\nThe old pull request (${issue.devPrUrl}) is left open; close it once the new one is ready.` : ''}`,
             status: null,
         });
-
-        return json(200, { ok: true, devMergeStatus: 'conflict_queued' });
+        // An engineering step: the reporter hears once the fix is live, not now.
+        return json(200, { ok: true, devHandoffStatus: 'in_progress' });
     }
 
     // ── POST ?action=request-merge-all: merge every ready fix PR at once ──────────

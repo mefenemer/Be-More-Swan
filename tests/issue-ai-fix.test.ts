@@ -139,6 +139,27 @@ async function main() {
         assert.strictEqual(nextAiFixState({ ...base, startedAt: mins(AI_FIX_NO_RUN_MINS + 1) })?.kind, 'failed');
     });
 
+    await check('state machine: a PR from an earlier attempt only counts once this run succeeded (redo / pass again)', () => {
+        const old = { ...pr('open'), reused: true };
+        assert.strictEqual(nextAiFixState({ ...base, pr: old }), null, 'no run yet: wait, don’t take the old fix');
+        assert.strictEqual(nextAiFixState({ ...base, pr: old, run: run('in_progress', null) })?.kind, 'running');
+        assert.strictEqual(nextAiFixState({ ...base, pr: old, run: run('completed', 'failure') })?.kind, 'failed');
+        assert.strictEqual(nextAiFixState({ ...base, pr: old, run: run('completed', 'success') })?.kind, 'completed');
+    });
+
+    await check('findAiFixPr marks a PR opened before this attempt as reused', async () => {
+        const since = new Date('2026-11-12T10:00:00Z');
+        const p = await findAiFixPr({ issueId: 42, since, token: 't', fetchImpl: async () => res(200, [
+            { number: 801, html_url: PR_URL, state: 'open', created_at: '2026-11-10T00:00:00Z', updated_at: '2026-11-12T10:10:00Z', merged_at: null, body: '' },
+        ]) });
+        assert.strictEqual((p as AiFixPr).reused, true);
+    });
+
+    await check('issue text: a note from the team comes before the description', () => {
+        const t = buildAiFixIssueText({ id: 7, description: 'Broken', note: 'Write the fix again on the latest staging.' });
+        assert.ok(t.startsWith('Issue #7\nNote from the team: Write the fix again on the latest staging.\nLocation in app: unknown\n\nDescription:\nBroken'), t);
+    });
+
     await check('state machine: only touches issues the cloud holds (not the laptop runner’s, not finished ones)', () => {
         for (const [current, runnerId] of [['in_progress', 'mac:123'], ['queued', null], ['completed', CLOUD_RUNNER_ID], ['failed', CLOUD_RUNNER_ID], [null, null]] as const) {
             assert.strictEqual(nextAiFixState({ ...base, current, runnerId, pr: pr('open') }), null, `${current}/${runnerId}`);
@@ -271,6 +292,24 @@ async function main() {
         assert.ok(bulk.includes('.limit(AI_FIX_BULK_MAX + 1)'));
         assert.ok(bulk.indexOf('.set(cloudClaim())') < bulk.indexOf('await dispatchForIssue'));
         assert.ok(api.includes("bulkHandoff(db, 'reported'") && api.includes("bulkHandoff(db, 'backlog'"));
+    });
+
+    await check('endpoint: Redo fix (after a failed merge) claims before it dispatches, with a note; old action name kept', () => {
+        const block = api.slice(api.indexOf("action === 'redo-fix'"), api.indexOf("action === 'request-merge-all'"));
+        assert.ok(block.startsWith("action === 'redo-fix' || action === 'request-conflict-fix')"));
+        assert.ok(block.includes("if (issue.devMergeStatus !== 'failed')"));
+        assert.ok(block.includes(".set({ ...cloudClaim(), devMergeStatus: null, devMergeResult: null })"));
+        assert.ok(block.includes("eq(issueReports.devMergeStatus, 'failed')"), 'compare-and-swap on the failed merge');
+        assert.ok(block.indexOf('.returning(') < block.indexOf('await dispatchForIssue(db, issue, note)'));
+        assert.ok(block.includes("devMergeStatus: 'failed', devMergeResult: issue.devMergeResult"), 'a refused dispatch puts the failed merge back');
+        assert.ok(!block.includes('notifyIssueUser'), 'an engineering step: the reporter is not told');
+        assert.ok(!/conflict_queued/.test(block), 'nothing queues the laptop conflict fix');
+    });
+
+    await check('panel: the failed-merge card offers Redo fix, not the laptop conflict fix', () => {
+        const html = read('admin.html');
+        assert.ok(html.includes('Redo fix on latest staging</button>') && html.includes('action=redo-fix'));
+        assert.ok(!html.includes('requestConflictFix(') && !html.includes('Investigate &amp; fix conflicts'));
     });
 
     await check('endpoint: opening an issue and loading the list follow the cloud run', () => {
