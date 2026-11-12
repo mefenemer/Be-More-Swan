@@ -76,6 +76,16 @@ check('the system prompt tells the model to respect decisions and allows "keep"'
     assert.ok(/say "keep"\. That is a good answer/.test(src));
 });
 
+check('an answer that never searched is retried once, then refused — never stored as a result', () => {
+    const src = read('src/utils/system-review.ts');
+    const run = src.slice(src.indexOf('export async function runSystemReview'));
+    assert.ok(/let res = await ask\(`\$\{SEARCH_FIRST\}/.test(run), 'the first ask must open with the search-first instruction');
+    assert.ok(/if \(res\.searchCount === 0\) \{\s*res = await ask\(`\$\{SEARCH_RETRY\}/.test(run), 'no search → one retry');
+    const refuse = run.indexOf("if (res.searchCount === 0) throw new Error(");
+    assert.ok(refuse > 0 && refuse < run.indexOf('parseReview('), 'a second unsearched answer must fail before it is parsed and stored');
+    assert.strictEqual((run.match(/logServiceCost\('anthropic-web-search'/g) || []).length, 2, 'both attempts\' searches are logged');
+});
+
 check('a check stuck queued/running past 20 minutes reads as stalled', () => {
     const now = new Date('2026-11-12T12:00:00Z');
     assert.strictEqual(reviewState({ status: 'running', createdAt: new Date(now.getTime() - STALE_REVIEW_MS - 1000) }, now), 'stalled');

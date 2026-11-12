@@ -51,7 +51,7 @@ export interface ReviewContext {
 export const REVIEW_SYSTEM = `You review one piece of Be More Swan's technology stack. Be More Swan is a UK SaaS: AI assistants that draft social posts, blogs, emails, videos and websites for small businesses, on Netlify with a Neon Postgres database. Your job: is there a better tool on the market today for what we use this system for — better QUALITY, better FEATURES, or a better PRICE for our usage?
 
 Method:
-- Search the web for current options and current prices. Prefer the providers' own pricing and docs pages, and independent benchmarks. Today's facts beat what you remember.
+- You MUST search the web before answering — at least two searches: the current price of what we use, and the strongest alternatives. An answer without searching is rejected, even a "keep". Prefer the providers' own pricing and docs pages, and independent benchmarks. Today's facts beat what you remember.
 - Judge against what WE use it for and what we spend (given below), not in general. A cheaper tool that can't do what we need is not better.
 - Respect the decisions already taken. Never suggest something a decision says was turned down or chosen against, unless you found a material change since that decision (say exactly what changed).
 - Count the cost of switching honestly: code to rewrite, quality risk, contracts, data to move.
@@ -74,6 +74,11 @@ Reply with ONE JSON object and nothing else:
   "caveats": "anything you could not confirm, or ''"
 }
 At most 3 alternatives, best first. "switch" only when an alternative is clearly better AND worth the switching effort.`;
+
+/** Opens the user turn: search first. Exported for tests. */
+export const SEARCH_FIRST = 'Start by using web search (at least two searches) to find today\'s prices and the strongest alternatives. Do not answer from memory.';
+/** The one retry when a first answer ran no search. */
+export const SEARCH_RETRY = 'Your last answer did not search the web, so it was rejected. Use the web_search tool now — at least two searches — then answer with the JSON.';
 
 export function buildReviewPrompt(c: ReviewContext): string {
     const lines = [
@@ -145,17 +150,27 @@ const REVIEW_DEADLINE_MS = 240_000;
 export async function runSystemReview(db: Db, reviewId: number, ctx: ReviewContext): Promise<'done' | 'failed'> {
     await db.update(systemReviews).set({ status: 'running' }).where(eq(systemReviews.id, reviewId));
     try {
-        const res = await gatewayGenerateGrounded({
+        // The first live check (fal, staging 2026-11-12) answered in 9 s with NO search — an honest
+        // "keep" from memory, which is exactly what this check exists not to be. So: say so up front,
+        // retry once with a direct instruction, and never store an unsearched answer as a result.
+        const ask = (content: string) => gatewayGenerateGrounded({
             system: REVIEW_SYSTEM,
-            messages: [{ role: 'user', content: buildReviewPrompt(ctx) }],
+            messages: [{ role: 'user', content }],
             maxTokens: 6000,
             deadlineMs: REVIEW_DEADLINE_MS,
             model: REVIEW_MODEL,
             thinking: 'low',
             usage: { sessionId: 'system-review', dataCategories: ['business_context'] },
         });
+        const prompt = buildReviewPrompt(ctx);
+        let res = await ask(`${SEARCH_FIRST}\n\n${prompt}`);
         // Web search is billed per search on top of tokens; the gateway records only the tokens.
         logServiceCost('anthropic-web-search', res.searchCount, { sessionId: 'system-review' });
+        if (res.searchCount === 0) {
+            res = await ask(`${SEARCH_RETRY}\n\n${prompt}`);
+            logServiceCost('anthropic-web-search', res.searchCount, { sessionId: 'system-review' });
+        }
+        if (res.searchCount === 0) throw new Error('The check answered without searching the web, so no result was saved. Try again.');
         const parsed = parseReview(res.text, res.searchedUrls);
         if (!parsed) throw new Error(res.stopReason === 'max_tokens' ? 'The answer was cut off before it finished.' : 'The answer had no usable result.');
         await db.update(systemReviews).set({
