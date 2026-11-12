@@ -15,11 +15,14 @@
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { getDb } from '../../db/client';
 import { runFixLiveCheck, type FixLiveResult } from '../../src/utils/issue-fix-live';
+import { syncOpenCloudMerges } from '../../src/utils/issue-cloud-merge';
 import { autoCloseQuietTickets } from '../../src/utils/ticket-auto-close';
 
-export async function runFixesLiveCheck(): Promise<FixLiveResult & { ticketsAutoClosed: number }> {
+export async function runFixesLiveCheck(): Promise<FixLiveResult & { mergesSynced?: number; ticketsAutoClosed: number }> {
     const db = getDb();
-    const result = await runFixLiveCheck(db);
+    // Merges to staging running in GitHub Actions first, so one that just landed is checked below.
+    const mergesSynced = await syncOpenCloudMerges(db);
+    const result = { ...(await runFixLiveCheck(db)), mergesSynced };
     if (result.skipped) console.warn(`[check-fixes-live] live check skipped: ${result.skipped}`);
     // Support tickets follow the same 7-quiet-days rule (src/utils/ticket-auto-close.ts) on the same tick.
     const ticketsAutoClosed = await autoCloseQuietTickets(db);

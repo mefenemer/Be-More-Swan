@@ -163,7 +163,10 @@ test('users never see one; Support inbox and "Pass all" leave them out', () => {
     assert.match(inbox, /\n\s+JOIN users u ON u\.id = i\.user_id/);
     assert.match(inbox, /An automatic report has no customer to answer/);
     const admin = read('netlify/functions/admin-issue-reports.ts');
-    assert.equal((admin.match(/\.\.\.\(await notSuspected\(db\)\)/g) ?? []).length, 2, 'both bulk hand-offs filter suspected');
+    // Both bulk hand-offs go through bulkHandoff (src/utils/issue-ai-fix.ts era), which filters suspected once.
+    const bulk = admin.slice(admin.indexOf('async function bulkHandoff'), admin.indexOf('const bulkReply'));
+    assert.equal((bulk.match(/\.\.\.\(await notSuspected\(db\)\)/g) ?? []).length, 1, 'the shared bulk hand-off filters suspected');
+    assert.ok(admin.includes("bulkHandoff(db, 'reported'") && admin.includes("bulkHandoff(db, 'backlog'"), 'both bulk hand-offs use it');
     const html = read('admin.html');
     assert.equal((html.match(/i\.source !== 'suspected'/g) ?? []).length, 2, 'both bulk buttons count without suspected');
     assert.ok(html.includes('_irSourceChip(i)') && html.includes('${_irIncidentBlock(i)}'));

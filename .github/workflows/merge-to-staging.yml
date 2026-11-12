@@ -1,0 +1,117 @@
+# Merge to staging — merges ONE issue's fix PR into staging.
+#
+# Replaces the MERGE job of the developer-laptop runner (scripts/dev-issue-fixer.mjs). Started from
+# the admin portal ("Merge to staging" / "Merge all", src/utils/issue-cloud-merge.ts) through the
+# workflow_dispatch API. The app follows the run and the PR (syncCloudMerge), then does what the
+# runner's report used to trigger: mark the merge, move the issue on, rebuild staging once drained.
+#
+# Conflict fixing still runs on the laptop runner.
+#
+# ── Safety ───────────────────────────────────────────────────────────────────────────────────────
+# • Inputs go through env vars, never ${{ }} inside a script, and must be whole numbers.
+# • No checkout and no repo code runs: it only talks to GitHub with `gh`.
+# • It merges only a PR that goes into staging from this issue's own fix branch
+#   (ai-fix/issue-<id> or the runner's fix/issue-<id>-…). It cannot touch main.
+# • Branch rules on staging still apply: if required checks haven't passed, the merge is refused
+#   and the issue shows why.
+#
+# ── Secrets ──────────────────────────────────────────────────────────────────────────────────────
+# MERGE_PR_TOKEN (recommended, falls back to AI_FIX_PR_TOKEN, HOTFIX_PR_TOKEN, then the built-in
+# token): fine-grained, this repo only, Contents + Pull requests read/write. A merge made with the
+# built-in GITHUB_TOKEN does not start other workflows (CI on staging) afterwards.
+
+name: Merge to staging
+run-name: Merge to staging for issue #${{ inputs.issue_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_id:
+        description: "Issue id (Admin ▸ Fix pipeline)"
+        required: true
+        type: string
+      pr:
+        description: "The fix PR number"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Per issue: one shared group would keep only ONE pending run and cancel the rest of a "Merge all".
+concurrency:
+  group: merge-to-staging-${{ inputs.issue_id }}
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ISSUE_ID: ${{ inputs.issue_id }}
+      PR: ${{ inputs.pr }}
+      GH_TOKEN: ${{ secrets.MERGE_PR_TOKEN || secrets.AI_FIX_PR_TOKEN || secrets.HOTFIX_PR_TOKEN || github.token }}
+      REASON: ${{ runner.temp }}/reason.txt
+    steps:
+      - name: Check the inputs are numbers
+        run: |
+          if ! [[ "$ISSUE_ID" =~ ^[0-9]{1,9}$ && "$PR" =~ ^[0-9]{1,9}$ ]]; then
+            echo "issue_id and pr must be whole numbers." > "$REASON"
+            exit 1
+          fi
+
+      - name: Check the PR belongs to this issue and goes into staging
+        id: pr
+        run: |
+          set -euo pipefail
+          if ! json=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state,baseRefName,headRefName,url 2>&1); then
+            echo "GitHub could not find PR #$PR: $json" > "$REASON"
+            exit 1
+          fi
+          state=$(jq -r .state <<<"$json")
+          base=$(jq -r .baseRefName <<<"$json")
+          head=$(jq -r .headRefName <<<"$json")
+          if [[ "$base" != "staging" ]]; then
+            echo "PR #$PR goes into '$base', not staging. Not merged." > "$REASON"
+            exit 1
+          fi
+          if ! [[ "$head" == "ai-fix/issue-$ISSUE_ID" || "$head" =~ ^fix/issue-$ISSUE_ID(-[0-9]+)?$ ]]; then
+            echo "PR #$PR comes from '$head', which is not issue #$ISSUE_ID's fix branch. Not merged." > "$REASON"
+            exit 1
+          fi
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+
+      - name: Merge
+        if: steps.pr.outputs.state != 'MERGED'
+        run: |
+          set -uo pipefail
+          if [[ "$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state --jq .state)" == "CLOSED" ]]; then
+            echo "PR #$PR is closed. Reopen it, or pass the issue to the developer again." > "$REASON"
+            exit 1
+          fi
+          if ! out=$(gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --merge --delete-branch 2>&1); then
+            { echo "GitHub refused the merge:"; echo "$out"; } > "$REASON"
+            exit 1
+          fi
+          echo "$out"
+
+      - name: Confirm it is merged
+        run: |
+          set -uo pipefail
+          state=$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json state --jq .state)
+          if [[ "$state" != "MERGED" ]]; then
+            echo "The merge command finished but PR #$PR is $state, not merged." > "$REASON"
+            exit 1
+          fi
+          echo "PR #$PR is merged into staging."
+
+      - name: Say why it failed
+        if: failure()
+        run: |
+          reason=$(cat "$REASON" 2>/dev/null || echo "A step failed. See the log above.")
+          reason=${reason:0:3000}
+          # One line, so nothing in the reason can start another workflow command.
+          reason=${reason//'%'/'%25'}; reason=${reason//$'\r'/'%0D'}; reason=${reason//$'\n'/'%0A'}
+          echo "::error title=Merge to staging::$reason"

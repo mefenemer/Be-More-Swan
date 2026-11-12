@@ -1,7 +1,7 @@
 // src/utils/issue-reports.ts
 // Shared constants/helpers for the testing-phase "Report an Issue" feature.
 
-import { eq, or, and, lt, inArray, isNull, sql } from 'drizzle-orm';
+import { eq, or, and, lt, inArray, isNull, ne, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { users, issueReports, issueReportMessages } from '../../db/schema';
 import { createNotification } from './notify';
@@ -307,6 +307,9 @@ export async function reclaimStaleMerges(db: Db): Promise<number> {
             isNull(issueReports.devRunnerHeartbeat),
             lt(issueReports.devRunnerHeartbeat, new Date(Date.now() - STALE_MERGE_MINS * 60_000)),
         ),
+        // Never a merge running in GitHub Actions (issue-cloud-merge.ts): its heartbeat is its start
+        // time, and syncCloudMerge reports a stuck run itself. Literal, to avoid an import cycle.
+        or(isNull(issueReports.devRunnerId), ne(issueReports.devRunnerId, 'GitHub Actions')),
     )).returning({ id: issueReports.id });
     if (reclaimed.length === 0) return 0;
 

@@ -1,6 +1,11 @@
 // netlify/functions/admin-issue-handoff.ts
 // "Pass to Developer" — machine-to-machine endpoint for the local AI auto-fix runner.
 //
+// Since 2026-11-12 the FIX job runs in GitHub Actions (.github/workflows/ai-fix.yml, started and
+// followed by src/utils/issue-ai-fix.ts), and so do merges to staging (merge-to-staging.yml,
+// src/utils/issue-cloud-merge.ts). Nothing new is 'queued' for ?action=claim or ?action=claim-merge;
+// they only drain rows queued before that. Conflict fixes still come through here.
+//
 // The admin portal queues an issue (POST /admin-issue-reports?action=handoff, cookie-auth).
 // A watcher running on a developer machine — where the repo + Claude Code live — then
 // drives the actual fix and talks to THIS endpoint. Because the runner has no admin
@@ -26,7 +31,8 @@
 // If DEV_HANDOFF_TOKEN is unset the endpoint is disabled (503) — the feature is opt-in.
 
 import { Handler } from '@netlify/functions';
-import { and, eq, asc, lt } from 'drizzle-orm';
+import { and, eq, asc, lt, or, isNull, ne } from 'drizzle-orm';
+import { CLOUD_RUNNER_ID } from '../../src/utils/issue-ai-fix';
 import { loadIncidentFields } from '../../src/utils/platform-incident';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
@@ -81,11 +87,14 @@ export default withLambda(async (event) => {
     if (event.httpMethod === 'GET' && action === 'claim') {
         // Reclaim issues abandoned by a dead runner: an 'in_progress' row whose heartbeat has
         // gone stale is put back in the queue (identity cleared) so it can be re-claimed below.
+        // Never a fix the cloud holds (src/utils/issue-ai-fix.ts): its heartbeat only moves when
+        // the app syncs, and syncAiFix reports a stuck run itself.
         await db.update(issueReports)
             .set({ devHandoffStatus: 'queued', devRunnerId: null, devRunnerHeartbeat: null, updatedAt: new Date() })
             .where(and(
                 eq(issueReports.devHandoffStatus, 'in_progress'),
                 lt(issueReports.devRunnerHeartbeat, new Date(Date.now() - FIX_RECLAIM_MS)),
+                or(isNull(issueReports.devRunnerId), ne(issueReports.devRunnerId, CLOUD_RUNNER_ID)),
             ));
 
         const [next] = await db
