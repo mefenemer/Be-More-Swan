@@ -18,9 +18,10 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Sonnet 4.6 pricing (USD per M tokens) → converted to GBP at 0.79
-const INPUT_COST_GBP_PER_M  = 3 * 0.79;
-const OUTPUT_COST_GBP_PER_M = 15 * 0.79;
+// Sonnet 5.5 pricing (USD per M tokens; the gateway's default since 2026-11-12, was Sonnet 4.6 at $3/$15)
+// → converted to GBP at 0.79. An estimate: a role whose chosen model differs is priced at this rate too.
+const INPUT_COST_GBP_PER_M  = 2 * 0.79;
+const OUTPUT_COST_GBP_PER_M = 10 * 0.79;
 
 const PLATFORM_CHAR_LIMITS: Record<string, number> = {
     instagram: 2200,
