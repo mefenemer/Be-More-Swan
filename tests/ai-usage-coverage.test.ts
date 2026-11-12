@@ -148,7 +148,7 @@ check('every successful generation records its cost — once, where the provider
     const music = read('netlify/functions/process-music-job-background.ts');
     assert.ok(/success: true[\s\S]{0,300}logMediaCost\(job\.model/.test(music), 'a finished music track records nothing (and it must be after the SUCCESS settle)');
     // Nothing reaches fal or Stability around these: a new direct caller would be unpriced.
-    const direct = sources.filter((f) => !['src/lib/fal-gateway.ts', 'src/lib/stability-audio.ts', 'src/utils/provider-balance.ts', 'netlify/functions/admin-system-status.ts'].includes(f)
+    const direct = sources.filter((f) => !['src/lib/fal-gateway.ts', 'src/lib/stability-audio.ts', 'src/utils/provider-balance.ts', 'src/utils/system-registry.ts'].includes(f)
         && /queue\.fal\.run|fal\.run\/|api\.stability\.ai/.test(read(f)));
     assert.deepStrictEqual(direct, [], `these call fal/Stability directly and record no cost:\n    ${direct.join('\n    ')}`);
 });

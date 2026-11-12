@@ -21,6 +21,25 @@ Status: **plan agreed 2026-11-12 ("write the plan doc then start phase 1").** **
   checked, so no guessed figure was written. The registry says so on the Gemini entry.
 - **Not verified live:** no real render, transcription or tour clip has written a row yet.
 
+**Phase 2 built 2026-11-12 on staging (not committed at time of writing).** SQL applied to both DBs (owner). As built:
+- **One registry:** `src/utils/system-registry.ts` (moved out of admin-system-status.ts, which is now a thin wrapper).
+  Adds `SYSTEM_VERSIONS` (API version we call + installed SDK version; a test fails on drift) and an Anthropic
+  health check (free `GET /v1/models`). Neon's Postgres version is read live.
+- **One loader:** `src/utils/system-map-data.ts` → `loadSystemMap()`; maths in `assembleSystemMap()` (pure). GBP at
+  platform_config `fx_rates_to_gbp` (the COGS rate), shown on the hub. Unmapped spend is flagged but counted.
+- **Endpoint** `admin-system-map.ts`: GET the map; POST `add_fixed` / `end_fixed` / `delete_fixed` (validated by
+  `validateFixedCostRequest`). Super admin; writes refused while impersonating.
+- **Chat** `admin-systems-chat.ts` ("Ask about systems", under the map): reads the same loader, never writes;
+  cards POST the page form's exact body to admin-system-map.ts. Model Opus 5.5, Opus 4.8 fallback.
+- **Page** `src/components/admin-system-map.js`: strip (spend 30 d / all time + since, tasks 30 d / all time,
+  cost per task, systems down), hub-and-spoke map with health-coloured curves, model chips under providers,
+  drawer (status, version, cost split, models with assistant names, monthly bills add/end/delete, links,
+  "Better options: not checked yet"). Phone: lines hidden, groups stack, drawer full screen.
+- **Checked** in the browser pane against a fixture (no DB): desktop + 375 px (no sideways scroll), drawer, bill
+  form, Escape + focus return, chat card confirm. **Not checked against staging data or a real chat answer.**
+- Decisions taken by default (owner's open questions): GBP with the rate shown; the owner enters bills in the drawer
+  (or via chat). Nothing seeded.
+
 ---
 
 ## 1. Where it stands today
@@ -83,5 +102,5 @@ Endpoint returns registry + health + 30-day/all-time spend per system (variable 
 Monthly job + stored results + drawer section + "decisions already taken" list per system.
 
 ## 5. Open questions for the owner
-- Currency on the page: costs are logged in USD; show GBP converted at a stated rate, or USD? (Recommend GBP, rate shown.)
-- Fixed costs: enter them yourself in Phase 2's form, or give me the current list to seed?
+- ~~Currency~~ — GBP at the COGS rate, shown (default taken 2026-11-12; say if you want USD).
+- ~~Fixed costs~~ — entered by the owner in the drawer or chat; nothing seeded.
