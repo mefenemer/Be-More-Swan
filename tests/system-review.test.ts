@@ -179,6 +179,12 @@ check('SQL and Drizzle mirror agree; seeded decisions insert once', () => {
     assert.ok(schema.includes('pgTable("system_reviews"') && schema.includes('pgTable("system_decisions"'));
 });
 
+check('a check that ran no search never claims to come from one', () => {
+    const js = read('src/components/admin-system-map.js');
+    assert.ok(/r\.searchCount > 0\s*\?\s*`An opinion from/.test(js));
+    assert.ok(js.includes('No web search was run for this check'));
+});
+
 check('the drawer escapes what the model wrote', () => {
     const js = read('src/components/admin-system-map.js');
     for (const f of ['x.name', 'x.detail', 'x.priceNote', 'r.summary', 'd.decision', 'x.url', 'a.error']) assert.ok(js.includes(`esc(${f}`), `${f} must go through esc()`);

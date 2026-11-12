@@ -430,7 +430,9 @@
             ${x.priceNote ? `<p style="font-size:12px;color:var(--sm-sub);margin:4px 0 0">${esc(x.priceNote)}</p>` : ''}
           </div>`).join('')}
         ${r.sources?.length ? `<p style="font-size:11px;color:var(--sm-sub);margin:8px 0 0">Sources: ${r.sources.map((u) => `<a class="sm-link" style="font-size:11px;font-weight:600" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(hostOf(u))}</a>`).join(', ')}</p>` : ''}
-        <p style="font-size:11px;color:var(--sm-sub);margin:6px 0 0">An opinion from a web search on that date, not advice. Prices change: check them before you switch.</p>`
+        <p style="font-size:11px;color:var(--sm-sub);margin:6px 0 0">${r.searchCount > 0
+          ? `An opinion from ${esc(r.searchCount)} web search${r.searchCount === 1 ? '' : 'es'} on that date, not advice. Prices change: check them before you switch.`
+          : 'No web search was run for this check, so it is a general opinion, not checked against today\'s prices. Check again for a searched one.'}</p>`
       : `<p style="font-size:13px;color:var(--sm-sub);margin:8px 0 0">Not checked yet. A check searches the web for tools that beat this one on quality, features or price, given what we use it for and spend. It runs on the 2nd of each month, or now.</p>`}
       ${attemptLine}
       <h5 style="margin:14px 0 6px">Decisions already taken</h5>
