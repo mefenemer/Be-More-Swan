@@ -59,9 +59,14 @@ jobs:
     timeout-minutes: 40
     env:
       ISSUE_ID: ${{ inputs.issue_id }}
-      WORK: ${{ runner.temp }}/work
-      OUT: ${{ runner.temp }}/out
     steps:
+      # The runner context is not allowed in job-level env (the whole file is rejected), so the
+      # paths under runner.temp are set here for every later step.
+      - name: Set work paths
+        run: |
+          echo "WORK=$RUNNER_TEMP/work" >> "$GITHUB_ENV"
+          echo "OUT=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
+
       - name: Check the inputs
         env:
           ISSUE_TEXT: ${{ inputs.issue_text }}

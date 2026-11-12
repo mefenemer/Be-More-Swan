@@ -52,8 +52,11 @@ jobs:
       ISSUE_ID: ${{ inputs.issue_id }}
       PR: ${{ inputs.pr }}
       GH_TOKEN: ${{ secrets.MERGE_PR_TOKEN || secrets.AI_FIX_PR_TOKEN || secrets.HOTFIX_PR_TOKEN || github.token }}
-      REASON: ${{ runner.temp }}/reason.txt
     steps:
+      # The runner context is not allowed in job-level env (the whole file is rejected).
+      - name: Set the reason file path
+        run: echo "REASON=$RUNNER_TEMP/reason.txt" >> "$GITHUB_ENV"
+
       - name: Check the inputs are numbers
         run: |
           if ! [[ "$ISSUE_ID" =~ ^[0-9]{1,9}$ && "$PR" =~ ^[0-9]{1,9}$ ]]; then
