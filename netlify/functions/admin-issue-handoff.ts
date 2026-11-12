@@ -4,7 +4,9 @@
 // Since 2026-11-12 the FIX job runs in GitHub Actions (.github/workflows/ai-fix.yml, started and
 // followed by src/utils/issue-ai-fix.ts), and so do merges to staging (merge-to-staging.yml,
 // src/utils/issue-cloud-merge.ts). Nothing new is 'queued' for ?action=claim or ?action=claim-merge;
-// they only drain rows queued before that. Conflict fixes still come through here.
+// they only drain rows queued before that. Conflict fixes are no longer queued either: a failed merge
+// is redone by the AI fix workflow (?action=redo-fix in admin-issue-reports.ts). Nothing here gets
+// new work; it stays until the laptop runner is retired.
 //
 // The admin portal queues an issue (POST /admin-issue-reports?action=handoff, cookie-auth).
 // A watcher running on a developer machine — where the repo + Claude Code live — then

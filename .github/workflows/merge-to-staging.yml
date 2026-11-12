@@ -5,7 +5,8 @@
 # workflow_dispatch API. The app follows the run and the PR (syncCloudMerge), then does what the
 # runner's report used to trigger: mark the merge, move the issue on, rebuild staging once drained.
 #
-# Conflict fixing still runs on the laptop runner.
+# After a failed merge, "Redo fix on latest staging" runs ai-fix.yml again instead of resolving
+# conflicts on a laptop.
 #
 # ── Safety ───────────────────────────────────────────────────────────────────────────────────────
 # • Inputs go through env vars, never ${{ }} inside a script, and must be whole numbers.

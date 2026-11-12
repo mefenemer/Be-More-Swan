@@ -6903,8 +6903,9 @@ function _irMergeCard(i) {
   const mergeBtn = isSuper
     ? `<button onclick="requestMerge(${i.id})" ${sqlPending ? 'disabled' : ''} class="w-full px-4 py-2.5 ${sqlPending ? 'bg-gray-300 text-white cursor-not-allowed' : 'btn-primary'} text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔀</span> Merge to staging</button>`
     : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can merge to staging.</p>`;
-  const conflictBtn = isSuper
-    ? `<button onclick="requestConflictFix(${i.id})" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔧</span> Investigate &amp; fix conflicts</button>`
+  // Replaces "Investigate & fix conflicts": the AI fix workflow writes the fix again on current staging.
+  const redoBtn = isSuper
+    ? `<button onclick="requestRedoFix(${i.id})" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔁</span> Redo fix on latest staging</button>`
     : '';
 
   let chip, inner;
@@ -6912,9 +6913,9 @@ function _irMergeCard(i) {
     const failed = ms === 'failed';
     chip = failed ? ['bg-red-100 text-red-700', 'Last merge failed'] : ['bg-amber-100 text-amber-800', 'Ready to merge'];
     inner = `<p class="text-xs text-gray-500">${failed
-        ? 'The merge attempt failed — see the runner output below. Have the AI developer investigate and resolve any conflicts, or try the merge again.'
+        ? 'The merge attempt failed — see why below. Try the merge again, or have the AI developer write the fix again on the latest staging (the new version needs reviewing).'
         : 'The fix is on a branch with an open pull request. Merge it to <b>staging</b> to make it live and move the issue to “Fixed &amp; Ready to Test”.'}${sqlPending ? ' <b class="text-amber-700">Run the database migration above first.</b>' : ''}</p>
-      ${prLink}${failed ? resultBlock : ''}${failed ? conflictBtn : ''}${mergeBtn}`;
+      ${prLink}${failed ? resultBlock : ''}${failed ? redoBtn : ''}${mergeBtn}`;
   } else if (ms === 'queued') {
     chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
     inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Merge requested — the developer runner will merge this within ~15s…</div>${prLink}`;
@@ -7048,12 +7049,12 @@ async function requestProdPromote(id) {
   }
 }
 
-async function requestConflictFix(id) {
-  if (!(await window.confirmModal('The issue will move to “Fixed & Ready to Test” once it succeeds.', { title: 'Have the AI developer investigate this failed merge, resolve any conflicts, and retry?' }))) return;
+async function requestRedoFix(id) {
+  if (!(await window.confirmModal('Claude Code checks out the latest staging in GitHub Actions and writes the fix again, updating the pull request. It is a new version of the fix, so review it again before merging.', { title: 'Redo this fix on the latest staging?' }))) return;
   const btn = event?.target?.closest('button');
-  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
   try {
-    await api(`${IR_API}?id=${id}&action=request-conflict-fix`, {
+    await api(`${IR_API}?id=${id}&action=redo-fix`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
     await openIssuePanel(id);

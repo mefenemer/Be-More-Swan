@@ -6,8 +6,9 @@
 // ⚠️ Since 2026-11-12 the FIX job runs in GitHub Actions instead (.github/workflows/ai-fix.yml,
 // started and followed by src/utils/issue-ai-fix.ts), and so do merges to staging
 // (.github/workflows/merge-to-staging.yml, src/utils/issue-cloud-merge.ts). The app no longer
-// queues either here. This watcher is still what drains conflict fixes; its fix and merge loops
-// only pick up rows queued before the switch.
+// queues either here, nor conflict fixes: a failed merge is redone by the AI fix workflow on the
+// latest staging. This watcher only drains rows queued before the switch, and can be retired once
+// none are left (and any open laptop fix/issue-* PRs are merged or passed on again).
 //
 // This watcher runs on a DEVELOPER MACHINE, where the repo and the Claude Code CLI
 // live. The cloud admin portal only queues work; this script does the actual fixing:

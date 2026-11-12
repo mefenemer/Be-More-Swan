@@ -11,8 +11,8 @@
 //
 // The heartbeat is NOT refreshed while a cloud merge runs: it is the start time this module and the
 // panel read. reclaimStaleMerges skips cloud rows; this module reports a stuck run itself.
-// 'queued' stays the laptop runner's merge queue, which nothing sets any more. Conflict fixes still
-// go through the laptop runner.
+// 'queued' stays the laptop runner's merge queue, which nothing sets any more. A failed merge is
+// redone by the AI fix workflow on the latest staging (?action=redo-fix), not resolved on a laptop.
 //
 // Tokens: as issue-ai-fix.ts (GITHUB_AI_FIX_TOKEN or GITHUB_HOTFIX_TOKEN: Actions read/write,
 // Pull requests read, Checks read optional).
@@ -130,7 +130,7 @@ export async function applyMergeState(db: Db, row: MergeRow, next: MergeNext, he
     if (!r.length) return false;
     await db.execute(sql`
         INSERT INTO issue_report_messages (issue_id, author_type, author_id, body, status)
-        VALUES (${row.id}, 'admin', NULL, ${`⚠️ Merge to staging failed — the pull request was NOT merged.\n\n${next.result}\n\nResolve the problem and request the merge again.`}, NULL)`);
+        VALUES (${row.id}, 'admin', NULL, ${`⚠️ Merge to staging failed — the pull request was NOT merged.\n\n${next.result}\n\nTry the merge again, or press “Redo fix on latest staging” to have the AI developer write it again against current staging.`}, NULL)`);
     await triggerStagingDeployIfDrained(db);
     return true;
 }

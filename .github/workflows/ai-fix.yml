@@ -5,8 +5,8 @@
 # src/utils/issue-ai-fix.ts) through the workflow_dispatch API. The app follows this run and its PR
 # (syncAiFix) and fills in the issue's branch, PR, summary and any proposed SQL.
 #
-# Merging to staging is .github/workflows/merge-to-staging.yml. Conflict fixing still runs on the
-# laptop runner.
+# Merging to staging is .github/workflows/merge-to-staging.yml. After a failed merge, "Redo fix on
+# latest staging" runs this workflow again: fresh staging, force-push, the open PR updated.
 #
 # ── Safety ───────────────────────────────────────────────────────────────────────────────────────
 # • Every input goes through env vars, never ${{ }} inside a script, so nothing typed into the
