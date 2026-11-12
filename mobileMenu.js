@@ -64,7 +64,11 @@
     function schedule() {
         if (queued) return;
         queued = true;
-        requestAnimationFrame(function () { queued = false; fit(); });
+        // Whichever comes first: the next frame, or a timer for when no frames run (background tab,
+        // hidden pane — the web font loading late widened the links after the first fit).
+        var run = function () { if (!queued) return; queued = false; fit(); };
+        requestAnimationFrame(run);
+        setTimeout(run, 150);
     }
 
     // Watch the nav once it is injected: its row's width (window resizes) and its text (i18n,
@@ -80,7 +84,10 @@
         if (window.ResizeObserver) new ResizeObserver(schedule).observe(nav);
         else window.addEventListener('resize', schedule);
         if (document.fonts && document.fonts.ready) document.fonts.ready.then(schedule);
-        schedule();
+        // Fit now, not on the next frame: a background tab or a hidden pane runs no animation frames,
+        // so the links stayed ~30px off the page at 1024–1100px until it was shown (seen 2026-11-12;
+        // screenshot and preview renderers read the page in that state). Later changes still batch.
+        fit();
     }
 
     function start() {

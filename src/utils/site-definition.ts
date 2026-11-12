@@ -173,7 +173,8 @@ export interface ItemsProps { heading: string | null; intro: string | null; item
 /** Text, optionally with a picture beside it (left or right — on a phone it sits above the words). */
 /** headingAlign: where the heading sits (FR#8, 2026-11-10). Absent = left, so older sites read unchanged. */
 export type HeadingAlign = 'left' | 'center' | 'right';
-export interface TextProps { heading: string | null; body: string; image: Image | null; imageSide: 'left' | 'right'; headingAlign?: HeadingAlign; }
+/** textAlign: where the body text sits (FR#11, 2026-11-12). Absent = left, the same as headingAlign. */
+export interface TextProps { heading: string | null; body: string; image: Image | null; imageSide: 'left' | 'right'; headingAlign?: HeadingAlign; textAlign?: HeadingAlign; }
 export interface FaqProps { heading: string | null; items: Array<{ q: string; a: string }>; }
 export interface CtaProps { heading: string; body: string | null; button: Link; }
 /** What customers say — the proof a buyer looks for (and the Mystery Shopper checks for). */
@@ -527,8 +528,11 @@ export function cleanSection(type: unknown, rawProps: unknown, warn: (m: string)
             const body = cleanText(p.body, LIMITS.textBody, true);
             if (!body) { warn('A text section was left out: it is empty.'); return null; }
             // Heading alignment: kept only when it isn't the default left, so a stored definition only grows when used.
-            const headingAlign = p.headingAlign === 'center' || p.headingAlign === 'centre' ? 'center' : p.headingAlign === 'right' ? 'right' : null;
-            return { type: 'text', props: { heading: textOrNull(p.heading, LIMITS.headline), body, image: cleanImage(p.image, warn), imageSide: p.imageSide === 'left' ? 'left' : 'right', ...(headingAlign ? { headingAlign } : {}) } };
+            // Body text alignment (FR#11) follows the same rule.
+            const align = (v: unknown): HeadingAlign | null => v === 'center' || v === 'centre' ? 'center' : v === 'right' ? 'right' : null;
+            const headingAlign = align(p.headingAlign);
+            const textAlign = align(p.textAlign);
+            return { type: 'text', props: { heading: textOrNull(p.heading, LIMITS.headline), body, image: cleanImage(p.image, warn), imageSide: p.imageSide === 'left' ? 'left' : 'right', ...(headingAlign ? { headingAlign } : {}), ...(textAlign ? { textAlign } : {}) } };
         }
         case 'faq': {
             const list = (Array.isArray(p.items) ? p.items : []).map((x) => {
