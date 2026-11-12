@@ -1523,10 +1523,10 @@ export const issueReports = pgTable("issue_reports", {
   devSqlRanAt: timestamp("dev_sql_ran_at"),
 
   // Merge of the fix PR to staging — requested from the ticket (super-admin) and performed
-  // by the local watcher (gh pr merge). The issue only reaches 'fixed_ready_to_test' once
-  // merged (and any migration applied). null | 'ready' | 'queued' | 'merging' | 'merged' | 'failed'
-  // | 'conflict_queued' | 'conflict_resolving' — the last two are a failed merge sent back to
-  // the AI developer to resolve conflicts and retry (see admin-issue-handoff's claim-conflict-fix).
+  // in GitHub Actions (merge-to-staging.yml, src/utils/issue-cloud-merge.ts). The issue only
+  // moves on once merged (and any migration applied). null | 'ready' | 'merging' | 'merged' | 'failed'.
+  // 'queued' | 'conflict_queued' | 'conflict_resolving' belonged to the retired laptop runner and are
+  // no longer set (db/z-retire-laptop-runner.sql releases any left over).
   devMergeStatus: text("dev_merge_status"),
   devMergedAt: timestamp("dev_merged_at"),
   devMergeResult: text("dev_merge_result"),  // gh output / error from the merge attempt

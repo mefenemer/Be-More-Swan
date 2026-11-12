@@ -24,7 +24,7 @@ import { dispatchAiFix, buildAiFixIssueText, syncAiFix, syncOpenAiFixes, CLOUD_R
 import { dispatchCloudMerge, syncCloudMerge, syncOpenCloudMerges, MERGE_BULK_MAX } from '../../src/utils/issue-cloud-merge';
 import { loadSeverities, setIssueSeverity, isIssueSeverity } from '../../src/utils/issue-severity';
 import { loadOrgPlanValues } from '../../src/utils/org-plan-value';
-import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, reclaimStaleMerges, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
+import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -154,7 +154,9 @@ export default withLambda(async (event) => {
     if (event.httpMethod === 'POST' && action === 'handoff' && id) {
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
-        if (issue.devHandoffStatus === 'queued' || issue.devHandoffStatus === 'in_progress') {
+        // Only a run the cloud holds blocks a new pass. A 'queued' or laptop-held 'in_progress' row
+        // left over from the retired laptop runner can be passed on again (the claim below swaps it).
+        if (issue.devHandoffStatus === 'in_progress' && issue.devRunnerId === CLOUD_RUNNER_ID) {
             return json(409, { error: 'This issue has already been passed to a developer.' });
         }
 
@@ -287,14 +289,10 @@ export default withLambda(async (event) => {
         if (issue.devMergeStatus === 'merged') {
             return json(409, { error: 'This pull request has already been merged.' });
         }
-        // 'queued' means no runner has picked it up yet — re-queuing changes nothing, so it's a
-        // plain 409. A 'merging' claim blocks a re-request too, UNLESS the runner has gone quiet
-        // (no heartbeat for STALE_MERGE_MINS): then a super-admin can force it, instead of the
-        // issue being 409'd forever. `canForce` tells the UI to offer that retry.
-        if (issue.devMergeStatus === 'queued') {
-            // Only the laptop runner's old queue: a merge requested before the move to GitHub Actions.
-            return json(409, { error: 'A merge is already queued for this issue — it starts as soon as a developer runner is online.', canForce: false });
-        }
+        // A 'merging' claim blocks a re-request, UNLESS nothing has confirmed it for
+        // STALE_MERGE_MINS: then a super-admin can force a restart, instead of the issue being
+        // 409'd forever. `canForce` tells the UI to offer that retry. A 'queued' merge left over
+        // from the retired laptop runner is simply started here (the claim below swaps it).
         const stuck = issue.devMergeStatus === 'merging';
         if (stuck && !force) {
             return isMergeClaimStale(issue.devRunnerHeartbeat)
@@ -361,7 +359,8 @@ export default withLambda(async (event) => {
         }
         const fixPr = parsePrNumber(issue.devPrUrl);
         if (!fixPr) return json(400, { error: 'This issue has no fix PR in this repository to copy.' });
-        if (issue.devProdStatus && ['queued', 'promoting', 'hotfix_requested', 'hotfix_open'].includes(issue.devProdStatus)) {
+        // A 'queued' / 'promoting' promotion left over from the retired laptop runner doesn't block.
+        if (issue.devProdStatus && ['hotfix_requested', 'hotfix_open'].includes(issue.devProdStatus)) {
             return json(409, { error: 'A hotfix for this issue is already in progress — see the card for its PR.' });
         }
         if (issue.devProdStatus === 'promoted') {
@@ -407,17 +406,18 @@ export default withLambda(async (event) => {
         }
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
-        if (issue.devMergeStatus !== 'failed') {
+        // 'conflict_queued' / 'conflict_resolving': a conflict fix the retired laptop runner never finished.
+        if (!issue.devMergeStatus || !['failed', 'conflict_queued', 'conflict_resolving'].includes(issue.devMergeStatus)) {
             return json(409, { error: 'Only a fix whose merge failed can be redone from here.' });
         }
-        if (issue.devHandoffStatus === 'queued' || issue.devHandoffStatus === 'in_progress') {
+        if (issue.devHandoffStatus === 'in_progress' && issue.devRunnerId === CLOUD_RUNNER_ID) {
             return json(409, { error: 'The AI developer is already working on this issue.' });
         }
 
         // Claim first (compare-and-swap on the merge state we just read). Clearing dev_merge_status
         // moves the card back to "fixing"; syncAiFix sets it to 'ready' when the new PR is there.
         const claimed = await db.update(issueReports).set({ ...cloudClaim(), devMergeStatus: null, devMergeResult: null })
-            .where(and(eq(issueReports.id, id), eq(issueReports.devMergeStatus, 'failed')))
+            .where(and(eq(issueReports.id, id), eq(issueReports.devMergeStatus, issue.devMergeStatus)))
             .returning({ id: issueReports.id });
         if (!claimed.length) return json(409, { error: 'This issue changed while you were looking at it — reload it and try again.' });
 
@@ -497,10 +497,8 @@ export default withLambda(async (event) => {
         });
     }
 
-    // Staging is now rebuilt automatically once a merge drains the queue — see
-    // triggerStagingDeployIfDrained(), called from admin-issue-handoff's merge-result
-    // handler. There is no separate manual "deploy" step to request here anymore.
-
+    // Staging is rebuilt automatically once no merge is left in flight — see
+    // triggerStagingDeployIfDrained(), called when syncCloudMerge records a merge outcome.
 
     // ── GET single issue (with thread + screenshot) ──────────────────────────────
     if (event.httpMethod === 'GET' && id) {
@@ -540,8 +538,6 @@ export default withLambda(async (event) => {
 
     // ── GET list ─────────────────────────────────────────────────────────────────
     if (event.httpMethod === 'GET') {
-        // Self-heal merges stranded by a dead runner so the list reflects true state.
-        await reclaimStaleMerges(db).catch((e) => console.error('[issue-reports] merge reclaim failed:', e?.message || e));
         // Cloud AI fixes in flight: record finished ones so the list and board are current (capped).
         await syncOpenAiFixes(db, { limit: 5 });
         await syncOpenCloudMerges(db, { limit: 5 });
@@ -676,21 +672,6 @@ export default withLambda(async (event) => {
             if (newStatus === 'fixed_ready_to_test') await stampFixedAt(db, id);
         }
 
-        // Putting a ticket On Hold cancels a still-QUEUED AI handoff, otherwise the local
-        // runner claims it (its claim query keys off dev_handoff_status, not the visible
-        // status) and its result overwrites the status straight back out of On Hold. The
-        // compare-and-swap on dev_handoff_status='queued' only cancels a handoff nobody has
-        // started: if a runner claimed it (→ 'in_progress') in the meantime the WHERE misses,
-        // so we never yank a fix out from under an active runner.
-        let handoffCancelled = false;
-        if (newStatus === 'on_hold') {
-            const cancelled = await db.update(issueReports)
-                .set({ devHandoffStatus: null, devHandoffAt: null, devResult: null, updatedAt: new Date() })
-                .where(and(eq(issueReports.id, id), eq(issueReports.devHandoffStatus, 'queued')))
-                .returning({ id: issueReports.id });
-            handoffCancelled = cancelled.length > 0;
-        }
-
         // Promoting to the roadmap creates (or refreshes) a Feature Roadmap item carrying the
         // chosen priority. Idempotent — re-promoting the same issue won't duplicate it.
         if (newStatus === 'roadmap') {
@@ -708,8 +689,7 @@ export default withLambda(async (event) => {
 
         // Record the supporting message / status change in the thread.
         if (message || newStatus) {
-            const autoBody = `We've updated this to "${ISSUE_STATUS_LABEL[finalStatus]}".` +
-                (handoffCancelled ? ' The queued AI auto-fix has been cancelled.' : '');
+            const autoBody = `We've updated this to "${ISSUE_STATUS_LABEL[finalStatus]}".`;
             await db.insert(issueReportMessages).values({
                 issueId: id,
                 authorType: 'admin',
@@ -723,7 +703,7 @@ export default withLambda(async (event) => {
         await notifyIssueUser(db, { userId: issue.userId, issueId: id, status: finalStatus, adminMessage: message, headers: event.headers })
             .catch((e) => console.error('[admin-issue-reports] user notify failed:', e?.message || e));
 
-        return json(200, { ok: true, status: finalStatus, handoffCancelled });
+        return json(200, { ok: true, status: finalStatus });
     }
 
     return json(405, { error: 'Method Not Allowed.' });

@@ -182,10 +182,9 @@ async function main() {
         assert.ok(read('netlify/functions/check-fixes-live.ts').includes('const mergesSynced = await syncOpenCloudMerges(db);'));
     });
 
-    await check('the stale-merge reclaim leaves cloud merges alone', () => {
-        const r = read('src/utils/issue-reports.ts');
-        const fn = r.slice(r.indexOf('export async function reclaimStaleMerges'));
-        assert.ok(fn.includes("or(isNull(issueReports.devRunnerId), ne(issueReports.devRunnerId, 'GitHub Actions'))"));
+    await check('no laptop-era reclaim is left to undo a cloud merge', () => {
+        assert.ok(!read('src/utils/issue-reports.ts').includes('reclaimStaleMerges'));
+        assert.ok(!api.includes('reclaimStaleMerges'));
         assert.strictEqual(CLOUD_RUNNER_ID, 'GitHub Actions');
     });
 

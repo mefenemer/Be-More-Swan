@@ -1,6 +1,7 @@
 // src/utils/issue-ai-fix.ts — "Pass to Developer" runs in GitHub Actions, not on a laptop.
 //
-// The laptop runner (scripts/dev-issue-fixer.mjs) only moved when someone's machine was on. Now:
+// This used to be a laptop runner (scripts/dev-issue-fixer.mjs, retired 2026-11-12) that only moved
+// when someone's machine was on. Now:
 //
 //   1. The admin endpoint claims the issue (compare-and-swap → dev_handoff_status 'in_progress',
 //      dev_runner_id CLOUD_RUNNER_ID) and dispatchAiFix starts .github/workflows/ai-fix.yml with
@@ -9,12 +10,11 @@
 //      the summary and any proposed SQL in the PR body.
 //   3. syncAiFix follows the run and the PR — when the admin opens the issue, when the list loads,
 //      and on every hourly live-check run — and records the result on the same columns the laptop
-//      runner used (dev_branch, dev_pr_url, dev_result, dev_sql, dev_merge_status 'ready',
+//      runner did (dev_branch, dev_pr_url, dev_result, dev_sql, dev_merge_status 'ready',
 //      status 'merge'), so the issue panel, the list and the board work unchanged.
 //
-// 'queued' is no longer set by anything here: it is the laptop runner's queue. The laptop's claim
-// endpoint skips cloud rows (admin-issue-handoff.ts), so a laptop left running can't reclaim them.
-// Merging to staging is issue-cloud-merge.ts. After a failed merge, ?action=redo-fix runs this
+// 'queued' was the laptop runner's queue and nothing sets it any more; db/z-retire-laptop-runner.sql
+// releases any rows it left, and the endpoint lets them be passed on again regardless. Merging to staging is issue-cloud-merge.ts. After a failed merge, ?action=redo-fix runs this
 // workflow again on the latest staging instead of the laptop's conflict fix.
 //
 // The issue text is untrusted (a customer, or a model, wrote it). It travels only as a workflow

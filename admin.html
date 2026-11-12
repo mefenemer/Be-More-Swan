@@ -6413,12 +6413,12 @@ async function loadIssueBoard() {
 function _irBadge(s) { return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${IR_STATUS_CLS[s] || 'bg-gray-100 text-gray-700'}">${IR_STATUS_LABEL[s] || s}</span>`; }
 // Small AI auto-fix ("Pass to Developer") badge for the list — empty unless handed off.
 const IR_HANDOFF_BADGE = {
-  queued:      { cls: 'bg-violet-100 text-violet-700', text: '🤖 Queued' },
   in_progress: { cls: 'bg-violet-100 text-violet-700', text: '🤖 Fixing…' },
   completed:   { cls: 'bg-violet-100 text-violet-700', text: '🤖 PR ready' },
   failed:      { cls: 'bg-amber-100 text-amber-800',   text: '🤖 Failed' },
 };
 function _irHandoffBadge(i) {
+  i = _irNoLaptop(i);
   // Most-actionable state wins: a pending DB migration first, then the merge gate.
   if (i.devSqlStatus === 'pending') {
     return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">🗄️ SQL to run</span>`;
@@ -6426,19 +6426,13 @@ function _irHandoffBadge(i) {
   if (i.devMergeStatus === 'ready') {
     return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">🔀 To merge</span>`;
   }
-  if (i.devMergeStatus === 'queued' || i.devMergeStatus === 'merging') {
+  if (i.devMergeStatus === 'merging') {
     return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔀 Merging…</span>`;
-  }
-  if (i.devMergeStatus === 'conflict_queued' || i.devMergeStatus === 'conflict_resolving') {
-    return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔧 Resolving conflict…</span>`;
   }
   // Once merged to staging, the prod-promotion state (if any) is the more-actionable signal.
   if (i.devMergeStatus === 'merged') {
     const staging = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🔀 Merged to staging</span>`;
     const ps = i.devProdStatus;
-    if (ps === 'queued' || ps === 'promoting') {
-      return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🚀 ${ps === 'queued' ? 'Prod queued…' : 'Promoting…'}</span>`;
-    }
     // Hotfix PR (src/utils/issue-hotfix.ts): the workflow is opening it, or it waits for a merge.
     if (ps === 'hotfix_requested' || ps === 'hotfix_open') {
       return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">🚀 ${ps === 'hotfix_requested' ? 'Opening hotfix PR…' : 'Hotfix PR to merge'}</span>`;
@@ -6460,12 +6454,25 @@ function _irHandoffBadge(i) {
 }
 function _irFmt(d) { return d ? new Date(d).toLocaleString() : ''; }
 
-// ── Runner attribution ───────────────────────────────────────────────────────
-// Several runners can drain the AI auto-fix queue at once. When one has claimed an
-// issue (a fix or a merge), devRunnerId/devRunnerHeartbeat tell us who and since when.
-const IR_RUNNER_STALL_MS = 15 * 60 * 1000; // a fix normally finishes in minutes
+// ── Who holds the issue ──────────────────────────────────────────────────────
+// Fixes and merges run in GitHub Actions (devRunnerId 'GitHub Actions'; devRunnerHeartbeat is
+// when it started). src/utils/issue-ai-fix.ts and issue-cloud-merge.ts follow the runs and mark a
+// stuck one failed themselves; a merge nothing has confirmed for 15 min can be force-restarted.
+const IR_RUNNER_STALL_MS = 15 * 60 * 1000; // a merge normally finishes in a couple of minutes
+// The laptop runner was retired 2026-11-12. Rows it left unfinished (until
+// db/z-retire-laptop-runner.sql runs) are shown as what can be done about them now.
+function _irNoLaptop(i) {
+  const o = { ...i };
+  if (o.devHandoffStatus === 'queued' || (o.devHandoffStatus === 'in_progress' && o.devRunnerId !== 'GitHub Actions')) {
+    o.devHandoffStatus = 'failed';
+    o.devResult = 'Left unfinished by the retired laptop runner. Pass it to the developer again.';
+  }
+  if (o.devMergeStatus === 'queued') o.devMergeStatus = 'ready';
+  if (o.devMergeStatus === 'conflict_queued' || o.devMergeStatus === 'conflict_resolving') o.devMergeStatus = 'failed';
+  return o;
+}
 function _irRunnerActive(i) {
-  return !!i.devRunnerId && (i.devHandoffStatus === 'in_progress' || i.devMergeStatus === 'merging' || i.devMergeStatus === 'conflict_resolving' || i.devProdStatus === 'promoting');
+  return !!i.devRunnerId && (i.devHandoffStatus === 'in_progress' || i.devMergeStatus === 'merging');
 }
 function _irRunnerElapsed(i) {
   if (!i.devRunnerHeartbeat) return '';
@@ -6477,17 +6484,18 @@ function _irRunnerElapsed(i) {
 function _irRunnerStalled(i) {
   return !!i.devRunnerHeartbeat && (Date.now() - new Date(i.devRunnerHeartbeat).getTime()) > IR_RUNNER_STALL_MS;
 }
-// Small chip for the list: which runner holds this issue, and for how long. Turns red
-// once the claim has outlived a normal fix — a hint the runner may have died.
+// Small chip for the list: a fix or merge running in GitHub Actions, and since when. A merge
+// that has outlived a normal one turns red (open it to force a restart).
 function _irRunnerChip(i) {
+  i = _irNoLaptop(i);
   if (!_irRunnerActive(i)) return '';
-  const stalled = _irRunnerStalled(i);
+  const stalled = i.devMergeStatus === 'merging' && _irRunnerStalled(i);
   const el = _irRunnerElapsed(i);
   const cls = stalled ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700';
   const title = stalled
-    ? 'This runner has been working far longer than a normal fix — it may have stopped. Re-queue the issue with “Pass to Developer”.'
-    : 'Runner currently working this issue';
-  return `<span title="${title}" class="text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}">🖥 ${_esc(i.devRunnerId)}${el ? ` · ${el}` : ''}${stalled ? ' ⚠' : ''}</span>`;
+    ? 'Nothing has confirmed this merge for a while. Open the issue to force a restart.'
+    : 'Running in GitHub Actions';
+  return `<span title="${title}" class="text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}">☁️ ${_esc(i.devRunnerId)}${el ? ` · ${el}` : ''}${stalled ? ' ⚠' : ''}</span>`;
 }
 
 async function loadIssueReports() {
@@ -6658,6 +6666,7 @@ async function submitIssueDescription(id) {
 // Claude Code in GitHub Actions (.github/workflows/ai-fix.yml, src/utils/issue-ai-fix.ts).
 function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function _irHandoffCard(i) {
+  i = _irNoLaptop(i);
   const s = i.devHandoffStatus || null;
   const passBtn = (label) =>
     `<button onclick="passToDeveloper(${i.id})" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2">
@@ -6669,22 +6678,13 @@ function _irHandoffCard(i) {
     ? `<a href="${_esc(i.devPrUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-sm font-bold text-violet-700 hover:underline">View pull request →</a>` : '';
 
   let inner;
-  if (s === 'queued') {
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-violet-700"><span class="animate-pulse">●</span> Queued for AI auto-fix… a developer runner will pick this up.</div>`;
-  } else if (s === 'in_progress') {
-    // 'GitHub Actions' = the cloud workflow (src/utils/issue-ai-fix.ts): the app follows the run and
-    // marks a stuck one failed itself, so there is no runner to re-queue from.
-    const cloud = i.devRunnerId === 'GitHub Actions';
-    const stalled = !cloud && _irRunnerStalled(i);
-    const who = cloud
-      ? `<div class="text-xs text-violet-600">☁️ Running in <b>GitHub Actions</b> · usually 5–20 minutes. Reopen the issue to refresh.</div>`
-      : i.devRunnerId
-      ? `<div class="text-xs ${stalled ? 'text-red-700' : 'text-violet-600'}">🖥 Runner <b>${_esc(i.devRunnerId)}</b> · working for ${_irRunnerElapsed(i) || 'a moment'}</div>` : '';
-    const stall = stalled
-      ? `<div class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">⚠ This is far longer than a normal fix — the runner may have stopped. Re-queue with “Pass to Developer”.</div>${passBtn('Re-queue for another runner')}` : '';
+  if (s === 'in_progress') {
+    // Always the cloud workflow (src/utils/issue-ai-fix.ts): the app follows the run and marks a
+    // stuck one failed itself, so there is nothing to re-queue here.
     inner = `<div class="space-y-2">
         <div class="flex items-center gap-2 text-sm font-semibold text-violet-700"><span class="animate-pulse">●</span> The AI developer is working on a fix…</div>
-        ${who}${cloud ? resultBlock : ''}${stall}
+        <div class="text-xs text-violet-600">☁️ Running in <b>GitHub Actions</b> · usually 5–20 minutes. Reopen the issue to refresh.</div>
+        ${resultBlock}
       </div>`;
   } else if (s === 'completed') {
     inner = `<div class="space-y-2">
@@ -6893,6 +6893,7 @@ async function runIssueSql(id) {
 // here and performed by the local watcher; the issue only reaches "Fixed & Ready to
 // Test" once the merge (and any DB migration) is done.
 function _irMergeCard(i) {
+  i = _irNoLaptop(i);
   const ms = i.devMergeStatus;
   if (!ms || !i.devPrUrl) return '';
   const prLink = `<a href="${_esc(i.devPrUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-sm font-bold text-indigo-700 hover:underline">View pull request →</a>`;
@@ -6916,13 +6917,10 @@ function _irMergeCard(i) {
         ? 'The merge attempt failed — see why below. Try the merge again, or have the AI developer write the fix again on the latest staging (the new version needs reviewing).'
         : 'The fix is on a branch with an open pull request. Merge it to <b>staging</b> to make it live and move the issue to “Fixed &amp; Ready to Test”.'}${sqlPending ? ' <b class="text-amber-700">Run the database migration above first.</b>' : ''}</p>
       ${prLink}${failed ? resultBlock : ''}${failed ? redoBtn : ''}${mergeBtn}`;
-  } else if (ms === 'queued') {
-    chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Merge requested — the developer runner will merge this within ~15s…</div>${prLink}`;
   } else if (ms === 'merging') {
-    // A merge takes seconds; a claim that has outlived IR_RUNNER_STALL_MS means the runner
-    // died mid-merge. The server reclaims it on the next list load, and super-admins can
-    // force a re-queue from here meanwhile.
+    // A merge takes seconds; one nothing has confirmed for IR_RUNNER_STALL_MS can be force-restarted
+    // (the workflow treats an already-merged PR as success). A 'merging' row the retired laptop
+    // runner left looks stalled the same way and is restarted the same way.
     const stalled = _irRunnerStalled(i) || !i.devRunnerHeartbeat;
     const forceBtn = (isSuper && stalled)
       ? `<button onclick="requestMerge(${i.id}, true)" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔁</span> Force restart (merge unconfirmed)</button>`
@@ -6932,15 +6930,8 @@ function _irMergeCard(i) {
     const cloudMerge = i.devRunnerId === 'GitHub Actions';
     const who = cloudMerge
       ? `<div class="text-xs ${stalled ? 'text-amber-700' : 'text-indigo-600'}">☁️ ${stalled ? 'GitHub Actions started this but nothing has confirmed it yet' : 'Merging in <b>GitHub Actions</b> · usually under 2 minutes. Reopen the issue to refresh.'}</div>`
-      : i.devRunnerId ? `<div class="text-xs ${stalled ? 'text-amber-700' : 'text-indigo-600'}">🖥 Runner <b>${_esc(i.devRunnerId)}</b> ${stalled ? 'claimed the merge but has gone quiet' : 'is merging'}${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
+      : `<div class="text-xs text-amber-700">Left unfinished by the retired laptop runner. Force a restart to merge it in GitHub Actions.</div>`;
     inner = `<div class="flex items-center gap-2 text-sm font-semibold ${stalled ? 'text-amber-700' : 'text-indigo-700'}"><span class="animate-pulse">●</span> ${stalled ? 'Merge appears stuck' : 'Merging to staging…'}</div>${who}${prLink}${forceBtn}`;
-  } else if (ms === 'conflict_queued') {
-    chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Investigation requested — the developer runner will resolve the conflict within ~15s…</div>${prLink}`;
-  } else if (ms === 'conflict_resolving') {
-    chip = ['bg-indigo-100 text-indigo-700', 'Resolving conflict…'];
-    const who = i.devRunnerId ? `<div class="text-xs text-indigo-600">🖥 Runner <b>${_esc(i.devRunnerId)}</b> is investigating${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Investigating &amp; resolving the merge conflict…</div>${who}${prLink}`;
   } else if (ms === 'merged') {
     chip = ['bg-emerald-100 text-emerald-700', 'Merged ✓'];
     inner = `<div class="flex items-center gap-2 text-sm font-semibold text-emerald-700">✅ Merged to staging${i.devMergedAt ? ` · ${_irFmt(i.devMergedAt)}` : ''}.</div>${prLink}${resultBlock}`;
@@ -6973,7 +6964,8 @@ function _irProdCard(i) {
   const resultBlock = detail
     ? `<div class="rounded-lg p-3 text-xs whitespace-pre-wrap max-h-48 overflow-auto bg-white border border-gray-200 text-gray-700">${_esc(detail)}</div>` : '';
   const isSuper = _can('deploy_code');
-  const canStart = !ps || ps === 'failed';
+  // 'queued' / 'promoting' were the retired laptop runner's "Push to prod"; they no longer block.
+  const canStart = !ps || ps === 'failed' || ps === 'queued' || ps === 'promoting';
   const startBtn = isSuper
     ? `<button onclick="requestProdPromote(${i.id})" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🚀</span> ${ps === 'failed' ? 'Try the hotfix PR again' : 'Open hotfix PR'}</button>`
     : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can open a hotfix PR.</p>`;
@@ -6996,10 +6988,6 @@ function _irProdCard(i) {
   } else if (ps === 'promoted') {
     chip = ['bg-emerald-100 text-emerald-700', 'Merged into main ✓'];
     inner = `<div class="text-sm font-semibold text-emerald-700">🚀 Merged into main${i.devProdAt ? ` · ${_irFmt(i.devProdAt)}` : ''}. The reporter is told once the prod deploy has it.</div>${_irHotfixLink(i)}`;
-  } else if (ps === 'queued' || ps === 'promoting') {
-    // Left behind by the old laptop-runner "Push to prod"; nothing sets these any more.
-    chip = ['bg-indigo-100 text-indigo-700', 'Old promotion'];
-    inner = `<p class="text-xs text-gray-500">An older “Push to prod” request is still recorded here. It promotes all of staging, so it is no longer started from this card.</p>${resultBlock}`;
   } else { return ''; }
 
   return `<div class="border border-gray-200 bg-gray-50 rounded-xl p-4 space-y-3">
@@ -7084,7 +7072,7 @@ function _updateMergeAllBtns(issues) {
   const isSuper = _can('deploy_code');
   const onTab = _irFilter === 'merge';
   const eligible = (issues || []).filter(_irMergeEligible);
-  const inFlight = (issues || []).filter(i => i.devMergeStatus === 'queued' || i.devMergeStatus === 'merging');
+  const inFlight = (issues || []).filter(i => i.devMergeStatus === 'merging');
 
   if (onTab && isSuper && eligible.length > 0) {
     mergeBtn.dataset.count = eligible.length;

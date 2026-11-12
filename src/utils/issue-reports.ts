@@ -239,7 +239,7 @@ export async function maybeAdvanceToReadyToTest(
 
 /**
  * Fire the Netlify staging build hook once the merge queue has drained — called after
- * every merge-result (success or failure) so "Merge to Staging" alone puts the fix live,
+ * every recorded merge outcome (issue-cloud-merge.ts, success or failure) so "Merge to Staging" alone puts the fix live,
  * matching what maybeAdvanceToReadyToTest already tells the reporter. Only fires when
  * nothing else is still queued/merging, so a bulk "merge all" still yields one rebuild
  * instead of one per PR. Best-effort: a hook failure is logged, never thrown.
@@ -260,69 +260,14 @@ export async function triggerStagingDeployIfDrained(db: Db): Promise<void> {
     }
 }
 
-/**
- * Fire the Netlify PRODUCTION build hook after a successful staging → main promotion.
- * The push to `main` already auto-deploys prod, so this is a belt-and-suspenders rebuild
- * that only runs when NETLIFY_PROD_BUILD_HOOK is set (unset → no-op). Unlike the staging
- * hook there is no drain check: a promotion is a single deliberate action, not a batch.
- * Best-effort: a hook failure is logged, never thrown.
- */
-export async function triggerProdDeploy(): Promise<void> {
-    const hook = process.env.NETLIFY_PROD_BUILD_HOOK;
-    if (!hook) return;
-
-    try {
-        const res = await fetch(hook, { method: 'POST' });
-        if (!res.ok) console.error(`[issue-reports] prod deploy hook returned ${res.status}`);
-    } catch (e) {
-        console.error('[issue-reports] prod deploy hook unreachable:', e instanceof Error ? e.message : e);
-    }
-}
-
-// A merge is a two-step handshake: the runner claims it (dev_merge_status 'queued' → 'merging',
-// stamping dev_runner_heartbeat) and only later POSTs the result to flip it to 'merged'/'failed'.
-// If the runner dies mid-merge (crash, machine offline, a network blip on the result POST) the
-// row is stranded in 'merging' forever, and request-merge refuses to re-queue a merge that is
-// "in progress". A `gh pr merge` takes seconds and the runner sends no heartbeat while merging,
-// so a claim older than STALE_MERGE_MINS means the runner is gone. This resets those rows to
-// 'ready' so a super-admin can request the merge again; the runner treats an already-merged PR
-// as success, so a merge that landed but was never reported resolves cleanly on the retry.
+// A merge to staging runs in GitHub Actions (issue-cloud-merge.ts): the claim stamps
+// dev_runner_heartbeat with its start time and nothing refreshes it while the workflow runs.
+// A merge takes seconds, so a claim older than STALE_MERGE_MINS that nothing has confirmed lets
+// a super-admin force a restart (admin-issue-reports ?action=request-merge { force }). The
+// workflow treats an already-merged PR as success, so a restart after a merge that did land is
+// harmless. syncCloudMerge also marks a run that never finished as failed on its own.
 export const STALE_MERGE_MINS = 15;
 
 export function isMergeClaimStale(heartbeat: Date | string | null | undefined, now = Date.now()): boolean {
     return !heartbeat || now - new Date(heartbeat).getTime() > STALE_MERGE_MINS * 60_000;
-}
-
-export async function reclaimStaleMerges(db: Db): Promise<number> {
-    // One UPDATE … RETURNING, so two concurrent callers can't both reclaim (and announce) a row.
-    const reclaimed = await db.update(issueReports).set({
-        devMergeStatus: 'ready',
-        devMergeResult: `Auto-reclaimed: the runner stopped responding before it confirmed the merge (no heartbeat for ${STALE_MERGE_MINS}+ min).`,
-        devRunnerId: null,
-        devRunnerHeartbeat: null,
-        updatedAt: new Date(),
-    }).where(and(
-        eq(issueReports.devMergeStatus, 'merging'),
-        or(
-            isNull(issueReports.devRunnerHeartbeat),
-            lt(issueReports.devRunnerHeartbeat, new Date(Date.now() - STALE_MERGE_MINS * 60_000)),
-        ),
-        // Never a merge running in GitHub Actions (issue-cloud-merge.ts): its heartbeat is its start
-        // time, and syncCloudMerge reports a stuck run itself. Literal, to avoid an import cycle.
-        or(isNull(issueReports.devRunnerId), ne(issueReports.devRunnerId, 'GitHub Actions')),
-    )).returning({ id: issueReports.id });
-    if (reclaimed.length === 0) return 0;
-
-    await db.insert(issueReportMessages).values(reclaimed.map(({ id }) => ({
-        issueId: id,
-        authorType: 'admin',
-        authorId: null,
-        body: '♻️ Merge reclaimed — the developer runner went away before confirming the merge, so it was un-stuck automatically. Check the pull request, then request the merge to staging again.',
-        status: null,
-    })));
-
-    // A stranded merge also held back the staging rebuild for every merge that finished
-    // alongside it (the hook only fires once nothing is queued/merging), so try it now.
-    await triggerStagingDeployIfDrained(db);
-    return reclaimed.length;
 }

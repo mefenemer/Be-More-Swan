@@ -76,8 +76,8 @@ export default withLambda(async (event) => {
             .limit(100);
 
         const ids = issues.map((i) => i.id);
-        // Messages with no authorId are posted by the AI auto-fix runner itself (see
-        // admin-issue-handoff.ts) rather than a person. Those are internal/dev-facing
+        // Messages with no authorId are posted by the AI developer's automation (see
+        // src/utils/issue-ai-fix.ts and issue-cloud-merge.ts) rather than a person. Those are internal/dev-facing
         // and stay out of the reporter's view — only the conversation with the admin
         // (and the admin's own status changes) should show here.
         const messages = ids.length

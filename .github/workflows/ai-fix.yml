@@ -1,7 +1,7 @@
 # AI fix — Claude Code writes the fix for ONE reported issue and opens a PR into staging.
 #
-# Replaces the FIX job of the developer-laptop runner (scripts/dev-issue-fixer.mjs), so a fix no
-# longer waits for someone's laptop to be on. Started from the admin portal ("Pass to Developer",
+# Replaced the FIX job of the developer-laptop runner (retired 2026-11-12), so a fix no longer
+# waits for someone's laptop to be on. Started from the admin portal ("Pass to Developer",
 # src/utils/issue-ai-fix.ts) through the workflow_dispatch API. The app follows this run and its PR
 # (syncAiFix) and fills in the issue's branch, PR, summary and any proposed SQL.
 #
