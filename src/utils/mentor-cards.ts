@@ -74,7 +74,7 @@ export type MentorCard =
     | { type: 'mentor_products_remove'; summary: string; productIds: number[]; products?: Array<{ id: number; name: string }> }
     | { type: 'mentor_products_update'; summary: string; productId: number; fields: Partial<Record<ProductEditField, string>>; productName?: string; changes?: ProductChange[] }
     | { type: 'mentor_quiet_mode'; summary: string; on: boolean; assistantId: number }
-    | { type: 'mentor_support_request'; summary: string; destination: 'issue' | 'support' | 'feature'; subject: string; description: string }
+    | { type: 'mentor_support_request'; summary: string; destination: 'issue' | 'support' | 'feature'; subject: string; description: string; topic?: 'billing' | 'security' }
     | { type: 'mentor_business_stage'; summary: string; assistantId: number }
     | { type: 'mentor_hire_recommendation'; summary: string; asked: boolean }
     | { type: 'mentor_review_all'; summary: string }
@@ -162,7 +162,9 @@ export function mentorCardFromUiElement(ui: unknown, assistantId: number): Mento
             const description = text(u.description, 3000);
             if (!subject || !description) return { error: 'A message to Be More Swan needs a subject and a description.' };
             const destination = u.destination === 'issue' || u.destination === 'feature' ? u.destination : 'support';
-            return { type: 'mentor_support_request', summary, destination, subject, description };
+            // Billing and security take the direct route (src/utils/support-priority.ts): a person first.
+            const topic = destination === 'support' && (u.topic === 'billing' || u.topic === 'security') ? u.topic : undefined;
+            return { type: 'mentor_support_request', summary, destination, subject, description, ...(topic ? { topic } : {}) };
         }
         case 'mentor_business_stage':
             return { type: 'mentor_business_stage', summary, assistantId };
@@ -326,7 +328,7 @@ export function mentorCardsPromptBlock(): string {
 3. Quiet mode — when they ask you to stop making suggestions (on) or to start again (off):
 {"type":"mentor_quiet_mode","summary":"<one sentence>","on":true}
 
-4. Ask Be More Swan for help, report something broken, or suggest a feature — only when the user asks for it, describes a problem with Be More Swan itself, or wants something it doesn't do yet. "issue" = something isn't working; "support" = a question, billing, or help; "feature" = an idea for something Be More Swan doesn't do yet (subject = the idea in a few words, description = what they want and why). Write it in their words; never include passwords, card details or other people's personal details:
+4. Ask Be More Swan for help, report something broken, or suggest a feature — only when the user asks for it, describes a problem with Be More Swan itself, or wants something it doesn't do yet. "issue" = something isn't working; "support" = a question, billing, or help; "feature" = an idea for something Be More Swan doesn't do yet (subject = the idea in a few words, description = what they want and why). For a "support" message about money or about security, privacy or their data, add "topic":"billing" or "topic":"security" — it goes straight to a person. Write it in their words; never include passwords, card details or other people's personal details:
 {"type":"mentor_support_request","summary":"<one sentence>","destination":"issue"|"support"|"feature","subject":"<short>","description":"<what happened, what they expected, and where — or, for a feature, what they want and why>"}
 
 Set "asked": true ONLY when the user's latest message asked for exactly this change ("add my website", "fill in my products"); a suggestion you volunteer is "asked": false. Volunteered suggestions are limited to 3 a week and the user can dismiss them (see SUGGESTIONS THIS WEEK): never volunteer one they dismissed, and when the week's 3 are used, mention the gap in words instead. If they want a dismissed one back, they can ask you for it or use "Bring back" on your Suggestions tab.

@@ -20,6 +20,8 @@ import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { hasPermission } from '../../src/utils/rbac';
 import { stampFixedAt, loadFixLiveFields, parsePrNumber } from '../../src/utils/issue-fix-live';
 import { dispatchHotfix, syncHotfix } from '../../src/utils/issue-hotfix';
+import { loadSeverities, setIssueSeverity, isIssueSeverity } from '../../src/utils/issue-severity';
+import { loadOrgPlanValues } from '../../src/utils/org-plan-value';
 import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, reclaimStaleMerges, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -437,6 +439,7 @@ export default withLambda(async (event) => {
                 reporterName: issue.userId == null ? 'Automatic (Be More Swan)' : [reporter?.firstName, reporter?.lastName].filter(Boolean).join(' ') || reporter?.email || `User #${issue.userId}`,
                 reporterEmail: reporter?.email || null,
                 ...((await loadIncidentFields(db, [issue.id])).get(issue.id) ?? { source: 'user', occurrences: 1, lastSeenAt: null, incident: null }),
+                severity: (await loadSeverities(db, [issue.id])).get(issue.id) ?? 'normal',
             },
             messages,
         });
@@ -453,6 +456,7 @@ export default withLambda(async (event) => {
             .select({
                 id: issueReports.id,
                 userId: issueReports.userId,
+                organisationId: issueReports.organisationId,
                 description: issueReports.description,
                 sourceLocation: issueReports.sourceLocation,
                 status: issueReports.status,
@@ -487,6 +491,9 @@ export default withLambda(async (event) => {
         const incidents = await loadIncidentFields(db, rows.map((r) => r.id));
         // Live check fields (issue-fix-live.ts) for the board's "Waiting to go live" / "closes in N days".
         const fixLive = await loadFixLiveFields(db, rows.map((r) => r.id));
+        // Severity (issue-severity.ts) and what the reporter's workspace pays (org-plan-value.ts).
+        const severities = await loadSeverities(db, rows.map((r) => r.id));
+        const planValues = await loadOrgPlanValues(db, rows.map((r) => r.organisationId));
 
         return json(200, {
             issues: rows.map((r) => ({
@@ -514,6 +521,10 @@ export default withLambda(async (event) => {
                 fixedAt: fixLive.get(r.id)?.fixedAt ?? null,
                 liveAt: fixLive.get(r.id)?.liveAt ?? null,
                 awaitingLive: !!r.devPrUrl && r.devMergeStatus === 'merged' && fixLive.get(r.id)?.livePrUrl !== r.devPrUrl,
+                severity: severities.get(r.id) ?? 'normal',
+                planName: r.organisationId != null ? (planValues.get(r.organisationId)?.planName ?? 'No plan') : null,
+                planMonthlyGbp: r.organisationId != null ? (planValues.get(r.organisationId)?.monthlyGbp ?? 0) : 0,
+                paying: r.organisationId != null ? !!planValues.get(r.organisationId)?.paying : false,
             })),
             counts: Object.fromEntries(counts.map((c) => [c.status, c.n])),
         });
@@ -535,6 +546,13 @@ export default withLambda(async (event) => {
             await db.update(issueReports)
                 .set({ description, updatedAt: new Date() })
                 .where(eq(issueReports.id, id));
+        }
+
+        // Severity is its own edit too (issue-severity.ts): no status change, no reporter notification.
+        if (body.severity !== undefined) {
+            if (!isIssueSeverity(body.severity)) return json(400, { error: 'Severity must be critical, high, normal or low.' });
+            if (!(await setIssueSeverity(db, id, body.severity))) return json(503, { error: 'Severity needs db/z-issue-severity.sql applied first.' });
+            if (body.status === undefined && body.message === undefined && description === null) return json(200, { ok: true, severity: body.severity });
         }
 
         const newStatus: IssueStatus | null = isIssueStatus(body.status) ? body.status : null;

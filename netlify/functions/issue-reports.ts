@@ -12,6 +12,8 @@
 // when they pressed the button is captured (sourceLocation/sourceUrl) so the developer knows
 // WHERE the issue occurred. An optional screenshot is stored inline (base64 data URL).
 
+import { isIssueSeverity, setIssueSeverity, needsPayingAlert, ISSUE_SEVERITY_LABEL, type IssueSeverity } from '../../src/utils/issue-severity';
+import { loadOrgPlanValues } from '../../src/utils/org-plan-value';
 import { Handler } from '@netlify/functions';
 import { and, eq, desc, asc, inArray, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -184,8 +186,13 @@ export default withLambda(async (event) => {
         status: 'reported',
     }).returning({ id: issueReports.id });
 
+    // "How bad is it?" (src/utils/issue-severity.ts). Written after the insert, raw, so the form still
+    // works on a database db/z-issue-severity.sql hasn't reached.
+    const severity = isIssueSeverity(body.severity) ? body.severity : 'normal';
+    if (severity !== 'normal') await setIssueSeverity(db, created.id, severity);
+
     // Notify the admin owner(s) — non-blocking; never fail the user's submission over email.
-    notifyAdmins(db, created.id, userId, description, sourceLocation, sourceUrl, !!imageData, event.headers)
+    notifyAdmins(db, created.id, userId, description, sourceLocation, sourceUrl, !!imageData, event.headers, { severity, organisationId: organisationId ?? null })
         .catch((e) => console.error('[issue-reports] admin notify failed:', e?.message || e));
 
     return json(201, { ok: true, id: created.id });
@@ -200,8 +207,12 @@ async function notifyAdmins(
     sourceUrl: string | null,
     hasImage: boolean,
     headers: Record<string, string | undefined>,
+    triage: { severity: IssueSeverity; organisationId: number | null } = { severity: 'normal', organisationId: null },
 ): Promise<void> {
     const recipients = await getAdminRecipients(db);
+    // A paying workspace's critical/high issue stands out in the inbox (issue-severity.ts).
+    const plan = triage.organisationId != null ? (await loadOrgPlanValues(db, [triage.organisationId])).get(triage.organisationId) : undefined;
+    const urgent = needsPayingAlert(triage.severity, !!plan?.paying);
     if (!recipients.length) return;
 
     const [reporter] = await db
@@ -219,6 +230,8 @@ async function notifyAdmins(
           <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Issue&nbsp;ID</td><td style="padding:4px 0;"><strong>#${issueId}</strong></td></tr>
           <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Reported&nbsp;by</td><td style="padding:4px 0;">${esc(reporterName)} (${esc(reporter?.email || '')})</td></tr>
           <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Location</td><td style="padding:4px 0;">${esc(sourceLocation || '—')}${sourceUrl ? ` <span style="color:#9ca3af;">(${esc(sourceUrl)})</span>` : ''}</td></tr>
+          <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">How bad</td><td style="padding:4px 0;"><strong>${ISSUE_SEVERITY_LABEL[triage.severity]}</strong></td></tr>
+          <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Plan</td><td style="padding:4px 0;">${plan ? `${esc(plan.planName)}${plan.paying ? ` · £${plan.monthlyGbp.toFixed(0)}/mo` : ' · not paying'}` : 'No plan'}</td></tr>
           <tr><td style="padding:4px 12px 4px 0;color:#6b7280;">Screenshot</td><td style="padding:4px 0;">${hasImage ? 'Attached (view in Admin Portal)' : 'None'}</td></tr>
         </table>
         <p style="margin-top:16px;"><strong>Description</strong></p>
@@ -229,7 +242,9 @@ async function notifyAdmins(
           </a>
         </p>`;
 
-    const subject = `🐞 New issue reported #${issueId} — ${description.slice(0, 60)}${description.length > 60 ? '…' : ''}`;
+    const subject = (urgent
+        ? `🚨 ${ISSUE_SEVERITY_LABEL[triage.severity].toUpperCase()} issue #${issueId} from a paying customer (${plan!.planName}, £${plan!.monthlyGbp.toFixed(0)}/mo) — `
+        : `🐞 New issue reported #${issueId} — `) + `${description.slice(0, 60)}${description.length > 60 ? '…' : ''}`;
     // De-dupe recipient emails (override can repeat; admin+super_admin sets are disjoint).
     const seen = new Set<string>();
     for (const r of recipients) {

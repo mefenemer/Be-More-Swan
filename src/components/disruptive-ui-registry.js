@@ -3250,8 +3250,8 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       eyebrow: issue ? 'Report a problem to Be More Swan' : feature ? 'Suggest a feature to Be More Swan' : 'Message Be More Swan support', summary: ui.summary, why: null,
       bodyHtml: `<div class="mt-2 rounded-lg bg-gray-50 border border-dashed border-gray-300 px-3 py-2"><p class="text-xs font-bold text-gray-900">${esc(String(ui.subject || ''))}</p><p class="text-xs text-gray-700 mt-1 whitespace-pre-line break-words">${esc(String(ui.description || ''))}</p></div>`,
       goLabel: issue ? 'Send report' : feature ? 'Send idea' : 'Send', eventName: 'mentor:support',
-      detail: { destination, subject: ui.subject, description: ui.description, from: typeof ui.from === 'string' ? ui.from : undefined },
-      doneText: issue ? 'Sent — follow it under Help & Support ▸ Report an Issue.'
+      detail: { destination, subject: ui.subject, description: ui.description, from: typeof ui.from === 'string' ? ui.from : undefined, topic: ui.topic === 'billing' || ui.topic === 'security' ? ui.topic : undefined },
+      doneText: issue ? 'Sent — follow it under Help & Support ▸ Contact us, where it shows as an issue.'
         : feature ? 'Sent — follow it under Help & Support ▸ Feature Requests ▸ Your requests.'
         : 'Sent — the team will reply by email and in Help & Support.',
       note: 'Only what’s written here is sent, with the page you were on. Nothing else from your workspace.',

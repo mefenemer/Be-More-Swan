@@ -6275,6 +6275,17 @@ function irColumnOf(i) {
   return 'new';
 }
 const IR_SOURCE_LABEL = { user: 'Customer', system: 'Automatic', suspected: 'Assistant noticed' };
+// How bad (src/utils/issue-severity.ts) — keep in step with ISSUE_SEVERITIES there.
+const IR_SEVERITIES = ['critical', 'high', 'normal', 'low'];
+const IR_SEVERITY_LABEL = { critical: 'Critical', high: 'High', normal: 'Normal', low: 'Low' };
+const IR_SEVERITY_RANK = { critical: 0, high: 1, normal: 2, low: 3 };
+async function irSetSeverity(id, severity) {
+  try {
+    await api(`${IR_API}?id=${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ severity }) });
+    window.showToast?.(`Severity set to ${IR_SEVERITY_LABEL[severity] || severity}.`, { icon: '✅' });
+    loadIssueReports();
+  } catch (e) { window.showToast?.(e.message || 'Could not save it.', { icon: '⚠️' }); }
+}
 const _irDaysLeft = (i) => {
   if (!i.fixedAt) return null;
   return Math.max(0, Math.ceil((new Date(i.fixedAt).getTime() + 7 * 864e5 - Date.now()) / 864e5));
@@ -6282,6 +6293,9 @@ const _irDaysLeft = (i) => {
 function irBoardCard(i) {
   const first = String(i.description || '').split('\n')[0].trim() || '(no description)';
   const badges = [];
+  if (i.severity === 'critical') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Critical</span>');
+  if (i.severity === 'high') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">High</span>');
+  if (i.paying) badges.push(`<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700" title="What this workspace pays (list price)">${_escH(i.planName || 'Paid')} · £${Math.round(Number(i.planMonthlyGbp) || 0)}/mo</span>`);
   if (i.status === 'more_info_required') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">Waiting on customer</span>');
   if (i.status === 'on_hold') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">On hold</span>');
   if (i.status === 'roadmap') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">On roadmap</span>');
@@ -6315,18 +6329,23 @@ function irBoard() {
     filters: [
       { key: 'source', label: 'Source', options: () => Object.entries(IR_SOURCE_LABEL).map(([value, label]) => ({ value, label })), test: (i, v) => (i.source || 'user') === v },
       { key: 'area', label: 'Area', options: (items) => _irDistinct(items, i => i.sourceLocation), test: (i, v) => i.sourceLocation === v },
+      { key: 'severity', label: 'How bad', options: () => IR_SEVERITIES.map(s => ({ value: s, label: IR_SEVERITY_LABEL[s] })), test: (i, v) => (i.severity || 'normal') === v },
+      { key: 'plan', label: 'Plan', options: (items) => [{ value: '__paying', label: 'Paying customers' }, ..._irDistinct(items, i => i.planName)], test: (i, v) => v === '__paying' ? !!i.paying : i.planName === v },
       { key: 'state', label: 'Flag', options: () => [
           { value: 'waiting', label: 'Waiting on customer' }, { value: 'hold', label: 'On hold' },
           { value: 'pr', label: 'Has a PR' }, { value: 'nopr', label: 'No PR yet' }],
         test: (i, v) => v === 'waiting' ? i.status === 'more_info_required' : v === 'hold' ? i.status === 'on_hold' : v === 'pr' ? !!i.devPrUrl : !i.devPrUrl },
     ],
     groups: [
+      { key: 'severity', label: 'How bad', of: (i) => IR_SEVERITY_LABEL[i.severity || 'normal'] },
+      { key: 'plan', label: 'Plan', of: (i) => i.planName || 'No plan' },
       { key: 'source', label: 'Source', of: (i) => IR_SOURCE_LABEL[i.source || 'user'] || i.source },
       { key: 'area', label: 'Area', of: (i) => i.sourceLocation || 'No area' },
       { key: 'reporter', label: 'Reporter', of: (i) => i.reporterName || '—' },
     ],
     sorts: [
       { key: 'oldest', label: 'Oldest first', compare: (a, b) => new Date(a.createdAt) - new Date(b.createdAt) },
+      { key: 'urgent', label: 'Most urgent', compare: (a, b) => (IR_SEVERITY_RANK[a.severity || 'normal'] - IR_SEVERITY_RANK[b.severity || 'normal']) || ((b.planMonthlyGbp || 0) - (a.planMonthlyGbp || 0)) || (new Date(a.createdAt) - new Date(b.createdAt)) },
       { key: 'newest', label: 'Newest first', compare: (a, b) => new Date(b.createdAt) - new Date(a.createdAt) },
       { key: 'occurrences', label: 'Most occurrences', compare: (a, b) => (b.occurrences || 1) - (a.occurrences || 1) },
       { key: 'activity', label: 'Recent activity', compare: (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt) },
@@ -6569,6 +6588,11 @@ async function openIssuePanel(id) {
         <div class="flex items-center gap-3 flex-wrap">
           <span class="text-xs font-bold uppercase text-gray-400">Current</span>${_irBadge(i.status)}${i.devMergeStatus === 'merged' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔀 Merged to staging</span>' : ''}${i.devProdStatus === 'promoted' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🚀 Merged to prod</span>' : ''}
         </div>
+        <!-- How bad (src/utils/issue-severity.ts): its own edit, saved on change, never tells the reporter. -->
+        <label for="ir-severity" class="block text-xs font-bold uppercase text-gray-400">How bad</label>
+        <select id="ir-severity" onchange="irSetSeverity(${i.id}, this.value)" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2">
+          ${IR_SEVERITIES.map(s => `<option value="${s}" ${(i.severity || 'normal') === s ? 'selected' : ''}>${IR_SEVERITY_LABEL[s]}</option>`).join('')}
+        </select>
         <label class="block text-xs font-bold uppercase text-gray-400">Update status</label>
         <select id="ir-new-status" onchange="irOnStatusChange()" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2">
           ${IR_STATUSES.map(s => `<option value="${s}" ${i.status === s ? 'selected' : ''}>${IR_STATUS_LABEL[s]}</option>`).join('')}
@@ -7238,6 +7262,8 @@ function frBoardCard(it) {
     it.status === 'brief_ready' ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">Brief ready</span>' : '',
     it.status === 'duplicate' ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500">Duplicate</span>' : '',
     it.targetQuarter ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">${_esc(it.targetQuarter)}</span>` : '',
+    // Revenue behind it (src/utils/feature-revenue.ts): paying workspaces that asked or voted, list price.
+    Number(it.revenueGbp) > 0 ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700" title="${Number(it.payingWorkspaces) || 0} paying workspace(s) asked or voted — monthly list price">£${Math.round(Number(it.revenueGbp))}/mo · ${Number(it.payingWorkspaces) || 0} paying</span>` : '',
   ].filter(Boolean).join('');
   const who = it.source === 'issue' && it.issueId ? `From issue #${Number(it.issueId)}` : it.source === 'manual' ? 'Added by admin' : (it.submitterEmail || 'a user');
   return `
@@ -7268,6 +7294,7 @@ function frBoard() {
       { key: 'type', label: 'Type', options: () => FR_ITEM_TYPES.map(t => ({ value: t, label: FR_ITEM_TYPE_LABEL[t] })), test: (it, v) => (it.itemType || 'feature') === v },
       { key: 'quarter', label: 'Quarter', options: (items) => _frDistinct(items, it => it.targetQuarter), test: (it, v) => it.targetQuarter === v },
       { key: 'source', label: 'From', options: () => [{ value: 'user', label: 'Customers' }, { value: 'manual', label: 'Admins' }, { value: 'issue', label: 'Issues' }], test: (it, v) => it.source === v },
+      { key: 'revenue', label: 'Revenue', options: () => [{ value: 'paying', label: 'From paying customers' }, { value: 'none', label: 'No paying customer yet' }], test: (it, v) => v === 'paying' ? Number(it.revenueGbp) > 0 : !(Number(it.revenueGbp) > 0) },
     ],
     groups: [
       { key: 'category', label: 'Category', of: (it) => FR_CATEGORY_LABEL[it.category] || it.category },
@@ -7277,6 +7304,7 @@ function frBoard() {
     ],
     sorts: [
       { key: 'votes', label: 'Most votes', compare: (a, b) => (b.voteCount || 0) - (a.voteCount || 0) || new Date(b.createdAt) - new Date(a.createdAt) },
+      { key: 'revenue', label: 'Most revenue', compare: (a, b) => (Number(b.revenueGbp) || 0) - (Number(a.revenueGbp) || 0) || (b.voteCount || 0) - (a.voteCount || 0) },
       { key: 'newest', label: 'Newest first', compare: (a, b) => new Date(b.createdAt) - new Date(a.createdAt) },
       { key: 'priority', label: 'Priority', compare: (a, b) => (FR_PRIORITY_RANK[a.priority] ?? 9) - (FR_PRIORITY_RANK[b.priority] ?? 9) || (b.voteCount || 0) - (a.voteCount || 0) },
       { key: 'rank', label: 'Board order', compare: (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) },

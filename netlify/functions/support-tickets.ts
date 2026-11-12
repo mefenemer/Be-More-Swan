@@ -1,4 +1,6 @@
 // netlify/functions/support-tickets.ts
+import { topicPriority, inboxSubject, confirmationLine } from '../../src/utils/support-priority';
+import { canReopenClosedTicket } from '../../src/utils/ticket-auto-close';
 import { HandlerEvent } from '@netlify/functions';
 import { and, asc, eq, desc } from 'drizzle-orm';
 import { Resend } from 'resend';
@@ -79,11 +81,12 @@ export default withLambda(async (event: HandlerEvent) => {
             const [ticket] = await db.select().from(supportTickets)
                 .where(and(eq(supportTickets.id, ticketId), eq(supportTickets.userId, userId))).limit(1);
             if (!ticket) return { statusCode: 404, body: JSON.stringify({ error: 'Ticket not found.' }) };
-            if (ticket.status === 'closed') return { statusCode: 409, body: JSON.stringify({ error: 'This ticket is closed — open a new one.' }) };
+            // A closed ticket reopens on a reply for a while (ticket-auto-close.ts promises it in its note).
+            if (ticket.status === 'closed' && !canReopenClosedTicket(ticket.closedAt)) return { statusCode: 409, body: JSON.stringify({ error: 'This ticket is closed — open a new one.' }) };
             const [reply] = await db.insert(ticketReplies).values({ ticketId, authorId: userId, body, isInternal: false }).returning();
             // The ball is back with the team: a ticket waiting on the customer, or resolved and
             // then answered, is open again.
-            await db.update(supportTickets).set({ status: 'open', updatedAt: new Date() }).where(eq(supportTickets.id, ticketId));
+            await db.update(supportTickets).set({ status: 'open', closedAt: null, updatedAt: new Date() }).where(eq(supportTickets.id, ticketId));
             const [user] = await db.select({ email: users.email, firstName: users.firstName }).from(users).where(eq(users.id, userId));
             await alertInbox(`[Ticket #${ticketId}] Customer replied: ${ticket.subject}`,
                 `<p><strong>${escHtml(user?.firstName || user?.email || 'A customer')}</strong> replied on ticket #${ticketId} — <em>${escHtml(ticket.subject)}</em>:</p>
@@ -132,8 +135,9 @@ export default withLambda(async (event: HandlerEvent) => {
                 category: category,
                 description: description.trim(),
                 status: 'open',
-                // Someone asked to speak to a person: it goes to the top of the queue.
-                ...(callback ? { priority: 'high' } : {}),
+                // Someone asked to speak to a person: it goes to the top of the queue. Security and
+                // billing take the direct route too (support-priority.ts): urgent / high.
+                ...(callback ? { priority: 'high' } : topicPriority(category) ? { priority: topicPriority(category)! } : {}),
             }).returning();
 
             // FIXED: Removed 'referenceId' to match your strict Drizzle schema
@@ -177,7 +181,7 @@ export default withLambda(async (event: HandlerEvent) => {
       <p style="margin:0 0 24px;color:#6b7280;font-size:15px;line-height:1.6">
         ${callback
             ? `A person from our team will call you back on <strong>${escHtml(callback.phone)}</strong>. If we can't reach you, we'll email you.`
-            : 'Your support ticket has been created. Our team typically responds within <strong>1–2 business days</strong>.'}
+            : confirmationLine(newTicket.category)}
       </p>
 
       <div style="background:#f3f4f6;border-radius:8px;padding:20px;margin-bottom:24px">
@@ -217,7 +221,7 @@ export default withLambda(async (event: HandlerEvent) => {
             // The business inbox hears about every new ticket — before this, only the admin portal did.
             await alertInbox(callback
                 ? `[Ticket #${newTicket.id}] 📞 Call-back request from ${user.email || 'a customer'} — ${callback.phone}${callback.timezone ? ` (${callback.timezone})` : ''}`
-                : `[Ticket #${newTicket.id}] New ${newTicket.category} ticket: ${newTicket.subject}`,
+                : inboxSubject(newTicket.id, newTicket.category, newTicket.subject),
                 `<p>New support ticket from <strong>${escHtml(user.email || '')}</strong>:</p>
                  <p><strong>${escHtml(newTicket.subject)}</strong> <span style="color:#787263">(${escHtml(newTicket.category)})</span></p>
                  <blockquote style="border-left:3px solid #eae4d7;padding-left:12px;color:#444036;white-space:pre-wrap">${escHtml(newTicket.description)}</blockquote>

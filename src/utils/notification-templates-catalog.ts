@@ -1853,6 +1853,15 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [v('ticket.id', 'Ticket ID', '482'), v('ticket.subject', 'Ticket subject', 'Cannot connect LinkedIn')],
     },
     {
+        templateKey: 'ticket_auto_closed',
+        name: 'Support ticket closed after 7 days (automatic)',
+        category: 'Support',
+        type: 'ticket_reply',
+        title: 'Ticket #{{ticket.id}} closed',
+        message: 'We closed "{{ticket.subject}}" as we hadn\'t heard back in 7 days. Reply within 30 days if you still need help and we\'ll reopen it.',
+        variables: [v('ticket.id', 'Ticket ID', '482'), v('ticket.subject', 'Ticket subject', 'Cannot connect LinkedIn')],
+    },
+    {
         templateKey: 'feature_released',
         name: 'Backed feature released',
         category: 'Support',
