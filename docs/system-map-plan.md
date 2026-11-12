@@ -101,8 +101,8 @@ Endpoint returns registry + health + 30-day/all-time spend per system (variable 
 ### Phase 3 — better options job
 Monthly job + stored results + drawer section + "decisions already taken" list per system.
 
-**Phase 3 built 2026-11-12 on staging (not committed at time of writing).** ⚠️ **`db/z-system-reviews.sql` must be
-applied to BOTH DBs before deploy** (it also seeds 5 decisions already on record). As built:
+**Phase 3 built 2026-11-12 on staging (not committed at time of writing).** Committed 38adcb35. `db/z-system-reviews.sql` **applied to BOTH DBs
+(owner, 2026-11-12)**, which also seeded 5 decisions already on record. As built:
 - `src/utils/system-review.ts`: 16 reviewable systems (paid products — not our config, sub-entries, free data or
   customer connectors); Opus 5.5 + server-side web search (`gatewayGenerateGrounded`), thinking low, 4 min budget.
   Reply is JSON: verdict keep / consider / switch, summary, ≤3 alternatives (better for quality / features / price,
