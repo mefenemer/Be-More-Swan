@@ -203,12 +203,13 @@ async function analyseOne(db: Db, row: typeof footageAnalyses.$inferSelect, ctx:
     if (row.audioKey) {
         const wav = await r2Bytes(row.audioKey);
         if (wav.length > 25 * 1024 * 1024) throw new Error('The sound in that video is too long to read. Trim the video first.');
-        ({ words } = await transcribeAudio(wav, {
+        const heard = await transcribeAudio(wav, {
             filename: 'footage.wav', type: 'audio/wav', timeoutMs: 90_000, language: ctx.language,
             prompt: transcriptionPrompt(ctx.language, ctx.businessName),
             keyterms: ctx.businessName ? [ctx.businessName] : [],
-        }));
-        await logTranscriptionCost(row.durationS, { workspaceId: ctx.orgId, assistantId: ctx.assistantId, sessionId: 'footage-review' });
+        });
+        words = heard.words;
+        await logTranscriptionCost(row.durationS, { workspaceId: ctx.orgId, assistantId: ctx.assistantId, sessionId: 'footage-review' }, heard.provider);
     }
     // Stored as { frames, loudness } since 2026-11-09; a bare array before.
     const stored = JSON.parse((await r2Bytes(row.framesKey)).toString('utf8')) as Array<{ t: number; data: string }> | { frames: Array<{ t: number; data: string }>; loudness?: number[] };

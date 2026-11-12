@@ -84,6 +84,8 @@ export const MENTOR_DATA_INVENTORY: Readonly<Record<string, MentorInventoryEntry
     // The owner's own videos as the Video Producer understood them (shot lists, spoken words) — only
     // the Video Producer reads them; nothing the Mentor needs.
     ...group('never', 'Video Producer footage reviews: shot lists and transcripts of the owner\'s own videos', ['footage_analyses']),
+    // docs/email-assistant-plan.md §7.3: a mailbox is ONE person's — not even the workspace owner sees it.
+    ...group('never', 'Email Assistant mailboxes: one person\'s own email (senders, subjects, summaries), private even from the workspace owner', ['mailboxes', 'mailbox_messages']),
     ...group('on_request', 'The user\'s own support tickets and issue reports, with status', ['support_tickets', 'issue_reports']),
     ...group('on_request', 'A half-finished assistant set-up, to offer picking it up', ['onboarding_drafts']),
     ...group('on_request', 'Bookings: counts and upcoming, when bookings are in use', ['bookings', 'booking_settings', 'class_sessions']),

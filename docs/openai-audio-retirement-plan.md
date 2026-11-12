@@ -33,8 +33,8 @@ So the System Map check on staging had the dates and names right. One fix: for `
 | --- | --- |
 | `src/lib/tts.ts:23` `TTS_MODEL` | Fallback voice (ElevenLabs off or failed) fails from 6 Jan 2027. Voiceovers already fail softly, but with no fallback an ElevenLabs outage means no voiceover at all. |
 | `src/lib/tts.ts:24` `TRANSCRIBE_MODEL` + `transcribeAudio` | No captions or word timings from 26 Feb 2027 (own voice keeps the recording without words, as designed). |
-| `netlify/functions/tour-narration.ts:31` | Tour narration fails from 6 Jan 2027. |
-| `src/utils/provider-balance.ts:213` | The OpenAI health ping sends a `gpt-4o-mini-tts` request. From 6 Jan 2027 it will report OpenAI as down even when it's up. |
+| `netlify/functions/tour-narration.ts:31` | Tour narration fails from 6 Jan 2027. **Fixed 2026-11-12: now Pepper (ElevenLabs).** |
+| `src/utils/provider-balance.ts:213` | The OpenAI health ping sends a `gpt-4o-mini-tts` request. From 6 Jan 2027 it will report OpenAI as down even when it's up. **Fixed 2026-11-12: billed embedding probe.** |
 | `src/lib/tts.ts:121-127` `voiceoverCostUsd` | The costs are written inline here (`0.015` speech, `0.006` transcription). `WHISPER_USD_PER_MINUTE` and `SPEECH_USD_PER_MINUTE` don't exist in `src/utils/ai-usage.ts`. |
 
 ## Recommended path
@@ -89,9 +89,11 @@ Tour narration (`tour-narration.ts`) should move with the same choice. It could 
    - **⚠️ Owner action before it does anything:** the ElevenLabs key was made with only Text to Speech, Voices Read and User permissions. Add **Speech to Text** to the key (ElevenLabs → API keys) on the same key used by every context. Until then every call is refused and falls back to whisper, so nothing breaks, but nothing changes either.
    - To check on staging: one voiceover and one footage review. Captions should line up, the "um"s should be tightened, and the server log should *not* show `[tts] Scribe failed`.
    - Not covered: own-voice and footage transcription costs are not logged to `ai_usage_log` at all (they weren't with whisper either). This is a separate gap.
-2. Fallback voice — **decided 2026-11-12: D, no fallback.** What that means when it's built:
+2. Fallback voice — **decided 2026-11-12: D, no fallback. Built 2026-11-12** (staging). What changed:
    - `synthesize()` in `src/lib/tts.ts` stops falling back to OpenAI. If ElevenLabs is off or fails, the voiceover fails with a clear message. `TTS_MODEL`, `synthesizeSpeech` and the OpenAI speech cost line go.
    - `tour-narration.ts` uses OpenAI as its *main* voice, so "no fallback" there means moving it to the ElevenLabs Pepper voice, not just deleting a fallback.
    - The `provider-balance.ts` OpenAI ping switches to `GET /v1/models` (still needed for whisper until step 1 lands).
-   - Timing: the OpenAI path keeps working until 6 Jan 2027, so this can be built any time before then. Building it in December keeps the current safety net for longest.
+   - As built: `speakVoiceover` never reads an ElevenLabs voice with OpenAI; `generate-voiceover` refuses before holding a credit when the chosen voice's own provider has no key (`voiceConfigured`). Tour narration speaks Pepper through ElevenLabs. The voice is in the cache key, so each tour step is spoken once more (a few thousand characters of the monthly ElevenLabs allowance, once). The OpenAI health check now sends one billed `text-embedding-3-small` embedding, which still catches an empty account. A free `GET /v1/models` would not, and embedding models are on no retirement list.
+   - Transcription costs (`logTranscriptionCost`, own voice and footage) are charged to whoever transcribed: Scribe $0.20/h as `eleven_scribe`, whisper $0.006/min.
+   - **⚠️ Still OpenAI-only after this, and they stop on 6 Jan 2027:** the **London man** (`london_man`, OpenAI `ballad`) and the six **legacy** voices (coral, sage, verse, alloy, onyx, shimmer; kept for old saved settings). They have no ElevenLabs voice. **Owner: pick an ElevenLabs voice by ear for the London man** (and decide whether the legacy six map to existing ElevenLabs voices) before 6 Jan 2027. After that date the OpenAI speech code can be deleted.
 3. Test ElevenLabs TTS-with-timestamps to skip transcription on our own voiceovers? — **open**

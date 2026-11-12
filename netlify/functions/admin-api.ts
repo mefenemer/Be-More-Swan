@@ -49,6 +49,7 @@ import { loadDeliveryReport, listDeliveryProblems } from '../../src/utils/email-
 import { isAdminRole, hasPermission, requirePermission, permissionsForRole } from '../../src/utils/rbac';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { SPECIAL_CATEGORY_CLAUSE } from './get-dpa-content';
+import { withSpecialCategoryClause } from '../../src/utils/special-category-clause';
 import { deleteUserAndSoleOrgs } from '../../src/utils/user-deletion';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -2281,13 +2282,9 @@ export default withLambda(async (event) => {
             // US-GDPR-1.2.1 SC3: Auto-append special-category refusal clause to every
             // master assistant system prompt so it is always present regardless of what
             // the admin writes above it.
-            const clauseMarker = '<!-- special-category-clause -->';
-            let finalPrompt: string | null = systemPrompt ?? null;
-            if (finalPrompt && !finalPrompt.includes(clauseMarker)) {
-                finalPrompt = `${finalPrompt}\n\n${clauseMarker}\n${SPECIAL_CATEGORY_CLAUSE}`;
-            } else if (!finalPrompt) {
-                finalPrompt = `${clauseMarker}\n${SPECIAL_CATEGORY_CLAUSE}`;
-            }
+            // The Email Assistant carries its own clause instead (src/utils/special-category-clause.ts).
+            const [roleRow] = await db.select({ roleKey: masterAssistants.roleKey }).from(masterAssistants).where(eq(masterAssistants.id, uid2)).limit(1);
+            const finalPrompt: string = withSpecialCategoryClause(systemPrompt ?? null, roleRow?.roleKey, SPECIAL_CATEGORY_CLAUSE);
 
             const [newVersion] = await db.insert(assistantVersions).values({
                 assistantId: uid2,

@@ -59,9 +59,14 @@ jobs:
     timeout-minutes: 40
     env:
       ISSUE_ID: ${{ inputs.issue_id }}
-      WORK: ${{ runner.temp }}/work
-      OUT: ${{ runner.temp }}/out
     steps:
+      # The runner context is not allowed in job-level env (the whole file is rejected), so the
+      # paths under runner.temp are set here for every later step.
+      - name: Set work paths
+        run: |
+          echo "WORK=$RUNNER_TEMP/work" >> "$GITHUB_ENV"
+          echo "OUT=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
+
       - name: Check the inputs
         env:
           ISSUE_TEXT: ${{ inputs.issue_text }}
@@ -88,9 +93,11 @@ jobs:
         with:
           node-version: '22'
 
+      # Pinned. MODEL (claude-opus-5-5) needs Claude Code 2.1.280 or newer: on 2.1.198 every run failed at
+      # once with "API Error: 400 ... does not support this model". Bump this with any MODEL change.
       - name: Install Claude Code
         working-directory: ${{ runner.temp }}
-        run: npm install -g @anthropic-ai/claude-code@2.1.198
+        run: npm install -g @anthropic-ai/claude-code@2.1.312
 
       - name: Make a copy for Claude and write the prompt
         env:
@@ -161,14 +168,23 @@ jobs:
             --permission-mode acceptEdits \
             --allowedTools "Read,Edit,Write,Glob,Grep" \
             --disallowedTools "Bash,WebFetch,WebSearch,Task,NotebookEdit" \
-            < "$OUT/prompt.txt" > "$OUT/claude.json" || status=$?
+            < "$OUT/prompt.txt" > "$OUT/claude.json" 2> "$OUT/claude.err" || status=$?
           if [[ $status -ne 0 ]]; then
             if [[ $status -eq 124 ]]; then echo "Claude Code ran out of time (25 minutes)." > "$OUT/reason.txt";
-            else echo "Claude Code exited with code $status." > "$OUT/reason.txt"; fi
+            else
+              # Say WHY (bad key, no credit, unknown model…): Claude's own message, from the JSON
+              # result or stderr. Neither contains the key.
+              detail=$(jq -r '.result // empty' "$OUT/claude.json" 2>/dev/null | head -c 1500)
+              [[ -z "$detail" ]] && detail=$(tail -c 1500 "$OUT/claude.err" 2>/dev/null)
+              [[ -z "$detail" ]] && detail=$(head -c 1500 "$OUT/claude.json" 2>/dev/null)
+              { echo "Claude Code exited with code $status."; [[ -n "$detail" ]] && echo "$detail"; } > "$OUT/reason.txt"
+              cat "$OUT/reason.txt"
+            fi
             exit 1
           fi
           if [[ "$(jq -r '.is_error // false' "$OUT/claude.json")" == "true" ]]; then
-            echo "Claude Code stopped early ($(jq -r '.subtype // "error"' "$OUT/claude.json"))." > "$OUT/reason.txt"
+            { echo "Claude Code stopped early ($(jq -r '.subtype // "error"' "$OUT/claude.json"))."; jq -r '.result // empty' "$OUT/claude.json" | head -c 1500; } > "$OUT/reason.txt"
+            cat "$OUT/reason.txt"
             exit 1
           fi
 
