@@ -269,7 +269,7 @@ address{font-style:normal;margin:0 0 12px}
 html{scroll-behavior:smooth}section[id]{scroll-margin-top:12px}
 .band{background:var(--p);color:var(--ink)}.band a:not(.btn){color:var(--ink)}.band .card,.band details{color:var(--t)}.band .btn{background:var(--ink);color:var(--p)}
 @media(min-width:700px){.grid.c2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid.c3{grid-template-columns:repeat(3,minmax(0,1fr))}}
-.ha-c{text-align:center}.ha-r{text-align:right}.tx{display:grid;gap:28px;align-items:center}.tx img{border-radius:var(--r)}@media(min-width:800px){.tx{grid-template-columns:1fr 1fr}.tx.left img{order:0}.tx.right img{order:2}}
+.ha-c{text-align:center}.ha-r{text-align:right}:is(.ha-c,.ha-r)>:is(ul,ol){list-style-position:inside;padding-left:0}.tx{display:grid;gap:28px;align-items:center}.tx img{border-radius:var(--r)}@media(min-width:800px){.tx{grid-template-columns:1fr 1fr}.tx.left img{order:0}.tx.right img{order:2}}
 video{display:block;width:100%;height:auto;max-width:100%;border-radius:var(--r);background:#000}.hero video{margin:24px auto 0}.hero.split video{margin:0}.gal.sq video{aspect-ratio:1/1;object-fit:cover}@media(min-width:800px){.tx.left video{order:0}.tx.right video{order:2}}
 .fm{display:grid;gap:14px;margin-top:20px;max-width:560px}.fm label{display:grid;gap:4px;font-weight:600;font-size:.95rem}.fm .opt{display:flex;gap:8px;align-items:flex-start;font-weight:400}
 .fm input:not([type=checkbox]):not([type=radio]),.fm textarea,.fm select{font:inherit;color:var(--t);background:var(--b);border:1px solid rgba(0,0,0,.25);border-radius:var(--r);padding:10px 12px;width:100%}
@@ -495,7 +495,9 @@ function sectionHtml(s: Section, h1: boolean, bg: SectionBg): string {
             const p = s.props;
             // Heading alignment (FR#8): a class, never an inline style (the CSP).
             const ha = p.headingAlign === 'center' ? ' class="ha-c"' : p.headingAlign === 'right' ? ' class="ha-r"' : '';
-            const words = `${p.heading ? `<${H}${ha}>${esc(p.heading)}</${H}>` : ''}${paragraphs(p.body)}`;
+            // Body text alignment (FR#11): the same classes on a wrapper round the body, lists' bullets kept beside their lines.
+            const ta = p.textAlign === 'center' ? 'ha-c' : p.textAlign === 'right' ? 'ha-r' : '';
+            const words = `${p.heading ? `<${H}${ha}>${esc(p.heading)}</${H}>` : ''}${ta ? `<div class="${ta}">${paragraphs(p.body)}</div>` : paragraphs(p.body)}`;
             const src = imageSrc(p.image);
             if (p.image && src) {
                 // Beside the words on a wide screen (left or right), above them on a phone.
