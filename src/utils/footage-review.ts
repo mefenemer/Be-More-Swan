@@ -22,6 +22,7 @@ import { gatewayRoleModel } from './assistant-model';
 import { putR2Object } from '../lib/media-persist';
 import { presignR2Get } from './social-publish';
 import { languageLabel, transcribeAudio } from '../lib/tts';
+import { logTranscriptionCost } from './ai-usage';
 import { recordCompletedWork, hasTaskCapacity } from './work-metering';
 import { getTaskCosts } from './task-costs';
 import { recordPlatformIncident } from './platform-incident';
@@ -205,6 +206,7 @@ async function analyseOne(db: Db, row: typeof footageAnalyses.$inferSelect, ctx:
             filename: 'footage.wav', type: 'audio/wav', timeoutMs: 90_000, language: ctx.language,
             prompt: transcriptionPrompt(ctx.language, ctx.businessName),
         }));
+        logTranscriptionCost(row.durationS, { workspaceId: ctx.orgId, assistantId: ctx.assistantId, sessionId: 'footage-review' });
     }
     // Stored as { frames, loudness } since 2026-11-09; a bare array before.
     const stored = JSON.parse((await r2Bytes(row.framesKey)).toString('utf8')) as Array<{ t: number; data: string }> | { frames: Array<{ t: number; data: string }>; loudness?: number[] };

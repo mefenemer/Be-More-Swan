@@ -14,7 +14,8 @@ import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { hasPermission } from '../../src/utils/rbac';
-import { FAL_BILLING_URL } from '../../src/utils/provider-balance';
+import { FAL_BILLING_URL, readElevenLabsBalance, readStabilityBalance } from '../../src/utils/provider-balance';
+import { remotionConfigured } from '../../src/lib/remotion-lambda';
 
 const jwtSecret = process.env.JWT_SECRET;
 const json = (statusCode: number, body: unknown) => ({
@@ -242,9 +243,52 @@ const SERVICES: ServiceDef[] = [
             : 'n/a',
     },
     {
-        key: 'embeddings', name: 'Embeddings & moderation', category: 'AI', tier: 'core',
-        purpose: 'Vector embeddings for KB search and content moderation. At least one provider key must be set.',
-        consoleUrl: 'https://dashboard.voyageai.com', envVars: ['VOYAGE_API_KEY', 'OPENAI_API_KEY'],
+        key: 'embeddings', name: 'Voyage AI', category: 'AI', tier: 'core',
+        purpose: 'Vector embeddings (voyage-3.5-lite) for Knowledge Base search. Spend is logged per call.',
+        consoleUrl: 'https://dashboard.voyageai.com', envVars: ['VOYAGE_API_KEY'],
+    },
+    {
+        key: 'openai', name: 'OpenAI', category: 'AI', tier: 'core',
+        purpose: 'Voiceovers when ElevenLabs is off or fails (gpt-4o-mini-tts), word timings (whisper-1), content moderation, '
+            + 'tour narration and the AI Visibility checks. Without it voiceovers and captions stop and moderation fails open.',
+        consoleUrl: 'https://platform.openai.com/usage', envVars: ['OPENAI_API_KEY'],
+        // GET /v1/models is free and read-only: proves the key without spending anything.
+        check: async () => process.env.OPENAI_API_KEY
+            ? pingOk('https://api.openai.com/v1/models', { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` })
+            : 'n/a',
+    },
+    {
+        key: 'gemini', name: 'Google Gemini', category: 'AI', tier: 'infra',
+        purpose: 'Used only by the monthly AI Visibility check ("do AI assistants name us"). Its spend is NOT logged yet.',
+        consoleUrl: 'https://aistudio.google.com/apikey', envVars: ['GEMINI_API_KEY'],
+    },
+    {
+        key: 'elevenlabs', name: 'ElevenLabs', category: 'AI', tier: 'core',
+        purpose: 'British voiceovers (the Pepper voice and the voice catalogue). Falls back to OpenAI voices when missing or out of characters.',
+        consoleUrl: 'https://elevenlabs.io/app/subscription', envVars: ['ELEVENLABS_API_KEY'],
+        // The same free subscription read the balance check makes.
+        check: async () => {
+            const b = await readElevenLabsBalance();
+            return b.status === 'ok' ? 'ok' : b.status === 'not_configured' ? 'n/a' : 'error';
+        },
+    },
+    {
+        key: 'stability', name: 'Stability AI', category: 'AI', tier: 'core',
+        purpose: 'AI music (Stable Audio) for video moods and the music generator. Without it, AI music cannot be made.',
+        consoleUrl: 'https://platform.stability.ai/account/credits', envVars: ['STABILITY_API_KEY'],
+        check: async () => {
+            const b = await readStabilityBalance();
+            return b.status === 'ok' ? 'ok' : b.status === 'not_configured' ? 'n/a' : 'error';
+        },
+    },
+    {
+        key: 'remotion', name: 'Remotion Lambda (AWS)', category: 'Media', tier: 'core',
+        purpose: 'Renders finished videos (post videos, Video Producer) on AWS Lambda. Needs the function, the deployed site, '
+            + 'the region and the REMOTION_AWS_* keys; without them videos cannot render. Render cost is logged per render.',
+        consoleUrl: 'https://console.aws.amazon.com/lambda',
+        envVars: ['REMOTION_LAMBDA_FUNCTION_NAME', 'REMOTION_SERVE_URL', 'REMOTION_REGION', 'REMOTION_AWS_ACCESS_KEY_ID', 'REMOTION_AWS_SECRET_ACCESS_KEY'],
+        // Every part must be present, not just one — remotionConfigured() is the app's own guard.
+        check: async () => remotionConfigured() ? 'n/a' : 'error',
     },
     {
         key: 'pexels', name: 'Pexels', category: 'Media', tier: 'core',
@@ -258,6 +302,16 @@ const SERVICES: ServiceDef[] = [
         key: 'serper', name: 'Serper', category: 'Search', tier: 'core',
         purpose: 'Live web search powering Lead Generator outbound discovery. Without it, discovery cannot run.',
         consoleUrl: 'https://serper.dev/dashboard', envVars: ['SERPER_API_KEY'],
+    },
+    {
+        key: 'hunter', name: 'Hunter', category: 'Search', tier: 'core',
+        purpose: 'Finds contact email addresses for discovered leads. Charged per email found; spend is logged per lookup.',
+        consoleUrl: 'https://hunter.io/dashboard', envVars: ['HUNTER_API_KEY'],
+    },
+    {
+        key: 'companies-house', name: 'Companies House', category: 'Search', tier: 'core',
+        purpose: 'UK company register lookups for Lead Generator (free API).',
+        consoleUrl: 'https://developer.company-information.service.gov.uk', envVars: ['COMPANIES_HOUSE_API_KEY'],
     },
 
     // ── infra: operational hardening (not user-visible, but should be set in prod) ─
@@ -297,6 +351,9 @@ const SERVICES: ServiceDef[] = [
     connector('quickbooks', 'QuickBooks', 'Connector · Finance', 'https://developer.intuit.com', 'QUICKBOOKS'),
     connector('searchconsole', 'Google Search Console', 'Connector · SEO', 'https://console.cloud.google.com', 'SEARCHCONSOLE'),
     connector('wordpresscom', 'WordPress.com', 'Connector · Blog', 'https://developer.wordpress.com', 'WORDPRESSCOM'),
+    connector('canva', 'Canva', 'Connector · Design', 'https://www.canva.com/developers', 'CANVA'),
+    connector('googlecalendar', 'Google Calendar (Meet links)', 'Connector · Booking', 'https://console.cloud.google.com', 'GOOGLE_CALENDAR'),
+    connector('outlook', 'Microsoft Outlook / Teams', 'Connector · Booking', 'https://portal.azure.com', 'OUTLOOK'),
 ];
 
 // Mask: only ever reveal that a value exists + its last 4 chars, never the secret itself.

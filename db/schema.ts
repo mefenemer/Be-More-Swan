@@ -3135,6 +3135,21 @@ export const taskLedger = pgTable("task_ledger", {
 ]);
 
 // What work costs in tasks, set in Admin → Money → Task costs (db/z-task-costs.sql, src/utils/task-costs.ts).
+// System Map (docs/system-map-plan.md): monthly bills no API call shows. db/z-system-fixed-costs.sql.
+export const systemFixedCosts = pgTable("system_fixed_costs", {
+  id: serial().primaryKey(),
+  systemKey: text("system_key").notNull(),
+  label: text("label").notNull().default(''),
+  amountMonthly: decimal("amount_monthly", { precision: 10, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default('GBP'),           // GBP | USD | EUR
+  startedOn: date("started_on", { mode: 'string' }).notNull(),
+  endedOn: date("ended_on", { mode: 'string' }),
+  note: text("note").notNull().default(''),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [index("system_fixed_costs_system_idx").on(t.systemKey)]);
+
 export const taskCostChanges = pgTable("task_cost_changes", {
   id: serial().primaryKey(),
   status: text("status").notNull(),                                // baseline | draft | announced | cancelled

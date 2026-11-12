@@ -234,3 +234,37 @@ export function logServiceCost(
     if (!(units > 0)) return;
     void logAiUsage({ ...ctx, model: service, inputTokens: 0, outputTokens: 0, costUsdOverride: (units * serviceUnitPriceUsd(service)).toFixed(6) });
 }
+
+// ── Compute and transcription (Remotion renders, whisper) ─────────────────────────────────────────
+// Added 2026-11-12 for the System Map (docs/system-map-plan.md): these were the last paid calls in no
+// ledger. Same ai_usage_log, 0 tokens, a cost worked out here.
+//   • Remotion Lambda: Remotion's own `costs.accruedSoFar` (USD) for the render — an estimate from AWS
+//     Lambda list prices, logged once per render that ran (a failed render still spent compute).
+//   • whisper-1: $0.006 per minute of audio (OpenAI pricing, as used by voiceoverCostUsd in lib/tts.ts).
+//   • gpt-4o-mini-tts speech: ~$0.015 per minute of audio; the tour estimates minutes from words at 150/min.
+export const REMOTION_USAGE_MODEL = 'remotion-lambda';
+export const WHISPER_USD_PER_MINUTE = 0.006;
+export const SPEECH_USD_PER_MINUTE = 0.015;
+
+/** Whisper cost for `durationS` seconds of audio, billed to the second with a 1 s floor. Pure. */
+export function transcriptionCostUsd(durationS: number | null | undefined): string {
+    const s = Number.isFinite(durationS as number) && (durationS as number) > 0 ? (durationS as number) : 1;
+    return ((s / 60) * WHISPER_USD_PER_MINUTE).toFixed(6);
+}
+
+/** Speech cost estimated from the text: 150 spoken words a minute. Pure. */
+export function speechCostFromTextUsd(text: string): string {
+    const words = (text.trim().match(/\S+/g) ?? []).length;
+    return (Math.max(words / 150, 1 / 60) * SPEECH_USD_PER_MINUTE).toFixed(6);
+}
+
+/** Record one finished Remotion render's compute. A null/0 cost records nothing. Never throws. */
+export function logRenderCost(costUsd: number | null | undefined, ctx: Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens' | 'costUsdOverride'> = {}): void {
+    if (!(typeof costUsd === 'number' && costUsd > 0)) return;
+    void logAiUsage({ ...ctx, model: REMOTION_USAGE_MODEL, inputTokens: 0, outputTokens: 0, costUsdOverride: costUsd.toFixed(6) });
+}
+
+/** Record one whisper transcription. Never throws. */
+export function logTranscriptionCost(durationS: number | null | undefined, ctx: Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens' | 'costUsdOverride'> = {}): void {
+    void logAiUsage({ ...ctx, model: 'whisper-1', inputTokens: 0, outputTokens: 0, costUsdOverride: transcriptionCostUsd(durationS) });
+}
