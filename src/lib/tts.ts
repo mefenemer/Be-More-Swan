@@ -20,8 +20,9 @@
 // 2026-11-12: NO fallback voice (owner's choice, docs/openai-audio-retirement-plan.md). OpenAI retires
 // gpt-4o-mini-tts on 6 Jan 2027 and its replacement is Realtime-only, so an ElevenLabs voice that
 // fails now fails the voiceover (the endpoint refunds the credit) instead of being read in an American
-// OpenAI voice. Voices with no `elevenlabs` id (the London man, the legacy six) are still OpenAI's
-// only — they need an ElevenLabs voice picked by ear before 6 Jan 2027.
+// OpenAI voice. The legacy six now have ElevenLabs voices of the same gender (voice-catalogue.json);
+// the London man is the one voice still OpenAI's only — it needs an ElevenLabs voice picked by ear
+// before 6 Jan 2027.
 //
 // 2026-11-12 (docs/openai-audio-retirement-plan.md): OpenAI retires whisper-1 on 26 Feb 2027 and its
 // replacement (gpt-transcribe) gives no word timestamps. Word timings now come from ElevenLabs Scribe
@@ -59,7 +60,7 @@ import CATALOGUE from '../public/voice-catalogue.json';
  * an accent line for the delivery note — gpt-4o-mini-tts takes accent from its instructions) is the
  * OpenAI voice, used only when there is no ElevenLabs id. `legacy` voices (the original six OpenAI voices,
  * American-sounding) stay valid for saved settings but are no longer offered (owner, 2026-11-02:
- * "robotic … not human like at all"). Each voice speaks its own `lang`; the script decides the language.
+ * "robotic … not human like at all"); since 2026-11-12 each is spoken by an ElevenLabs voice. Each voice speaks its own `lang`; the script decides the language.
  */
 export interface Voice {
     id: string; name: string; label: string; gender: 'female' | 'male'; lang: string; region: string;

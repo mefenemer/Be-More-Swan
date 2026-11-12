@@ -77,6 +77,23 @@ export function errorClass(err: unknown): string {
     return shape || name || 'unknown';
 }
 
+/**
+ * Pure: what actually went wrong, as one line. drizzle rethrows every query failure as
+ * "Failed query: insert into … params: …" and hangs the real Postgres error (and its SQLSTATE) on
+ * `cause` — recording only `message` is why a blog drafting incident read "failed query: insert into
+ * ( id" and named neither the table nor the fault. Anything that is not a wrapped query error is
+ * returned as its own message.
+ */
+export function failureMessage(err: unknown): string {
+    if (!(err instanceof Error)) return String(err);
+    const cause = (err as { cause?: unknown }).cause as { message?: unknown; code?: unknown } | null | undefined;
+    if (/^Failed query:/i.test(err.message) && typeof cause?.message === 'string' && cause.message) {
+        const code = typeof cause.code === 'string' && cause.code ? ` ${cause.code}` : '';
+        return `Database error${code}: ${cause.message}`;
+    }
+    return err.message;
+}
+
 /** Pure: strip anything that could be someone's content — emails, quoted text, URLs — and cut it short. */
 export function scrub(message: string, max = 200): string {
     const out = String(message || '')

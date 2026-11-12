@@ -55,7 +55,7 @@ export function hotfixPrFromResult(result: string | null | undefined, repo?: str
 }
 
 /** Start the workflow. Returns an error string for the admin, or null on success. */
-export async function dispatchHotfix(opts: { issueId: number; fixPr: number; token?: string; repo?: string; fetchImpl?: FetchLike }): Promise<string | null> {
+export async function dispatchHotfix(opts: { issueId: number; fixPr: number; autoMerge?: boolean; token?: string; repo?: string; fetchImpl?: FetchLike }): Promise<string | null> {
     const token = opts.token ?? writeToken();
     if (!token) return 'GITHUB_HOTFIX_TOKEN is not set in Netlify, so the hotfix workflow cannot be started.';
     const f = opts.fetchImpl || (fetch as unknown as FetchLike);
@@ -63,11 +63,14 @@ export async function dispatchHotfix(opts: { issueId: number; fixPr: number; tok
         const res = await f(`https://api.github.com/repos/${repoOf(opts.repo)}/actions/workflows/${HOTFIX_WORKFLOW}/dispatches`, {
             method: 'POST',
             headers: { ...headers(token), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ref: 'main', inputs: { issue_id: String(opts.issueId), fix_pr: String(opts.fixPr) } }),
+            // auto_merge only when asked ("Approve for production"): main's hotfix-pr.yml must have the input,
+            // and an older copy refuses unknown inputs with 422.
+            body: JSON.stringify({ ref: 'main', inputs: { issue_id: String(opts.issueId), fix_pr: String(opts.fixPr), ...(opts.autoMerge ? { auto_merge: 'true' } : {}) } }),
         });
         if (res.status === 204 || res.ok) return null;
         if (res.status === 404) return 'GitHub could not find the hotfix workflow on main (merge .github/workflows/hotfix-pr.yml first), or the token cannot see it.';
         if (res.status === 401 || res.status === 403) return 'GitHub refused the token: it needs Actions read/write on this repo.';
+        if (res.status === 422) return 'GitHub refused the workflow inputs (HTTP 422): main\'s hotfix-pr.yml is older than this app. Ship the latest staging to main first.';
         return `GitHub refused to start the workflow (HTTP ${res.status}).`;
     } catch (e) {
         return `Could not reach GitHub: ${e instanceof Error ? e.message : String(e)}`;

@@ -6550,6 +6550,7 @@ async function openIssuePanel(id) {
           <span class="text-xs text-gray-400">${_irFmt(m.createdAt)}</span>
         </div>
         <p class="text-gray-800 whitespace-pre-wrap">${_escH(m.body)}</p>
+        ${/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(m.imageUrl || '') ? `<a href="${m.imageUrl}" target="_blank" rel="noopener"><img src="${m.imageUrl}" alt="Repro screenshot" class="mt-2 rounded-lg border border-gray-200 max-h-64"></a>` : ''}
       </div>`).join('') || '<p class="text-xs text-gray-400">No messages yet.</p>';
     // Only an http(s) page address is a link; a data: image is the only screenshot we draw.
     const srcUrl = /^https?:\/\//i.test(i.sourceUrl || '') ? i.sourceUrl : '';
@@ -6589,7 +6590,7 @@ async function openIssuePanel(id) {
       ${_irMergeCard(i)}
 
       <!-- Promote the staging-verified fix to production -->
-      ${_irProdCard(i)}
+      ${_irProdCard(i, d.proof)}
 
       <!-- Status control -->
       <div class="border border-gray-200 rounded-xl p-4 space-y-3">
@@ -6957,7 +6958,72 @@ function _irHotfixLink(i) {
   const m = /Hotfix PR: (https:\/\/github\.com\/\S+\/pull\/\d+)/.exec(i.devProdResult || '');
   return m ? `<a href="${_escH(m[1])}" target="_blank" rel="noopener" class="font-bold text-emerald-700 hover:underline">Open the hotfix PR on GitHub ↗</a>` : '';
 }
-function _irProdCard(i) {
+// "Ready for production?" (src/utils/issue-fix-proof.ts productionChecklist, owner decisions 2026-11-12):
+// root cause confirmed or guessed, repro test before/after, SQL safety, SQL on staging, tests on staging,
+// live on staging. Approve for production runs the prod SQL then merges the one fix, only when ready.
+function _irProofList(proof) {
+  const icon = { ok: '✅', warn: '⚠️', fail: '❌', wait: '⏳' };
+  const tone = { ok: 'text-emerald-800', warn: 'text-amber-800', fail: 'text-red-700', wait: 'text-gray-600' };
+  return `<ul class="space-y-1.5">${proof.items.map((c) => `
+      <li class="text-xs ${tone[c.state] || ''}"><span class="mr-1">${icon[c.state] || '•'}</span><b>${_escH(c.label)}:</b> ${_escH(c.detail)}</li>`).join('')}</ul>
+    ${proof.row && proof.row.devRootCause ? `<details class="text-xs text-gray-700"><summary class="cursor-pointer font-semibold">What the AI developer found</summary><div class="mt-1 whitespace-pre-wrap">${_escH(proof.row.devRootCause)}</div></details>` : ''}`;
+}
+function _irProofCard(i, proof) {
+  const ps = i.devProdStatus || null;
+  const merged = i.devMergeStatus === 'merged';
+  const canApprove = merged && proof.onProdSite && (!ps || ps === 'failed') && !(proof.row && proof.row.devProdApprovedAt);
+  const isSuper = _can('deploy_code') && _can('run_migration_sql');
+  let action = '';
+  if (canApprove && isSuper) {
+    action = proof.ready
+      ? `<button onclick="approveProduction(${i.id})" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🚀</span> ${ps === 'failed' ? 'Approve for production again' : 'Approve for production'}</button>
+         <p class="text-[11px] text-gray-500">Runs the same SQL that passed on staging on the prod database, then merges only this fix into main once main's checks pass.</p>`
+      : `<button disabled class="w-full px-4 py-2.5 text-sm font-bold rounded-lg bg-gray-200 text-gray-500 cursor-not-allowed">🚀 Approve for production (not ready yet)</button>`;
+  } else if (merged && !proof.onProdSite) {
+    action = `<p class="text-xs text-gray-500">Approve for production is on the production site's Fix pipeline (it runs the SQL on the prod database).</p>`;
+  } else if (canApprove) {
+    action = `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can approve for production.</p>`;
+  }
+  const result = ps === 'failed' && i.devProdResult
+    ? `<div class="rounded-lg p-3 text-xs whitespace-pre-wrap max-h-48 overflow-auto bg-white border border-red-200 text-red-800">${_esc(String(i.devProdResult).replace(/^Hotfix PR: \S+\n?/, ''))}</div>${_irHotfixLink(i)}` : '';
+  const after = ps === 'hotfix_requested' ? `<div class="text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Approved. Opening the hotfix PR into main…</div>`
+    : ps === 'hotfix_open' ? `<div class="text-sm font-semibold text-amber-800">Approved. The hotfix PR merges itself once main's checks pass.</div>${_irHotfixLink(i)}`
+    : ps === 'promoted' ? `<div class="text-sm font-semibold text-emerald-700">🚀 Merged into main${i.devProdAt ? ` · ${_irFmt(i.devProdAt)}` : ''}. The reporter is told once the prod deploy has it.</div>${_irHotfixLink(i)}` : '';
+  const chip = ps === 'promoted' ? ['bg-emerald-100 text-emerald-700', 'In main ✓']
+    : (ps === 'hotfix_requested' || ps === 'hotfix_open') ? ['bg-indigo-100 text-indigo-700', 'Approved']
+    : proof.ready ? ['bg-emerald-100 text-emerald-700', proof.warnings ? 'Ready (with warnings)' : 'Ready'] : ['bg-gray-100 text-gray-700', merged ? 'Not ready yet' : 'Before staging'];
+  return `<div class="border border-gray-200 bg-gray-50 rounded-xl p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase text-gray-600">Ready for production?</span>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${chip[0]}">${chip[1]}</span>
+      </div>
+      ${_irProofList(proof)}
+      ${result}${after}${action}
+    </div>`;
+}
+async function approveProduction(id, confirm) {
+  if (!confirm && !(await window.confirmModal('The fix\'s SQL (if any) runs on the PRODUCTION database now, then only this fix is merged into main once main\'s required checks pass.', { title: 'Approve this fix for production?', confirmLabel: 'Approve' }))) return;
+  const btn = event?.target?.closest('button');
+  if (btn) { btn.disabled = true; btn.textContent = 'Approving…'; }
+  try {
+    await api(`${IR_API}?id=${id}&action=approve-production`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(confirm ? { confirm: true } : {}),
+    });
+    await openIssuePanel(id);
+    if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
+  } catch (e) {
+    if (btn) { btn.disabled = false; }
+    if (!confirm && e?.data?.needsConfirm) {
+      const ok = await window.confirmModal(`${e.message}\n\nApprove anyway?`, { title: 'The root cause is not confirmed', confirmLabel: 'Approve anyway' });
+      if (ok) return approveProduction(id, true);
+      return;
+    }
+    window.showToast?.(e.message, { icon: '⚠️' });
+  }
+}
+function _irProdCard(i, proof) {
+  // After db/z-issue-fix-proof.sql: the checklist and Approve for production, from the PR onwards.
+  if (proof && (proof.row?.devRootCauseStatus || i.devMergeStatus === 'merged')) return _irProofCard(i, proof);
   if (i.devMergeStatus !== 'merged') return '';
   const ps = i.devProdStatus || null;
   const detail = String(i.devProdResult || '').replace(/^Hotfix PR: \S+\n?/, '');

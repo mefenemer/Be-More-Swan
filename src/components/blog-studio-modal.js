@@ -1135,13 +1135,18 @@
     var video = state.pendingVideo;
     state.pendingVideo = null;
     var title = video && video.title ? String(video.title).slice(0, 200) : 'Untitled draft';
+    var made = null;
     api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title, assistantId: state.assistantId }) }).then(function (res) {
       if (!res.ok) { setStatus('bs-save-status', ''); showOpenError('Could not start a new draft: ' + ((res.body && res.body.error) || 'please try again.'), startBlankPost); return; }
       setStatus('bs-save-status', '');
-      var editor = openWorkspace(res.body.post.id, title, video && video.words ? String(video.words) : '');
+      made = res.body.post.id;
+      var editor = openWorkspace(made, title, video && video.words ? String(video.words) : '');
       // A video handed over by the Video Producer goes into the body straight away.
       if (video) attachInline({ assetId: Number(video.assetId) });
       if (editor && editor.focus) editor.focus();   // drop straight into typing
+    }).catch(function () {
+      // The draft row may already exist; Try again reopens it rather than creating a second one.
+      openFailed('Could not start a new draft: please try again.', made ? function () { loadExistingPost(made); } : startBlankPost);
     });
   }
 
@@ -1530,7 +1535,15 @@
         el('bs-unpublish').classList.remove('bs-hidden');
         el('bs-repush').classList.remove('bs-hidden');
       }
-    }).catch(function () { setStatus('bs-save-status', ''); });
+    }).catch(function () { openFailed('Could not open this article: please try again.', function () { loadExistingPost(id); }); });
+  }
+
+  // Something THREW while the editor was being built (api() itself never rejects). This catch used to
+  // clear the status line and nothing else, so the author was left on a blank or half-built panel.
+  function openFailed(msg, retry) {
+    setStatus('bs-save-status', '');
+    el('bs-workspace').classList.add('bs-hidden');
+    showOpenError(msg, retry);
   }
 
   // ── Widget config / theming ────────────────────────────────────────────────────────────────────
@@ -3264,6 +3277,12 @@
     // Paint the fallback wording immediately so no button is briefly blank, then correct it once
     // the assistant list is in.
     applyAssistantNaming();
+    // Say so at once. The post is only asked for once the assistant list is in, and until then the
+    // panel was blank — or still showed the PREVIOUS article's editor. openWorkspace reveals it again.
+    el('bs-workspace').classList.add('bs-hidden');
+    el('bs-decide').classList.add('bs-hidden');
+    bd.classList.remove('bs-deciding');
+    showOpening(opts.postId ? 'Opening your article…' : 'Starting a new draft…');
     loadAssistants().then(function () {
       // Opening onto an existing post loads it; opening fresh drops straight into a blank draft in
       // the editor (the old "Start a new post" brief screen is gone).
@@ -3272,6 +3291,10 @@
       } else {
         startBlankPost();
       }
+    }).catch(function () {
+      // Anything that threw before the load started would otherwise leave the opening line spinning.
+      var retry = function () { openBlogStudio(opts); };
+      openFailed(opts.postId ? 'Could not open this article: please try again.' : 'Could not start a new draft: please try again.', retry);
     });
   }
 

@@ -19,7 +19,9 @@ export default defineConfig({
     use: {
         baseURL: `http://127.0.0.1:${port}`,
         trace: 'retain-on-failure',
-        screenshot: 'only-on-failure',
+        // E2E_SCREENSHOT=on: the AI fix's repro run (ai-fix.yml) keeps a screenshot of every test, before
+        // and after the fix, for the ticket.
+        screenshot: process.env.E2E_SCREENSHOT === 'on' ? 'on' : 'only-on-failure',
     },
     projects: [
         { name: 'desktop', use: { ...devices['Desktop Chrome'] }, testIgnore: /phone\.spec\.ts/ },

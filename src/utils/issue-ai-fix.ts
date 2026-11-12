@@ -25,6 +25,7 @@
 // fall back to GITHUB_FIX_CHECK_TOKEN.
 
 import { sql } from 'drizzle-orm';
+import { saveFixProof, parseProof, rootCauseStatus } from './issue-fix-proof';
 import type { getDb } from '../../db/client';
 
 type Db = ReturnType<typeof getDb>;
@@ -44,6 +45,8 @@ export const AI_FIX_BULK_MAX = 10;
 /** The issue text sent to the workflow is capped here (the workflow refuses over 12000). */
 export const AI_FIX_TEXT_MAX = 8000;
 
+/** Where ai-fix.yml saves the screenshot in Claude's copy (one of .png/.jpg/.gif/.webp). */
+export const SCREENSHOT_FILE_GLOB = '.issue-screenshot.*';
 export const SQL_START = '---SQL-MIGRATION-START---';
 export const SQL_END = '---SQL-MIGRATION-END---';
 
@@ -81,14 +84,18 @@ export interface ThreadMessage { authorType: string; body: string | null; create
  * bug. On a retry the latest thread (the reporter's "it still doesn't work", the last attempt's
  * summary) matters most, so the newest messages are kept when the cap bites.
  */
-export function buildAiFixIssueText(issue: { id: number; description: string | null; sourceLocation?: string | null; sourceUrl?: string | null; hasImage?: boolean; note?: string }, thread: ThreadMessage[] = []): string {
+export function buildAiFixIssueText(issue: { id: number; description: string | null; sourceLocation?: string | null; sourceUrl?: string | null; hasImage?: boolean; screenshotSent?: boolean; note?: string }, thread: ThreadMessage[] = []): string {
     const head = [
         `Issue #${issue.id}`,
         // From the app, not the reporter: e.g. "redo this fix on the latest staging".
         issue.note ? `Note from the team: ${sanitiseIssueText(issue.note, 600)}` : '',
         `Location in app: ${sanitiseIssueText(issue.sourceLocation, 200) || 'unknown'}`,
         issue.sourceUrl ? `Page: ${sanitiseIssueText(issue.sourceUrl, 300)}` : '',
-        issue.hasImage ? '(The reporter attached a screenshot. It is not available here.)' : '',
+        issue.hasImage
+            ? (issue.screenshotSent
+                ? `(The reporter attached a screenshot. If a file named ${SCREENSHOT_FILE_GLOB} is at the top of the current directory, read it before anything else: it shows what they saw. It is not part of the code, so don't edit or mention it as a change. If it isn't there, it could not be fetched.)`
+                : '(The reporter attached a screenshot. It is not available here.)')
+            : '',
         '',
         'Description:',
         sanitiseIssueText(issue.description, 4000) || '(no description provided)',
@@ -109,7 +116,7 @@ export function buildAiFixIssueText(issue: { id: number; description: string | n
 }
 
 /** Start the workflow. Returns an error string for the admin, or null on success. */
-export async function dispatchAiFix(opts: { issueId: number; issueText: string; token?: string; repo?: string; fetchImpl?: FetchLike }): Promise<string | null> {
+export async function dispatchAiFix(opts: { issueId: number; issueText: string; screenshotUrl?: string | null; token?: string; repo?: string; fetchImpl?: FetchLike }): Promise<string | null> {
     const token = opts.token ?? writeToken();
     if (!token) return 'GITHUB_AI_FIX_TOKEN (or GITHUB_HOTFIX_TOKEN) is not set in Netlify, so the AI fix workflow cannot be started.';
     const f = opts.fetchImpl || (fetch as unknown as FetchLike);
@@ -117,7 +124,7 @@ export async function dispatchAiFix(opts: { issueId: number; issueText: string; 
         const res = await f(`https://api.github.com/repos/${repoOf(opts.repo)}/actions/workflows/${AI_FIX_WORKFLOW}/dispatches`, {
             method: 'POST',
             headers: { ...ghHeaders(token), 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ref: AI_FIX_BASE, inputs: { issue_id: String(opts.issueId), issue_text: sanitiseIssueText(opts.issueText) || `Issue #${opts.issueId}` } }),
+            body: JSON.stringify({ ref: AI_FIX_BASE, inputs: { issue_id: String(opts.issueId), issue_text: sanitiseIssueText(opts.issueText) || `Issue #${opts.issueId}`, screenshot_url: opts.screenshotUrl || '' } }),
         });
         if (res.status === 204 || res.ok) return null;
         if (res.status === 404) return 'GitHub could not find the AI fix workflow (.github/workflows/ai-fix.yml must be on main and staging), or the token cannot see it.';
@@ -223,7 +230,7 @@ export function parseAiFixPrBody(body: string | null | undefined): { summary: st
 }
 
 export type AiFixNext =
-    | { kind: 'completed'; branch: string; prUrl: string; summary: string; sql: string | null }
+    | { kind: 'completed'; branch: string; prUrl: string; summary: string; sql: string | null; body?: string }
     | { kind: 'failed'; result: string }
     | { kind: 'running'; result: string };
 
@@ -247,7 +254,7 @@ export function nextAiFixState(input: {
 
     if (pr && (pr.state === 'open' || pr.merged)) {
         const { summary, sql: sqlText } = parseAiFixPrBody(pr.body);
-        return { kind: 'completed', branch: pr.branch, prUrl: pr.url, summary: summary || 'A fix has been produced.', sql: sqlText };
+        return { kind: 'completed', branch: pr.branch, prUrl: pr.url, summary: summary || 'A fix has been produced.', sql: sqlText, body: pr.body };
     }
     if (pr && pr.state === 'closed') {
         return { kind: 'failed', result: `The AI fix PR was closed without merging: ${pr.url}\nPass it to the developer again to retry.` };
@@ -305,9 +312,16 @@ export async function applyAiFixState(db: Db, row: AiFixRow, next: AiFixNext): P
                dev_runner_id = NULL, dev_runner_heartbeat = NULL, status = 'merge', updated_at = now()
          WHERE ${claim} RETURNING id`) as unknown[];
     if (!r.length) return false;
-    const prLine = `\n\nPull request: ${next.prUrl}\nBranch: ${next.branch}`;
+    // Root cause, repro result, SQL safety (docs/fix-pipeline-proof-plan.md). A redo clears the later stages.
+    await saveFixProof(db, row.id, next.body, next.sql).catch((e) => console.error('[issue-ai-fix] saving the proof failed:', e instanceof Error ? e.message : e));
+    const proof = parseProof(next.body);
+    const rc = rootCauseStatus(proof);
+    const proofLine = proof
+        ? `\n\nRoot cause: ${rc === 'confirmed' ? 'CONFIRMED (its repro test failed before the fix and passes after)' : rc === 'guessed' ? 'GUESSED (not reproduced)' : 'NOT FOUND'}.`
+        : '';
+    const prLine = `${proofLine}\n\nPull request: ${next.prUrl}\nBranch: ${next.branch}`;
     const body = needsSql
-        ? `✅ AI auto-fix complete — but it needs a DATABASE MIGRATION and a merge to staging.\n\n${next.summary}${prLine}\n\n⚠️ Review and run the SQL in this ticket, then merge the pull request to staging.`
+        ? `✅ AI auto-fix complete — it needs a DATABASE CHANGE and a merge to staging.\n\n${next.summary}${prLine}\n\n⚠️ Review the SQL in this ticket. Additive SQL runs on staging automatically at Merge to staging; anything else must be run by hand first.`
         : `✅ AI auto-fix complete — review the pull request and merge it to staging when ready.\n\n${next.summary}${prLine}`;
     // The reporter is not told here: only once the fix is live (issue-fix-live.ts).
     await db.execute(sql`

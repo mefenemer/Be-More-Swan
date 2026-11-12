@@ -19,7 +19,7 @@
 # dispatch can become shell.
 
 name: Hotfix PR
-run-name: Hotfix PR for issue #${{ inputs.issue_id }}
+run-name: "Hotfix PR for issue #${{ inputs.issue_id }}"
 
 on:
   workflow_dispatch:
@@ -31,6 +31,11 @@ on:
       fix_pr:
         description: "The fix PR number, already merged into staging"
         required: true
+        type: string
+      auto_merge:
+        description: "'true' when the owner pressed Approve for production: the PR merges itself once main's required checks pass"
+        required: false
+        default: 'false'
         type: string
 
 permissions:
@@ -48,6 +53,7 @@ jobs:
     env:
       ISSUE_ID: ${{ inputs.issue_id }}
       FIX_PR: ${{ inputs.fix_pr }}
+      AUTO_MERGE: ${{ inputs.auto_merge }}
     steps:
       - name: Check the inputs are numbers
         run: |
@@ -110,6 +116,7 @@ jobs:
           git push --force origin "HEAD:refs/heads/hotfix/issue-$ISSUE_ID"
 
       - name: Open the hotfix PR
+        id: open
         env:
           GH_TOKEN: ${{ secrets.HOTFIX_PR_TOKEN || github.token }}
           FIX_URL: ${{ steps.fix.outputs.url }}
@@ -120,6 +127,7 @@ jobs:
           existing=$(gh pr list --head "$branch" --base main --state open --json url --jq '.[0].url // empty')
           if [[ -n "$existing" ]]; then
             echo "Hotfix PR already open: $existing"
+            echo "url=$existing" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           title="Hotfix: issue #$ISSUE_ID — $(head -c 150 "$RUNNER_TEMP/fix-title.txt")"
@@ -128,4 +136,23 @@ jobs:
             note=$'\n\n> ⚠️ Opened with the built-in token, so CI did not start on its own. Add the `HOTFIX_PR_TOKEN` secret, or push an empty commit to this branch, to run the required checks.'
           fi
           body=$(printf 'Ships the fix for issue #%s to production on its own, copied from %s.\n\nOnly that change is here; nothing else from staging. Review and merge as usual. The reporter is told once the prod deploy contains it.%s\n\nOpened from Admin ▸ Fix pipeline ▸ "Open hotfix PR" (.github/workflows/hotfix-pr.yml).' "$ISSUE_ID" "$FIX_URL" "$note")
-          gh pr create --base main --head "$branch" --title "$title" --body "$body"
+          if [[ "$AUTO_MERGE" == "true" ]]; then
+            body+=$'\n\n✅ Approved for production by the owner in Admin ▸ Fix pipeline, after the fix\'s SQL ran on staging and prod and CI passed on staging. It merges itself once main\'s required checks pass.'
+          fi
+          url=$(gh pr create --base main --head "$branch" --title "$title" --body "$body")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # The owner's "Approve for production" is the approval: merge once main's required checks pass
+      # (main's ruleset still enforces them). Needs "Allow auto-merge" in the repo settings.
+      - name: Merge once the checks pass (Approve for production)
+        if: inputs.auto_merge == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.HOTFIX_PR_TOKEN || github.token }}
+          PR_URL: ${{ steps.open.outputs.url }}
+        run: |
+          set -euo pipefail
+          if ! gh pr merge "$PR_URL" --auto --merge; then
+            echo "::error title=Hotfix PR::Could not turn on auto-merge for $PR_URL. Turn on 'Allow auto-merge' in the repo settings (General ▸ Pull Requests), or merge the PR by hand."
+            exit 1
+          fi
+          echo "Auto-merge is on for $PR_URL."
