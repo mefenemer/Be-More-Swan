@@ -77,7 +77,7 @@ async function main() {
 
     await check('the run-name the app matches is the one the workflow sets', () => {
         assert.strictEqual(hotfixRunTitle(42), 'Hotfix PR for issue #42');
-        assert.ok(read('.github/workflows/hotfix-pr.yml').includes('run-name: Hotfix PR for issue #${{ inputs.issue_id }}'));
+        assert.ok(read('.github/workflows/hotfix-pr.yml').includes('run-name: "Hotfix PR for issue #${{ inputs.issue_id }}"'));
     });
 
     const wf = read('.github/workflows/hotfix-pr.yml');
