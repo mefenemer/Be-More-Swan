@@ -15,7 +15,7 @@ import { eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { systemReviews } from '../../db/schema';
 import { gatewayGenerateGrounded } from '../lib/ai-gateway';
-import { logServiceCost } from './ai-usage';
+import { logAiUsage, serviceUnitPriceUsd } from './ai-usage';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -116,7 +116,14 @@ export function parseReview(text: string, searchedUrls: string[]): ParsedReview 
     const end = text.lastIndexOf('}');
     if (start < 0 || end <= start) return null;
     let raw: any;
-    try { raw = JSON.parse(text.slice(start, end + 1)); } catch { return null; }
+    // With web search on, the reply arrives as several text blocks split around citations, and the
+    // gateway joins them with '\n' — which can land INSIDE a JSON string, where a raw newline is
+    // invalid. JSON allows any whitespace between tokens, so flattening newlines is safe outside
+    // strings and harmless inside them.
+    const body = text.slice(start, end + 1);
+    try { raw = JSON.parse(body); } catch {
+        try { raw = JSON.parse(body.replace(/\r?\n/g, ' ')); } catch { return null; }
+    }
     if (!raw || typeof raw !== 'object') return null;
     const verdict = (VERDICTS as readonly string[]).includes(raw.verdict) ? raw.verdict : null;
     const summary = str(raw.summary, 1200);
@@ -163,16 +170,24 @@ export async function runSystemReview(db: Db, reviewId: number, ctx: ReviewConte
             usage: { sessionId: 'system-review', dataCategories: ['business_context'] },
         });
         const prompt = buildReviewPrompt(ctx);
-        let res = await ask(`${SEARCH_FIRST}\n\n${prompt}`);
         // Web search is billed per search on top of tokens; the gateway records only the tokens.
-        logServiceCost('anthropic-web-search', res.searchCount, { sessionId: 'system-review' });
+        // Awaited: a background function can be frozen as soon as it returns, losing a fire-and-forget write.
+        const logSearches = (n: number) => n > 0 ? logAiUsage({ model: 'anthropic-web-search', inputTokens: 0, outputTokens: 0, costUsdOverride: (n * serviceUnitPriceUsd('anthropic-web-search')).toFixed(6), sessionId: 'system-review' }) : Promise.resolve();
+        let res = await ask(`${SEARCH_FIRST}\n\n${prompt}`);
+        await logSearches(res.searchCount);
         if (res.searchCount === 0) {
             res = await ask(`${SEARCH_RETRY}\n\n${prompt}`);
-            logServiceCost('anthropic-web-search', res.searchCount, { sessionId: 'system-review' });
+            await logSearches(res.searchCount);
         }
         if (res.searchCount === 0) throw new Error('The check answered without searching the web, so no result was saved. Try again.');
         const parsed = parseReview(res.text, res.searchedUrls);
-        if (!parsed) throw new Error(res.stopReason === 'max_tokens' ? 'The answer was cut off before it finished.' : 'The answer had no usable result.');
+        if (!parsed) {
+            // Keep a short excerpt so a failure can be diagnosed from the page, not only from logs.
+            const excerpt = res.text.replace(/\s+/g, ' ').slice(0, 160);
+            throw new Error(res.stopReason === 'max_tokens'
+                ? 'The answer was cut off before it finished.'
+                : `The answer had no usable result (${res.searchCount} searches; it began: "${excerpt}").`);
+        }
         await db.update(systemReviews).set({
             status: 'done', verdict: parsed.verdict,
             summary: parsed.caveats ? `${parsed.summary}\n\nNot confirmed: ${parsed.caveats}` : parsed.summary,

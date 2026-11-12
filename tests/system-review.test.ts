@@ -52,6 +52,13 @@ check('parse: "switch" with nothing to show becomes "keep"; junk is null', () =>
     assert.strictEqual(parseReview(answer({ verdict: 'consider', summary: 's', alternatives: Array(6).fill({ name: 'A' }) }), [])!.alternatives.length, 3);
 });
 
+check('parse: a newline the citation split put inside a JSON string still parses', () => {
+    const broken = '{"verdict": "keep", "summary": "Fal is fine at our\nspend.", "alternatives": []}';
+    const r = parseReview(broken, []);
+    assert.ok(r, 'a raw newline inside a string must not lose the whole review');
+    assert.strictEqual(r!.summary, 'Fal is fine at our spend.');
+});
+
 check('normaliseUrl', () => {
     assert.strictEqual(normaliseUrl('https://Example.com/a/?utm_medium=x#top'), 'https://example.com/a');
     assert.strictEqual(normaliseUrl('not a url'), '');
@@ -83,7 +90,7 @@ check('an answer that never searched is retried once, then refused — never sto
     assert.ok(/if \(res\.searchCount === 0\) \{\s*res = await ask\(`\$\{SEARCH_RETRY\}/.test(run), 'no search → one retry');
     const refuse = run.indexOf("if (res.searchCount === 0) throw new Error(");
     assert.ok(refuse > 0 && refuse < run.indexOf('parseReview('), 'a second unsearched answer must fail before it is parsed and stored');
-    assert.strictEqual((run.match(/logServiceCost\('anthropic-web-search'/g) || []).length, 2, 'both attempts\' searches are logged');
+    assert.strictEqual((run.match(/await logSearches\(res\.searchCount\)/g) || []).length, 2, 'both attempts\' searches are logged, awaited');
 });
 
 check('a check stuck queued/running past 20 minutes reads as stalled', () => {
@@ -131,7 +138,7 @@ check('every reviewable system is on the registry, and none is a connector', () 
 check('web searches are priced, mapped to Anthropic and logged by each check', () => {
     assert.strictEqual(SERVICE_UNIT_PRICE_USD['anthropic-web-search']?.fallback, 0.01);
     assert.strictEqual(systemForUsageModel('anthropic-web-search'), 'anthropic');
-    assert.ok(/logServiceCost\('anthropic-web-search', res\.searchCount/.test(read('src/utils/system-review.ts')));
+    assert.ok(/model: 'anthropic-web-search'[\s\S]{0,120}serviceUnitPriceUsd\('anthropic-web-search'\)/.test(read('src/utils/system-review.ts')));
 });
 
 check('the worker needs the cron secret, runs two at a time and stops starting at 12 minutes', () => {
