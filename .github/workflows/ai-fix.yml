@@ -93,9 +93,11 @@ jobs:
         with:
           node-version: '22'
 
+      # Pinned. MODEL (claude-opus-5-5) needs Claude Code 2.1.280 or newer: on 2.1.198 every run failed at
+      # once with "API Error: 400 ... does not support this model". Bump this with any MODEL change.
       - name: Install Claude Code
         working-directory: ${{ runner.temp }}
-        run: npm install -g @anthropic-ai/claude-code@2.1.198
+        run: npm install -g @anthropic-ai/claude-code@2.1.312
 
       - name: Make a copy for Claude and write the prompt
         env:
