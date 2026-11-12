@@ -7883,8 +7883,9 @@ function inboxRender() {
       </td></tr>`;
   }).join('') || '<tr><td colspan="6" class="px-5 py-8 text-center text-gray-400">Nothing here.</td></tr>');
 }
-// Move a request to the other queue (support-inbox.ts ticketToIssue / issueToTicket).
-async function inboxReroute(kind, id) {
+// Move a request to the other queue (support-inbox.ts ticketToIssue / issueToTicket / ticketToFeature).
+async function inboxReroute(kind, id, to) {
+  if (to === 'feature') return inboxRerouteToFeature(id);
   const toIssue = kind === 'ticket';
   const ok = await window.confirmModal(toIssue
       ? 'This creates a reported problem in the Fix pipeline with the whole conversation, replies to the customer saying where it went, and closes this request.'
@@ -7900,6 +7901,32 @@ async function inboxReroute(kind, id) {
   } catch (e) {
     window.showToast?.(e.message || 'Could not move it.', { icon: '⚠️' });
   }
+}
+
+// A support request that is really an idea → a feature request at Pending Review. Likely duplicates
+// come back named, not merged: merge them on Feature requests, which moves the votes across.
+async function inboxRerouteToFeature(id) {
+  const ok = await window.confirmModal('This creates a feature request (Pending Review) with the whole conversation, submitted by the customer so they hear when its status changes. They are told where to follow it, and this request closes.',
+    { title: 'Send to Feature requests?', confirmLabel: 'Send to Feature requests', cancelLabel: 'Cancel' });
+  if (!ok) return;
+  try {
+    const r = await api('/.netlify/functions/admin-api?resource=inbox-reroute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'ticket', id, to: 'feature' }) });
+    const dupes = Array.isArray(r.possibleDuplicates) ? r.possibleDuplicates : [];
+    window.showToast?.(dupes.length
+      ? `Sent to Feature requests as #${r.to.id}. Possible duplicate of ${dupes.map(d => `#${d.id} “${d.title}”`).join(', ')} — merge it there.`
+      : `Sent to Feature requests as #${r.to.id}.`, { icon: '✅' });
+    closeTicketPanel();
+    if (document.getElementById('view-inbox') && !document.getElementById('view-inbox').classList.contains('hidden')) loadInbox();
+  } catch (e) {
+    window.showToast?.(e.message || 'Could not move it.', { icon: '⚠️' });
+  }
+}
+
+// Open one feature request's editor from anywhere (Contacts), loading the board first if needed.
+async function openFeatureRequest(id) {
+  adminNav('feature-roadmap');
+  if (!_frItems.some(x => x.id === id)) await loadFeatureRoadmap();
+  openRoadmapEdit(id);
 }
 
 async function loadTickets() {
@@ -7969,7 +7996,10 @@ async function openTicketPanel(tid) {
       <div class="bg-gray-50 rounded-xl p-4 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${_escH(t.description)}</div>
       ${t.status !== 'closed' ? `<div class="flex items-center justify-between gap-3 border border-violet-100 bg-violet-50 rounded-xl px-4 py-3">
         <p class="text-xs text-violet-800">Really a fault? Move it to the Fix pipeline — the customer is told where it went, and this request closes.</p>
-        <button type="button" onclick="inboxReroute('ticket', ${t.id})" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold border rounded-lg">Send to Fix pipeline</button></div>` : ''}
+        <button type="button" onclick="inboxReroute('ticket', ${t.id})" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold border rounded-lg">Send to Fix pipeline</button></div>
+      <div class="flex items-center justify-between gap-3 border border-amber-100 bg-amber-50 rounded-xl px-4 py-3">
+        <p class="text-xs text-amber-800">Really an idea for something new? Make it a feature request — the customer is told where to follow it, and this request closes.</p>
+        <button type="button" onclick="inboxReroute('ticket', ${t.id}, 'feature')" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold border rounded-lg">Send to Feature requests</button></div>` : ''}
       <!-- Reply thread -->
       <div id="reply-thread" class="space-y-3">
         ${replies.map(r => `
@@ -9581,7 +9611,7 @@ async function openContact(id) {
   document.getElementById('contact-info').innerHTML = '<p class="p-1 text-gray-400">Loading…</p>';
   try {
     const data = await api(`/.netlify/functions/admin-api?resource=contact-detail&id=${id}`);
-    renderContactDetail(data.lead, data.thread || [], data.tasks || [], data.client || null, data.tickets || [], data.issues || [], data.adminMessages || []);
+    renderContactDetail(data.lead, data.thread || [], data.tasks || [], data.client || null, data.tickets || [], data.issues || [], data.adminMessages || [], data.featureRequests || []);
     renderContactInfo(data.lead, data.client || null);
     // Scroll the detail pane back to the top so the avatar/header is fully visible.
     if (detailPane.parentElement) detailPane.parentElement.scrollTop = 0;
@@ -9591,7 +9621,7 @@ async function openContact(id) {
   }
 }
 
-function renderContactDetail(lead, thread, tasks, client, tickets, issues, adminMessages) {
+function renderContactDetail(lead, thread, tasks, client, tickets, issues, adminMessages, featureIdeas) {
   const pill = CT_TYPE_PILL[lead.contactType] || CT_TYPE_PILL.lead;
   // Prefer the client's account name for the header so it matches the read-only Contact info.
   const displayName = (client && client.accountName) || lead.name || '';
@@ -9651,6 +9681,7 @@ function renderContactDetail(lead, thread, tasks, client, tickets, issues, admin
       ${_ctSupportSection(tickets, client)}
 
       ${_ctIssuesSection(issues, client)}
+      ${_ctFeatureSection(featureIdeas, client)}
 
       ${_ctAdminMessagesSection(adminMessages, client)}
 
@@ -9801,6 +9832,28 @@ function _ctIssuesSection(issues, client) {
     'Issues reported',
     open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${issues.length})</span>`,
     `<div class="space-y-2">${issues.length ? issues.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No issues reported yet.</p>'}</div>`
+  );
+}
+
+// Feature requests — ideas this account submitted, or that were moved here from their support
+// requests (support-inbox.ts ticketToFeature), newest first. Each row opens the Feature requests
+// editor. Same visibility rule as Support requests / Issues reported.
+function _ctFeatureSection(items, client) {
+  items = Array.isArray(items) ? items : [];
+  if (!items.length && !client) return '';
+  const open = items.filter(f => !['released', 'declined', 'duplicate'].includes(f.status)).length;
+  const row = f => `<button onclick="openFeatureRequest(${Number(f.id)})" class="btn-secondary w-full text-left border rounded-xl px-3 py-2.5 transition flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <p class="text-sm font-semibold text-gray-800 truncate">${_escH(f.title || '(no title)')}</p>
+        <p class="text-xs text-gray-400 mt-0.5">#${Number(f.id)} · ${Number(f.voteCount) || 0} vote${Number(f.voteCount) === 1 ? '' : 's'} · ${age(f.createdAt)}</p>
+      </div>
+      <span class="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${FR_STATUS_CLS[f.status] || 'bg-gray-100 text-gray-600'}">${_escH(FR_STATUS_LABEL[f.status] || f.status)}</span>
+    </button>`;
+  return _ctSection(
+    'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z',
+    'Feature requests',
+    open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${items.length})</span>`,
+    `<div class="space-y-2">${items.length ? items.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No feature requests yet.</p>'}</div>`
   );
 }
 

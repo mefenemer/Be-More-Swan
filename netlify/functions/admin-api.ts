@@ -37,11 +37,11 @@ import {
     agentAnomalies, agentAnomalyThresholds, taskRuns,
     legalHolds, jwtBlocklist, stripeDisputes, storageUsage, helpArticles,
     rewardAudits, userOrganisations,
-    leadReplies, contactTasks, issueReports, notifications, loginEvents,
+    leadReplies, contactTasks, issueReports, notifications, loginEvents, featureRequests,
 } from '../../db/schema';
 import { createNotification, ADMIN_MESSAGE_TYPE } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
-import { loadInbox, ticketToIssue, issueToTicket } from '../../src/utils/support-inbox';
+import { loadInbox, ticketToIssue, issueToTicket, ticketToFeature } from '../../src/utils/support-inbox';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { loginLinkParams } from '../../src/utils/login-link';
@@ -436,8 +436,9 @@ export default withLambda(async (event) => {
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items, scope }) };
         }
 
-        // POST ?resource=inbox-reroute { kind: 'ticket' | 'issue', id } — the customer picked the wrong
-        // topic: move it to the other queue, closing the original with a note saying where it went.
+        // POST ?resource=inbox-reroute { kind: 'ticket' | 'issue', id, to?: 'feature' } — the customer
+        // picked the wrong topic: move it to the other queue, closing the original with a note saying
+        // where it went. `to: 'feature'` (tickets only) makes it a feature request instead of an issue.
         if (event.httpMethod === 'POST' && resource === 'inbox-reroute') {
             const denied = requirePermission(adminRole, 'view_tickets') || requirePermission(adminRole, 'view_issue_reports');
             if (denied) return denied;
@@ -446,7 +447,14 @@ export default withLambda(async (event) => {
             if (!Number.isInteger(id) || id <= 0 || (b.kind !== 'ticket' && b.kind !== 'issue')) {
                 return { statusCode: 400, body: JSON.stringify({ error: 'kind (ticket|issue) and id required.' }) };
             }
-            const r = b.kind === 'ticket' ? await ticketToIssue(db, id, adminId) : await issueToTicket(db, id, adminId);
+            const toFeature = b.to === 'feature';
+            if (toFeature && b.kind !== 'ticket') {
+                // An issue that is really an idea already has its route: the Fix pipeline's "On Roadmap" status.
+                return { statusCode: 400, body: JSON.stringify({ error: 'Only a support request can be sent to Feature requests here.' }) };
+            }
+            if (toFeature) { const d2 = requirePermission(adminRole, 'manage_feature_requests'); if (d2) return d2; }
+            const r = toFeature ? await ticketToFeature(db, id, adminId)
+                : b.kind === 'ticket' ? await ticketToIssue(db, id, adminId) : await issueToTicket(db, id, adminId);
             if (!r.ok) return { statusCode: r.status, body: JSON.stringify({ error: r.error }) };
             // Tell the customer on the side they will look at: the ticket's closing reply, or the new ticket.
             const ticketId = r.from.kind === 'ticket' ? r.from.id : r.to.id;
@@ -458,7 +466,7 @@ export default withLambda(async (event) => {
                 previousState: { kind: r.from.kind, id: r.from.id }, newState: { kind: r.to.kind, id: r.to.id },
                 ipAddress: getAdminIp(event.headers),
             });
-            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, from: r.from, to: r.to }) };
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, from: r.from, to: r.to, possibleDuplicates: r.possibleDuplicates || [] }) };
         }
 
         // ── GET: assistant catalog (admin view) ───────────────────────────────
@@ -2035,6 +2043,7 @@ export default withLambda(async (event) => {
             let tickets: any[] = [];
             let issues: any[] = [];
             let adminMessages: any[] = [];
+            let featureIdeas: any[] = [];
             if (lead.email) {
                 const [snap] = await db.execute<{
                     user_id: number; first_name: string | null; last_name: string | null;
@@ -2148,6 +2157,16 @@ export default withLambda(async (event) => {
                       .where(eq(issueReports.userId, snap.user_id))
                       .orderBy(desc(issueReports.createdAt)).limit(50);
 
+                    // Feature requests — ideas this account submitted (or that were moved here from
+                    // their support requests), newest first. Completes the person's history beside
+                    // their tickets and issues. Opens the Feature requests editor (openFeatureRequest).
+                    featureIdeas = await db.select({
+                        id: featureRequests.id, title: featureRequests.title, status: featureRequests.status,
+                        voteCount: featureRequests.voteCount, createdAt: featureRequests.createdAt,
+                    }).from(featureRequests)
+                      .where(eq(featureRequests.submittedBy, snap.user_id))
+                      .orderBy(desc(featureRequests.createdAt)).limit(50);
+
                     // In App Messages — ad-hoc admin → user notifications sent from
                     // Growth → Message one person (notifications.type = 'admin_message'), newest
                     // first. title/message are stored ALREADY HTML-escaped by
@@ -2163,7 +2182,7 @@ export default withLambda(async (event) => {
                 }
             }
 
-            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread, tasks, client, tickets, issues, adminMessages }) };
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread, tasks, client, tickets, issues, adminMessages, featureRequests: featureIdeas }) };
         }
 
         // POST ?resource=contact-update → edit name/company/phone/type/tags

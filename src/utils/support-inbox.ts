@@ -185,8 +185,11 @@ const REROUTE_TICKET_NOTE = (issueId: number) =>
 const REROUTE_ISSUE_NOTE = (ticketId: number) =>
     `This looks like a question rather than a fault, so we've moved it to support request #TK-${ticketId} in Help & Support → Contact us, where we'll answer it. This report is closed so you only have one place to look.`;
 
+const REROUTE_FEATURE_NOTE = (featureId: number) =>
+    `This is an idea for something new rather than a fault or a question, so we've passed it to the product team as feature request #${featureId}. You can follow it in Help & Support → Feature Requests → Your requests, and we'll let you know when its status changes. This conversation is closed so you only have one place to look.`;
+
 export type RerouteResult =
-    | { ok: true; from: { kind: 'ticket' | 'issue'; id: number }; to: { kind: 'ticket' | 'issue'; id: number }; userId: number; subject: string }
+    | { ok: true; from: { kind: 'ticket' | 'issue'; id: number }; to: { kind: 'ticket' | 'issue' | 'feature'; id: number }; userId: number; subject: string; possibleDuplicates?: Array<{ id: number; title: string }> }
     | { ok: false; status: number; error: string };
 
 /**
@@ -247,5 +250,47 @@ export async function issueToTicket(db: Db, issueId: number, adminId: number): P
             VALUES (${issueId}, 'admin', ${adminId}, ${REROUTE_ISSUE_NOTE(ticket.id)}, 'closed')`);
         await tx.execute(sql`UPDATE issue_reports SET status = 'closed', updated_at = now() WHERE id = ${issueId}`);
         return { ok: true as const, from: { kind: 'issue' as const, id: issueId }, to: { kind: 'ticket' as const, id: ticket.id }, userId: i.user_id, subject };
+    });
+}
+
+/**
+ * A ticket that is really an idea → a new feature request at 'pending_review' (Admin ▸ Feature
+ * requests; not on the public board until reviewed), submitted by the customer so its status-change
+ * notifications reach them. The ticket gets a public reply saying where it went and is closed. One
+ * transaction. Likely duplicates are returned, not merged: an admin merges them on Feature requests,
+ * which moves the votes across (admin-feature-requests.ts ?action=merge).
+ */
+export async function ticketToFeature(db: Db, ticketId: number, adminId: number): Promise<RerouteResult> {
+    return db.transaction(async (tx) => {
+        const [t] = await tx.execute<{ id: number; user_id: number; organisation_id: number | null; subject: string; description: string; status: string }>(sql`
+            SELECT id, user_id, organisation_id, subject, description, status FROM support_tickets WHERE id = ${ticketId} FOR UPDATE`) as unknown as Array<any>;
+        if (!t) return { ok: false as const, status: 404, error: 'Support request not found.' };
+        if (t.status === 'closed') return { ok: false as const, status: 409, error: 'That request is already closed.' };
+        const replies = await tx.execute<{ body: string; from_team: boolean; created_at: Date }>(sql`
+            SELECT r.body, (r.author_id IS DISTINCT FROM ${t.user_id}) AS from_team, r.created_at
+              FROM ticket_replies r WHERE r.ticket_id = ${ticketId} AND r.is_internal = false ORDER BY r.created_at`) as unknown as Array<any>;
+        const title = (firstLine(t.subject, 200) || `Idea from support request #TK-${ticketId}`).slice(0, 200);
+        const description = [t.description]
+            .concat(replies.map((r) => `\n— ${r.from_team ? 'Our reply' : 'Customer'} (${iso(r.created_at).slice(0, 10)}): ${r.body}`))
+            .concat([`\n(Moved from support request #TK-${ticketId}.)`]).join('\n').slice(0, 5000);
+        const [feature] = await tx.execute<{ id: number }>(sql`
+            INSERT INTO feature_requests (submitted_by, organisation_id, title, description, submitter_description, category, status, source)
+            VALUES (${t.user_id}, ${t.organisation_id}, ${title}, ${description}, ${t.description}, 'app_core', 'pending_review', 'user')
+            RETURNING id`) as unknown as Array<{ id: number }>;
+        await tx.execute(sql`
+            INSERT INTO ticket_replies (ticket_id, author_id, body, is_internal) VALUES (${ticketId}, ${adminId}, ${REROUTE_FEATURE_NOTE(feature.id)}, false)`);
+        await tx.execute(sql`UPDATE support_tickets SET status = 'closed', closed_at = now(), updated_at = now() WHERE id = ${ticketId}`);
+        // Same match as the customer's own "already suggested?" search (feature-requests.ts ?action=search),
+        // widened to requests still in review, which an admin can see.
+        const like = `%${title.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+        const dupes = await tx.execute<{ id: number; title: string }>(sql`
+            SELECT id, title FROM feature_requests
+             WHERE id <> ${feature.id} AND status NOT IN ('declined', 'duplicate')
+               AND (title ILIKE ${like} OR (length(title) >= 8 AND ${title} ILIKE '%' || title || '%'))
+             ORDER BY vote_count DESC LIMIT 3`) as unknown as Array<{ id: number; title: string }>;
+        return {
+            ok: true as const, from: { kind: 'ticket' as const, id: ticketId }, to: { kind: 'feature' as const, id: feature.id },
+            userId: t.user_id, subject: t.subject, possibleDuplicates: dupes.map((d) => ({ id: d.id, title: d.title })),
+        };
     });
 }

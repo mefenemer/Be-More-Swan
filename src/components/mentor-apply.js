@@ -14,7 +14,7 @@
  *   mentor_business_stage   → update-assistant-context.ts PUT patchContext { businessStage }
  *   setup_field_proposal    → update-assistant-context.ts PUT patchContext { [key]: value } (checked again
  *                             on the server against the role's questions; active assistants only)
- *   mentor_support_request  → support-tickets.ts POST, or issue-reports.ts POST
+ *   mentor_support_request  → support-tickets.ts POST, issue-reports.ts POST, or feature-requests.ts POST
  *   decide                  → mentor.ts { action: 'decide' } — accepted after a saved click, or dismissed
  *   strategy_proposal       → mentor.ts strategy_save / strategy_approve / strategy_draft — the Plan tab's
  *                             Save draft, Approve and "Draft it for me" (Phase 2, §4)
@@ -101,6 +101,10 @@
   async function support(d) {
     if (d.destination === 'issue') {
       await post('/.netlify/functions/issue-reports', { description: `${d.subject}\n\n${d.description}`, sourceLocation: d.from ? `${d.from} chat` : 'Business Mentor chat', sourceUrl: window.location.href });
+    } else if (d.destination === 'feature') {
+      // An idea → Feature requests at Pending Review (feature-requests.ts), the same as Help & Support ▸
+      // Feature Requests. Title and description are capped there at 200 / 5000.
+      await post('/.netlify/functions/feature-requests', { title: String(d.subject || '').slice(0, 200), description: String(d.description || '').slice(0, 5000), category: 'app_core' });
     } else {
       await post('/.netlify/functions/support-tickets', { subject: d.subject, category: d.from || 'Business Mentor', description: d.description });
     }
