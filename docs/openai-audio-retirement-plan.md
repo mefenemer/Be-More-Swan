@@ -1,6 +1,6 @@
 # OpenAI audio models retiring: plan (2026-11-12)
 
-Status: **plan only. No code changed.** Needs the owner's yes before anything is built.
+Status (updated 2026-11-12): **decisions 1 and 2 built and on staging** (Scribe word timings, no fallback voice, the six legacy voices moved to ElevenLabs). Not yet heard or checked on staging. What's left is under [What's left](#whats-left) at the end.
 
 ## What OpenAI says (read on OpenAI's own pages, 2026-11-12)
 
@@ -31,11 +31,11 @@ So the System Map check on staging had the dates and names right. One fix: for `
 
 | File | What breaks, and when |
 | --- | --- |
-| `src/lib/tts.ts:23` `TTS_MODEL` | Fallback voice (ElevenLabs off or failed) fails from 6 Jan 2027. Voiceovers already fail softly, but with no fallback an ElevenLabs outage means no voiceover at all. |
-| `src/lib/tts.ts:24` `TRANSCRIBE_MODEL` + `transcribeAudio` | No captions or word timings from 26 Feb 2027 (own voice keeps the recording without words, as designed). |
+| `src/lib/tts.ts:23` `TTS_MODEL` | Fallback voice (ElevenLabs off or failed) fails from 6 Jan 2027. Voiceovers already fail softly, but with no fallback an ElevenLabs outage means no voiceover at all. **Fixed 2026-11-12: no fallback (D). Still used by the London man only.** |
+| `src/lib/tts.ts:24` `TRANSCRIBE_MODEL` + `transcribeAudio` | No captions or word timings from 26 Feb 2027 (own voice keeps the recording without words, as designed). **Fixed 2026-11-12: Scribe first; whisper only as a fallback until it retires.** |
 | `netlify/functions/tour-narration.ts:31` | Tour narration fails from 6 Jan 2027. **Fixed 2026-11-12: now Pepper (ElevenLabs).** |
 | `src/utils/provider-balance.ts:213` | The OpenAI health ping sends a `gpt-4o-mini-tts` request. From 6 Jan 2027 it will report OpenAI as down even when it's up. **Fixed 2026-11-12: billed embedding probe.** |
-| `src/lib/tts.ts:121-127` `voiceoverCostUsd` | The costs are written inline here (`0.015` speech, `0.006` transcription). `WHISPER_USD_PER_MINUTE` and `SPEECH_USD_PER_MINUTE` don't exist in `src/utils/ai-usage.ts`. |
+| `src/lib/tts.ts:121-127` `voiceoverCostUsd` | The costs are written inline here (`0.015` speech, `0.006` transcription). `WHISPER_USD_PER_MINUTE` and `SPEECH_USD_PER_MINUTE` don't exist in `src/utils/ai-usage.ts`. **Fixed 2026-11-12: transcription is charged to whoever did it (`TRANSCRIBE_USD_PER_MINUTE`; `SCRIBE_USD_PER_MINUTE` in `ai-usage.ts`).** |
 
 ## Recommended path
 
@@ -68,7 +68,7 @@ Tour narration (`tour-narration.ts`) should move with the same choice. It could 
 
 ### 3. Small fixes that come with it
 
-- `provider-balance.ts`: ping something that won't be retired (e.g. `GET /v1/models`) in place of a speech request.
+- `provider-balance.ts`: ping something that won't be retired in place of a speech request. (Built as a billed `text-embedding-3-small` embedding, because a free `GET /v1/models` can't spot an empty account.)
 - Cost lines in `voiceoverCostUsd`: Scribe ~$0.0033/min in place of whisper's $0.006; the fallback speech line set to the chosen option's measured price. Also note a side observation: ElevenLabs' API page now lists v2 Multilingual at **$0.08/1K characters**, but `ELEVENLABS_USD_PER_1K_CHARS` is `0.15`. That may depend on plan (credits vs pay-as-you-go), so check it against the bill.
 - ElevenLabs is already a sub-processor, so Scribe adds none.
 
@@ -82,18 +82,39 @@ Tour narration (`tour-narration.ts`) should move with the same choice. It could 
 
 ## Decisions for the owner
 
-1. Move word timings to ElevenLabs Scribe — **decided 2026-11-12: yes. Built** (not yet on staging):
+1. Move word timings to ElevenLabs Scribe — **decided 2026-11-12: yes. Built and on staging 2026-11-12** (not yet checked there):
    - `transcribeAudio` in `src/lib/tts.ts` calls Scribe (`ELEVENLABS_STT_MODEL`, default `scribe_v3`) with `language_code`, word timestamps, `no_verbatim=false` (the "um"s stay in for tightening), `tag_audio_events=false`, and the business name as a keyterm for footage.
    - whisper-1 stays as the fallback until it retires: used when there's no ElevenLabs key, or Scribe refuses (key, permission, credits, HTTP error). A Scribe **timeout** is not retried on whisper, because a second wait could outlast the request.
    - The voiceover cost line now charges the transcription to whoever did it (Scribe $0.20/h, whisper $0.006/min, nothing when it failed).
-   - **⚠️ Owner action before it does anything:** the ElevenLabs key was made with only Text to Speech, Voices Read and User permissions. Add **Speech to Text** to the key (ElevenLabs → API keys) on the same key used by every context. Until then every call is refused and falls back to whisper, so nothing breaks, but nothing changes either.
+   - The ElevenLabs key was made with only Text to Speech, Voices Read and User permissions. **The owner added Speech to Text on 2026-11-12.** Not yet confirmed by a real call: if the permission is missing, every call is refused and falls back to whisper (nothing breaks, the log shows `[tts] Scribe failed`).
    - To check on staging: one voiceover and one footage review. Captions should line up, the "um"s should be tightened, and the server log should *not* show `[tts] Scribe failed`.
-   - Not covered: own-voice and footage transcription costs are not logged to `ai_usage_log` at all (they weren't with whisper either). This is a separate gap.
+   - Own-voice and footage transcription costs are now logged to `ai_usage_log` (`logTranscriptionCost`, added by another session), as `eleven_scribe` or `whisper-1` depending on who transcribed.
 2. Fallback voice — **decided 2026-11-12: D, no fallback. Built 2026-11-12** (staging). What changed:
    - `synthesize()` in `src/lib/tts.ts` stops falling back to OpenAI. If ElevenLabs is off or fails, the voiceover fails with a clear message. `TTS_MODEL`, `synthesizeSpeech` and the OpenAI speech cost line go.
    - `tour-narration.ts` uses OpenAI as its *main* voice, so "no fallback" there means moving it to the ElevenLabs Pepper voice, not just deleting a fallback.
-   - The `provider-balance.ts` OpenAI ping switches to `GET /v1/models` (still needed for whisper until step 1 lands).
+   - The `provider-balance.ts` OpenAI ping moves off `gpt-4o-mini-tts` (as built: a billed embedding, see below, not `GET /v1/models`).
    - As built: `speakVoiceover` never reads an ElevenLabs voice with OpenAI; `generate-voiceover` refuses before holding a credit when the chosen voice's own provider has no key (`voiceConfigured`). Tour narration speaks Pepper through ElevenLabs. The voice is in the cache key, so each tour step is spoken once more (a few thousand characters of the monthly ElevenLabs allowance, once). The OpenAI health check now sends one billed `text-embedding-3-small` embedding, which still catches an empty account. A free `GET /v1/models` would not, and embedding models are on no retirement list.
    - Transcription costs (`logTranscriptionCost`, own voice and footage) are charged to whoever transcribed: Scribe $0.20/h as `eleven_scribe`, whisper $0.006/min.
-   - **⚠️ Still OpenAI-only after this, and they stop on 6 Jan 2027:** the **London man** (`london_man`, OpenAI `ballad`) and the six **legacy** voices (coral, sage, verse, alloy, onyx, shimmer; kept for old saved settings). They have no ElevenLabs voice. **Owner: pick an ElevenLabs voice by ear for the London man** (and decide whether the legacy six map to existing ElevenLabs voices) before 6 Jan 2027. After that date the OpenAI speech code can be deleted.
+   - **Legacy six moved 2026-11-12** (owner's yes; still hidden from the picker, kept for old saved settings). Each now speaks through a British ElevenLabs voice of the same gender as in the catalogue:
+
+     | Legacy voice | Now spoken by |
+     | --- | --- |
+     | coral, sage, alloy | Pepper (`6vIP9mPY4dr6w8krUg01`) |
+     | shimmer | Beth (`zH7TN9vEZAsEway9xWev`) |
+     | verse | Archer (`Fahco4VZzobUeiPqni1S`) |
+     | onyx | Adam (`NFG5qt843uXKj4pFvR7C`) |
+
+   - **⚠️ Still OpenAI-only, and it stops on 6 Jan 2027:** the **London man** (`london_man`, OpenAI `ballad`), now the only voice with no `elevenlabs` id (`tests/tts-voices.test.ts` fails if another appears). **Owner: pick an ElevenLabs voice by ear, add it to "My Voices" and send the voice ID** before 6 Jan 2027.
 3. Test ElevenLabs TTS-with-timestamps to skip transcription on our own voiceovers? — **open**
+
+## What's left
+
+| Who | What | By |
+| --- | --- | --- |
+| Owner | Check on staging: a footage review (captions line up, "um"s tightened, no `[tts] Scribe failed` in the log), the guided tour in Pepper, and an old saved voice (e.g. coral) in a British voice | Before promoting |
+| Owner | Promote staging → main | After the check |
+| Owner | ElevenLabs voice ID for the London man | **6 Jan 2027** |
+| Dev | Delete the OpenAI speech code (`TTS_MODEL`, `synthesizeSpeech`, the OpenAI cost line) once the London man has moved | After 6 Jan 2027 |
+| Dev | Remove the whisper fallback (`transcribeWhisper`, `TRANSCRIBE_MODEL`) | After **26 Feb 2027** |
+| Optional | Check `ELEVENLABS_USD_PER_1K_CHARS` (0.15) against the bill; the list price shows $0.08 | — |
+| Optional | Decision 3: TTS-with-timestamps for our own voiceovers | — |
