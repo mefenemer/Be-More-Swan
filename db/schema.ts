@@ -1523,10 +1523,10 @@ export const issueReports = pgTable("issue_reports", {
   devSqlRanAt: timestamp("dev_sql_ran_at"),
 
   // Merge of the fix PR to staging — requested from the ticket (super-admin) and performed
-  // by the local watcher (gh pr merge). The issue only reaches 'fixed_ready_to_test' once
-  // merged (and any migration applied). null | 'ready' | 'queued' | 'merging' | 'merged' | 'failed'
-  // | 'conflict_queued' | 'conflict_resolving' — the last two are a failed merge sent back to
-  // the AI developer to resolve conflicts and retry (see admin-issue-handoff's claim-conflict-fix).
+  // in GitHub Actions (merge-to-staging.yml, src/utils/issue-cloud-merge.ts). The issue only
+  // moves on once merged (and any migration applied). null | 'ready' | 'merging' | 'merged' | 'failed'.
+  // 'queued' | 'conflict_queued' | 'conflict_resolving' belonged to the retired laptop runner and are
+  // no longer set (db/z-retire-laptop-runner.sql releases any left over).
   devMergeStatus: text("dev_merge_status"),
   devMergedAt: timestamp("dev_merged_at"),
   devMergeResult: text("dev_merge_result"),  // gh output / error from the merge attempt
@@ -3135,6 +3135,49 @@ export const taskLedger = pgTable("task_ledger", {
 ]);
 
 // What work costs in tasks, set in Admin → Money → Task costs (db/z-task-costs.sql, src/utils/task-costs.ts).
+// System Map (docs/system-map-plan.md): monthly bills no API call shows. db/z-system-fixed-costs.sql.
+export const systemFixedCosts = pgTable("system_fixed_costs", {
+  id: serial().primaryKey(),
+  systemKey: text("system_key").notNull(),
+  label: text("label").notNull().default(''),
+  amountMonthly: decimal("amount_monthly", { precision: 10, scale: 2 }).notNull(),
+  currency: text("currency").notNull().default('GBP'),           // GBP | USD | EUR
+  startedOn: date("started_on", { mode: 'string' }).notNull(),
+  endedOn: date("ended_on", { mode: 'string' }),
+  note: text("note").notNull().default(''),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [index("system_fixed_costs_system_idx").on(t.systemKey)]);
+
+// System Map Phase 3 (docs/system-map-plan.md): monthly "better options" checks and the decisions
+// they must respect. db/z-system-reviews.sql.
+export const systemReviews = pgTable("system_reviews", {
+  id: serial().primaryKey(),
+  systemKey: text("system_key").notNull(),
+  status: text("status").notNull().default('queued'),             // queued | running | done | failed
+  verdict: text("verdict"),                                       // keep | consider | switch
+  summary: text("summary").notNull().default(''),
+  alternatives: jsonb("alternatives").notNull().default([]),
+  sources: jsonb("sources").notNull().default([]),
+  model: text("model"),
+  searchCount: integer("search_count").notNull().default(0),
+  error: text("error"),
+  trigger: text("trigger").notNull().default('manual'),           // manual | monthly | chat
+  requestedBy: integer("requested_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  finishedAt: timestamp("finished_at"),
+}, (t) => [index("system_reviews_system_idx").on(t.systemKey, t.createdAt)]);
+
+export const systemDecisions = pgTable("system_decisions", {
+  id: serial().primaryKey(),
+  systemKey: text("system_key").notNull(),
+  decision: text("decision").notNull(),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  retiredAt: timestamp("retired_at"),
+}, (t) => [index("system_decisions_system_idx").on(t.systemKey)]);
+
 export const taskCostChanges = pgTable("task_cost_changes", {
   id: serial().primaryKey(),
   status: text("status").notNull(),                                // baseline | draft | announced | cancelled

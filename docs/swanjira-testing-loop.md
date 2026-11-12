@@ -51,7 +51,7 @@ environment field says whether there were uncommitted changes: check that first 
 - **One checkout writer.** Only Claude edits `/Users/mefenemer/WebstormProjects/Be More Swan`. Antigravity works in the browser against staging.
 - **A promote carries everything on staging,** not just tested fixes — the owner decides when to release.
 - **Prod SQL before the merge.** A new column the code reads breaks prod until its SQL is applied.
-- **One tracker.** SwanJira is used for tester bugs. The admin portal's "Pass to Developer" flow (`scripts/dev-issue-fixer.mjs`) has its own "Push to prod" route — don't run both on the same bug.
+- **One tracker.** SwanJira is used for tester bugs. The admin portal's "Pass to Developer" flow (Claude Code in GitHub Actions, `.github/workflows/ai-fix.yml`) has its own "Open hotfix PR" route — don't run both on the same bug.
 - **Waking Claude:** the owner says "check SwanJira" (chosen 2026-11-01; no timed polling). Claude then reads `GET /api/tickets?status=REPORTED` plus any bounced `IN_PROGRESS` tickets.
 
 ## SwanJira API (as used by its own UI)

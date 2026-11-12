@@ -25,6 +25,7 @@ import { getDb } from '../../db/client';
 import { contentRules, aiAssistants } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -93,14 +94,14 @@ Respond with ONLY valid JSON: { "directive": "the instruction" }`;
     let directive = '';
     try {
         const anthropic = new Anthropic({ apiKey });
-        const response = await anthropic.messages.create({
-            model: 'claude-haiku-4-5-20251001',
+        const response = await anthropic.messages.create(adaptForModel({
+            model: 'claude-haiku-5-5',
             max_tokens: 512,
             system: systemPrompt,
             messages: [{ role: 'user', content: userMessage }],
-        });
-        logMessageUsage(response, 'claude-haiku-4-5-20251001', { workspaceId: orgId, userId, assistantId: Number(assistantId) || null, sessionId: 'tune-assistant' });
-        const rawText = response.content[0]?.type === 'text' ? response.content[0].text : '';
+        }, 'claude-haiku-5-5', 'low') as Anthropic.MessageCreateParamsNonStreaming);
+        await logMessageUsage(response, 'claude-haiku-5-5', { workspaceId: orgId, userId, assistantId: Number(assistantId) || null, sessionId: 'tune-assistant' });
+        const rawText = replyText(response.content);
         const parsed = parseModelJson<{ directive?: string }>(rawText);
         if (parsed) directive = String(parsed.directive || '').trim();
     } catch (err) {

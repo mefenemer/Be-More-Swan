@@ -181,7 +181,7 @@ console.log('\n──── the sent messages show up in Contacts ────')
 const adminApiSrc = read('netlify/functions/admin-api.ts');
 
 check('contact-detail returns adminMessages', () => {
-    assert.ok(/JSON\.stringify\(\{ lead, thread, tasks, client, tickets, issues, adminMessages \}\)/.test(adminApiSrc),
+    assert.ok(/JSON\.stringify\(\{ lead, thread, tasks, client, tickets, issues, adminMessages[,} ]/.test(adminApiSrc),
         'contact-detail must include adminMessages in its response');
 });
 

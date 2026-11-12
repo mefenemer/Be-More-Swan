@@ -1853,6 +1853,15 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [v('ticket.id', 'Ticket ID', '482'), v('ticket.subject', 'Ticket subject', 'Cannot connect LinkedIn')],
     },
     {
+        templateKey: 'ticket_auto_closed',
+        name: 'Support ticket closed after 7 days (automatic)',
+        category: 'Support',
+        type: 'ticket_reply',
+        title: 'Ticket #{{ticket.id}} closed',
+        message: 'We closed "{{ticket.subject}}" as we hadn\'t heard back in 7 days. Reply within 30 days if you still need help and we\'ll reopen it.',
+        variables: [v('ticket.id', 'Ticket ID', '482'), v('ticket.subject', 'Ticket subject', 'Cannot connect LinkedIn')],
+    },
+    {
         templateKey: 'feature_released',
         name: 'Backed feature released',
         category: 'Support',
@@ -1972,6 +1981,30 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
             v('issue.id', 'Issue ID', '129'),
             v('issue.status_label', 'Status label', 'Closed'),
             v('issue.admin_message', 'Admin note (may be empty)', ''),
+        ],
+    },
+    // The two automatic issue messages (src/utils/issue-fix-live.ts): sent by the scheduled live
+    // check, never by an admin, so they carry no admin note.
+    {
+        templateKey: 'issue_fixed_live',
+        name: 'Issue fixed — live now (automatic)',
+        category: 'Support',
+        type: 'issue_update',
+        title: '✅ Issue #{{issue.id}} is fixed and live',
+        message: 'The fix is live now. Could you give it another try? If it\'s still not right, just reply and we\'ll pick it straight back up. If we don\'t hear from you, it closes on its own in 7 days.',
+        variables: [
+            v('issue.id', 'Issue ID', '129'),
+        ],
+    },
+    {
+        templateKey: 'issue_auto_closed',
+        name: 'Issue closed after 7 days (automatic)',
+        category: 'Support',
+        type: 'issue_update',
+        title: 'Issue #{{issue.id}} closed',
+        message: 'We\'ve closed this as we haven\'t heard back in 7 days since the fix went out. If it\'s still not working, reply and we\'ll reopen it.',
+        variables: [
+            v('issue.id', 'Issue ID', '129'),
         ],
     },
     {

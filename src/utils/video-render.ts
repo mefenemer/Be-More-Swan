@@ -24,6 +24,7 @@ import { persistRemoteMediaToR2, r2IsConfigured } from '../lib/media-persist';
 import { RENDER_FPS, renderableOverlays, resolveAudioTracks, resolveCaptionTrack, resolveEditClips, shouldRetryRender, type VideoBase } from '../lib/post-render';
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../lib/remotion-lambda';
 import { recordPlatformIncident } from './platform-incident';
+import { logRenderCost } from './ai-usage';
 import type { ProjectTimeline } from './video-producer';
 import { SOURCE_POST_NOTES, attachVideoToSourcePost, placeVideoOnCampaignPost } from './video-post-media';
 import type { Storyboard } from '../lib/storyboard';
@@ -114,6 +115,8 @@ export async function renderProject(db: Db, projectId: number): Promise<void> {
         let retried = false;
         while (true) {
             const progress = await renderProgress(started);
+            // Every render that ran spent AWS compute — a failed one before its retry included.
+            if (progress.done) await logRenderCost(progress.costUsd, { workspaceId: orgId, userId: p.createdBy, assistantId: p.aiAssistantId ?? null, sessionId: 'video-producer-render' });
             if (progress.error && shouldRetryRender(progress.error, retried, deadline - Date.now())) {
                 retried = true;
                 started = await startRender(props);

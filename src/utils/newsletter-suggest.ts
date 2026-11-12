@@ -58,7 +58,7 @@ export async function suggestEmailLine(
         ].filter(Boolean).join('\n\n'),
         messages: [{ role: 'user', content: `${ask}\n\nTHE EMAIL:\n${body}` }],
     });
-    void logAiUsage({
+    await logAiUsage({
         userId: opts.userId, workspaceId: opts.organisationId, model: NEWSLETTER_MODEL,
         inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0,
     });

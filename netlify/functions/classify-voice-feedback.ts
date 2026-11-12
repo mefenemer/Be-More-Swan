@@ -28,6 +28,7 @@ import { getDb } from '../../db/client';
 import { scheduledPosts, aiAssistants } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 const jwtSecret = process.env.JWT_SECRET;
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -105,15 +106,15 @@ Classify each piece of feedback.`;
 
     let items: any[] = [];
     try {
-        const response = await anthropic.messages.create({
-            model: 'claude-haiku-4-5-20251001',
+        const response = await anthropic.messages.create(adaptForModel({
+            model: 'claude-haiku-5-5',
             max_tokens: 1024,
             system: systemPrompt,
             messages: [{ role: 'user', content: userMessage }],
-        });
-        logMessageUsage(response, 'claude-haiku-4-5-20251001', { workspaceId: orgId ?? null, userId, assistantId: Number(assistantId) || null, sessionId: 'classify-voice-feedback' });
+        }, 'claude-haiku-5-5', 'low') as Anthropic.MessageCreateParamsNonStreaming);
+        await logMessageUsage(response, 'claude-haiku-5-5', { workspaceId: orgId ?? null, userId, assistantId: Number(assistantId) || null, sessionId: 'classify-voice-feedback' });
 
-        const rawText = response.content[0].type === 'text' ? response.content[0].text : '';
+        const rawText = replyText(response.content);
         const parsed = parseModelJson<{ items?: unknown }>(rawText);
         if (parsed) items = Array.isArray(parsed.items) ? parsed.items as typeof items : [];
     } catch (err) {

@@ -96,7 +96,7 @@ export default withLambda(async (event: HandlerEvent) => {
             const payload = await falResult(responseUrl);
             const video = extractVideo(payload);
             // Charged by fal on a COMPLETED job, so recorded here rather than at submit.
-            logMediaCost(job.model, { durationSeconds: job.durationSeconds ?? 6 }, { workspaceId: orgId, userId: job.userId, assistantId: job.assistantId ?? null, sessionId: 'fal-video' });
+            await logMediaCost(job.model, { durationSeconds: job.durationSeconds ?? 6 }, { workspaceId: orgId, userId: job.userId, assistantId: job.assistantId ?? null, sessionId: 'fal-video' });
             videoUrl = video.url;
             videoContentType = video.contentType;
         }

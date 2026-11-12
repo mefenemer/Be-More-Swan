@@ -22,7 +22,7 @@ import { MAX_TOPICS, TOPIC_MAX_CHARS, TOPIC_WORDING_RULES, normaliseTopics, sour
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-export const TRIAGE_MODEL = 'claude-haiku-4-5-20251001';
+export const TRIAGE_MODEL = 'claude-haiku-5-5';
 /** Threads judged per call — each verdict carries a reply of up to ~150 words. */
 const GROUP_SIZE = 5;
 const CALL_TIMEOUT_MS = 60_000;
@@ -161,7 +161,7 @@ async function triageGroup(group: TriageCandidate[], offset: number, sender: Dis
             system: `${systemPrompt(sender)}\n\n${ARRAY_SHAPE}`,
             messages: [{ role: 'user', content: `Judge these ${group.length} threads:\n${JSON.stringify(group.map((c, i) => threadPayload(c, offset + i)))}` }],
         }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming, { timeout: CALL_TIMEOUT_MS, maxRetries: 1 }) }), { requestPath: false, label: 'discussion-triage' });
-        logMessageUsage(resp, used, { ...usage, sessionId: 'discussion-triage' });
+        await logMessageUsage(resp, used, { ...usage, sessionId: 'discussion-triage' });
         const parsed = parseModelJsonArray(replyText(resp.content));
         const list = Array.isArray(parsed) ? parsed : [];
         return {
@@ -215,7 +215,7 @@ Return STRICT JSON only (no markdown): { "reply": "<the reply>" }`,
                 content: `${JSON.stringify(threadPayload(c, 0))}\n\nThe current draft:\n${c.currentReply || '(none)'}\n\n${instruction ? `What the business owner wants changed: ${instruction}` : 'Write a better reply.'}`,
             }],
         }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming, { timeout: 20_000, maxRetries: 0 }) }), { requestPath: true, label: 'discussion-redraft' });
-        logMessageUsage(resp, used, { ...usage, sessionId: 'discussion-redraft' });
+        await logMessageUsage(resp, used, { ...usage, sessionId: 'discussion-redraft' });
         const parsed = parseModelJson(replyText(resp.content)) as { reply?: unknown } | null;
         const reply = parsed && typeof parsed.reply === 'string' ? parsed.reply.trim().slice(0, 2000) : '';
         return reply || null;
@@ -259,7 +259,7 @@ Rewrite EACH topic you are given into the wording most likely to find relevant t
 Return STRICT JSON only (no markdown): [{ "topic": "<the improved topic>", "why": "<under 15 words, for the business owner: what changed and why it finds more>" }]`,
             messages: [{ role: 'user', content: JSON.stringify(from) }],
         }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming, { timeout: 20_000, maxRetries: 0 }) }), { requestPath: true, label: 'discussion-topics' });
-        logMessageUsage(resp, used, { ...usage, sessionId: 'discussion-topics' });
+        await logMessageUsage(resp, used, { ...usage, sessionId: 'discussion-topics' });
         return topicSuggestionsFromModel(from, parseModelJsonArray(replyText(resp.content)));
     } catch (err) {
         console.error('[discussion-triage] topic wording failed', err instanceof Error ? err.message : err);

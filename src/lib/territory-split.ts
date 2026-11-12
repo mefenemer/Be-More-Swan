@@ -25,9 +25,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { logMessageUsage } from '../utils/ai-usage';
 import { parseModelJson } from '../utils/model-json';
+import { adaptForModel, replyText } from '../config/model-options';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 /**
  * Above this, a split stops being a plan and becomes a bill.
@@ -118,16 +119,16 @@ export async function splitTerritories(idea: string, granularity: SplitGranulari
     if (!text || !process.env.ANTHROPIC_API_KEY) return null;
 
     try {
-        const resp = await anthropic.messages.create({
+        const resp = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 1600,
             system: systemPrompt(granularity),
             messages: [{ role: 'user', content: `Who they want to find:\n${text.slice(0, 1000)}` }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
         // No workspace in scope here: counted in the platform total, unattributed.
-        logMessageUsage(resp, MODEL, { sessionId: 'territory-split' });
+        await logMessageUsage(resp, MODEL, { sessionId: 'territory-split' });
         const parsed = parseModelJson<Record<string, unknown>>(
-            resp.content[0]?.type === 'text' ? resp.content[0].text : '',
+            replyText(resp.content),
         );
         if (!parsed) return null;
 

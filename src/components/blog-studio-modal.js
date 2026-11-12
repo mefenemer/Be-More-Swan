@@ -86,6 +86,17 @@
 
   // Coloured success/error banner — the Create Post sheet's gpSetPanelStatus, ported. Replaces the
   // grey one-liners and alert()s so a failure actually reads as one.
+  // The one place an OPEN failure (create or load) is shown — visible while bs-workspace is hidden.
+  // msg '' hides it. retry runs when "Try again" is pressed.
+  function showOpenError(msg, retry) {
+    var box = el('bs-open-error');
+    if (!box) return;
+    if (!msg) { box.classList.add('bs-hidden'); el('bs-open-retry').onclick = null; return; }
+    el('bs-open-error-msg').textContent = msg;
+    el('bs-open-retry').onclick = function () { showOpenError(''); if (retry) retry(); };
+    box.classList.remove('bs-hidden');
+  }
+
   function setBanner(id, msg, type) {
     var e = el(id);
     if (!e) return;
@@ -402,6 +413,12 @@
     + '      <button type="button" id="bs-select" class="bs-btn bs-btn-ghost bs-btn-sm bs-hidden" aria-pressed="false"'
     + '        title="Click a paragraph, heading or list to ask your assistant to change it">\uD83C\uDFAF Select</button>'
     + '      <button type="button" id="bs-chat-toggle" class="bs-btn bs-btn-sm bs-btn-assist bs-hidden" aria-pressed="false" title="Show or hide the chat beside your article">\uD83D\uDCAC <span data-bs-assistant-label="chat">Chat</span></button></span>'
+    + '  </div>'
+    // OUTSIDE bs-workspace, on purpose. The workspace stays hidden until a post is created or loaded,
+    // so an error written into a banner inside it (bs-action-status) was invisible: when blog-posts
+    // 502'd on prod (2026-11-12, columns missing), Blog Studio opened onto a blank panel.
+    + '  <div id="bs-open-error" class="bs-banner bs-banner-error bs-hidden" role="alert">'
+    + '    <span id="bs-open-error-msg"></span> <button type="button" id="bs-open-retry" class="bs-btn bs-btn-ghost bs-btn-sm" style="margin-left:8px;">Try again</button>'
     + '  </div>'
     // The old "Start a new post" brief screen is gone: opening Blog Studio drops straight into the
     // editor on a fresh draft. AI drafting from a topic now lives inline in the editor (bs-ai-draft).
@@ -1098,7 +1115,7 @@
     state.pendingVideo = null;
     var title = video && video.title ? String(video.title).slice(0, 200) : 'Untitled draft';
     api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title, assistantId: state.assistantId }) }).then(function (res) {
-      if (!res.ok) { setBanner('bs-action-status', 'Could not create a draft: ' + ((res.body && res.body.error) || 'please try again.'), 'error'); return; }
+      if (!res.ok) { setStatus('bs-save-status', ''); showOpenError('Could not start a new draft: ' + ((res.body && res.body.error) || 'please try again.'), startBlankPost); return; }
       setStatus('bs-save-status', '');
       var editor = openWorkspace(res.body.post.id, title, video && video.words ? String(video.words) : '');
       // A video handed over by the Video Producer goes into the body straight away.
@@ -1469,7 +1486,13 @@
   function loadExistingPost(id) {
     setStatus('bs-save-status', 'Loading…');
     api('blog-posts?id=' + encodeURIComponent(id), { method: 'GET' }).then(function (res) {
-      if (!res.ok || !res.body.post) { setStatus('bs-save-status', ''); return; }
+      if (!res.ok || !res.body.post) {
+        setStatus('bs-save-status', '');
+        // A post that can't load used to leave the panel blank with nothing said.
+        showOpenError('Could not open this article: ' + ((res.body && res.body.error) || 'please try again.'),
+          function () { loadExistingPost(id); });
+        return;
+      }
       var post = res.body.post;
       if (post.assistantId != null) state.assistantId = post.assistantId;
       openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '', post);
@@ -3083,6 +3106,7 @@
   // Clear transient editor state before (re)opening onto a post — the modal is injected once and
   // reused, so status lines and the AI-draft form must not carry over between opens.
   function clearWorkspaceState() {
+    showOpenError('');
     // Disarm the widget autosave until loadWidget has repainted the panel. The DOM survives between
     // opens, so without this a change made during the reload would save the PREVIOUS session's
     // values back over whatever this one just fetched.

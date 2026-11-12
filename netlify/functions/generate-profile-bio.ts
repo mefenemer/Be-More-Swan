@@ -20,9 +20,10 @@ import { requireTenant } from '../../src/utils/tenant';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 // Platform char budgets — mirror the slices social-profile-sync applies when pushing.
 const LIMITS = { instagram: 150, facebook: 255, linkedin: 700 } as const;
@@ -124,13 +125,13 @@ Rules:
     const MAX_RETRIES = 3;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const response = await anthropic.messages.create({
+            const response = await anthropic.messages.create(adaptForModel({
                 model: MODEL,
                 max_tokens: 700,
                 messages: [{ role: 'user', content: prompt }],
-            });
-            logMessageUsage(response, MODEL, { workspaceId: organisationId, assistantId: assistantId ?? null, sessionId: 'generate-profile-bio' });
-            const raw = (response.content[0] as { text: string }).text.trim();
+            }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
+            await logMessageUsage(response, MODEL, { workspaceId: organisationId, assistantId: assistantId ?? null, sessionId: 'generate-profile-bio' });
+            const raw = replyText(response.content).trim();
             const parsed = parseModelJson<BioDraft>(raw);
             if (parsed?.instagram && parsed?.facebook && parsed?.linkedin) {
                 draft = clampDraft(parsed);

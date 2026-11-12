@@ -64,11 +64,12 @@ import {
 } from '../../src/config/outreach-sequences';
 import { parseModelJson } from '../../src/utils/model-json';
 import { voiceDirective } from '../../src/utils/voice-profile';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 type Db = ReturnType<typeof getDb>;
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 /**
  * How long a claimed enrolment is invisible to other invocations. Comfortably longer than one
@@ -234,7 +235,7 @@ write one anyway and do NOT put your reasoning in the subject or body. Return ex
 Otherwise return STRICT JSON only (no markdown, no prose outside the JSON):
 { "subject": "<subject line>", "body": "<the email body>" }`;
 
-    const resp = await anthropic.messages.create({
+    const resp = await anthropic.messages.create(adaptForModel({
         model: MODEL,
         max_tokens: 640,
         system,
@@ -242,9 +243,9 @@ Otherwise return STRICT JSON only (no markdown, no prose outside the JSON):
             role: 'user',
             content: `Original subject: ${originalSubject ?? '(unknown)'}\n\nConversation so far, oldest first:\n${transcript}`,
         }],
-    });
+    }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-    void logAiUsage({
+    await logAiUsage({
         workspaceId: enrolment.organisation_id,
         userId: null,
         assistantId: enrolment.ai_assistant_id,
@@ -255,7 +256,7 @@ Otherwise return STRICT JSON only (no markdown, no prose outside the JSON):
         dataCategories: ['business_context'],
     });
 
-    const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+    const raw = replyText(resp.content);
     // Shared extractor. A follow-up whose model narrated above the fence used to return null here,
     // which routes into handleSendFailure — a cadence step silently skipped over a wrapper.
     const parsed = parseModelJson<{ subject?: unknown; body?: unknown; decline?: unknown }>(raw);

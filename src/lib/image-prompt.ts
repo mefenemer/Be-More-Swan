@@ -25,9 +25,10 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { logAiUsage } from '../utils/ai-usage';
+import { adaptForModel } from '../config/model-options';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 /** The image call shares a 26s function budget, so this step must be quick or not happen. */
 const TIMEOUT_MS = 4000;
 /** Four prompts are ~4x the output of one; the image budget is cut to match (generate-ai-image.ts). */
@@ -81,10 +82,10 @@ export async function visualisePrompts(
     if (!process.env.ANTHROPIC_API_KEY) return fillPrompts([], request, n);
     try {
         const resp = await anthropic.messages.create(
-            { model: MODEL, max_tokens: 900, system: SYSTEM_VARIANTS(n), messages: [{ role: 'user', content: request.slice(0, 1000) }] },
+            adaptForModel({ model: MODEL, max_tokens: 900, system: SYSTEM_VARIANTS(n), messages: [{ role: 'user', content: request.slice(0, 1000) }] }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming,
             { timeout: VARIANTS_TIMEOUT_MS, maxRetries: 0 },
         );
-        void logAiUsage({
+        await logAiUsage({
             workspaceId: usage?.workspaceId ?? null, userId: usage?.userId ?? null, assistantId: usage?.assistantId ?? null,
             model: MODEL, inputTokens: resp.usage.input_tokens, outputTokens: resp.usage.output_tokens,
             sessionId: 'image-prompt', dataCategories: ['business_context'],
@@ -106,10 +107,10 @@ export async function visualisePrompt(
     if (!process.env.ANTHROPIC_API_KEY) return request;
     try {
         const resp = await anthropic.messages.create(
-            { model: MODEL, max_tokens: 300, system: SYSTEM, messages: [{ role: 'user', content: request.slice(0, 1000) }] },
+            adaptForModel({ model: MODEL, max_tokens: 300, system: SYSTEM, messages: [{ role: 'user', content: request.slice(0, 1000) }] }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming,
             { timeout: TIMEOUT_MS, maxRetries: 0 },
         );
-        void logAiUsage({
+        await logAiUsage({
             workspaceId: usage?.workspaceId ?? null, userId: usage?.userId ?? null, assistantId: usage?.assistantId ?? null,
             model: MODEL, inputTokens: resp.usage.input_tokens, outputTokens: resp.usage.output_tokens,
             sessionId: 'image-prompt', dataCategories: ['business_context'],
@@ -177,10 +178,10 @@ export async function planImage(
     if (!process.env.ANTHROPIC_API_KEY) return { scene: request, words: [] };
     try {
         const resp = await anthropic.messages.create(
-            { model: MODEL, max_tokens: 450, system: SYSTEM_PLAN, messages: [{ role: 'user', content: request.slice(0, 1000) }] },
+            adaptForModel({ model: MODEL, max_tokens: 450, system: SYSTEM_PLAN, messages: [{ role: 'user', content: request.slice(0, 1000) }] }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming,
             { timeout: TIMEOUT_MS, maxRetries: 0 },
         );
-        void logAiUsage({
+        await logAiUsage({
             workspaceId: usage?.workspaceId ?? null, userId: usage?.userId ?? null, assistantId: usage?.assistantId ?? null,
             model: MODEL, inputTokens: resp.usage.input_tokens, outputTokens: resp.usage.output_tokens,
             sessionId: 'image-prompt', dataCategories: ['business_context'],

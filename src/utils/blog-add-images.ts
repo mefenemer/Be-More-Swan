@@ -169,7 +169,7 @@ export async function addImagesToBlog(
             + '"alt":"<short alt text for a screen reader>"}]}',
         }],
     });
-    void logAiUsage({
+    await logAiUsage({
         userId: opts.userId, workspaceId: opts.organisationId, model: BLOG_MODEL,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });
@@ -276,7 +276,7 @@ async function replacePicture(
             + '"alt":"<short alt text for a screen reader>"}',
         }],
     });
-    void logAiUsage({
+    await logAiUsage({
         userId: opts.userId, workspaceId: opts.organisationId, model: BLOG_MODEL,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });

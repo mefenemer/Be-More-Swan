@@ -14,9 +14,10 @@ import {
 // ⚠️ NOT a local copy. The local one anchored its fence-strip to the start of the reply, so a
 // model that narrated STEP ONE above the fence failed the whole run. See src/utils/llm-json.ts.
 import { parseModelJson } from '../utils/model-json';
+import { adaptForModel, replyText } from '../config/model-options';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-export const QUERY_GEN_MODEL = 'claude-haiku-4-5-20251001';
+export const QUERY_GEN_MODEL = 'claude-haiku-5-5';
 
 // The three discovery strategies map 1:1 to discovered_leads.discovered_via.
 export type DiscoveryStrategy = 'niche_scrape' | 'intent_signal' | 'footprint';
@@ -255,15 +256,15 @@ ${JSON.stringify(input.icpSnapshot ?? {})}`;
     let queries = EMPTY;
 
     try {
-        const resp = await anthropic.messages.create({
+        const resp = await anthropic.messages.create(adaptForModel({
             model: QUERY_GEN_MODEL,
             max_tokens: 1024,
             system,
             messages: [{ role: 'user', content: userMsg }],
-        });
+        }, QUERY_GEN_MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
         inputTokens = resp.usage.input_tokens;
         outputTokens = resp.usage.output_tokens;
-        const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+        const raw = replyText(resp.content);
         const parsed = parseModelJson<Record<string, unknown>>(raw);
         if (parsed) {
             queries = {

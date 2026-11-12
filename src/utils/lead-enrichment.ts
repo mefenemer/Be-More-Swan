@@ -592,7 +592,7 @@ export async function deepEnrichLead(
     }, opts.icp, opts.sender, { domain: opts.domain, modelChoice: await loadRoleModel(db, 'lead_qualifier') });
     // rescoreWithIntel reports its tokens and logs nothing itself; nor did anything else.
     if (rescored.inputTokens || rescored.outputTokens) {
-        void logAiUsage({
+        await logAiUsage({
             workspaceId: rec.organisationId ?? null, assistantId: rec.aiAssistantId ?? null,
             model: rescored.model, inputTokens: rescored.inputTokens, outputTokens: rescored.outputTokens,
             sessionId: 'lead-deep-enrichment', dataCategories: ['business_context'],

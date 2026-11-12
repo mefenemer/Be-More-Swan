@@ -40,8 +40,9 @@ import { displayCaption, stripCodeFences } from '../../src/utils/model-json';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { chargeHelper } from '../../src/utils/basic-work';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -71,7 +72,7 @@ async function fitCaption(args: {
     const { caption, platform, limit, publishDate, userId, orgId } = args;
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 1200,
             // Same date-first rule as rewrite-post-text: a rewrite is free to invent a year that was
@@ -88,11 +89,11 @@ async function fitCaption(args: {
                     + `Original caption (${caption.length} characters):\n"""${caption.slice(0, 5000)}"""\n\n`
                     + `Task: rewrite it to fit comfortably within ${limit} characters.`,
             }],
-        });
-        let text = stripCodeFences((response.content[0] as { text?: string })?.text?.trim() ?? '');
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
+        let text = stripCodeFences(replyText(response.content).trim());
         if (!text) return null;
 
-        void logAiUsage({
+        await logAiUsage({
             userId, workspaceId: orgId, model: MODEL,
             inputTokens: response.usage?.input_tokens ?? 0,
             outputTokens: response.usage?.output_tokens ?? 0,

@@ -150,7 +150,7 @@ export async function makeVideoTrack(db: Db, args: { orgId: number; userId: numb
             attributionName: 'Generated with Stable Audio (Stability AI)', prompt: built.prompt, generationJobId: job.id, status: 'pending',
         }).returning({ id: contentAssets.id });
         await db.update(mediaGenerationJobs).set({ status: 'completed', resultAssetIds: [asset.id], updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, job.id));
-        logMediaCost(MUSIC_MODEL, {}, { workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId ?? null, sessionId: 'stability-music' });
+        await logMediaCost(MUSIC_MODEL, {}, { workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId ?? null, sessionId: 'stability-music' });
         return { assetId: asset.id, title: args.title.slice(0, 80) };
     } catch (err) {
         await failJob(err instanceof Error ? err.message : String(err));

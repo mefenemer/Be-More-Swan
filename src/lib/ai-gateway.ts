@@ -3,14 +3,14 @@
 // US-AI-GW-1 (centralized routing) + US-AI-GW-2 (failover on 429/503).
 //
 // Config:
-//   AI_GATEWAY_PRIMARY_MODEL   — defaults to claude-sonnet-4-6
-//   AI_GATEWAY_FALLBACK_MODEL  — defaults to claude-haiku-4-5-20251001
+//   AI_GATEWAY_PRIMARY_MODEL   — defaults to claude-sonnet-5-5 (was claude-sonnet-4-6 until 2026-11-12)
+//   AI_GATEWAY_FALLBACK_MODEL  — defaults to claude-haiku-5-5 (was claude-haiku-4-5-20251001)
 //
 // Changing the target model requires only an env-var update; no business logic changes needed.
 
 import { sanitizeForModel } from '../utils/text-safe';
 import Anthropic from '@anthropic-ai/sdk';
-import { logAiUsage, type DataCategory } from '../utils/ai-usage';
+import { logAiUsage, serviceUnitPriceUsd, type DataCategory } from '../utils/ai-usage';
 import { adaptForModel, modelOption, replyText, type ThinkingLevel } from '../config/model-options';
 
 export interface GatewayRequest {
@@ -84,8 +84,8 @@ export interface GatewayResponse {
     tokensOutput: number | null;
 }
 
-const PRIMARY_MODEL  = process.env.AI_GATEWAY_PRIMARY_MODEL  ?? 'claude-sonnet-4-6';
-const FALLBACK_MODEL = process.env.AI_GATEWAY_FALLBACK_MODEL ?? 'claude-haiku-4-5-20251001';
+const PRIMARY_MODEL  = process.env.AI_GATEWAY_PRIMARY_MODEL  ?? 'claude-sonnet-5-5';
+const FALLBACK_MODEL = process.env.AI_GATEWAY_FALLBACK_MODEL ?? 'claude-haiku-5-5';
 
 const client = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
@@ -146,13 +146,15 @@ async function callModel(model: string, req: GatewayRequest): Promise<Anthropic.
     // whole-site draft on any other model — or with no role model chosen — kept the client's 24s and
     // died at 3 × 24s ("Request timed out.") before the model could finish writing ~8k tokens.
     const deadline = req.deadlineMs ? { timeout: req.deadlineMs } : undefined;
-    // Only a role's chosen model is adapted; PRIMARY/FALLBACK calls go out exactly as before.
-    if (model !== req.model) return client.messages.create(params, deadline);
+    // EVERY call is adapted (2026-11-12): PRIMARY/FALLBACK are 5.5 models now, which reject sampling
+    // settings and can open with a thinking block, so sending them raw as before would break. A
+    // role's chosen model keeps its chosen thinking level; PRIMARY/FALLBACK run at Low. adaptForModel
+    // leaves a previous-generation model (an env override) untouched.
     // A thinking model gets the caller's deadline, or 2 minutes in background work (no deadline),
     // rather than the client's 24s: the head-to-head measured Opus 5.5 at up to 22.6s on short
     // prompts, and drafts carry ~8k tokens. Request paths pass a deadline (gatewayRoleModel).
-    const thinks = modelOption(model)?.thinking !== 'none';
-    return client.messages.create(adaptForModel(params, model, req.thinking) as Anthropic.MessageCreateParamsNonStreaming,
+    const thinks = (modelOption(model)?.thinking ?? 'none') !== 'none';
+    return client.messages.create(adaptForModel(params, model, model === req.model ? req.thinking : 'low') as Anthropic.MessageCreateParamsNonStreaming,
         thinks ? { timeout: req.deadlineMs ?? 120_000 } : deadline);
 }
 
@@ -186,7 +188,7 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
     }
 
     const text = replyText(response.content);
-    recordUsage(req, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0, usedFallback ? FALLBACK_MODEL : calledModel);
+    await recordUsage(req, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0, usedFallback ? FALLBACK_MODEL : calledModel);
     return {
         text,
         stopReason: response.stop_reason ?? null,
@@ -200,8 +202,9 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
 /**
  * Write one ai_usage_log row for a call that has just succeeded.
  *
- * Never awaited and never able to throw: a book-keeping failure must not turn a generated post into
- * a failed job. logAiUsage swallows its own errors; the void and the catch here cover the rest.
+ * Awaited (2026-11-12) but never able to throw: a book-keeping failure must not turn a generated post
+ * into a failed job. It used to be fire-and-forget, and a Netlify function frozen at its return lost
+ * the write (see logAiUsage). logAiUsage swallows its own errors; the catch here covers the rest.
  *
  * ⚠️ The model KEY WE INVOKED, not `response.model`. The API resolves a request for
  * `claude-sonnet-4-6` into a dated id, and `ai_model_pricing` is keyed on the undated constant —
@@ -210,10 +213,10 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
  * exact hole this change exists to close. Still accurate after a failover, because the caller passes
  * the model it actually called.
  */
-function recordUsage(req: GatewayRequest, inputTokens: number, outputTokens: number, modelKey: string): void {
+async function recordUsage(req: GatewayRequest, inputTokens: number, outputTokens: number, modelKey: string): Promise<void> {
     const u = req.usage ?? {};
     try {
-        void logAiUsage({
+        await logAiUsage({
             workspaceId:  u.workspaceId  ?? null,
             userId:       u.userId       ?? null,
             assistantId:  u.assistantId  ?? null,
@@ -226,6 +229,34 @@ function recordUsage(req: GatewayRequest, inputTokens: number, outputTokens: num
         });
     } catch (err) {
         console.error('[ai-gateway] usage logging failed (the call itself succeeded)', err);
+    }
+}
+
+/**
+ * Claude's server-side web search is billed per search on top of the tokens, so a grounded call
+ * records it as a second row ('anthropic-web-search', 0 tokens, priced per search). Recorded here,
+ * once, for every grounded caller — callers must not log it again. Awaited, like the token row since
+ * 2026-11-12: background callers (the System Map review) can be frozen as soon as they return, which would
+ * lose a fire-and-forget write of a fee that was already paid. Never throws.
+ */
+async function recordSearchFee(req: GatewayRequest, searches: number): Promise<void> {
+    if (!(searches > 0)) return;
+    const u = req.usage ?? {};
+    try {
+        await logAiUsage({
+            workspaceId:  u.workspaceId  ?? null,
+            userId:       u.userId       ?? null,
+            assistantId:  u.assistantId  ?? null,
+            model:        'anthropic-web-search',
+            inputTokens:  0,
+            outputTokens: 0,
+            costUsdOverride: (searches * serviceUnitPriceUsd('anthropic-web-search')).toFixed(6),
+            taskRunId:    u.taskRunId    ?? null,
+            sessionId:    u.sessionId    ?? null,
+            dataCategories: u.dataCategories,
+        });
+    } catch (err) {
+        console.error('[ai-gateway] web search fee logging failed (the call itself succeeded)', err);
     }
 }
 
@@ -252,7 +283,7 @@ export interface GroundedResponse extends GatewayResponse {
  * graceful degrade — so pick it from the model id.
  */
 function webSearchTool(model: string): Anthropic.Messages.ToolUnion {
-    const dynamicFiltering = /opus-4-(6|7|8)|sonnet-5|sonnet-4-6|fable-5/.test(model);
+    const dynamicFiltering = /opus-4-(6|7|8)|opus-5|sonnet-5|sonnet-4-6|fable-5/.test(model);
     return {
         type: dynamicFiltering ? 'web_search_20260209' : 'web_search_20250305',
         name: 'web_search',
@@ -315,9 +346,9 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
         };
         // A thinking model searching in background work (no deadline) gets 3 minutes a call, not the
         // client's 24 s: thinking plus up to four searches runs well past it.
-        const adapted = m === roleModel;
-        const thinks = adapted && modelOption(m)?.thinking !== 'none';
-        return client.messages.create((adapted ? adaptForModel(params, m, req.thinking) : params) as Anthropic.MessageCreateParamsNonStreaming,
+        // Every model is adapted, as in callModel: PRIMARY/FALLBACK are 5.5 models since 2026-11-12.
+        const thinks = (modelOption(m)?.thinking ?? 'none') !== 'none';
+        return client.messages.create(adaptForModel(params, m, m === roleModel ? req.thinking : 'low') as Anthropic.MessageCreateParamsNonStreaming,
             left === Infinity ? (thinks ? { timeout: 180_000 } : undefined) : {
             timeout: Math.max(MIN_CALL_MS, left),
             // A `timeout` is per ATTEMPT, not per call: the SDK retries a connection timeout
@@ -376,7 +407,8 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
     const { urls, searches } = collectSearchedUrls(allContent);
     const text = allContent.filter(b => b.type === 'text').map(b => (b as any).text).join('\n').trim();
 
-    recordUsage(req, tokensIn, tokensOut, model);
+    await recordUsage(req, tokensIn, tokensOut, model);
+    await recordSearchFee(req, searches);
     return {
         text,
         stopReason: response.stop_reason ?? null,

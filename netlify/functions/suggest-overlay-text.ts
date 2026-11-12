@@ -30,8 +30,9 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { stripCodeFences } from '../../src/utils/model-json';
 import { isUpstreamBlocked } from '../../src/lib/ai-gateway';
 import { chargeHelper } from '../../src/utils/basic-work';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 /** What fits on a still at a readable size. The overlay renderer shrinks past this, it does not wrap well. */
 const MAX_OVERLAY_CHARS = 80;
 const MAX_INPUT_CHARS = 400;
@@ -136,7 +137,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 120,
             system:
@@ -157,9 +158,9 @@ export default withLambda(async (event: HandlerEvent) => {
                           ? clipBrief(clip) + '\n\nWrite the overlay wording for THIS clip.'
                           : 'Write the overlay wording for this post.'),
             }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-        let text = (response.content[0] as { text?: string })?.text?.trim() ?? '';
+        let text = replyText(response.content).trim();
         // The model is asked for one line and no decoration; strip what it adds anyway rather than
         // showing the user a quoted, fenced, or multi-line "hook" they then have to tidy by hand.
         text = stripCodeFences(text);
@@ -167,7 +168,7 @@ export default withLambda(async (event: HandlerEvent) => {
         if (text.length > MAX_OVERLAY_CHARS) text = text.slice(0, MAX_OVERLAY_CHARS).trimEnd();
         if (!text) throw new Error('Empty suggestion.');
 
-        void logAiUsage({
+        await logAiUsage({
             userId: ctx.userId,
             workspaceId: ctx.organisationId,
             model: MODEL,

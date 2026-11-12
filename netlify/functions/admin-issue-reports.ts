@@ -18,7 +18,13 @@ import { incidentColumnsReady, loadIncidentFields } from '../../src/utils/platfo
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { hasPermission } from '../../src/utils/rbac';
-import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, reclaimStaleMerges, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
+import { stampFixedAt, loadFixLiveFields, parsePrNumber } from '../../src/utils/issue-fix-live';
+import { dispatchHotfix, syncHotfix } from '../../src/utils/issue-hotfix';
+import { dispatchAiFix, buildAiFixIssueText, syncAiFix, syncOpenAiFixes, CLOUD_RUNNER_ID, AI_FIX_BULK_MAX } from '../../src/utils/issue-ai-fix';
+import { dispatchCloudMerge, syncCloudMerge, syncOpenCloudMerges, MERGE_BULK_MAX } from '../../src/utils/issue-cloud-merge';
+import { loadSeverities, setIssueSeverity, isIssueSeverity } from '../../src/utils/issue-severity';
+import { loadOrgPlanValues } from '../../src/utils/org-plan-value';
+import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -34,6 +40,90 @@ const json = (statusCode: number, body: unknown) => ({
 async function notSuspected(db: Parameters<typeof incidentColumnsReady>[0]) {
     return (await incidentColumnsReady(db)) ? [sql`${issueReports}.source <> 'suspected'`] : [];
 }
+
+const HANDOFF_THANKS = "Thanks for reporting this — we've passed it to the developer and a fix is now underway.";
+
+/** The claim written before the workflow is started: the cloud now holds the issue. */
+const cloudClaim = () => ({
+    devHandoffStatus: 'in_progress',
+    devHandoffAt: new Date(),
+    devRunnerId: CLOUD_RUNNER_ID,
+    devRunnerHeartbeat: new Date(),
+    devResult: 'Starting the AI fix workflow on GitHub…',
+    status: 'fix_in_progress',
+    updatedAt: new Date(),
+});
+
+/** Start .github/workflows/ai-fix.yml for one claimed issue. Returns an error for the admin, or null. */
+async function dispatchForIssue(db: ReturnType<typeof getDb>, issue: typeof issueReports.$inferSelect, note?: string): Promise<string | null> {
+    const thread = await db
+        .select({ authorType: issueReportMessages.authorType, body: issueReportMessages.body, createdAt: issueReportMessages.createdAt })
+        .from(issueReportMessages)
+        .where(eq(issueReportMessages.issueId, issue.id))
+        .orderBy(asc(issueReportMessages.createdAt))
+        .limit(50);
+    const issueText = buildAiFixIssueText({
+        id: issue.id, description: issue.description, sourceLocation: issue.sourceLocation,
+        sourceUrl: issue.sourceUrl, hasImage: !!issue.imageMime, note,
+    }, thread);
+    return dispatchAiFix({ issueId: issue.id, issueText });
+}
+
+/** The workflow didn't start: release the claim and put the visible status back. */
+async function releaseCloudClaim(db: ReturnType<typeof getDb>, id: number, prevStatus: string, err: string, restore: Partial<typeof issueReports.$inferInsert> = {}) {
+    await db.update(issueReports).set({
+        devHandoffStatus: 'failed', devResult: err, devRunnerId: null, devRunnerHeartbeat: null,
+        status: prevStatus, updatedAt: new Date(), ...restore,
+    }).where(and(eq(issueReports.id, id), eq(issueReports.devHandoffStatus, 'in_progress'), eq(issueReports.devRunnerId, CLOUD_RUNNER_ID)));
+}
+
+/**
+ * The bulk passes: claim up to AI_FIX_BULK_MAX eligible issues in one status (compare-and-swap, so a
+ * double click claims each once), start a workflow for each, then thread + notify the ones that started.
+ * Suspected incidents are never included: they only reach the AI developer by a person's hand.
+ */
+async function bulkHandoff(db: ReturnType<typeof getDb>, fromStatus: 'reported' | 'backlog', adminId: number, headers: Record<string, string | undefined>) {
+    const eligible = and(
+        eq(issueReports.status, fromStatus),
+        or(isNull(issueReports.devHandoffStatus), notInArray(issueReports.devHandoffStatus, ['queued', 'in_progress'])),
+        ...(await notSuspected(db)), // §6.2: a suspected issue is only ever passed on by hand
+    );
+    const picked = await db.select({ id: issueReports.id }).from(issueReports)
+        .where(eligible).orderBy(asc(issueReports.createdAt)).limit(AI_FIX_BULK_MAX + 1);
+    const ids = picked.slice(0, AI_FIX_BULK_MAX).map((p) => p.id);
+    if (!ids.length) return { claimed: [] as Array<typeof issueReports.$inferSelect>, started: [] as number[], errors: [] as string[], more: false };
+
+    const claimed = await db.update(issueReports).set(cloudClaim())
+        .where(and(inArray(issueReports.id, ids), eligible)).returning();
+    const started: number[] = [];
+    const errors: string[] = [];
+    for (const issue of claimed) {
+        const err = await dispatchForIssue(db, issue);
+        if (err) { errors.push(err); await releaseCloudClaim(db, issue.id, fromStatus, err); }
+        else started.push(issue.id);
+    }
+    const ok = claimed.filter((c) => started.includes(c.id));
+    if (ok.length) {
+        await db.insert(issueReportMessages).values(ok.map((u) => ({
+            issueId: u.id, authorType: 'admin', authorId: adminId, body: HANDOFF_THANKS, status: 'fix_in_progress',
+        })));
+        await Promise.allSettled(ok.map((u) =>
+            notifyIssueUser(db, { userId: u.userId, issueId: u.id, status: 'fix_in_progress', headers })
+                .catch((e) => console.error('[admin-issue-reports] bulk handoff notify failed:', e?.message || e)),
+        ));
+    }
+    return { claimed, started, errors, more: picked.length > AI_FIX_BULK_MAX };
+}
+
+const bulkReply = (r: Awaited<ReturnType<typeof bulkHandoff>>) => {
+    if (!r.claimed.length) return json(200, { ok: true, queued: 0 });
+    if (!r.started.length) return json(502, { error: r.errors[0] || 'The AI fix workflow could not be started.' });
+    return json(200, {
+        ok: true, queued: r.started.length, ids: r.started, failed: r.errors.length,
+        ...(r.errors.length ? { error: r.errors[0] } : {}),
+        ...(r.more ? { more: true, note: `Started ${r.started.length}. Press again for the next ${AI_FIX_BULK_MAX}.` } : {}),
+    });
+};
 
 async function requireAdmin(event: any): Promise<{ id: number; role: string } | null> {
     if (!jwtSecret) return null;
@@ -56,105 +146,55 @@ export default withLambda(async (event) => {
     const id = qs.id ? Number(qs.id) : null;
     const action = qs.action || '';
 
-    // ── POST ?action=handoff: queue the issue for AI auto-fix ────────────────────
-    // Flags the issue for a local Claude Code runner (see scripts/dev-issue-fixer.mjs),
-    // moves the user-visible status to "Fix In Progress", and notifies the reporter.
+    // ── POST ?action=handoff: start the AI fix for this issue ─────────────────────
+    // Claims the issue for the cloud (compare-and-swap, so a double click starts one run), starts
+    // .github/workflows/ai-fix.yml (src/utils/issue-ai-fix.ts), moves the visible status to
+    // "Fix In Progress" and notifies the reporter. syncAiFix follows the run and the PR. By hand,
+    // so a suspected incident may be passed on here.
     if (event.httpMethod === 'POST' && action === 'handoff' && id) {
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
-        if (issue.devHandoffStatus === 'queued' || issue.devHandoffStatus === 'in_progress') {
+        // Only a run the cloud holds blocks a new pass. A 'queued' or laptop-held 'in_progress' row
+        // left over from the retired laptop runner can be passed on again (the claim below swaps it).
+        if (issue.devHandoffStatus === 'in_progress' && issue.devRunnerId === CLOUD_RUNNER_ID) {
             return json(409, { error: 'This issue has already been passed to a developer.' });
         }
 
-        await db.update(issueReports).set({
-            devHandoffStatus: 'queued',
-            devHandoffAt: new Date(),
-            devResult: null,
-            status: 'fix_in_progress',
-            updatedAt: new Date(),
-        }).where(eq(issueReports.id, id));
+        const claimed = await db.update(issueReports).set(cloudClaim()).where(and(
+            eq(issueReports.id, id),
+            issue.devHandoffStatus == null ? isNull(issueReports.devHandoffStatus) : eq(issueReports.devHandoffStatus, issue.devHandoffStatus),
+        )).returning({ id: issueReports.id });
+        if (!claimed.length) return json(409, { error: 'Someone else just passed this on — refresh the issue.' });
+
+        const err = await dispatchForIssue(db, issue);
+        if (err) {
+            await releaseCloudClaim(db, id, issue.status, err);
+            return json(502, { error: err });
+        }
 
         await db.insert(issueReportMessages).values({
             issueId: id,
             authorType: 'admin',
             authorId: admin.id,
-            body: "Thanks for reporting this — we've passed it to the developer and a fix is now underway.",
+            body: HANDOFF_THANKS,
             status: 'fix_in_progress',
         });
 
         await notifyIssueUser(db, { userId: issue.userId, issueId: id, status: 'fix_in_progress', headers: event.headers })
             .catch((e) => console.error('[admin-issue-reports] handoff notify failed:', e?.message || e));
 
-        return json(200, { ok: true, devHandoffStatus: 'queued' });
+        return json(200, { ok: true, devHandoffStatus: 'in_progress' });
     }
 
-    // ── POST ?action=handoff-all: queue every eligible Reported issue at once ─────
-    // Bulk version of ?action=handoff. Queues every issue still in "Reported" that
-    // isn't already queued or being fixed, posts the same thread message on each,
-    // and notifies each reporter.
+    // ── POST ?action=handoff-all: start the AI fix for Reported issues in bulk ───
+    // Up to AI_FIX_BULK_MAX per click, never a suspected incident.
     if (event.httpMethod === 'POST' && action === 'handoff-all') {
-        const updated = await db.update(issueReports).set({
-            devHandoffStatus: 'queued',
-            devHandoffAt: new Date(),
-            devResult: null,
-            status: 'fix_in_progress',
-            updatedAt: new Date(),
-        }).where(and(
-            eq(issueReports.status, 'reported'),
-            or(isNull(issueReports.devHandoffStatus), notInArray(issueReports.devHandoffStatus, ['queued', 'in_progress'])),
-            ...(await notSuspected(db)), // §6.2: a suspected issue is only ever passed on by hand
-        )).returning({ id: issueReports.id, userId: issueReports.userId });
-
-        if (updated.length === 0) return json(200, { ok: true, queued: 0 });
-
-        await db.insert(issueReportMessages).values(updated.map((u) => ({
-            issueId: u.id,
-            authorType: 'admin',
-            authorId: admin.id,
-            body: "Thanks for reporting this — we've passed it to the developer and a fix is now underway.",
-            status: 'fix_in_progress',
-        })));
-
-        await Promise.allSettled(updated.map((u) =>
-            notifyIssueUser(db, { userId: u.userId, issueId: u.id, status: 'fix_in_progress', headers: event.headers })
-                .catch((e) => console.error('[admin-issue-reports] handoff-all notify failed:', e?.message || e)),
-        ));
-
-        return json(200, { ok: true, queued: updated.length, ids: updated.map((u) => u.id) });
+        return bulkReply(await bulkHandoff(db, 'reported', admin.id, event.headers));
     }
 
-    // ── POST ?action=handoff-backlog-all: queue every eligible Backlog issue at once ─
-    // Bulk version of ?action=handoff, scoped to the Backlog tab — lets an admin hand off
-    // a batch of previously-deferred issues to the AI developer in one click.
+    // ── POST ?action=handoff-backlog-all: the same for the Backlog tab ───────────
     if (event.httpMethod === 'POST' && action === 'handoff-backlog-all') {
-        const updated = await db.update(issueReports).set({
-            devHandoffStatus: 'queued',
-            devHandoffAt: new Date(),
-            devResult: null,
-            status: 'fix_in_progress',
-            updatedAt: new Date(),
-        }).where(and(
-            eq(issueReports.status, 'backlog'),
-            or(isNull(issueReports.devHandoffStatus), notInArray(issueReports.devHandoffStatus, ['queued', 'in_progress'])),
-            ...(await notSuspected(db)),
-        )).returning({ id: issueReports.id, userId: issueReports.userId });
-
-        if (updated.length === 0) return json(200, { ok: true, queued: 0 });
-
-        await db.insert(issueReportMessages).values(updated.map((u) => ({
-            issueId: u.id,
-            authorType: 'admin',
-            authorId: admin.id,
-            body: "Thanks for reporting this — we've passed it to the developer and a fix is now underway.",
-            status: 'fix_in_progress',
-        })));
-
-        await Promise.allSettled(updated.map((u) =>
-            notifyIssueUser(db, { userId: u.userId, issueId: u.id, status: 'fix_in_progress', headers: event.headers })
-                .catch((e) => console.error('[admin-issue-reports] handoff-backlog-all notify failed:', e?.message || e)),
-        ));
-
-        return json(200, { ok: true, queued: updated.length, ids: updated.map((u) => u.id) });
+        return bulkReply(await bulkHandoff(db, 'backlog', admin.id, event.headers));
     }
 
     // ── POST ?action=backlog-all: move every Reported issue to the Backlog at once ─
@@ -229,9 +269,9 @@ export default withLambda(async (event) => {
         return json(200, { ok: exec.ok, outcome: exec.outcome, status: advanced ? 'fixed_ready_to_test' : issue.status });
     }
 
-    // ── POST ?action=request-merge: queue a merge of the fix PR to staging ────────
-    // Super-admin only. The local watcher claims the queued merge and runs `gh pr merge`;
-    // a successful merge (plus any applied migration) is what advances the issue.
+    // ── POST ?action=request-merge: merge the fix PR to staging ───────────────────
+    // Super-admin only. Starts .github/workflows/merge-to-staging.yml (src/utils/issue-cloud-merge.ts);
+    // syncCloudMerge records the merge and advances the issue, as the laptop runner's report used to.
     if (event.httpMethod === 'POST' && action === 'request-merge' && id) {
         if (!hasPermission(admin.role, 'deploy_code')) {
             return json(403, { error: 'Merging to staging requires the deploy_code privilege.' });
@@ -249,34 +289,44 @@ export default withLambda(async (event) => {
         if (issue.devMergeStatus === 'merged') {
             return json(409, { error: 'This pull request has already been merged.' });
         }
-        // 'queued' means no runner has picked it up yet — re-queuing changes nothing, so it's a
-        // plain 409. A 'merging' claim blocks a re-request too, UNLESS the runner has gone quiet
-        // (no heartbeat for STALE_MERGE_MINS): then a super-admin can force it, instead of the
-        // issue being 409'd forever. `canForce` tells the UI to offer that retry.
-        if (issue.devMergeStatus === 'queued') {
-            return json(409, { error: 'A merge is already queued for this issue — it starts as soon as a developer runner is online.', canForce: false });
-        }
+        // A 'merging' claim blocks a re-request, UNLESS nothing has confirmed it for
+        // STALE_MERGE_MINS: then a super-admin can force a restart, instead of the issue being
+        // 409'd forever. `canForce` tells the UI to offer that retry. A 'queued' merge left over
+        // from the retired laptop runner is simply started here (the claim below swaps it).
         const stuck = issue.devMergeStatus === 'merging';
         if (stuck && !force) {
             return isMergeClaimStale(issue.devRunnerHeartbeat)
-                ? json(409, { error: `The merge looks stuck — the runner hasn't responded for over ${STALE_MERGE_MINS} minutes. Force a re-queue to hand it back to the developer runner.`, canForce: true })
+                ? json(409, { error: `The merge looks stuck — nothing has confirmed it for over ${STALE_MERGE_MINS} minutes. Force a restart to start it again.`, canForce: true })
                 : json(409, { error: 'A merge is already in progress for this issue.', canForce: false });
         }
 
-        // Compare-and-swap on the status we just read, so a runner reporting its result in the
-        // meantime isn't overwritten by a stale force.
-        const queued = await db.update(issueReports).set({
-            devMergeStatus: 'queued',
-            devMergeResult: null,
-            devRunnerId: null,
-            devRunnerHeartbeat: null,
+        const prNum = parsePrNumber(issue.devPrUrl);
+        if (!prNum) return json(400, { error: 'This issue\'s pull request is not in this repository, so it cannot be merged from here.' });
+
+        // Claim first (compare-and-swap on the status we just read), so a double click or a stale
+        // force starts one merge, and a result landing meanwhile isn't overwritten. The heartbeat is
+        // the start time syncCloudMerge reads (src/utils/issue-cloud-merge.ts).
+        const claimed = await db.update(issueReports).set({
+            devMergeStatus: 'merging',
+            devMergeResult: 'Starting the merge workflow on GitHub…',
+            devRunnerId: CLOUD_RUNNER_ID,
+            devRunnerHeartbeat: new Date(),
             updatedAt: new Date(),
         }).where(and(
             eq(issueReports.id, id),
             issue.devMergeStatus ? eq(issueReports.devMergeStatus, issue.devMergeStatus) : isNull(issueReports.devMergeStatus),
         )).returning({ id: issueReports.id });
-        if (queued.length === 0) {
+        if (claimed.length === 0) {
             return json(409, { error: 'This merge changed state while you were looking at it — reload the ticket and try again.' });
+        }
+
+        const err = await dispatchCloudMerge({ issueId: id, pr: prNum });
+        if (err) {
+            await db.update(issueReports).set({
+                devMergeStatus: stuck ? 'failed' : (issue.devMergeStatus || 'ready'), devMergeResult: err,
+                devRunnerId: null, devRunnerHeartbeat: null, updatedAt: new Date(),
+            }).where(and(eq(issueReports.id, id), eq(issueReports.devMergeStatus, 'merging'), eq(issueReports.devRunnerId, CLOUD_RUNNER_ID)));
+            return json(502, { error: err });
         }
 
         await db.insert(issueReportMessages).values({
@@ -284,127 +334,188 @@ export default withLambda(async (event) => {
             authorType: 'admin',
             authorId: admin.id,
             body: stuck
-                ? '🔁 Merge force-requeued — the previous attempt appeared stuck, so it was reset and handed back to the developer runner.'
-                : "🔀 We've queued this fix to merge into staging — it should be there shortly.",
+                ? '🔁 Merge restarted — the previous attempt appeared stuck, so it was reset and started again in GitHub Actions.'
+                : "🔀 We're merging this fix into staging — it should be there shortly.",
             status: null,
         });
 
-        return json(200, { ok: true, devMergeStatus: 'queued', forced: stuck });
+        return json(200, { ok: true, devMergeStatus: 'merging', forced: stuck });
     }
 
-    // ── POST ?action=request-prod-promote: promote a staging-verified fix to prod ──
-    // Super-admin only, and separate from closing the ticket. The fix must already be
-    // merged to staging. Queues a promotion the local watcher claims and performs by
-    // pushing staging → main (prod deploys from main); see admin-issue-handoff's
-    // claim-promote / promote-result.
+    // ── POST ?action=request-prod-promote: open a hotfix PR for THIS fix only ─────
+    // Super-admin only. Replaces "Push to prod", which promoted ALL of staging to main through the
+    // laptop runner. Starts .github/workflows/hotfix-pr.yml, which copies just this fix PR's merge
+    // commit onto a branch from main and opens a PR into main; a person merges it on GitHub.
+    // src/utils/issue-hotfix.ts follows the PR; the live check tells the reporter once prod has it.
+    // The action name is kept so older admin tabs still reach the new behaviour.
     if (event.httpMethod === 'POST' && action === 'request-prod-promote' && id) {
         if (!hasPermission(admin.role, 'deploy_code')) {
-            return json(403, { error: 'Promoting to production requires the deploy_code privilege.' });
+            return json(403, { error: 'Opening a hotfix PR requires the deploy_code privilege.' });
         }
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
         if (issue.devMergeStatus !== 'merged') {
-            return json(400, { error: 'Merge this fix to staging before promoting to production.' });
+            return json(400, { error: 'Merge this fix to staging before opening a hotfix PR.' });
         }
-        if (issue.devProdStatus === 'queued' || issue.devProdStatus === 'promoting') {
-            return json(409, { error: 'A promotion to production is already in progress for this issue.' });
+        const fixPr = parsePrNumber(issue.devPrUrl);
+        if (!fixPr) return json(400, { error: 'This issue has no fix PR in this repository to copy.' });
+        // A 'queued' / 'promoting' promotion left over from the retired laptop runner doesn't block.
+        if (issue.devProdStatus && ['hotfix_requested', 'hotfix_open'].includes(issue.devProdStatus)) {
+            return json(409, { error: 'A hotfix for this issue is already in progress — see the card for its PR.' });
         }
         if (issue.devProdStatus === 'promoted') {
-            return json(409, { error: 'This fix has already been promoted to production.' });
+            return json(409, { error: 'This fix has already been merged into main.' });
         }
 
-        await db.update(issueReports).set({
-            devProdStatus: 'queued',
-            devProdResult: null,
+        // Claim first (compare-and-swap), so a double click starts one workflow, not two.
+        let claimed: Array<{ id: number }>;
+        try {
+            claimed = await db.update(issueReports).set({
+            devProdStatus: 'hotfix_requested',
+            devProdAt: new Date(),
+            devProdResult: 'Starting the hotfix workflow on GitHub…',
             updatedAt: new Date(),
-        }).where(eq(issueReports.id, id));
+            }).where(and(eq(issueReports.id, id), issue.devProdStatus == null ? isNull(issueReports.devProdStatus) : eq(issueReports.devProdStatus, issue.devProdStatus)))
+              .returning({ id: issueReports.id });
+        } catch (e) {
+            // Before db/z-issue-hotfix-pr.sql the status CHECK refuses 'hotfix_requested'.
+            console.error('[admin-issue-reports] hotfix claim failed:', e instanceof Error ? e.message : e);
+            return json(503, { error: 'Hotfix PRs need db/z-issue-hotfix-pr.sql applied to this database first.' });
+        }
+        if (!claimed.length) return json(409, { error: 'Someone else just started this — refresh the issue.' });
 
-        await db.insert(issueReportMessages).values({
-            issueId: id,
-            authorType: 'admin',
-            authorId: admin.id,
-            body: "🚀 We've queued this fix to promote from staging to production — it should be live shortly.",
-            status: null,
-        });
-
-        return json(200, { ok: true, devProdStatus: 'queued' });
+        const err = await dispatchHotfix({ issueId: id, fixPr });
+        if (err) {
+            await db.update(issueReports).set({ devProdStatus: 'failed', devProdResult: err, updatedAt: new Date() })
+                .where(eq(issueReports.id, id));
+            return json(502, { error: err });
+        }
+        return json(200, { ok: true, devProdStatus: 'hotfix_requested' });
     }
 
-    // ── POST ?action=request-conflict-fix: investigate + auto-resolve a failed merge ─
-    // Super-admin only. Only valid once a merge attempt has actually failed. The local
-    // watcher (see scripts/dev-issue-fixer.mjs) claims it, merges the base branch into
-    // the fix branch, resolves any conflicts with Claude Code, pushes, and retries the
-    // PR merge — same as a normal merge, success moves the issue on to "Fixed & Ready
-    // to Test".
-    if (event.httpMethod === 'POST' && action === 'request-conflict-fix' && id) {
+    // ── POST ?action=redo-fix: write the fix again on the latest staging ──────────
+    // Super-admin only, after a failed merge. Replaces "Investigate & fix conflicts", which the
+    // laptop runner did by merging staging into the fix branch and having Claude resolve markers.
+    // Instead this starts the AI fix workflow again (src/utils/issue-ai-fix.ts): it checks out
+    // current staging, rewrites the fix, force-pushes ai-fix/issue-<id> and updates its open PR, so
+    // the new PR has no conflict. The fix is rewritten, so the PR needs reviewing again.
+    // 'request-conflict-fix' is kept as an alias so older admin tabs reach the new behaviour.
+    if (event.httpMethod === 'POST' && (action === 'redo-fix' || action === 'request-conflict-fix') && id) {
         if (!hasPermission(admin.role, 'deploy_code')) {
-            return json(403, { error: 'Investigating a merge conflict requires the deploy_code privilege.' });
+            return json(403, { error: 'Redoing a fix requires the deploy_code privilege.' });
         }
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
-        if (!issue.devPrUrl) return json(400, { error: 'This issue has no pull request to merge.' });
-        if (issue.devMergeStatus !== 'failed') {
-            return json(409, { error: 'Only a failed merge can be investigated.' });
+        // 'conflict_queued' / 'conflict_resolving': a conflict fix the retired laptop runner never finished.
+        if (!issue.devMergeStatus || !['failed', 'conflict_queued', 'conflict_resolving'].includes(issue.devMergeStatus)) {
+            return json(409, { error: 'Only a fix whose merge failed can be redone from here.' });
+        }
+        if (issue.devHandoffStatus === 'in_progress' && issue.devRunnerId === CLOUD_RUNNER_ID) {
+            return json(409, { error: 'The AI developer is already working on this issue.' });
         }
 
-        await db.update(issueReports).set({
-            devMergeStatus: 'conflict_queued',
-            devMergeResult: null,
-            updatedAt: new Date(),
-        }).where(eq(issueReports.id, id));
+        // Claim first (compare-and-swap on the merge state we just read). Clearing dev_merge_status
+        // moves the card back to "fixing"; syncAiFix sets it to 'ready' when the new PR is there.
+        const claimed = await db.update(issueReports).set({ ...cloudClaim(), devMergeStatus: null, devMergeResult: null })
+            .where(and(eq(issueReports.id, id), eq(issueReports.devMergeStatus, issue.devMergeStatus)))
+            .returning({ id: issueReports.id });
+        if (!claimed.length) return json(409, { error: 'This issue changed while you were looking at it — reload it and try again.' });
 
+        const note = `The previous fix (${issue.devPrUrl || 'its pull request'}) could not be merged into staging, most likely because staging changed underneath it. Write the fix again against the current code. The thread below includes the previous attempt and why its merge failed.`;
+        const err = await dispatchForIssue(db, issue, note);
+        if (err) {
+            await releaseCloudClaim(db, id, issue.status, err, { devMergeStatus: 'failed', devMergeResult: issue.devMergeResult, devHandoffStatus: issue.devHandoffStatus });
+            return json(502, { error: err });
+        }
+
+        const oldFixBranch = issue.devBranch && !issue.devBranch.startsWith('ai-fix/');
         await db.insert(issueReportMessages).values({
             issueId: id,
             authorType: 'admin',
             authorId: admin.id,
-            body: "🔧 We've queued an investigation into the merge conflict — the AI developer will resolve it and merge to staging.",
+            body: `🔁 The merge failed, so the AI developer is writing the fix again on the latest staging. The new version needs reviewing before it is merged.${oldFixBranch ? `\n\nThe old pull request (${issue.devPrUrl}) is left open; close it once the new one is ready.` : ''}`,
             status: null,
         });
-
-        return json(200, { ok: true, devMergeStatus: 'conflict_queued' });
+        // An engineering step: the reporter hears once the fix is live, not now.
+        return json(200, { ok: true, devHandoffStatus: 'in_progress' });
     }
 
-    // ── POST ?action=request-merge-all: queue every mergeable fix PR at once ──────
-    // Bulk version of ?action=request-merge, for the "Fix In Progress" tab. Queues a
-    // merge for every issue whose fix PR is ready (or whose last merge failed), skipping
-    // any fix still gated on a pending DB migration — those must be run individually
-    // from the ticket first.
+    // ── POST ?action=request-merge-all: merge every ready fix PR at once ──────────
+    // Bulk version of ?action=request-merge, for the "Fix In Progress" tab. Claims up to
+    // MERGE_BULK_MAX issues whose fix PR is ready (or whose last merge failed), skipping any fix
+    // still gated on a pending DB migration, then starts the merge workflow for each.
     if (event.httpMethod === 'POST' && action === 'request-merge-all') {
         if (!hasPermission(admin.role, 'deploy_code')) {
             return json(403, { error: 'Merging to staging requires the deploy_code privilege.' });
         }
-        const updated = await db.update(issueReports).set({
-            devMergeStatus: 'queued',
-            devMergeResult: null,
-            updatedAt: new Date(),
-        }).where(and(
+        const eligible = and(
             isNotNull(issueReports.devPrUrl),
             inArray(issueReports.devMergeStatus, ['ready', 'failed']),
             or(isNull(issueReports.devSqlStatus), ne(issueReports.devSqlStatus, 'pending')),
-        )).returning({ id: issueReports.id });
+        );
+        const picked = await db.select({ id: issueReports.id }).from(issueReports)
+            .where(eligible).orderBy(asc(issueReports.devHandoffAt)).limit(MERGE_BULK_MAX + 1);
+        const ids = picked.slice(0, MERGE_BULK_MAX).map((p) => p.id);
+        if (ids.length === 0) return json(200, { ok: true, queued: 0 });
 
-        if (updated.length === 0) return json(200, { ok: true, queued: 0 });
+        const claimed = await db.update(issueReports).set({
+            devMergeStatus: 'merging',
+            devMergeResult: 'Starting the merge workflow on GitHub…',
+            devRunnerId: CLOUD_RUNNER_ID,
+            devRunnerHeartbeat: new Date(),
+            updatedAt: new Date(),
+        }).where(and(inArray(issueReports.id, ids), eligible))
+          .returning({ id: issueReports.id, devPrUrl: issueReports.devPrUrl });
 
-        await db.insert(issueReportMessages).values(updated.map((u) => ({
-            issueId: u.id,
-            authorType: 'admin',
-            authorId: admin.id,
-            body: "🔀 We've queued this fix to merge into staging — it should be there shortly.",
-            status: null,
-        })));
+        const started: number[] = [];
+        const errors: string[] = [];
+        for (const c of claimed) {
+            const prNum = parsePrNumber(c.devPrUrl);
+            const err = prNum ? await dispatchCloudMerge({ issueId: c.id, pr: prNum }) : 'The pull request is not in this repository.';
+            if (err) {
+                errors.push(err);
+                await db.update(issueReports).set({ devMergeStatus: 'failed', devMergeResult: err, devRunnerId: null, devRunnerHeartbeat: null, updatedAt: new Date() })
+                    .where(and(eq(issueReports.id, c.id), eq(issueReports.devMergeStatus, 'merging'), eq(issueReports.devRunnerId, CLOUD_RUNNER_ID)));
+            } else started.push(c.id);
+        }
+        if (claimed.length && !started.length) return json(502, { error: errors[0] || 'The merge workflow could not be started.' });
 
-        return json(200, { ok: true, queued: updated.length, ids: updated.map((u) => u.id) });
+        if (started.length) {
+            await db.insert(issueReportMessages).values(started.map((sid) => ({
+                issueId: sid,
+                authorType: 'admin',
+                authorId: admin.id,
+                body: "🔀 We're merging this fix into staging — it should be there shortly.",
+                status: null,
+            })));
+        }
+
+        return json(200, {
+            ok: true, queued: started.length, ids: started, failed: errors.length,
+            ...(errors.length ? { error: errors[0] } : {}),
+            ...(picked.length > MERGE_BULK_MAX ? { more: true, note: `Started ${started.length}. Press again for the next ${MERGE_BULK_MAX}.` } : {}),
+        });
     }
 
-    // Staging is now rebuilt automatically once a merge drains the queue — see
-    // triggerStagingDeployIfDrained(), called from admin-issue-handoff's merge-result
-    // handler. There is no separate manual "deploy" step to request here anymore.
-
+    // Staging is rebuilt automatically once no merge is left in flight — see
+    // triggerStagingDeployIfDrained(), called when syncCloudMerge records a merge outcome.
 
     // ── GET single issue (with thread + screenshot) ──────────────────────────────
     if (event.httpMethod === 'GET' && id) {
-        const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        let [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
+        // A hotfix in flight: follow it on GitHub now, so the card is current when the admin looks.
+        if (await syncHotfix(db, issue)) {
+            [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        }
+        // An AI fix running in GitHub Actions: pick up its PR, failure or progress now.
+        if (await syncAiFix(db, issue)) {
+            [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        }
+        // A merge to staging running in GitHub Actions: record it (and move the issue on) now.
+        if (await syncCloudMerge(db, issue, { headers: event.headers })) {
+            [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        }
         // No reporter on an automatic incident (source 'system' | 'suspected').
         const [reporter] = issue.userId == null ? [] : await db
             .select({ email: users.email, firstName: users.firstName, lastName: users.lastName })
@@ -419,6 +530,7 @@ export default withLambda(async (event) => {
                 reporterName: issue.userId == null ? 'Automatic (Be More Swan)' : [reporter?.firstName, reporter?.lastName].filter(Boolean).join(' ') || reporter?.email || `User #${issue.userId}`,
                 reporterEmail: reporter?.email || null,
                 ...((await loadIncidentFields(db, [issue.id])).get(issue.id) ?? { source: 'user', occurrences: 1, lastSeenAt: null, incident: null }),
+                severity: (await loadSeverities(db, [issue.id])).get(issue.id) ?? 'normal',
             },
             messages,
         });
@@ -426,8 +538,9 @@ export default withLambda(async (event) => {
 
     // ── GET list ─────────────────────────────────────────────────────────────────
     if (event.httpMethod === 'GET') {
-        // Self-heal merges stranded by a dead runner so the list reflects true state.
-        await reclaimStaleMerges(db).catch((e) => console.error('[issue-reports] merge reclaim failed:', e?.message || e));
+        // Cloud AI fixes in flight: record finished ones so the list and board are current (capped).
+        await syncOpenAiFixes(db, { limit: 5 });
+        await syncOpenCloudMerges(db, { limit: 5 });
 
         const status = qs.status && isIssueStatus(qs.status) ? qs.status : null;
         const where = status ? eq(issueReports.status, status) : undefined;
@@ -435,6 +548,7 @@ export default withLambda(async (event) => {
             .select({
                 id: issueReports.id,
                 userId: issueReports.userId,
+                organisationId: issueReports.organisationId,
                 description: issueReports.description,
                 sourceLocation: issueReports.sourceLocation,
                 status: issueReports.status,
@@ -467,6 +581,11 @@ export default withLambda(async (event) => {
 
         // Automatic incidents (§6.2): their columns are read raw, so this works before the SQL is applied.
         const incidents = await loadIncidentFields(db, rows.map((r) => r.id));
+        // Live check fields (issue-fix-live.ts) for the board's "Waiting to go live" / "closes in N days".
+        const fixLive = await loadFixLiveFields(db, rows.map((r) => r.id));
+        // Severity (issue-severity.ts) and what the reporter's workspace pays (org-plan-value.ts).
+        const severities = await loadSeverities(db, rows.map((r) => r.id));
+        const planValues = await loadOrgPlanValues(db, rows.map((r) => r.organisationId));
 
         return json(200, {
             issues: rows.map((r) => ({
@@ -491,6 +610,13 @@ export default withLambda(async (event) => {
                 source: incidents.get(r.id)?.source ?? 'user',
                 occurrences: incidents.get(r.id)?.occurrences ?? 1,
                 lastSeenAt: incidents.get(r.id)?.lastSeenAt ?? null,
+                fixedAt: fixLive.get(r.id)?.fixedAt ?? null,
+                liveAt: fixLive.get(r.id)?.liveAt ?? null,
+                awaitingLive: !!r.devPrUrl && r.devMergeStatus === 'merged' && fixLive.get(r.id)?.livePrUrl !== r.devPrUrl,
+                severity: severities.get(r.id) ?? 'normal',
+                planName: r.organisationId != null ? (planValues.get(r.organisationId)?.planName ?? 'No plan') : null,
+                planMonthlyGbp: r.organisationId != null ? (planValues.get(r.organisationId)?.monthlyGbp ?? 0) : 0,
+                paying: r.organisationId != null ? !!planValues.get(r.organisationId)?.paying : false,
             })),
             counts: Object.fromEntries(counts.map((c) => [c.status, c.n])),
         });
@@ -514,6 +640,13 @@ export default withLambda(async (event) => {
                 .where(eq(issueReports.id, id));
         }
 
+        // Severity is its own edit too (issue-severity.ts): no status change, no reporter notification.
+        if (body.severity !== undefined) {
+            if (!isIssueSeverity(body.severity)) return json(400, { error: 'Severity must be critical, high, normal or low.' });
+            if (!(await setIssueSeverity(db, id, body.severity))) return json(503, { error: 'Severity needs db/z-issue-severity.sql applied first.' });
+            if (body.status === undefined && body.message === undefined && description === null) return json(200, { ok: true, severity: body.severity });
+        }
+
         const newStatus: IssueStatus | null = isIssueStatus(body.status) ? body.status : null;
         const message = typeof body.message === 'string' ? body.message.trim() : '';
         if (!newStatus && !message) {
@@ -535,21 +668,8 @@ export default withLambda(async (event) => {
                     resolvedAt: isTerminal ? new Date() : issue.resolvedAt,
                 })
                 .where(eq(issueReports.id, id));
-        }
-
-        // Putting a ticket On Hold cancels a still-QUEUED AI handoff, otherwise the local
-        // runner claims it (its claim query keys off dev_handoff_status, not the visible
-        // status) and its result overwrites the status straight back out of On Hold. The
-        // compare-and-swap on dev_handoff_status='queued' only cancels a handoff nobody has
-        // started: if a runner claimed it (→ 'in_progress') in the meantime the WHERE misses,
-        // so we never yank a fix out from under an active runner.
-        let handoffCancelled = false;
-        if (newStatus === 'on_hold') {
-            const cancelled = await db.update(issueReports)
-                .set({ devHandoffStatus: null, devHandoffAt: null, devResult: null, updatedAt: new Date() })
-                .where(and(eq(issueReports.id, id), eq(issueReports.devHandoffStatus, 'queued')))
-                .returning({ id: issueReports.id });
-            handoffCancelled = cancelled.length > 0;
+            // Set by hand: start the 7-day auto-close clock (issue-fix-live.ts).
+            if (newStatus === 'fixed_ready_to_test') await stampFixedAt(db, id);
         }
 
         // Promoting to the roadmap creates (or refreshes) a Feature Roadmap item carrying the
@@ -569,8 +689,7 @@ export default withLambda(async (event) => {
 
         // Record the supporting message / status change in the thread.
         if (message || newStatus) {
-            const autoBody = `We've updated this to "${ISSUE_STATUS_LABEL[finalStatus]}".` +
-                (handoffCancelled ? ' The queued AI auto-fix has been cancelled.' : '');
+            const autoBody = `We've updated this to "${ISSUE_STATUS_LABEL[finalStatus]}".`;
             await db.insert(issueReportMessages).values({
                 issueId: id,
                 authorType: 'admin',
@@ -584,7 +703,7 @@ export default withLambda(async (event) => {
         await notifyIssueUser(db, { userId: issue.userId, issueId: id, status: finalStatus, adminMessage: message, headers: event.headers })
             .catch((e) => console.error('[admin-issue-reports] user notify failed:', e?.message || e));
 
-        return json(200, { ok: true, status: finalStatus, handoffCancelled });
+        return json(200, { ok: true, status: finalStatus });
     }
 
     return json(405, { error: 'Method Not Allowed.' });

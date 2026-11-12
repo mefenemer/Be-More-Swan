@@ -21,10 +21,11 @@ import { logAiUsage } from './ai-usage';
 import { excerpt } from './markdown-render';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { parseModelJson } from './model-json';
+import { adaptForModel, replyText } from '../config/model-options';
 
 type Db = ReturnType<typeof getDb>;
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 /** Categories per post. More than this and the blog's category menu grows by a few every post. */
 const MAX_CATEGORIES = 3;
@@ -90,7 +91,7 @@ export async function generateBlogSeo(
         : 'tags (array of 1-3 short, broad lowercase category names a reader could browse by — e.g. "marketing", not "five instagram tips for bakers")';
 
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-    const response = await anthropic.messages.create({
+    const response = await anthropic.messages.create(adaptForModel({
         model: MODEL,
         max_tokens: 500,
         system:
@@ -104,9 +105,9 @@ export async function generateBlogSeo(
             role: 'user',
             content: `Title: ${post.title}\n\nBody:\n${await excerpt(post.bodyMarkdown, 1500)}`,
         }],
-    });
+    }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-    const raw = (response.content[0] as { text?: string })?.text?.trim() ?? '';
+    const raw = replyText(response.content).trim();
     const parsed = parseModelJson<Record<string, any>>(raw);
     if (!parsed || typeof parsed !== 'object') throw new Error('Invalid SEO response.');
 
@@ -128,7 +129,7 @@ export async function generateBlogSeo(
         if (clash) urlSlug = `${urlSlug}-${id}`;
     }
 
-    void logAiUsage({
+    await logAiUsage({
         userId, workspaceId: organisationId, model: MODEL,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });

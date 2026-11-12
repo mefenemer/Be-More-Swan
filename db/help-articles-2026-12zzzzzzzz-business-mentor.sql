@@ -92,7 +92,7 @@ You can ask your Business Mentor how to do anything in Be More Swan, and it will
 
 Tell your Mentor what happened in your own words, for example "the calendar won't load" or "I keep getting logged out". It shows a card ready to send:
 
-- **Report a problem to Be More Swan** goes to the team as an issue report. Follow it under **Help & Support ▸ Report an Issue**.
+- **Report a problem to Be More Swan** goes to the team as an issue report. Follow it under **Help & Support ▸ Contact us**, where it shows as an issue.
 - **Message Be More Swan support** is for a question, billing, or help with your account. The team replies by email and in Help & Support.
 
 You can read and change what it wrote before you press **Send report** or **Send**.

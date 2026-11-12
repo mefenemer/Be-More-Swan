@@ -69,10 +69,29 @@ export interface AiUsageParams {
 
 /**
  * Write one row to ai_usage_log.
- * Non-blocking — call with `void logAiUsage(...)` or wrap in setImmediate.
- * Never throws; errors are logged to console only.
+ * ⚠️ AWAIT IT (2026-11-12). It used to say "call with `await logAiUsage(...)`", and every caller did:
+ * a Netlify function can be frozen the moment it returns, so a write started just before the return
+ * often never ran — a live Haiku call on staging returned 200 and left no row, and COGS and the
+ * System Map read low by however many were lost. It never throws, so awaiting it can't fail a job;
+ * it only adds one small insert. tests/usage-writes-awaited.test.ts holds every caller to this.
+ * Bounded: an await waits at most USAGE_WRITE_WAIT_MS, so a slow database can delay a draft by that
+ * much and no more (the write carries on; only that rare slow one can still be lost).
  */
-export async function logAiUsage(params: AiUsageParams): Promise<void> {
+export const USAGE_WRITE_WAIT_MS = 2_500;
+
+export function logAiUsage(params: AiUsageParams): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const write = writeUsageRow(params);
+    const limit = new Promise<void>((resolve) => {
+        timer = setTimeout(() => {
+            console.warn(`[ai-usage] usage write for ${params.model} still running after ${USAGE_WRITE_WAIT_MS} ms — not waiting longer`);
+            resolve();
+        }, USAGE_WRITE_WAIT_MS);
+    });
+    return Promise.race([write, limit]).finally(() => clearTimeout(timer));
+}
+
+async function writeUsageRow(params: AiUsageParams): Promise<void> {
     try {
         const db = getDb();
 
@@ -122,16 +141,16 @@ export async function logAiUsage(params: AiUsageParams): Promise<void> {
 /**
  * Record a direct Anthropic SDK call (one that does not go through src/lib/ai-gateway.ts, which
  * records its own). Pass the response as returned and the model constant you CALLED — not
- * `response.model`, which is the dated id the API echoes and matches no price. Fire-and-forget:
- * never throws, never needs awaiting.
+ * `response.model`, which is the dated id the API echoes and matches no price. Never throws.
+ * AWAIT it — see logAiUsage.
  */
 export function logMessageUsage(
     response: { usage?: { input_tokens?: number | null; output_tokens?: number | null } | null } | null | undefined,
     model: string,
     ctx: Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens'> = {},
-): void {
-    if (!response?.usage) return;
-    void logAiUsage({
+): Promise<void> {
+    if (!response?.usage) return Promise.resolve();
+    return logAiUsage({
         ...ctx,
         model,
         inputTokens: response.usage.input_tokens ?? 0,
@@ -189,14 +208,14 @@ export function mediaCostUsd(model: string, opts: { images?: Array<{ width?: num
     return usd.toFixed(6);
 }
 
-/** Record one SUCCESSFUL media generation. Fire-and-forget: never throws, never needs awaiting. */
+/** Record one SUCCESSFUL media generation. Never throws; AWAIT it — see logAiUsage. */
 export function logMediaCost(
     model: string,
     opts: { images?: Array<{ width?: number | null; height?: number | null }>; durationSeconds?: number | null },
     ctx: Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens' | 'costUsdOverride'> = {},
-): void {
+): Promise<void> {
     if (!MEDIA_LIST_PRICE_USD[model]) console.warn(`[ai-usage] no media price for ${model} — logged at $0; add it to MEDIA_LIST_PRICE_USD`);
-    void logAiUsage({ ...ctx, model, inputTokens: 0, outputTokens: 0, costUsdOverride: mediaCostUsd(model, opts) });
+    return logAiUsage({ ...ctx, model, inputTokens: 0, outputTokens: 0, costUsdOverride: mediaCostUsd(model, opts) });
 }
 
 // ── Per-call services (search, contact lookups) ───────────────────────────────────────────────────
@@ -211,6 +230,9 @@ export const SERVICE_UNIT_PRICE_USD: Record<string, { envVar: string; fallback: 
     'hunter-domain-search': { envVar: 'HUNTER_COST_USD_PER_CREDIT', fallback: 0.0285, unit: 'credit' },
     // Email Finder: 1 credit per address FOUND for a named person, none on a miss — the same credit.
     'hunter-email-finder': { envVar: 'HUNTER_COST_USD_PER_CREDIT', fallback: 0.0285, unit: 'credit' },
+    // Claude's server-side web search: $10 per 1,000 searches, on top of tokens (Anthropic pricing).
+    // Logged by the gateway for every grounded call (src/lib/ai-gateway.ts recordSearchFee).
+    'anthropic-web-search': { envVar: 'ANTHROPIC_WEB_SEARCH_USD', fallback: 0.01, unit: 'search' },
 };
 
 export function serviceUnitPriceUsd(service: string): number {
@@ -230,7 +252,41 @@ export function logServiceCost(
     service: string,
     units: number,
     ctx: Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens' | 'costUsdOverride'> = {},
-): void {
-    if (!(units > 0)) return;
-    void logAiUsage({ ...ctx, model: service, inputTokens: 0, outputTokens: 0, costUsdOverride: (units * serviceUnitPriceUsd(service)).toFixed(6) });
+): Promise<void> {
+    if (!(units > 0)) return Promise.resolve();
+    return logAiUsage({ ...ctx, model: service, inputTokens: 0, outputTokens: 0, costUsdOverride: (units * serviceUnitPriceUsd(service)).toFixed(6) });
+}
+
+// ── Compute and transcription (Remotion renders, whisper) ─────────────────────────────────────────
+// Added 2026-11-12 for the System Map (docs/system-map-plan.md): these were the last paid calls in no
+// ledger. Same ai_usage_log, 0 tokens, a cost worked out here.
+//   • Remotion Lambda: Remotion's own `costs.accruedSoFar` (USD) for the render — an estimate from AWS
+//     Lambda list prices, logged once per render that ran (a failed render still spent compute).
+//   • whisper-1: $0.006 per minute of audio (OpenAI pricing, as used by voiceoverCostUsd in lib/tts.ts).
+//   • gpt-4o-mini-tts speech: ~$0.015 per minute of audio; the tour estimates minutes from words at 150/min.
+export const REMOTION_USAGE_MODEL = 'remotion-lambda';
+export const WHISPER_USD_PER_MINUTE = 0.006;
+export const SPEECH_USD_PER_MINUTE = 0.015;
+
+/** Whisper cost for `durationS` seconds of audio, billed to the second with a 1 s floor. Pure. */
+export function transcriptionCostUsd(durationS: number | null | undefined): string {
+    const s = Number.isFinite(durationS as number) && (durationS as number) > 0 ? (durationS as number) : 1;
+    return ((s / 60) * WHISPER_USD_PER_MINUTE).toFixed(6);
+}
+
+/** Speech cost estimated from the text: 150 spoken words a minute. Pure. */
+export function speechCostFromTextUsd(text: string): string {
+    const words = (text.trim().match(/\S+/g) ?? []).length;
+    return (Math.max(words / 150, 1 / 60) * SPEECH_USD_PER_MINUTE).toFixed(6);
+}
+
+/** Record one finished Remotion render's compute. A null/0 cost records nothing. Never throws; AWAIT it. */
+export function logRenderCost(costUsd: number | null | undefined, ctx: Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens' | 'costUsdOverride'> = {}): Promise<void> {
+    if (!(typeof costUsd === 'number' && costUsd > 0)) return Promise.resolve();
+    return logAiUsage({ ...ctx, model: REMOTION_USAGE_MODEL, inputTokens: 0, outputTokens: 0, costUsdOverride: costUsd.toFixed(6) });
+}
+
+/** Record one whisper transcription. Never throws; AWAIT it. */
+export function logTranscriptionCost(durationS: number | null | undefined, ctx: Omit<AiUsageParams, 'model' | 'inputTokens' | 'outputTokens' | 'costUsdOverride'> = {}): Promise<void> {
+    return logAiUsage({ ...ctx, model: 'whisper-1', inputTokens: 0, outputTokens: 0, costUsdOverride: transcriptionCostUsd(durationS) });
 }

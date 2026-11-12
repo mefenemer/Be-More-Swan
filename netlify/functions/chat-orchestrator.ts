@@ -157,7 +157,7 @@ import { recordPlatformIncident } from '../../src/utils/platform-incident';
 import { extractAssistantNote, recordAssistantNote } from '../../src/utils/assistant-notes';
 import { ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT, SUPPORT_REQUEST_PROMPT } from '../../src/constants/assistant-shared-prompts';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+const DEFAULT_MODEL = 'claude-haiku-5-5';
 
 const MAX_MESSAGE_CHARS = 4000;
 // Cap on the serialised payloadToPass a HandoffProposalCard approval may carry — the
@@ -855,7 +855,7 @@ function businessMentorSurfaces(costs: TaskCosts): string {
 - "Business Information" — the business description, who the customers are, tone of voice, the "Products & Services" tab, and "Brand Assets" (brand style, picture guidelines, files and links). Brand Assets is also on every assistant's settings as "Your brand" — the same thing, so a change in either place is the change in both.
 - Each assistant's own page — its settings, set-up answers, goals ("Results" tab) and rules. Only mention assistants listed as active below.
 - "My Account" — its "Billing & Subscription" tab (the plan, payments, resubscribing and changing plan), tasks used, notifications and "Your data". Always say "My Account ▸ Billing & Subscription", never "the Billing page".
-- "Help & Support" — Help Centre articles, contacting support, and "Report an Issue".
+- "Help & Support" — the Help Centre articles, "Contact us" (questions, billing, and issues when something isn't working) and "Feature Requests" (ideas and votes).
 Your own page has a "Suggestions" tab, a "Plan" tab, a "Results" tab and an "Activity" tab; the user chats with you from the "Chat" icon at the top of the menu down the right of the page, and the chat sits beside the "Suggestions" and "Plan" tabs on a wide screen. The "Plan" tab holds:
   - "Your plans" — "Idea check", "Business plan" and "Marketing plan". The idea check is the same questions you ask, one at a time with "Back" and "Next", then the "Lean Canvas" (nine boxes they can edit) and "Riskiest assumptions". Each plan has "Save draft", "Approve" (owner or admin only), "Changes" since the approved version and "Earlier versions"; "Draft it for me" (or "Draft my canvas") drafts it for ${cost(costs, 'mentor_strategy')}, and the result waits there with "Use this draft". An existing workspace's plans start pre-filled from Business Information, not saved until "Save draft".
   - "Look this up" — a question box (${cost(costs, 'mentor_research')}, about two minutes) and the "Research" list of past answers with their links. Each section of a plan has a "Look this up" link too.
@@ -3691,7 +3691,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
 
             // Shadow calls burn real tokens — same telemetry as a foreground turn, with a
             // :handoff session suffix so COGS reporting can split background work out.
-            void logAiUsage({
+            await logAiUsage({
                 workspaceId: orgId,
                 userId,
                 assistantId: shadowRow?.id ?? assistantRow.id,
@@ -3739,7 +3739,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             { requestPath: true, label: 'chat' },
         );
 
-        void logAiUsage({
+        await logAiUsage({
             workspaceId: orgId,
             userId,
             assistantId: assistantRow.id,
@@ -3770,7 +3770,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
                     system: sanitizeForModel(system),
                     messages: sanitizeForModel([...llmMessages, { role: 'assistant' as const, content: raw }, { role: 'user' as const, content: CARD_FORMAT_RETRY }]),
                 }, chatModel, 'off') as Anthropic.MessageCreateParamsNonStreaming, { timeout: 10_000, maxRetries: 0 });
-                void logAiUsage({ workspaceId: orgId, userId, assistantId: assistantRow.id, model: chatModel, inputTokens: retry.usage.input_tokens, outputTokens: retry.usage.output_tokens, sessionId: `chat:${session.id}:card-retry`, dataCategories: ['business_context'] });
+                await logAiUsage({ workspaceId: orgId, userId, assistantId: assistantRow.id, model: chatModel, inputTokens: retry.usage.input_tokens, outputTokens: retry.usage.output_tokens, sessionId: `chat:${session.id}:card-retry`, dataCategories: ['business_context'] });
                 const again = extractAssistantNote(replyText(retry.content)).text;
                 const reparsed = route.parseResponse(again);
                 console.warn('[chat-orchestrator] prose reply pointed at a card it did not send — asked again as JSON', { role: assistantRow.roleKey, sessionId: session.id, recovered: !!reparsed.uiElement });
@@ -4032,7 +4032,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
             // a refused card to ask again (shortenRuleText). If that fails the card still refuses it.
             const shorter = await shortenRuleText(ruleReq.ruleText, async (system, user) => {
                 const res = await anthropic.messages.create({ model: DEFAULT_MODEL, max_tokens: 300, system, messages: [{ role: 'user', content: user }] });
-                void logAiUsage({
+                await logAiUsage({
                     workspaceId: orgId, userId, assistantId: assistantRow.id, model: DEFAULT_MODEL,
                     inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens,
                     sessionId: `chat:${session.id}:rule-shorten`, dataCategories: ['business_context'],

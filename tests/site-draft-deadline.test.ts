@@ -19,7 +19,9 @@ const check = (name: string, fn: () => void) => { try { fn(); passed++; console.
 check('the gateway gives a caller\'s deadline to every model, not only thinking ones', () => {
     const call = gw.slice(gw.indexOf('async function callModel('), gw.indexOf('function isRequestRefusal('));
     assert.ok(call.includes('const deadline = req.deadlineMs ? { timeout: req.deadlineMs } : undefined;'));
-    assert.ok(call.includes('if (model !== req.model) return client.messages.create(params, deadline);'), 'primary / fallback');
+    // PRIMARY/FALLBACK are adapted too since 2026-11-12 (5.5 models); a model that doesn't think still gets the caller's deadline.
+    assert.ok(call.includes("thinks ? { timeout: req.deadlineMs ?? 120_000 } : deadline"), 'primary / fallback');
+    assert.ok(!call.includes('if (model !== req.model) return client.messages.create(params, deadline);'), 'no unadapted path left for a 5.5 default');
     assert.ok(call.includes('thinks ? { timeout: req.deadlineMs ?? 120_000 } : deadline);'), 'a non-thinking role model');
 });
 

@@ -21,8 +21,9 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJsonArray } from '../../src/utils/model-json';
 import { chargeHelper, helperCapacity } from '../../src/utils/basic-work';
 import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -55,7 +56,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 700,
             system:
@@ -69,9 +70,9 @@ export default withLambda(async (event: HandlerEvent) => {
                 role: 'user',
                 content: `Title: ${post.title}\n\nPost excerpt:\n${await excerpt(post.bodyMarkdown, 600)}`,
             }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-        const raw = (response.content[0] as { text?: string })?.text?.trim() ?? '';
+        const raw = replyText(response.content).trim();
         const parsed = parseModelJsonArray(raw);
         if (!Array.isArray(parsed) || parsed.length === 0) throw new Error('Invalid hook response.');
 
@@ -81,7 +82,7 @@ export default withLambda(async (event: HandlerEvent) => {
             intro: String(v.intro || '').slice(0, 400),
         }));
 
-        void logAiUsage({
+        await logAiUsage({
             userId: ctx.userId, workspaceId: ctx.organisationId, model: MODEL,
             inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
         });

@@ -39,7 +39,7 @@ import { dpaAcceptedVersionClause } from './accept-dpa';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Instance default only — chat routes pick their own model per roleKey (chat-orchestrator ROUTES).
-const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+const DEFAULT_MODEL = 'claude-haiku-5-5';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),

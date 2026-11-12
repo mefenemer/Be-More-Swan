@@ -65,7 +65,7 @@ Anything the import couldn't place is listed before you choose, under **Didn't f
 Most website builders, including Wix, Squarespace, WordPress (with Elementor or WooCommerce), Shopify, Webflow, Framer, GoDaddy, Duda, Weebly and Ghost, and sites built by hand or with AI tools. Sites that draw their words with JavaScript are read in a browser first.
 
 We follow your site's robots.txt. Our reader is called **bemoreswan-siteimport**.
-$$),
+$$, TRUE),
 
 ('Your Assistants', 77, 'Designing Your Website', $$
 # Designing Your Website
@@ -115,7 +115,7 @@ Words in square brackets with no address after them, like `[Customer name]`, are
 - **Old addresses that forward here**: addresses from your old site that now lead to a new page. Remove any you don't need.
 
 You can also ask your Website Assistant in chat to change any of these. It shows you the change before anything is saved.
-$$)
+$$, TRUE)
 
 ON CONFLICT (title) DO NOTHING
 RETURNING id, title;

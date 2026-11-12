@@ -27,9 +27,10 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { logMessageUsage } from '../utils/ai-usage';
 import { parseModelJson } from '../utils/model-json';
+import { adaptForModel, replyText } from '../config/model-options';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 export interface MarketAdvice {
     /** True when the target market is one with a public, reasonably complete listing. */
@@ -60,7 +61,7 @@ export async function assessMarket(idea: string, icp?: Record<string, unknown> |
     if (!text || !process.env.ANTHROPIC_API_KEY) return null;
 
     try {
-        const resp = await anthropic.messages.create({
+        const resp = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 200,
             system: SYSTEM,
@@ -69,10 +70,10 @@ export async function assessMarket(idea: string, icp?: Record<string, unknown> |
                 content: `Who they want to find:\n${text.slice(0, 1000)}`
                     + (icp ? `\n\nIdeal customer profile:\n${JSON.stringify(icp).slice(0, 600)}` : ''),
             }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
         // No workspace in scope here: counted in the platform total, unattributed.
-        logMessageUsage(resp, MODEL, { sessionId: 'market-enumerability' });
-        const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+        await logMessageUsage(resp, MODEL, { sessionId: 'market-enumerability' });
+        const raw = replyText(resp.content);
         const parsed = parseModelJson<Record<string, unknown>>(raw);
         if (!parsed || typeof parsed.enumerable !== 'boolean') return null;
 

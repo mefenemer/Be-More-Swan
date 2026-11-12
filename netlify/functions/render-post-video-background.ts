@@ -24,6 +24,7 @@ import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, read
 import { editChangesMedia, editHasStills } from '../../src/lib/video-edit';
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../../src/lib/remotion-lambda';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { logRenderCost } from '../../src/utils/ai-usage';
 
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 12 * 60 * 1000;   // under the 15-min background ceiling, room for one retry
@@ -203,6 +204,8 @@ export default withLambda(async (event: HandlerEvent) => {
         let retried = false;
         while (true) {
             const progress = await renderProgress(started);
+            // Every render that ran spent AWS compute — a failed one before its retry included.
+            if (progress.done) await logRenderCost(progress.costUsd, { workspaceId: job.organisationId, userId: job.userId ?? null, sessionId: 'post-render' });
             if (progress.error && shouldRetryRender(progress.error, retried, deadline - Date.now())) {
                 // Remotion's "No frame found at position…" hit two of six renders on 2026-11-01, on
                 // intact Pexels clips (all frames present, probed locally), and both passed when the

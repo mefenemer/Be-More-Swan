@@ -619,7 +619,7 @@ async function aiVideoOptions(db: Db, brief: BriefRow, ad: ArtDirection, userId:
                 await sleep(VIDEO_POLL_INTERVAL_MS);
             }
             const v = extractVideo(await falResult(sub.responseUrl));
-            logMediaCost(sub.model, { durationSeconds: sub.billedSeconds }, { ...usage, sessionId: 'fal-video' });
+            await logMediaCost(sub.model, { durationSeconds: sub.billedSeconds }, { ...usage, sessionId: 'fal-video' });
             url = v.url;
             contentType = v.contentType || contentType;
         }

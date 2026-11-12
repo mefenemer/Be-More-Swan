@@ -28,10 +28,11 @@ import { discoveredLeads, discoveryCampaigns } from '../../db/schema';
 import { logMessageUsage } from './ai-usage';
 import { parseModelJson } from './model-json';
 import type { mirrorDecision } from './campaign-mirror';
+import { adaptForModel, replyText } from '../config/model-options';
 
 type Db = Parameters<typeof mirrorDecision>[0];
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 /** Cold leads read per search. Enough for a pattern; small enough for one cheap call. */
 export const COLD_SAMPLE = 30;
@@ -142,7 +143,7 @@ export async function modelTightening(idea: string, cold: ColdLead[]): Promise<s
             ].filter(Boolean).join('; ');
             return `${i + 1}. ${c.companyName}${tags ? ` (${tags})` : ''} — ${c.reasons.join(' / ') || 'no reason recorded'}`;
         }).join('\n');
-        const resp = await anthropic.messages.create({
+        const resp = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 400,
             system: SYSTEM,
@@ -150,9 +151,9 @@ export async function modelTightening(idea: string, cold: ColdLead[]): Promise<s
                 role: 'user',
                 content: `Current description:\n${idea.slice(0, MAX_IDEA)}\n\nCompanies it found that were rated cold, with the scorer's reasons:\n${evidence.slice(0, 8000)}`,
             }],
-        });
-        logMessageUsage(resp, MODEL, { sessionId: 'halt-tightening' });
-        const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
+        await logMessageUsage(resp, MODEL, { sessionId: 'halt-tightening' });
+        const raw = replyText(resp.content);
         const parsed = parseModelJson<Record<string, unknown>>(raw);
         return usableIdea(parsed?.idea, idea);
     } catch (err) {

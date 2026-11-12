@@ -112,7 +112,7 @@ function chaseDate(): Date {
 }
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 /**
  * When this lead was FIRST contacted — the start of the sales cycle (Phase 4.5).
@@ -284,8 +284,8 @@ export default withLambda(async (event) => {
         async (model, thinking) => ({ model, resp: await anthropic.messages.create(adaptForModel({ ...params, model }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }),
         { requestPath: true, label: 'lead generation' });
 
-    function logUsage(resp: Anthropic.Message, suffix: string, model: string = MODEL) {
-        void logAiUsage({
+    async function logUsage(resp: Anthropic.Message, suffix: string, model: string = MODEL) {
+        await logAiUsage({
             workspaceId: orgId,
             userId,
             assistantId: assistant.id,
@@ -377,7 +377,7 @@ ${outreachFirstEmailBlock(leadSender.outreachOffer)}`;
                 system,
                 messages: [{ role: 'user', content: `Score this lead:\n${JSON.stringify(lead)}` }],
             });
-            logUsage(resp, 'score_lead', usedModel);
+            await logUsage(resp, 'score_lead', usedModel);
             const raw = replyText(resp.content);
             // Widened on purpose: the card is stored as the record's `data` blob and this path
             // stamps extra fields onto it below.
@@ -955,7 +955,7 @@ Return STRICT JSON only: { "subject": "<subject>", "body": "<email body, UNDER 7
                 max_tokens: 700, system,
                 messages: [{ role: 'user', content: `Lead: ${JSON.stringify({ title: rec.title, ...data, outreachDraft: undefined, draftOriginal: undefined })}\n\nCurrent draft:\nSubject: ${str(draft?.subject as string, 300) ?? ''}\n\n${curBody}` }],
             });
-            logUsage(resp, 'improve_draft', usedModel);
+            await logUsage(resp, 'improve_draft', usedModel);
             const gen = parseModelJson<{ subject?: string; body?: string }>(replyText(resp.content)) || {};
             const newBody = str(gen.body, 4000);
             if (!newBody) return json(502, { error: 'Couldn’t improve this email just now — please try again.' });
@@ -1465,7 +1465,7 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                     max_tokens: 512, system,
                     messages: [{ role: 'user', content: `Lead: ${JSON.stringify({ title: rec.title, ...data })}` }],
                 });
-                logUsage(resp, 'send_outreach_gen', usedModel);
+                await logUsage(resp, 'send_outreach_gen', usedModel);
                 const gen = parseModelJson<{ subject?: string; body?: string; decline?: string }>(replyText(resp.content)) || {};
 
                 // An explicit refusal — e.g. the scoring pass wrote "do not contact" or "internal test
@@ -2055,7 +2055,7 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
                 system,
                 messages: [{ role: 'user', content: 'Propose 3 lead-generation ideas.' }],
             });
-            logUsage(resp, 'generate_ideas', usedModel);
+            await logUsage(resp, 'generate_ideas', usedModel);
             const raw = replyText(resp.content);
             const parsed = parseModelJsonArray(raw);
             const list = Array.isArray(parsed) ? parsed : [];

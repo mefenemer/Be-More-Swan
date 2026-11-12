@@ -10,7 +10,7 @@ import assert from 'node:assert';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { VOICES, OFFERED_VOICES, VOICE_LANGUAGES, DEFAULT_VOICE, isVoiceId, voiceRequest, VOICEOVER_INSTRUCTIONS, synthesizeSpeech, speakVoiceover, elevenLabsVoice, voiceoverCostUsd } from '../src/lib/tts';
+import { VOICES, OFFERED_VOICES, VOICE_LANGUAGES, DEFAULT_VOICE, isVoiceId, voiceRequest, VOICEOVER_INSTRUCTIONS, synthesizeSpeech, speakVoiceover, elevenLabsVoice, voiceoverCostUsd, transcribeAudio, parseWords, spokenDuration, scribeKeyterms, TRANSCRIBE_USD_PER_MINUTE } from '../src/lib/tts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -108,9 +108,85 @@ await check('OpenAI voices never call ElevenLabs, and ElevenLabs is costed per c
         speakVoiceover('Hello', 'london_man', (async (u: any) => { urls.push(String(u)); return new Response(new Uint8Array([1])); }) as typeof fetch));
     assert.strictEqual(r.provider, 'openai');
     assert.ok(urls.every((u) => !u.includes('elevenlabs')));
-    // 1,000 characters at $0.15 + one minute of whisper at $0.006.
+    // 1,000 characters at $0.15 + one minute of whisper at $0.006, or of Scribe at $0.20/hour, or none when it failed.
     assert.strictEqual(voiceoverCostUsd(60, { provider: 'elevenlabs', chars: 1000 }), '0.156000');
+    assert.strictEqual(voiceoverCostUsd(60, { provider: 'elevenlabs', chars: 1000 }, 'elevenlabs'), '0.153333');
+    assert.strictEqual(voiceoverCostUsd(60, { provider: 'elevenlabs', chars: 1000 }, null), '0.150000');
+    assert.ok(TRANSCRIBE_USD_PER_MINUTE.elevenlabs < TRANSCRIBE_USD_PER_MINUTE.openai);
     assert.strictEqual(voiceoverCostUsd(60, { provider: 'openai', chars: 1000 }), voiceoverCostUsd(60));
+});
+
+await check('Scribe words: only type "word" counts, text becomes the word, its duration is read', () => {
+    const payload = { audio_duration_secs: 4.567, words: [
+        { text: 'Hello', start: 0.1, end: 0.4, type: 'word' }, { text: ' ', start: 0.4, end: 0.5, type: 'spacing' },
+        { text: '(laughter)', start: 0.5, end: 0.9, type: 'audio_event' }, { text: 'um', start: 1.0, end: 1.2, type: 'word' },
+    ] };
+    const words = parseWords(payload);
+    assert.deepStrictEqual(words, [{ word: 'Hello', start: 0.1, end: 0.4 }, { word: 'um', start: 1.0, end: 1.2 }]);
+    assert.strictEqual(spokenDuration(payload, words), 4.57);
+});
+
+await check('word timings: Scribe first (verbatim, no event tags, language + keyterms), whisper only when Scribe refuses', async () => {
+    const calls: Array<{ url: string; form: FormData }> = [];
+    const scribeOk = (async (u: any, init: any) => {
+        calls.push({ url: String(u), form: init.body });
+        return new Response(JSON.stringify({ audio_duration_secs: 2, words: [{ text: 'Hi', start: 0, end: 0.4, type: 'word' }] }), { status: 200 });
+    }) as typeof fetch;
+    const t = await withKeys({ ELEVENLABS_API_KEY: 'el', OPENAI_API_KEY: 'oa' }, () =>
+        transcribeAudio(Buffer.from([1]), { filename: 'f.wav', type: 'audio/wav', language: 'en', prompt: 'Umm', keyterms: ['Love Cat', '', 'Love Cat', 'x'.repeat(60)] }, scribeOk));
+    assert.deepStrictEqual(t, { words: [{ word: 'Hi', start: 0, end: 0.4 }], durationS: 2, provider: 'elevenlabs' });
+    assert.strictEqual(calls.length, 1);
+    assert.match(calls[0].url, /api\.elevenlabs\.io\/v1\/speech-to-text$/);
+    const f = calls[0].form;
+    assert.strictEqual(f.get('language_code'), 'en');
+    assert.strictEqual(f.get('timestamps_granularity'), 'word');
+    assert.strictEqual(f.get('tag_audio_events'), 'false');
+    assert.strictEqual(f.get('no_verbatim'), 'false');
+    assert.deepStrictEqual(f.getAll('keyterms'), ['Love Cat']);
+    assert.strictEqual(f.get('prompt'), null, 'Scribe takes no prompt');
+
+    // Refused (e.g. the key lacks Speech to Text) → whisper, with its prompt.
+    const urls: string[] = [];
+    let whisperForm: FormData | null = null;
+    const refused = (async (u: any, init: any) => {
+        urls.push(String(u));
+        if (String(u).includes('elevenlabs')) return new Response('{"detail":{"status":"missing_permissions"}}', { status: 401 });
+        whisperForm = init.body;
+        return new Response(JSON.stringify({ duration: 3, words: [{ word: 'Hi', start: 0, end: 0.4 }] }), { status: 200 });
+    }) as typeof fetch;
+    const w = await withKeys({ ELEVENLABS_API_KEY: 'el', OPENAI_API_KEY: 'oa' }, () =>
+        transcribeAudio(Buffer.from([1]), { filename: 'f.wav', type: 'audio/wav', prompt: 'Umm' }, refused));
+    assert.strictEqual(w.provider, 'openai');
+    assert.strictEqual(w.durationS, 3);
+    assert.strictEqual(urls.length, 2);
+    assert.strictEqual((whisperForm as unknown as FormData).get('model'), 'whisper-1');
+    assert.strictEqual((whisperForm as unknown as FormData).get('prompt'), 'Umm');
+
+    // No ElevenLabs key → whisper straight away; no OpenAI key → Scribe's error stands.
+    const onlyOpenAi = await withKeys({ ELEVENLABS_API_KEY: undefined, OPENAI_API_KEY: 'oa' }, () =>
+        transcribeAudio(Buffer.from([1]), { filename: 'f.wav', type: 'audio/wav' }, refused));
+    assert.strictEqual(onlyOpenAi.provider, 'openai');
+    await assert.rejects(() => withKeys({ ELEVENLABS_API_KEY: 'el', OPENAI_API_KEY: undefined }, () =>
+        transcribeAudio(Buffer.from([1]), { filename: 'f.wav', type: 'audio/wav' }, refused)), (e: Error & { kind?: string }) => e.kind === 'key');
+
+    // A Scribe timeout is not retried on whisper (a second wait could outlast the request).
+    const slow: string[] = [];
+    const timeout = (async (u: any) => { slow.push(String(u)); const e = new Error('timed out'); e.name = 'TimeoutError'; throw e; }) as typeof fetch;
+    await assert.rejects(() => withKeys({ ELEVENLABS_API_KEY: 'el', OPENAI_API_KEY: 'oa' }, () =>
+        transcribeAudio(Buffer.from([1]), { filename: 'f.wav', type: 'audio/wav' }, timeout)));
+    assert.strictEqual(slow.length, 1);
+});
+
+await check('Scribe keyterms are clean single lines, 1–50 characters, no repeats, at most 20', () => {
+    assert.deepStrictEqual(scribeKeyterms(['  Love\nCat ','<b>', 7, 'Love Cat', '']), ['Love Cat', 'b']);
+    assert.strictEqual(scribeKeyterms(Array.from({ length: 30 }, (_, i) => 't' + i)).length, 20);
+    assert.deepStrictEqual(scribeKeyterms(undefined), []);
+});
+
+await check('the voiceover cost line is told who transcribed it; footage review gives Scribe the business name', () => {
+    const src = read('src/utils/voiceover-asset.ts');
+    assert.ok(src.includes('provider: transcribedBy } = await transcribeWords(') && src.includes('chars: args.script.length }, transcribedBy)'));
+    assert.ok(read('src/utils/footage-review.ts').includes('keyterms: ctx.businessName ? [ctx.businessName] : []'));
 });
 
 await check('the voiceover asset records who spoke it', () => {

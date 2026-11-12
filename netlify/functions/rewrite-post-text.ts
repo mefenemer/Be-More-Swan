@@ -30,8 +30,9 @@ import { platformFormat } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { stripCodeFences } from '../../src/utils/model-json';
 import { chargeHelper } from '../../src/utils/basic-work';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 const MAX_CAPTION_CHARS = 5000;
 
 type Action = 'tone' | 'hashtags' | 'grammar' | 'shorter' | 'longer';
@@ -137,7 +138,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 1200,
             system:
@@ -162,13 +163,13 @@ export default withLambda(async (event: HandlerEvent) => {
                     + `Current hashtags: ${post.hashtags || '(none)'}\n\n`
                     + `Task: ${directive(action, tone, limit)}`,
             }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-        let text = (response.content[0] as { text?: string })?.text?.trim() ?? '';
+        let text = replyText(response.content).trim();
         text = stripCodeFences(text);
         if (!text) throw new Error('Empty rewrite.');
 
-        void logAiUsage({
+        await logAiUsage({
             userId: ctx.userId,
             workspaceId: ctx.organisationId,
             model: MODEL,

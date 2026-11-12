@@ -115,7 +115,7 @@ ${plan}`,
                 messages: [{ role: 'user', content: `Write Email ${i + 1} of ${steps.length} — Day ${s.day}: ${s.role}.` }],
             }, model, thinking) as Anthropic.MessageCreateParamsNonStreaming) }),
             { requestPath: true, label: 'campaign email' });
-        void logAiUsage({
+        await logAiUsage({
             userId: input.userId, workspaceId: input.organisationId, model: usedModel,
             inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0,
         });

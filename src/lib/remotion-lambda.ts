@@ -187,6 +187,16 @@ export interface RenderProgress {
     progress: number;        // 0..1
     outputUrl: string | null; // set once done
     error: string | null;     // set on a fatal render error
+    /** Remotion's own estimate of the AWS compute spent so far, in USD (its `costs.accruedSoFar`).
+     *  Null when it reports another currency or nothing. Read on `done` for the cost line. */
+    costUsd: number | null;
+}
+
+/** USD cost out of Remotion's `costs` block, or null. Pure. */
+export function renderCostUsd(costs: { accruedSoFar?: number; currency?: string } | null | undefined): number | null {
+    if (!costs || typeof costs.accruedSoFar !== 'number' || !Number.isFinite(costs.accruedSoFar) || costs.accruedSoFar < 0) return null;
+    if (costs.currency && costs.currency.toUpperCase() !== 'USD') return null;
+    return costs.accruedSoFar;
 }
 
 export async function renderProgress(r: StartedRender): Promise<RenderProgress> {
@@ -204,7 +214,7 @@ export async function renderProgress(r: StartedRender): Promise<RenderProgress> 
         const error = isConcurrencyError(raw)
             ? 'The video renderer was busy and could not finish. Try the render again in a few minutes.'
             : raw;
-        return { done: true, progress: p.overallProgress ?? 0, outputUrl: null, error };
+        return { done: true, progress: p.overallProgress ?? 0, outputUrl: null, error, costUsd: renderCostUsd(p.costs) };
     }
-    return { done: p.done, progress: p.overallProgress ?? 0, outputUrl: p.done ? (p.outputFile ?? null) : null, error: null };
+    return { done: p.done, progress: p.overallProgress ?? 0, outputUrl: p.done ? (p.outputFile ?? null) : null, error: null, costUsd: renderCostUsd(p.costs) };
 }

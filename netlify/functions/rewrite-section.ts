@@ -21,8 +21,9 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { stripCodeFences } from '../../src/utils/model-json';
 import { chargeHelper, helperCapacity } from '../../src/utils/basic-work';
 import { TASK_LIMIT_MESSAGE } from '../../src/utils/work-metering';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 const MAX_SELECTION_CHARS = 6000;
 
 type Action = 'expand' | 'condense' | 'tone' | 'custom';
@@ -88,7 +89,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 1500,
             system:
@@ -104,14 +105,14 @@ export default withLambda(async (event: HandlerEvent) => {
                     (blockContext ? `Surrounding block (for context, do NOT return it):\n"""${String(blockContext).slice(0, 3000)}"""\n` : '') +
                     `\nTask: ${directive}\n\nSelected passage to rewrite:\n"""${selectedText}"""`,
             }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-        let rewrittenText = (response.content[0] as { text?: string })?.text?.trim() ?? '';
+        let rewrittenText = replyText(response.content).trim();
         // Strip an accidental wrapping code fence if the model added one.
         rewrittenText = stripCodeFences(rewrittenText);
         if (!rewrittenText) throw new Error('Empty rewrite result.');
 
-        void logAiUsage({
+        await logAiUsage({
             userId: ctx.userId,
             workspaceId: ctx.organisationId,
             model: MODEL,

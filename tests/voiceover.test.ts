@@ -93,11 +93,14 @@ async function main() {
         assert.strictEqual(await kind(500, 'boom'), 'failed');
         const ok = await synthesizeSpeech('hi', 'coral', (async () => new Response(new Uint8Array([1, 2, 3]), { status: 200 })) as unknown as typeof fetch);
         assert.strictEqual(ok.byteLength, 3);
+        const savedEleven = process.env.ELEVENLABS_API_KEY;
+        delete process.env.ELEVENLABS_API_KEY;   // whisper path: Scribe is tested in tts-voices.test.ts
         const t = await transcribeWords(Buffer.from([1]), (async () => new Response(JSON.stringify({ duration: 2, words: [{ word: 'Hi', start: 0, end: 0.4 }] }), { status: 200 })) as unknown as typeof fetch);
-        assert.deepStrictEqual(t, { words: [{ word: 'Hi', start: 0, end: 0.4 }], durationS: 2 });
+        assert.deepStrictEqual(t, { words: [{ word: 'Hi', start: 0, end: 0.4 }], durationS: 2, provider: 'openai' });
         delete process.env.OPENAI_API_KEY;
         await assert.rejects(() => synthesizeSpeech('hi', 'coral'), (e: TtsError) => e.kind === 'not_configured');
         if (saved !== undefined) process.env.OPENAI_API_KEY = saved;
+        if (savedEleven !== undefined) process.env.ELEVENLABS_API_KEY = savedEleven;
     });
 
     await check('the endpoint holds before speaking, refunds every failure, keeps audio when timings fail', () => {

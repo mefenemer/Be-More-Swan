@@ -23,6 +23,8 @@
   <!-- Toast + the confirm/alert/prompt dialogs. In <head> and not deferred: handlers reach
        for these, so they must exist before anything can run. -->
   <script src="/dialogs.js"></script>
+  <script src="/src/components/admin-board.js"></script>
+  <script src="/src/components/admin-system-map.js"></script>
   <link href="./style.css" rel="stylesheet">
   <script src="/site-theme.js"></script>
   <script src="/src/public/site-theme-core.js"></script>
@@ -892,15 +894,16 @@
         </div>
       </section>
 
-      <!-- ── Systems & Connections — infra registry (super_admin) ────── -->
+      <!-- ── Systems & Connections — the System Map (super_admin). src/components/admin-system-map.js,
+           docs/system-map-plan.md. Registry: src/utils/system-registry.ts ─────────────────────────── -->
       <section id="view-systems" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
         <div class="mb-4 flex items-center justify-between flex-wrap gap-3">
           <div>
-            <p class="text-sm text-gray-600 max-w-2xl">The external systems that run Be More Swan. Secrets live in Netlify environment variables — they are never stored here. The live status below reflects <strong id="systems-env-label">this</strong> deployment; check the other environment from its own admin portal.</p>
+            <p class="text-sm text-gray-600 max-w-2xl">Every external system Be More Swan runs on: whether it's up, the version we use, what it costs and the AI models each assistant uses. Click a system for more. Secrets live in Netlify environment variables and are never shown here. Status is for <strong id="systems-env-label">this</strong> deployment.</p>
           </div>
           <button onclick="loadSystemStatus()" class="shrink-0 text-sm font-semibold text-violet-600 hover:text-violet-700">↻ Refresh</button>
         </div>
-        <div id="systems-panel" class="space-y-3">
+        <div id="systems-panel">
           <div class="text-gray-400 animate-pulse text-sm">Loading…</div>
         </div>
       </section>
@@ -2387,10 +2390,17 @@
             <button onclick="moveAllToBacklog()" id="ir-backlog-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">📥 Move all to Backlog</button>
             <button onclick="moveBacklogAllToDeveloper()" id="ir-backlog-dev-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Move All to a Developer</button>
             <button onclick="requestMergeAll()" id="ir-merge-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">🔀 Merge all to staging</button>
+            <div class="flex gap-1 bg-gray-100 rounded-lg p-1" role="group" aria-label="Fix pipeline view">
+              <button type="button" id="ir-mode-board" onclick="irSetMode('board')" class="px-3 py-1 text-sm font-semibold rounded-md">Board</button>
+              <button type="button" id="ir-mode-list" onclick="irSetMode('list')" class="px-3 py-1 text-sm font-semibold rounded-md">List</button>
+            </div>
             <button onclick="loadIssueReports()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">↻ Refresh</button>
           </div>
         </div>
 
+        <!-- Board (src/components/admin-board.js) — the default view -->
+        <div id="ir-board" class="hidden"></div>
+        <div id="ir-list-wrap">
         <!-- Status filter chips -->
         <div id="ir-filters" class="flex flex-wrap gap-2 mb-5 text-xs"></div>
 
@@ -2412,6 +2422,7 @@
             </tbody>
           </table>
         </div>
+        </div>
 
       </section>
 
@@ -2430,7 +2441,8 @@
 
         <!-- Sub-tabs -->
         <div class="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-max">
-          <button id="fr-subtab-moderation" onclick="frSwitchPane('moderation')" class="btn-secondary px-4 py-1.5 text-sm font-semibold rounded-md shadow-sm border">Moderation</button>
+          <button id="fr-subtab-board" onclick="frSwitchPane('board')" class="px-4 py-1.5 text-sm font-semibold rounded-md text-gray-500">Board</button>
+          <button id="fr-subtab-moderation" onclick="frSwitchPane('moderation')" class="px-4 py-1.5 text-sm font-semibold rounded-md text-gray-500">List</button>
           <button id="fr-subtab-roadmap" onclick="frSwitchPane('roadmap')" class="px-4 py-1.5 text-sm font-semibold rounded-md text-gray-500">Roadmap (Gantt)</button>
         </div>
 
@@ -2499,8 +2511,11 @@
           </div>
         </div>
 
-        <!-- Moderation pane -->
-        <div id="fr-pane-moderation">
+        <!-- Board pane (src/components/admin-board.js) — the default view -->
+        <div id="fr-pane-board" class="hidden"><div id="fr-kanban"></div></div>
+
+        <!-- Moderation pane (the List view) -->
+        <div id="fr-pane-moderation" class="hidden">
           <div class="flex items-center gap-2 mb-3">
             <label class="text-xs font-bold uppercase text-gray-400">Filter</label>
             <select id="fr-mod-filter" onchange="renderModerationList()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
@@ -6233,15 +6248,177 @@ const IR_STATUS_CLS = {
 const IR_PRIORITIES = ['critical','high','medium','low'];
 const IR_PRIORITY_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
 let _irFilter = '';
+
+// ── Fix pipeline board (src/components/admin-board.js) ──────────────────────────────────────────
+// Six columns derived from the existing status + dev_* fields, so nothing is stored differently.
+// Dragging only does what a person decides: triage into Backlog, hand to the AI developer, close.
+// "Review & merge", "Waiting to go live" and "Live" are filled by the pipeline itself.
+const IR_BOARD_COLUMNS = [
+  { key: 'new', label: 'New', hint: 'Reported, or waiting on the customer' },
+  { key: 'backlog', label: 'Backlog', hint: 'Triaged; On hold is a badge' },
+  { key: 'fixing', label: 'Fixing', hint: 'With the AI developer' },
+  { key: 'review', label: 'Review & merge', hint: 'PR, SQL or merge waiting on you' },
+  { key: 'golive', label: 'Waiting to go live', hint: 'Merged; moves when the deploy has it' },
+  { key: 'live', label: 'Live, awaiting reply', hint: 'Closes itself after 7 quiet days' },
+  { key: 'closed', label: 'Closed', hint: 'Closed or on the roadmap', folded: true },
+];
+const IR_REVIEW_MERGE = ['ready', 'queued', 'merging', 'failed', 'conflict_queued', 'conflict_resolving'];
+function irColumnOf(i) {
+  const st = i.status;
+  if (st === 'closed' || st === 'roadmap') return 'closed';
+  if (st === 'fixed_ready_to_test') return 'live';
+  if (st === 'more_info_required') return 'new';
+  if (i.devMergeStatus === 'merged' && i.devSqlStatus !== 'pending') return 'golive';
+  if (st === 'merge' || i.devHandoffStatus === 'completed' || i.devSqlStatus === 'pending' || IR_REVIEW_MERGE.includes(i.devMergeStatus)) return 'review';
+  if (st === 'fix_in_progress' || i.devHandoffStatus === 'queued' || i.devHandoffStatus === 'in_progress') return 'fixing';
+  if (st === 'backlog' || st === 'on_hold') return 'backlog';
+  return 'new';
+}
+const IR_SOURCE_LABEL = { user: 'Customer', system: 'Automatic', suspected: 'Assistant noticed' };
+// How bad (src/utils/issue-severity.ts) — keep in step with ISSUE_SEVERITIES there.
+const IR_SEVERITIES = ['critical', 'high', 'normal', 'low'];
+const IR_SEVERITY_LABEL = { critical: 'Critical', high: 'High', normal: 'Normal', low: 'Low' };
+const IR_SEVERITY_RANK = { critical: 0, high: 1, normal: 2, low: 3 };
+async function irSetSeverity(id, severity) {
+  try {
+    await api(`${IR_API}?id=${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ severity }) });
+    window.showToast?.(`Severity set to ${IR_SEVERITY_LABEL[severity] || severity}.`, { icon: '✅' });
+    loadIssueReports();
+  } catch (e) { window.showToast?.(e.message || 'Could not save it.', { icon: '⚠️' }); }
+}
+const _irDaysLeft = (i) => {
+  if (!i.fixedAt) return null;
+  return Math.max(0, Math.ceil((new Date(i.fixedAt).getTime() + 7 * 864e5 - Date.now()) / 864e5));
+};
+function irBoardCard(i) {
+  const first = String(i.description || '').split('\n')[0].trim() || '(no description)';
+  const badges = [];
+  if (i.severity === 'critical') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Critical</span>');
+  if (i.severity === 'high') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">High</span>');
+  if (i.paying) badges.push(`<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700" title="What this workspace pays (list price)">${_escH(i.planName || 'Paid')} · £${Math.round(Number(i.planMonthlyGbp) || 0)}/mo</span>`);
+  if (i.status === 'more_info_required') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">Waiting on customer</span>');
+  if (i.status === 'on_hold') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">On hold</span>');
+  if (i.status === 'roadmap') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">On roadmap</span>');
+  if (i.devHandoffStatus === 'failed') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Fix failed</span>');
+  if (i.devSqlStatus === 'pending') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">SQL to run</span>');
+  if (i.devMergeStatus === 'failed') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Merge failed</span>');
+  if (i.devProdStatus === 'hotfix_open') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">Hotfix PR to merge</span>');
+  if (i.devProdStatus === 'hotfix_requested') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Opening hotfix PR</span>');
+  if (i.source && i.source !== 'user') badges.push(`<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700">${_escH(IR_SOURCE_LABEL[i.source] || i.source)}${i.occurrences > 1 ? ` ×${Number(i.occurrences)}` : ''}</span>`);
+  const left = i.status === 'fixed_ready_to_test' ? _irDaysLeft(i) : null;
+  if (left != null) badges.push(`<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Closes in ${left} day${left === 1 ? '' : 's'}</span>`);
+  const pr = /^https:\/\/github\.com\//.test(i.devPrUrl || '') ? ` · <a href="${_escH(i.devPrUrl)}" target="_blank" rel="noopener" class="text-emerald-700 font-semibold hover:underline">PR</a>` : '';
+  return `
+    <p class="text-sm font-semibold text-gray-800 line-clamp-3 break-words">${_escH(first)}</p>
+    ${badges.length ? `<div class="flex flex-wrap gap-1 mt-1.5">${badges.join('')}</div>` : ''}
+    <p class="text-[11px] text-gray-400 mt-1.5">#${Number(i.id)} · ${_escH(i.reporterName || '—')} · ${age(i.createdAt)}${pr}</p>
+    ${i.sourceLocation ? `<p class="text-[11px] text-gray-400 truncate">${_escH(i.sourceLocation)}</p>` : ''}`;
+}
+const _irDistinct = (items, f) => [...new Set(items.map(f).filter(Boolean))].sort().map(v => ({ value: v, label: v }));
+let _irBoard = null;
+function irBoard() {
+  if (_irBoard) return _irBoard;
+  _irBoard = window.AdminBoard.create({
+    id: 'fix',
+    mount: document.getElementById('ir-board'),
+    columns: IR_BOARD_COLUMNS,
+    columnOf: irColumnOf,
+    idOf: (i) => i.id,
+    searchText: (i) => [i.description, i.reporterName, i.reporterEmail, i.sourceLocation].join(' '),
+    renderCard: irBoardCard,
+    filters: [
+      { key: 'source', label: 'Source', options: () => Object.entries(IR_SOURCE_LABEL).map(([value, label]) => ({ value, label })), test: (i, v) => (i.source || 'user') === v },
+      { key: 'area', label: 'Area', options: (items) => _irDistinct(items, i => i.sourceLocation), test: (i, v) => i.sourceLocation === v },
+      { key: 'severity', label: 'How bad', options: () => IR_SEVERITIES.map(s => ({ value: s, label: IR_SEVERITY_LABEL[s] })), test: (i, v) => (i.severity || 'normal') === v },
+      { key: 'plan', label: 'Plan', options: (items) => [{ value: '__paying', label: 'Paying customers' }, ..._irDistinct(items, i => i.planName)], test: (i, v) => v === '__paying' ? !!i.paying : i.planName === v },
+      { key: 'state', label: 'Flag', options: () => [
+          { value: 'waiting', label: 'Waiting on customer' }, { value: 'hold', label: 'On hold' },
+          { value: 'pr', label: 'Has a PR' }, { value: 'nopr', label: 'No PR yet' }],
+        test: (i, v) => v === 'waiting' ? i.status === 'more_info_required' : v === 'hold' ? i.status === 'on_hold' : v === 'pr' ? !!i.devPrUrl : !i.devPrUrl },
+    ],
+    groups: [
+      { key: 'severity', label: 'How bad', of: (i) => IR_SEVERITY_LABEL[i.severity || 'normal'] },
+      { key: 'plan', label: 'Plan', of: (i) => i.planName || 'No plan' },
+      { key: 'source', label: 'Source', of: (i) => IR_SOURCE_LABEL[i.source || 'user'] || i.source },
+      { key: 'area', label: 'Area', of: (i) => i.sourceLocation || 'No area' },
+      { key: 'reporter', label: 'Reporter', of: (i) => i.reporterName || '—' },
+    ],
+    sorts: [
+      { key: 'oldest', label: 'Oldest first', compare: (a, b) => new Date(a.createdAt) - new Date(b.createdAt) },
+      { key: 'urgent', label: 'Most urgent', compare: (a, b) => (IR_SEVERITY_RANK[a.severity || 'normal'] - IR_SEVERITY_RANK[b.severity || 'normal']) || ((b.planMonthlyGbp || 0) - (a.planMonthlyGbp || 0)) || (new Date(a.createdAt) - new Date(b.createdAt)) },
+      { key: 'newest', label: 'Newest first', compare: (a, b) => new Date(b.createdAt) - new Date(a.createdAt) },
+      { key: 'occurrences', label: 'Most occurrences', compare: (a, b) => (b.occurrences || 1) - (a.occurrences || 1) },
+      { key: 'activity', label: 'Recent activity', compare: (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt) },
+    ],
+    defaultSort: 'oldest',
+    quickViews: [{ key: 'needs', label: 'Needs me', columns: ['new', 'review'] }],
+    canDrop: (i, to) => {
+      const from = irColumnOf(i);
+      if (to === 'backlog') return ['new'].includes(from) || 'Only a new issue can be moved to Backlog here.';
+      if (to === 'fixing') return ['new', 'backlog'].includes(from) || 'Only a new or backlog issue can be handed to the AI developer.';
+      if (to === 'closed') return from !== 'closed' || 'Already closed.';
+      if (to === 'new') return 'An issue comes back to New when the reporter replies.';
+      if (to === 'review') return 'Moves here by itself when the AI developer opens a PR.';
+      if (to === 'golive') return 'Moves here by itself when the PR is merged.';
+      if (to === 'live') return 'Moves here by itself when the fix is in the deployed site.';
+      return 'Not a move you can make here.';
+    },
+    onDrop: async (i, to) => {
+      try {
+        if (to === 'fixing') {
+          if (!(await window.confirmModal('It will be fixed on a branch and a pull request opened for review.', { title: `Pass #${i.id} to the AI developer?`, confirmLabel: 'Pass to developer' }))) return;
+          await api(`${IR_API}?id=${i.id}&action=handoff`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        } else {
+          const status = to === 'closed' ? 'closed' : 'backlog';
+          const who = i.userId === null || (i.source && i.source !== 'user') ? '' : ' The reporter is told.';
+          if (!(await window.confirmModal(`Move #${i.id} to ${status === 'closed' ? 'Closed' : 'Backlog'}?${who}`, { title: status === 'closed' ? 'Close this issue?' : 'Move to Backlog?', confirmLabel: status === 'closed' ? 'Close' : 'Move' }))) return;
+          await api(`${IR_API}?id=${i.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+        }
+        window.showToast?.(`#${i.id} moved.`, { icon: '✅' });
+      } catch (e) { window.showToast?.(e.message || 'Could not move it.', { icon: '⚠️' }); }
+      loadIssueReports();
+    },
+    onOpen: (i) => openIssuePanel(i.id),
+  });
+  return _irBoard;
+}
+let _irMode = (() => { try { return localStorage.getItem('admin-board:fix:mode') || 'board'; } catch { return 'board'; } })();
+function irSetMode(mode) {
+  _irMode = mode === 'list' ? 'list' : 'board';
+  try { localStorage.setItem('admin-board:fix:mode', _irMode); } catch { /* defaults next time */ }
+  loadIssueReports();
+}
+function _irPaintMode() {
+  document.getElementById('ir-board')?.classList.toggle('hidden', _irMode !== 'board');
+  document.getElementById('ir-list-wrap')?.classList.toggle('hidden', _irMode !== 'list');
+  [['board', 'ir-mode-board'], ['list', 'ir-mode-list']].forEach(([m, id]) => {
+    const b = document.getElementById(id); if (!b) return;
+    const on = m === _irMode;
+    b.classList.toggle('bg-white', on); b.classList.toggle('shadow-sm', on); b.classList.toggle('text-gray-900', on); b.classList.toggle('text-gray-500', !on);
+    b.setAttribute('aria-pressed', String(on));
+  });
+  // The bulk buttons belong to the List's status chips.
+  if (_irMode === 'board') ['ir-pass-all-btn', 'ir-backlog-all-btn', 'ir-backlog-dev-all-btn', 'ir-merge-all-btn'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+}
+async function loadIssueBoard() {
+  const mount = document.getElementById('ir-board');
+  if (mount && !_irBoard) mount.innerHTML = '<div class="text-gray-400 text-sm py-8 text-center animate-pulse">Loading…</div>';
+  try {
+    const d = await api(IR_API);
+    irBoard().setItems(d.issues || []);
+  } catch (e) {
+    if (mount) mount.innerHTML = `<div class="text-red-500 text-sm py-5">${_escH(e.message)}</div>`;
+  }
+}
 function _irBadge(s) { return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${IR_STATUS_CLS[s] || 'bg-gray-100 text-gray-700'}">${IR_STATUS_LABEL[s] || s}</span>`; }
 // Small AI auto-fix ("Pass to Developer") badge for the list — empty unless handed off.
 const IR_HANDOFF_BADGE = {
-  queued:      { cls: 'bg-violet-100 text-violet-700', text: '🤖 Queued' },
   in_progress: { cls: 'bg-violet-100 text-violet-700', text: '🤖 Fixing…' },
   completed:   { cls: 'bg-violet-100 text-violet-700', text: '🤖 PR ready' },
   failed:      { cls: 'bg-amber-100 text-amber-800',   text: '🤖 Failed' },
 };
 function _irHandoffBadge(i) {
+  i = _irNoLaptop(i);
   // Most-actionable state wins: a pending DB migration first, then the merge gate.
   if (i.devSqlStatus === 'pending') {
     return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">🗄️ SQL to run</span>`;
@@ -6249,18 +6426,16 @@ function _irHandoffBadge(i) {
   if (i.devMergeStatus === 'ready') {
     return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">🔀 To merge</span>`;
   }
-  if (i.devMergeStatus === 'queued' || i.devMergeStatus === 'merging') {
+  if (i.devMergeStatus === 'merging') {
     return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔀 Merging…</span>`;
-  }
-  if (i.devMergeStatus === 'conflict_queued' || i.devMergeStatus === 'conflict_resolving') {
-    return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔧 Resolving conflict…</span>`;
   }
   // Once merged to staging, the prod-promotion state (if any) is the more-actionable signal.
   if (i.devMergeStatus === 'merged') {
     const staging = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🔀 Merged to staging</span>`;
     const ps = i.devProdStatus;
-    if (ps === 'queued' || ps === 'promoting') {
-      return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🚀 ${ps === 'queued' ? 'Prod queued…' : 'Promoting…'}</span>`;
+    // Hotfix PR (src/utils/issue-hotfix.ts): the workflow is opening it, or it waits for a merge.
+    if (ps === 'hotfix_requested' || ps === 'hotfix_open') {
+      return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">🚀 ${ps === 'hotfix_requested' ? 'Opening hotfix PR…' : 'Hotfix PR to merge'}</span>`;
     }
     if (ps === 'promoted') {
       return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🚀 Merged to prod</span>`;
@@ -6279,12 +6454,25 @@ function _irHandoffBadge(i) {
 }
 function _irFmt(d) { return d ? new Date(d).toLocaleString() : ''; }
 
-// ── Runner attribution ───────────────────────────────────────────────────────
-// Several runners can drain the AI auto-fix queue at once. When one has claimed an
-// issue (a fix or a merge), devRunnerId/devRunnerHeartbeat tell us who and since when.
-const IR_RUNNER_STALL_MS = 15 * 60 * 1000; // a fix normally finishes in minutes
+// ── Who holds the issue ──────────────────────────────────────────────────────
+// Fixes and merges run in GitHub Actions (devRunnerId 'GitHub Actions'; devRunnerHeartbeat is
+// when it started). src/utils/issue-ai-fix.ts and issue-cloud-merge.ts follow the runs and mark a
+// stuck one failed themselves; a merge nothing has confirmed for 15 min can be force-restarted.
+const IR_RUNNER_STALL_MS = 15 * 60 * 1000; // a merge normally finishes in a couple of minutes
+// The laptop runner was retired 2026-11-12. Rows it left unfinished (until
+// db/z-retire-laptop-runner.sql runs) are shown as what can be done about them now.
+function _irNoLaptop(i) {
+  const o = { ...i };
+  if (o.devHandoffStatus === 'queued' || (o.devHandoffStatus === 'in_progress' && o.devRunnerId !== 'GitHub Actions')) {
+    o.devHandoffStatus = 'failed';
+    o.devResult = 'Left unfinished by the retired laptop runner. Pass it to the developer again.';
+  }
+  if (o.devMergeStatus === 'queued') o.devMergeStatus = 'ready';
+  if (o.devMergeStatus === 'conflict_queued' || o.devMergeStatus === 'conflict_resolving') o.devMergeStatus = 'failed';
+  return o;
+}
 function _irRunnerActive(i) {
-  return !!i.devRunnerId && (i.devHandoffStatus === 'in_progress' || i.devMergeStatus === 'merging' || i.devMergeStatus === 'conflict_resolving' || i.devProdStatus === 'promoting');
+  return !!i.devRunnerId && (i.devHandoffStatus === 'in_progress' || i.devMergeStatus === 'merging');
 }
 function _irRunnerElapsed(i) {
   if (!i.devRunnerHeartbeat) return '';
@@ -6296,20 +6484,23 @@ function _irRunnerElapsed(i) {
 function _irRunnerStalled(i) {
   return !!i.devRunnerHeartbeat && (Date.now() - new Date(i.devRunnerHeartbeat).getTime()) > IR_RUNNER_STALL_MS;
 }
-// Small chip for the list: which runner holds this issue, and for how long. Turns red
-// once the claim has outlived a normal fix — a hint the runner may have died.
+// Small chip for the list: a fix or merge running in GitHub Actions, and since when. A merge
+// that has outlived a normal one turns red (open it to force a restart).
 function _irRunnerChip(i) {
+  i = _irNoLaptop(i);
   if (!_irRunnerActive(i)) return '';
-  const stalled = _irRunnerStalled(i);
+  const stalled = i.devMergeStatus === 'merging' && _irRunnerStalled(i);
   const el = _irRunnerElapsed(i);
   const cls = stalled ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700';
   const title = stalled
-    ? 'This runner has been working far longer than a normal fix — it may have stopped. Re-queue the issue with “Pass to Developer”.'
-    : 'Runner currently working this issue';
-  return `<span title="${title}" class="text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}">🖥 ${_esc(i.devRunnerId)}${el ? ` · ${el}` : ''}${stalled ? ' ⚠' : ''}</span>`;
+    ? 'Nothing has confirmed this merge for a while. Open the issue to force a restart.'
+    : 'Running in GitHub Actions';
+  return `<span title="${title}" class="text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}">☁️ ${_esc(i.devRunnerId)}${el ? ` · ${el}` : ''}${stalled ? ' ⚠' : ''}</span>`;
 }
 
 async function loadIssueReports() {
+  _irPaintMode();
+  if (_irMode === 'board') return loadIssueBoard();
   const tbody = document.getElementById('ir-tbody');
   if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</td></tr>';
   try {
@@ -6405,6 +6596,11 @@ async function openIssuePanel(id) {
         <div class="flex items-center gap-3 flex-wrap">
           <span class="text-xs font-bold uppercase text-gray-400">Current</span>${_irBadge(i.status)}${i.devMergeStatus === 'merged' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔀 Merged to staging</span>' : ''}${i.devProdStatus === 'promoted' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🚀 Merged to prod</span>' : ''}
         </div>
+        <!-- How bad (src/utils/issue-severity.ts): its own edit, saved on change, never tells the reporter. -->
+        <label for="ir-severity" class="block text-xs font-bold uppercase text-gray-400">How bad</label>
+        <select id="ir-severity" onchange="irSetSeverity(${i.id}, this.value)" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2">
+          ${IR_SEVERITIES.map(s => `<option value="${s}" ${(i.severity || 'normal') === s ? 'selected' : ''}>${IR_SEVERITY_LABEL[s]}</option>`).join('')}
+        </select>
         <label class="block text-xs font-bold uppercase text-gray-400">Update status</label>
         <select id="ir-new-status" onchange="irOnStatusChange()" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2">
           ${IR_STATUSES.map(s => `<option value="${s}" ${i.status === s ? 'selected' : ''}>${IR_STATUS_LABEL[s]}</option>`).join('')}
@@ -6466,10 +6662,11 @@ async function submitIssueDescription(id) {
 }
 
 // ── "Pass to Developer" AI auto-fix handoff ──────────────────────────────────
-// Renders the handoff state and, when actionable, the button that queues the
-// issue for the local Claude Code runner (scripts/dev-issue-fixer.mjs).
+// Renders the handoff state and, when actionable, the button that starts the AI fix:
+// Claude Code in GitHub Actions (.github/workflows/ai-fix.yml, src/utils/issue-ai-fix.ts).
 function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function _irHandoffCard(i) {
+  i = _irNoLaptop(i);
   const s = i.devHandoffStatus || null;
   const passBtn = (label) =>
     `<button onclick="passToDeveloper(${i.id})" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2">
@@ -6481,17 +6678,13 @@ function _irHandoffCard(i) {
     ? `<a href="${_esc(i.devPrUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-sm font-bold text-violet-700 hover:underline">View pull request →</a>` : '';
 
   let inner;
-  if (s === 'queued') {
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-violet-700"><span class="animate-pulse">●</span> Queued for AI auto-fix… a developer runner will pick this up.</div>`;
-  } else if (s === 'in_progress') {
-    const stalled = _irRunnerStalled(i);
-    const who = i.devRunnerId
-      ? `<div class="text-xs ${stalled ? 'text-red-700' : 'text-violet-600'}">🖥 Runner <b>${_esc(i.devRunnerId)}</b> · working for ${_irRunnerElapsed(i) || 'a moment'}</div>` : '';
-    const stall = stalled
-      ? `<div class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">⚠ This is far longer than a normal fix — the runner may have stopped. Re-queue with “Pass to Developer”.</div>${passBtn('Re-queue for another runner')}` : '';
+  if (s === 'in_progress') {
+    // Always the cloud workflow (src/utils/issue-ai-fix.ts): the app follows the run and marks a
+    // stuck one failed itself, so there is nothing to re-queue here.
     inner = `<div class="space-y-2">
         <div class="flex items-center gap-2 text-sm font-semibold text-violet-700"><span class="animate-pulse">●</span> The AI developer is working on a fix…</div>
-        ${who}${stall}
+        <div class="text-xs text-violet-600">☁️ Running in <b>GitHub Actions</b> · usually 5–20 minutes. Reopen the issue to refresh.</div>
+        ${resultBlock}
       </div>`;
   } else if (s === 'completed') {
     inner = `<div class="space-y-2">
@@ -6507,7 +6700,7 @@ function _irHandoffCard(i) {
       </div>`;
   } else {
     inner = `<div class="space-y-2">
-        <p class="text-xs text-gray-500">Hand this issue to an AI developer (Claude Code). It will fix it on a branch, open a pull request, and move the status to “Fixed &amp; Ready to Test”.</p>
+        <p class="text-xs text-gray-500">Hand this issue to an AI developer (Claude Code, running in GitHub Actions). It fixes it on a branch and opens a pull request into staging for you to review and merge.</p>
         ${passBtn('Pass to Developer')}
       </div>`;
   }
@@ -6560,12 +6753,14 @@ function _updatePassAllBtn(issues) {
 async function passAllToDeveloper() {
   const btn = document.getElementById('ir-pass-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (!(await window.confirmModal(`Each will be fixed on its own branch with a pull request opened for review.`, { title: `Pass all ${window.escapeHtml(n)} reported issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
-  if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
+  if (!(await window.confirmModal(`Each is fixed by Claude Code in GitHub Actions on its own branch, with a pull request opened for review. Up to 10 start per click.`, { title: `Pass all ${window.escapeHtml(n)} reported issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
+  if (btn) { btn.disabled = true; btn.textContent = '🤖 Starting…'; }
   try {
-    await api(`${IR_API}?action=handoff-all`, {
+    const r = await api(`${IR_API}?action=handoff-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
+    // Up to 10 start per click; a partial failure names the first reason.
+    if (r && (r.error || r.note)) window.showToast?.(r.error ? `${r.queued} started. ${r.error}` : r.note, { icon: r.error ? '⚠️' : '🤖' });
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { loadIssueReports(); }
 }
@@ -6619,12 +6814,14 @@ function _updateMoveAllToDeveloperBtn(issues) {
 async function moveBacklogAllToDeveloper() {
   const btn = document.getElementById('ir-backlog-dev-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (!(await window.confirmModal(`Each will be fixed on its own branch with a pull request opened for review.`, { title: `Pass all ${window.escapeHtml(n)} backlog issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
-  if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
+  if (!(await window.confirmModal(`Each is fixed by Claude Code in GitHub Actions on its own branch, with a pull request opened for review. Up to 10 start per click.`, { title: `Pass all ${window.escapeHtml(n)} backlog issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
+  if (btn) { btn.disabled = true; btn.textContent = '🤖 Starting…'; }
   try {
-    await api(`${IR_API}?action=handoff-backlog-all`, {
+    const r = await api(`${IR_API}?action=handoff-backlog-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
+    // Up to 10 start per click; a partial failure names the first reason.
+    if (r && (r.error || r.note)) window.showToast?.(r.error ? `${r.queued} started. ${r.error}` : r.note, { icon: r.error ? '⚠️' : '🤖' });
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { loadIssueReports(); }
 }
@@ -6696,6 +6893,7 @@ async function runIssueSql(id) {
 // here and performed by the local watcher; the issue only reaches "Fixed & Ready to
 // Test" once the merge (and any DB migration) is done.
 function _irMergeCard(i) {
+  i = _irNoLaptop(i);
   const ms = i.devMergeStatus;
   if (!ms || !i.devPrUrl) return '';
   const prLink = `<a href="${_esc(i.devPrUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-sm font-bold text-indigo-700 hover:underline">View pull request →</a>`;
@@ -6706,8 +6904,9 @@ function _irMergeCard(i) {
   const mergeBtn = isSuper
     ? `<button onclick="requestMerge(${i.id})" ${sqlPending ? 'disabled' : ''} class="w-full px-4 py-2.5 ${sqlPending ? 'bg-gray-300 text-white cursor-not-allowed' : 'btn-primary'} text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔀</span> Merge to staging</button>`
     : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can merge to staging.</p>`;
-  const conflictBtn = isSuper
-    ? `<button onclick="requestConflictFix(${i.id})" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔧</span> Investigate &amp; fix conflicts</button>`
+  // Replaces "Investigate & fix conflicts": the AI fix workflow writes the fix again on current staging.
+  const redoBtn = isSuper
+    ? `<button onclick="requestRedoFix(${i.id})" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔁</span> Redo fix on latest staging</button>`
     : '';
 
   let chip, inner;
@@ -6715,30 +6914,24 @@ function _irMergeCard(i) {
     const failed = ms === 'failed';
     chip = failed ? ['bg-red-100 text-red-700', 'Last merge failed'] : ['bg-amber-100 text-amber-800', 'Ready to merge'];
     inner = `<p class="text-xs text-gray-500">${failed
-        ? 'The merge attempt failed — see the runner output below. Have the AI developer investigate and resolve any conflicts, or try the merge again.'
+        ? 'The merge attempt failed — see why below. Try the merge again, or have the AI developer write the fix again on the latest staging (the new version needs reviewing).'
         : 'The fix is on a branch with an open pull request. Merge it to <b>staging</b> to make it live and move the issue to “Fixed &amp; Ready to Test”.'}${sqlPending ? ' <b class="text-amber-700">Run the database migration above first.</b>' : ''}</p>
-      ${prLink}${failed ? resultBlock : ''}${failed ? conflictBtn : ''}${mergeBtn}`;
-  } else if (ms === 'queued') {
-    chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Merge requested — the developer runner will merge this within ~15s…</div>${prLink}`;
+      ${prLink}${failed ? resultBlock : ''}${failed ? redoBtn : ''}${mergeBtn}`;
   } else if (ms === 'merging') {
-    // A merge takes seconds; a claim that has outlived IR_RUNNER_STALL_MS means the runner
-    // died mid-merge. The server reclaims it on the next list load, and super-admins can
-    // force a re-queue from here meanwhile.
+    // A merge takes seconds; one nothing has confirmed for IR_RUNNER_STALL_MS can be force-restarted
+    // (the workflow treats an already-merged PR as success). A 'merging' row the retired laptop
+    // runner left looks stalled the same way and is restarted the same way.
     const stalled = _irRunnerStalled(i) || !i.devRunnerHeartbeat;
     const forceBtn = (isSuper && stalled)
-      ? `<button onclick="requestMerge(${i.id}, true)" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔁</span> Force re-queue (runner unresponsive)</button>`
+      ? `<button onclick="requestMerge(${i.id}, true)" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔁</span> Force restart (merge unconfirmed)</button>`
       : '';
     chip = stalled ? ['bg-amber-100 text-amber-800', 'Merging — stalled?'] : ['bg-indigo-100 text-indigo-700', 'Merging…'];
-    const who = i.devRunnerId ? `<div class="text-xs ${stalled ? 'text-amber-700' : 'text-indigo-600'}">🖥 Runner <b>${_esc(i.devRunnerId)}</b> ${stalled ? 'claimed the merge but has gone quiet' : 'is merging'}${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
+    // 'GitHub Actions' = .github/workflows/merge-to-staging.yml (src/utils/issue-cloud-merge.ts).
+    const cloudMerge = i.devRunnerId === 'GitHub Actions';
+    const who = cloudMerge
+      ? `<div class="text-xs ${stalled ? 'text-amber-700' : 'text-indigo-600'}">☁️ ${stalled ? 'GitHub Actions started this but nothing has confirmed it yet' : 'Merging in <b>GitHub Actions</b> · usually under 2 minutes. Reopen the issue to refresh.'}</div>`
+      : `<div class="text-xs text-amber-700">Left unfinished by the retired laptop runner. Force a restart to merge it in GitHub Actions.</div>`;
     inner = `<div class="flex items-center gap-2 text-sm font-semibold ${stalled ? 'text-amber-700' : 'text-indigo-700'}"><span class="animate-pulse">●</span> ${stalled ? 'Merge appears stuck' : 'Merging to staging…'}</div>${who}${prLink}${forceBtn}`;
-  } else if (ms === 'conflict_queued') {
-    chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Investigation requested — the developer runner will resolve the conflict within ~15s…</div>${prLink}`;
-  } else if (ms === 'conflict_resolving') {
-    chip = ['bg-indigo-100 text-indigo-700', 'Resolving conflict…'];
-    const who = i.devRunnerId ? `<div class="text-xs text-indigo-600">🖥 Runner <b>${_esc(i.devRunnerId)}</b> is investigating${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Investigating &amp; resolving the merge conflict…</div>${who}${prLink}`;
   } else if (ms === 'merged') {
     chip = ['bg-emerald-100 text-emerald-700', 'Merged ✓'];
     inner = `<div class="flex items-center gap-2 text-sm font-semibold text-emerald-700">✅ Merged to staging${i.devMergedAt ? ` · ${_irFmt(i.devMergedAt)}` : ''}.</div>${prLink}${resultBlock}`;
@@ -6757,40 +6950,49 @@ function _irMergeCard(i) {
 // Shown once the fix is merged to staging (dev_merge_status='merged'). Separate from
 // closing the ticket. Queues a promotion the local watcher performs by pushing staging →
 // main (prod deploys from main); the ticket shows "Merged to prod" once it lands.
+// "Open hotfix PR" (src/utils/issue-hotfix.ts) — replaces "Push to prod", which promoted ALL of
+// staging to main through the laptop runner. A GitHub workflow copies just this fix onto a branch
+// from main and opens a PR; a person merges it on GitHub. The issue's card follows that PR.
+function _irHotfixLink(i) {
+  const m = /Hotfix PR: (https:\/\/github\.com\/\S+\/pull\/\d+)/.exec(i.devProdResult || '');
+  return m ? `<a href="${_escH(m[1])}" target="_blank" rel="noopener" class="font-bold text-emerald-700 hover:underline">Open the hotfix PR on GitHub ↗</a>` : '';
+}
 function _irProdCard(i) {
   if (i.devMergeStatus !== 'merged') return '';
   const ps = i.devProdStatus || null;
-  const resultBlock = i.devProdResult
-    ? `<div class="rounded-lg p-3 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto bg-white border border-gray-200 text-gray-700">${_esc(i.devProdResult)}</div>` : '';
+  const detail = String(i.devProdResult || '').replace(/^Hotfix PR: \S+\n?/, '');
+  const resultBlock = detail
+    ? `<div class="rounded-lg p-3 text-xs whitespace-pre-wrap max-h-48 overflow-auto bg-white border border-gray-200 text-gray-700">${_esc(detail)}</div>` : '';
   const isSuper = _can('deploy_code');
-  const canPromote = !ps || ps === 'failed';
-  const promoteBtn = isSuper
-    ? `<button onclick="requestProdPromote(${i.id})" class="btn-destructive w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🚀</span> ${ps === 'failed' ? 'Retry push to prod' : 'Push to prod'}</button>`
-    : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can promote to production.</p>`;
+  // 'queued' / 'promoting' were the retired laptop runner's "Push to prod"; they no longer block.
+  const canStart = !ps || ps === 'failed' || ps === 'queued' || ps === 'promoting';
+  const startBtn = isSuper
+    ? `<button onclick="requestProdPromote(${i.id})" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🚀</span> ${ps === 'failed' ? 'Try the hotfix PR again' : 'Open hotfix PR'}</button>`
+    : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can open a hotfix PR.</p>`;
 
   let chip, inner;
-  if (canPromote) {
+  if (canStart) {
     const failed = ps === 'failed';
-    chip = failed ? ['bg-red-100 text-red-700', 'Last promotion failed'] : ['bg-amber-100 text-amber-800', 'Ready for prod'];
+    chip = failed ? ['bg-red-100 text-red-700', 'Hotfix failed'] : ['bg-gray-100 text-gray-700', 'Ships with next release'];
     inner = `<p class="text-xs text-gray-500">${failed
-        ? 'The promotion failed — see the runner output below. Resolve the problem and push to prod again.'
-        : 'This fix is live on <b>staging</b>. Promote it to <b>production</b> — the developer runner will push staging → main and prod will redeploy.'}</p>
-      ${failed ? resultBlock : ''}${promoteBtn}`;
-  } else if (ps === 'queued') {
-    chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Promotion requested — the developer runner will push to production within ~15s…</div>`;
-  } else if (ps === 'promoting') {
-    chip = ['bg-indigo-100 text-indigo-700', 'Promoting…'];
-    const who = i.devRunnerId ? `<div class="text-xs text-indigo-600">🖥 Runner <b>${_esc(i.devRunnerId)}</b> is promoting${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Pushing staging → production…</div>${who}`;
+        ? 'The last hotfix attempt didn’t go through — the reason is below.'
+        : 'This fix reaches production with the next staging → main PR. Urgent? Open a hotfix PR: GitHub copies <b>only this fix</b> onto main for you to review and merge. Nothing else on staging goes with it.'}</p>
+      ${failed ? resultBlock + _irHotfixLink(i) : ''}${startBtn}`;
+  } else if (ps === 'hotfix_requested') {
+    chip = ['bg-indigo-100 text-indigo-700', 'Opening PR…'];
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> GitHub is copying this fix onto main and opening a PR…</div>
+      <p class="text-xs text-gray-500">Reopen this issue in a minute to see the PR.</p>`;
+  } else if (ps === 'hotfix_open') {
+    chip = ['bg-amber-100 text-amber-800', 'Waiting for your merge'];
+    inner = `<p class="text-xs text-gray-500">The hotfix PR holds only this fix. Review and merge it on GitHub; the reporter is told once the prod deploy has it.</p>${_irHotfixLink(i)}`;
   } else if (ps === 'promoted') {
-    chip = ['bg-emerald-100 text-emerald-700', 'Live on prod ✓'];
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-emerald-700">🚀 Promoted to production${i.devProdAt ? ` · ${_irFmt(i.devProdAt)}` : ''}.</div>${resultBlock}`;
+    chip = ['bg-emerald-100 text-emerald-700', 'Merged into main ✓'];
+    inner = `<div class="text-sm font-semibold text-emerald-700">🚀 Merged into main${i.devProdAt ? ` · ${_irFmt(i.devProdAt)}` : ''}. The reporter is told once the prod deploy has it.</div>${_irHotfixLink(i)}`;
   } else { return ''; }
 
-  return `<div class="border border-red-200 bg-red-50 rounded-xl p-4 space-y-3">
+  return `<div class="border border-gray-200 bg-gray-50 rounded-xl p-4 space-y-3">
       <div class="flex items-center justify-between">
-        <span class="text-xs font-bold uppercase text-red-600">Push to Production</span>
+        <span class="text-xs font-bold uppercase text-gray-600">Ship to production</span>
         <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${chip[0]}">${chip[1]}</span>
       </div>
       ${inner}
@@ -6799,11 +7001,11 @@ function _irProdCard(i) {
 
 async function requestMerge(id, force) {
   const ok = force
-    ? await window.confirmModal('The previous attempt looks stuck. This resets it and hands the pull request back to the developer runner — if it already merged, the runner just confirms it.', { title: 'Force re-queue this merge?' })
-    : await window.confirmModal('The developer runner will merge the pull request and the issue will move to “Fixed & Ready to Test”.', { title: 'Merge this fix to the staging branch now?' });
+    ? await window.confirmModal('The previous attempt looks stuck. This starts the merge again in GitHub Actions — if it already merged, that is simply confirmed.', { title: 'Restart this merge?' })
+    : await window.confirmModal('GitHub Actions will merge the pull request into staging. The issue moves on once the fix is live.', { title: 'Merge this fix to the staging branch now?' });
   if (!ok) return;
   const btn = event?.target?.closest('button');
-  if (btn) { btn.disabled = true; btn.textContent = force ? 'Re-queuing…' : 'Requesting…'; }
+  if (btn) { btn.disabled = true; btn.textContent = force ? 'Restarting…' : 'Starting…'; }
   try {
     await api(`${IR_API}?id=${id}&action=request-merge`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -6820,7 +7022,7 @@ async function requestMerge(id, force) {
 }
 
 async function requestProdPromote(id) {
-  if (!(await window.confirmModal('The developer runner will push staging → main and prod will redeploy with everything currently on staging. This affects live users.', { title: 'Promote this fix to PRODUCTION now?' }))) return;
+  if (!(await window.confirmModal('GitHub copies only this fix onto a branch from main and opens a pull request. Nothing reaches production until you review and merge that PR.', { title: 'Open a hotfix PR for this fix?', confirmLabel: 'Open hotfix PR' }))) return;
   const btn = event?.target?.closest('button');
   if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
   try {
@@ -6835,12 +7037,12 @@ async function requestProdPromote(id) {
   }
 }
 
-async function requestConflictFix(id) {
-  if (!(await window.confirmModal('The issue will move to “Fixed & Ready to Test” once it succeeds.', { title: 'Have the AI developer investigate this failed merge, resolve any conflicts, and retry?' }))) return;
+async function requestRedoFix(id) {
+  if (!(await window.confirmModal('Claude Code checks out the latest staging in GitHub Actions and writes the fix again, updating the pull request. It is a new version of the fix, so review it again before merging.', { title: 'Redo this fix on the latest staging?' }))) return;
   const btn = event?.target?.closest('button');
-  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
   try {
-    await api(`${IR_API}?id=${id}&action=request-conflict-fix`, {
+    await api(`${IR_API}?id=${id}&action=redo-fix`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
     await openIssuePanel(id);
@@ -6853,7 +7055,7 @@ async function requestConflictFix(id) {
 
 // ── "Merge all to staging" (super-admin only) ──────────────────────────────────
 // On the Merge tab, merge every ready fix PR in one go instead of opening each
-// ticket. The developer runner merges each PR in turn; once nothing is left in
+// ticket. GitHub Actions merges each PR (merge-to-staging.yml); once nothing is left in
 // flight, the backend itself rebuilds staging (see triggerStagingDeployIfDrained
 // in src/utils/issue-reports.ts) — there's no separate "commit"/deploy step here.
 let _irMergeAllTracking = false; // a bulk merge was queued this session and is draining
@@ -6870,7 +7072,7 @@ function _updateMergeAllBtns(issues) {
   const isSuper = _can('deploy_code');
   const onTab = _irFilter === 'merge';
   const eligible = (issues || []).filter(_irMergeEligible);
-  const inFlight = (issues || []).filter(i => i.devMergeStatus === 'queued' || i.devMergeStatus === 'merging');
+  const inFlight = (issues || []).filter(i => i.devMergeStatus === 'merging');
 
   if (onTab && isSuper && eligible.length > 0) {
     mergeBtn.dataset.count = eligible.length;
@@ -6885,14 +7087,15 @@ function _updateMergeAllBtns(issues) {
   // merge status until merged) — other filters would report a false "done".
   if (_irMergeAllTracking && (_irFilter === '' || _irFilter === 'merge')) {
     if (inFlight.length > 0) {
-      if (!_irMergePollTimer) _irMergePollTimer = setInterval(loadIssueReports, 5000);
+      // Each list load asks GitHub about up to 5 cloud merges, so poll gently.
+      if (!_irMergePollTimer) _irMergePollTimer = setInterval(loadIssueReports, 15000);
     } else {
       _irMergeAllTracking = false;
       if (_irMergePollTimer) { clearInterval(_irMergePollTimer); _irMergePollTimer = null; }
       // Failed merges pop back into the eligible list above — flag them; whatever did
       // merge has already been committed to staging automatically.
       if (eligible.length > 0) {
-        window.showToast?.(`${eligible.length} merge${eligible.length === 1 ? '' : 's'} failed — open the ticket${eligible.length === 1 ? '' : 's'} to see the runner output, or press “Merge all” to retry.`, { icon: '⚠️' });
+        window.showToast?.(`${eligible.length} merge${eligible.length === 1 ? '' : 's'} failed — open the ticket${eligible.length === 1 ? '' : 's'} to see why, or press “Merge all” to retry.`, { icon: '⚠️' });
       }
     }
   }
@@ -6901,13 +7104,13 @@ function _updateMergeAllBtns(issues) {
 async function requestMergeAll() {
   const btn = document.getElementById('ir-merge-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (!(await window.confirmModal(`The developer runner will merge each pull request in turn and staging will rebuild automatically once every merge has finished.`, { title: `Merge all ${window.escapeHtml(n)} ready fix${n === 1 ? '' : 'es'} to the staging branch now?` }))) return;
-  if (btn) { btn.disabled = true; btn.textContent = '🔀 Queuing…'; }
+  if (!(await window.confirmModal(`GitHub Actions will merge each pull request (up to 10 per click) and staging will rebuild automatically once every merge has finished.`, { title: `Merge all ${window.escapeHtml(n)} ready fix${n === 1 ? '' : 'es'} to the staging branch now?` }))) return;
+  if (btn) { btn.disabled = true; btn.textContent = '🔀 Starting…'; }
   try {
     const d = await api(`${IR_API}?action=request-merge-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
-    if ((d.queued || 0) > 0) { _irMergeAllTracking = true; }
+    if ((d.queued || 0) > 0) { _irMergeAllTracking = true; if (d.error || d.note) window.showToast?.(d.error ? `${d.queued} started. ${d.error}` : d.note, { icon: d.error ? '⚠️' : '🔀' }); }
     else window.showToast?.('Nothing to merge — no fix PRs are ready (fixes awaiting a database migration must be run from their ticket first).', { icon: '⚠️' });
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
   finally { loadIssueReports(); }
@@ -6944,7 +7147,8 @@ const FR_STATUS_CLS = {
   declined: 'bg-red-100 text-red-600', duplicate: 'bg-gray-200 text-gray-500',
 };
 let _frItems = [];
-let _frPane = 'moderation';
+// Board is the default; the last view chosen is remembered (frSwitchPane).
+let _frPane = (() => { try { return localStorage.getItem('admin-board:features:pane') || 'board'; } catch { return 'board'; } })();
 
 async function loadFeatureRoadmap() {
   const board = document.getElementById('fr-board');
@@ -6952,7 +7156,7 @@ async function loadFeatureRoadmap() {
   try {
     const d = await api(FR_API);
     _frItems = d.requests || [];
-    if (_frPane === 'roadmap') renderGantt(); else renderModerationList();
+    frSwitchPane(_frPane);
   } catch (e) {
     if (board) board.innerHTML = `<div class="text-red-500 text-sm py-5">${e.message}</div>`;
   }
@@ -6960,15 +7164,17 @@ async function loadFeatureRoadmap() {
 
 function frSwitchPane(name) {
   _frPane = name;
+  try { localStorage.setItem('admin-board:features:pane', name); } catch { /* defaults next time */ }
+  document.getElementById('fr-pane-board').classList.toggle('hidden', name !== 'board');
   document.getElementById('fr-pane-moderation').classList.toggle('hidden', name !== 'moderation');
   document.getElementById('fr-pane-roadmap').classList.toggle('hidden', name !== 'roadmap');
-  [['moderation','fr-subtab-moderation'],['roadmap','fr-subtab-roadmap']].forEach(([n, id]) => {
+  [['board','fr-subtab-board'],['moderation','fr-subtab-moderation'],['roadmap','fr-subtab-roadmap']].forEach(([n, id]) => {
     const b = document.getElementById(id); if (!b) return;
     const active = n === name;
     b.classList.toggle('bg-white', active); b.classList.toggle('text-gray-900', active); b.classList.toggle('shadow-sm', active);
     b.classList.toggle('text-gray-500', !active);
   });
-  if (name === 'roadmap') renderGantt(); else renderModerationList();
+  if (name === 'roadmap') renderGantt(); else if (name === 'board') frBoard().setItems(_frItems); else renderModerationList();
 }
 
 // ── Moderation list (US04) ──────────────────────────────────────────────────
@@ -7030,6 +7236,98 @@ async function frSetStatus(id, status) {
     });
     loadFeatureRoadmap();
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); loadFeatureRoadmap(); }
+}
+
+
+// ── Feature requests board (src/components/admin-board.js) ─────────────────────────────────────
+// Five columns over the nine statuses. A drop is a status change, which notifies the submitter and
+// voters (admin-feature-requests.ts), so Released and Declined ask first.
+const FR_BOARD_COLUMNS = [
+  { key: 'review', label: 'To review', hint: 'New ideas, not public yet' },
+  { key: 'backlog', label: 'Backlog', hint: 'Accepted, collecting votes' },
+  { key: 'planned', label: 'Planned' },
+  { key: 'building', label: 'Building', hint: 'Brief ready or in progress' },
+  { key: 'released', label: 'Released' },
+  { key: 'closed', label: 'Declined / duplicate', folded: true },
+];
+const FR_COLUMN_OF_STATUS = {
+  pending_review: 'review', under_review: 'backlog', open: 'backlog', planned: 'planned',
+  brief_ready: 'building', in_progress: 'building', released: 'released', declined: 'closed', duplicate: 'closed',
+};
+const FR_STATUS_FOR_COLUMN = { review: 'pending_review', backlog: 'open', planned: 'planned', building: 'in_progress', released: 'released', closed: 'declined' };
+const FR_PRIORITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+const frColumnOf = (it) => FR_COLUMN_OF_STATUS[it.status] || 'review';
+function frBoardCard(it) {
+  const parent = it.parentId ? _frItems.find(x => x.id === it.parentId) : null;
+  const badges = [
+    `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${FR_PRIORITY_CLS[it.priority] || 'bg-gray-100 text-gray-600'}">${_esc(FR_PRIORITY_LABEL[it.priority] || it.priority)}</span>`,
+    (it.itemType && it.itemType !== 'feature') ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${FR_ITEM_TYPE_CLS[it.itemType] || 'bg-gray-100 text-gray-600'}">${_esc(FR_ITEM_TYPE_LABEL[it.itemType] || it.itemType)}</span>` : '',
+    it.status === 'brief_ready' ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">Brief ready</span>' : '',
+    it.status === 'duplicate' ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500">Duplicate</span>' : '',
+    it.targetQuarter ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">${_esc(it.targetQuarter)}</span>` : '',
+    // Revenue behind it (src/utils/feature-revenue.ts): paying workspaces that asked or voted, list price.
+    Number(it.revenueGbp) > 0 ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700" title="${Number(it.payingWorkspaces) || 0} paying workspace(s) asked or voted — monthly list price">£${Math.round(Number(it.revenueGbp))}/mo · ${Number(it.payingWorkspaces) || 0} paying</span>` : '',
+  ].filter(Boolean).join('');
+  const who = it.source === 'issue' && it.issueId ? `From issue #${Number(it.issueId)}` : it.source === 'manual' ? 'Added by admin' : (it.submitterEmail || 'a user');
+  return `
+    <div class="flex items-start gap-2">
+      <span class="text-emerald-600 text-xs font-bold shrink-0 pt-0.5" title="Votes">▲ ${Number(it.voteCount) || 0}</span>
+      <p class="text-sm font-semibold text-gray-800 line-clamp-3 break-words">${_esc(it.title)}</p>
+    </div>
+    <div class="flex flex-wrap gap-1 mt-1.5">${badges}</div>
+    ${parent ? `<p class="text-[11px] text-gray-400 mt-1 truncate">↳ ${_esc(parent.title)}</p>` : ''}
+    <p class="text-[11px] text-gray-400 mt-1">#${Number(it.id)} · ${_esc(FR_CATEGORY_LABEL[it.category] || it.category)}${it.assistantRef ? ' · ' + _esc(it.assistantRef) : ''} · ${_esc(who)}</p>`;
+}
+const _frDistinct = (items, f) => [...new Set(items.map(f).filter(Boolean))].sort().map(v => ({ value: v, label: v }));
+let _frKanban = null;
+function frBoard() {
+  if (_frKanban) return _frKanban;
+  _frKanban = window.AdminBoard.create({
+    id: 'features',
+    mount: document.getElementById('fr-kanban'),
+    columns: FR_BOARD_COLUMNS,
+    columnOf: frColumnOf,
+    idOf: (it) => it.id,
+    searchText: (it) => [it.title, it.description, it.submitterEmail, it.assistantRef].join(' '),
+    renderCard: frBoardCard,
+    filters: [
+      { key: 'category', label: 'Category', options: () => Object.entries(FR_CATEGORY_LABEL).map(([value, label]) => ({ value, label })), test: (it, v) => it.category === v },
+      { key: 'assistant', label: 'Assistant', options: (items) => _frDistinct(items, it => it.assistantRef), test: (it, v) => it.assistantRef === v },
+      { key: 'priority', label: 'Priority', options: () => FR_PRIORITIES.map(p => ({ value: p, label: FR_PRIORITY_LABEL[p] })), test: (it, v) => it.priority === v },
+      { key: 'type', label: 'Type', options: () => FR_ITEM_TYPES.map(t => ({ value: t, label: FR_ITEM_TYPE_LABEL[t] })), test: (it, v) => (it.itemType || 'feature') === v },
+      { key: 'quarter', label: 'Quarter', options: (items) => _frDistinct(items, it => it.targetQuarter), test: (it, v) => it.targetQuarter === v },
+      { key: 'source', label: 'From', options: () => [{ value: 'user', label: 'Customers' }, { value: 'manual', label: 'Admins' }, { value: 'issue', label: 'Issues' }], test: (it, v) => it.source === v },
+      { key: 'revenue', label: 'Revenue', options: () => [{ value: 'paying', label: 'From paying customers' }, { value: 'none', label: 'No paying customer yet' }], test: (it, v) => v === 'paying' ? Number(it.revenueGbp) > 0 : !(Number(it.revenueGbp) > 0) },
+    ],
+    groups: [
+      { key: 'category', label: 'Category', of: (it) => FR_CATEGORY_LABEL[it.category] || it.category },
+      { key: 'assistant', label: 'Assistant', of: (it) => it.assistantRef || 'Not an assistant' },
+      { key: 'priority', label: 'Priority', of: (it) => FR_PRIORITY_LABEL[it.priority] || it.priority },
+      { key: 'epic', label: 'Epic', of: (it) => { const p = it.parentId ? _frItems.find(x => x.id === it.parentId) : null; return p ? p.title : (it.itemType === 'epic' ? it.title : 'No epic'); } },
+    ],
+    sorts: [
+      { key: 'votes', label: 'Most votes', compare: (a, b) => (b.voteCount || 0) - (a.voteCount || 0) || new Date(b.createdAt) - new Date(a.createdAt) },
+      { key: 'revenue', label: 'Most revenue', compare: (a, b) => (Number(b.revenueGbp) || 0) - (Number(a.revenueGbp) || 0) || (b.voteCount || 0) - (a.voteCount || 0) },
+      { key: 'newest', label: 'Newest first', compare: (a, b) => new Date(b.createdAt) - new Date(a.createdAt) },
+      { key: 'priority', label: 'Priority', compare: (a, b) => (FR_PRIORITY_RANK[a.priority] ?? 9) - (FR_PRIORITY_RANK[b.priority] ?? 9) || (b.voteCount || 0) - (a.voteCount || 0) },
+      { key: 'rank', label: 'Board order', compare: (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) },
+    ],
+    defaultSort: 'votes',
+    quickViews: [{ key: 'needs', label: 'Needs me', columns: ['review'] }],
+    canDrop: (it, to) => frColumnOf(it) !== to || 'Already there.',
+    onDrop: async (it, to) => {
+      const status = FR_STATUS_FOR_COLUMN[to];
+      if (!status) return;
+      if (to === 'released' || to === 'closed') {
+        const ok = await window.confirmModal(`The submitter and everyone who voted (${Number(it.voteCount) || 0}) are told.`,
+          { title: to === 'released' ? `Mark #${it.id} as released?` : `Decline #${it.id}?`, confirmLabel: to === 'released' ? 'Mark released' : 'Decline' });
+        if (!ok) return;
+      }
+      await frSetStatus(it.id, status);
+    },
+    onOpen: (it) => { openRoadmapEdit(it.id); document.getElementById('fr-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+  });
+  return _frKanban;
 }
 
 async function frMergeRequest(sourceId) {
@@ -7247,100 +7545,13 @@ async function frGanttDrop(e, quarter) {
 }
 
 // ── Epic: Superadmin Environment Management — US4/US5: Sandbox panel ──────────
-async function loadSystemStatus() {
+// Systems & connections = the System Map (src/components/admin-system-map.js). The old card list
+// read admin-system-status.ts; the map reads admin-system-map.ts, which carries the same registry.
+function loadSystemStatus() {
   const panel = document.getElementById('systems-panel');
   if (!panel) return;
-  panel.innerHTML = '<div class="text-gray-400 animate-pulse text-sm">Loading…</div>';
-
-  let data;
-  try {
-    const res = await fetch('/.netlify/functions/admin-system-status');
-    if (res.status === 403) { panel.innerHTML = '<div class="text-sm text-red-600">Super admin access required.</div>'; return; }
-    if (!res.ok) throw new Error('failed');
-    data = await res.json();
-  } catch {
-    panel.innerHTML = '<div class="text-sm text-red-600">Could not load system status. Please try again.</div>';
-    return;
-  }
-
-  const env = data.environment === 'production' ? 'production' : 'staging';
-  const other = env === 'production' ? 'staging' : 'production';
-  const envLabelEl = document.getElementById('systems-env-label');
-  if (envLabelEl) envLabelEl.textContent = `the ${env}`;
-
-  const NETLIFY_ENV_URL = 'https://app.netlify.com'; // → Site configuration → Environment variables
-
-  const healthBadge = (h) => {
-    if (h === 'ok')    return '<span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">● Reachable</span>';
-    if (h === 'error') return '<span class="inline-flex items-center gap-1 text-xs font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">● Unreachable</span>';
-    return '<span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-400 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-full">No check</span>';
-  };
-  const configBadge = (configured, maskedHint) => {
-    if (configured === null) return '<span class="text-xs text-gray-400">Console-managed</span>';
-    if (configured) return `<span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">✓ Configured</span>${maskedHint ? ` <span class="text-xs text-gray-400 font-mono">${maskedHint}</span>` : ''}`;
-    return '<span class="inline-flex items-center gap-1 text-xs font-semibold text-amber-700">⚠ Not configured</span>';
-  };
-
-  // Two columns: the current deployment env shows live config/health; the other env links out.
-  const liveCol = (s) => `
-    <div class="flex-1 min-w-0 border border-gray-200 rounded-lg p-3 bg-white">
-      <p class="text-[10px] font-bold uppercase tracking-wide text-emerald-600 mb-1.5">${env} · this deployment</p>
-      <div class="space-y-1.5">
-        <div>${configBadge(s.configured, s.maskedHint)}</div>
-        <div>${healthBadge(s.health)}</div>
-      </div>
-    </div>`;
-  const otherCol = (s) => `
-    <div class="flex-1 min-w-0 border border-dashed border-gray-200 rounded-lg p-3 bg-gray-50/50">
-      <p class="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">${other}</p>
-      <p class="text-xs text-gray-400">Check from the ${other} admin portal.</p>
-    </div>`;
-
-  // Launch-readiness banner — the go/no-go verdict for critical keys in THIS deployment env.
-  const r = data.readiness;
-  const readinessBanner = !r ? '' : (() => {
-    const chip = (label, items, tone) => !items || !items.length ? '' :
-      `<p class="text-xs mt-1 ${tone}"><span class="font-semibold">${label}:</span> ${items.join(', ')}</p>`;
-    if (r.launchReady) {
-      return `<div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 mb-4">
-        <p class="text-sm font-bold text-emerald-800">✓ Launch-ready — all critical services configured in ${env}.</p>
-        ${chip('Running in mock/disabled mode', r.missingCore, 'text-amber-700')}
-        ${chip('Connectors live', r.connectorsLive, 'text-emerald-700')}
-      </div>`;
-    }
-    return `<div class="rounded-xl border border-red-200 bg-red-50 p-4 mb-4">
-      <p class="text-sm font-bold text-red-800">⚠ Not launch-ready in ${env} — critical services need attention.</p>
-      ${chip('Missing critical keys', r.missingCritical, 'text-red-700')}
-      ${chip('Configured but unreachable', r.unreachableCritical, 'text-red-700')}
-      ${chip('Also in mock/disabled mode', r.missingCore, 'text-amber-700')}
-    </div>`;
-  })();
-
-  // The Node version these functions are executing on right now — Netlify picks the patch
-  // release, so this is the only place to read it when a security advisory names versions.
-  const rt = data.runtime;
-  const runtimeLine = !rt?.node ? '' : `<div class="rounded-xl border border-gray-200 bg-white p-4 mb-4">
-      <p class="text-sm text-gray-700"><span class="font-semibold">Functions run on Node <span class="font-mono">${rt.node}</span></span> in ${env}.</p>
-      ${rt.pinnedMatches === false ? `<p class="text-xs mt-1 text-amber-700">⚠ Does not match the pinned NODE_VERSION ${rt.pinned} in netlify.toml.</p>` : ''}
-    </div>`;
-
-  panel.innerHTML = readinessBanner + runtimeLine + data.services.map(s => `
-    <div class="bg-white border border-gray-200 rounded-xl p-4">
-      <div class="flex items-start justify-between gap-3 mb-3 flex-wrap">
-        <div class="min-w-0">
-          <p class="text-sm font-bold text-gray-900">${s.name} <span class="ml-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">${s.category}</span></p>
-          <p class="text-sm text-gray-500 mt-0.5">${s.purpose}</p>
-          ${s.envVars && s.envVars.length ? `<p class="text-[11px] text-gray-400 mt-1 font-mono">${s.envVars.join(' · ')}</p>` : ''}
-        </div>
-        <div class="flex items-center gap-2 shrink-0">
-          <a href="${s.consoleUrl}" target="_blank" rel="noopener noreferrer" class="text-xs font-semibold text-violet-600 hover:text-violet-700 whitespace-nowrap">Open console ↗</a>
-          ${s.envVars && s.envVars.length ? `<a href="${NETLIFY_ENV_URL}" target="_blank" rel="noopener noreferrer" class="text-xs font-semibold text-gray-500 hover:text-gray-700 whitespace-nowrap">Edit env ↗</a>` : ''}
-        </div>
-      </div>
-      <div class="flex gap-3 flex-col sm:flex-row">
-        ${env === 'production' ? liveCol(s) + otherCol(s) : otherCol(s) + liveCol(s)}
-      </div>
-    </div>`).join('');
+  if (!window.AdminSystemMap) { panel.innerHTML = '<div class="text-sm text-red-600">The system map did not load. Refresh the page.</div>'; return; }
+  window.AdminSystemMap.load(panel);
 }
 
 function loadSandboxPanel() {
@@ -7883,8 +8094,9 @@ function inboxRender() {
       </td></tr>`;
   }).join('') || '<tr><td colspan="6" class="px-5 py-8 text-center text-gray-400">Nothing here.</td></tr>');
 }
-// Move a request to the other queue (support-inbox.ts ticketToIssue / issueToTicket).
-async function inboxReroute(kind, id) {
+// Move a request to the other queue (support-inbox.ts ticketToIssue / issueToTicket / ticketToFeature).
+async function inboxReroute(kind, id, to) {
+  if (to === 'feature') return inboxRerouteToFeature(id);
   const toIssue = kind === 'ticket';
   const ok = await window.confirmModal(toIssue
       ? 'This creates a reported problem in the Fix pipeline with the whole conversation, replies to the customer saying where it went, and closes this request.'
@@ -7900,6 +8112,32 @@ async function inboxReroute(kind, id) {
   } catch (e) {
     window.showToast?.(e.message || 'Could not move it.', { icon: '⚠️' });
   }
+}
+
+// A support request that is really an idea → a feature request at Pending Review. Likely duplicates
+// come back named, not merged: merge them on Feature requests, which moves the votes across.
+async function inboxRerouteToFeature(id) {
+  const ok = await window.confirmModal('This creates a feature request (Pending Review) with the whole conversation, submitted by the customer so they hear when its status changes. They are told where to follow it, and this request closes.',
+    { title: 'Send to Feature requests?', confirmLabel: 'Send to Feature requests', cancelLabel: 'Cancel' });
+  if (!ok) return;
+  try {
+    const r = await api('/.netlify/functions/admin-api?resource=inbox-reroute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind: 'ticket', id, to: 'feature' }) });
+    const dupes = Array.isArray(r.possibleDuplicates) ? r.possibleDuplicates : [];
+    window.showToast?.(dupes.length
+      ? `Sent to Feature requests as #${r.to.id}. Possible duplicate of ${dupes.map(d => `#${d.id} “${d.title}”`).join(', ')} — merge it there.`
+      : `Sent to Feature requests as #${r.to.id}.`, { icon: '✅' });
+    closeTicketPanel();
+    if (document.getElementById('view-inbox') && !document.getElementById('view-inbox').classList.contains('hidden')) loadInbox();
+  } catch (e) {
+    window.showToast?.(e.message || 'Could not move it.', { icon: '⚠️' });
+  }
+}
+
+// Open one feature request's editor from anywhere (Contacts), loading the board first if needed.
+async function openFeatureRequest(id) {
+  adminNav('feature-roadmap');
+  if (!_frItems.some(x => x.id === id)) await loadFeatureRoadmap();
+  openRoadmapEdit(id);
 }
 
 async function loadTickets() {
@@ -7969,7 +8207,10 @@ async function openTicketPanel(tid) {
       <div class="bg-gray-50 rounded-xl p-4 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${_escH(t.description)}</div>
       ${t.status !== 'closed' ? `<div class="flex items-center justify-between gap-3 border border-violet-100 bg-violet-50 rounded-xl px-4 py-3">
         <p class="text-xs text-violet-800">Really a fault? Move it to the Fix pipeline — the customer is told where it went, and this request closes.</p>
-        <button type="button" onclick="inboxReroute('ticket', ${t.id})" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold border rounded-lg">Send to Fix pipeline</button></div>` : ''}
+        <button type="button" onclick="inboxReroute('ticket', ${t.id})" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold border rounded-lg">Send to Fix pipeline</button></div>
+      <div class="flex items-center justify-between gap-3 border border-amber-100 bg-amber-50 rounded-xl px-4 py-3">
+        <p class="text-xs text-amber-800">Really an idea for something new? Make it a feature request — the customer is told where to follow it, and this request closes.</p>
+        <button type="button" onclick="inboxReroute('ticket', ${t.id}, 'feature')" class="btn-secondary shrink-0 px-3 py-1.5 text-xs font-bold border rounded-lg">Send to Feature requests</button></div>` : ''}
       <!-- Reply thread -->
       <div id="reply-thread" class="space-y-3">
         ${replies.map(r => `
@@ -9581,7 +9822,7 @@ async function openContact(id) {
   document.getElementById('contact-info').innerHTML = '<p class="p-1 text-gray-400">Loading…</p>';
   try {
     const data = await api(`/.netlify/functions/admin-api?resource=contact-detail&id=${id}`);
-    renderContactDetail(data.lead, data.thread || [], data.tasks || [], data.client || null, data.tickets || [], data.issues || [], data.adminMessages || []);
+    renderContactDetail(data.lead, data.thread || [], data.tasks || [], data.client || null, data.tickets || [], data.issues || [], data.adminMessages || [], data.featureRequests || []);
     renderContactInfo(data.lead, data.client || null);
     // Scroll the detail pane back to the top so the avatar/header is fully visible.
     if (detailPane.parentElement) detailPane.parentElement.scrollTop = 0;
@@ -9591,7 +9832,7 @@ async function openContact(id) {
   }
 }
 
-function renderContactDetail(lead, thread, tasks, client, tickets, issues, adminMessages) {
+function renderContactDetail(lead, thread, tasks, client, tickets, issues, adminMessages, featureIdeas) {
   const pill = CT_TYPE_PILL[lead.contactType] || CT_TYPE_PILL.lead;
   // Prefer the client's account name for the header so it matches the read-only Contact info.
   const displayName = (client && client.accountName) || lead.name || '';
@@ -9651,6 +9892,7 @@ function renderContactDetail(lead, thread, tasks, client, tickets, issues, admin
       ${_ctSupportSection(tickets, client)}
 
       ${_ctIssuesSection(issues, client)}
+      ${_ctFeatureSection(featureIdeas, client)}
 
       ${_ctAdminMessagesSection(adminMessages, client)}
 
@@ -9801,6 +10043,28 @@ function _ctIssuesSection(issues, client) {
     'Issues reported',
     open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${issues.length})</span>`,
     `<div class="space-y-2">${issues.length ? issues.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No issues reported yet.</p>'}</div>`
+  );
+}
+
+// Feature requests — ideas this account submitted, or that were moved here from their support
+// requests (support-inbox.ts ticketToFeature), newest first. Each row opens the Feature requests
+// editor. Same visibility rule as Support requests / Issues reported.
+function _ctFeatureSection(items, client) {
+  items = Array.isArray(items) ? items : [];
+  if (!items.length && !client) return '';
+  const open = items.filter(f => !['released', 'declined', 'duplicate'].includes(f.status)).length;
+  const row = f => `<button onclick="openFeatureRequest(${Number(f.id)})" class="btn-secondary w-full text-left border rounded-xl px-3 py-2.5 transition flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <p class="text-sm font-semibold text-gray-800 truncate">${_escH(f.title || '(no title)')}</p>
+        <p class="text-xs text-gray-400 mt-0.5">#${Number(f.id)} · ${Number(f.voteCount) || 0} vote${Number(f.voteCount) === 1 ? '' : 's'} · ${age(f.createdAt)}</p>
+      </div>
+      <span class="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${FR_STATUS_CLS[f.status] || 'bg-gray-100 text-gray-600'}">${_escH(FR_STATUS_LABEL[f.status] || f.status)}</span>
+    </button>`;
+  return _ctSection(
+    'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z',
+    'Feature requests',
+    open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${items.length})</span>`,
+    `<div class="space-y-2">${items.length ? items.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No feature requests yet.</p>'}</div>`
   );
 }
 

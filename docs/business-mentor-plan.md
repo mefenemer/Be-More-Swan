@@ -64,7 +64,7 @@ existing write paths*.
 | Being the user guide | Ask Your Team answers from published `help_articles` only (`src/utils/help-knowledge.ts`) and cites them | Reuse the same block in the Mentor's prompt |
 | Handing work to another assistant | Chat hand-offs (`ROUTES[targetRoleKey]`, `orchestration_runs`), Campaign Assistant orders, "Requested by" pills (`src/utils/requested-by.ts`) | Mentor as a requester (§2.2) |
 | Support request from chat | `netlify/functions/support-tickets.ts` (POST `{subject, category, description}`, emails the admin inbox, audits) | A proposal card any route can emit (§3.7) |
-| Bug report from chat | `issue_reports` + `netlify/functions/issue-reports.ts` (Report an Issue, user-facing) + `admin-issue-reports.ts` + "Pass to Developer" (`admin-issue-handoff.ts`) | Same card, routed by kind (§2.6) |
+| Bug report from chat | `issue_reports` + `netlify/functions/issue-reports.ts` (Report an Issue, user-facing) + `admin-issue-reports.ts` + "Pass to Developer" (`src/utils/issue-ai-fix.ts`, GitHub Actions) | Same card, routed by kind (§2.6) |
 | Automatic incident reporting | The same `issue_reports` table and admin screens | A hidden, system-only source (§6.2); `issue_reports.user_id` is NOT NULL today |
 | Weekly review email | `netlify/functions/weekly-digest.ts` — fixed but deliberately **unscheduled** | Reuse as the delivery vehicle if the owner turns it on |
 | Facts with sources | `gatewayGenerateGrounded` in `src/lib/ai-gateway.ts` (Anthropic `web_search` server tool, max 4 searches, URL allow-list from the tool's own results); used by `src/utils/compliance-verification.ts` | Must run as a background job (§1.1) |

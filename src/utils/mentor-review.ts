@@ -566,7 +566,7 @@ export async function runMentorReview(db: Db, reviewId: number, now = new Date()
                 }, m, thinking) as Anthropic.MessageCreateParamsNonStreaming, { timeout: 240_000 }) }),
                 { label: 'mentor weekly review' },
             );
-            void logAiUsage({
+            await logAiUsage({
                 workspaceId: orgId, userId: readerId, assistantId: mentor.id, model,
                 inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens,
                 sessionId: `mentor:review:${reviewId}`, dataCategories: ['business_context'],

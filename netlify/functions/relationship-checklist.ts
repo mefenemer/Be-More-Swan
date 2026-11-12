@@ -18,9 +18,10 @@ import { requireTenant } from '../../src/utils/tenant';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJsonArray } from '../../src/utils/model-json';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 const VALID_CATEGORIES = new Set(['engagement', 'outreach', 'community', 'follow_up']);
 
 /** UTC calendar day as YYYY-MM-DD — the checklist's "today". */
@@ -189,12 +190,12 @@ Rules:
     const MAX_RETRIES = 3;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const response = await anthropic.messages.create({
+            const response = await anthropic.messages.create(adaptForModel({
                 model: MODEL, max_tokens: 700,
                 messages: [{ role: 'user', content: prompt }],
-            });
-            logMessageUsage(response, MODEL, { workspaceId: organisationId, sessionId: 'relationship-checklist' });
-            const raw = (response.content[0] as { text: string }).text.trim();
+            }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
+            await logMessageUsage(response, MODEL, { workspaceId: organisationId, sessionId: 'relationship-checklist' });
+            const raw = replyText(response.content).trim();
             const candidate = parseModelJsonArray<ChecklistItem>(raw);
             if (Array.isArray(candidate) && candidate.length) { parsed = candidate; break; }
             console.warn(`[relationship-checklist] Attempt ${attempt}: invalid LLM response`);

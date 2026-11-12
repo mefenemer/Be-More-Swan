@@ -197,7 +197,7 @@ export function buildBlogSystemPrompt({
         (inspoBlock ? `\n\n${inspoBlock}` : ''));
 }
 
-export const BLOG_MODEL = 'claude-haiku-4-5-20251001';
+export const BLOG_MODEL = 'claude-haiku-5-5';
 export const DEFAULT_TONE = 'friendly and professional';
 
 /** Trim an untrusted string to a bounded length; non-strings become ''. */
@@ -413,7 +413,7 @@ export async function generateBlogBody(
     const raw = replyText(response.content).trim();
     if (!raw) throw new Error('Empty draft.');
 
-    void logAiUsage({
+    await logAiUsage({
         userId, workspaceId: organisationId, model: usedModel,
         inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
     });

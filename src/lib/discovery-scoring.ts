@@ -43,7 +43,7 @@ function senderPhrase(sender: SenderIdentity): string {
     const name = (sender.businessName || '').trim();
     return name ? `"${name}"` : 'the business that owns this workspace';
 }
-export const SCORING_MODEL = 'claude-haiku-4-5-20251001';
+export const SCORING_MODEL = 'claude-haiku-5-5';
 
 /**
  * How many times a blank batch may be halved and re-scored.

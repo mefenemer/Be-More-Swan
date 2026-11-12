@@ -25,10 +25,11 @@ import { parseModelJson } from './model-json';
 import { loadProductsBlock } from './org-products';
 import { pickBalancedTopic, topicLine } from './topic-balance';
 import { PILLAR_PROFILES } from './pillar-profiles';
+import { adaptForModel, replyText } from '../config/model-options';
 
 type Db = ReturnType<typeof getDb>;
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 /** How many recent titles to show the model as "don't repeat these". Bounded so a large library
  *  doesn't grow the prompt without limit — recency is what matters for avoiding near-duplicates. */
@@ -168,7 +169,7 @@ export async function ideateBlogTopic(
 
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 400,
             system:
@@ -186,14 +187,14 @@ export async function ideateBlogTopic(
                 (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
                 (inspoBlock ? `\n\n${inspoBlock}` : ''),
             messages: [{ role: 'user', content: brief }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-        void logAiUsage({
+        await logAiUsage({
             userId, workspaceId: organisationId, model: MODEL,
             inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
         });
 
-        const parsed = parseModelJson<Record<string, unknown>>((response.content[0] as { text?: string })?.text ?? '');
+        const parsed = parseModelJson<Record<string, unknown>>(replyText(response.content) ?? '');
         if (!parsed) return null;
 
         const title = str(parsed.title, 200);

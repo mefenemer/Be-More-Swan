@@ -100,7 +100,7 @@ export default withLambda(async (event: HandlerEvent) => {
 
         await settleHold(db, { orgId, amount: cost, success: true, mediaType: 'audio', userId: ownerId, jobId: job.id, assistantId: job.assistantId ?? null });
         // Stability charges a SUCCESSFUL generation only — which is exactly here.
-        logMediaCost(job.model, {}, { workspaceId: orgId, userId: ownerId, assistantId: job.assistantId ?? null, sessionId: 'stability-music' });
+        await logMediaCost(job.model, {}, { workspaceId: orgId, userId: ownerId, assistantId: job.assistantId ?? null, sessionId: 'stability-music' });
 
         // ── Shared with the community: into the library every workspace can browse ───────────────
         // After the customer has their track and has been charged the shared price, and isolated so a

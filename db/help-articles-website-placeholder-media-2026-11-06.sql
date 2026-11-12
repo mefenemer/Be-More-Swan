@@ -46,7 +46,7 @@ If a picture or video can't be found or made, your site is still written. You're
 - **Your own pictures** already on a section are never replaced.
 
 Nothing goes live until you press **Publish**.
-$$)
+$$, TRUE)
 
 ON CONFLICT (title) DO NOTHING
 RETURNING id, title;

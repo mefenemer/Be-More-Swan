@@ -24,6 +24,7 @@ import { tourNarrationCache } from '../../db/schema';
 import { requireSession } from '../../src/utils/session';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { logAiUsage, speechCostFromTextUsd } from '../../src/utils/ai-usage';
 
 // "shimmer" reads as warm and animated rather than flat — the closest built-in match to the
 // "more human and excited" quality the user asked for.
@@ -87,6 +88,8 @@ export default withLambda(async (event: HandlerEvent) => {
         }
 
         const audioBuffer = Buffer.from(await res.arrayBuffer());
+        // A cache miss is the only time this costs anything; every later run serves the stored clip.
+        await logAiUsage({ model: MODEL, inputTokens: 0, outputTokens: 0, costUsdOverride: speechCostFromTextUsd(text), sessionId: 'tour-narration' });
         const audioBase64 = audioBuffer.toString('base64');
         const mimeType = 'audio/mpeg';
 

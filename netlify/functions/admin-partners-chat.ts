@@ -236,7 +236,7 @@ export default withLambda(async (event) => {
             }, { timeout: remaining, maxRetries: 0 });
             // Priced by the model that actually answered: a refusal fallback bills at its own rate.
             const served = String(response.model || '').startsWith(FALLBACK_MODEL) ? FALLBACK_MODEL : PARTNER_OPS_MODEL;
-            logMessageUsage(response, served, { userId: adminId, dataCategories: ['business_context'] });
+            await logMessageUsage(response, served, { userId: adminId, dataCategories: ['business_context'] });
 
             if (response.stop_reason === 'refusal') { reply = "I can't help with that one."; break; }
             const text = response.content.filter((b): b is Anthropic.Beta.BetaTextBlock => b.type === 'text').map((b) => b.text).join('\n').trim();

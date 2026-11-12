@@ -43,9 +43,10 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { searchMemory, type MemoryHit } from '../../src/utils/account-memory';
 import { traverseGraph } from '../../src/utils/account-graph';
 import { DEFAULT_MEMORY_TOP_K } from '../../src/config/account-graph';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 /** Graph expansion depth. Deliberately shallower than MAX_TRAVERSAL_DEPTH — an answer needs the
  *  account and its people, not a four-hop web of competitors-of-competitors. */
@@ -300,14 +301,14 @@ ${graphBlock}
 OUTCOMES (from the revenue ledger, this organisation, all time):
 ${statsBlock}`;
 
-    const resp = await anthropic.messages.create({
+    const resp = await anthropic.messages.create(adaptForModel({
         model: MODEL,
         max_tokens: 700,
         system,
         messages: [{ role: 'user', content: user }],
-    });
+    }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-    void logAiUsage({
+    await logAiUsage({
         workspaceId: organisationId,
         userId,
         assistantId,
@@ -322,5 +323,5 @@ ${statsBlock}`;
         dataCategories: ['business_context'],
     });
 
-    return resp.content[0]?.type === 'text' ? resp.content[0].text.trim() : '';
+    return replyText(resp.content).trim();
 }

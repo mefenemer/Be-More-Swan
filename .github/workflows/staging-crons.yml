@@ -127,6 +127,8 @@ jobs:
           # a workspace is due only a week after its last read.
           # `run-video-autopilot` (6h) writes the Video Producer's weekly storyboards (video-autopilot.ts).
           # Idempotent: a storyboard is due only after its spacing (7/3/2 days); never makes a video.
+          # `run-fix-live-check` (1h) tells Issues reporters their fix is live on staging and closes issues
+          # nobody replied to 7 days later (issue-fix-live.ts). Idempotent: every change is compare-and-swap.
           # `run-partner-sweep` (24h) makes partner commissions past their holding period payable.
           # Idempotent; daily matches production.
           # `run-paid-optimiser` (12h) is the paid-campaign sweep: fatigue pauses, the control
@@ -146,6 +148,7 @@ jobs:
           run-account-memory        3600    120
           run-goal-telemetry        3600    120
           run-campaign-reconciler   3600    120
+          run-fix-live-check        3600    120
           run-follower-counts       14400   120
           run-insights-ingest       21600   120
           run-lead-sweeps           21600   300

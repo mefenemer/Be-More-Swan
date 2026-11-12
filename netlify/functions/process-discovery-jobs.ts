@@ -22,7 +22,7 @@ import {
     discoveryCampaigns, discoveryGuardrails, discoveredLeads, discoveryJobs,
     aiAssistants, assistantRecords,
 } from '../../db/schema';
-import { generateQueries, type DiscoveryStrategy } from '../../src/lib/discovery-query-gen';
+import { generateQueries, QUERY_GEN_MODEL, type DiscoveryStrategy } from '../../src/lib/discovery-query-gen';
 import { scoreCandidates, discardReason, type LeadScoringCard, type ScoreCandidate, type ScoringSearchContext } from '../../src/lib/discovery-scoring';
 import { resolveSearchArea } from '../../src/lib/discovery-search-area';
 import { loadSenderIdentity } from '../../src/utils/sender-identity';
@@ -463,9 +463,9 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                 approvedQueries: approvedQueriesOf(campaign.approvedBrief),
             });
             tokensUsed += gen.inputTokens + gen.outputTokens;
-            void logAiUsage({
+            await logAiUsage({
                 workspaceId: job.organisation_id, assistantId: campaign.aiAssistantId,
-                model: 'claude-haiku-4-5-20251001', inputTokens: gen.inputTokens, outputTokens: gen.outputTokens,
+                model: QUERY_GEN_MODEL, inputTokens: gen.inputTokens, outputTokens: gen.outputTokens,
                 sessionId: `discovery:${job.job_id}:query_gen`, dataCategories: ['business_context'],
             });
             if (gen.flat.length === 0) {
@@ -648,7 +648,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
             // ten-company page: Opus 5.5 at low thinking 22–23s, Haiku 4.5 24–25s.
             const scored = await scoreCandidates(toScore, icp, sender, rulesBlock, searchContext, await loadRoleModel(db, 'lead_qualifier'));
             tokensUsed += scored.inputTokens + scored.outputTokens;
-            void logAiUsage({
+            await logAiUsage({
                 workspaceId: job.organisation_id, assistantId: campaign.aiAssistantId,
                 model: scored.model, inputTokens: scored.inputTokens, outputTokens: scored.outputTokens,
                 sessionId: `discovery:${job.job_id}:scoring`, dataCategories: ['business_context'],

@@ -37,7 +37,7 @@ import { isUpstreamBlocked } from '../lib/ai-gateway';
 
 export const FAL_BILLING_URL = 'https://api.fal.ai/v1/account/billing?expand=credits';
 const PROBE_TIMEOUT_MS = 8_000;
-const PROBE_MODEL = 'claude-haiku-4-5-20251001';
+const PROBE_MODEL = 'claude-haiku-5-5';
 /** Warn below this many USD. FLUX.2 Pro is ~$0.03–0.045 an image, so $10 is ~250 images of runway. */
 export const DEFAULT_FAL_LOW_BALANCE_USD = 10;
 
@@ -177,7 +177,7 @@ export async function probeAnthropic(
 ): Promise<AnthropicProbe> {
     if (!process.env.ANTHROPIC_API_KEY && !call) return { status: 'not_configured' };
     const run = call ?? (() => new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: PROBE_TIMEOUT_MS, maxRetries: 0 })
-        .messages.create({ model: PROBE_MODEL, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }));
+        .messages.create({ model: PROBE_MODEL, max_tokens: 1, thinking: { type: 'disabled' }, messages: [{ role: 'user', content: 'ping' }] }));
     try {
         await run();
         return { status: 'ok' };
