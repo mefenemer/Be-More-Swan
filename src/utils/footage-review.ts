@@ -43,7 +43,8 @@ type Db = ReturnType<typeof getDb>;
 export const ANALYSIS_VERSION = 3;   // 3 (2026-11-09): "um"s are transcribed (transcriptionPrompt)
 
 /**
- * What whisper is primed with. It drops "um"s by default — and then tightening can't see them, and its
+ * What whisper is primed with (only when it stands in for ElevenLabs Scribe, which is verbatim by
+ * default and keeps the "um"s without a prompt — src/lib/tts.ts). whisper drops "um"s by default — and then tightening can't see them, and its
  * loudness safety net protects them as "unheard speech" (staging, 2026-11-09: two opening ums stayed).
  * A prompt written WITH hesitations makes it write them down (OpenAI's documented technique); English
  * only, because a hesitation prompt in the wrong language pulls the transcript towards it. Pure.
@@ -205,6 +206,7 @@ async function analyseOne(db: Db, row: typeof footageAnalyses.$inferSelect, ctx:
         ({ words } = await transcribeAudio(wav, {
             filename: 'footage.wav', type: 'audio/wav', timeoutMs: 90_000, language: ctx.language,
             prompt: transcriptionPrompt(ctx.language, ctx.businessName),
+            keyterms: ctx.businessName ? [ctx.businessName] : [],
         }));
         await logTranscriptionCost(row.durationS, { workspaceId: ctx.orgId, assistantId: ctx.assistantId, sessionId: 'footage-review' });
     }

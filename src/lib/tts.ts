@@ -15,8 +15,13 @@
 // 2026-11-02: OpenAI could not sound like a British woman however the accent was described, so a
 // voice with an `elevenlabs` id is spoken by ElevenLabs (ELEVENLABS_API_KEY; ~3–6p a voiceover, the
 // owner kept it inside the 1-task weight). Any ElevenLabs failure falls back to the OpenAI speaker
-// and accent, so a voiceover is never lost — only its accent. Word timings stay with whisper for
-// both providers: one timing path, and it times the words that were actually spoken.
+// and accent, so a voiceover is never lost — only its accent. Word timings use one path for both
+// providers, and it times the words that were actually spoken.
+//
+// 2026-11-12 (docs/openai-audio-retirement-plan.md): OpenAI retires whisper-1 on 26 Feb 2027 and its
+// replacement (gpt-transcribe) gives no word timestamps. Word timings now come from ElevenLabs Scribe
+// (verbatim by default, so "um"s stay in for tightening; ~$0.0033/min). whisper-1 is used only when
+// Scribe is not set up or refuses (e.g. the key lacks the Speech to Text permission), until it retires.
 //
 // Pure helpers are exported for tests; the two network calls never retry and throw TtsError.
 
@@ -24,6 +29,9 @@ export const TTS_MODEL = process.env.OPENAI_TTS_MODEL ?? 'gpt-4o-mini-tts';
 export const TRANSCRIBE_MODEL = 'whisper-1';
 const SPEECH_URL = 'https://api.openai.com/v1/audio/speech';
 const TRANSCRIBE_URL = 'https://api.openai.com/v1/audio/transcriptions';
+/** ElevenLabs speech-to-text: word start/end times in one upload (files up to 5 GB). */
+export const SCRIBE_MODEL = process.env.ELEVENLABS_STT_MODEL ?? 'scribe_v3';
+const SCRIBE_URL = 'https://api.elevenlabs.io/v1/speech-to-text';
 export const ELEVENLABS_MODEL = process.env.ELEVENLABS_TTS_MODEL ?? 'eleven_multilingual_v2';
 const ELEVENLABS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 /** USD per 1,000 characters: Starter is $6 for 40,000. Recheck when the plan changes. */
@@ -96,38 +104,48 @@ export function cleanScript(text: string): string {
 }
 
 /**
- * Words from whisper's verbose_json. Pure. Drops entries without numeric times and keeps them in
- * order; an empty list is valid (captions are then simply absent — never invented).
+ * Words from a transcription: whisper's verbose_json (`word`) or Scribe's (`text`, with `type` —
+ * only 'word' entries count; 'spacing' and 'audio_event' are dropped). Pure. Drops entries without
+ * numeric times and keeps them in order; an empty list is valid (captions are then simply absent —
+ * never invented).
  */
 export function parseWords(payload: unknown): SpokenWord[] {
     const words = (payload as { words?: unknown[] } | null)?.words;
     if (!Array.isArray(words)) return [];
     return words
-        .map((w) => w as { word?: unknown; start?: unknown; end?: unknown })
+        .map((w) => w as { word?: unknown; text?: unknown; type?: unknown; start?: unknown; end?: unknown })
+        .filter((w) => w.type === undefined || w.type === 'word')
+        .map((w) => ({ word: typeof w.word === 'string' ? w.word : w.text, start: w.start, end: w.end }))
         .filter((w) => typeof w.word === 'string' && Number.isFinite(w.start) && Number.isFinite(w.end))
         .map((w) => ({ word: String(w.word).trim(), start: Number(w.start), end: Math.max(Number(w.end), Number(w.start)) }))
         .filter((w) => w.word.length > 0)
         .sort((a, b) => a.start - b.start);
 }
 
-/** Seconds of audio: whisper's own duration, else the last word's end. Pure. */
+/** Seconds of audio: the provider's own duration (whisper `duration`, Scribe `audio_duration_secs`), else the last word's end. Pure. */
 export function spokenDuration(payload: unknown, words: SpokenWord[]): number | null {
-    const d = Number((payload as { duration?: unknown } | null)?.duration);
+    const p = payload as { duration?: unknown; audio_duration_secs?: unknown } | null;
+    const d = Number(p?.duration ?? p?.audio_duration_secs);
     if (Number.isFinite(d) && d > 0) return Math.round(d * 100) / 100;
     return words.length ? Math.round(words[words.length - 1].end * 100) / 100 : null;
 }
 
-/**
- * List-price cost of one voiceover in USD: speech ~$0.015/min of audio + transcription $0.006/min
- * (OpenAI's published per-minute estimates as last read; recheck when the bill disagrees). Pure.
- */
-export function voiceoverCostUsd(durationS: number | null, spoken?: { provider: TtsProvider; chars: number }): string {
-    const minutes = Math.max((durationS ?? 30) / 60, 1 / 60);
-    if (spoken?.provider === 'elevenlabs') return (spoken.chars / 1000 * ELEVENLABS_USD_PER_1K_CHARS + minutes * 0.006).toFixed(6);
-    return (minutes * (0.015 + 0.006)).toFixed(6);
-}
-
 export type TtsProvider = 'openai' | 'elevenlabs';
+
+/** USD per minute of audio transcribed, list prices read 2026-11-12: Scribe $0.20/hour, whisper-1 $0.006/min. */
+export const TRANSCRIBE_USD_PER_MINUTE: Record<TtsProvider, number> = { elevenlabs: 0.2 / 60, openai: 0.006 };
+
+/**
+ * List-price cost of one voiceover in USD: the speech (ElevenLabs per character, or OpenAI ~$0.015/min
+ * of audio) + the transcription by whoever did it (TRANSCRIBE_USD_PER_MINUTE; null = it failed, so
+ * nothing). Published list prices as last read; recheck when the bill disagrees. Pure.
+ */
+export function voiceoverCostUsd(durationS: number | null, spoken?: { provider: TtsProvider; chars: number }, transcribedBy: TtsProvider | null = 'openai'): string {
+    const minutes = Math.max((durationS ?? 30) / 60, 1 / 60);
+    const timing = transcribedBy ? minutes * TRANSCRIBE_USD_PER_MINUTE[transcribedBy] : 0;
+    if (spoken?.provider === 'elevenlabs') return (spoken.chars / 1000 * ELEVENLABS_USD_PER_1K_CHARS + timing).toFixed(6);
+    return (minutes * 0.015 + timing).toFixed(6);
+}
 
 /** The ElevenLabs voice id for one of our voices, or null when OpenAI speaks it. Pure. */
 export function elevenLabsVoice(voice: VoiceId): string | null {
@@ -204,24 +222,85 @@ export async function synthesizeSpeech(text: string, voice: VoiceId, fetchImpl: 
     return Buffer.from(await res.arrayBuffer());
 }
 
+/** What a transcription gives back: the words, the audio's length, and who heard it (for the cost line). */
+export interface Transcript { words: SpokenWord[]; durationS: number | null; provider: TtsProvider }
+
 /** Word timings + duration for an mp3. A failure here is NOT fatal to the voiceover — callers keep the audio. */
-export async function transcribeWords(mp3: Buffer, fetchImpl: typeof fetch = fetch): Promise<{ words: SpokenWord[]; durationS: number | null }> {
+export async function transcribeWords(mp3: Buffer, fetchImpl: typeof fetch = fetch): Promise<Transcript> {
     return transcribeAudio(mp3, { filename: 'voiceover.mp3', type: 'audio/mpeg' }, fetchImpl);
 }
 
+export interface TranscribeOptions {
+    filename: string; type: string; timeoutMs?: number;
+    /** ISO-639-1 ('en'). Said, not guessed: left to detect the language, whisper heard an English
+     *  speaker as Welsh and got every word time wrong with it (footage review on staging, 2026-11-09). */
+    language?: string;
+    /** whisper only: text it is primed with (Scribe takes no prompt and is verbatim already). */
+    prompt?: string;
+    /** Scribe only: names and terms it should spell right (e.g. the business name). */
+    keyterms?: string[];
+}
+
 /**
- * Word timings for any audio whisper takes (≤ 25 MB) — the owner's footage arrives as a 16 kHz mono
- * WAV the browser made (src/components/footage-reader.js), ~10 MB for five minutes, so it gets longer.
+ * Word timings for any audio: ElevenLabs Scribe first, whisper-1 when Scribe is not set up or refuses
+ * (key, permission, credits, a bad answer). A Scribe timeout is NOT retried on whisper — a second wait
+ * could outlast the request — and every caller already treats a failed transcription as "no words".
+ * Throws TtsError when neither can be used.
  */
-export async function transcribeAudio(
-    bytes: Buffer, file: { filename: string; type: string; timeoutMs?: number; language?: string; prompt?: string }, fetchImpl: typeof fetch = fetch,
-): Promise<{ words: SpokenWord[]; durationS: number | null }> {
+export async function transcribeAudio(bytes: Buffer, file: TranscribeOptions, fetchImpl: typeof fetch = fetch): Promise<Transcript> {
+    if (process.env.ELEVENLABS_API_KEY) {
+        try {
+            return await transcribeScribe(bytes, file, fetchImpl);
+        } catch (err) {
+            const timedOut = err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError');
+            if (timedOut || !process.env.OPENAI_API_KEY) throw err;
+            console.warn('[tts] Scribe failed — transcribing with whisper instead:', err instanceof Error ? err.message : err);
+        }
+    }
+    return transcribeWhisper(bytes, file, fetchImpl);
+}
+
+/** Scribe's keyterms: one line each, no angle brackets, 1–50 characters, no repeats, at most 20. Pure. */
+export function scribeKeyterms(terms: readonly unknown[] | undefined): string[] {
+    return [...new Set((terms ?? [])
+        .map((t) => (typeof t === 'string' ? t.replace(/[<>\r\n]+/g, ' ').replace(/\s+/g, ' ').trim() : ''))
+        .filter((t) => t.length > 0 && t.length <= 50))].slice(0, 20);
+}
+
+/** ElevenLabs Scribe: verbatim (fillers kept), no audio-event tags, word timestamps. */
+export async function transcribeScribe(bytes: Buffer, file: TranscribeOptions, fetchImpl: typeof fetch = fetch): Promise<Transcript> {
+    const key = process.env.ELEVENLABS_API_KEY;
+    if (!key) throw new TtsError('ElevenLabs is not configured.', 'not_configured');
+    const form = new FormData();
+    form.append('file', new Blob([new Uint8Array(bytes)], { type: file.type }), file.filename);
+    form.append('model_id', SCRIBE_MODEL);
+    if (file.language) form.append('language_code', file.language);
+    form.append('timestamps_granularity', 'word');
+    form.append('tag_audio_events', 'false');
+    form.append('no_verbatim', 'false');
+    for (const term of scribeKeyterms(file.keyterms)) form.append('keyterms', term);
+    const res = await fetchImpl(SCRIBE_URL, {
+        method: 'POST',
+        headers: { 'xi-api-key': key },
+        body: form,
+        signal: AbortSignal.timeout(file.timeoutMs ?? 8_000),
+    });
+    if (!res.ok) throw classifyElevenLabs(res.status, await res.text().catch(() => ''));
+    const payload = await res.json();
+    const words = parseWords(payload);
+    return { words, durationS: spokenDuration(payload, words), provider: 'elevenlabs' };
+}
+
+/**
+ * whisper-1 (≤ 25 MB) — the fallback until OpenAI retires it on 26 Feb 2027. The owner's footage
+ * arrives as a 16 kHz mono WAV the browser made (src/components/footage-reader.js), ~10 MB for five
+ * minutes, so it gets longer.
+ */
+export async function transcribeWhisper(bytes: Buffer, file: TranscribeOptions, fetchImpl: typeof fetch = fetch): Promise<Transcript> {
     const key = process.env.OPENAI_API_KEY;
     if (!key) throw new TtsError('Voiceovers are not configured.', 'not_configured');
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(bytes)], { type: file.type }), file.filename);
-    // Said, not guessed: left to detect the language, whisper heard an English speaker as Welsh and
-    // got every word time wrong with it (footage review on staging, 2026-11-09).
     if (file.language) form.append('language', file.language);
     if (file.prompt) form.append('prompt', file.prompt.slice(0, 600));
     form.append('model', TRANSCRIBE_MODEL);
@@ -236,5 +315,5 @@ export async function transcribeAudio(
     if (!res.ok) throw classify(res.status, await res.text().catch(() => ''));
     const payload = await res.json();
     const words = parseWords(payload);
-    return { words, durationS: spokenDuration(payload, words) };
+    return { words, durationS: spokenDuration(payload, words), provider: 'openai' };
 }

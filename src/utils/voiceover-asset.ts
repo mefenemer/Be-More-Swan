@@ -13,7 +13,7 @@ import { mediaGenerationJobs, contentAssets } from '../../db/schema';
 import { persistBufferToR2 } from '../lib/media-persist';
 import { logAiUsage } from './ai-usage';
 import { VOICEOVER_CREDIT_COST } from './ai-credits';
-import { speakVoiceover, transcribeWords, voiceoverCostUsd, type SpokenWord, type VoiceId } from '../lib/tts';
+import { speakVoiceover, transcribeWords, voiceoverCostUsd, type SpokenWord, type TtsProvider, type VoiceId } from '../lib/tts';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -31,8 +31,9 @@ export async function makeVoiceoverAsset(db: Db, args: {
     const { mp3, provider, model } = await speakVoiceover(args.script, args.voice);
     let words: SpokenWord[] = [];
     let durationS: number | null = null;
+    let transcribedBy: TtsProvider | null = null;
     try {
-        ({ words, durationS } = await transcribeWords(mp3));
+        ({ words, durationS, provider: transcribedBy } = await transcribeWords(mp3));
     } catch (err) {
         console.warn('[voiceover-asset] transcription failed — saving without word timings:', err instanceof Error ? err.message : err);
     }
@@ -52,6 +53,6 @@ export async function makeVoiceoverAsset(db: Db, args: {
     }).returning({ id: contentAssets.id });
     await db.update(mediaGenerationJobs).set({ resultAssetIds: [asset.id], updatedAt: new Date() })
         .where(eq(mediaGenerationJobs.id, job.id)).catch(() => {});
-    await logAiUsage({ workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId ?? null, model, inputTokens: 0, outputTokens: 0, costUsdOverride: voiceoverCostUsd(durationS, { provider, chars: args.script.length }), sessionId: 'voiceover' });
+    await logAiUsage({ workspaceId: args.orgId, userId: args.userId, assistantId: args.assistantId ?? null, model, inputTokens: 0, outputTokens: 0, costUsdOverride: voiceoverCostUsd(durationS, { provider, chars: args.script.length }, transcribedBy), sessionId: 'voiceover' });
     return { assetId: asset.id, jobId: job.id, storageKey: stored.storageKey, durationS, words };
 }

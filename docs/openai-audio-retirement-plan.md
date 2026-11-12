@@ -82,7 +82,13 @@ Tour narration (`tour-narration.ts`) should move with the same choice. It could 
 
 ## Decisions for the owner
 
-1. Move word timings to ElevenLabs Scribe? (recommended) — **open**
+1. Move word timings to ElevenLabs Scribe — **decided 2026-11-12: yes. Built** (not yet on staging):
+   - `transcribeAudio` in `src/lib/tts.ts` calls Scribe (`ELEVENLABS_STT_MODEL`, default `scribe_v3`) with `language_code`, word timestamps, `no_verbatim=false` (the "um"s stay in for tightening), `tag_audio_events=false`, and the business name as a keyterm for footage.
+   - whisper-1 stays as the fallback until it retires: used when there's no ElevenLabs key, or Scribe refuses (key, permission, credits, HTTP error). A Scribe **timeout** is not retried on whisper, because a second wait could outlast the request.
+   - The voiceover cost line now charges the transcription to whoever did it (Scribe $0.20/h, whisper $0.006/min, nothing when it failed).
+   - **⚠️ Owner action before it does anything:** the ElevenLabs key was made with only Text to Speech, Voices Read and User permissions. Add **Speech to Text** to the key (ElevenLabs → API keys) on the same key used by every context. Until then every call is refused and falls back to whisper, so nothing breaks, but nothing changes either.
+   - To check on staging: one voiceover and one footage review. Captions should line up, the "um"s should be tightened, and the server log should *not* show `[tts] Scribe failed`.
+   - Not covered: own-voice and footage transcription costs are not logged to `ai_usage_log` at all (they weren't with whisper either). This is a separate gap.
 2. Fallback voice — **decided 2026-11-12: D, no fallback.** What that means when it's built:
    - `synthesize()` in `src/lib/tts.ts` stops falling back to OpenAI. If ElevenLabs is off or fails, the voiceover fails with a clear message. `TTS_MODEL`, `synthesizeSpeech` and the OpenAI speech cost line go.
    - `tour-narration.ts` uses OpenAI as its *main* voice, so "no fallback" there means moving it to the ElevenLabs Pepper voice, not just deleting a fallback.
