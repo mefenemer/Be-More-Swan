@@ -225,8 +225,11 @@ async function main() {
         process.env.OPENAI_API_KEY = 'sk-test';
         const boom = await probeOpenAi((async () => { throw new Error('ECONNRESET'); }) as unknown as typeof fetch);
         assert.strictEqual(boom.status, 'transient');
-        const ok = await probeOpenAi((async () => new Response(new Uint8Array([1]), { status: 200 })) as unknown as typeof fetch);
+        const sent: Array<{ url: string; body: any }> = [];
+        const ok = await probeOpenAi((async (u: any, init: any) => { sent.push({ url: String(u), body: JSON.parse(init.body) }); return new Response('{}', { status: 200 }); }) as unknown as typeof fetch);
         assert.deepStrictEqual(ok, { status: 'ok' });
+        // A billed embedding (catches an empty account), not gpt-4o-mini-tts (shuts down 6 Jan 2027).
+        assert.deepStrictEqual(sent, [{ url: 'https://api.openai.com/v1/embeddings', body: { model: 'text-embedding-3-small', input: '.' } }]);
         if (saved === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = saved;
     });
 

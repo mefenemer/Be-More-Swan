@@ -14,9 +14,14 @@
 // no new bill or balance. check-provider-balances probes it (provider-balance.ts probeOpenAi).
 // 2026-11-02: OpenAI could not sound like a British woman however the accent was described, so a
 // voice with an `elevenlabs` id is spoken by ElevenLabs (ELEVENLABS_API_KEY; ~3–6p a voiceover, the
-// owner kept it inside the 1-task weight). Any ElevenLabs failure falls back to the OpenAI speaker
-// and accent, so a voiceover is never lost — only its accent. Word timings use one path for both
-// providers, and it times the words that were actually spoken.
+// owner kept it inside the 1-task weight). Word timings use one path for both providers, and it
+// times the words that were actually spoken.
+//
+// 2026-11-12: NO fallback voice (owner's choice, docs/openai-audio-retirement-plan.md). OpenAI retires
+// gpt-4o-mini-tts on 6 Jan 2027 and its replacement is Realtime-only, so an ElevenLabs voice that
+// fails now fails the voiceover (the endpoint refunds the credit) instead of being read in an American
+// OpenAI voice. Voices with no `elevenlabs` id (the London man, the legacy six) are still OpenAI's
+// only — they need an ElevenLabs voice picked by ear before 6 Jan 2027.
 //
 // 2026-11-12 (docs/openai-audio-retirement-plan.md): OpenAI retires whisper-1 on 26 Feb 2027 and its
 // replacement (gpt-transcribe) gives no word timestamps. Word timings now come from ElevenLabs Scribe
@@ -37,6 +42,11 @@ const ELEVENLABS_URL = 'https://api.elevenlabs.io/v1/text-to-speech';
 /** USD per 1,000 characters: Starter is $6 for 40,000. Recheck when the plan changes. */
 const ELEVENLABS_USD_PER_1K_CHARS = 0.15;
 
+/** List-price cost of `chars` characters spoken by ElevenLabs, in USD. Pure. */
+export function elevenLabsSpeechCostUsd(chars: number): string {
+    return (Math.max(chars, 0) / 1000 * ELEVENLABS_USD_PER_1K_CHARS).toFixed(6);
+}
+
 /** ~80 seconds of speech at a natural pace — longer than any short-form video needs. */
 export const VOICEOVER_MAX_CHARS = 1200;
 
@@ -45,9 +55,9 @@ import CATALOGUE from '../public/voice-catalogue.json';
 /**
  * The voices offered: src/public/voice-catalogue.json, the ONE list the server and the voice picker
  * (src/components/voice-picker.js) both read. Labels describe the sound, never a person. A voice with
- * an `elevenlabs` id is spoken by ElevenLabs; `speaker` (+ `accent`, an accent line for the delivery
- * note — gpt-4o-mini-tts takes accent from its instructions) is the OpenAI voice used if it fails, or
- * the only speaker when there is no ElevenLabs id. `legacy` voices (the original six OpenAI voices,
+ * an `elevenlabs` id is spoken by ElevenLabs only (no fallback since 2026-11-12); `speaker` (+ `accent`,
+ * an accent line for the delivery note — gpt-4o-mini-tts takes accent from its instructions) is the
+ * OpenAI voice, used only when there is no ElevenLabs id. `legacy` voices (the original six OpenAI voices,
  * American-sounding) stay valid for saved settings but are no longer offered (owner, 2026-11-02:
  * "robotic … not human like at all"). Each voice speaks its own `lang`; the script decides the language.
  */
@@ -168,7 +178,7 @@ export async function synthesizeElevenLabs(text: string, voiceId: string, fetchI
         headers: { 'Content-Type': 'application/json', 'xi-api-key': key },
         // Settings the owner heard in the trials: a little expressive, true to the speaker.
         body: JSON.stringify({ text, model_id: ELEVENLABS_MODEL, voice_settings: { stability: 0.45, similarity_boost: 0.8, style: 0.2 } }),
-        // Short enough that the OpenAI fallback still fits inside the request.
+        // Leaves room for the transcription inside the request (there is no fallback voice to wait for).
         signal: AbortSignal.timeout(12_000),
     });
     if (!res.ok) throw classifyElevenLabs(res.status, await res.text().catch(() => ''));
@@ -176,19 +186,19 @@ export async function synthesizeElevenLabs(text: string, voiceId: string, fetchI
 }
 
 /**
- * Speak a voiceover with whichever provider owns the voice, falling back to OpenAI when ElevenLabs
- * is missing or fails. Returns the audio and who made it, for the job row and the cost line.
+ * Speak a voiceover with the provider that owns the voice — and only that one: an ElevenLabs voice
+ * that fails (or has no key) throws, it is never read by OpenAI instead. Returns the audio and who
+ * made it, for the job row and the cost line.
  */
 export async function speakVoiceover(text: string, voice: VoiceId, fetchImpl: typeof fetch = fetch): Promise<{ mp3: Buffer; provider: TtsProvider; model: string }> {
     const eleven = elevenLabsVoice(voice);
-    if (eleven && process.env.ELEVENLABS_API_KEY) {
-        try {
-            return { mp3: await synthesizeElevenLabs(text, eleven, fetchImpl), provider: 'elevenlabs', model: ELEVENLABS_MODEL };
-        } catch (err) {
-            console.warn('[tts] ElevenLabs failed — speaking with OpenAI instead:', err instanceof Error ? err.message : err);
-        }
-    }
+    if (eleven) return { mp3: await synthesizeElevenLabs(text, eleven, fetchImpl), provider: 'elevenlabs', model: ELEVENLABS_MODEL };
     return { mp3: await synthesizeSpeech(text, voice, fetchImpl), provider: 'openai', model: TTS_MODEL };
+}
+
+/** Is there a key for the provider that speaks this voice? Pure over the environment. */
+export function voiceConfigured(voice: VoiceId): boolean {
+    return elevenLabsVoice(voice) ? !!process.env.ELEVENLABS_API_KEY : !!process.env.OPENAI_API_KEY;
 }
 
 function classify(status: number, body: string): TtsError {
