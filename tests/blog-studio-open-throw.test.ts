@@ -42,4 +42,21 @@ check('startBlankPost: a throw shows the error, and Try again reopens the create
     assert.match(fn, /made \? function \(\) \{ loadExistingPost\(made\); \} : startBlankPost/);
 });
 
+// Issue #42: "Blog Studio opens to a blank page when an article is clicked from the Blogs tab". The
+// post is only requested once blog-tone answers; until then nothing was on screen (or the previous
+// article was), and a throw in that step was not caught at all.
+check('openBlogStudio: the opening line shows at once and the old editor is hidden', () => {
+    const fn = slice('function openBlogStudio(', 'function notifyChanged(');
+    const opening = fn.indexOf("showOpening(opts.postId ? 'Opening your article");
+    assert.notStrictEqual(opening, -1, 'opening line not shown on open');
+    assert.ok(opening < fn.indexOf('loadAssistants()'), 'opening line must show before waiting on blog-tone');
+    assert.match(fn, /el\('bs-workspace'\)\.classList\.add\('bs-hidden'\);/);
+});
+
+check('openBlogStudio: a throw while starting the load shows the open error with a retry', () => {
+    const fn = slice('function openBlogStudio(', 'function notifyChanged(');
+    assert.match(fn, /\}\)\.catch\(function \(\) \{[\s\S]*openFailed\(/);
+    assert.match(fn, /openBlogStudio\(opts\)/);
+});
+
 console.log(`\n${passed} passed`);
