@@ -18,7 +18,7 @@ import { incidentColumnsReady, loadIncidentFields } from '../../src/utils/platfo
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { hasPermission } from '../../src/utils/rbac';
-import { stampFixedAt } from '../../src/utils/issue-fix-live';
+import { stampFixedAt, loadFixLiveFields } from '../../src/utils/issue-fix-live';
 import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, reclaimStaleMerges, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -468,6 +468,8 @@ export default withLambda(async (event) => {
 
         // Automatic incidents (§6.2): their columns are read raw, so this works before the SQL is applied.
         const incidents = await loadIncidentFields(db, rows.map((r) => r.id));
+        // Live check fields (issue-fix-live.ts) for the board's "Waiting to go live" / "closes in N days".
+        const fixLive = await loadFixLiveFields(db, rows.map((r) => r.id));
 
         return json(200, {
             issues: rows.map((r) => ({
@@ -492,6 +494,9 @@ export default withLambda(async (event) => {
                 source: incidents.get(r.id)?.source ?? 'user',
                 occurrences: incidents.get(r.id)?.occurrences ?? 1,
                 lastSeenAt: incidents.get(r.id)?.lastSeenAt ?? null,
+                fixedAt: fixLive.get(r.id)?.fixedAt ?? null,
+                liveAt: fixLive.get(r.id)?.liveAt ?? null,
+                awaitingLive: !!r.devPrUrl && r.devMergeStatus === 'merged' && fixLive.get(r.id)?.livePrUrl !== r.devPrUrl,
             })),
             counts: Object.fromEntries(counts.map((c) => [c.status, c.n])),
         });

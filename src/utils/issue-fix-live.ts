@@ -73,6 +73,27 @@ export async function stampFixedAt(db: Db, issueId: number): Promise<void> {
     }
 }
 
+/**
+ * fixed_at / live_at for these issues, for the Fix pipeline board's "Waiting to go live" and
+ * "closes in N days". Empty before the SQL. Never throws.
+ */
+export async function loadFixLiveFields(db: Db, ids: number[]): Promise<Map<number, { fixedAt: string | null; liveAt: string | null; livePrUrl: string | null }>> {
+    const out = new Map<number, { fixedAt: string | null; liveAt: string | null; livePrUrl: string | null }>();
+    const clean = ids.filter((id) => Number.isInteger(id));
+    if (!clean.length) return out;
+    try {
+        if (!(await fixLiveColumnsReady(db))) return out;
+        const rows = await db.execute(sql`
+            SELECT id, fixed_at, live_at, live_pr_url FROM issue_reports
+             WHERE id IN (${sql.join(clean.map((id) => sql`${id}`), sql`, `)})`) as Array<{ id: number; fixed_at: Date | string | null; live_at: Date | string | null; live_pr_url: string | null }>;
+        const iso = (d: Date | string | null) => (d == null ? null : new Date(d).toISOString());
+        for (const r of rows) out.set(Number(r.id), { fixedAt: iso(r.fixed_at), liveAt: iso(r.live_at), livePrUrl: r.live_pr_url });
+    } catch (e) {
+        console.error('[issue-fix-live] loadFixLiveFields failed:', e instanceof Error ? e.message : e);
+    }
+    return out;
+}
+
 /** The PR number from a GitHub PR URL in THIS repo, or null (another repo, or not a PR URL). */
 export function parsePrNumber(url: string | null | undefined, repo = DEFAULT_REPO): number | null {
     if (!url) return null;

@@ -23,6 +23,7 @@
   <!-- Toast + the confirm/alert/prompt dialogs. In <head> and not deferred: handlers reach
        for these, so they must exist before anything can run. -->
   <script src="/dialogs.js"></script>
+  <script src="/src/components/admin-board.js"></script>
   <link href="./style.css" rel="stylesheet">
   <script src="/site-theme.js"></script>
   <script src="/src/public/site-theme-core.js"></script>
@@ -2387,10 +2388,17 @@
             <button onclick="moveAllToBacklog()" id="ir-backlog-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">📥 Move all to Backlog</button>
             <button onclick="moveBacklogAllToDeveloper()" id="ir-backlog-dev-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Move All to a Developer</button>
             <button onclick="requestMergeAll()" id="ir-merge-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">🔀 Merge all to staging</button>
+            <div class="flex gap-1 bg-gray-100 rounded-lg p-1" role="group" aria-label="Fix pipeline view">
+              <button type="button" id="ir-mode-board" onclick="irSetMode('board')" class="px-3 py-1 text-sm font-semibold rounded-md">Board</button>
+              <button type="button" id="ir-mode-list" onclick="irSetMode('list')" class="px-3 py-1 text-sm font-semibold rounded-md">List</button>
+            </div>
             <button onclick="loadIssueReports()" class="btn-utility px-3 py-2 text-sm font-semibold border rounded-lg transition">↻ Refresh</button>
           </div>
         </div>
 
+        <!-- Board (src/components/admin-board.js) — the default view -->
+        <div id="ir-board" class="hidden"></div>
+        <div id="ir-list-wrap">
         <!-- Status filter chips -->
         <div id="ir-filters" class="flex flex-wrap gap-2 mb-5 text-xs"></div>
 
@@ -2412,6 +2420,7 @@
             </tbody>
           </table>
         </div>
+        </div>
 
       </section>
 
@@ -2430,7 +2439,8 @@
 
         <!-- Sub-tabs -->
         <div class="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-max">
-          <button id="fr-subtab-moderation" onclick="frSwitchPane('moderation')" class="btn-secondary px-4 py-1.5 text-sm font-semibold rounded-md shadow-sm border">Moderation</button>
+          <button id="fr-subtab-board" onclick="frSwitchPane('board')" class="px-4 py-1.5 text-sm font-semibold rounded-md text-gray-500">Board</button>
+          <button id="fr-subtab-moderation" onclick="frSwitchPane('moderation')" class="px-4 py-1.5 text-sm font-semibold rounded-md text-gray-500">List</button>
           <button id="fr-subtab-roadmap" onclick="frSwitchPane('roadmap')" class="px-4 py-1.5 text-sm font-semibold rounded-md text-gray-500">Roadmap (Gantt)</button>
         </div>
 
@@ -2499,8 +2509,11 @@
           </div>
         </div>
 
-        <!-- Moderation pane -->
-        <div id="fr-pane-moderation">
+        <!-- Board pane (src/components/admin-board.js) — the default view -->
+        <div id="fr-pane-board" class="hidden"><div id="fr-kanban"></div></div>
+
+        <!-- Moderation pane (the List view) -->
+        <div id="fr-pane-moderation" class="hidden">
           <div class="flex items-center gap-2 mb-3">
             <label class="text-xs font-bold uppercase text-gray-400">Filter</label>
             <select id="fr-mod-filter" onchange="renderModerationList()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
@@ -6233,6 +6246,147 @@ const IR_STATUS_CLS = {
 const IR_PRIORITIES = ['critical','high','medium','low'];
 const IR_PRIORITY_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
 let _irFilter = '';
+
+// ── Fix pipeline board (src/components/admin-board.js) ──────────────────────────────────────────
+// Six columns derived from the existing status + dev_* fields, so nothing is stored differently.
+// Dragging only does what a person decides: triage into Backlog, hand to the AI developer, close.
+// "Review & merge", "Waiting to go live" and "Live" are filled by the pipeline itself.
+const IR_BOARD_COLUMNS = [
+  { key: 'new', label: 'New', hint: 'Reported, or waiting on the customer' },
+  { key: 'backlog', label: 'Backlog', hint: 'Triaged; On hold is a badge' },
+  { key: 'fixing', label: 'Fixing', hint: 'With the AI developer' },
+  { key: 'review', label: 'Review & merge', hint: 'PR, SQL or merge waiting on you' },
+  { key: 'golive', label: 'Waiting to go live', hint: 'Merged; moves when the deploy has it' },
+  { key: 'live', label: 'Live, awaiting reply', hint: 'Closes itself after 7 quiet days' },
+  { key: 'closed', label: 'Closed', hint: 'Closed or on the roadmap', folded: true },
+];
+const IR_REVIEW_MERGE = ['ready', 'queued', 'merging', 'failed', 'conflict_queued', 'conflict_resolving'];
+function irColumnOf(i) {
+  const st = i.status;
+  if (st === 'closed' || st === 'roadmap') return 'closed';
+  if (st === 'fixed_ready_to_test') return 'live';
+  if (st === 'more_info_required') return 'new';
+  if (i.devMergeStatus === 'merged' && i.devSqlStatus !== 'pending') return 'golive';
+  if (st === 'merge' || i.devHandoffStatus === 'completed' || i.devSqlStatus === 'pending' || IR_REVIEW_MERGE.includes(i.devMergeStatus)) return 'review';
+  if (st === 'fix_in_progress' || i.devHandoffStatus === 'queued' || i.devHandoffStatus === 'in_progress') return 'fixing';
+  if (st === 'backlog' || st === 'on_hold') return 'backlog';
+  return 'new';
+}
+const IR_SOURCE_LABEL = { user: 'Customer', system: 'Automatic', suspected: 'Assistant noticed' };
+const _irDaysLeft = (i) => {
+  if (!i.fixedAt) return null;
+  return Math.max(0, Math.ceil((new Date(i.fixedAt).getTime() + 7 * 864e5 - Date.now()) / 864e5));
+};
+function irBoardCard(i) {
+  const first = String(i.description || '').split('\n')[0].trim() || '(no description)';
+  const badges = [];
+  if (i.status === 'more_info_required') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">Waiting on customer</span>');
+  if (i.status === 'on_hold') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">On hold</span>');
+  if (i.status === 'roadmap') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">On roadmap</span>');
+  if (i.devHandoffStatus === 'failed') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Fix failed</span>');
+  if (i.devSqlStatus === 'pending') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">SQL to run</span>');
+  if (i.devMergeStatus === 'failed') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Merge failed</span>');
+  if (i.source && i.source !== 'user') badges.push(`<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700">${_escH(IR_SOURCE_LABEL[i.source] || i.source)}${i.occurrences > 1 ? ` ×${Number(i.occurrences)}` : ''}</span>`);
+  const left = i.status === 'fixed_ready_to_test' ? _irDaysLeft(i) : null;
+  if (left != null) badges.push(`<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Closes in ${left} day${left === 1 ? '' : 's'}</span>`);
+  const pr = /^https:\/\/github\.com\//.test(i.devPrUrl || '') ? ` · <a href="${_escH(i.devPrUrl)}" target="_blank" rel="noopener" class="text-emerald-700 font-semibold hover:underline">PR</a>` : '';
+  return `
+    <p class="text-sm font-semibold text-gray-800 line-clamp-3 break-words">${_escH(first)}</p>
+    ${badges.length ? `<div class="flex flex-wrap gap-1 mt-1.5">${badges.join('')}</div>` : ''}
+    <p class="text-[11px] text-gray-400 mt-1.5">#${Number(i.id)} · ${_escH(i.reporterName || '—')} · ${age(i.createdAt)}${pr}</p>
+    ${i.sourceLocation ? `<p class="text-[11px] text-gray-400 truncate">${_escH(i.sourceLocation)}</p>` : ''}`;
+}
+const _irDistinct = (items, f) => [...new Set(items.map(f).filter(Boolean))].sort().map(v => ({ value: v, label: v }));
+let _irBoard = null;
+function irBoard() {
+  if (_irBoard) return _irBoard;
+  _irBoard = window.AdminBoard.create({
+    id: 'fix',
+    mount: document.getElementById('ir-board'),
+    columns: IR_BOARD_COLUMNS,
+    columnOf: irColumnOf,
+    idOf: (i) => i.id,
+    searchText: (i) => [i.description, i.reporterName, i.reporterEmail, i.sourceLocation].join(' '),
+    renderCard: irBoardCard,
+    filters: [
+      { key: 'source', label: 'Source', options: () => Object.entries(IR_SOURCE_LABEL).map(([value, label]) => ({ value, label })), test: (i, v) => (i.source || 'user') === v },
+      { key: 'area', label: 'Area', options: (items) => _irDistinct(items, i => i.sourceLocation), test: (i, v) => i.sourceLocation === v },
+      { key: 'state', label: 'Flag', options: () => [
+          { value: 'waiting', label: 'Waiting on customer' }, { value: 'hold', label: 'On hold' },
+          { value: 'pr', label: 'Has a PR' }, { value: 'nopr', label: 'No PR yet' }],
+        test: (i, v) => v === 'waiting' ? i.status === 'more_info_required' : v === 'hold' ? i.status === 'on_hold' : v === 'pr' ? !!i.devPrUrl : !i.devPrUrl },
+    ],
+    groups: [
+      { key: 'source', label: 'Source', of: (i) => IR_SOURCE_LABEL[i.source || 'user'] || i.source },
+      { key: 'area', label: 'Area', of: (i) => i.sourceLocation || 'No area' },
+      { key: 'reporter', label: 'Reporter', of: (i) => i.reporterName || '—' },
+    ],
+    sorts: [
+      { key: 'oldest', label: 'Oldest first', compare: (a, b) => new Date(a.createdAt) - new Date(b.createdAt) },
+      { key: 'newest', label: 'Newest first', compare: (a, b) => new Date(b.createdAt) - new Date(a.createdAt) },
+      { key: 'occurrences', label: 'Most occurrences', compare: (a, b) => (b.occurrences || 1) - (a.occurrences || 1) },
+      { key: 'activity', label: 'Recent activity', compare: (a, b) => new Date(b.updatedAt) - new Date(a.updatedAt) },
+    ],
+    defaultSort: 'oldest',
+    quickViews: [{ key: 'needs', label: 'Needs me', columns: ['new', 'review'] }],
+    canDrop: (i, to) => {
+      const from = irColumnOf(i);
+      if (to === 'backlog') return ['new'].includes(from) || 'Only a new issue can be moved to Backlog here.';
+      if (to === 'fixing') return ['new', 'backlog'].includes(from) || 'Only a new or backlog issue can be handed to the AI developer.';
+      if (to === 'closed') return from !== 'closed' || 'Already closed.';
+      if (to === 'new') return 'An issue comes back to New when the reporter replies.';
+      if (to === 'review') return 'Moves here by itself when the AI developer opens a PR.';
+      if (to === 'golive') return 'Moves here by itself when the PR is merged.';
+      if (to === 'live') return 'Moves here by itself when the fix is in the deployed site.';
+      return 'Not a move you can make here.';
+    },
+    onDrop: async (i, to) => {
+      try {
+        if (to === 'fixing') {
+          if (!(await window.confirmModal('It will be fixed on a branch and a pull request opened for review.', { title: `Pass #${i.id} to the AI developer?`, confirmLabel: 'Pass to developer' }))) return;
+          await api(`${IR_API}?id=${i.id}&action=handoff`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        } else {
+          const status = to === 'closed' ? 'closed' : 'backlog';
+          const who = i.userId === null || (i.source && i.source !== 'user') ? '' : ' The reporter is told.';
+          if (!(await window.confirmModal(`Move #${i.id} to ${status === 'closed' ? 'Closed' : 'Backlog'}?${who}`, { title: status === 'closed' ? 'Close this issue?' : 'Move to Backlog?', confirmLabel: status === 'closed' ? 'Close' : 'Move' }))) return;
+          await api(`${IR_API}?id=${i.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+        }
+        window.showToast?.(`#${i.id} moved.`, { icon: '✅' });
+      } catch (e) { window.showToast?.(e.message || 'Could not move it.', { icon: '⚠️' }); }
+      loadIssueReports();
+    },
+    onOpen: (i) => openIssuePanel(i.id),
+  });
+  return _irBoard;
+}
+let _irMode = (() => { try { return localStorage.getItem('admin-board:fix:mode') || 'board'; } catch { return 'board'; } })();
+function irSetMode(mode) {
+  _irMode = mode === 'list' ? 'list' : 'board';
+  try { localStorage.setItem('admin-board:fix:mode', _irMode); } catch { /* defaults next time */ }
+  loadIssueReports();
+}
+function _irPaintMode() {
+  document.getElementById('ir-board')?.classList.toggle('hidden', _irMode !== 'board');
+  document.getElementById('ir-list-wrap')?.classList.toggle('hidden', _irMode !== 'list');
+  [['board', 'ir-mode-board'], ['list', 'ir-mode-list']].forEach(([m, id]) => {
+    const b = document.getElementById(id); if (!b) return;
+    const on = m === _irMode;
+    b.classList.toggle('bg-white', on); b.classList.toggle('shadow-sm', on); b.classList.toggle('text-gray-900', on); b.classList.toggle('text-gray-500', !on);
+    b.setAttribute('aria-pressed', String(on));
+  });
+  // The bulk buttons belong to the List's status chips.
+  if (_irMode === 'board') ['ir-pass-all-btn', 'ir-backlog-all-btn', 'ir-backlog-dev-all-btn', 'ir-merge-all-btn'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+}
+async function loadIssueBoard() {
+  const mount = document.getElementById('ir-board');
+  if (mount && !_irBoard) mount.innerHTML = '<div class="text-gray-400 text-sm py-8 text-center animate-pulse">Loading…</div>';
+  try {
+    const d = await api(IR_API);
+    irBoard().setItems(d.issues || []);
+  } catch (e) {
+    if (mount) mount.innerHTML = `<div class="text-red-500 text-sm py-5">${_escH(e.message)}</div>`;
+  }
+}
 function _irBadge(s) { return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${IR_STATUS_CLS[s] || 'bg-gray-100 text-gray-700'}">${IR_STATUS_LABEL[s] || s}</span>`; }
 // Small AI auto-fix ("Pass to Developer") badge for the list — empty unless handed off.
 const IR_HANDOFF_BADGE = {
@@ -6310,6 +6464,8 @@ function _irRunnerChip(i) {
 }
 
 async function loadIssueReports() {
+  _irPaintMode();
+  if (_irMode === 'board') return loadIssueBoard();
   const tbody = document.getElementById('ir-tbody');
   if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</td></tr>';
   try {
@@ -6944,7 +7100,8 @@ const FR_STATUS_CLS = {
   declined: 'bg-red-100 text-red-600', duplicate: 'bg-gray-200 text-gray-500',
 };
 let _frItems = [];
-let _frPane = 'moderation';
+// Board is the default; the last view chosen is remembered (frSwitchPane).
+let _frPane = (() => { try { return localStorage.getItem('admin-board:features:pane') || 'board'; } catch { return 'board'; } })();
 
 async function loadFeatureRoadmap() {
   const board = document.getElementById('fr-board');
@@ -6952,7 +7109,7 @@ async function loadFeatureRoadmap() {
   try {
     const d = await api(FR_API);
     _frItems = d.requests || [];
-    if (_frPane === 'roadmap') renderGantt(); else renderModerationList();
+    frSwitchPane(_frPane);
   } catch (e) {
     if (board) board.innerHTML = `<div class="text-red-500 text-sm py-5">${e.message}</div>`;
   }
@@ -6960,15 +7117,17 @@ async function loadFeatureRoadmap() {
 
 function frSwitchPane(name) {
   _frPane = name;
+  try { localStorage.setItem('admin-board:features:pane', name); } catch { /* defaults next time */ }
+  document.getElementById('fr-pane-board').classList.toggle('hidden', name !== 'board');
   document.getElementById('fr-pane-moderation').classList.toggle('hidden', name !== 'moderation');
   document.getElementById('fr-pane-roadmap').classList.toggle('hidden', name !== 'roadmap');
-  [['moderation','fr-subtab-moderation'],['roadmap','fr-subtab-roadmap']].forEach(([n, id]) => {
+  [['board','fr-subtab-board'],['moderation','fr-subtab-moderation'],['roadmap','fr-subtab-roadmap']].forEach(([n, id]) => {
     const b = document.getElementById(id); if (!b) return;
     const active = n === name;
     b.classList.toggle('bg-white', active); b.classList.toggle('text-gray-900', active); b.classList.toggle('shadow-sm', active);
     b.classList.toggle('text-gray-500', !active);
   });
-  if (name === 'roadmap') renderGantt(); else renderModerationList();
+  if (name === 'roadmap') renderGantt(); else if (name === 'board') frBoard().setItems(_frItems); else renderModerationList();
 }
 
 // ── Moderation list (US04) ──────────────────────────────────────────────────
@@ -7030,6 +7189,94 @@ async function frSetStatus(id, status) {
     });
     loadFeatureRoadmap();
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); loadFeatureRoadmap(); }
+}
+
+
+// ── Feature requests board (src/components/admin-board.js) ─────────────────────────────────────
+// Five columns over the nine statuses. A drop is a status change, which notifies the submitter and
+// voters (admin-feature-requests.ts), so Released and Declined ask first.
+const FR_BOARD_COLUMNS = [
+  { key: 'review', label: 'To review', hint: 'New ideas, not public yet' },
+  { key: 'backlog', label: 'Backlog', hint: 'Accepted, collecting votes' },
+  { key: 'planned', label: 'Planned' },
+  { key: 'building', label: 'Building', hint: 'Brief ready or in progress' },
+  { key: 'released', label: 'Released' },
+  { key: 'closed', label: 'Declined / duplicate', folded: true },
+];
+const FR_COLUMN_OF_STATUS = {
+  pending_review: 'review', under_review: 'backlog', open: 'backlog', planned: 'planned',
+  brief_ready: 'building', in_progress: 'building', released: 'released', declined: 'closed', duplicate: 'closed',
+};
+const FR_STATUS_FOR_COLUMN = { review: 'pending_review', backlog: 'open', planned: 'planned', building: 'in_progress', released: 'released', closed: 'declined' };
+const FR_PRIORITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 };
+const frColumnOf = (it) => FR_COLUMN_OF_STATUS[it.status] || 'review';
+function frBoardCard(it) {
+  const parent = it.parentId ? _frItems.find(x => x.id === it.parentId) : null;
+  const badges = [
+    `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${FR_PRIORITY_CLS[it.priority] || 'bg-gray-100 text-gray-600'}">${_esc(FR_PRIORITY_LABEL[it.priority] || it.priority)}</span>`,
+    (it.itemType && it.itemType !== 'feature') ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${FR_ITEM_TYPE_CLS[it.itemType] || 'bg-gray-100 text-gray-600'}">${_esc(FR_ITEM_TYPE_LABEL[it.itemType] || it.itemType)}</span>` : '',
+    it.status === 'brief_ready' ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">Brief ready</span>' : '',
+    it.status === 'duplicate' ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-500">Duplicate</span>' : '',
+    it.targetQuarter ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">${_esc(it.targetQuarter)}</span>` : '',
+  ].filter(Boolean).join('');
+  const who = it.source === 'issue' && it.issueId ? `From issue #${Number(it.issueId)}` : it.source === 'manual' ? 'Added by admin' : (it.submitterEmail || 'a user');
+  return `
+    <div class="flex items-start gap-2">
+      <span class="text-emerald-600 text-xs font-bold shrink-0 pt-0.5" title="Votes">▲ ${Number(it.voteCount) || 0}</span>
+      <p class="text-sm font-semibold text-gray-800 line-clamp-3 break-words">${_esc(it.title)}</p>
+    </div>
+    <div class="flex flex-wrap gap-1 mt-1.5">${badges}</div>
+    ${parent ? `<p class="text-[11px] text-gray-400 mt-1 truncate">↳ ${_esc(parent.title)}</p>` : ''}
+    <p class="text-[11px] text-gray-400 mt-1">#${Number(it.id)} · ${_esc(FR_CATEGORY_LABEL[it.category] || it.category)}${it.assistantRef ? ' · ' + _esc(it.assistantRef) : ''} · ${_esc(who)}</p>`;
+}
+const _frDistinct = (items, f) => [...new Set(items.map(f).filter(Boolean))].sort().map(v => ({ value: v, label: v }));
+let _frKanban = null;
+function frBoard() {
+  if (_frKanban) return _frKanban;
+  _frKanban = window.AdminBoard.create({
+    id: 'features',
+    mount: document.getElementById('fr-kanban'),
+    columns: FR_BOARD_COLUMNS,
+    columnOf: frColumnOf,
+    idOf: (it) => it.id,
+    searchText: (it) => [it.title, it.description, it.submitterEmail, it.assistantRef].join(' '),
+    renderCard: frBoardCard,
+    filters: [
+      { key: 'category', label: 'Category', options: () => Object.entries(FR_CATEGORY_LABEL).map(([value, label]) => ({ value, label })), test: (it, v) => it.category === v },
+      { key: 'assistant', label: 'Assistant', options: (items) => _frDistinct(items, it => it.assistantRef), test: (it, v) => it.assistantRef === v },
+      { key: 'priority', label: 'Priority', options: () => FR_PRIORITIES.map(p => ({ value: p, label: FR_PRIORITY_LABEL[p] })), test: (it, v) => it.priority === v },
+      { key: 'type', label: 'Type', options: () => FR_ITEM_TYPES.map(t => ({ value: t, label: FR_ITEM_TYPE_LABEL[t] })), test: (it, v) => (it.itemType || 'feature') === v },
+      { key: 'quarter', label: 'Quarter', options: (items) => _frDistinct(items, it => it.targetQuarter), test: (it, v) => it.targetQuarter === v },
+      { key: 'source', label: 'From', options: () => [{ value: 'user', label: 'Customers' }, { value: 'manual', label: 'Admins' }, { value: 'issue', label: 'Issues' }], test: (it, v) => it.source === v },
+    ],
+    groups: [
+      { key: 'category', label: 'Category', of: (it) => FR_CATEGORY_LABEL[it.category] || it.category },
+      { key: 'assistant', label: 'Assistant', of: (it) => it.assistantRef || 'Not an assistant' },
+      { key: 'priority', label: 'Priority', of: (it) => FR_PRIORITY_LABEL[it.priority] || it.priority },
+      { key: 'epic', label: 'Epic', of: (it) => { const p = it.parentId ? _frItems.find(x => x.id === it.parentId) : null; return p ? p.title : (it.itemType === 'epic' ? it.title : 'No epic'); } },
+    ],
+    sorts: [
+      { key: 'votes', label: 'Most votes', compare: (a, b) => (b.voteCount || 0) - (a.voteCount || 0) || new Date(b.createdAt) - new Date(a.createdAt) },
+      { key: 'newest', label: 'Newest first', compare: (a, b) => new Date(b.createdAt) - new Date(a.createdAt) },
+      { key: 'priority', label: 'Priority', compare: (a, b) => (FR_PRIORITY_RANK[a.priority] ?? 9) - (FR_PRIORITY_RANK[b.priority] ?? 9) || (b.voteCount || 0) - (a.voteCount || 0) },
+      { key: 'rank', label: 'Board order', compare: (a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) },
+    ],
+    defaultSort: 'votes',
+    quickViews: [{ key: 'needs', label: 'Needs me', columns: ['review'] }],
+    canDrop: (it, to) => frColumnOf(it) !== to || 'Already there.',
+    onDrop: async (it, to) => {
+      const status = FR_STATUS_FOR_COLUMN[to];
+      if (!status) return;
+      if (to === 'released' || to === 'closed') {
+        const ok = await window.confirmModal(`The submitter and everyone who voted (${Number(it.voteCount) || 0}) are told.`,
+          { title: to === 'released' ? `Mark #${it.id} as released?` : `Decline #${it.id}?`, confirmLabel: to === 'released' ? 'Mark released' : 'Decline' });
+        if (!ok) return;
+      }
+      await frSetStatus(it.id, status);
+    },
+    onOpen: (it) => { openRoadmapEdit(it.id); document.getElementById('fr-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); },
+  });
+  return _frKanban;
 }
 
 async function frMergeRequest(sourceId) {
