@@ -82,6 +82,22 @@ export function missingCardReply(content: string, hasCard: boolean): string {
 }
 
 /**
+ * Issue #39 (prod 2026-11-11, org 41, Website Assistant session 114): 6 of ~40 replies came back as
+ * plain prose — no JSON envelope at all — saying "The card below opens My Content…" over nothing, and
+ * the next turn the same model sent the card fine. The history shows the model only the PROSE of its
+ * earlier replies (never the envelope), so now and then it answers in that shape. Every [card-dropped]
+ * row read that day was 'reply was prose, not JSON'. So a structured route's reply that is prose,
+ * carries no card and points at one is asked for once more, as JSON (chat-orchestrator.ts). Pure.
+ */
+export function proseReplyLostItsCard(raw: string, parsed: { content: string; uiElement: unknown }): boolean {
+    if (parsed.uiElement) return false;
+    if (raw.trimStart().startsWith('{') || /"(?:reply|uiElement)"\s*:/.test(raw)) return false;   // a broken JSON attempt, not prose
+    return replyPointsAtCard(parsed.content);
+}
+/** The one follow-up turn sent when proseReplyLostItsCard: model-only, never stored or shown. */
+export const CARD_FORMAT_RETRY = '[Format check from the system, not the user] Your reply above was plain text, so the card it mentions never reached them: they would see "the card below" and no card. Send that reply again as the JSON object your instructions describe — {"reply": "<your words>", "uiElement": {<the card>}} — and nothing else. If no card fits after all, send {"reply": "<your words, without mentioning a card>", "uiElement": null}.';
+
+/**
  * What to keep when a reply points at a card that was not drawn (Fix pipeline #33, prod 2026-11-10).
  * Three Blog Writer replies said "the card below…" over nothing, and the card the model sent (if any)
  * was only console.warn'd, gone by the time anyone looked. This is stored as a hidden role 'system'
