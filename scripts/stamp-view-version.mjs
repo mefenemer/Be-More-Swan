@@ -80,3 +80,23 @@ for (const file of TARGETS) {
 if (!stampedAny) {
   console.warn('[stamp-view-version] nothing stamped.');
 }
+
+// The full deployed commit, for the functions (src/generated/build-commit.ts). Only on Netlify:
+// locally there is no deploy, and rewriting a committed file from a dev build would leave it dirty.
+// The Issues live check (src/utils/issue-fix-live.ts) compares a fix's merge commit against this.
+const fullRef = process.env.COMMIT_REF;
+if (fullRef && /^[0-9a-f]{40}$/i.test(fullRef)) {
+  const commitFile = resolve(root, 'src/generated/build-commit.ts');
+  try {
+    const src = readFileSync(commitFile, 'utf8');
+    const re = /export const BUILD_COMMIT: string = '[^']*';/;
+    if (re.test(src)) {
+      writeFileSync(commitFile, src.replace(re, `export const BUILD_COMMIT: string = '${fullRef}';`));
+      console.log(`[stamp-view-version] BUILD_COMMIT='${fullRef}'`);
+    } else {
+      console.warn('[stamp-view-version] no BUILD_COMMIT marker in src/generated/build-commit.ts — skipped');
+    }
+  } catch (e) {
+    console.warn(`[stamp-view-version] could not stamp BUILD_COMMIT: ${e?.message || e}`);
+  }
+}

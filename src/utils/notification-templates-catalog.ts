@@ -1974,6 +1974,30 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
             v('issue.admin_message', 'Admin note (may be empty)', ''),
         ],
     },
+    // The two automatic issue messages (src/utils/issue-fix-live.ts): sent by the scheduled live
+    // check, never by an admin, so they carry no admin note.
+    {
+        templateKey: 'issue_fixed_live',
+        name: 'Issue fixed — live now (automatic)',
+        category: 'Support',
+        type: 'issue_update',
+        title: '✅ Issue #{{issue.id}} is fixed and live',
+        message: 'The fix is live now. Could you give it another try? If it\'s still not right, just reply and we\'ll pick it straight back up. If we don\'t hear from you, it closes on its own in 7 days.',
+        variables: [
+            v('issue.id', 'Issue ID', '129'),
+        ],
+    },
+    {
+        templateKey: 'issue_auto_closed',
+        name: 'Issue closed after 7 days (automatic)',
+        category: 'Support',
+        type: 'issue_update',
+        title: 'Issue #{{issue.id}} closed',
+        message: 'We\'ve closed this as we haven\'t heard back in 7 days since the fix went out. If it\'s still not working, reply and we\'ll reopen it.',
+        variables: [
+            v('issue.id', 'Issue ID', '129'),
+        ],
+    },
     {
         templateKey: 'issue_updated',
         name: 'Issue updated (generic)',

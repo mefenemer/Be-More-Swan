@@ -1523,6 +1523,22 @@ node_bundler = "esbuild"
 [functions.reconcile-campaigns]
   schedule = "0 * * * *"
 
+# Issues live check + auto-close (src/utils/issue-fix-live.ts). Tells a reporter their fix is live
+# only once THIS deploy's commit contains the fix's merge commit (GitHub compare), and closes issues
+# nobody replied to 7 days after that. Before it, reporters were told at the STAGING merge.
+#
+# HOURLY on the hour, joining the existing batch so Neon can autosuspend in the gaps. A prod release
+# reaches reporters within the hour; tighter buys nothing a person would notice.
+#
+# Needs GITHUB_FIX_CHECK_TOKEN (fine-grained, this repo, read-only Contents + Pull requests); without
+# it the live check is skipped and logged, and auto-close still runs.
+#
+# ⚠️ Netlify fires scheduled functions ONLY on the production deploy. Staging is a branch deploy, so
+# this never runs there — .github/workflows/staging-crons.yml pokes run-fix-live-check
+# instead, which calls the same function. The two must stay in step.
+[functions.check-fixes-live]
+  schedule = "0 * * * *"
+
 # The Leads tab's bulk delete (assistant-records DELETE { ids }) writes a ledger event per lead.
 # Batched since 2026-10-03, but a full chunk still needs more than the 10s default — a timeout here
 # comes back as a bare gateway error after part of the chunk is already done.

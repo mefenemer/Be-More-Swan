@@ -10,6 +10,7 @@ import { resolveBaseUrl } from './base-url';
 import { isEmailAllowedForUser } from './notification-email-gate';
 
 import { adminInbox } from './admin-inbox';
+import { fixLiveColumnsReady } from './issue-fix-live';
 type Db = ReturnType<typeof getDb>;
 
 // Canonical lifecycle states. KEEP IN SYNC with db/issue-reports.sql status CHECK.
@@ -97,14 +98,21 @@ export async function notifyIssueUser(
         status: IssueStatus;
         adminMessage?: string;
         headers?: Record<string, string | undefined>;
+        /**
+         * Copy for the two automatic messages (src/utils/issue-fix-live.ts):
+         * 'live' — the fix reached the site this reporter uses; 'auto_closed' — no reply 7 days after it.
+         */
+        variant?: 'live' | 'auto_closed';
     },
 ): Promise<void> {
-    const { userId, issueId, status, adminMessage = '' } = opts;
+    const { userId, issueId, status, adminMessage = '', variant } = opts;
     if (userId == null) return;
     const label = ISSUE_STATUS_LABEL[status];
 
     // Status-specific call to action.
     const cta =
+        variant === 'live'               ? "The fix is live now. Could you give it another try? If it's still not right, just reply and we'll pick it straight back up. If we don't hear from you, it closes on its own in 7 days." :
+        variant === 'auto_closed'        ? "We've closed this as we haven't heard back in 7 days since the fix went out. If it's still not working, reply and we'll reopen it." :
         status === 'fixed_ready_to_test' ? "We've pushed a fix — could you give it another try and let us know how it goes?" :
         status === 'more_info_required'  ? "We'd love to help, but we need a bit more detail from you first." :
         status === 'fix_in_progress'     ? "We've picked this up and are working on a fix now." :
@@ -116,6 +124,8 @@ export async function notifyIssueUser(
         "There's an update on the issue you reported.";
 
     const title =
+        variant === 'live'               ? `✅ Issue #${issueId} is fixed and live` :
+        variant === 'auto_closed'        ? `Issue #${issueId} closed` :
         status === 'fixed_ready_to_test' ? `✅ Issue #${issueId} fixed — ready to test` :
         status === 'more_info_required'  ? `❓ Issue #${issueId} — more info needed` :
         status === 'backlog'             ? `🗂️ Issue #${issueId} added to the backlog` :
@@ -137,7 +147,10 @@ export async function notifyIssueUser(
         roadmap:             'issue_roadmap',
         closed:              'issue_closed',
     };
-    await createNotification(db, ISSUE_TEMPLATE_KEY[status] ?? 'issue_updated', {
+    const templateKey = variant === 'live' ? 'issue_fixed_live'
+        : variant === 'auto_closed' ? 'issue_auto_closed'
+        : (ISSUE_TEMPLATE_KEY[status] ?? 'issue_updated');
+    await createNotification(db, templateKey, {
         userId,
         context: { issue: { id: issueId, status_label: label, admin_message: messageLine } },
         metadata: { issueId, status },
@@ -176,6 +189,11 @@ export async function notifyIssueUser(
  * it threads a note and notifies the reporter. No-op (returns false) if a gate is unmet or
  * the issue is already past testing. Shared by the merge-result and run-SQL endpoints so
  * whichever finishes last triggers the single advance + reporter notification.
+ *
+ * ⚠️ Since db/z-issue-fix-live.sql: once both gates pass this only threads "merged, we'll tell you
+ * when it's live" and returns false. The scheduled live check (issue-fix-live.ts) advances the issue
+ * when this environment's deployed commit contains the fix. The old path below runs only on a
+ * database the SQL hasn't reached.
  */
 export async function maybeAdvanceToReadyToTest(
     db: Db,
@@ -187,6 +205,20 @@ export async function maybeAdvanceToReadyToTest(
     if (row.status === 'fixed_ready_to_test' || row.status === 'closed') return false;
     if (row.devMergeStatus !== 'merged') return false;     // not merged to staging yet
     if (row.devSqlStatus === 'pending') return false;       // migration still outstanding
+
+    // Once db/z-issue-fix-live.sql is in, merged is not live: the scheduled live check
+    // (issue-fix-live.ts) moves the issue on, and tells the reporter, when THIS site's deployed
+    // commit contains the fix. Telling them now asked prod customers to re-test a staging-only fix.
+    if (await fixLiveColumnsReady(db)) {
+        await db.insert(issueReportMessages).values({
+            issueId,
+            authorType: 'admin',
+            authorId: null,
+            body: "🔀 The fix is merged. We'll let you know as soon as it's live.",
+            status: null,
+        });
+        return false;
+    }
 
     await db.update(issueReports)
         .set({ status: 'fixed_ready_to_test', updatedAt: new Date() })

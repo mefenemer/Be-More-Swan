@@ -18,6 +18,7 @@ import { incidentColumnsReady, loadIncidentFields } from '../../src/utils/platfo
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { hasPermission } from '../../src/utils/rbac';
+import { stampFixedAt } from '../../src/utils/issue-fix-live';
 import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, reclaimStaleMerges, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -535,6 +536,8 @@ export default withLambda(async (event) => {
                     resolvedAt: isTerminal ? new Date() : issue.resolvedAt,
                 })
                 .where(eq(issueReports.id, id));
+            // Set by hand: start the 7-day auto-close clock (issue-fix-live.ts).
+            if (newStatus === 'fixed_ready_to_test') await stampFixedAt(db, id);
         }
 
         // Putting a ticket On Hold cancels a still-QUEUED AI handoff, otherwise the local

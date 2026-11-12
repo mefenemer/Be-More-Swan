@@ -320,7 +320,10 @@
             </div>`;
         } else if (i.status === 'more_info_required') {
             actions = `<div class="mt-3"><button type="button" onclick="window.riToggleReply(${i.id})" class="btn-primary px-3 py-1.5 text-xs font-bold rounded-lg">Provide more info</button></div>`;
-        } else if (i.status !== 'closed') {
+        } else if (i.status === 'closed') {
+            // A reply reopens a closed issue (issue-reports.ts) — the auto-close note promises it.
+            actions = `<div class="mt-3"><button type="button" onclick="window.riToggleReply(${i.id})" class="btn-utility px-2 py-1 text-xs font-semibold rounded-lg">Still broken? Reply to reopen</button></div>`;
+        } else {
             actions = `<div class="mt-3"><button type="button" onclick="window.riToggleReply(${i.id})" class="btn-utility px-2 py-1 text-xs font-semibold rounded-lg">Add a comment</button></div>`;
         }
         return `

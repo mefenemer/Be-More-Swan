@@ -140,7 +140,9 @@ export default withLambda(async (event) => {
 
         // A user reply on a "more info" request, or on a fix they've found still broken,
         // re-opens the issue so it lands back in the developer's queue with the reply visible.
-        const newStatus = (issue.status === 'more_info_required' || issue.status === 'fixed_ready_to_test')
+        // 'closed' too: an issue closes itself 7 days after its fix goes live (issue-fix-live.ts),
+        // and that note promises a reply reopens it.
+        const newStatus = (issue.status === 'more_info_required' || issue.status === 'fixed_ready_to_test' || issue.status === 'closed')
             ? 'reported'
             : issue.status;
         await db.insert(issueReportMessages).values({
