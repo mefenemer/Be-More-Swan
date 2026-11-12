@@ -32,9 +32,28 @@ test('a new draft that cannot be created says so, and Try again opens the editor
     await expect(page.locator('#bs-workspace')).toBeVisible();
 });
 
+test('while an article loads, the panel says so; the line goes once the editor is up', async ({ page, api }) => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    // Hold the load so the in-between state can be seen.
+    await page.route('**/.netlify/functions/blog-posts?id=*', async (route) => {
+        await held;
+        await route.fulfill({ json: { post: { id: 132, title: 'Held article', status: 'draft', bodyMarkdown: 'Words.' } } });
+    });
+    api.set('blog-posts', { posts: [] });
+    await open(page, { postId: 132 });
+    const opening = page.locator('#bs-opening');
+    await expect(opening).toBeVisible();
+    await expect(opening).toContainText('Opening your article');
+    release();
+    await expect(page.locator('#bs-workspace')).toBeVisible();
+    await expect(opening).toBeHidden();
+});
+
 test('an existing article that cannot load says so instead of a blank panel', async ({ page, api }) => {
     api.set('blog-posts', { status: 502, json: { errorType: 'Error', errorMessage: 'Failed query: select …' } });
     await open(page, { postId: 132 });
     await expect(page.locator('#bs-open-error')).toContainText('Could not open this article');
+    await expect(page.locator('#bs-opening')).toBeHidden();
     await expect(page.locator('#bs-workspace')).toBeHidden();
 });
