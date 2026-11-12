@@ -23,25 +23,26 @@ import { taskRuns } from '../../db/schema';
 import { checkRepeatedTaskFailure } from '../../src/utils/churn';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const SCORE_MODEL = 'claude-haiku-4-5-20251001';
+const SCORE_MODEL = 'claude-haiku-5-5';
 
 async function scoreOutputConfidence(taskRunId: number, outputText: string, userId: number): Promise<void> {
     const controller = new AbortController();
     const timeoutId  = setTimeout(() => controller.abort(), 5_000);
     try {
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model: SCORE_MODEL,
             max_tokens: 256,
             messages: [{
                 role: 'user',
                 content: `You are a factual confidence reviewer for AI-generated task outputs.\n\nRespond with a single JSON object (no markdown):\n{\n  "confidenceLevel": "green" | "amber" | "red",\n  "verifyHint": "<one sentence — what to verify, or null if green>"\n}\n\nRules:\n- green: factually safe, no misleading claims\n- amber: contains unverified claims or ambiguous language\n- red: likely incorrect or could cause harm if used without verification\n\nOutput:\n"""\n${outputText.slice(0, 2000)}\n"""`,
             }],
-        }, { signal: controller.signal as any });
+        }, SCORE_MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming, { signal: controller.signal as any });
         clearTimeout(timeoutId);
 
-        const raw = (response.content[0] as any).text?.trim() || '{}';
+        const raw = replyText(response.content)?.trim() || '{}';
         const parsed = JSON.parse(raw);
         const confidenceLevel = ['green', 'amber', 'red'].includes(parsed.confidenceLevel) ? parsed.confidenceLevel : 'amber';
         const verifyHint      = parsed.verifyHint || null;

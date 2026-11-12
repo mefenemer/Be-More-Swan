@@ -64,7 +64,7 @@ type Db = ReturnType<typeof getDb>;
  * workspace's voice, and two content surfaces drafting at different quality levels is a difference
  * a customer would see and could not explain. Raise both together or neither.
  */
-export const NEWSLETTER_MODEL = 'claude-haiku-4-5-20251001';
+export const NEWSLETTER_MODEL = 'claude-haiku-5-5';
 
 /** Marks a draft as machine-written, for the AI transparency badge and the review queue. */
 export const NEWSLETTER_DRAFT_REASON = 'assistant_draft';

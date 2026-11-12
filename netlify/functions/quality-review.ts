@@ -26,10 +26,11 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
 import { hasFeature } from '../../src/utils/plan-features';
 import { featureTierKey } from '../../src/config/beta-plan';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 const jwtSecret   = process.env.JWT_SECRET;
 const anthropic   = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const REVIEW_MODEL = 'claude-haiku-4-5-20251001';
+const REVIEW_MODEL = 'claude-haiku-5-5';
 const TIMEOUT_MS   = 5_000;
 
 // Access is gated on the plan's `quality_reviewer` feature flag, NOT a hardcoded tier-key list.
@@ -199,11 +200,11 @@ export default withLambda(async (event) => {
     const timeoutId  = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model:      REVIEW_MODEL,
             max_tokens: 600,
             messages:   [{ role: 'user', content: prompt }],
-        }, { signal: controller.signal as any });
+        }, REVIEW_MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming, { signal: controller.signal as any });
 
         clearTimeout(timeoutId);
 
@@ -216,7 +217,7 @@ export default withLambda(async (event) => {
             dataCategories: ['business_context'],
         });
 
-        const text = response.content[0].type === 'text' ? response.content[0].text : '';
+        const text = replyText(response.content);
         // An unparseable reply leaves raw empty; formatChecks then uses pass defaults.
         const raw: Record<string, any> = parseModelJson<Record<string, any>>(text) ?? {};
 

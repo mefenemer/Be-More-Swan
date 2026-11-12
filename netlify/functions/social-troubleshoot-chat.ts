@@ -8,10 +8,11 @@ import Anthropic from '@anthropic-ai/sdk';
 import { logMessageUsage } from '../../src/utils/ai-usage';
 import jwt from 'jsonwebtoken';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 const jwtSecret = process.env.JWT_SECRET!;
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL      = 'claude-haiku-4-5-20251001';
+const MODEL      = 'claude-haiku-5-5';
 
 // AC: 10 re-check attempts per user per platform per 24 hours (server-side enforcement)
 const RATE_LIMIT_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -108,13 +109,13 @@ Do not mention check IDs. Do not use bullet points. Write naturally as if you're
     }
 
     try {
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 200,
             messages: [{ role: 'user', content: prompt }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
         logMessageUsage(response, MODEL, { userId, sessionId: 'social-troubleshoot-chat' });
-        const message = (response.content[0] as { text: string }).text.trim();
+        const message = replyText(response.content).trim();
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json', 'X-RateLimit-Remaining': String(remaining) },

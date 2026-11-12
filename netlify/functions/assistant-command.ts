@@ -25,8 +25,9 @@ import { loadHelpKnowledge } from '../../src/utils/help-knowledge';
 
 import { liveRoleLabel } from '../../src/utils/live-role-label';
 import { MENTOR_ROLE_KEY } from '../../src/utils/mentor-provision';
+import { adaptForModel } from '../../src/config/model-options';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 // The workspace views the bar is allowed to route to (mirrors workspace.html routes).
 // `assets` (Business Information) is included so the bar can route a user to the setup
@@ -195,7 +196,7 @@ ${mentor ? `- Business advice — what to focus on or do next for the BUSINESS, 
 - Never invent assistant ids or view keys.`;
 
     try {
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 600,
             system: [
@@ -203,7 +204,7 @@ ${mentor ? `- Business advice — what to focus on or do next for the BUSINESS, 
                 { type: 'text', text: system },
             ],
             messages: [{ role: 'user', content: command }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
         logMessageUsage(response, MODEL, { workspaceId: orgId, userId, sessionId: 'assistant-command' });
 
         const textBlock = response.content.find((b): b is Anthropic.TextBlock => b.type === 'text');

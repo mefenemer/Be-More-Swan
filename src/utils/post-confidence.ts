@@ -16,9 +16,10 @@
 
 import Anthropic from '@anthropic-ai/sdk';
 import { logAiUsage } from './ai-usage';
+import { adaptForModel, replyText } from '../config/model-options';
 
 const anthropic       = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const SCORE_MODEL      = 'claude-haiku-4-5-20251001';
+const SCORE_MODEL      = 'claude-haiku-5-5';
 const SCORE_TIMEOUT_MS = 5_000;
 
 export type ConfidenceScore = 'green' | 'amber' | 'red';
@@ -94,15 +95,15 @@ ${caption}
     const timeoutId  = setTimeout(() => controller.abort(), SCORE_TIMEOUT_MS);
 
     try {
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model: SCORE_MODEL,
             max_tokens: 512,
             messages: [{ role: 'user', content: prompt }],
-        }, { signal: controller.signal as any });
+        }, SCORE_MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming, { signal: controller.signal as any });
 
         clearTimeout(timeoutId);
         const durationMs = Date.now() - start;
-        const content = response.content[0].type === 'text' ? response.content[0].text : '';
+        const content = replyText(response.content);
 
         void logAiUsage({
             model: SCORE_MODEL,

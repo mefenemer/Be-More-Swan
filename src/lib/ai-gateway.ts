@@ -3,8 +3,8 @@
 // US-AI-GW-1 (centralized routing) + US-AI-GW-2 (failover on 429/503).
 //
 // Config:
-//   AI_GATEWAY_PRIMARY_MODEL   — defaults to claude-sonnet-4-6
-//   AI_GATEWAY_FALLBACK_MODEL  — defaults to claude-haiku-4-5-20251001
+//   AI_GATEWAY_PRIMARY_MODEL   — defaults to claude-sonnet-5-5 (was claude-sonnet-4-6 until 2026-11-12)
+//   AI_GATEWAY_FALLBACK_MODEL  — defaults to claude-haiku-5-5 (was claude-haiku-4-5-20251001)
 //
 // Changing the target model requires only an env-var update; no business logic changes needed.
 
@@ -84,8 +84,8 @@ export interface GatewayResponse {
     tokensOutput: number | null;
 }
 
-const PRIMARY_MODEL  = process.env.AI_GATEWAY_PRIMARY_MODEL  ?? 'claude-sonnet-4-6';
-const FALLBACK_MODEL = process.env.AI_GATEWAY_FALLBACK_MODEL ?? 'claude-haiku-4-5-20251001';
+const PRIMARY_MODEL  = process.env.AI_GATEWAY_PRIMARY_MODEL  ?? 'claude-sonnet-5-5';
+const FALLBACK_MODEL = process.env.AI_GATEWAY_FALLBACK_MODEL ?? 'claude-haiku-5-5';
 
 const client = new Anthropic({
     apiKey: process.env.ANTHROPIC_API_KEY,
@@ -146,13 +146,15 @@ async function callModel(model: string, req: GatewayRequest): Promise<Anthropic.
     // whole-site draft on any other model — or with no role model chosen — kept the client's 24s and
     // died at 3 × 24s ("Request timed out.") before the model could finish writing ~8k tokens.
     const deadline = req.deadlineMs ? { timeout: req.deadlineMs } : undefined;
-    // Only a role's chosen model is adapted; PRIMARY/FALLBACK calls go out exactly as before.
-    if (model !== req.model) return client.messages.create(params, deadline);
+    // EVERY call is adapted (2026-11-12): PRIMARY/FALLBACK are 5.5 models now, which reject sampling
+    // settings and can open with a thinking block, so sending them raw as before would break. A
+    // role's chosen model keeps its chosen thinking level; PRIMARY/FALLBACK run at Low. adaptForModel
+    // leaves a previous-generation model (an env override) untouched.
     // A thinking model gets the caller's deadline, or 2 minutes in background work (no deadline),
     // rather than the client's 24s: the head-to-head measured Opus 5.5 at up to 22.6s on short
     // prompts, and drafts carry ~8k tokens. Request paths pass a deadline (gatewayRoleModel).
-    const thinks = modelOption(model)?.thinking !== 'none';
-    return client.messages.create(adaptForModel(params, model, req.thinking) as Anthropic.MessageCreateParamsNonStreaming,
+    const thinks = (modelOption(model)?.thinking ?? 'none') !== 'none';
+    return client.messages.create(adaptForModel(params, model, model === req.model ? req.thinking : 'low') as Anthropic.MessageCreateParamsNonStreaming,
         thinks ? { timeout: req.deadlineMs ?? 120_000 } : deadline);
 }
 
@@ -252,7 +254,7 @@ export interface GroundedResponse extends GatewayResponse {
  * graceful degrade — so pick it from the model id.
  */
 function webSearchTool(model: string): Anthropic.Messages.ToolUnion {
-    const dynamicFiltering = /opus-4-(6|7|8)|sonnet-5|sonnet-4-6|fable-5/.test(model);
+    const dynamicFiltering = /opus-4-(6|7|8)|opus-5|sonnet-5|sonnet-4-6|fable-5/.test(model);
     return {
         type: dynamicFiltering ? 'web_search_20260209' : 'web_search_20250305',
         name: 'web_search',
@@ -315,9 +317,9 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
         };
         // A thinking model searching in background work (no deadline) gets 3 minutes a call, not the
         // client's 24 s: thinking plus up to four searches runs well past it.
-        const adapted = m === roleModel;
-        const thinks = adapted && modelOption(m)?.thinking !== 'none';
-        return client.messages.create((adapted ? adaptForModel(params, m, req.thinking) : params) as Anthropic.MessageCreateParamsNonStreaming,
+        // Every model is adapted, as in callModel: PRIMARY/FALLBACK are 5.5 models since 2026-11-12.
+        const thinks = (modelOption(m)?.thinking ?? 'none') !== 'none';
+        return client.messages.create(adaptForModel(params, m, m === roleModel ? req.thinking : 'low') as Anthropic.MessageCreateParamsNonStreaming,
             left === Infinity ? (thinks ? { timeout: 180_000 } : undefined) : {
             timeout: Math.max(MIN_CALL_MS, left),
             // A `timeout` is per ATTEMPT, not per call: the SDK retries a connection timeout

@@ -9,9 +9,10 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJsonArray } from '../../src/utils/model-json';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 const jwtSecret = process.env.JWT_SECRET;
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -57,16 +58,16 @@ export default withLambda(async (event: HandlerEvent) => {
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-        const response = await anthropic.messages.create({
+        const response = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 256,
             messages: [{
                 role: 'user',
                 content: `You are a creative naming assistant for an AI software platform. The user wants to name their new AI Assistant. The assistant's role is "${role}" and the creative theme is "${theme}". Return EXACTLY 3 to 5 unique, catchy, and professional name suggestions. Return ONLY a valid JSON array of strings (e.g. ["Name 1", "Name 2", "Name 3"]). Do not include markdown formatting, explanations, or extra text.`
             }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
 
-        const raw = (response.content[0] as { text: string }).text.trim();
+        const raw = replyText(response.content).trim();
         const names = parseModelJsonArray(raw);
         if (!Array.isArray(names) || names.length === 0) throw new Error('Invalid LLM response format.');
 

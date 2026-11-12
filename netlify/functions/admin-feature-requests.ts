@@ -43,9 +43,10 @@ import {
     type FeatureStatus,
 } from '../../src/utils/feature-requests';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 const jwtSecret = process.env.JWT_SECRET;
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -86,15 +87,15 @@ export default withLambda(async (event) => {
 
         try {
             const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-            const response = await anthropic.messages.create({
+            const response = await anthropic.messages.create(adaptForModel({
                 model: MODEL,
                 max_tokens: 512,
                 messages: [{
                     role: 'user',
                     content: `You are a product manager refining a user-submitted feature request for an AI assistant SaaS platform. Rewrite the request below into a clear, concise, professional feature summary (2-4 sentences). Keep the user's intent; fix grammar and clarity; do NOT invent scope or commitments. Return ONLY the rewritten summary, no preamble or markdown.\n\nRaw request:\n"""${text}"""`,
                 }],
-            });
-            const enhanced = ((response.content[0] as { text: string })?.text || '').trim();
+            }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
+            const enhanced = (replyText(response.content) || '').trim();
             if (!enhanced) throw new Error('Empty LLM response.');
 
             void logAiUsage({
@@ -124,15 +125,15 @@ export default withLambda(async (event) => {
 
         try {
             const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-            const response = await anthropic.messages.create({
+            const response = await anthropic.messages.create(adaptForModel({
                 model: MODEL,
                 max_tokens: 768,
                 messages: [{
                     role: 'user',
                     content: `You are a senior engineer writing an implementation brief for an AI coding agent (Claude) that will build this feature request end-to-end in a web app codebase. Based on the title and description below, write a clear, actionable brief covering: what to build, key considerations or edge cases, and acceptance criteria. Do not invent specific file paths, table names, or technical details you cannot know from the request alone. Keep it concise (a short paragraph plus a few bullet points). Return ONLY the brief text, no preamble or markdown headers.\n\nTitle: "${title}"\nDescription: "${description || '(none provided)'}"`,
                 }],
-            });
-            const brief = ((response.content[0] as { text: string })?.text || '').trim();
+            }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
+            const brief = (replyText(response.content) || '').trim();
             if (!brief) throw new Error('Empty LLM response.');
 
             void logAiUsage({

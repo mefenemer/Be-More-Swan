@@ -43,9 +43,9 @@ export const MODEL_OPTIONS: readonly ModelOption[] = [
     { id: 'claude-opus-5-5', label: 'Opus 5.5', generation: 'current', inPerM: 4, outPerM: 20, thinking: 'always', sampling: false,
       summary: 'Best writing and most accurate specialist detail, and the slowest. Always thinks, so it cannot be set to Off.' },
     { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', generation: 'previous', inPerM: 3, outPerM: 15, thinking: 'none', sampling: true,
-      summary: 'Previous generation. Today\'s social drafting model.' },
+      summary: 'Previous generation, listed as legacy by Anthropic. Was the social drafting model until 2026-11-12; nothing uses it by default now.' },
     { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5', generation: 'previous', inPerM: 1, outPerM: 5, thinking: 'none', sampling: true,
-      summary: 'Previous generation. Today\'s chat, email, blog and lead model.' },
+      summary: 'Previous generation, listed as legacy by Anthropic. Was the chat, email, blog and lead model until 2026-11-12; nothing uses it by default now.' },
 ];
 
 export function modelOption(id: string | null | undefined): ModelOption | null {

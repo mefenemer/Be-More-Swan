@@ -157,7 +157,7 @@ import { recordPlatformIncident } from '../../src/utils/platform-incident';
 import { extractAssistantNote, recordAssistantNote } from '../../src/utils/assistant-notes';
 import { ASSISTANT_PAGE_LAYOUT, OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT, SUPPORT_REQUEST_PROMPT } from '../../src/constants/assistant-shared-prompts';
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+const DEFAULT_MODEL = 'claude-haiku-5-5';
 
 const MAX_MESSAGE_CHARS = 4000;
 // Cap on the serialised payloadToPass a HandoffProposalCard approval may carry — the

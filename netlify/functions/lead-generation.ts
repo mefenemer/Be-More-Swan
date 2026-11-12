@@ -112,7 +112,7 @@ function chaseDate(): Date {
 }
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 /**
  * When this lead was FIRST contacted — the start of the sales cycle (Phase 4.5).

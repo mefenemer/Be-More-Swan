@@ -160,23 +160,23 @@ export function promptLayersFor(roleKey: string): PromptLayer[] {
 
 /** The work of each role that reads the model setting (src/utils/assistant-model.ts), beyond its chat, which every role's does. */
 export const ROLE_MODEL_PATHS: Record<string, { label: string; defaultModel: string }[]> = {
-    social_media_manager: [{ label: 'Drafting posts', defaultModel: 'claude-sonnet-4-6' }],
+    social_media_manager: [{ label: 'Drafting posts', defaultModel: 'claude-sonnet-5-5' }],
     newsletter_editor: [
-        { label: 'Newsletters and welcome emails', defaultModel: 'claude-haiku-4-5-20251001' },
-        { label: 'Email Studio flow emails', defaultModel: 'claude-haiku-4-5-20251001' },
+        { label: 'Newsletters and welcome emails', defaultModel: 'claude-haiku-5-5' },
+        { label: 'Email Studio flow emails', defaultModel: 'claude-haiku-5-5' },
     ],
-    blog_writer: [{ label: 'Drafting articles', defaultModel: 'claude-haiku-4-5-20251001' }],
+    blog_writer: [{ label: 'Drafting articles', defaultModel: 'claude-haiku-5-5' }],
     // Lead discovery (src/lib/discovery-scoring.ts — the classifier, bulk scoring and the deep
     // re-score) reads it too since 2026-10-25: it writes most of the outreach emails.
-    lead_qualifier: [{ label: 'Scoring leads (in chat and in lead discovery), ideas and outreach emails', defaultModel: 'claude-haiku-4-5-20251001' }],
+    lead_qualifier: [{ label: 'Scoring leads (in chat and in lead discovery), ideas and outreach emails', defaultModel: 'claude-haiku-5-5' }],
     // These three run through the AI gateway, whose own model (AI_GATEWAY_PRIMARY_MODEL) is the default.
-    mystery_shopper: [{ label: 'Site audits', defaultModel: 'claude-sonnet-4-6' }],
+    mystery_shopper: [{ label: 'Site audits', defaultModel: 'claude-sonnet-5-5' }],
     website_assistant: [
-        { label: 'Drafting and importing sites', defaultModel: 'claude-sonnet-4-6' },
-        { label: 'Rewriting the owner\'s own words (Low thinking at most)', defaultModel: 'claude-sonnet-4-6' },
+        { label: 'Drafting and importing sites', defaultModel: 'claude-sonnet-5-5' },
+        { label: 'Rewriting the owner\'s own words (Low thinking at most)', defaultModel: 'claude-sonnet-5-5' },
     ],
-    brand_designer: [{ label: 'Art direction for visual briefs', defaultModel: 'claude-sonnet-4-6' }],
-    video_producer: [{ label: 'Planning video storyboards', defaultModel: 'claude-sonnet-4-6' }],
+    brand_designer: [{ label: 'Art direction for visual briefs', defaultModel: 'claude-sonnet-5-5' }],
+    video_producer: [{ label: 'Planning video storyboards', defaultModel: 'claude-sonnet-5-5' }],
     // Background jobs (src/utils/mentor-jobs.ts MENTOR_JOB_DEFAULT_MODEL), not held to Low thinking (§2.4.1).
     business_mentor: [
         { label: 'Strategy documents', defaultModel: 'claude-opus-5-5' },
@@ -185,4 +185,4 @@ export const ROLE_MODEL_PATHS: Record<string, { label: string; defaultModel: str
     ],
 };
 /** Every role's chat. */
-export const CHAT_DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+export const CHAT_DEFAULT_MODEL = 'claude-haiku-5-5';

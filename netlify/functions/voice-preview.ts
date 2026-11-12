@@ -28,8 +28,9 @@ import { voiceDirective, type VoiceSurface } from '../../src/utils/voice-profile
 import { allowedArticleTypes, allowedSocialShapes } from '../../src/utils/content-shapes';
 import { parseModelJson } from '../../src/utils/model-json';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL = 'claude-haiku-5-5';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -107,12 +108,12 @@ export default withLambda(async (event: HandlerEvent) => {
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
         // Lower temperature when rewriting the owner's words: fidelity matters more than flair there.
-        const response = await anthropic.messages.create({ model: MODEL, max_tokens: 700, temperature: own ? 0.4 : 0.9, system, messages: [{ role: 'user', content: user }] });
+        const response = await anthropic.messages.create(adaptForModel({ model: MODEL, max_tokens: 700, temperature: own ? 0.4 : 0.9, system, messages: [{ role: 'user', content: user }] }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
         void logAiUsage({
             userId: ctx.userId, workspaceId: ctx.organisationId, model: MODEL,
             inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
         });
-        const raw = (response.content[0] as { text?: string })?.text ?? '';
+        const raw = replyText(response.content) ?? '';
         const parsed = parseModelJson<{ samples?: unknown }>(raw);
         const texts = Array.isArray(parsed?.samples) ? parsed!.samples.map((t) => String(t).trim()).filter(Boolean) : [];
         if (!texts.length) return json(502, { error: 'The preview came back empty — try again.' });
@@ -163,7 +164,7 @@ async function checkRewrite(
     ctx: { userId: number; organisationId: number },
 ): Promise<{ text: string; removed: string[] } | null> {
     try {
-        const res = await anthropic.messages.create({
+        const res = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 500,
             temperature: 0,
@@ -176,12 +177,12 @@ async function checkRewrite(
                 'Return ONLY JSON: {"removed": ["what changed, in under 8 words", ...], "text": "the corrected rewrite"}',
             ].join('\n'),
             messages: [{ role: 'user', content: `<original>${original}</original>\n<rewrite>${rewrite}</rewrite>` }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
         void logAiUsage({
             userId: ctx.userId, workspaceId: ctx.organisationId, model: MODEL,
             inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0,
         });
-        const parsed = parseModelJson<{ removed?: unknown; text?: unknown }>((res.content[0] as { text?: string })?.text ?? '');
+        const parsed = parseModelJson<{ removed?: unknown; text?: unknown }>(replyText(res.content) ?? '');
         const text = typeof parsed?.text === 'string' ? parsed.text.trim() : '';
         if (!text) return null;
         const removed = Array.isArray(parsed?.removed) ? parsed!.removed.map((r) => String(r).trim()).filter(Boolean).slice(0, 5) : [];
@@ -205,7 +206,7 @@ async function checkFresh(
     ctx: { userId: number; organisationId: number },
 ): Promise<{ text: string; removed: string[] } | null> {
     try {
-        const res = await anthropic.messages.create({
+        const res = await anthropic.messages.create(adaptForModel({
             model: MODEL,
             max_tokens: 500,
             temperature: 0,
@@ -219,12 +220,12 @@ async function checkFresh(
                 'Return ONLY JSON: {"removed": ["the claim, in under 8 words", ...], "text": "the corrected sample"}',
             ].join('\n'),
             messages: [{ role: 'user', content: `<facts>${facts || '(none stated)'}</facts>\n<sample>${text}</sample>` }],
-        });
+        }, MODEL, 'low') as Anthropic.MessageCreateParamsNonStreaming);
         void logAiUsage({
             userId: ctx.userId, workspaceId: ctx.organisationId, model: MODEL,
             inputTokens: res.usage?.input_tokens ?? 0, outputTokens: res.usage?.output_tokens ?? 0,
         });
-        const parsed = parseModelJson<{ removed?: unknown; text?: unknown }>((res.content[0] as { text?: string })?.text ?? '');
+        const parsed = parseModelJson<{ removed?: unknown; text?: unknown }>(replyText(res.content) ?? '');
         const out = typeof parsed?.text === 'string' ? parsed.text.trim() : '';
         if (!out) return null;
         const removed = Array.isArray(parsed?.removed) ? parsed!.removed.map((r) => String(r).trim()).filter(Boolean).slice(0, 5) : [];

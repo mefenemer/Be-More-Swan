@@ -22,7 +22,7 @@ import { MAX_TOPICS, TOPIC_MAX_CHARS, TOPIC_WORDING_RULES, normaliseTopics, sour
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-export const TRIAGE_MODEL = 'claude-haiku-4-5-20251001';
+export const TRIAGE_MODEL = 'claude-haiku-5-5';
 /** Threads judged per call — each verdict carries a reply of up to ~150 words. */
 const GROUP_SIZE = 5;
 const CALL_TIMEOUT_MS = 60_000;

@@ -15,9 +15,10 @@ import { requireTenant } from '../../src/utils/tenant';
 import { X_OAUTH_SCOPE_LIST } from '../../src/config/x-scopes';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
+import { adaptForModel, replyText } from '../../src/config/model-options';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const HAIKU = 'claude-haiku-4-5-20251001';
+const HAIKU = 'claude-haiku-5-5';
 
 // Platform-specific execution constraints for LLM blueprint assembly
 const PLATFORM_CONSTRAINTS: Record<string, Record<string, unknown>> = {
@@ -325,16 +326,16 @@ export default withLambda(async (event) => {
         // Call Anthropic to format executionConstraints as LLM-ready narrative
         let executionConstraints: Record<string, unknown> = { raw: constraintsInput };
         try {
-            const llmRes = await anthropic.messages.create({
+            const llmRes = await anthropic.messages.create(adaptForModel({
                 model: HAIKU,
                 max_tokens: 400,
                 messages: [{
                     role: 'user',
                     content: `You are assembling a social media posting blueprint for an AI assistant. Based on the platform data below, write a concise JSON object with key "narrative" (a 2-3 sentence plain-English summary of what the assistant must know before posting: rate limits, best times, restrictions, and any current blockers). Return ONLY valid JSON.\n\nData:\n${JSON.stringify(constraintsInput, null, 2)}`,
                 }],
-            });
+            }, HAIKU, 'low') as Anthropic.MessageCreateParamsNonStreaming);
             logMessageUsage(llmRes, HAIKU, { workspaceId: organisationId, sessionId: 'social-preflight-audit' });
-            const raw = (llmRes.content[0] as { text: string }).text.trim();
+            const raw = replyText(llmRes.content).trim();
             const parsed = parseModelJson<{ narrative?: string }>(raw);
             if (parsed?.narrative) {
                 executionConstraints = { ...constraintsInput, narrative: parsed.narrative };

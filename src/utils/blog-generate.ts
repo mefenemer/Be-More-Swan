@@ -197,7 +197,7 @@ export function buildBlogSystemPrompt({
         (inspoBlock ? `\n\n${inspoBlock}` : ''));
 }
 
-export const BLOG_MODEL = 'claude-haiku-4-5-20251001';
+export const BLOG_MODEL = 'claude-haiku-5-5';
 export const DEFAULT_TONE = 'friendly and professional';
 
 /** Trim an untrusted string to a bounded length; non-strings become ''. */
