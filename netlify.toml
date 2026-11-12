@@ -1152,6 +1152,10 @@ node_bundler = "esbuild"
 [functions.ai-visibility-reminder]
   schedule = "0 8 1 * *"
 
+# System Map "better options": monthly web check of every paid system (docs/system-map-plan.md) — 2nd at 05:00 UTC
+[functions.system-review-monthly]
+  schedule = "0 5 2 * *"
+
 # US-SMM-2.4.1: Draft horizon gap-fill — HOURLY, on the hour.
 #
 # Was 06:00 UTC daily. That made the assistant look broken: nothing watches for gaps appearing, so

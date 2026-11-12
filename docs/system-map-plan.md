@@ -101,6 +101,26 @@ Endpoint returns registry + health + 30-day/all-time spend per system (variable 
 ### Phase 3 — better options job
 Monthly job + stored results + drawer section + "decisions already taken" list per system.
 
+**Phase 3 built 2026-11-12 on staging (not committed at time of writing).** ⚠️ **`db/z-system-reviews.sql` must be
+applied to BOTH DBs before deploy** (it also seeds 5 decisions already on record). As built:
+- `src/utils/system-review.ts`: 16 reviewable systems (paid products — not our config, sub-entries, free data or
+  customer connectors); Opus 5.5 + server-side web search (`gatewayGenerateGrounded`), thinking low, 4 min budget.
+  Reply is JSON: verdict keep / consider / switch, summary, ≤3 alternatives (better for quality / features / price,
+  switching effort, price note). **A URL survives only if the search tool returned it**; "switch" with nothing to
+  show becomes "keep". Web searches are now priced (`anthropic-web-search`, $0.01) and logged.
+- Prompt carries purpose, version, models + assistants, 30-day spend, current bills, **decisions already taken**
+  (never re-suggest what was turned down unless something material changed) and the last check's summary.
+- `system-review-background.ts` (cron secret, 2 at a time, stops starting at 12 min); `system-review-monthly.ts`
+  scheduled **2nd of the month 05:00 UTC** (prod only). A check stuck > 20 min reads as stalled and can be re-run;
+  one that can't start is marked failed at once.
+- Endpoint actions `check_now` (one / `all`), `add_decision`, `retire_decision` — one validator for page and chat.
+- Drawer: verdict, date, summary, alternatives with "Not for us" (records "Turned down X: why"), sources, Check now,
+  decisions list + add/remove. Map: "Worth a look" / "Better option found" badge; "Check all" button; auto-refresh
+  every 20 s while a check runs. Chat: `better_options`, `propose_check_now`, `propose_add_decision`.
+- **Checked** on a fixture in the browser pane (desktop + phone). **No real check has run yet** — the first one will
+  show whether Opus returns clean JSON within budget. Other grounded callers (AI Visibility, Mentor) still don't log
+  their web searches.
+
 ## 5. Open questions for the owner
 - ~~Currency~~ — GBP at the COGS rate, shown (default taken 2026-11-12; say if you want USD).
 - ~~Fixed costs~~ — entered by the owner in the drawer or chat; nothing seeded.

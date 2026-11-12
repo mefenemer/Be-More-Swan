@@ -10,7 +10,7 @@
 
 /** Ordered rules: the first that matches wins. Keys are system-registry.ts SERVICES keys. */
 const RULES: Array<{ system: string; test: (model: string) => boolean }> = [
-    { system: 'anthropic', test: (m) => m.startsWith('claude-') },
+    { system: 'anthropic', test: (m) => m.startsWith('claude-') || m.startsWith('anthropic-') },
     { system: 'fal', test: (m) => m.startsWith('fal-ai/') },
     { system: 'stability', test: (m) => m.startsWith('stable-audio') },
     { system: 'embeddings', test: (m) => m.startsWith('voyage-') },

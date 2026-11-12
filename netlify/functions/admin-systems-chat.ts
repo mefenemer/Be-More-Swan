@@ -25,6 +25,7 @@ import { sanitizeForModel, safeSlice } from '../../src/utils/text-safe';
 import { currentDatePromptBlock } from '../../src/utils/current-date-prompt';
 import { loadSystemMap } from '../../src/utils/system-map-data';
 import { validateFixedCostRequest } from '../../src/utils/system-map';
+import { REVIEWABLE_SYSTEMS, validateReviewRequest } from '../../src/utils/system-review';
 
 type SystemMap = Awaited<ReturnType<typeof loadSystemMap>>;
 
@@ -52,6 +53,9 @@ export const SYSTEMS_CHAT_TOOLS: Anthropic.Beta.BetaTool[] = [
         currency: { type: 'string', enum: ['GBP', 'USD', 'EUR'] }, startedOn: day, endedOn: { type: ['string', 'null'] }, note: { type: 'string' },
     }),
     tool('propose_end_fixed_cost', 'Offer a card ending a monthly bill on its last paid day (a price change = end the old bill, add the new one).', { id: { type: 'integer' }, endedOn: day }),
+    tool('better_options', 'The stored "better options" checks: for each checked system, the latest verdict (keep / consider / switch), summary, alternatives with what each is better for, switching effort, sources, the date checked, any check in progress, and the decisions already taken. systemKey null = every system.', { systemKey: { type: ['string', 'null'] } }),
+    tool('propose_check_now', 'Offer a card starting a fresh web check for better options (about two minutes each, Opus 5.5 with web search — costs a little). systemKeys: system keys, or ["all"] for every checked system.', { systemKeys: { type: 'array', items: { type: 'string' } } }),
+    tool('propose_add_decision', 'Offer a card recording a decision about a system (e.g. "Turned down Runway: quality worse in our trial"), so later checks respect it and never re-suggest it.', { systemKey: { type: 'string' }, decision: { type: 'string' } }),
     tool('propose_delete_fixed_cost', 'Offer a card deleting a monthly bill entered by mistake. To stop a real bill, END it instead so all-time totals stay right.', { id: { type: 'integer' } }),
 ];
 
@@ -68,7 +72,8 @@ What you can do:
 - Answer by calling the read tools. Never guess a number — fetch it.
 - Change a monthly bill ONLY with a propose_* tool. That puts a card under your reply; the admin clicks Confirm. Never say a change has been made.
 - The same controls are on the screen: click a system on the map → "Monthly bills".
-- Better alternatives to a system: not built yet (a monthly research check is planned). If asked, give a brief, clearly-labelled opinion from general knowledge, say it isn't checked against today's prices, and never present it as current fact.
+- Better alternatives: answer from the stored checks (better_options) — each is a dated web-search opinion with sources; give the date and say prices may have moved. If a system has no check, or it is old, offer a fresh one with propose_check_now. Only these systems are checked: ${REVIEWABLE_SYSTEMS.join(', ')}. Without a stored check, any view you give is general knowledge: label it so.
+- When the admin says they decided against something or chose something on purpose, offer propose_add_decision so the checks respect it.
 
 Be concise: short paragraphs or a compact list, plain British English.`;
 
@@ -128,6 +133,38 @@ export default withLambda(async (event) => {
             case 'list_models': {
                 const m = await map();
                 return { roleNames: m.roleNames, models: [...m.systems.flatMap((s) => s.models), ...m.unmappedModels] };
+            }
+            case 'better_options': {
+                const m = await map();
+                const pick = (x: SystemMap['systems'][number]) => ({ key: x.key, name: x.name, reviewable: x.reviewable, review: x.review, checkInProgress: x.reviewAttempt, decisions: x.decisions });
+                if (input.systemKey) {
+                    const x = m.systems.find((y) => y.key === String(input.systemKey));
+                    return x ? pick(x) : { error: `No system "${input.systemKey}".` };
+                }
+                return m.systems.filter((x) => x.reviewable).map(pick);
+            }
+            case 'propose_check_now':
+            case 'propose_add_decision': {
+                const m = await map();
+                const body = name === 'propose_check_now'
+                    ? { action: 'check_now', systemKeys: Array.isArray(input.systemKeys) && input.systemKeys.includes('all') ? 'all' : input.systemKeys }
+                    : { action: 'add_decision', systemKey: input.systemKey, decision: input.decision };
+                const v = validateReviewRequest(body, m.systems.map((x) => x.key));
+                if ('error' in v) return { offered: false, problem: v.error };
+                const req = v.ok;
+                const nameOf = (k: string) => m.systems.find((x) => x.key === k)?.name ?? k;
+                if (req.action === 'check_now') {
+                    const all = body.systemKeys === 'all';
+                    cards.push({ kind: 'check_now', title: all ? 'Check every paid system for better options' : `Check ${req.systemKeys.map(nameOf).join(', ')} for better options`,
+                        summary: `${req.systemKeys.length} web-search check${req.systemKeys.length === 1 ? '' : 's'} on Opus 5.5, about two minutes each. Costs are logged.`,
+                        request: { action: 'check_now', systemKeys: all ? 'all' : req.systemKeys, via: 'chat' } });
+                    return { offered: true };
+                }
+                if (req.action === 'add_decision') {
+                    cards.push({ kind: 'add_decision', title: `Record a decision for ${nameOf(req.systemKey)}`, summary: req.decision, request: req as unknown as Record<string, unknown> });
+                    return { offered: true };
+                }
+                return { offered: false, problem: 'Not offered.' };
             }
             case 'propose_add_fixed_cost':
             case 'propose_end_fixed_cost':

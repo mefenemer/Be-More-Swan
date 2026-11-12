@@ -6,6 +6,7 @@ import { sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { systemStatus } from './system-registry';
 import { assembleSystemMap, type FixedCostRow, type UsageRow } from './system-map';
+import { attachReviews, type DecisionRow, type ReviewRow } from './system-review';
 
 type Db = ReturnType<typeof getDb>;
 const DEFAULT_FX = { USD: 0.787, EUR: 0.853, AUD: 0.512, CAD: 0.574 };   // same fallback as the COGS report
@@ -19,7 +20,7 @@ async function safe<T>(p: Promise<T[]>, label: string): Promise<T[]> {
 }
 
 export async function loadSystemMap(db: Db, hostHeader: string | null | undefined, now = new Date()) {
-    const [status, usage, roles, chosen, fixed, tasks, fxRow, pg, names] = await Promise.all([
+    const [status, usage, roles, chosen, fixed, tasks, fxRow, pg, names, reviews, decisions] = await Promise.all([
         systemStatus(hostHeader),
         safe(rows<{ model: string; usd_all: string; usd_30: string; calls_30: number; calls_all: number; first_at: string | null }>(db, sql`
             SELECT model,
@@ -48,6 +49,15 @@ export async function loadSystemMap(db: Db, hostHeader: string | null | undefine
         safe(rows<{ value: Record<string, number> }>(db, sql`SELECT value FROM platform_config WHERE key = 'fx_rates_to_gbp' LIMIT 1`), 'fx rates'),
         safe(rows<{ v: string }>(db, sql`SELECT current_setting('server_version') AS v`), 'postgres version'),
         safe(rows<{ role_key: string; name: string }>(db, sql`SELECT role_key, name FROM master_assistants`), 'assistant names'),
+        // Each system's last few checks is plenty: the newest finished one and anything after it.
+        safe(rows<ReviewRow>(db, sql`
+            SELECT id, system_key AS "systemKey", status, verdict, summary, alternatives, sources, model,
+                   search_count AS "searchCount", error, trigger, created_at::text AS "createdAt", finished_at::text AS "finishedAt"
+            FROM (SELECT *, row_number() OVER (PARTITION BY system_key ORDER BY created_at DESC) AS n FROM system_reviews) r
+            WHERE n <= 5 ORDER BY created_at DESC`), 'system_reviews'),
+        safe(rows<DecisionRow>(db, sql`
+            SELECT id, system_key AS "systemKey", decision, created_at::text AS "createdAt"
+            FROM system_decisions WHERE retired_at IS NULL ORDER BY created_at`), 'system_decisions'),
     ]);
 
     // Neon reports its Postgres version live — the one system whose version we can read, not state.
@@ -67,5 +77,11 @@ export async function loadSystemMap(db: Db, hostHeader: string | null | undefine
         now,
     });
     // Role keys → assistant names, so the page and chat say "Blog Assistant", not "blog".
-    return { ...map, roleNames: Object.fromEntries(names.map((n) => [n.role_key, n.name])) as Record<string, string> };
+    // "Better options" (Phase 3): the latest finished check, any check in progress, the decisions it respects.
+    // created_at::text is naive UTC (memory local-db-reads-shift-naive-timestamps) — read it as UTC.
+    const asUtc = (t: string) => new Date(`${t.replace(' ', 'T')}Z`).toISOString();
+    const systems = attachReviews(map.systems,
+        reviews.map((r) => ({ ...r, createdAt: asUtc(r.createdAt), finishedAt: r.finishedAt ? asUtc(r.finishedAt) : null })),
+        decisions, now);
+    return { ...map, systems, roleNames: Object.fromEntries(names.map((n) => [n.role_key, n.name])) as Record<string, string> };
 }

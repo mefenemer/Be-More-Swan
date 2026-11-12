@@ -1,10 +1,11 @@
 // src/components/admin-system-map.js — the System Map on Admin → Systems & connections
-// (docs/system-map-plan.md, Phase 2).
+// (docs/system-map-plan.md, Phases 2–3).
 //
 // Be More Swan in the middle, every external system around it grouped by what it does, a line to
 // each coloured by its health, AI models listed under their provider. A strip of totals on top
 // (spend in GBP, tasks, systems down). Click a system → a drawer with its version, cost, models,
-// monthly bills (add / end / delete) and links. Below the map, "Ask about systems": the chat
+// monthly bills (add / end / delete), better options (a dated web check + decisions it respects) and
+// links. Below the map, "Ask about systems": the chat
 // (admin-systems-chat.ts) reads the same data and its cards send exactly the requests this page's
 // own bill form sends to admin-system-map.ts.
 //
@@ -133,6 +134,11 @@
       .sm-form input,.sm-form select{font:inherit;font-size:13px;border:1px solid #d1d5db;border-radius:8px;padding:6px 8px;color:var(--sm-ink);background:#fff}
       .sm-form .full{grid-column:1 / -1}
       .sm-err{color:var(--sm-err);font-size:12px;margin-top:6px}
+      .sm-verdict{display:inline-block;font-size:12px;font-weight:700;border-radius:999px;padding:2px 10px;background:#f3f4f6;color:#374151}
+      .sm-verdict.ok{background:#ecfdf5;color:#047857}.sm-verdict.warn{background:#fffbeb;color:#b45309}.sm-verdict.bad{background:#fef2f2;color:#b91c1c}
+      .sm-alt{border:1px solid var(--sm-line);border-radius:10px;padding:10px;margin-top:8px}
+      .sm-decisions{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+      .sm-decisions li{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;font-size:13px;background:#f9fafb;border-radius:8px;padding:6px 8px}
       .sm-chat{margin-top:22px;background:#fff;border:1px solid var(--sm-line);border-radius:14px;padding:14px}
       .sm-chat h3{margin:0 0 4px;font-size:15px;font-weight:800}
       .sm-log{display:flex;flex-direction:column;gap:10px;max-height:420px;overflow-y:auto;margin:10px 0}
@@ -185,6 +191,7 @@
     return `<button type="button" class="sm-node${state.open === s.key ? ' sel' : ''}" data-key="${esc(s.key)}" data-health="${h.cls}" aria-label="${esc(s.name)}: ${esc(h.label)}">
       <div class="sm-nrow"><span class="sm-nrow" style="gap:7px;min-width:0"><span class="sm-dot ${h.cls}" title="${esc(h.label)}"></span><span class="sm-name">${esc(s.name)}</span></span>${cost}</div>
       ${ver ? `<div class="sm-ver">${esc(ver)}</div>` : ''}
+      ${s.review && (s.review.verdict === 'consider' || s.review.verdict === 'switch') ? `<div class="sm-models"><span class="sm-verdict ${s.review.verdict === 'switch' ? 'bad' : 'warn'}" style="font-size:10px">${s.review.verdict === 'switch' ? 'Better option found' : 'Worth a look'}</span></div>` : ''}
       ${models.length ? `<div class="sm-models">${models.map((m) => `<span class="sm-chip">${esc(m.model)}${m.spend30Gbp > 0 ? `<em>${esc(gbp(m.spend30Gbp))}</em>` : ''}</span>`).join('')}</div>` : ''}
     </button>`;
   }
@@ -196,6 +203,7 @@
   }
 
   function render() {
+    const draft = state.mount.querySelector('#sm-ask-input')?.value || '';
     const d = state.data;
     const t = d.totals || {};
     const r = d.readiness || {};
@@ -230,7 +238,10 @@
           <span><i style="border-color:var(--sm-na);border-top-style:dashed"></i>Configured, no live check</span>
           <span><i style="border-color:var(--sm-off);border-top-style:dotted"></i>Not configured</span>
         </div>
-        <label style="font-size:12px;color:var(--sm-sub);display:flex;gap:6px;align-items:center"><input type="checkbox" id="sm-hide-unused" ${state.hideUnused ? 'checked' : ''}> Hide connectors not set up here</label>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <label style="font-size:12px;color:var(--sm-sub);display:flex;gap:6px;align-items:center"><input type="checkbox" id="sm-hide-unused" ${state.hideUnused ? 'checked' : ''}> Hide connectors not set up here</label>
+          <button type="button" class="sm-btn" id="sm-check-all"${systems.some(inProgress) ? ' disabled' : ''} title="Search the web for better tools for every paid system (about 16 checks, a few minutes)">${systems.some(inProgress) ? 'Checking for better options…' : 'Check all for better options'}</button>
+        </div>
       </div>
       <div class="sm-map" id="sm-map">
         <svg class="sm-svg" id="sm-svg" aria-hidden="true"></svg>
@@ -244,7 +255,18 @@
 
     state.mount.querySelectorAll('.sm-node').forEach((b) => b.addEventListener('click', () => openDrawer(b.dataset.key)));
     state.mount.querySelector('#sm-hide-unused').addEventListener('change', (e) => { state.hideUnused = e.target.checked; render(); });
+    state.mount.querySelector('#sm-check-all').addEventListener('click', async (e) => {
+      const yes = window.confirmModal
+        ? await window.confirmModal('Check every paid system for better options now? About 16 web-search checks on Opus 5.5 — a few pounds in all, logged to the costs above. It also runs by itself on the 2nd of each month.', { title: 'Check all for better options', confirmLabel: 'Check all', tone: 'primary' })
+        : window.confirm('Check every paid system for better options now?');
+      if (!yes) return;
+      e.target.disabled = true;
+      if (await post({ action: 'check_now', systemKeys: 'all' }, null)) { window.showToast?.('Checking every paid system — results appear over the next few minutes.'); load(); }
+      else e.target.disabled = false;
+    });
+    schedulePoll();
     wireChat();
+    if (draft) { const inp = state.mount.querySelector('#sm-ask-input'); if (inp) inp.value = draft; }
     requestAnimationFrame(drawLines);
     if (!state.ro && 'ResizeObserver' in window) {
       state.ro = new ResizeObserver(() => requestAnimationFrame(drawLines));
@@ -360,10 +382,7 @@
             <div class="full"><button type="submit" class="sm-btn pri">Add monthly bill</button><div class="sm-err" id="sm-bill-err" role="alert"></div></div>
           </form>
         </div>
-        <div class="sm-sec">
-          <h5>Better options</h5>
-          <p style="font-size:13px;color:var(--sm-sub);margin:0">Not checked yet. A monthly check of alternatives (quality, features, price), dated and with sources, is the next phase. Until then, ask below. The answer will be a general opinion, not checked against today's prices.</p>
-        </div>
+        ${betterHtml(s)}
         <div class="sm-sec" style="border-bottom:0">
           <h5>Settings</h5>
           ${s.envVars?.length ? `<p class="sm-mono" style="margin:0 0 8px">${esc(s.envVars.join(' · '))}</p>` : ''}
@@ -371,6 +390,93 @@
           ${s.envVars?.length ? ` &nbsp; <a class="sm-link" href="https://app.netlify.com" target="_blank" rel="noopener noreferrer" style="color:var(--sm-sub)">Netlify environment variables ↗</a>` : ''}
         </div>
       </div>`;
+  }
+
+  // ── Better options (Phase 3) ────────────────────────────────────────────────────────────────
+  const VERDICT = {
+    keep: { label: 'Keep — nothing clearly better', cls: 'ok' },
+    consider: { label: 'Worth a look', cls: 'warn' },
+    switch: { label: 'Better option found', cls: 'bad' },
+  };
+  const inProgress = (s) => s.reviewAttempt && (s.reviewAttempt.state === 'queued' || s.reviewAttempt.state === 'running');
+  const hostOf = (u) => { try { return new URL(u).host.replace(/^www\./, ''); } catch { return u; } };
+
+  function betterHtml(s) {
+    const r = s.review;
+    const a = s.reviewAttempt;
+    const decisions = s.decisions || [];
+    if (!s.reviewable) {
+      return `<div class="sm-sec"><h5>Better options</h5><p style="font-size:13px;color:var(--sm-sub);margin:0">Not checked. This is ${s.tier === 'connector' ? 'a connector your customers choose' : 'our own configuration, not a product we buy'}.</p></div>`;
+    }
+    const v = r && VERDICT[r.verdict];
+    const attemptLine = !a ? ''
+      : inProgress(s) ? `<p class="sm-note info" style="margin:8px 0 0">Checking now (started ${esc(day(a.createdAt))}). This takes a minute or two; the page refreshes itself.</p>`
+      : `<p class="sm-note warn" style="margin:8px 0 0">The last check ${a.state === 'stalled' ? 'stopped before it finished' : 'failed'}${a.error ? `: ${esc(a.error)}` : '.'}</p>`;
+    const alts = r ? (Array.isArray(r.alternatives) ? r.alternatives : []) : [];
+    return `<div class="sm-sec" id="sm-better">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><h5 style="margin:0">Better options</h5>
+        <button type="button" class="sm-btn" id="sm-check-now"${inProgress(s) ? ' disabled' : ''}>${r ? 'Check again' : 'Check now'}</button></div>
+      ${r ? `
+        <p style="margin:10px 0 4px"><span class="sm-verdict ${v ? v.cls : ''}">${esc(v ? v.label : r.verdict)}</span>
+          <small style="color:var(--sm-sub);margin-left:6px">Checked ${esc(day(r.finishedAt || r.createdAt))}${r.trigger === 'monthly' ? ' (monthly check)' : ''}</small></p>
+        <p style="font-size:13px;color:#374151;margin:6px 0 0;white-space:pre-wrap">${esc(r.summary)}</p>
+        ${alts.map((x, i) => `<div class="sm-alt">
+            <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">
+              <b style="font-size:13px">${x.url ? `<a class="sm-link" style="font-size:13px" href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.name)} ↗</a>` : esc(x.name)}</b>
+              <button type="button" class="sm-btn" data-notforus="${i}" title="Record that we decided against this, so later checks don't suggest it again">Not for us</button>
+            </div>
+            <div style="margin-top:4px">${(x.betterFor || []).map((b) => `<span class="sm-chip">Better ${esc(b)}</span>`).join(' ')} <span class="sm-chip">Switching: ${esc(x.switchingEffort)}</span></div>
+            ${x.detail ? `<p style="font-size:12px;color:#374151;margin:6px 0 0">${esc(x.detail)}</p>` : ''}
+            ${x.priceNote ? `<p style="font-size:12px;color:var(--sm-sub);margin:4px 0 0">${esc(x.priceNote)}</p>` : ''}
+          </div>`).join('')}
+        ${r.sources?.length ? `<p style="font-size:11px;color:var(--sm-sub);margin:8px 0 0">Sources: ${r.sources.map((u) => `<a class="sm-link" style="font-size:11px;font-weight:600" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(hostOf(u))}</a>`).join(', ')}</p>` : ''}
+        <p style="font-size:11px;color:var(--sm-sub);margin:6px 0 0">An opinion from a web search on that date, not advice. Prices change: check them before you switch.</p>`
+      : `<p style="font-size:13px;color:var(--sm-sub);margin:8px 0 0">Not checked yet. A check searches the web for tools that beat this one on quality, features or price, given what we use it for and spend. It runs on the 2nd of each month, or now.</p>`}
+      ${attemptLine}
+      <h5 style="margin:14px 0 6px">Decisions already taken</h5>
+      <p style="font-size:12px;color:var(--sm-sub);margin:0 0 6px">The check respects these and won't suggest what you turned down.</p>
+      ${decisions.length ? `<ul class="sm-decisions">${decisions.map((d) => `<li><span>${esc(d.decision)} <small style="color:var(--sm-sub)">${esc(day(d.createdAt))}</small></span><button type="button" class="sm-btn" data-retire="${esc(d.id)}" title="No longer holds — later checks may suggest it again">Remove</button></li>`).join('')}</ul>` : '<p style="font-size:13px;color:var(--sm-sub);margin:0">None recorded.</p>'}
+      <form class="sm-ask" id="sm-decision-form" style="margin-top:8px"><textarea name="decision" rows="1" maxlength="500" placeholder="e.g. We stay on Stripe for Connect payouts" aria-label="Add a decision"></textarea><button type="submit" class="sm-btn">Add</button></form>
+      <div class="sm-err" id="sm-better-err" role="alert"></div>
+    </div>`;
+  }
+
+  function wireBetter(dr, s) {
+    const err = dr.querySelector('#sm-better-err');
+    dr.querySelector('#sm-check-now')?.addEventListener('click', async (e) => {
+      e.target.disabled = true;
+      if (await post({ action: 'check_now', systemKeys: [s.key] }, err)) { window.showToast?.(`Checking ${s.name} — about two minutes.`); load(); }
+      else e.target.disabled = false;
+    });
+    dr.querySelector('#sm-decision-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const decision = e.target.decision.value.trim();
+      if (!decision) return;
+      if (await post({ action: 'add_decision', systemKey: s.key, decision }, err)) { window.showToast?.('Decision recorded.'); load(); }
+    });
+    dr.querySelectorAll('[data-retire]').forEach((b) => b.addEventListener('click', async () => {
+      if (await post({ action: 'retire_decision', id: Number(b.dataset.retire) }, err)) { window.showToast?.('Decision removed.'); load(); }
+    }));
+    dr.querySelectorAll('[data-notforus]').forEach((b) => b.addEventListener('click', async () => {
+      const alt = (s.review?.alternatives || [])[Number(b.dataset.notforus)];
+      if (!alt) return;
+      const why = window.promptModal
+        ? await window.promptModal(`Why not <b>${esc(alt.name)}</b>? Later checks will respect this.`, { title: 'Not for us', placeholder: 'e.g. quality was worse in our trial', confirmLabel: 'Record decision' })
+        : window.prompt(`Why not ${alt.name}?`);
+      if (why === null || why === undefined) return;
+      const decision = `Turned down ${alt.name}${String(why).trim() ? `: ${String(why).trim()}` : ''}`.slice(0, 500);
+      if (await post({ action: 'add_decision', systemKey: s.key, decision }, err)) { window.showToast?.('Decision recorded.'); load(); }
+    }));
+  }
+
+  // While a check runs, refresh every 20 s — only while the map is on screen.
+  function schedulePoll() {
+    clearTimeout(state.poll);
+    if (!(state.data?.systems || []).some(inProgress)) return;
+    state.poll = setTimeout(() => {
+      const map = document.getElementById('sm-map');
+      if (map && map.offsetParent !== null) load();
+    }, 20_000);
   }
 
   function openDrawer(key, opts = {}) {
@@ -396,6 +502,7 @@
     state.release = window.holdDialogFocus ? window.holdDialogFocus(dr, opts.keepFocus ? null : dr.querySelector('#sm-close')) : null;
     if (!window.holdDialogFocus && !opts.keepFocus) dr.querySelector('#sm-close').focus();
 
+    wireBetter(dr, s);
     dr.querySelector('#sm-bill-form').addEventListener('submit', async (e) => {
       e.preventDefault();
       const f = new FormData(e.target);
@@ -441,7 +548,7 @@
   }
 
   // ── Chat ────────────────────────────────────────────────────────────────────────────────────
-  const STARTERS = ['What costs the most this month?', 'Is anything down or not set up?', 'Which models do the assistants use?', 'Add our Netlify Pro bill: $19 a month since 1 Sep 2026'];
+  const STARTERS = ['What costs the most this month?', 'Is anything down or not set up?', 'Where could we save money or get better quality?', 'Add our Netlify Pro bill: $19 a month since 1 Sep 2026'];
 
   function chatHtml() {
     const c = state.chat;

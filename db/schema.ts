@@ -3150,6 +3150,34 @@ export const systemFixedCosts = pgTable("system_fixed_costs", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [index("system_fixed_costs_system_idx").on(t.systemKey)]);
 
+// System Map Phase 3 (docs/system-map-plan.md): monthly "better options" checks and the decisions
+// they must respect. db/z-system-reviews.sql.
+export const systemReviews = pgTable("system_reviews", {
+  id: serial().primaryKey(),
+  systemKey: text("system_key").notNull(),
+  status: text("status").notNull().default('queued'),             // queued | running | done | failed
+  verdict: text("verdict"),                                       // keep | consider | switch
+  summary: text("summary").notNull().default(''),
+  alternatives: jsonb("alternatives").notNull().default([]),
+  sources: jsonb("sources").notNull().default([]),
+  model: text("model"),
+  searchCount: integer("search_count").notNull().default(0),
+  error: text("error"),
+  trigger: text("trigger").notNull().default('manual'),           // manual | monthly | chat
+  requestedBy: integer("requested_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  finishedAt: timestamp("finished_at"),
+}, (t) => [index("system_reviews_system_idx").on(t.systemKey, t.createdAt)]);
+
+export const systemDecisions = pgTable("system_decisions", {
+  id: serial().primaryKey(),
+  systemKey: text("system_key").notNull(),
+  decision: text("decision").notNull(),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  retiredAt: timestamp("retired_at"),
+}, (t) => [index("system_decisions_system_idx").on(t.systemKey)]);
+
 export const taskCostChanges = pgTable("task_cost_changes", {
   id: serial().primaryKey(),
   status: text("status").notNull(),                                // baseline | draft | announced | cancelled
