@@ -18,7 +18,8 @@ import { incidentColumnsReady, loadIncidentFields } from '../../src/utils/platfo
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { hasPermission } from '../../src/utils/rbac';
-import { stampFixedAt, loadFixLiveFields } from '../../src/utils/issue-fix-live';
+import { stampFixedAt, loadFixLiveFields, parsePrNumber } from '../../src/utils/issue-fix-live';
+import { dispatchHotfix, syncHotfix } from '../../src/utils/issue-hotfix';
 import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, reclaimStaleMerges, isMergeClaimStale, STALE_MERGE_MINS, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -293,42 +294,54 @@ export default withLambda(async (event) => {
         return json(200, { ok: true, devMergeStatus: 'queued', forced: stuck });
     }
 
-    // ── POST ?action=request-prod-promote: promote a staging-verified fix to prod ──
-    // Super-admin only, and separate from closing the ticket. The fix must already be
-    // merged to staging. Queues a promotion the local watcher claims and performs by
-    // pushing staging → main (prod deploys from main); see admin-issue-handoff's
-    // claim-promote / promote-result.
+    // ── POST ?action=request-prod-promote: open a hotfix PR for THIS fix only ─────
+    // Super-admin only. Replaces "Push to prod", which promoted ALL of staging to main through the
+    // laptop runner. Starts .github/workflows/hotfix-pr.yml, which copies just this fix PR's merge
+    // commit onto a branch from main and opens a PR into main; a person merges it on GitHub.
+    // src/utils/issue-hotfix.ts follows the PR; the live check tells the reporter once prod has it.
+    // The action name is kept so older admin tabs still reach the new behaviour.
     if (event.httpMethod === 'POST' && action === 'request-prod-promote' && id) {
         if (!hasPermission(admin.role, 'deploy_code')) {
-            return json(403, { error: 'Promoting to production requires the deploy_code privilege.' });
+            return json(403, { error: 'Opening a hotfix PR requires the deploy_code privilege.' });
         }
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
         if (issue.devMergeStatus !== 'merged') {
-            return json(400, { error: 'Merge this fix to staging before promoting to production.' });
+            return json(400, { error: 'Merge this fix to staging before opening a hotfix PR.' });
         }
-        if (issue.devProdStatus === 'queued' || issue.devProdStatus === 'promoting') {
-            return json(409, { error: 'A promotion to production is already in progress for this issue.' });
+        const fixPr = parsePrNumber(issue.devPrUrl);
+        if (!fixPr) return json(400, { error: 'This issue has no fix PR in this repository to copy.' });
+        if (issue.devProdStatus && ['queued', 'promoting', 'hotfix_requested', 'hotfix_open'].includes(issue.devProdStatus)) {
+            return json(409, { error: 'A hotfix for this issue is already in progress — see the card for its PR.' });
         }
         if (issue.devProdStatus === 'promoted') {
-            return json(409, { error: 'This fix has already been promoted to production.' });
+            return json(409, { error: 'This fix has already been merged into main.' });
         }
 
-        await db.update(issueReports).set({
-            devProdStatus: 'queued',
-            devProdResult: null,
+        // Claim first (compare-and-swap), so a double click starts one workflow, not two.
+        let claimed: Array<{ id: number }>;
+        try {
+            claimed = await db.update(issueReports).set({
+            devProdStatus: 'hotfix_requested',
+            devProdAt: new Date(),
+            devProdResult: 'Starting the hotfix workflow on GitHub…',
             updatedAt: new Date(),
-        }).where(eq(issueReports.id, id));
+            }).where(and(eq(issueReports.id, id), issue.devProdStatus == null ? isNull(issueReports.devProdStatus) : eq(issueReports.devProdStatus, issue.devProdStatus)))
+              .returning({ id: issueReports.id });
+        } catch (e) {
+            // Before db/z-issue-hotfix-pr.sql the status CHECK refuses 'hotfix_requested'.
+            console.error('[admin-issue-reports] hotfix claim failed:', e instanceof Error ? e.message : e);
+            return json(503, { error: 'Hotfix PRs need db/z-issue-hotfix-pr.sql applied to this database first.' });
+        }
+        if (!claimed.length) return json(409, { error: 'Someone else just started this — refresh the issue.' });
 
-        await db.insert(issueReportMessages).values({
-            issueId: id,
-            authorType: 'admin',
-            authorId: admin.id,
-            body: "🚀 We've queued this fix to promote from staging to production — it should be live shortly.",
-            status: null,
-        });
-
-        return json(200, { ok: true, devProdStatus: 'queued' });
+        const err = await dispatchHotfix({ issueId: id, fixPr });
+        if (err) {
+            await db.update(issueReports).set({ devProdStatus: 'failed', devProdResult: err, updatedAt: new Date() })
+                .where(eq(issueReports.id, id));
+            return json(502, { error: err });
+        }
+        return json(200, { ok: true, devProdStatus: 'hotfix_requested' });
     }
 
     // ── POST ?action=request-conflict-fix: investigate + auto-resolve a failed merge ─
@@ -404,8 +417,12 @@ export default withLambda(async (event) => {
 
     // ── GET single issue (with thread + screenshot) ──────────────────────────────
     if (event.httpMethod === 'GET' && id) {
-        const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        let [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
+        // A hotfix in flight: follow it on GitHub now, so the card is current when the admin looks.
+        if (await syncHotfix(db, issue)) {
+            [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        }
         // No reporter on an automatic incident (source 'system' | 'suspected').
         const [reporter] = issue.userId == null ? [] : await db
             .select({ email: users.email, firstName: users.firstName, lastName: users.lastName })

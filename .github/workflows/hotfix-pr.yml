@@ -1,0 +1,131 @@
+# Hotfix PR — ships ONE issue's fix to production on its own.
+#
+# Replaces "Push to prod", which promoted ALL of staging to main (first by a direct push from a
+# developer's laptop, later by opening and merging the whole staging → main PR), so any unreviewed
+# work on staging shipped alongside the fix.
+#
+# Started from the admin portal's issue panel ("Open hotfix PR", src/utils/issue-hotfix.ts) through
+# the workflow_dispatch API. It copies just the fix PR's merge commit onto a branch cut from main
+# and opens a PR into main. A person reviews and merges it on GitHub, under main's normal ruleset
+# and required checks. The app follows the PR (src/utils/issue-hotfix.ts syncHotfix) and the live
+# check tells the reporter once the prod deploy contains it.
+#
+# ── Secrets ────────────────────────────────────────────────────────────────────────────────────
+# HOTFIX_PR_TOKEN (recommended): a fine-grained token, this repo only, Contents + Pull requests
+# read/write. GitHub does not run other workflows (CI) on a PR opened with the built-in
+# GITHUB_TOKEN, so without this secret the hotfix PR opens but its required checks never start.
+#
+# Every input goes through env vars, never ${{ }} inside a script, so nothing typed into the
+# dispatch can become shell.
+
+name: Hotfix PR
+run-name: Hotfix PR for issue #${{ inputs.issue_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_id:
+        description: "Issue id (Admin ▸ Fix pipeline)"
+        required: true
+        type: string
+      fix_pr:
+        description: "The fix PR number, already merged into staging"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: hotfix-${{ inputs.issue_id }}
+  cancel-in-progress: false
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ISSUE_ID: ${{ inputs.issue_id }}
+      FIX_PR: ${{ inputs.fix_pr }}
+    steps:
+      - name: Check the inputs are numbers
+        run: |
+          if ! [[ "$ISSUE_ID" =~ ^[0-9]{1,9}$ && "$FIX_PR" =~ ^[0-9]{1,9}$ ]]; then
+            echo "::error::issue_id and fix_pr must be whole numbers."
+            exit 1
+          fi
+
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.HOTFIX_PR_TOKEN || github.token }}
+
+      - name: Find the fix's merge commit
+        id: fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          json=$(gh pr view "$FIX_PR" --json state,baseRefName,mergeCommit,title,url)
+          state=$(jq -r .state <<<"$json")
+          base=$(jq -r .baseRefName <<<"$json")
+          sha=$(jq -r '.mergeCommit.oid // empty' <<<"$json")
+          if [[ "$state" != "MERGED" || -z "$sha" ]]; then
+            echo "::error::PR #$FIX_PR is not merged yet, so there is no fix to copy."
+            exit 1
+          fi
+          if [[ "$base" != "staging" ]]; then
+            echo "::error::PR #$FIX_PR was merged into '$base', not staging."
+            exit 1
+          fi
+          {
+            echo "sha=$sha"
+            echo "url=$(jq -r .url <<<"$json")"
+          } >> "$GITHUB_OUTPUT"
+          jq -r .title <<<"$json" > "$RUNNER_TEMP/fix-title.txt"
+
+      - name: Copy just that commit onto a branch from main
+        env:
+          SHA: ${{ steps.fix.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "be-more-swan-hotfix[bot]"
+          git config user.email "hotfix-bot@users.noreply.github.com"
+          git checkout -B "hotfix/issue-$ISSUE_ID" origin/main
+          if git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::main already contains this fix — nothing to ship."
+            exit 1
+          fi
+          parents=$(git rev-list --parents -n 1 "$SHA" | wc -w)
+          args=()
+          if [[ "$parents" -gt 2 ]]; then args=(-m 1); fi
+          if ! git cherry-pick -x "${args[@]}" "$SHA"; then
+            git cherry-pick --abort || true
+            echo "::error::The fix doesn't apply cleanly to main (it depends on something only on staging). Ship it with the next staging → main PR instead."
+            exit 1
+          fi
+          git push --force origin "HEAD:refs/heads/hotfix/issue-$ISSUE_ID"
+
+      - name: Open the hotfix PR
+        env:
+          GH_TOKEN: ${{ secrets.HOTFIX_PR_TOKEN || github.token }}
+          FIX_URL: ${{ steps.fix.outputs.url }}
+          HAS_PAT: ${{ secrets.HOTFIX_PR_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          branch="hotfix/issue-$ISSUE_ID"
+          existing=$(gh pr list --head "$branch" --base main --state open --json url --jq '.[0].url // empty')
+          if [[ -n "$existing" ]]; then
+            echo "Hotfix PR already open: $existing"
+            exit 0
+          fi
+          title="Hotfix: issue #$ISSUE_ID — $(head -c 150 "$RUNNER_TEMP/fix-title.txt")"
+          note=""
+          if [[ "$HAS_PAT" != "true" ]]; then
+            note=$'\n\n> ⚠️ Opened with the built-in token, so CI did not start on its own. Add the `HOTFIX_PR_TOKEN` secret, or push an empty commit to this branch, to run the required checks.'
+          fi
+          body=$(printf 'Ships the fix for issue #%s to production on its own, copied from %s.\n\nOnly that change is here; nothing else from staging. Review and merge as usual. The reporter is told once the prod deploy contains it.%s\n\nOpened from Admin ▸ Fix pipeline ▸ "Open hotfix PR" (.github/workflows/hotfix-pr.yml).' "$ISSUE_ID" "$FIX_URL" "$note")
+          gh pr create --base main --head "$branch" --title "$title" --body "$body"

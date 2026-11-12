@@ -6286,6 +6286,8 @@ function irBoardCard(i) {
   if (i.devHandoffStatus === 'failed') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Fix failed</span>');
   if (i.devSqlStatus === 'pending') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">SQL to run</span>');
   if (i.devMergeStatus === 'failed') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Merge failed</span>');
+  if (i.devProdStatus === 'hotfix_open') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">Hotfix PR to merge</span>');
+  if (i.devProdStatus === 'hotfix_requested') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700">Opening hotfix PR</span>');
   if (i.source && i.source !== 'user') badges.push(`<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700">${_escH(IR_SOURCE_LABEL[i.source] || i.source)}${i.occurrences > 1 ? ` ×${Number(i.occurrences)}` : ''}</span>`);
   const left = i.status === 'fixed_ready_to_test' ? _irDaysLeft(i) : null;
   if (left != null) badges.push(`<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Closes in ${left} day${left === 1 ? '' : 's'}</span>`);
@@ -6415,6 +6417,10 @@ function _irHandoffBadge(i) {
     const ps = i.devProdStatus;
     if (ps === 'queued' || ps === 'promoting') {
       return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🚀 ${ps === 'queued' ? 'Prod queued…' : 'Promoting…'}</span>`;
+    }
+    // Hotfix PR (src/utils/issue-hotfix.ts): the workflow is opening it, or it waits for a merge.
+    if (ps === 'hotfix_requested' || ps === 'hotfix_open') {
+      return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">🚀 ${ps === 'hotfix_requested' ? 'Opening hotfix PR…' : 'Hotfix PR to merge'}</span>`;
     }
     if (ps === 'promoted') {
       return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🚀 Merged to prod</span>`;
@@ -6913,40 +6919,52 @@ function _irMergeCard(i) {
 // Shown once the fix is merged to staging (dev_merge_status='merged'). Separate from
 // closing the ticket. Queues a promotion the local watcher performs by pushing staging →
 // main (prod deploys from main); the ticket shows "Merged to prod" once it lands.
+// "Open hotfix PR" (src/utils/issue-hotfix.ts) — replaces "Push to prod", which promoted ALL of
+// staging to main through the laptop runner. A GitHub workflow copies just this fix onto a branch
+// from main and opens a PR; a person merges it on GitHub. The issue's card follows that PR.
+function _irHotfixLink(i) {
+  const m = /Hotfix PR: (https:\/\/github\.com\/\S+\/pull\/\d+)/.exec(i.devProdResult || '');
+  return m ? `<a href="${_escH(m[1])}" target="_blank" rel="noopener" class="font-bold text-emerald-700 hover:underline">Open the hotfix PR on GitHub ↗</a>` : '';
+}
 function _irProdCard(i) {
   if (i.devMergeStatus !== 'merged') return '';
   const ps = i.devProdStatus || null;
-  const resultBlock = i.devProdResult
-    ? `<div class="rounded-lg p-3 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto bg-white border border-gray-200 text-gray-700">${_esc(i.devProdResult)}</div>` : '';
+  const detail = String(i.devProdResult || '').replace(/^Hotfix PR: \S+\n?/, '');
+  const resultBlock = detail
+    ? `<div class="rounded-lg p-3 text-xs whitespace-pre-wrap max-h-48 overflow-auto bg-white border border-gray-200 text-gray-700">${_esc(detail)}</div>` : '';
   const isSuper = _can('deploy_code');
-  const canPromote = !ps || ps === 'failed';
-  const promoteBtn = isSuper
-    ? `<button onclick="requestProdPromote(${i.id})" class="btn-destructive w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🚀</span> ${ps === 'failed' ? 'Retry push to prod' : 'Push to prod'}</button>`
-    : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can promote to production.</p>`;
+  const canStart = !ps || ps === 'failed';
+  const startBtn = isSuper
+    ? `<button onclick="requestProdPromote(${i.id})" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🚀</span> ${ps === 'failed' ? 'Try the hotfix PR again' : 'Open hotfix PR'}</button>`
+    : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can open a hotfix PR.</p>`;
 
   let chip, inner;
-  if (canPromote) {
+  if (canStart) {
     const failed = ps === 'failed';
-    chip = failed ? ['bg-red-100 text-red-700', 'Last promotion failed'] : ['bg-amber-100 text-amber-800', 'Ready for prod'];
+    chip = failed ? ['bg-red-100 text-red-700', 'Hotfix failed'] : ['bg-gray-100 text-gray-700', 'Ships with next release'];
     inner = `<p class="text-xs text-gray-500">${failed
-        ? 'The promotion failed — see the runner output below. Resolve the problem and push to prod again.'
-        : 'This fix is live on <b>staging</b>. Promote it to <b>production</b> — the developer runner will push staging → main and prod will redeploy.'}</p>
-      ${failed ? resultBlock : ''}${promoteBtn}`;
-  } else if (ps === 'queued') {
-    chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Promotion requested — the developer runner will push to production within ~15s…</div>`;
-  } else if (ps === 'promoting') {
-    chip = ['bg-indigo-100 text-indigo-700', 'Promoting…'];
-    const who = i.devRunnerId ? `<div class="text-xs text-indigo-600">🖥 Runner <b>${_esc(i.devRunnerId)}</b> is promoting${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Pushing staging → production…</div>${who}`;
+        ? 'The last hotfix attempt didn’t go through — the reason is below.'
+        : 'This fix reaches production with the next staging → main PR. Urgent? Open a hotfix PR: GitHub copies <b>only this fix</b> onto main for you to review and merge. Nothing else on staging goes with it.'}</p>
+      ${failed ? resultBlock + _irHotfixLink(i) : ''}${startBtn}`;
+  } else if (ps === 'hotfix_requested') {
+    chip = ['bg-indigo-100 text-indigo-700', 'Opening PR…'];
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> GitHub is copying this fix onto main and opening a PR…</div>
+      <p class="text-xs text-gray-500">Reopen this issue in a minute to see the PR.</p>`;
+  } else if (ps === 'hotfix_open') {
+    chip = ['bg-amber-100 text-amber-800', 'Waiting for your merge'];
+    inner = `<p class="text-xs text-gray-500">The hotfix PR holds only this fix. Review and merge it on GitHub; the reporter is told once the prod deploy has it.</p>${_irHotfixLink(i)}`;
   } else if (ps === 'promoted') {
-    chip = ['bg-emerald-100 text-emerald-700', 'Live on prod ✓'];
-    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-emerald-700">🚀 Promoted to production${i.devProdAt ? ` · ${_irFmt(i.devProdAt)}` : ''}.</div>${resultBlock}`;
+    chip = ['bg-emerald-100 text-emerald-700', 'Merged into main ✓'];
+    inner = `<div class="text-sm font-semibold text-emerald-700">🚀 Merged into main${i.devProdAt ? ` · ${_irFmt(i.devProdAt)}` : ''}. The reporter is told once the prod deploy has it.</div>${_irHotfixLink(i)}`;
+  } else if (ps === 'queued' || ps === 'promoting') {
+    // Left behind by the old laptop-runner "Push to prod"; nothing sets these any more.
+    chip = ['bg-indigo-100 text-indigo-700', 'Old promotion'];
+    inner = `<p class="text-xs text-gray-500">An older “Push to prod” request is still recorded here. It promotes all of staging, so it is no longer started from this card.</p>${resultBlock}`;
   } else { return ''; }
 
-  return `<div class="border border-red-200 bg-red-50 rounded-xl p-4 space-y-3">
+  return `<div class="border border-gray-200 bg-gray-50 rounded-xl p-4 space-y-3">
       <div class="flex items-center justify-between">
-        <span class="text-xs font-bold uppercase text-red-600">Push to Production</span>
+        <span class="text-xs font-bold uppercase text-gray-600">Ship to production</span>
         <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${chip[0]}">${chip[1]}</span>
       </div>
       ${inner}
@@ -6976,7 +6994,7 @@ async function requestMerge(id, force) {
 }
 
 async function requestProdPromote(id) {
-  if (!(await window.confirmModal('The developer runner will push staging → main and prod will redeploy with everything currently on staging. This affects live users.', { title: 'Promote this fix to PRODUCTION now?' }))) return;
+  if (!(await window.confirmModal('GitHub copies only this fix onto a branch from main and opens a pull request. Nothing reaches production until you review and merge that PR.', { title: 'Open a hotfix PR for this fix?', confirmLabel: 'Open hotfix PR' }))) return;
   const btn = event?.target?.closest('button');
   if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
   try {

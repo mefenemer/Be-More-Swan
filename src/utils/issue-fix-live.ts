@@ -29,6 +29,7 @@ import type { getDb } from '../../db/client';
 import { issueReportMessages } from '../../db/schema';
 import { BUILD_COMMIT } from '../generated/build-commit';
 import { notifyIssueUser } from './issue-reports';
+import { syncOpenHotfixes, hotfixPrFromResult } from './issue-hotfix';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -159,6 +160,8 @@ export interface FixLiveResult {
     notYet: number;
     errors: number;
     autoClosed: number;
+    /** Hotfix PRs whose GitHub state changed this run (issue-hotfix.ts). */
+    hotfixesSynced?: number;
 }
 
 /**
@@ -180,6 +183,9 @@ export async function runFixLiveCheck(db: Db, opts: {
     const token = opts.token ?? process.env.GITHUB_FIX_CHECK_TOKEN ?? '';
     const repo = opts.repo || process.env.GITHUB_REPO || DEFAULT_REPO;
 
+    // Follow hotfix PRs first, so one merged since the last run is checked against this deploy now.
+    if (token) result.hotfixesSynced = await syncOpenHotfixes(db, { repo, fetchImpl: opts.fetchImpl, ...(opts.token ? { token: opts.token } : {}) });
+
     if (!token) result.skipped = 'no_token';
     else if (!isFullSha(deployedSha)) result.skipped = 'no_commit';
     else await confirmLiveFixes(db, { deployedSha, token, repo, fetchImpl: opts.fetchImpl }, result);
@@ -196,7 +202,7 @@ async function confirmLiveFixes(
     // Merged fixes whose CURRENT PR hasn't been confirmed live. A reopened issue keeps live_pr_url
     // pointing at its old PR, so it only comes back here once a new fix PR replaces dev_pr_url.
     const rows = await db.execute(sql`
-        SELECT id, user_id, dev_pr_url
+        SELECT id, user_id, dev_pr_url, dev_prod_status, dev_prod_result
           FROM issue_reports
          WHERE dev_merge_status = 'merged'
            AND dev_pr_url IS NOT NULL
@@ -204,13 +210,22 @@ async function confirmLiveFixes(
            AND status NOT IN ('closed', 'roadmap')
            AND dev_sql_status IS DISTINCT FROM 'pending'
          ORDER BY dev_merged_at ASC NULLS LAST
-         LIMIT ${MAX_LIVE_CHECKS_PER_RUN}`) as Array<{ id: number; user_id: number | null; dev_pr_url: string }>;
+         LIMIT ${MAX_LIVE_CHECKS_PER_RUN}`) as Array<{ id: number; user_id: number | null; dev_pr_url: string; dev_prod_status: string | null; dev_prod_result: string | null }>;
 
     for (const row of rows) {
         const prNumber = parsePrNumber(row.dev_pr_url, o.repo);
         if (!prNumber) { result.errors++; continue; }
         result.checked++;
-        const state = await checkFixDeployed({ prNumber, deployedSha: o.deployedSha, token: o.token, repo: o.repo, fetchImpl: o.fetchImpl });
+        let state = await checkFixDeployed({ prNumber, deployedSha: o.deployedSha, token: o.token, repo: o.repo, fetchImpl: o.fetchImpl });
+        // Shipped on its own by a hotfix PR (issue-hotfix.ts): that PR's merge commit is a copy, not
+        // the staging commit, so ask about it too.
+        if (state !== 'live' && row.dev_prod_status === 'promoted') {
+            const hotfixPr = hotfixPrFromResult(row.dev_prod_result, o.repo);
+            if (hotfixPr) {
+                const hotfixState = await checkFixDeployed({ prNumber: hotfixPr, deployedSha: o.deployedSha, token: o.token, repo: o.repo, fetchImpl: o.fetchImpl });
+                if (hotfixState === 'live' || hotfixState === 'error') state = hotfixState;
+            }
+        }
         if (state === 'not_yet' || state === 'not_merged') { result.notYet++; continue; }
         if (state === 'error') { result.errors++; continue; }
 
