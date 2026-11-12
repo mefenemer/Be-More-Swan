@@ -10,7 +10,7 @@
 
 import { sanitizeForModel } from '../utils/text-safe';
 import Anthropic from '@anthropic-ai/sdk';
-import { logAiUsage, type DataCategory } from '../utils/ai-usage';
+import { logAiUsage, serviceUnitPriceUsd, type DataCategory } from '../utils/ai-usage';
 import { adaptForModel, modelOption, replyText, type ThinkingLevel } from '../config/model-options';
 
 export interface GatewayRequest {
@@ -229,6 +229,34 @@ function recordUsage(req: GatewayRequest, inputTokens: number, outputTokens: num
     }
 }
 
+/**
+ * Claude's server-side web search is billed per search on top of the tokens, so a grounded call
+ * records it as a second row ('anthropic-web-search', 0 tokens, priced per search). Recorded here,
+ * once, for every grounded caller — callers must not log it again. Awaited, unlike the token row:
+ * background callers (the System Map review) can be frozen as soon as they return, which would
+ * lose a fire-and-forget write of a fee that was already paid. Never throws.
+ */
+async function recordSearchFee(req: GatewayRequest, searches: number): Promise<void> {
+    if (!(searches > 0)) return;
+    const u = req.usage ?? {};
+    try {
+        await logAiUsage({
+            workspaceId:  u.workspaceId  ?? null,
+            userId:       u.userId       ?? null,
+            assistantId:  u.assistantId  ?? null,
+            model:        'anthropic-web-search',
+            inputTokens:  0,
+            outputTokens: 0,
+            costUsdOverride: (searches * serviceUnitPriceUsd('anthropic-web-search')).toFixed(6),
+            taskRunId:    u.taskRunId    ?? null,
+            sessionId:    u.sessionId    ?? null,
+            dataCategories: u.dataCategories,
+        });
+    } catch (err) {
+        console.error('[ai-gateway] web search fee logging failed (the call itself succeeded)', err);
+    }
+}
+
 // ── Web search ───────────────────────────────────────────────────────────────────────────────
 // A second entry point rather than a flag on gatewayGenerate, because the caller needs something
 // gatewayGenerate deliberately does not return: the URLs the SEARCH TOOL actually returned, as
@@ -377,6 +405,7 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
     const text = allContent.filter(b => b.type === 'text').map(b => (b as any).text).join('\n').trim();
 
     recordUsage(req, tokensIn, tokensOut, model);
+    await recordSearchFee(req, searches);
     return {
         text,
         stopReason: response.stop_reason ?? null,

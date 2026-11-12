@@ -15,7 +15,6 @@ import { eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { systemReviews } from '../../db/schema';
 import { gatewayGenerateGrounded } from '../lib/ai-gateway';
-import { logAiUsage, serviceUnitPriceUsd } from './ai-usage';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -170,14 +169,10 @@ export async function runSystemReview(db: Db, reviewId: number, ctx: ReviewConte
             usage: { sessionId: 'system-review', dataCategories: ['business_context'] },
         });
         const prompt = buildReviewPrompt(ctx);
-        // Web search is billed per search on top of tokens; the gateway records only the tokens.
-        // Awaited: a background function can be frozen as soon as it returns, losing a fire-and-forget write.
-        const logSearches = (n: number) => n > 0 ? logAiUsage({ model: 'anthropic-web-search', inputTokens: 0, outputTokens: 0, costUsdOverride: (n * serviceUnitPriceUsd('anthropic-web-search')).toFixed(6), sessionId: 'system-review' }) : Promise.resolve();
+        // The gateway records the tokens AND the per-search web fee (recordSearchFee, awaited there).
         let res = await ask(`${SEARCH_FIRST}\n\n${prompt}`);
-        await logSearches(res.searchCount);
         if (res.searchCount === 0) {
             res = await ask(`${SEARCH_RETRY}\n\n${prompt}`);
-            await logSearches(res.searchCount);
         }
         if (res.searchCount === 0) throw new Error('The check answered without searching the web, so no result was saved. Try again.');
         const parsed = parseReview(res.text, res.searchedUrls);

@@ -90,7 +90,8 @@ check('an answer that never searched is retried once, then refused — never sto
     assert.ok(/if \(res\.searchCount === 0\) \{\s*res = await ask\(`\$\{SEARCH_RETRY\}/.test(run), 'no search → one retry');
     const refuse = run.indexOf("if (res.searchCount === 0) throw new Error(");
     assert.ok(refuse > 0 && refuse < run.indexOf('parseReview('), 'a second unsearched answer must fail before it is parsed and stored');
-    assert.strictEqual((run.match(/await logSearches\(res\.searchCount\)/g) || []).length, 2, 'both attempts\' searches are logged, awaited');
+    // Each attempt is its own gateway call, and the gateway records that call's searches (awaited).
+    assert.strictEqual((run.match(/await ask\(/g) || []).length, 2, 'both attempts go through the gateway, which logs their searches');
 });
 
 check('a check stuck queued/running past 20 minutes reads as stalled', () => {
@@ -135,10 +136,15 @@ check('every reviewable system is on the registry, and none is a connector', () 
     }
 });
 
-check('web searches are priced, mapped to Anthropic and logged by each check', () => {
+check('web searches are priced, mapped to Anthropic and logged once, by the gateway, for every grounded call', () => {
     assert.strictEqual(SERVICE_UNIT_PRICE_USD['anthropic-web-search']?.fallback, 0.01);
     assert.strictEqual(systemForUsageModel('anthropic-web-search'), 'anthropic');
-    assert.ok(/model: 'anthropic-web-search'[\s\S]{0,120}serviceUnitPriceUsd\('anthropic-web-search'\)/.test(read('src/utils/system-review.ts')));
+    const gw = read('src/lib/ai-gateway.ts');
+    const fee = gw.slice(gw.indexOf('async function recordSearchFee('), gw.indexOf('// ── Web search ──'));
+    assert.ok(/model:\s+'anthropic-web-search'[\s\S]{0,200}serviceUnitPriceUsd\('anthropic-web-search'\)/.test(fee), 'priced per search');
+    assert.ok(/await logAiUsage\(/.test(fee), 'awaited: a background review can be frozen as soon as it returns');
+    assert.ok(/recordUsage\(req, tokensIn, tokensOut, model\);\s*await recordSearchFee\(req, searches\);/.test(gw), 'the grounded path records the fee');
+    assert.ok(!/anthropic-web-search|logAiUsage\(/.test(read('src/utils/system-review.ts')), 'the review must not log it again');
 });
 
 check('the worker needs the cron secret, runs two at a time and stops starting at 12 minutes', () => {
