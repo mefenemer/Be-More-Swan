@@ -3277,6 +3277,12 @@
     // Paint the fallback wording immediately so no button is briefly blank, then correct it once
     // the assistant list is in.
     applyAssistantNaming();
+    // Say so at once. The post is only asked for once the assistant list is in, and until then the
+    // panel was blank — or still showed the PREVIOUS article's editor. openWorkspace reveals it again.
+    el('bs-workspace').classList.add('bs-hidden');
+    el('bs-decide').classList.add('bs-hidden');
+    bd.classList.remove('bs-deciding');
+    showOpening(opts.postId ? 'Opening your article…' : 'Starting a new draft…');
     loadAssistants().then(function () {
       // Opening onto an existing post loads it; opening fresh drops straight into a blank draft in
       // the editor (the old "Start a new post" brief screen is gone).
@@ -3285,6 +3291,10 @@
       } else {
         startBlankPost();
       }
+    }).catch(function () {
+      // Anything that threw before the load started would otherwise leave the opening line spinning.
+      var retry = function () { openBlogStudio(opts); };
+      openFailed(opts.postId ? 'Could not open this article: please try again.' : 'Could not start a new draft: please try again.', retry);
     });
   }
 
