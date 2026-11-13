@@ -18,7 +18,7 @@ import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierCanGenerateVideo } from '../../src/utils/ai-credits';
-import { footageAudioPrefix, footageStatus, ownVideos, prepareFootage } from '../../src/utils/footage-review';
+import { footageAudioPrefix, footageStatus, ownVideos, prepareFootage, footageFrameAt } from '../../src/utils/footage-review';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { MAX_FOOTAGE_BYTES } from '../../src/lib/footage';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -51,6 +51,15 @@ export default withLambda(async (event) => {
 
     if (event.httpMethod === 'GET') {
         const q = event.queryStringParameters ?? {};
+        // ?frame=<assetId>&t=<s>: a still for a footage scene's box (issues #49/#50), from this workspace's own video only.
+        if (q.frame) {
+            const assetId = Number(q.frame);
+            const [own] = Number.isInteger(assetId) && assetId > 0 ? await ownVideos(db, orgId, [assetId]) : [];
+            const jpeg = own ? await footageFrameAt(db, orgId, assetId, Number(q.t) || 0).catch(() => null) : null;
+            // A body, never '': an empty body comes back as a 502 under withLambda.
+            if (!jpeg) return { statusCode: 404, headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }, body: 'No still for this video yet.', isBase64Encoded: false };
+            return { statusCode: 200, headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, max-age=86400' }, body: jpeg.toString('base64'), isBase64Encoded: true };
+        }
         if (q.list) {
             const all = (await ownVideos(db, orgId)).reverse().slice(0, 60);
             const status = new Map((await footageStatus(db, orgId, all.map((v) => v.id))).map((s) => [s.assetId, s]));
