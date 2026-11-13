@@ -73,7 +73,7 @@ import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
 import { applySiteOperation, assetIdsIn, EDITOR_LIMITS, FEATURE_LABELS, FONTS, FEATURE_SECTIONS, planSplit, SECTION_TYPES, SITE_FEATURES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { cleanSiteSlugInput, siteAssetUrl, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
-import { checkDomain, claimDomain, currentDomain, domainView, notifyDomainLive, removeDomain } from '../../src/utils/site-domains';
+import { checkDomain, claimDomain, currentDomain, domainView, lookupDomainRegistry, notifyDomainLive, removeDomain } from '../../src/utils/site-domains';
 import { SITE_TEMPLATES } from '../../src/config/site-templates';
 import { FONT_PAIRS } from '../../src/utils/site-render';
 import { listSignupForms } from '../../src/utils/site-forms';
@@ -187,7 +187,8 @@ export default withLambda(async (event) => {
                 unpublishedChanges: s.status === 'published' ? await hasUnpublishedChanges(db, s, maxPages) : false,
                 // Home holds sections that would sit better on their own pages (the "Spread across pages" offer).
                 // Their own domain (site-domains.ts): status, what to add at their registrar.
-                customDomain: domainView(ownDomain),
+                // Plus who manages it (registry lookup, cached) so the panel can say where to make the change.
+                customDomain: { ...domainView(ownDomain), registry: ownDomain ? await lookupDomainRegistry(ownDomain.altDomain || ownDomain.domain) : null },
                 canSplit: planSplit(definition.pages[0]?.sections ?? []).parts.length > 0,
                 suspendedReason: s.status === 'suspended' ? (s.suspendedReason || 'Taken offline by Be More Swan.') : null,
                 publishBlocker: publishBlocker(s, definition),

@@ -234,8 +234,26 @@ export async function removeDomain(db: Db, row: SiteDomainRow): Promise<void> {
     await db.update(siteDomains).set({ status: 'removed', statusDetail: 'Removed by the owner.', updatedAt: new Date() }).where(eq(siteDomains.id, row.id));
 }
 
+/**
+ * "Doesn't point here yet", in words that say what to do. A CNAME to some OTHER *.netlify.app is a site
+ * already on Netlify (Restorative Futures, 2026-11-13): changing the record is not enough — the domain
+ * must also come off that site, or Netlify keeps showing it.
+ */
+export function notPointingDetail(row: Pick<SiteDomainRow, 'domain' | 'altDomain'>, found: string, target: string): string {
+    const other = /CNAME ([a-z0-9-]+\.netlify\.app)/.exec(found)?.[1];
+    if (other && other !== target) {
+        return `${row.domain} still points at another Netlify website (${other}). Change that record to ${target} as shown below. Then remove ${row.altDomain || row.domain} from that site in Netlify (Domain management) and press Check now straight away, so there's no gap.`;
+    }
+    return `${row.domain} doesn't point here yet (found: ${found}). DNS changes can take up to a few hours — we check every 10 minutes.`;
+}
+
 // What the owner reads. Exported so the panel's heading (domainView) and the tests agree with checkDomain.
 export const DETAIL_DNS_RIGHT_PREFIX = 'Your DNS is right.';
+export const DETAIL_HELD_ELSEWHERE = (domain: string) => `${DETAIL_DNS_RIGHT_PREFIX.slice(0, -1)}, but ${domain} is still attached to another Netlify website, so it keeps showing that one. Whoever runs that site needs to remove the domain there (Netlify → that site → Domain management), then press Check now straight away — we also check every 10 minutes. Can't get into that Netlify account? Contact us and we'll sort it out with Netlify.`;
+/** Netlify's refusal when another Netlify site (any account) already carries one of the names. */
+export function heldByAnotherNetlifySite(err: unknown): boolean {
+    return err instanceof NetlifyApiError && err.status === 422 && /already|in use|another|taken|registered|belongs|exists/i.test(err.message);
+}
 export const DETAIL_OUR_SIDE = `${DETAIL_DNS_RIGHT_PREFIX} Something on our side stopped us finishing the connection. We've been alerted and will finish it for you — you don't need to change anything.`;
 const OPERATOR_EMAIL = () => process.env.FOUNDER_ALERT_EMAIL || 'hello@bemoreswan.com';
 
@@ -263,7 +281,7 @@ export async function checkDomain(db: Db, row: SiteDomainRow, now = new Date()):
     if (row.status === 'pending_dns') {
         const main = await dnsPointsAtUs(row.domain, cfg.target);
         const alt = row.altDomain ? await dnsPointsAtUs(row.altDomain, cfg.target) : { ok: true, found: '' };
-        if (!main.ok) return set({ statusDetail: `${row.domain} doesn't point here yet (found: ${main.found}). DNS changes can take up to a few hours.` });
+        if (!main.ok) return set({ statusDetail: notPointingDetail(row, main.found, cfg.target) });
         try {
             // The bare form joins only once its own record points here too; until then www works on its own.
             await changeAliases(db, [row.domain, ...(row.altDomain && alt.ok ? [row.altDomain] : [])], []);
@@ -271,6 +289,18 @@ export async function checkDomain(db: Db, row: SiteDomainRow, now = new Date()):
             console.error('[site-domains] could not add aliases', { domainId: row.id }, err);
             // Ours, not the customer's: their DNS is right. Alert once per stuck spell (the 10-minute
             // recheck keeps the same detail, so it doesn't re-send); the owner is told to do nothing.
+            // Held by another Netlify site: the owner (or whoever runs that site) can fix this, so say how.
+            if (heldByAnotherNetlifySite(err)) {
+                const detail = DETAIL_HELD_ELSEWHERE(row.altDomain || row.domain);
+                if (row.statusDetail !== detail) {
+                    await alertOperator(`Own domain held by another Netlify site: ${row.domain}`, [
+                        `${row.domain}${row.altDomain ? ` (and ${row.altDomain})` : ''}: DNS points at us, but Netlify says another site carries the name.`,
+                        'The owner has been asked to remove it from that site. If they can\'t reach that Netlify account, the real owner of the domain can claim it through Netlify support (a TXT record check).',
+                        `Error: ${err instanceof Error ? err.message : String(err)}`, `site_domains.id ${row.id}. Rechecked every 10 minutes.`,
+                    ]);
+                }
+                return set({ statusDetail: detail });
+            }
             if (row.statusDetail !== DETAIL_OUR_SIDE) {
                 const why = err instanceof NetlifyApiError && (err.status === 401 || err.status === 403)
                     ? 'Netlify refused our API token — replace NETLIFY_API_TOKEN (production) and redeploy. Every domain connection fails until then.'
@@ -317,12 +347,14 @@ export async function checkDomain(db: Db, row: SiteDomainRow, now = new Date()):
 /**
  * Where a domain stands, for the heading — never "waiting for your DNS" when the DNS is right:
  *   needs_dns   the owner still has records to add
+ *   held_elsewhere  DNS right, but another Netlify site still carries the domain
  *   connecting  DNS right; we're adding it (or we're stuck — the detail says it's ours)
  *   securing    on Netlify; the https certificate is being issued
  *   live
  */
-export function domainPhase(row: Pick<SiteDomainRow, 'status' | 'statusDetail'>): 'needs_dns' | 'connecting' | 'securing' | 'live' | 'removed' {
+export function domainPhase(row: Pick<SiteDomainRow, 'status' | 'statusDetail'>): 'needs_dns' | 'held_elsewhere' | 'connecting' | 'securing' | 'live' | 'removed' {
     if (row.status === 'live' || row.status === 'securing' || row.status === 'removed') return row.status;
+    if ((row.statusDetail || '').includes('is still attached to another Netlify website')) return 'held_elsewhere';
     return (row.statusDetail || '').startsWith(DETAIL_DNS_RIGHT_PREFIX) ? 'connecting' : 'needs_dns';
 }
 
@@ -384,4 +416,114 @@ export async function checkDueDomains(db: Db, onLive: (row: SiteDomainRow, slug:
         } catch (err) { failed++; console.error('[site-domains] scheduled check failed', { domainId: row.id }, err); }
     }
     return { checked: due.length, live, failed };
+}
+
+// ── Where the domain is managed (shown on the panel) ────────────────────────────────────────────
+// "Where you bought restorativefutures.co.uk" assumed the owner knew. They thought Openprovider; it was
+// Webador (a reseller of Openprovider's) — the public registry said so in one lookup. RDAP gives the
+// reseller, registrar and expiry; the nameservers say whose DNS panel the records go in. Looked up when
+// the panel loads, cached per instance, so no column and no SQL. Never throws, never blocks: a failed
+// lookup just leaves the panel as it was.
+
+export interface DomainRegistry {
+    /** Whose DNS settings the records go in, e.g. "Webador", "GoDaddy", "Cloudflare". Null: unknown. */
+    dnsManagedBy: string | null;
+    /** The reseller or registrar the domain was bought through. */
+    boughtThrough: string | null;
+    expiresAt: string | null;
+    /** Already on Netlify DNS — usually another Netlify account; records are edited there. */
+    netlifyDns: boolean;
+}
+
+const NAMESERVER_HOSTS: Array<[RegExp, string]> = [
+    [/\.domaincontrol\.com$/, 'GoDaddy'], [/\.registrar-servers\.com$/, 'Namecheap'], [/\.cloudflare\.com$/, 'Cloudflare'],
+    [/\.ui-dns\.(com|de|org|biz)$/, 'IONOS'], [/\.123-reg\.co\.uk$/, '123 Reg'], [/\.wixdns\.net$/, 'Wix'],
+    [/\.squarespacedns\.com$|\.googledomains\.com$/, 'Squarespace'], [/\.dns-parking\.com$/, 'Hostinger'],
+    [/\.awsdns-\d+\./, 'Amazon Route 53'], [/\.ovh\.net$/, 'OVH'], [/\.gandi\.net$/, 'Gandi'], [/\.openprovider\.(nl|be|eu)$/, 'Openprovider'],
+    [/\.nsone\.net$/, 'Netlify DNS'], [/\.hover\.com$/, 'Hover'], [/\.name-services\.com$/, 'Enom'], [/\.fasthosts\.net\.uk$|\.livedns\.co\.uk$/, 'Fasthosts'],
+];
+
+/** Pure: the DNS host a set of nameservers belongs to. */
+export function dnsHostFromNameservers(ns: string[]): string | null {
+    for (const n of ns.map((x) => x.toLowerCase().replace(/\.$/, ''))) {
+        const hit = NAMESERVER_HOSTS.find(([re]) => re.test(n));
+        if (hit) return hit[1];
+    }
+    return null;
+}
+
+/** Pure: the reseller (else registrar) and expiry from an RDAP domain answer. */
+export function parseRdap(json: unknown): { reseller: string | null; registrar: string | null; expiresAt: string | null } {
+    const d = (json && typeof json === 'object' ? json : {}) as { entities?: Array<{ roles?: string[]; vcardArray?: [string, Array<[string, unknown, string, unknown]>] }>; events?: Array<{ eventAction?: string; eventDate?: string }> };
+    const nameOf = (role: string) => {
+        const e = (d.entities || []).find((x) => (x.roles || []).includes(role));
+        const card = e?.vcardArray?.[1] || [];
+        const pick = (k: string) => { const v = card.find((c) => c[0] === k)?.[3]; return typeof v === 'string' && v.trim() ? v.trim() : null; };
+        return pick('org') || pick('fn');
+    };
+    const exp = (d.events || []).find((e) => e.eventAction === 'expiration')?.eventDate;
+    return { reseller: nameOf('reseller'), registrar: nameOf('registrar'), expiresAt: exp && !Number.isNaN(Date.parse(exp)) ? new Date(exp).toISOString() : null };
+}
+
+/** Pure: put the two together. A reseller on a wholesale registrar's nameservers is whose panel the owner uses. */
+export function summariseRegistry(ns: string[], rdap: ReturnType<typeof parseRdap>): DomainRegistry {
+    const host = dnsHostFromNameservers(ns);
+    const wholesale = host === 'Openprovider' || host === 'Enom';
+    return {
+        dnsManagedBy: host === 'Netlify DNS' ? 'Netlify DNS' : wholesale && rdap.reseller ? rdap.reseller : host,
+        boughtThrough: rdap.reseller || rdap.registrar,
+        expiresAt: rdap.expiresAt,
+        netlifyDns: host === 'Netlify DNS',
+    };
+}
+
+// The official RDAP server for each domain ending comes from IANA's bootstrap list (RFC 9224), not a
+// middleman: rdap.org answers Node's fetch with a 403. Some country endings (.io…) have no RDAP — then
+// only the nameservers are known, which is still enough to say whose DNS panel to use.
+const IANA_RDAP_BOOTSTRAP = 'https://data.iana.org/rdap/dns.json';
+let bootstrap: { at: number; services: Array<[string[], string[]]> } | null = null;
+/** Pure: the RDAP base URL for a domain from the bootstrap services (longest matching ending wins). */
+export function rdapBaseFor(domain: string, services: Array<[string[], string[]]>): string | null {
+    const labels = domain.toLowerCase().split('.');
+    for (let i = 1; i < labels.length; i++) {
+        const ending = labels.slice(i).join('.');
+        const svc = services.find(([endings]) => endings.includes(ending));
+        const url = svc?.[1].find((u) => u.startsWith('https://')) ?? svc?.[1][0];
+        if (url) return url.endsWith('/') ? url : `${url}/`;
+    }
+    return null;
+}
+async function rdapServerFor(domain: string, fetchJson: (url: string) => Promise<unknown>): Promise<string | null> {
+    if (!bootstrap || Date.now() - bootstrap.at > 24 * 3_600_000) {
+        const j = await fetchJson(IANA_RDAP_BOOTSTRAP) as { services?: Array<[string[], string[]]> };
+        bootstrap = { at: Date.now(), services: Array.isArray(j?.services) ? j.services : [] };
+    }
+    return rdapBaseFor(domain, bootstrap.services);
+}
+
+const REGISTRY_CACHE = new Map<string, { at: number; value: DomainRegistry | null }>();
+const REGISTRY_TTL_MS = 6 * 3_600_000;
+const REGISTRY_FAIL_TTL_MS = 10 * 60_000;
+
+/** Who manages a domain — for the panel. Cached; at most ~2.5 s on a miss; null when nothing is known. */
+export async function lookupDomainRegistry(host: string, deps: { resolveNs?: (h: string) => Promise<string[]>; fetchJson?: (url: string) => Promise<unknown> } = {}): Promise<DomainRegistry | null> {
+    const bare = isRegistrable(host);
+    const hit = REGISTRY_CACHE.get(bare);
+    if (hit && Date.now() - hit.at < (hit.value ? REGISTRY_TTL_MS : REGISTRY_FAIL_TTL_MS)) return hit.value;
+    const resolveNs = deps.resolveNs ?? ((h: string) => new Resolver({ timeout: 2000, tries: 1 }).resolveNs(h));
+    const fetchJson = deps.fetchJson ?? (async (url: string) => {
+        const res = await fetch(url, { headers: { Accept: 'application/rdap+json, application/json' }, signal: AbortSignal.timeout(2500), redirect: 'follow' });
+        if (!res.ok) throw new Error(`RDAP ${res.status}`);
+        return res.json();
+    });
+    const [ns, rdap] = await Promise.all([
+        resolveNs(bare).catch(() => [] as string[]),
+        rdapServerFor(bare, fetchJson)
+            .then((base) => base ? fetchJson(`${base}domain/${encodeURIComponent(bare)}`).then(parseRdap) : Promise.reject(new Error('no RDAP server for this ending')))
+            .catch(() => ({ reseller: null, registrar: null, expiresAt: null })),
+    ]);
+    const s = summariseRegistry(ns, rdap);
+    const value = s.dnsManagedBy || s.boughtThrough || s.expiresAt ? s : null;
+    REGISTRY_CACHE.set(bare, { at: Date.now(), value });
+    return value;
 }
