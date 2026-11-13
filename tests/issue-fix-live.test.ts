@@ -159,8 +159,8 @@ async function main() {
     });
 
     await check('scheduled on prod, poked on staging, commit stamped at build', () => {
-        assert.ok(read('netlify.toml').includes('[functions.check-fixes-live]\n  schedule = "0 * * * *"'));
-        assert.ok(/run-fix-live-check\s+3600\s+120/.test(read('.github/workflows/staging-crons.yml')));
+        assert.ok(read('netlify.toml').includes('[functions.check-fixes-live]\n  schedule = "*/30 * * * *"'));
+        assert.ok(/run-fix-live-check\s+1800\s+120/.test(read('.github/workflows/staging-crons.yml')));
         const stamp = read('scripts/stamp-view-version.mjs');
         assert.ok(stamp.includes("src/generated/build-commit.ts") && stamp.includes('process.env.COMMIT_REF'));
     });

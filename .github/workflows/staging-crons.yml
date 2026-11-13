@@ -127,7 +127,7 @@ jobs:
           # a workspace is due only a week after its last read.
           # `run-video-autopilot` (6h) writes the Video Producer's weekly storyboards (video-autopilot.ts).
           # Idempotent: a storyboard is due only after its spacing (7/3/2 days); never makes a video.
-          # `run-fix-live-check` (1h) tells Issues reporters their fix is live on staging and closes issues
+          # `run-fix-live-check` (30 min) tells Issues reporters their fix is live on staging and closes issues
           # nobody replied to 7 days later (issue-fix-live.ts). Idempotent: every change is compare-and-swap.
           # `poll-mailboxes` (10m) wakes the Email Assistant's mailbox reads (docs/email-assistant-plan.md §4).
           # Idempotent: a mailbox read in the last 9 minutes, or mid-read, is skipped.
@@ -150,7 +150,7 @@ jobs:
           run-account-memory        3600    120
           run-goal-telemetry        3600    120
           run-campaign-reconciler   3600    120
-          run-fix-live-check        3600    120
+          run-fix-live-check        1800    120
           poll-mailboxes            600     60
           run-follower-counts       14400   120
           run-insights-ingest       21600   120

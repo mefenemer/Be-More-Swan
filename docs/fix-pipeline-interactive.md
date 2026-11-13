@@ -62,7 +62,7 @@ kept for what it is good at: holding the ticket, its status and the evidence.
 
 ## Still automatic (owner to decide)
 
-The hourly live check (`src/utils/issue-fix-live.ts`) still tells the reporter "fixed and live" when the
+The 30-minute live check (`src/utils/issue-fix-live.ts`) still tells the reporter "fixed and live" when the
 prod deploy contains the fix, and closes a ticket 7 days later with a last notification. Those are the
 system's messages, not Claude's.
 
