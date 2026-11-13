@@ -3,7 +3,7 @@
 //
 // GET    /admin-feature-requests                       → ALL requests (incl. pending_review)
 // POST   /admin-feature-requests { title, description?, category?, priority? }
-//                                                       → admin creates a request directly (source='manual', status='open')
+//                                                       → admin adds a request (source='manual', status='pending_review' → To review)
 // POST   /admin-feature-requests?action=enhance { text }
 //                                                       → LLM-polished feature summary from raw text (US04)
 // POST   /admin-feature-requests?action=merge { sourceId, targetId }
@@ -222,11 +222,10 @@ export default withLambda(async (event) => {
             priority,
             itemType,
             parentId,
-            status: 'open',
+            // Lands in "To review" with the customers' ideas (owner 2026-11-13), not straight in Backlog.
+            status: 'pending_review',
             source: 'manual',
             sortOrder,
-            reviewedBy: admin.id,
-            reviewedAt: new Date(),
         }).returning({ id: featureRequests.id });
         return json(200, { ok: true, id: inserted.id });
     }

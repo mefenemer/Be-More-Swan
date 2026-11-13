@@ -3,6 +3,8 @@
 //
 // GET   /admin-issue-reports                     → all issues (newest first), optional ?status=
 // GET   /admin-issue-reports?id=N                → single issue + full message thread + screenshot
+// POST  /admin-issue-reports { description, sourceLocation?, sourceUrl?, severity? }
+//                                                → an admin adds an issue by hand; lands in Reported
 // PATCH /admin-issue-reports?id=N { status?, message? }
 //                                                → update status and/or post a supporting message,
 //                                                  then notify the reporting user (in-app + email).
@@ -338,6 +340,31 @@ export default withLambda(async (event) => {
     // triggerStagingDeployIfDrained(), called when syncCloudMerge records a merge outcome.
 
     // ── GET ?action=version: has anything changed? (the board's auto-refresh polls this) ──
+    // ── POST (no action): an admin adds an issue by hand (2026-11-13) ──
+    // Lands in Reported like a customer's report. The admin who adds it is the reporter (source 'user'
+    // keeps the issue_reports_user_report_has_user CHECK happy), so a later status change tells them,
+    // not a customer. No workspace, and no admin alert email — they are the admin.
+    if (event.httpMethod === 'POST' && !action && !id) {
+        let body: any;
+        try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
+        const description = typeof body.description === 'string' ? body.description.trim() : '';
+        if (!description) return json(400, { error: 'Describe the problem.' });
+        if (description.length > 5000) return json(400, { error: 'Keep the description under 5,000 characters.' });
+        const area = typeof body.sourceLocation === 'string' && body.sourceLocation.trim() ? body.sourceLocation.trim().slice(0, 200) : null;
+        const url = typeof body.sourceUrl === 'string' && /^https?:\/\//i.test(body.sourceUrl.trim()) ? body.sourceUrl.trim().slice(0, 1000) : null;
+        const [created] = await db.insert(issueReports).values({
+            organisationId: null,
+            userId: admin.id,
+            description,
+            sourceLocation: area,
+            sourceUrl: url,
+            userAgent: null,
+            status: 'reported',
+        }).returning({ id: issueReports.id });
+        if (isIssueSeverity(body.severity) && body.severity !== 'normal') await setIssueSeverity(db, created.id, body.severity);
+        return json(201, { ok: true, id: created.id });
+    }
+
     if (event.httpMethod === 'GET' && action === 'version') {
         const [v] = await db.execute(sql`
             SELECT coalesce(max(updated_at)::text, '') || '|' || count(*)::text || '|' ||

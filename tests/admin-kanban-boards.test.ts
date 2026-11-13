@@ -103,4 +103,24 @@ check('the Fix pipeline list carries the live-check fields the board shows', () 
     assert.ok(api.includes('awaitingLive:'));
 });
 
+check('items added by hand land in the first bucket (owner 2026-11-13)', () => {
+    // Fix pipeline: + Add issue → POST admin-issue-reports → Reported, the admin as reporter.
+    assert.ok(html.includes('onclick="irOpenAdd()"'), 'Fix pipeline has an Add issue button');
+    const submit = between('async function irSubmitAdd()', 'async function loadIssueReports()');
+    assert.ok(submit.includes("api(IR_API, {") && submit.includes("method: 'POST'"), 'posts to the Fix pipeline API');
+    const api = read('netlify/functions/admin-issue-reports.ts');
+    const i = api.indexOf("if (event.httpMethod === 'POST' && !action && !id)");
+    assert.ok(i > 0, 'plain POST creates an issue');
+    const create = api.slice(i, api.indexOf("action === 'version'", i));
+    assert.ok(create.includes("status: 'reported'"), 'lands in Reported');
+    assert.ok(create.includes('userId: admin.id'), 'the admin is the reporter (never a customer)');
+    assert.ok(!create.includes('notifyIssueUser') && !create.includes('notifyAdmins'), 'adding tells nobody');
+    assert.strictEqual(ctx.irColumnOf({ status: 'reported' }), 'new');
+    // Feature requests: + Add request → pending_review → the To review column.
+    const fr = read('netlify/functions/admin-feature-requests.ts');
+    const ins = fr.slice(fr.indexOf('const [inserted] = await db.insert(featureRequests)'));
+    assert.ok(/status: 'pending_review',\s*source: 'manual'/.test(ins.slice(0, 600)), 'admin-added request is pending_review');
+    assert.strictEqual(ctx.frColumnOf({ status: 'pending_review' }), 'review');
+});
+
 console.log(`\n${passed} passed`);
