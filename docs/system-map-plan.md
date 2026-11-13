@@ -124,3 +124,7 @@ Monthly job + stored results + drawer section + "decisions already taken" list p
 ## 5. Open questions for the owner
 - ~~Currency~~ — GBP at the COGS rate, shown (default taken 2026-11-12; say if you want USD).
 - ~~Fixed costs~~ — entered by the owner in the drawer or chat; nothing seeded.
+
+---
+
+**Follow-on (2026-11-12):** an Assistants view on this page — what each assistant needs, who it hands work to, who breaks when a system is down. Plan: docs/assistant-map-plan.md (not built).
