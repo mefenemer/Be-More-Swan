@@ -287,7 +287,7 @@ async function main() {
                 await note(id, `Waiting for the owner to approve ${base === 'main' ? 'the prod' : base === 'staging' ? 'the staging' : 'this'} PR #${m[1]}: ${prUrl}${why ? `\n\n${why}` : ''}`);
                 console.log(`#${id}: "Approve PR #${m[1]}" (into ${base}) is now showing for the owner.`);
             } else {
-                await touch(id);
+                // Bookkeeping only (the UPDATE bumped updated_at): no touch, so no "Claude working" pill.
                 console.log(`#${id}: prod PR #${m[1]} recorded.`);
             }
         } else if (cmd === 'withdraw-approval') {
