@@ -220,5 +220,15 @@ await check('workspace.html loads version-check.js and exposes VIEW_VERSION to i
     assert.ok(after.includes('window.BMS_VIEW_VERSION = VIEW_VERSION;'), 'BMS_VIEW_VERSION set beside it');
 });
 
+await check('admin.html loads version-check.js, exposes VIEW_VERSION, and the build stamps it', () => {
+    const admin = readFileSync(join(root, 'admin.html'), 'utf8');
+    const stamper = readFileSync(join(root, 'scripts/stamp-view-version.mjs'), 'utf8');
+    assert.ok(admin.includes('<script src="/version-check.js" defer></script>'));
+    const at = admin.indexOf("const VIEW_VERSION = '");
+    assert.ok(at !== -1, 'VIEW_VERSION literal present (the stamp regex needs it)');
+    assert.ok(admin.slice(at, at + 200).includes('window.BMS_VIEW_VERSION = VIEW_VERSION;'));
+    assert.ok(/const TARGETS = \[[^\]]*'admin\.html'/.test(stamper), 'admin.html in stamp TARGETS');
+});
+
 console.log(`\n${passed} passed`);
 })();

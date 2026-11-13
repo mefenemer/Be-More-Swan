@@ -32,6 +32,14 @@
   <!-- US-COMMS-1.1: Quill WYSIWYG editor for the email template builder (loaded on demand) -->
   <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js" defer></script>
+  <!-- The deploy this page was built from. 'dev' here; scripts/stamp-view-version.mjs replaces it with
+       the commit on every Netlify build. version-check.js compares it with the live deploy
+       (build-info) and offers "A new version is ready — Refresh" to a long-open admin tab. -->
+  <script>
+    const VIEW_VERSION = 'dev';
+    window.BMS_VIEW_VERSION = VIEW_VERSION;
+  </script>
+  <script src="/version-check.js" defer></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-100 h-screen overflow-hidden">
 
