@@ -9,6 +9,9 @@
 //   npx tsx scripts/inbox-drafts.ts --env prod show <id>
 //   npx tsx scripts/inbox-drafts.ts --env prod draft <id> --file <reply.md> [--note <why.md>]
 //   npx tsx scripts/inbox-drafts.ts --env prod discard <id>
+//   npx tsx scripts/inbox-drafts.ts --env prod to-feature <id> --as <adminUserId>
+//       ⚠️ ONLY on the owner's word: does exactly what Inbox ▸ "Send to Feature requests" does — makes the feature
+//       request, posts the closing reply ON THE CUSTOMER'S TICKET, notifies them, writes the admin audit log.
 //
 // --env prod → DATABASE_URL_PROD; --env staging → NETLIFY_DATABASE_URL. No default.
 
@@ -57,6 +60,23 @@ async function main() {
             const r = await sql`UPDATE support_tickets SET draft_reply = ${reply}, draft_note = ${note}, draft_at = now() WHERE id = ${id} RETURNING id`;
             if (!r.length) throw new Error(`No ticket #${id}.`);
             console.log(`Draft saved on ticket #${id}. Nothing was sent: the owner reviews and sends it.`);
+        } else if (cmd === 'to-feature') {
+            const asId = Number(arg(rest, '--as'));
+            if (!id || !Number.isInteger(asId) || asId <= 0) throw new Error('to-feature <id> --as <adminUserId>');
+            // The shared helpers open their own connection (getDb → NETLIFY_DATABASE_URL): point it at THIS database.
+            process.env.NETLIFY_DATABASE_URL = url;
+            const { getDb } = await import('../db/client');
+            const { ticketToFeature } = await import('../src/utils/support-inbox');
+            const { createNotification } = await import('../src/utils/notify');
+            const { insertAdminAuditLog } = await import('../src/utils/admin-audit');
+            const db = getDb() as any;
+            const r = await ticketToFeature(db, id, asId);
+            if (!r.ok) throw new Error(r.error);
+            const ticketId = r.from.kind === 'ticket' ? r.from.id : r.to.id;
+            await createNotification(db, 'ticket_reply', { userId: r.userId, context: { ticket: { id: ticketId, subject: r.subject } }, metadata: { ticketId } }).catch(() => {});
+            await insertAdminAuditLog({ adminId: asId, action: 'support_request_reroute', targetType: r.from.kind, targetId: r.from.id, previousState: { kind: r.from.kind, id: r.from.id }, newState: { kind: r.to.kind, id: r.to.id }, ipAddress: null as any });
+            console.log(`Ticket #${id} → feature request #${r.to.id} ("${r.subject}"). The customer's ticket is closed with the move note.${r.possibleDuplicates?.length ? ` Possible duplicates: ${r.possibleDuplicates.map((d) => `#${d.id} ${d.title}`).join('; ')}` : ''}`);
+            process.exit(0);
         } else if (cmd === 'discard') {
             await sql`UPDATE support_tickets SET draft_reply = NULL, draft_note = NULL, draft_at = NULL WHERE id = ${id}`;
             console.log(`Draft removed from ticket #${id}.`);
