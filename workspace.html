@@ -14,6 +14,9 @@
        sees every write. -->
   <script src="/src/components/cached-fetch.js"></script>
   <script src="./session-timeout.js" defer></script>
+  <!-- Shows "A new version is ready" when a newer deploy is live; reloads background tabs with
+       nothing unsaved. Reads window.BMS_VIEW_VERSION, set beside VIEW_VERSION below. -->
+  <script src="./version-check.js" defer></script>
   <script src="/src/i18n.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -2742,6 +2745,8 @@ function formatCurrency(amount, currency) {
   // Top-level scope on purpose: both loadSidebar (top-level) and the DOMContentLoaded
   // router below use it — declaring it inside the handler made loadSidebar throw.
   const VIEW_VERSION = 'bb501d4e';
+  // version-check.js compares this with the live deploy (build-info) to offer a refresh.
+  window.BMS_VIEW_VERSION = VIEW_VERSION;
 
   async function loadSidebar(placeholderId) {
     const container = document.getElementById(placeholderId);
