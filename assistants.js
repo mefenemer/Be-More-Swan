@@ -5610,8 +5610,12 @@ window._renderNeedsYou = function() {
         if (id && targetTab === 'review-queue' && rqKind.kind === 'posts' && !rqKind.source && typeof window.openPostReview === 'function') {
             window.openPostReview(Number(id)); return;
         }
+        const alreadyOpen = document.querySelector('.main-tab-btn.active-tab')?.dataset.maintab === targetTab;
         window._activateMainTab(targetTab);
         if (targetTab === 'review-queue') window.detailRqOpenStatus?.('review');
+        // Nothing named, and the work is on the tab already open (the Blog Writer lands on Blogs): switching
+        // to it changed nothing on screen, so "Open Blogs →" went nowhere (#47). Bring the list into view.
+        if (!id && alreadyOpen) document.getElementById(`maintab-${targetTab}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         // Anything else named: scroll to its card once the column has painted, and mark it briefly.
         if (id && (targetTab === 'review-queue' || targetTab === 'videos')) {
             const attrs = targetTab === 'videos' ? ['data-video'] : ['data-rq-record', 'data-rq-blog', 'data-rq-newsletter', 'data-post-id'];
