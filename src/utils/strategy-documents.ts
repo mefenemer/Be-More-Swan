@@ -346,7 +346,7 @@ export type StrategyWriteResult = { ok: true; doc: StrategyDoc } | { ok: false; 
  * edit doesn't wipe the rest) or merge into it. The Plan tab's Save draft, the step-by-step form, the
  * canvas and the chat card all come here.
  */
-export async function saveStrategyDraft(db: Db, orgId: number, userId: number, kind: StrategyKind, raw: { sections?: unknown; assumptions?: unknown }): Promise<StrategyWriteResult> {
+export async function saveStrategyDraft(db: Db, orgId: number, userId: number, kind: StrategyKind, raw: { sections?: unknown; assumptions?: unknown }, opts: { startFrom?: StrategyBody | null } = {}): Promise<StrategyWriteResult> {
     const patch = cleanStrategyPatch(kind, raw);
     if (!patch) return { ok: false, status: 400, error: 'There was nothing to save.' };
     try {
@@ -365,7 +365,10 @@ export async function saveStrategyDraft(db: Db, orgId: number, userId: number, k
                 return { ok: true as const, doc: toDoc(r) };
             }
             const version = (docs[0]?.version ?? 0) + 1;
-            const body = mergeBody(approved?.body ?? null, patch);
+            // Issue #52: with nothing approved yet, start from what the Plan tab shows (the pre-fill from
+            // Business Information), as its own Save does. A chat card saving one section used to create a
+            // draft of just that section, so every pre-filled section vanished.
+            const body = mergeBody(approved?.body ?? opts.startFrom ?? null, patch);
             const [r] = await tx.insert(strategyDocuments).values({
                 organisationId: orgId, kind, version, status: 'draft', body, createdBy: userId, updatedBy: userId,
             }).returning();
