@@ -67,6 +67,16 @@ const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
         assert.ok(d.includes('answers = r.body.trim() === domainCheckBody(row.siteId);') && d.includes('safeFetchText(`https://${row.domain}${DOMAIN_CHECK_PATH}`'));
         assert.ok(d.includes("const lapsed = h.status === 'pending_dns' &&"), 'an unproven claim lapses');
     });
+    await check('a refused certificate request does not hold the domain at "waiting" once its aliases are on', () => {
+        const d = read('src/utils/site-domains.ts');
+        const start = d.indexOf("if (row.status === 'pending_dns') {");
+        const end = d.indexOf("return set({ status: 'securing'", start);
+        assert.ok(start > -1 && end > start, 'pending_dns branch found');
+        const branch = d.slice(start, end);
+        const aliasTry = branch.slice(branch.indexOf('await changeAliases(db, [row.domain'), branch.indexOf("console.error('[site-domains] could not add aliases'"));
+        assert.ok(aliasTry.length > 0 && !aliasTry.includes('requestCertificate'), 'the certificate request is not inside the alias try');
+        assert.ok(branch.includes('try { await requestCertificate(); }\n        catch (err) { console.error('), 'its own try, logged, then on to securing');
+    });
     await check('serving: one address per site, page views redirected, forms answered in place; cache tagged per site', () => {
         const s = read('netlify/functions/site-serve.ts');
         assert.ok(s.includes("const resolved = await resolveSiteHost(getDb(), h['x-site-host']);"));

@@ -226,11 +226,16 @@ export async function checkDomain(db: Db, row: SiteDomainRow, now = new Date()):
         try {
             // The bare form joins only once its own record points here too; until then www works on its own.
             await changeAliases(db, [row.domain, ...(row.altDomain && alt.ok ? [row.altDomain] : [])], []);
-            await requestCertificate();
         } catch (err) {
-            console.error('[site-domains] could not add aliases / request a certificate', { domainId: row.id }, err);
+            console.error('[site-domains] could not add aliases', { domainId: row.id }, err);
             return set({ statusDetail: 'Your DNS is right. We couldn\'t finish connecting it just now — we\'ll try again when you next check.' });
         }
+        // Not fatal: once the aliases are on, the domain must move on to securing, where the check
+        // proves https and asks again for a certificate if one is overdue. Netlify answers 422 while a
+        // certificate is already being issued or already covers these names — treating that as a
+        // failure left Restorative Futures stuck on "waiting" with everything ready (2026-11-13).
+        try { await requestCertificate(); }
+        catch (err) { console.error('[site-domains] certificate request refused; moving on to securing', { domainId: row.id }, err); }
         return set({ status: 'securing', provisionRequestedAt: now, altLive: !!(row.altDomain && alt.ok),
             statusDetail: 'Your DNS is right. Setting up the secure (https) connection — usually a few minutes, sometimes up to an hour.' });
     }
