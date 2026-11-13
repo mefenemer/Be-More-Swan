@@ -368,7 +368,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     try {
       state.data = await post({ ...payload, assistantId: state.assistantId });
       state.version++;
-      state.publishNote = { text: okText, tone: 'ok' };
+      state.publishNote = { text: typeof okText === 'function' ? okText(state.data) : okText, tone: 'ok' };
       if (done) done();
     } catch (err) {
       state.publishNote = { text: err.message, tone: 'error' };
@@ -2253,6 +2253,21 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
   // ── Their own domain (site-domains.ts) ─────────────────────────────────────────────────────
   // Owners and admins connect it (sites.ts gates it too); the steps are the records to add where
   // the domain was bought, then "Check now" until it is live.
+  function domainLabel(phase) {
+    return phase === 'live' ? 'Live'
+      : phase === 'securing' ? 'Setting up https'
+      : phase === 'connecting' ? 'DNS is right — connecting'
+      : 'Waiting for your DNS settings';
+  }
+  // After "Check now": say what the check found, not just that it ran.
+  function domainCheckNote(data) {
+    const d = (data && data.site && data.site.customDomain) || {};
+    const phase = d.phase || d.status;
+    if (phase === 'live') return `Live — ${d.domain} now shows your website.`;
+    if (phase === 'securing') return 'Your DNS is right and the domain is connected. The secure (https) connection is being set up — we\'ll email you when it\'s live.';
+    if (phase === 'connecting') return 'Your DNS is right. We\'re finishing the connection and keep checking every 10 minutes — no need to press again.';
+    return 'Not pointing here yet. DNS changes can take a few hours — we keep checking every 10 minutes for 3 days and email you when it\'s live.';
+  }
   function domainBlock() {
     const d = state.data.site.customDomain || {};
     const canEdit = (state.data.payments || {}).canConnect !== false;
@@ -2264,9 +2279,12 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
         <p class="text-xs text-gray-500 mt-1">Already own a domain, like yourbusiness.co.uk? Use it for this site. You'll add one or two settings where you bought it (GoDaddy, 123 Reg, IONOS, Namecheap…) — we show you exactly what. Your ${esc(state.data.site.domain)} address keeps working and sends visitors to it.</p>
         <div class="flex flex-wrap items-center gap-2 mt-2"><input data-site-domain-input class="${inputCls}" style="max-width:260px" placeholder="yourbusiness.co.uk" value="${esc(state.domainTyped || '')}" autocomplete="off" spellcheck="false">${btn('data-site-domain-add', 'Connect', true)}</div>`;
     }
-    const tone = d.status === 'live' ? 'text-green-700' : 'text-amber-800';
-    const label = d.status === 'live' ? 'Live' : d.status === 'securing' ? 'Securing (https)' : 'Waiting for your DNS settings';
-    const records = d.status === 'pending_dns' || (d.status === 'live' && d.altDomain && /without www/.test(d.detail || ''))
+    // The heading follows the phase (site-domains.ts domainPhase), so it never says "waiting for your
+    // DNS" above "Your DNS is right" — and the records table only shows while there's something to add.
+    const phase = d.phase || (d.status === 'pending_dns' ? 'needs_dns' : d.status);
+    const tone = phase === 'live' ? 'text-green-700' : 'text-amber-800';
+    const label = domainLabel(phase);
+    const records = phase === 'needs_dns' || (d.status === 'live' && d.altDomain && /without www/.test(d.detail || ''))
       ? `<p class="text-xs text-gray-700 mt-3">Where you bought <strong>${esc(d.altDomain || d.domain)}</strong>, open its <strong>DNS</strong> settings and add:</p>
          <div class="overflow-x-auto mt-1"><table class="text-xs w-full border border-gray-200 rounded-lg" style="border-collapse:separate">
            <tr class="bg-gray-50 text-gray-600"><th class="text-left px-2 py-1">Type</th><th class="text-left px-2 py-1">Name / Host</th><th class="text-left px-2 py-1">Value / Points to</th></tr>
@@ -3190,7 +3208,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
       return;
     }
     if (t('[data-site-domain-check]')) {
-      await publishAction({ action: 'domain_check' }, 'Checked.');
+      await publishAction({ action: 'domain_check' }, domainCheckNote);
       return;
     }
     if (t('[data-site-domain-remove]')) {

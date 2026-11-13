@@ -1,5 +1,6 @@
 // netlify/functions/check-provider-balances.ts
-// Is fal, Anthropic or Stability out of money (or refusing our key)? Are AI images or videos failing
+// Is fal, Anthropic or Stability out of money (or refusing our key)? Has Netlify stopped accepting the
+// token customers' own domains are connected with? Are AI images or videos failing
 // across workspaces for any other reason? Emails the founder address when so.
 //
 // Scheduled every 6h (netlify.toml). The probes and the rules live in src/utils/provider-balance.ts,
@@ -24,6 +25,7 @@ import {
     type FalLockEvidence, type MediaFailureEvidence, type ProviderProblem,
 } from '../../src/utils/provider-balance';
 import { recordHeartbeat } from '../../src/utils/monitor-heartbeat';
+import { probeDomainsAccess } from '../../src/utils/site-domains';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const FOUNDER_EMAIL = process.env.FOUNDER_ALERT_EMAIL || 'hello@bemoreswan.com';
@@ -137,7 +139,7 @@ async function evaluateProviderBalances() {
     const lowLine = Number(process.env.FAL_LOW_BALANCE_USD) || DEFAULT_FAL_LOW_BALANCE_USD;
     const stabilityLow = Number(process.env.STABILITY_LOW_BALANCE_CREDITS) || DEFAULT_STABILITY_LOW_BALANCE_CREDITS;
     const elevenLabsLow = Number(process.env.ELEVENLABS_LOW_BALANCE_CHARS) || DEFAULT_ELEVENLABS_LOW_BALANCE_CHARS;
-    const [fal, anthropic, stability, openai, elevenlabs, falEvidence, mediaFailures] = await Promise.all([
+    const [fal, anthropic, stability, openai, elevenlabs, falEvidence, mediaFailures, netlifyDomains] = await Promise.all([
         readFalBalance(),
         probeAnthropic(),
         readStabilityBalance(),
@@ -153,12 +155,13 @@ async function evaluateProviderBalances() {
             console.error('[check-provider-balances] media failure query failed:', err);
             return [];
         }),
+        probeDomainsAccess(),
     ]);
     const problems = assessProviders({
         fal, falEvidence, anthropic, falLowBalanceUsd: lowLine, stability, stabilityLowBalanceCredits: stabilityLow, mediaFailures, openai,
-        elevenlabs, elevenLabsLowBalanceChars: elevenLabsLow,
+        elevenlabs, elevenLabsLowBalanceChars: elevenLabsLow, netlifyDomains,
     });
-    const summary = { fal, anthropic, stability, openai, elevenlabs, falEvidence, mediaFailures, problems: problems.map(p => p.headline) };
+    const summary = { fal, anthropic, stability, openai, elevenlabs, netlifyDomains, falEvidence, mediaFailures, problems: problems.map(p => p.headline) };
     // Always logged: with no alert, this line is the only record that the check ran and what it saw.
     console.log('[check-provider-balances]', JSON.stringify(summary));
 
@@ -173,7 +176,7 @@ async function evaluateProviderBalances() {
     try {
         await sendEmail({
             to: FOUNDER_EMAIL,
-            subject: `[Be More Swan] AI provider ${worst}: ${due.map(p => p.headline).join('; ')}`,
+            subject: `[Be More Swan] Provider ${worst}: ${due.map(p => p.headline).join('; ')}`,
             html: due.map(p => `<h3 style="margin:16px 0 6px">${esc(p.headline)}</h3><ul>${p.lines.map(l => `<li>${esc(l)}</li>`).join('')}</ul>`).join('')
                 + (fal.status === 'no_access'
                     ? `<p style="color:#666;font-size:12px">fal's balance could not be read (HTTP ${fal.httpStatus}) — the billing endpoint needs an ADMIN key. Set FAL_ADMIN_KEY to get a low-balance warning before the lock, not just the lock.</p>`

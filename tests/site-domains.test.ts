@@ -6,7 +6,8 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanDomainInput, customDomainsConfig, dnsPointsAtUs, dnsRecordsFor, isRegistrable, NETLIFY_APEX_IP } from '../src/utils/site-domains';
+import { cleanDomainInput, customDomainsConfig, DETAIL_DNS_RIGHT_PREFIX, DETAIL_OUR_SIDE, dnsPointsAtUs, dnsRecordsFor, domainPhase, isRegistrable, NETLIFY_APEX_IP } from '../src/utils/site-domains';
+import { assessProviders } from '../src/utils/provider-balance';
 import { siteSlugProblem } from '../src/utils/site-hosting';
 
 let passed = 0;
@@ -91,6 +92,56 @@ const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
         const ed = read('src/components/assistant-site-editor.js');
         assert.ok(ed.includes('function domainBlock()') && ed.includes("btn('data-site-domain-add', 'Connect', true)") && ed.includes("btn('data-site-domain-check', 'Check now', true)"));
         assert.ok(read('db/z-site-domains.sql').includes('CREATE UNIQUE INDEX IF NOT EXISTS site_domains_domain_uq ON site_domains (domain) WHERE status <> \'removed\';'));
+    });
+
+    console.log('\nWhen it gets stuck (Restorative Futures, 2026-11-13)');
+
+    await check('the heading follows the phase: never "waiting for your DNS" when the DNS is right', () => {
+        assert.strictEqual(domainPhase({ status: 'pending_dns', statusDetail: null }), 'needs_dns');
+        assert.strictEqual(domainPhase({ status: 'pending_dns', statusDetail: 'www.x.com doesn\'t point here yet (found: nothing yet).' }), 'needs_dns');
+        assert.strictEqual(domainPhase({ status: 'pending_dns', statusDetail: DETAIL_OUR_SIDE }), 'connecting');
+        assert.strictEqual(domainPhase({ status: 'securing', statusDetail: 'x' }), 'securing');
+        assert.strictEqual(domainPhase({ status: 'live', statusDetail: 'x' }), 'live');
+        assert.ok(DETAIL_OUR_SIDE.startsWith(DETAIL_DNS_RIGHT_PREFIX) && /don't need to change anything/.test(DETAIL_OUR_SIDE));
+        const d = read('src/utils/site-domains.ts');
+        assert.ok(d.includes("statusDetail: 'Your DNS is right. Setting up the secure (https) connection"), 'the step to securing still says the DNS is right');
+    });
+    await check('our failure: the owner is told to do nothing, the operator is emailed once per stuck spell', () => {
+        const d = read('src/utils/site-domains.ts');
+        const i = d.indexOf("console.error('[site-domains] could not add aliases'");
+        const branch = d.slice(i, d.indexOf('return set({ statusDetail: DETAIL_OUR_SIDE });', i));
+        assert.ok(i > -1 && branch.includes('if (row.statusDetail !== DETAIL_OUR_SIDE) {') && branch.includes('await alertOperator('), 'alerts only on the first failure');
+        assert.ok(branch.includes('err.status === 401 || err.status === 403') && branch.includes('NETLIFY_API_TOKEN'), 'a rejected token says what to replace');
+        assert.ok(!d.includes("we\\'ll try again when you next check"), 'never asks the owner to keep pressing');
+        assert.ok(d.includes("} catch (err) { console.error('[site-domains] OPERATOR ALERT FAILED"), 'a failed alert never breaks the check');
+    });
+    await check('rechecked every 10 minutes without anyone pressing; the owner is emailed when live', () => {
+        assert.ok(/\[functions\.check-site-domains\]\n\s+schedule = "3-59\/10 \* \* \* \*"/.test(read('netlify.toml')));
+        assert.ok(/run-site-domain-checks\s+600\s+120/.test(read('.github/workflows/staging-crons.yml')), 'staging is poked too');
+        const fn = read('netlify/functions/check-site-domains.ts');
+        assert.ok(fn.includes('checkDueDomains(db, async (row, slug) => {') && fn.includes('await notifyDomainLive(db, row.siteId, row.domain);'));
+        const trig = read('netlify/functions/run-site-domain-checks.ts');
+        assert.ok(trig.includes("import { runSiteDomainChecks } from './check-site-domains';") && trig.includes('if (token !== secret)'), 'staging trigger is secret-gated');
+        const d = read('src/utils/site-domains.ts');
+        assert.ok(d.includes("or(eq(siteDomains.status, 'securing'), and(eq(siteDomains.status, 'pending_dns'), gt(siteDomains.createdAt, since)))"), 'only domains on their way, for 72h');
+        const api = read('netlify/functions/sites.ts');
+        assert.ok(api.includes("if (before !== 'live' && after.status === 'live') {") && api.includes('await notifyDomainLive(db, site.id, after.domain);'), '"Check now" emails too');
+    });
+    await check('the panel says what the check found, and hides the records once the DNS is right', () => {
+        const ed = read('src/components/assistant-site-editor.js');
+        assert.ok(ed.includes("await publishAction({ action: 'domain_check' }, domainCheckNote);") && !ed.includes("'Checked.'"));
+        assert.ok(ed.includes("text: typeof okText === 'function' ? okText(state.data) : okText"));
+        assert.ok(ed.includes("const records = phase === 'needs_dns' ||"));
+        assert.ok(ed.includes("phase === 'connecting' ? 'DNS is right — connecting'"));
+    });
+    await check('the provider monitor emails when Netlify rejects our token; a blip is not an alert', () => {
+        const base = { fal: { status: 'not_configured' }, falEvidence: { failures: 0, organisations: 0, latestAt: null, sample: null, lastSuccessAt: null }, anthropic: { status: 'not_configured' } } as unknown as Parameters<typeof assessProviders>[0];
+        const rejected = assessProviders({ ...base, netlifyDomains: { status: 'key_rejected', httpStatus: 401 } });
+        assert.deepStrictEqual(rejected.map((p) => [p.provider, p.severity]), [['netlify_domains', 'down']]);
+        assert.ok(rejected[0].lines.some((l) => l.includes('NETLIFY_API_TOKEN')));
+        assert.deepStrictEqual(assessProviders({ ...base, netlifyDomains: { status: 'error', message: 'timeout' } }), []);
+        assert.deepStrictEqual(assessProviders({ ...base, netlifyDomains: { status: 'ok' } }), []);
+        assert.ok(read('netlify/functions/check-provider-balances.ts').includes('probeDomainsAccess(),'));
     });
 
     console.log(`\n${passed}/${total} passed\n`);

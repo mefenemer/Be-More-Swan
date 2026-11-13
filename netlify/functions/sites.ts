@@ -73,7 +73,7 @@ import { WEBSITE_ASSISTANT_ROLE_KEY } from '../../src/constants/roles';
 import { applySiteOperation, assetIdsIn, EDITOR_LIMITS, FEATURE_LABELS, FONTS, FEATURE_SECTIONS, planSplit, SECTION_TYPES, SITE_FEATURES, type SiteOperation } from '../../src/utils/site-definition';
 import { placeholdersIn } from '../../src/utils/site-draft';
 import { cleanSiteSlugInput, siteAssetUrl, siteOrigin, sitesDomain, siteVisibleText, suggestSiteSlug } from '../../src/utils/site-hosting';
-import { checkDomain, claimDomain, currentDomain, domainView, removeDomain } from '../../src/utils/site-domains';
+import { checkDomain, claimDomain, currentDomain, domainView, notifyDomainLive, removeDomain } from '../../src/utils/site-domains';
 import { SITE_TEMPLATES } from '../../src/config/site-templates';
 import { FONT_PAIRS } from '../../src/utils/site-render';
 import { listSignupForms } from '../../src/utils/site-forms';
@@ -360,7 +360,10 @@ export default withLambda(async (event) => {
         }
         const before = row.status;
         const after = await checkDomain(db, row);
-        if (before !== 'live' && after.status === 'live' && site.slug) await purgeSitePages(site.slug);   // start redirecting now
+        if (before !== 'live' && after.status === 'live') {
+            if (site.slug) await purgeSitePages(site.slug);   // start redirecting now
+            await notifyDomainLive(db, site.id, after.domain);
+        }
         return json(200, await view(site));
     }
 

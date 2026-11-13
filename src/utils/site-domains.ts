@@ -17,12 +17,19 @@
 //   securing     DNS points at us: added as aliases, HTTPS certificate requested.
 //   live         https://domain answers with this site — the bemoreswan.site address redirects here.
 //   removed      taken off (by the owner, or replaced) — kept for the record.
-// Checks run when the owner opens or presses "Check now" (sites.ts domain_check).
+// Checks run when the owner presses "Check now" (sites.ts domain_check) AND every 10 minutes for
+// domains still on their way (check-site-domains.ts → checkDueDomains), so nobody has to keep pressing.
+// The owner is emailed once when their domain goes live (notifyDomainLive).
+//
+// ⚠️ When WE are the reason it can't connect (Netlify refusing our token, Netlify down), the owner is
+// told so and told they don't need to do anything, and the operator is emailed (alertOperator). A
+// 401 here once left a customer pressing "Check now" for an hour while told "we'll try again"
+// (Restorative Futures, 2026-11-13). check-provider-balances also probes the token every 6 hours.
 
 import { Resolver } from 'node:dns/promises';
-import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, ne, or, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { siteDomains, sites } from '../../db/schema';
+import { aiAssistants, siteDomains, sites, users } from '../../db/schema';
 import { safeFetchText } from './safe-fetch';
 import { sitesDomain, slugFromHost } from './site-hosting';
 
@@ -109,6 +116,11 @@ export async function dnsPointsAtUs(host: string, target: string, resolver: DnsL
 
 // ── Netlify (the custom-domains project's aliases) ──────────────────────────────────────────────
 
+/** A refusal from Netlify's API, with its HTTP status (401/403 = our token, not the customer). */
+export class NetlifyApiError extends Error {
+    constructor(public status: number, message: string) { super(`Netlify ${status}: ${message}`); this.name = 'NetlifyApiError'; }
+}
+
 async function netlify(path: string, init: RequestInit = {}): Promise<unknown> {
     const { token } = customDomainsConfig();
     const res = await fetch(`https://api.netlify.com/api/v1${path}`, {
@@ -117,7 +129,7 @@ async function netlify(path: string, init: RequestInit = {}): Promise<unknown> {
         signal: AbortSignal.timeout(10_000),
     });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(`Netlify ${res.status}: ${(body as { message?: string }).message || res.statusText}`);
+    if (!res.ok) throw new NetlifyApiError(res.status, (body as { message?: string }).message || res.statusText);
     return body;
 }
 
@@ -136,6 +148,20 @@ export async function changeAliases(db: Db, add: string[], remove: string[]): Pr
         remove.forEach((d) => now.delete(d));
         await netlify(`/sites/${siteId}`, { method: 'PATCH', body: JSON.stringify({ domain_aliases: [...now] }) });
     });
+}
+
+/**
+ * Can our token still edit the custom-domains project? For check-provider-balances: a token that has
+ * expired or been revoked breaks every domain connection, and nobody sees it until a customer tries.
+ */
+export async function probeDomainsAccess(): Promise<{ status: 'ok' | 'not_configured' | 'key_rejected' | 'error'; httpStatus?: number; message?: string }> {
+    const { token, siteId } = customDomainsConfig();
+    if (!token || !siteId) return { status: 'not_configured' };
+    try { await netlify(`/sites/${siteId}`); return { status: 'ok' }; }
+    catch (err) {
+        if (err instanceof NetlifyApiError && (err.status === 401 || err.status === 403 || err.status === 404)) return { status: 'key_rejected', httpStatus: err.status, message: err.message };
+        return { status: 'error', message: err instanceof Error ? err.message : String(err) };
+    }
 }
 
 async function requestCertificate(): Promise<void> {
@@ -208,6 +234,21 @@ export async function removeDomain(db: Db, row: SiteDomainRow): Promise<void> {
     await db.update(siteDomains).set({ status: 'removed', statusDetail: 'Removed by the owner.', updatedAt: new Date() }).where(eq(siteDomains.id, row.id));
 }
 
+// What the owner reads. Exported so the panel's heading (domainView) and the tests agree with checkDomain.
+export const DETAIL_DNS_RIGHT_PREFIX = 'Your DNS is right.';
+export const DETAIL_OUR_SIDE = `${DETAIL_DNS_RIGHT_PREFIX} Something on our side stopped us finishing the connection. We've been alerted and will finish it for you — you don't need to change anything.`;
+const OPERATOR_EMAIL = () => process.env.FOUNDER_ALERT_EMAIL || 'hello@bemoreswan.com';
+
+/** Email the operator. Never throws: a failed alert is logged, and the domain check carries on. */
+export async function alertOperator(subject: string, lines: string[]): Promise<void> {
+    const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    try {
+        const { sendEmail } = await import('./email');
+        await sendEmail({ to: OPERATOR_EMAIL(), subject: `[Be More Swan] ${subject}`,
+            html: `<ul>${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`, text: lines.map((l) => `- ${l}`).join('\n') });
+    } catch (err) { console.error('[site-domains] OPERATOR ALERT FAILED — a domain is stuck and nobody has been told', subject, err); }
+}
+
 /**
  * Move a domain on as far as it can go right now, and say where it stands in words the owner can act
  * on. Safe to call often: Netlify is only touched when something changes (or a certificate is overdue).
@@ -228,7 +269,18 @@ export async function checkDomain(db: Db, row: SiteDomainRow, now = new Date()):
             await changeAliases(db, [row.domain, ...(row.altDomain && alt.ok ? [row.altDomain] : [])], []);
         } catch (err) {
             console.error('[site-domains] could not add aliases', { domainId: row.id }, err);
-            return set({ statusDetail: 'Your DNS is right. We couldn\'t finish connecting it just now — we\'ll try again when you next check.' });
+            // Ours, not the customer's: their DNS is right. Alert once per stuck spell (the 10-minute
+            // recheck keeps the same detail, so it doesn't re-send); the owner is told to do nothing.
+            if (row.statusDetail !== DETAIL_OUR_SIDE) {
+                const why = err instanceof NetlifyApiError && (err.status === 401 || err.status === 403)
+                    ? 'Netlify refused our API token — replace NETLIFY_API_TOKEN (production) and redeploy. Every domain connection fails until then.'
+                    : 'Netlify refused to add the domain as an alias. A 422 can mean the domain is still attached to another Netlify site.';
+                await alertOperator(`Own domain stuck: ${row.domain}`, [
+                    `${row.domain}${row.altDomain ? ` (and ${row.altDomain})` : ''}: the customer's DNS is right, but we couldn't add it to the custom-domains project.`,
+                    why, `Error: ${err instanceof Error ? err.message : String(err)}`, `site_domains.id ${row.id}. It is retried every 10 minutes; nothing is needed from the customer.`,
+                ]);
+            }
+            return set({ statusDetail: DETAIL_OUR_SIDE });
         }
         // Not fatal: once the aliases are on, the domain must move on to securing, where the check
         // proves https and asks again for a certificate if one is overdue. Netlify answers 422 while a
@@ -262,12 +314,74 @@ export async function checkDomain(db: Db, row: SiteDomainRow, now = new Date()):
     return set({ statusDetail: 'Setting up the secure (https) connection — usually a few minutes, sometimes up to an hour.' });
 }
 
+/**
+ * Where a domain stands, for the heading — never "waiting for your DNS" when the DNS is right:
+ *   needs_dns   the owner still has records to add
+ *   connecting  DNS right; we're adding it (or we're stuck — the detail says it's ours)
+ *   securing    on Netlify; the https certificate is being issued
+ *   live
+ */
+export function domainPhase(row: Pick<SiteDomainRow, 'status' | 'statusDetail'>): 'needs_dns' | 'connecting' | 'securing' | 'live' | 'removed' {
+    if (row.status === 'live' || row.status === 'securing' || row.status === 'removed') return row.status;
+    return (row.statusDetail || '').startsWith(DETAIL_DNS_RIGHT_PREFIX) ? 'connecting' : 'needs_dns';
+}
+
 /** What the Publish card shows. */
 export function domainView(row: SiteDomainRow | null) {
     const cfg = customDomainsConfig();
     if (!row) return { available: cfg.ready, domain: null };
     return {
-        available: cfg.ready, domain: row.domain, altDomain: row.altDomain, status: row.status, detail: row.statusDetail,
+        available: cfg.ready, domain: row.domain, altDomain: row.altDomain, status: row.status, phase: domainPhase(row), detail: row.statusDetail,
         checkedAt: row.checkedAt, records: cfg.ready ? dnsRecordsFor(row, cfg.target) : [],
     };
+}
+
+// ── Without anyone pressing "Check now" ─────────────────────────────────────────────────────────
+
+/** Domains still on their way are rechecked this long after they were saved; after that, "Check now" only. */
+export const AUTO_CHECK_HOURS = 72;
+
+/**
+ * Tell the site's owner, once, that their domain now shows their website. Never throws.
+ * Called on the step to live, from "Check now" and from the 10-minute recheck alike.
+ */
+export async function notifyDomainLive(db: Db, siteId: number, domain: string): Promise<void> {
+    try {
+        const [o] = await db.select({ email: users.email, firstName: users.firstName })
+            .from(sites).innerJoin(aiAssistants, eq(aiAssistants.id, sites.aiAssistantId)).leftJoin(users, eq(users.id, aiAssistants.userId))
+            .where(eq(sites.id, siteId)).limit(1);
+        if (!o?.email) return;
+        const url = `https://${domain}`;
+        const hi = o.firstName ? `Hi ${o.firstName},` : 'Hi,';
+        const { sendEmail } = await import('./email');
+        await sendEmail({
+            to: o.email,
+            subject: `Your website is live at ${domain}`,
+            html: `<p>${hi}</p><p>Good news: <a href="${url}">${domain}</a> now shows your Be More Swan website, with a secure (https) connection.</p><p>Your old bemoreswan.site address keeps working and sends visitors to it. You don't need to do anything else.</p>`,
+            text: `${hi}\n\nGood news: ${url} now shows your Be More Swan website, with a secure (https) connection.\n\nYour old bemoreswan.site address keeps working and sends visitors to it. You don't need to do anything else.`,
+        });
+    } catch (err) { console.error('[site-domains] could not email the owner that their domain is live', { siteId }, err); }
+}
+
+/**
+ * The scheduled recheck (check-site-domains.ts): every domain on its way — saved in the last
+ * AUTO_CHECK_HOURS and not yet live, or securing at any age — moved on as far as it will go.
+ * `onLive` runs for each that went live this time (purge the site's cache, email the owner).
+ * One failing domain never stops the rest.
+ */
+export async function checkDueDomains(db: Db, onLive: (row: SiteDomainRow, slug: string | null) => Promise<void>, now = new Date()): Promise<{ checked: number; live: number; failed: number }> {
+    if (!customDomainsConfig().ready) return { checked: 0, live: 0, failed: 0 };
+    const since = new Date(now.getTime() - AUTO_CHECK_HOURS * 3_600_000);
+    const due = await db.select({ row: siteDomains, slug: sites.slug }).from(siteDomains)
+        .innerJoin(sites, eq(sites.id, siteDomains.siteId))
+        .where(and(ne(sites.status, 'suspended'), or(eq(siteDomains.status, 'securing'), and(eq(siteDomains.status, 'pending_dns'), gt(siteDomains.createdAt, since)))))
+        .limit(100);
+    let live = 0; let failed = 0;
+    for (const { row, slug } of due) {
+        try {
+            const after = await checkDomain(db, row, now);
+            if (after.status === 'live') { live++; await onLive(after, slug); }
+        } catch (err) { failed++; console.error('[site-domains] scheduled check failed', { domainId: row.id }, err); }
+    }
+    return { checked: due.length, live, failed };
 }
