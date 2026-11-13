@@ -6,7 +6,7 @@
 //   1. requestHotfix starts .github/workflows/hotfix-pr.yml (workflow_dispatch). It copies just the
 //      fix PR's merge commit onto `hotfix/issue-<id>` cut from main and opens a PR into main.
 //   2. A person reviews and merges that PR on GitHub, under main's ruleset and required checks.
-//   3. syncHotfix follows it — when the admin opens the issue, and on every hourly live-check run —
+//   3. syncHotfix follows it — when the admin opens the issue, and on every 30-minute live-check run —
 //      and records the PR, a failure, or the merge on the dev_prod_* columns.
 //   4. The live check (issue-fix-live.ts) tells the reporter once the prod deploy contains the
 //      hotfix PR's merge commit.
@@ -148,7 +148,7 @@ export async function syncHotfix(db: Db, row: { id: number; devProdStatus: strin
         if (run === 'error') return false;
         const next = nextHotfixState({ current: row.devProdStatus, requestedAt: row.devProdAt, pr, run });
         if (!next) return false;
-        // The WHERE skips a write when nothing changed (e.g. a PR still open on every hourly run).
+        // The WHERE skips a write when nothing changed (e.g. a PR still open on every 30-minute run).
         const changed = await db.execute(sql`
             UPDATE issue_reports
                SET dev_prod_status = ${next.status}, dev_prod_result = ${next.result},
@@ -164,7 +164,7 @@ export async function syncHotfix(db: Db, row: { id: number; devProdStatus: strin
     }
 }
 
-/** Follow every hotfix still in flight (capped). Used by the hourly live-check run. */
+/** Follow every hotfix still in flight (capped). Used by the 30-minute live-check run. */
 export async function syncOpenHotfixes(db: Db, opts: { token?: string; repo?: string; fetchImpl?: FetchLike } = {}): Promise<number> {
     try {
         const rows = await db.execute(sql`
