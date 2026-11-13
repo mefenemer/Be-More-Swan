@@ -100,7 +100,7 @@ Tour narration (`tour-narration.ts`) should move with the same choice. It could 
      | Legacy voice | Now spoken by |
      | --- | --- |
      | coral, sage, alloy | Pepper (`6vIP9mPY4dr6w8krUg01`) |
-     | shimmer | Beth (`zH7TN9vEZAsEway9xWev`) |
+     | shimmer | Pepper (`6vIP9mPY4dr6w8krUg01`) — was Beth until 2026-11-13, removed as too quiet |
      | verse | Archer (`Fahco4VZzobUeiPqni1S`) |
      | onyx | Adam (`NFG5qt843uXKj4pFvR7C`) |
 
