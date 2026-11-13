@@ -124,7 +124,10 @@ export function splitProseAndCard(raw: string): { prose: string; card: Record<st
     const objText = balancedObject(text.slice(at));
     if (!objText) return null;
     const rest = text.slice(at + objText.length).replace(/```/g, '').trim();
-    if (rest) return null;
+    // A stray mark after the object (" /", ".", "—") is not more prose (issue #51: a support card ending
+    // in " /" was shown to the customer as raw JSON). Real words after it still mean it isn't a card.
+    // Never a closing brace or bracket: that means the object sat inside a larger one (an envelope).
+    if (rest && !/^[^\p{L}\p{N}{}[\]]{1,3}$/u.test(rest)) return null;
     let card: unknown = null;
     try { card = JSON.parse(objText); } catch {
         try { card = JSON.parse(escapeControlCharsInStrings(objText)); } catch { return null; }

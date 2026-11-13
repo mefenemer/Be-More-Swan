@@ -2,6 +2,7 @@
 //
 //   GET  /.netlify/functions/mailboxes                         → your mailboxes + sorted email (newest first)
 //   GET  /.netlify/functions/mailboxes?mailboxId=&messageId=   → one email's text, fetched from the mailbox now, NOT stored
+//        (Outlook or Gmail — src/utils/mail-reader/index.ts readerFor)
 //   POST { action: 'recategorise', mailboxId, messageId, category }   → move it in OUR list (+ remember the sender)
 //   POST { action: 'private_senders', mailboxId, add?, remove? }      → senders never sent to AI
 //   POST { action: 'refresh', mailboxId }                             → read new mail now
@@ -20,11 +21,11 @@ import { requireTenant } from '../../src/utils/tenant';
 import { isFeatureEnabled } from '../../src/utils/feature-flags';
 import {
     EMAIL_ASSISTANT_FLAG, MailboxError, disconnectMailbox, getMailboxAccessToken, getOwnMailbox, listOwnMailboxes,
-    mailboxAccess, parseMailboxSettings,
+    mailboxAccess, parseMailboxSettings, gmailMailboxConfigured,
 } from '../../src/utils/mailboxes';
 import { DEFAULT_CATEGORIES, PRIORITY_LABELS, categoryLabel } from '../../src/utils/email-sort';
-import { getGraphBodyText } from '../../src/utils/mail-reader/graph';
-import { triggerMailboxSync } from '../../src/utils/mailbox-sync';
+import { readerFor } from '../../src/utils/mail-reader';
+import { providerName, triggerMailboxSync } from '../../src/utils/mailbox-sync';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 const MESSAGE_LIMIT = 300;
@@ -53,6 +54,8 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const available = await isFeatureEnabled(ctx.organisationId, EMAIL_ASSISTANT_FLAG);
     if (!available) return json(200, { available: false, mailboxes: [], messages: [] });
+    // Which providers this site can connect: Gmail only once the mail project's client is configured.
+    const providers = { outlook: Boolean(process.env.OUTLOOK_CLIENT_ID), gmail: gmailMailboxConfigured() };
     const access = mailboxAccess(ctx);
 
     if (event.httpMethod === 'GET') {
@@ -68,13 +71,15 @@ export default withLambda(async (event) => {
                 .where(and(eq(mailboxMessages.id, Number(qp.messageId)), eq(mailboxMessages.mailboxId, box.id))).limit(1);
             if (!msg) return json(404, { error: 'Email not found.' });
             try {
+                const reader = readerFor(box.provider);
+                if (!reader) return json(400, { error: 'This kind of mailbox can\'t be read.' });
                 const token = await getMailboxAccessToken(db, box);
-                const body = await getGraphBodyText(token, msg.providerMessageId);
+                const body = await reader.getBody(token, msg.providerMessageId);
                 // Returned to the owner's browser only. Not written anywhere; not logged.
                 return json(200, { text: body.text.slice(0, 50_000), to: body.to, webLink: msg.webLink });
             } catch (err) {
                 if (err instanceof MailboxError) return json(err.status, { error: err.message, code: err.code });
-                return json(502, { error: 'Outlook did not return this email. Open it in Outlook instead.', webLink: msg.webLink });
+                return json(502, { error: `${providerName(box.provider)} did not return this email. Open it in ${providerName(box.provider)} instead.`, webLink: msg.webLink });
             }
         }
 
@@ -100,7 +105,7 @@ export default withLambda(async (event) => {
             privateSenders: own.reduce((n, b) => n + parseMailboxSettings(b.settings).privateSenders.length, 0),
         };
 
-        if (access !== 'owner') return json(200, { available, access, mailboxes: cards, stats, messages: [] });
+        if (access !== 'owner') return json(200, { available, access, providers, mailboxes: cards, stats, messages: [] });
 
         const wanted = qp.mailboxId ? own.filter((b) => b.id === Number(qp.mailboxId)) : own;
         const rows = wanted.length ? await db.select({
@@ -113,7 +118,7 @@ export default withLambda(async (event) => {
             .orderBy(desc(mailboxMessages.receivedAt)).limit(MESSAGE_LIMIT) : [];
         const privateSenders = Object.fromEntries(own.map((b) => [b.id, parseMailboxSettings(b.settings).privateSenders]));
         return json(200, {
-            available, access, mailboxes: cards, stats, privateSenders,
+            available, access, providers, mailboxes: cards, stats, privateSenders,
             categories: [...DEFAULT_CATEGORIES.map((c) => ({ key: c.key, label: c.label })), { key: 'private', label: categoryLabel('private') }],
             priorities: PRIORITY_LABELS,
             messages: rows,
@@ -131,7 +136,9 @@ export default withLambda(async (event) => {
         await disconnectMailbox(db, ctx.organisationId, ctx.userId, box.id);
         return json(200, {
             ok: true,
-            message: `Disconnected ${box.address}. Everything Be More Swan stored from it has been deleted. To remove the app from your Microsoft account as well, go to myapps.microsoft.com (work accounts) or account.live.com/consent/Manage (Outlook.com).`,
+            message: box.provider === 'gmail'
+                ? `Disconnected ${box.address}. Everything Be More Swan stored from it has been deleted, and its access to your Google account has been removed.`
+                : `Disconnected ${box.address}. Everything Be More Swan stored from it has been deleted. To remove the app from your Microsoft account as well, go to myapps.microsoft.com (work accounts) or account.live.com/consent/Manage (Outlook.com).`,
         });
     }
 

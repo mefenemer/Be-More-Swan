@@ -44,6 +44,9 @@ const POINTS_AT_CARD = new RegExp([
     /\bcard\s+(?:is|really is|should be|will be)\s+(?:below|above|here)\b/.source,
     /\b(?:the|a|this)\s+card\s+(?:that|which)\b/.source,
     /\bbelow is a card\b/.source,
+    // "Here's the card to confirm" over no card (issue #51, Video Producer, prod 2026-11-12).
+    /\bhere(?:'|’)?s (?:the|a|your) card\b/.source,
+    /\bthe card to (?:confirm|approve|send|check|accept)\b/.source,
     /\btap (?:the|an?) (?:button|answer) below\b/.source,
     // "Here it is now, and nothing is saved until you confirm on it" over no card (prod 2026-11-07, org 40).
     /\bhere it is now\b[^\n]{0,80}\bconfirm\b/.source,
@@ -94,6 +97,19 @@ export function proseReplyLostItsCard(raw: string, parsed: { content: string; ui
     if (raw.trimStart().startsWith('{') || /"(?:reply|uiElement)"\s*:/.test(raw)) return false;   // a broken JSON attempt, not prose
     return replyPointsAtCard(parsed.content);
 }
+/**
+ * How long the "send that again as JSON" retry may take, or 0 to skip it. The request has 26 s in all.
+ */
+export const CARD_RETRY_DEADLINE_MS = 23_500;   // of the 26 s: leaves time to save the reply and answer
+export const CARD_RETRY_MAX_MS = 12_000;
+export const CARD_RETRY_MIN_MS = 4_000;
+export function cardRetryTimeoutMs(t: { requestElapsedMs: number; replyElapsedMs: number }): number {
+    // Issues #53/#54: this used to run only when the first reply took under 10 s, so the Business Mentor's
+    // 12–16 s replies never got their card back. Now it uses whatever is left of the request, if that's enough.
+    const left = CARD_RETRY_DEADLINE_MS - t.requestElapsedMs;
+    return left >= CARD_RETRY_MIN_MS ? Math.min(CARD_RETRY_MAX_MS, left) : 0;
+}
+
 /** The one follow-up turn sent when proseReplyLostItsCard: model-only, never stored or shown. */
 export const CARD_FORMAT_RETRY = '[Format check from the system, not the user] Your reply above was plain text, so the card it mentions never reached them: they would see "the card below" and no card. Send that reply again as the JSON object your instructions describe — {"reply": "<your words>", "uiElement": {<the card>}} — and nothing else. If no card fits after all, send {"reply": "<your words, without mentioning a card>", "uiElement": null}.';
 

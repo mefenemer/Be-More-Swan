@@ -13,9 +13,14 @@
 //   npx tsx scripts/feature-requests.ts --env prod pr <id> --pr <url> --file <summary.md>
 //   npx tsx scripts/feature-requests.ts --env prod status <id> <planned|brief_ready|in_progress|released|declined|duplicate|open> --file <why.md>
 //   npx tsx scripts/feature-requests.ts --env prod release <id>                  (clear the pill)
+//   npx tsx scripts/feature-requests.ts --env prod prod-pr <id> --pr <url>       (record the PR into main: "Prod PR" pill)
+//   npx tsx scripts/feature-requests.ts --env prod ask-approval <id> --pr <url> [--file <why.md>]
+//                                         (shows the owner an "Approve PR #N" button; their click merges it; into main → Released, no one notified)
+//   npx tsx scripts/feature-requests.ts --env prod withdraw-approval <id>
 
 import 'dotenv/config';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import postgres from 'postgres';
 import { dbUrlFor, RUNNER_ID } from './fix-tickets';
 
@@ -72,6 +77,34 @@ async function main() {
             await sql`UPDATE feature_requests SET dev_pr_url = ${pr} WHERE id = ${id}`;
             await note(`Pull request: ${pr}\n\n${readFile('summary')}`);
             console.log(`#${id}: PR recorded.`);
+        } else if (cmd === 'prod-pr' || cmd === 'ask-approval') {
+            // PR pills + the owner's Approve button (src/utils/pr-approval.ts; db/z-pr-approval.sql).
+            const pr = arg(rest, '--pr');
+            const m = pr ? /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)$/.exec(pr) : null;
+            if (!pr || !m) throw new Error('--pr must be a GitHub pull request URL.');
+            const base = execFileSync('gh', ['pr', 'view', m[1], '--json', 'baseRefName', '-q', '.baseRefName'], { encoding: 'utf8' }).trim();
+            if (cmd === 'prod-pr' && base !== 'main') throw new Error(`PR #${m[1]} goes into "${base}", not main.`);
+            const ask = cmd === 'ask-approval';
+            const why = ask && arg(rest, '--file') ? readFile('note') : null;
+            const r = await sql`
+                UPDATE feature_requests SET
+                       prod_pr_url = CASE WHEN ${base}::text = 'main' THEN ${pr}::text ELSE prod_pr_url END,
+                       dev_pr_url = CASE WHEN ${base}::text <> 'main' AND dev_pr_url IS NULL THEN ${pr}::text ELSE dev_pr_url END,
+                       approval_pr_url = CASE WHEN ${ask}::boolean THEN ${pr}::text ELSE approval_pr_url END,
+                       approval_note = CASE WHEN ${ask}::boolean THEN ${why}::text ELSE approval_note END,
+                       approval_requested_at = CASE WHEN ${ask}::boolean THEN now() ELSE approval_requested_at END,
+                       updated_at = now()
+                 WHERE id = ${id} RETURNING id`;
+            if (!r.length) throw new Error(`No request #${id}.`);
+            if (ask) {
+                await note(`Waiting for the owner to approve PR #${m[1]} (into ${base}): ${pr}${why ? `\n\n${why}` : ''}`);
+                console.log(`#${id}: "Approve PR #${m[1]}" (into ${base}) is now showing for the owner.`);
+            } else {
+                console.log(`#${id}: prod PR #${m[1]} recorded.`);
+            }
+        } else if (cmd === 'withdraw-approval') {
+            await sql`UPDATE feature_requests SET approval_pr_url = NULL, approval_note = NULL, approval_requested_at = NULL, updated_at = now() WHERE id = ${id}`;
+            console.log(`#${id}: no longer asking for approval.`);
         } else if (cmd === 'status') {
             if (!extra || !STATUSES.includes(extra)) throw new Error(`status must be one of: ${STATUSES.join(', ')}`);
             const why = readFile('reason');
@@ -83,7 +116,7 @@ async function main() {
             await sql`UPDATE feature_requests SET dev_runner_id = NULL, dev_runner_heartbeat = NULL, updated_at = now() WHERE id = ${id}`;
             console.log(`#${id}: no longer marked as Claude working.`);
         } else {
-            console.error('Commands: list, show, start, note, pr, status, release (see the header).');
+            console.error('Commands: list, show, start, note, pr, prod-pr, ask-approval, withdraw-approval, status, release (see the header).');
             process.exitCode = 2;
         }
     } catch (e) {

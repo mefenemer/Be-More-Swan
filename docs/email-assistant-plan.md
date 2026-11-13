@@ -568,8 +568,9 @@ Proposed task costs (new keys in `task-weights.ts`, set in Admin → Money → T
 
 **Phase 0: paperwork that sets the timeline (started 2026-11-12, no code)** — `docs/email-assistant-phase0.md`
 - ✅ Scopes confirmed on Google's and Microsoft's docs.
-- ⚠️ Azure verified publisher: repo has no `microsoft-identity-association.json`, so probably not
-  verified; owner checks Branding & properties, then the steps in the pack (§6.1).
+- ✅ Azure verified publisher (owner checked Branding & properties, 2026-11-13): MPN ID 7137838,
+  publisher domain bemoreswan.com, display name "Be More Swan". Nothing to do for pack §6.1 except
+  adding the mail permission and redirect URIs.
 - Create the "Be More Swan Mail" Google project, consent screen, scopes (owner; steps §6.2); send the
   two CASA quote requests (drafted, §7).
 - ✅ Drafted: privacy policy sub-section (§4), DPA 1.2 (§5), DPIA (§8). Owner approves; privacy goes
@@ -623,10 +624,20 @@ page only — no real mailbox has been connected yet). As built:
 - Categories written to the mailbox; Activity log; notifications; chat cards for every action.
 - Task costs set from Phase 1 measurements.
 
-**Phase 3: Gmail**
-- Gmail adapter on the new project, with test users. Record the demo video for both uses
-  (Email Assistant + Part B), submit the restricted-scope review, do CASA.
-- Pub/Sub push for Gmail; Graph change notifications for Outlook; daily renewals; polling safety net.
+**Phase 3: Gmail** — split in two (2026-11-13):
+- **3a ✅ BUILT 2026-11-13** (branch `claude/email-assistant-phase1`): Gmail connect on the separate mail
+  project (`GMAIL_MAILBOX_SCOPE` = openid + userinfo.email + gmail.modify; `GMAIL_MAIL_CLIENT_ID/_SECRET`),
+  `/api/mailbox-oauth/gmail/{connect,callback}`, `src/utils/mail-reader/gmail.ts` (first read
+  `messages.list` 14 days of INBOX; then `history.list` from the saved historyId; 404 → read again),
+  `mail-reader/index.ts` picks the reader per provider (sync + open email), Google token refresh (no
+  rotation), Google revoke on disconnect, "Connect Gmail" shown only where the mail client is set.
+  Polling every 10 min, same as Outlook. Tests: tests/mailbox-email-assistant.test.ts (40 checks).
+  Checked against the fixture page only — no real Gmail connected yet (needs the Google project, §6.2).
+- **3b, next:** Gmail push (`users.watch` + Pub/Sub; Google Cloud sub-processor notice 14 days before
+  it reaches customers), Graph change notifications for Outlook, daily renewals; polling stays as the
+  safety net.
+- Then: record the demo video for both uses (Email Assistant + Part B), submit the restricted-scope
+  review, do CASA.
 
 **Phase 4: Lead Generator reading on the same reader (Part B B4–B5)**
 - Outreach consumer: replies and bounces from mailboxes at either grant level. Outlook can come
@@ -669,8 +680,9 @@ The owner chose the name, then said "go with your recommendations on D2–D12".
 12. **D12. CASA lab.** ✅ TAC Security at Google's negotiated rate, if the quote holds (about
     $540–720/year); still get a second quote to compare. Cost shared with Part B.
 
-**Still open:** none of the owner's. Phase 0 checks remain: Azure verified publisher, and confirming
-on Google's API reference that `gmail.modify` covers `messages.send` and `drafts.create`.
+**Still open:** none of the owner's. Both Phase 0 checks are done: the Azure app is a verified publisher
+(2026-11-13), and Google's API reference confirms `gmail.modify` covers `messages.send` and
+`drafts.create` (2026-11-12).
 
 ---
 
@@ -692,6 +704,9 @@ on Google's API reference that `gmail.modify` covers `messages.send` and `drafts
 - [ ] `db/z-mailboxes.sql` (and the task-cost rows) applied to **both** DBs before deploy; help
       article SQL on both DBs at release.
 - [ ] Feature flag `email_assistant` per org; Gmail behind its own flag until approval.
+- [ ] Google "Be More Swan Mail" OAuth client: redirect URIs
+      `https://staging--bemoreswan.netlify.app/api/mailbox-oauth/gmail/callback` and the prod one;
+      `GMAIL_MAIL_CLIENT_ID` / `_SECRET` on staging only until Google approves.
 - [ ] Azure app: add redirect URIs `https://staging--bemoreswan.netlify.app/api/mailbox-oauth/outlook/callback`
       and the prod equivalent, and the delegated `Mail.ReadWrite` permission (Phase 1).
 - [ ] To test Phase 1 on staging (`db/z-mailboxes.sql` ✅ applied to both DBs 2026-11-12): add the test workspace id to the

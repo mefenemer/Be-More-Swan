@@ -23,6 +23,11 @@
 //   npx tsx scripts/fix-tickets.ts --env prod sync <id>            (staging CI + staging deploy → checklist)
 //   npx tsx scripts/fix-tickets.ts --env prod prod-sql <id>        (only on the owner's word, before a release merges)
 //   npx tsx scripts/fix-tickets.ts --env prod release <id>         (clear the "Claude working" pill)
+//   npx tsx scripts/fix-tickets.ts --env prod prod-pr <id> --pr <url>     (record the PR into main: "Prod PR" pill)
+//   npx tsx scripts/fix-tickets.ts --env prod ask-approval <id> --pr <url> [--file <why.md>]
+//                                         (shows the owner an "Approve PR #N" button; their click merges it and moves the ticket on)
+//   npx tsx scripts/fix-tickets.ts --env prod withdraw-approval <id>      (hide that button again)
+//   npx tsx scripts/fix-tickets.ts --env prod inspect --file <query.sql>   (READ-ONLY: one SELECT, to investigate)
 //   npx tsx scripts/fix-tickets.ts --env prod status <id> <more_info_required|on_hold|closed>  (on_hold = Waiting on Others) --file <why.md>
 //
 // DB: --env prod → DATABASE_URL_PROD; --env staging → NETLIFY_DATABASE_URL (staging). The staging DB for
@@ -82,6 +87,7 @@ async function main() {
     const release = (issueId: number) => db.execute(sql`
         UPDATE issue_reports SET dev_runner_id = NULL, dev_runner_heartbeat = NULL, updated_at = now()
          WHERE id = ${issueId} AND dev_runner_id = ${RUNNER_ID}`);
+    const prBase = (num: string) => execFileSync('gh', ['pr', 'view', num, '--json', 'baseRefName', '-q', '.baseRefName'], { encoding: 'utf8' }).trim();
     const ghToken = () => { try { return execFileSync('gh', ['auth', 'token'], { encoding: 'utf8' }).trim(); } catch { return ''; } };
     const printChecklist = async (issueId: number) => {
         const row = await loadProofRow(db, issueId);
@@ -124,7 +130,7 @@ async function main() {
                 UPDATE issue_reports SET status = ${status}, dev_handoff_status = 'in_progress', dev_handoff_at = now(),
                        dev_runner_id = ${RUNNER_ID}, dev_runner_heartbeat = now(), updated_at = now()
                  WHERE id = ${id} AND status NOT IN ('closed', 'roadmap')
-                   AND (dev_handoff_status IS DISTINCT FROM 'in_progress' OR dev_runner_id = ${RUNNER_ID})
+                   AND (dev_handoff_status IS DISTINCT FROM 'in_progress' OR dev_runner_id IS NULL OR dev_runner_id = ${RUNNER_ID})
                 RETURNING id`) as Promise<unknown[]>;
             let status = 'investigating';
             let r: unknown[];
@@ -218,6 +224,17 @@ async function main() {
             await syncStagingProof(db, { id, devPrUrl: row.devPrUrl, devStagingCiStatus: null, devStagingLiveAt: null }, { token: ghToken() });
             await release(id);   // Claude's part is done; the checklist waits on staging CI / deploy, then the owner
             await printChecklist(id);
+        } else if (cmd === 'inspect') {
+            // Investigation only: one statement inside a READ ONLY transaction (Postgres refuses any write),
+            // capped at 20 s and 200 rows. For finding the cause of a ticket, never for changing data.
+            const q = readText(arg(rest, '--file'), 'SELECT');
+            if (!/^\s*(select|with)\b/i.test(q) || /;\s*\S/.test(q.replace(/;\s*$/, ''))) throw new Error('inspect runs ONE SELECT (or WITH … SELECT).');
+            const rows = await client.begin('READ ONLY', async (tx: any) => {
+                await tx.unsafe("SET LOCAL statement_timeout = '20s'");
+                return tx.unsafe(q.replace(/;\s*$/, ''));
+            }) as any[];
+            for (const r of rows.slice(0, 200)) console.log(JSON.stringify(r, (_k, v) => (typeof v === 'string' && v.length > 1500 ? `${v.slice(0, 1500)}…` : v)));
+            console.log(`(${rows.length} row(s)${rows.length > 200 ? ', first 200 shown' : ''})`);
         } else if (cmd === 'release') {
             need(id, 'release <id>');
             await release(id);
@@ -248,6 +265,35 @@ async function main() {
             const changed = await syncStagingProof(db, row, { token: ghToken() });
             console.log(changed ? 'Updated from GitHub / staging.' : 'No change.');
             await printChecklist(id);
+        } else if (cmd === 'prod-pr' || cmd === 'ask-approval') {
+            // PR pills + the owner's Approve button (src/utils/pr-approval.ts; db/z-pr-approval.sql).
+            need(id, `${cmd} <id> --pr <url>`);
+            const prUrl = need(arg(rest, '--pr'), '--pr <url>');
+            const m = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)$/.exec(prUrl);
+            if (!m) throw new Error('--pr must be a GitHub pull request URL.');
+            const base = prBase(m[1]);
+            if (cmd === 'prod-pr' && base !== 'main') throw new Error(`PR #${m[1]} goes into "${base}", not main.`);
+            const why = cmd === 'ask-approval' && arg(rest, '--file') ? readText(arg(rest, '--file'), 'note') : null;
+            await db.execute(sql`
+                UPDATE issue_reports SET
+                       prod_pr_url = CASE WHEN ${base}::text = 'main' THEN ${prUrl}::text ELSE prod_pr_url END,
+                       dev_pr_url = CASE WHEN ${base}::text = 'staging' AND dev_pr_url IS NULL THEN ${prUrl}::text ELSE dev_pr_url END,
+                       approval_pr_url = CASE WHEN ${cmd === 'ask-approval'}::boolean THEN ${prUrl} ELSE approval_pr_url END,
+                       approval_note = CASE WHEN ${cmd === 'ask-approval'}::boolean THEN ${why}::text ELSE approval_note END,
+                       approval_requested_at = CASE WHEN ${cmd === 'ask-approval'}::boolean THEN now() ELSE approval_requested_at END,
+                       updated_at = now()
+                 WHERE id = ${id}`);
+            if (cmd === 'ask-approval') {
+                await note(id, `Waiting for the owner to approve ${base === 'main' ? 'the prod' : base === 'staging' ? 'the staging' : 'this'} PR #${m[1]}: ${prUrl}${why ? `\n\n${why}` : ''}`);
+                console.log(`#${id}: "Approve PR #${m[1]}" (into ${base}) is now showing for the owner.`);
+            } else {
+                await touch(id);
+                console.log(`#${id}: prod PR #${m[1]} recorded.`);
+            }
+        } else if (cmd === 'withdraw-approval') {
+            need(id, 'withdraw-approval <id>');
+            await db.execute(sql`UPDATE issue_reports SET approval_pr_url = NULL, approval_note = NULL, approval_requested_at = NULL, updated_at = now() WHERE id = ${id}`);
+            console.log(`#${id}: no longer asking for approval.`);
         } else if (cmd === 'status') {
             need(id, 'status <id> <status> --file <why>');
             const s = need(extra, `status must be one of: ${ALLOWED_STATUSES.join(', ')}`) as (typeof ALLOWED_STATUSES)[number];
@@ -262,7 +308,7 @@ async function main() {
             await note(id, `Moved to ${s.replace(/_/g, ' ')}.\n\n${why}`);
             console.log(`#${id} → ${s}.`);
         } else {
-            console.error('Commands: list, show, start, fixing, note, proof, pr, staging-sql, merged, sync, prod-sql, release, status (see the header).');
+            console.error('Commands: list, show, start, fixing, note, proof, pr, staging-sql, merged, sync, prod-sql, prod-pr, ask-approval, withdraw-approval, release, status (see the header).');
             process.exitCode = 2;
         }
     } catch (e) {

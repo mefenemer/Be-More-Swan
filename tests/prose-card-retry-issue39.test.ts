@@ -52,8 +52,9 @@ check('the retry asks for the envelope and allows no card', () => {
 console.log('The orchestrator wiring');
 const src = read('netlify/functions/chat-orchestrator.ts');
 check('retries only structured routes, with time to spare, once', () => {
-    assert.ok(src.includes('route.parseResponse === parseStructuredReply && Date.now() - replyStartedAt < 10_000 && proseReplyLostItsCard(raw, parsed)'));
-    assert.ok(src.includes('{ timeout: 10_000, maxRetries: 0 }'));
+    // Issues #53/#54: the time limit is what's left of the request (cardRetryTimeoutMs), not a fixed 10 s.
+    assert.ok(src.includes('route.parseResponse === parseStructuredReply && retryMs > 0 && proseReplyLostItsCard(raw, parsed)'));
+    assert.ok(src.includes('{ timeout: retryMs, maxRetries: 0 }'));
     assert.strictEqual(src.split('CARD_FORMAT_RETRY').length - 1, 2, 'imported once, used once');
 });
 check('the retry is kept only when it brings a card', () => {

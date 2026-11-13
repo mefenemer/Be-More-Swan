@@ -34,6 +34,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, blogPosts, newsletterIssues, videoProjects, visualBriefs, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { buildMailboxSnapshot } from '../../src/utils/mailbox-snapshot';
+import { gmailMailboxConfigured } from '../../src/utils/mailboxes';
 import { appendFooter } from '../../src/utils/disclosure-footer';
 import { resolvePostFooter } from '../../src/utils/post-disclosure';
 import { logAiUsage } from '../../src/utils/ai-usage';
@@ -117,7 +118,7 @@ import { buildMyContentBlock } from '../../src/utils/chat-my-content';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { LEAD_EMAIL_WORDING_BUDGET, LEAD_EMAIL_WORDING_RULE, LEAD_SENT_EMAILS_SHOWN, quoteLeadEmails, type LeadEmailLine } from '../../src/utils/lead-email-wording';
-import { CARD_FORMAT_RETRY, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
+import { CARD_FORMAT_RETRY, cardRetryTimeoutMs, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { normaliseSitePictureCard, SITE_PICTURE_TYPE, MAX_PICTURE_SECTIONS } from '../../src/utils/site-picture-card';
 import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
@@ -1917,7 +1918,7 @@ OTHER WAYS A VIDEO STARTS. "Make a video version" on one of their posts in the R
 
 USING A FINISHED VIDEO. A READY video is saved in My Content, and they can download it on the "Videos" tab. You hand it to nobody and post it nowhere: if they want to use it in a post, an article or anywhere else, they pick it from My Content there, or download it. Never offer to post it or pass it to another assistant.
 
-CHANGING A FINISHED VIDEO. A READY video is never changed in place: approving a replan or scene-edit card on it makes a NEW VERSION (everything already made is kept, so only what changes is made and paid for again), and the finished one stays in My Content. Tell them that. "Change it" on the "Videos" tab does the same.
+CHANGING A FINISHED VIDEO. A READY video is never changed in place: approving a replan or scene-edit card on it makes a NEW VERSION (everything already made is kept, so only what changes is made and paid for again), and the finished one stays in My Content. Tell them that. "Change it" on the "Videos" tab does the same. The list shows a READY video's scenes by number: when they ask for changes to it ("remove the branded card in scene 1", "cut the coughing", "take the words off"), offer the card yourself — a video_replan_proposal with all their notes for several changes, or a video_scene_edit for one scene. Never tell them to make the change on the "Videos" tab instead, and never say you can't change a finished video from this chat.
 
 CHANGING A STORYBOARD. When the user wants a planned video done differently, emit a video_replan_proposal with the video's id from the list above and their notes. Approving it plans the storyboard again with those notes (free). To change ONE scene, emit { "type": "video_scene_edit", "projectId": <its id>, "scene": <the scene's number>, "voiceover": "<only if it changes, at most 240 characters>", "onScreenText": "<only if it changes, at most 60 characters, \"\" to take it off>", "source": "stock_video" | "stock_photo" | "ai_video" | "ai_image" | "brand_card" (only if it changes), "picture": "<only if it changes: what to show or search for, under 120 characters>", "nameCaption": { "name": "...", "role": "..." } (only if it changes; null takes it off), "summary": "<one sentence: what changes>" }. Changing only the words keeps the scene's picture. The user may have selected it: their message then starts "About this scene of my video N". Keep their facts; invent nothing. It only changes the plan: nothing is made or spent until they press "Make the video", so tell them that, and never say the scene has been changed. An AI source there costs more when they do. You cannot put their own clip or picture in a scene from here: for that they press "Change" on it. On a scene of THEIR OWN footage in its own sound, you can cut words they said ("take out 'basically'", "cut the bit where I say the price"): add "cutPhrase": "<the words exactly as said, from that scene's words>" to the video_scene_edit; they're cut when the video is made. On the tab they can also press "✎ Edit the words" on the scene and click words to cut or keep them, like editing a transcript. The voice belongs to the whole video, not one scene, so a different voice means a new video.
 
@@ -2203,11 +2204,11 @@ or
                 `You are this business's Email Assistant. You look after the owner's mailbox so they stay — and feel — organised: every new email is sorted into a category (Needs a reply, Customers, New enquiries, Money, Bookings & meetings, Suppliers & partners, Newsletters & offers, Notifications, Cold pitches, Other) with a priority (Now, Today, This week, Whenever) and a one-line summary. You help them see what needs them, find an email, and understand where things stand.
 
 ${urgent ? `What counts as urgent for them (from set-up): ${String(urgent).slice(0, 500)}` : ''}
-${provider === 'gmail' ? 'They said at set-up that their business email is Gmail. Gmail can\'t be connected yet (it is coming soon): if no mailbox is connected, tell them so plainly, and that Outlook works now.' : ''}
+${provider === 'gmail' && !gmailMailboxConfigured() ? 'They said at set-up that their business email is Gmail. Gmail can\'t be connected yet (it is coming soon): if no mailbox is connected, tell them so plainly, and that Outlook works now.' : ''}
 
 ${rc.mailboxSnapshot ?? 'Their email could not be read this turn. Do not guess what is in their inbox: say so, and suggest they look at the "Emails" tab.'}
 
-HOW TO ANSWER. "What needs me today?" → the Now and Today emails above, most urgent first, one short line each (who, what they want). "Anything from Jo?" → search the lists above by name, address and subject; if nothing matches, say you can only see the last 14 days of the inbox and suggest searching in Outlook. Quote senders and subjects exactly as listed; never invent an email, a date, an amount or what an email says beyond its summary. You only see each email's sender, subject, date, category and one-line summary, never its full text: to read one, they open it on the "Emails" tab.
+HOW TO ANSWER. "What needs me today?" → the Now and Today emails above, most urgent first, one short line each (who, what they want). "Anything from Jo?" → search the lists above by name, address and subject; if nothing matches, say you can only see the last 14 days of the inbox and suggest searching in their mailbox (Outlook or Gmail). Quote senders and subjects exactly as listed; never invent an email, a date, an amount or what an email says beyond its summary. You only see each email's sender, subject, date, category and one-line summary, never its full text: to read one, they open it on the "Emails" tab.
 
 WHAT YOU CAN'T DO YET. You can't send, reply to, delete, archive or move emails, in chat or anywhere: nothing in their mailbox is changed. Drafting replies and clean-ups (always approved by them first) are coming next. On the "Emails" tab they can: move an email to another category (the sender is remembered for next time), mark a sender private (never sent to AI, not even the subject), press Refresh to read new mail now, and Disconnect (which deletes everything stored from that mailbox). From this chat, tell them where those buttons are; never say you did one.
 
@@ -3080,6 +3081,7 @@ export default withLambda(async (event) => {
 });
 
 async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]>[0]) {
+    const requestStartedAt = Date.now();   // the card-format retry fits in what is left of the 26 s (cardRetryTimeoutMs)
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -3811,14 +3813,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // (confirm-card-reply.ts proseReplyLostItsCard). Kept only if the second reply brings a card; a
         // failed retry leaves the first reply exactly as it was, and the missing-card note below still applies.
         // Only with time to spare inside the 26s request: the reply above took under 10s, and the retry gets 10s at most.
-        if (route.parseResponse === parseStructuredReply && Date.now() - replyStartedAt < 10_000 && proseReplyLostItsCard(raw, parsed)) {
+        const retryMs = cardRetryTimeoutMs({ requestElapsedMs: Date.now() - requestStartedAt, replyElapsedMs: Date.now() - replyStartedAt });
+        if (route.parseResponse === parseStructuredReply && retryMs > 0 && proseReplyLostItsCard(raw, parsed)) {
             try {
                 const retry = await anthropic.messages.create(adaptForModel({
                     model: chatModel,
                     max_tokens: route.maxTokens,
                     system: sanitizeForModel(system),
                     messages: sanitizeForModel([...llmMessages, { role: 'assistant' as const, content: raw }, { role: 'user' as const, content: CARD_FORMAT_RETRY }]),
-                }, chatModel, 'off') as Anthropic.MessageCreateParamsNonStreaming, { timeout: 10_000, maxRetries: 0 });
+                }, chatModel, 'off') as Anthropic.MessageCreateParamsNonStreaming, { timeout: retryMs, maxRetries: 0 });
                 await logAiUsage({ workspaceId: orgId, userId, assistantId: assistantRow.id, model: chatModel, inputTokens: retry.usage.input_tokens, outputTokens: retry.usage.output_tokens, sessionId: `chat:${session.id}:card-retry`, dataCategories: ['business_context'] });
                 const again = extractAssistantNote(replyText(retry.content)).text;
                 const reparsed = route.parseResponse(again);

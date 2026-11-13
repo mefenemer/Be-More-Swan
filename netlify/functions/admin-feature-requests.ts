@@ -3,7 +3,7 @@
 //
 // GET    /admin-feature-requests                       → ALL requests (incl. pending_review)
 // POST   /admin-feature-requests { title, description?, category?, priority? }
-//                                                       → admin creates a request directly (source='manual', status='open')
+//                                                       → admin adds a request (source='manual', status='pending_review' → To review)
 // POST   /admin-feature-requests?action=enhance { text }
 //                                                       → LLM-polished feature summary from raw text (US04)
 // POST   /admin-feature-requests?action=merge { sourceId, targetId }
@@ -19,6 +19,7 @@
 
 import { loadFeatureRevenue } from '../../src/utils/feature-revenue';
 import { loadFeatureDev } from '../../src/utils/claude-work';
+import { approveTicketPr, loadPrFields, NO_PR_FIELDS } from '../../src/utils/pr-approval';
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import jwt from 'jsonwebtoken';
@@ -152,6 +153,16 @@ export default withLambda(async (event) => {
     }
 
     // ── POST ?action=merge: fold source into target, combine votes (US04) ────────
+    // ── POST ?action=approve-pr&id=N: the owner approves the PR Claude asked about ───
+    // Merges it on GitHub (src/utils/pr-approval.ts); a PR into main moves the request to Released WITHOUT
+    // the status broadcast (the owner tells submitters and voters). Needs deploy_code: it merges code.
+    if (event.httpMethod === 'POST' && action === 'approve-pr' && id) {
+        if (!hasPermission(admin.role, 'deploy_code')) return json(403, { error: 'Approving a pull request requires the deploy_code privilege.' });
+        const r = await approveTicketPr(db, 'feature', id);
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, r);
+    }
+
     if (event.httpMethod === 'POST' && action === 'merge') {
         let body: any;
         try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
@@ -222,11 +233,10 @@ export default withLambda(async (event) => {
             priority,
             itemType,
             parentId,
-            status: 'open',
+            // Lands in "To review" with the customers' ideas (owner 2026-11-13), not straight in Backlog.
+            status: 'pending_review',
             source: 'manual',
             sortOrder,
-            reviewedBy: admin.id,
-            reviewedAt: new Date(),
         }).returning({ id: featureRequests.id });
         return json(200, { ok: true, id: inserted.id });
     }
@@ -365,11 +375,14 @@ export default withLambda(async (event) => {
         const revenue = await loadFeatureRevenue(db, rows.map((r) => ({ id: r.id, organisationId: r.organisationId })));
         // Claude's work on a request (scripts/feature-requests.ts): notes, PR, "working now".
         const dev = await loadFeatureDev(db, rows.map((r) => r.id));
+        // Staging / prod PR pills and the Approve button (src/utils/pr-approval.ts).
+        const prFields = await loadPrFields(db, 'feature', rows.map((r) => r.id));
 
         return json(200, {
             requests: rows.map((r) => ({
                 ...r,
                 ...(dev.get(r.id) ?? { claudeWorking: false, devPrUrl: null, devNotes: null }),
+                ...(prFields.get(r.id) ?? NO_PR_FIELDS),
                 revenueGbp: revenue.get(r.id)?.monthlyGbp ?? 0,
                 payingWorkspaces: revenue.get(r.id)?.payingWorkspaces ?? 0,
                 categoryLabel: FR_CATEGORY_LABEL[r.category as keyof typeof FR_CATEGORY_LABEL] || r.category,

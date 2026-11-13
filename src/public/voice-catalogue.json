@@ -1,5 +1,5 @@
 {
-  "_about": "Every voiceover voice. ONE list, read by src/lib/tts.ts (server) and src/components/voice-picker.js (browser, fetched from /src/public/voice-catalogue.json). ElevenLabs library voices picked 2026-11-02 from the most-used voices per language and gender (free_users_allowed only); the owner chose Pepper, Beth and the London man by ear. `speaker` is the OpenAI voice, used only by a voice with no `elevenlabs` id (no fallback since 2026-11-12). `legacy` voices (the original OpenAI six) stay valid for saved settings but are not offered; since 2026-11-12 each is spoken by an ElevenLabs voice of the same gender (coral, sage, alloy → Pepper; shimmer → Beth; verse → Archer; onyx → Adam), because OpenAI retires gpt-4o-mini-tts on 6 Jan 2027. Samples: /audio/voices/<id>.mp3, made by scripts/make-voice-samples.mjs.",
+  "_about": "Every voiceover voice. ONE list, read by src/lib/tts.ts (server) and src/components/voice-picker.js (browser, fetched from /src/public/voice-catalogue.json). ElevenLabs library voices picked 2026-11-02 from the most-used voices per language and gender (free_users_allowed only); the owner chose Pepper and the London man by ear (Beth was removed 2026-11-13: her ElevenLabs voice came out far quieter and lower quality, about -40 LUFS against Pepper's -22; saved Beth settings now speak as Pepper). `speaker` is the OpenAI voice, used only by a voice with no `elevenlabs` id (no fallback since 2026-11-12). `legacy` voices (the original OpenAI six) stay valid for saved settings but are not offered; since 2026-11-12 each is spoken by an ElevenLabs voice of the same gender (coral, sage, alloy → Pepper; shimmer → Pepper; verse → Archer; onyx → Adam), because OpenAI retires gpt-4o-mini-tts on 6 Jan 2027. Samples: /audio/voices/<id>.mp3, made by scripts/make-voice-samples.mjs.",
   "languages": [
     { "code": "en", "label": "English" },
     { "code": "fr", "label": "French" },
@@ -16,8 +16,6 @@
   "voices": [
     { "id": "british_woman", "name": "Pepper", "label": "British, warm (woman)", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "6vIP9mPY4dr6w8krUg01", "speaker": "coral",
       "accent": "Speak with a natural British English accent, as a woman from the south of England: warm and friendly, not posh." },
-    { "id": "british_woman_playful", "name": "Beth", "label": "British, playful (woman)", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "zH7TN9vEZAsEway9xWev", "speaker": "coral",
-      "accent": "Speak with a natural British English accent, as a young woman from the south of England: playful, witty and warm, not posh." },
     { "id": "en_gb_allison", "name": "Allison", "label": "British, velvety (woman)", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "Se2Vw1WbHmGbBbyWTuu4", "speaker": "coral" },
     { "id": "en_gb_lucy", "name": "Lucy", "label": "British, fresh and casual (woman)", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "lcMyyd2HUfFzxdCaC4Ta", "speaker": "coral" },
     { "id": "london_man", "name": "Ballad", "label": "London, laid-back (man)", "gender": "male", "lang": "en", "region": "British", "speaker": "ballad",
@@ -60,6 +58,7 @@
     { "id": "verse", "name": "Verse", "label": "Bright and upbeat", "gender": "male", "lang": "en", "region": "British", "elevenlabs": "Fahco4VZzobUeiPqni1S", "speaker": "verse", "legacy": true },
     { "id": "alloy", "name": "Alloy", "label": "Neutral and steady", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "6vIP9mPY4dr6w8krUg01", "speaker": "alloy", "legacy": true },
     { "id": "onyx", "name": "Onyx", "label": "Deep and confident", "gender": "male", "lang": "en", "region": "British", "elevenlabs": "NFG5qt843uXKj4pFvR7C", "speaker": "onyx", "legacy": true },
-    { "id": "shimmer", "name": "Shimmer", "label": "Light and lively", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "zH7TN9vEZAsEway9xWev", "speaker": "shimmer", "legacy": true }
+    { "id": "shimmer", "name": "Shimmer", "label": "Light and lively", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "6vIP9mPY4dr6w8krUg01", "speaker": "shimmer", "legacy": true },
+    { "id": "british_woman_playful", "name": "Beth", "label": "British, playful (woman)", "gender": "female", "lang": "en", "region": "British", "elevenlabs": "6vIP9mPY4dr6w8krUg01", "speaker": "coral", "legacy": true }
   ]
 }

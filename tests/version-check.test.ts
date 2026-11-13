@@ -220,5 +220,19 @@ await check('workspace.html loads version-check.js and exposes VIEW_VERSION to i
     assert.ok(after.includes('window.BMS_VIEW_VERSION = VIEW_VERSION;'), 'BMS_VIEW_VERSION set beside it');
 });
 
+// The standalone signed-in pages that carry the check (workspace.html is checked above).
+const STANDALONE = ['admin.html', 'assistant-chat.html', 'onboarding.html', 'onboarding-social-media.html', 'assistant-setup.html'];
+const STAMPER = readFileSync(join(root, 'scripts/stamp-view-version.mjs'), 'utf8');
+for (const page of STANDALONE) {
+    await check(`${page} loads version-check.js, exposes VIEW_VERSION, and the build stamps it`, () => {
+        const html = readFileSync(join(root, page), 'utf8');
+        assert.ok(html.includes('<script src="/version-check.js" defer></script>'));
+        const at = html.indexOf("const VIEW_VERSION = '");
+        assert.ok(at !== -1, 'VIEW_VERSION literal present (the stamp regex needs it)');
+        assert.ok(html.slice(at, at + 200).includes('window.BMS_VIEW_VERSION = VIEW_VERSION;'));
+        assert.ok(new RegExp(`const TARGETS = \\[[^\\]]*'${page.replace('.', '\\.')}'`).test(STAMPER), `${page} in stamp TARGETS`);
+    });
+}
+
 console.log(`\n${passed} passed`);
 })();

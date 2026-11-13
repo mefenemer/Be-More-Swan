@@ -11,6 +11,14 @@
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
   <link rel="manifest" href="/favicon/manifest.json">
+  <!-- The deploy this page was built from. 'dev' here; scripts/stamp-view-version.mjs replaces it with
+       the commit on every Netlify build. version-check.js compares it with the live deploy
+       (build-info) and offers "A new version is ready — Refresh" to a long-open tab. -->
+  <script>
+    const VIEW_VERSION = 'dev';
+    window.BMS_VIEW_VERSION = VIEW_VERSION;
+  </script>
+  <script src="/version-check.js" defer></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen overflow-x-hidden">
 
