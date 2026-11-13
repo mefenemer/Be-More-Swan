@@ -169,7 +169,7 @@ export function featureChecklist(r: FeatureProofRow): { items: CheckItem[]; read
         key: 'tests_staging', label: 'Tests on staging',
         state: r.devStagingCiStatus === 'passed' ? 'ok' : r.devStagingCiStatus === 'failed' ? 'fail' : 'wait',
         detail: !r.devMergedAt ? 'Waiting for the merge to staging.'
-            : r.devStagingCiStatus === 'passed' ? 'CI passed on the merge commit (including the proof test).'
+            : r.devStagingCiStatus === 'passed' ? `CI passed on the merge commit${r.devRepro?.test ? ' (including the proof test)' : ''}.`
             : r.devStagingCiStatus === 'failed' ? 'CI FAILED on the merge commit.' : 'CI is running on the merge commit.',
     });
     items.push({
