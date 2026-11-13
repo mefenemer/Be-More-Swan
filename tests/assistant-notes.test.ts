@@ -87,11 +87,11 @@ const has = (calls: Array<{ text: string }>, s: string) => calls.some((c) => c.t
     await recordAssistantNote(fakeDb({ fail: true }).db, { note: { kind: 'gap', area: 'x y', text: 'z' }, organisationId: 5, assistantId: 9, role: null });
     assert.notEqual(noteFingerprint('bug', 'a', 'x'), noteFingerprint('gap', 'a', 'x'));
 
-    // Every route is told; it is stripped before parsing; the bulk hand-off still skips Suspected.
+    // Every route is told; it is stripped before parsing. (The bulk hand-off that skipped Suspected went with
+    // the cloud AI developer, 2026-11-13.)
     const orch = readFileSync('netlify/functions/chat-orchestrator.ts', 'utf8');
     assert.ok(orch.includes('OUTSIDE_PRODUCTS_RULE, PLATFORM_NOTE_PROMPT]'));
     assert.ok(orch.indexOf('extractAssistantNote(replyText(response.content))') < orch.indexOf('route.parseResponse(raw)'));
-    assert.ok(readFileSync('netlify/functions/admin-issue-reports.ts', 'utf8').includes("source <> 'suspected'"));
     assert.match(PLATFORM_NOTE_PROMPT, /NEVER put in it: any name, email/);
     // Automatic reports leave out what isn't our fault: a refused prompt, a site we couldn't read, a scene to change.
     const read = (f: string) => readFileSync(f, 'utf8');

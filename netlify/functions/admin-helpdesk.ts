@@ -16,6 +16,7 @@ import { users, supportTickets, ticketReplies, auditLogs } from '../../db/schema
 import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { hasPermission } from '../../src/utils/rbac';
+import { loadTicketDraft, clearTicketDraft } from '../../src/utils/claude-work';
 
 const jwtSecret = process.env.JWT_SECRET;
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
@@ -108,7 +109,8 @@ export default withLambda(async (event) => {
             return {
                 statusCode: 200,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ticket: { ...ticket, slaBreached: slaUpdated || !!ticket.slaBreachedAt }, replies, submitter }),
+                // draft: Claude's suggested reply (scripts/inbox-drafts.ts). Never sent until the owner sends it.
+                body: JSON.stringify({ ticket: { ...ticket, slaBreached: slaUpdated || !!ticket.slaBreachedAt }, replies, submitter, draft: await loadTicketDraft(db, ticketId) }),
             };
         }
 
@@ -166,6 +168,11 @@ export default withLambda(async (event) => {
         // ── POST: add reply ────────────────────────────────────────────────────
         if (event.httpMethod === 'POST') {
             const body = JSON.parse(event.body || '{}');
+            // Discard Claude's draft without sending anything.
+            if (body.action === 'discard-draft') {
+                await clearTicketDraft(db, ticketId);
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true }) };
+            }
             const { replyBody, isInternal = false } = body;
             if (!replyBody?.trim()) return { statusCode: 400, body: JSON.stringify({ error: 'replyBody is required.' }) };
 
@@ -185,6 +192,7 @@ export default withLambda(async (event) => {
 
             // US7 Sc3: Public replies → email customer + transition to 'pending_customer'
             if (!isInternal) {
+                await clearTicketDraft(db, ticketId);   // the owner sent their reply; Claude's draft is done
                 await db.update(supportTickets)
                     .set({ status: 'pending_customer', updatedAt: new Date() })
                     .where(eq(supportTickets.id, ticketId));

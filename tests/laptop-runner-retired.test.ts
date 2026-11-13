@@ -49,11 +49,11 @@ check('nothing sets the runner’s queued states any more', () => {
 });
 
 check('leftovers can be started again: pass on, merge, redo, hotfix', () => {
-    const handoff = api.slice(api.indexOf("action === 'handoff' && id"), api.indexOf("action === 'handoff-all'"));
-    assert.ok(handoff.includes("issue.devHandoffStatus === 'in_progress' && issue.devRunnerId === CLOUD_RUNNER_ID"), 'only a cloud run blocks a pass');
+    // The cloud AI developer (handoff / redo-fix) was removed 2026-11-13: Claude works tickets from a session.
+    assert.ok(!api.includes("action === 'handoff'") && !api.includes("action === 'redo-fix'"));
     const merge = api.slice(api.indexOf("action === 'request-merge' && id"), api.indexOf("action === 'request-prod-promote'"));
     assert.ok(!merge.includes("issue.devMergeStatus === 'queued'"), 'a queued merge is not 409d');
-    const prod = api.slice(api.indexOf("action === 'request-prod-promote'"), api.indexOf("action === 'redo-fix'"));
+    const prod = api.slice(api.indexOf("action === 'request-prod-promote'"), api.indexOf("action === 'request-merge-all'"));
     assert.ok(prod.includes("['hotfix_requested', 'hotfix_open'].includes(issue.devProdStatus)"), 'old promotions do not block');
     assert.ok(!api.includes('handoffCancelled'), 'the On Hold cancel of a laptop queue is gone');
 });
@@ -61,7 +61,7 @@ check('leftovers can be started again: pass on, merge, redo, hotfix', () => {
 check('the panel shows leftovers as what can be done now, with no runner wording', () => {
     const html = read('admin.html');
     assert.ok(html.includes('function _irNoLaptop(i)'));
-    for (const fn of ['function _irHandoffBadge(i) {', 'function _irHandoffCard(i) {', 'function _irMergeCard(i) {', 'function _irRunnerChip(i) {']) {
+    for (const fn of ['function _irHandoffBadge(i) {', 'function _irMergeCard(i) {', 'function _irRunnerChip(i) {']) {
         const at = html.indexOf(fn);
         assert.ok(at > -1 && html.slice(at, at + 200).includes('i = _irNoLaptop(i);'), fn);
     }

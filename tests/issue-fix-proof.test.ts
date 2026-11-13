@@ -1,14 +1,11 @@
 // tests/issue-fix-proof.test.ts
 // Fix pipeline: proof before production (docs/fix-pipeline-proof-plan.md, owner decisions 2026-11-12).
-// Pins: the proof block, "confirmed" only on fail-then-pass (and never for a source-scan or missing-code
-// "repro"), the checklist, SQL on staging before a merge, and Approve for production (server-side
+// Pins: the checklist (root cause / repro are recorded by scripts/fix-tickets.ts), SQL on staging before a merge, and Approve for production (server-side
 // re-check, same SQL hash, prod SQL before the merge, nothing merges when a step fails).
 import assert from 'node:assert';
-import { deflateRawSync } from 'node:zlib';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import {
-    parseProof, rootCauseStatus, productionChecklist, ensureStagingSql, approveForProduction, unzip,
-    stagingCiState, resetProofColumnsCache, PROOF_START, PROOF_END, type ProofRow,
+    productionChecklist, ensureStagingSql, approveForProduction, stagingCiState, resetProofColumnsCache, type ProofRow,
 } from '../src/utils/issue-fix-proof';
 import { sqlHash } from '../src/utils/issue-sql';
 
@@ -18,13 +15,6 @@ async function check(name: string, fn: () => void | Promise<void>) {
     try { await fn(); passed++; console.log(`  ✓ ${name}`); }
     catch (err) { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; }
 }
-
-const body = (p: unknown) => `## What changed\nstuff\n${PROOF_START}\n${JSON.stringify(p)}\n${PROOF_END}\n`;
-const proofOf = (before: number | null, after: number | null, extra: Record<string, unknown> = {}) => ({
-    claimed: 'identified', rootCause: 'blog-studio-modal.js:1530 swallowed the error',
-    repro: { test: 'tests/repro-issue-42.test.ts', kind: 'node', before: before == null ? null : { exit: before, tail: 'x' }, after: after == null ? null : { exit: after, tail: 'y' }, flags: [], ...extra },
-    runId: 123,
-});
 
 /** A db whose execute() answers by the SQL text, and records every statement. */
 function fakeDb(answer: (q: string, params: unknown[]) => unknown[] = () => []) {
@@ -59,23 +49,6 @@ const rowAnswer = (r: ProofRow) => (q: string) => (/FROM issue_reports WHERE id/
 const prodUrls = { staging: 'stg', production: 'prod', onProdSite: true };
 
 (async () => {
-    await check('parseProof reads the block; garbage or no block → null', () => {
-        const p = parseProof(body(proofOf(1, 0)));
-        assert.strictEqual(p?.repro.test, 'tests/repro-issue-42.test.ts');
-        assert.strictEqual(p?.runId, 123);
-        assert.strictEqual(parseProof('no block'), null);
-        assert.strictEqual(parseProof(`${PROOF_START}{not json${PROOF_END}`), null);
-    });
-
-    await check('confirmed ONLY when the repro failed before and passes after, with no flags', () => {
-        assert.strictEqual(rootCauseStatus(parseProof(body(proofOf(1, 0)))), 'confirmed');
-        assert.strictEqual(rootCauseStatus(parseProof(body(proofOf(0, 0)))), 'guessed');            // never reproduced
-        assert.strictEqual(rootCauseStatus(parseProof(body(proofOf(1, 0, { flags: ['source_scan'] })))), 'guessed');
-        assert.strictEqual(rootCauseStatus(parseProof(body(proofOf(1, 0, { flags: ['missing_code'] })))), 'guessed');
-        assert.strictEqual(rootCauseStatus(parseProof(body({ ...proofOf(null, null, { test: null }), claimed: 'unsure' }))), 'not_found');
-        assert.strictEqual(rootCauseStatus(null), 'not_found');
-    });
-
     await check('checklist: all green → ready, no warnings', () => {
         const c = productionChecklist(baseRow());
         assert.strictEqual(c.ready, true);
@@ -158,23 +131,6 @@ const prodUrls = { staging: 'stg', production: 'prod', onProdSite: true };
         const db = fakeDb((q) => (/RETURNING id/.test(q) ? [] : rowAnswer(baseRow())(q)));
         const r = await approveForProduction(db, 42, 7, { urls: prodUrls, dispatch: async () => null });
         assert.match((r as any).error, /already approved/);
-    });
-
-    await check('unzip reads stored and deflated entries (an Actions artifact)', () => {
-        const entries = [{ name: 'shots/before-1.png', data: Buffer.from('PNGDATA-before'), deflate: true }, { name: 'repro.json', data: Buffer.from('{}'), deflate: false }];
-        const locals: Buffer[] = []; const centrals: Buffer[] = []; let offset = 0;
-        for (const e of entries) {
-            const comp = e.deflate ? deflateRawSync(e.data) : e.data;
-            const name = Buffer.from(e.name);
-            const lh = Buffer.alloc(30); lh.writeUInt32LE(0x04034b50, 0); lh.writeUInt16LE(e.deflate ? 8 : 0, 8); lh.writeUInt32LE(comp.length, 18); lh.writeUInt32LE(e.data.length, 22); lh.writeUInt16LE(name.length, 26);
-            const ch = Buffer.alloc(46); ch.writeUInt32LE(0x02014b50, 0); ch.writeUInt16LE(e.deflate ? 8 : 0, 10); ch.writeUInt32LE(comp.length, 20); ch.writeUInt32LE(e.data.length, 24); ch.writeUInt16LE(name.length, 28); ch.writeUInt32LE(offset, 42);
-            locals.push(lh, name, comp); centrals.push(ch, name); offset += 30 + name.length + comp.length;
-        }
-        const cd = Buffer.concat(centrals);
-        const eocd = Buffer.alloc(22); eocd.writeUInt32LE(0x06054b50, 0); eocd.writeUInt16LE(entries.length, 8); eocd.writeUInt16LE(entries.length, 10); eocd.writeUInt32LE(cd.length, 12); eocd.writeUInt32LE(offset, 16);
-        const files = unzip(Buffer.concat([...locals, cd, eocd]));
-        assert.strictEqual(files.get('shots/before-1.png')?.toString(), 'PNGDATA-before');
-        assert.strictEqual(files.get('repro.json')?.toString(), '{}');
     });
 
     await check('staging CI: both required checks green → passed; newest run wins; any red → failed', async () => {

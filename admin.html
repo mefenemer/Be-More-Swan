@@ -2386,9 +2386,6 @@
             <p class="text-sm text-gray-500 mt-0.5">Reported problems on their way to a fix — hand-offs, merges and status. Conversations with the customer are in the <button type="button" onclick="adminNav('inbox')" class="font-semibold text-emerald-700 hover:underline">Inbox</button>; a status change here still notifies the reporter.</p>
           </div>
           <div class="flex items-center gap-2">
-            <button onclick="passAllToDeveloper()" id="ir-pass-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Pass all to Developer</button>
-            <button onclick="moveAllToBacklog()" id="ir-backlog-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">📥 Move all to Backlog</button>
-            <button onclick="moveBacklogAllToDeveloper()" id="ir-backlog-dev-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Move All to a Developer</button>
             <button onclick="requestMergeAll()" id="ir-merge-all-btn" class="hidden btn-primary px-3 py-2 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">🔀 Merge all to staging</button>
             <div class="flex gap-1 bg-gray-100 rounded-lg p-1" role="group" aria-label="Fix pipeline view">
               <button type="button" id="ir-mode-board" onclick="irSetMode('board')" class="px-3 py-1 text-sm font-semibold rounded-md">Board</button>
@@ -2473,6 +2470,7 @@
               </div>
             </div>
           </div>
+          <div id="fr-form-dev"></div>
           <div id="fr-form-brief-wrap" class="hidden">
             <div class="flex items-center justify-between mb-1">
               <label class="block text-xs font-bold uppercase text-gray-400">Brief (for Claude to execute)</label>
@@ -6231,14 +6229,14 @@ document.addEventListener('click', async (e) => {
 
 // ── Issue Reports (Testing) ──────────────────────────────────────────────────
 const IR_API = '/.netlify/functions/admin-issue-reports';
-const IR_STATUSES = ['reported','backlog','on_hold','fix_in_progress','merge','fixed_ready_to_test','more_info_required','closed','roadmap'];
+const IR_STATUSES = ['reported','investigating','on_hold','fix_in_progress','merge','fixed_ready_to_test','more_info_required','closed','roadmap'];
 const IR_STATUS_LABEL = {
-  reported: 'Reported', backlog: 'Backlog', on_hold: 'On Hold', fix_in_progress: 'Fix In Progress', merge: 'Merge',
+  reported: 'Reported', investigating: 'Investigation In Progress', on_hold: 'Waiting on Others', fix_in_progress: 'Fix In Progress', merge: 'Merge',
   fixed_ready_to_test: 'Fixed & Ready to Test', more_info_required: 'More Info Required', closed: 'Closed',
   roadmap: 'On Roadmap',
 };
 const IR_STATUS_CLS = {
-  reported: 'bg-gray-100 text-gray-700', backlog: 'bg-slate-100 text-slate-700',
+  reported: 'bg-gray-100 text-gray-700', investigating: 'bg-sky-100 text-sky-700',
   on_hold: 'bg-orange-100 text-orange-700',
   fix_in_progress: 'bg-blue-100 text-blue-700', merge: 'bg-indigo-100 text-indigo-700',
   fixed_ready_to_test: 'bg-emerald-100 text-emerald-700', more_info_required: 'bg-amber-100 text-amber-800',
@@ -6251,12 +6249,13 @@ let _irFilter = '';
 
 // ── Fix pipeline board (src/components/admin-board.js) ──────────────────────────────────────────
 // Six columns derived from the existing status + dev_* fields, so nothing is stored differently.
-// Dragging only does what a person decides: triage into Backlog, hand to the AI developer, close.
+// Dragging only does what a person decides: park as Waiting on others, or close. Claude moves tickets into
+// "Investigating & fixing" from its session (scripts/fix-tickets.ts); the cloud AI developer was removed 2026-11-13.
 // "Review & merge", "Waiting to go live" and "Live" are filled by the pipeline itself.
 const IR_BOARD_COLUMNS = [
   { key: 'new', label: 'New', hint: 'Reported, or waiting on the customer' },
-  { key: 'backlog', label: 'Backlog', hint: 'Triaged; On hold is a badge' },
-  { key: 'fixing', label: 'Fixing', hint: 'With the AI developer' },
+  { key: 'waiting', label: 'Waiting on others', hint: 'Blocked on someone outside (e.g. Meta)' },
+  { key: 'fixing', label: 'Investigating & fixing', hint: 'Claude is finding the cause or writing the fix' },
   { key: 'review', label: 'Review & merge', hint: 'PR, SQL or merge waiting on you' },
   { key: 'golive', label: 'Waiting to go live', hint: 'Merged; moves when the deploy has it' },
   { key: 'live', label: 'Live, awaiting reply', hint: 'Closes itself after 7 quiet days' },
@@ -6270,8 +6269,8 @@ function irColumnOf(i) {
   if (st === 'more_info_required') return 'new';
   if (i.devMergeStatus === 'merged' && i.devSqlStatus !== 'pending') return 'golive';
   if (st === 'merge' || i.devHandoffStatus === 'completed' || i.devSqlStatus === 'pending' || IR_REVIEW_MERGE.includes(i.devMergeStatus)) return 'review';
-  if (st === 'fix_in_progress' || i.devHandoffStatus === 'queued' || i.devHandoffStatus === 'in_progress') return 'fixing';
-  if (st === 'backlog' || st === 'on_hold') return 'backlog';
+  if (st === 'investigating' || st === 'fix_in_progress' || i.devHandoffStatus === 'queued' || i.devHandoffStatus === 'in_progress') return 'fixing';
+  if (st === 'on_hold') return 'waiting';
   return 'new';
 }
 const IR_SOURCE_LABEL = { user: 'Customer', system: 'Automatic', suspected: 'Assistant noticed' };
@@ -6290,14 +6289,23 @@ const _irDaysLeft = (i) => {
   if (!i.fixedAt) return null;
   return Math.max(0, Math.ceil((new Date(i.fixedAt).getTime() + 7 * 864e5 - Date.now()) / 864e5));
 };
+// "Claude working" (owner, 2026-11-13): scripts/fix-tickets.ts holds a ticket as 'Claude (interactive)' and
+// touches dev_runner_heartbeat on every step, so a recent heartbeat means Claude is on it right now.
+const IR_CLAUDE_RUNNER = 'Claude (interactive)';
+function _irClaudeWorking(i) {
+  if (i.devRunnerId !== IR_CLAUDE_RUNNER || !i.devRunnerHeartbeat) return false;
+  return Date.now() - new Date(i.devRunnerHeartbeat).getTime() < 30 * 60e3;
+}
+const IR_CLAUDE_PILL = '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sky-600 text-white animate-pulse" title="Claude is working on this ticket right now">🛠️ Claude working</span>';
 function irBoardCard(i) {
   const first = String(i.description || '').split('\n')[0].trim() || '(no description)';
   const badges = [];
+  if (_irClaudeWorking(i)) badges.push(IR_CLAUDE_PILL);
   if (i.severity === 'critical') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Critical</span>');
   if (i.severity === 'high') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">High</span>');
   if (i.paying) badges.push(`<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700" title="What this workspace pays (list price)">${_escH(i.planName || 'Paid')} · £${Math.round(Number(i.planMonthlyGbp) || 0)}/mo</span>`);
   if (i.status === 'more_info_required') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">Waiting on customer</span>');
-  if (i.status === 'on_hold') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">On hold</span>');
+  if (i.status === 'on_hold') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">Waiting on others</span>');
   if (i.status === 'roadmap') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">On roadmap</span>');
   if (i.devHandoffStatus === 'failed') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Fix failed</span>');
   if (i.devSqlStatus === 'pending') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">SQL to run</span>');
@@ -6354,24 +6362,21 @@ function irBoard() {
     quickViews: [{ key: 'needs', label: 'Needs me', columns: ['new', 'review'] }],
     canDrop: (i, to) => {
       const from = irColumnOf(i);
-      if (to === 'backlog') return ['new'].includes(from) || 'Only a new issue can be moved to Backlog here.';
-      if (to === 'fixing') return ['new', 'backlog'].includes(from) || 'Only a new or backlog issue can be handed to the AI developer.';
+      if (to === 'waiting') return ['new', 'fixing'].includes(from) || 'Only a new or in-progress issue can be parked as Waiting on others.';
+      if (to === 'fixing') return 'Claude moves a ticket here when it starts work on it (ask Claude in a session).';
       if (to === 'closed') return from !== 'closed' || 'Already closed.';
       if (to === 'new') return 'An issue comes back to New when the reporter replies.';
-      if (to === 'review') return 'Moves here by itself when the AI developer opens a PR.';
+      if (to === 'review') return 'Moves here by itself when Claude opens a PR.';
       if (to === 'golive') return 'Moves here by itself when the PR is merged.';
       if (to === 'live') return 'Moves here by itself when the fix is in the deployed site.';
       return 'Not a move you can make here.';
     },
     onDrop: async (i, to) => {
       try {
-        if (to === 'fixing') {
-          if (!(await window.confirmModal('It will be fixed on a branch and a pull request opened for review.', { title: `Pass #${i.id} to the AI developer?`, confirmLabel: 'Pass to developer' }))) return;
-          await api(`${IR_API}?id=${i.id}&action=handoff`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
-        } else {
-          const status = to === 'closed' ? 'closed' : 'backlog';
+        {
+          const status = to === 'closed' ? 'closed' : 'on_hold';
           const who = i.userId === null || (i.source && i.source !== 'user') ? '' : ' The reporter is told.';
-          if (!(await window.confirmModal(`Move #${i.id} to ${status === 'closed' ? 'Closed' : 'Backlog'}?${who}`, { title: status === 'closed' ? 'Close this issue?' : 'Move to Backlog?', confirmLabel: status === 'closed' ? 'Close' : 'Move' }))) return;
+          if (!(await window.confirmModal(`Move #${i.id} to ${status === 'closed' ? 'Closed' : 'Waiting on others'}?${who}`, { title: status === 'closed' ? 'Close this issue?' : 'Waiting on others?', confirmLabel: status === 'closed' ? 'Close' : 'Move' }))) return;
           await api(`${IR_API}?id=${i.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
         }
         window.showToast?.(`#${i.id} moved.`, { icon: '✅' });
@@ -6398,7 +6403,7 @@ function _irPaintMode() {
     b.setAttribute('aria-pressed', String(on));
   });
   // The bulk buttons belong to the List's status chips.
-  if (_irMode === 'board') ['ir-pass-all-btn', 'ir-backlog-all-btn', 'ir-backlog-dev-all-btn', 'ir-merge-all-btn'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
+  if (_irMode === 'board') ['ir-merge-all-btn'].forEach(id => document.getElementById(id)?.classList.add('hidden'));
 }
 async function loadIssueBoard() {
   const mount = document.getElementById('ir-board');
@@ -6411,11 +6416,11 @@ async function loadIssueBoard() {
   }
 }
 function _irBadge(s) { return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${IR_STATUS_CLS[s] || 'bg-gray-100 text-gray-700'}">${IR_STATUS_LABEL[s] || s}</span>`; }
-// Small AI auto-fix ("Pass to Developer") badge for the list — empty unless handed off.
+// Small developer badge for the list — empty until Claude starts on it.
 const IR_HANDOFF_BADGE = {
-  in_progress: { cls: 'bg-violet-100 text-violet-700', text: '🤖 Fixing…' },
-  completed:   { cls: 'bg-violet-100 text-violet-700', text: '🤖 PR ready' },
-  failed:      { cls: 'bg-amber-100 text-amber-800',   text: '🤖 Failed' },
+  in_progress: { cls: 'bg-sky-100 text-sky-700',       text: '🛠️ In progress' },
+  completed:   { cls: 'bg-violet-100 text-violet-700', text: '🔀 PR ready' },
+  failed:      { cls: 'bg-amber-100 text-amber-800',   text: '⚠️ Failed' },
 };
 function _irHandoffBadge(i) {
   i = _irNoLaptop(i);
@@ -6456,7 +6461,7 @@ function _irFmt(d) { return d ? new Date(d).toLocaleString() : ''; }
 
 // ── Who holds the issue ──────────────────────────────────────────────────────
 // Fixes and merges run in GitHub Actions (devRunnerId 'GitHub Actions'; devRunnerHeartbeat is
-// when it started). src/utils/issue-ai-fix.ts and issue-cloud-merge.ts follow the runs and mark a
+// when it started). src/utils/issue-cloud-merge.ts follows the runs and mark a
 // stuck one failed themselves; a merge nothing has confirmed for 15 min can be force-restarted.
 const IR_RUNNER_STALL_MS = 15 * 60 * 1000; // a merge normally finishes in a couple of minutes
 // The laptop runner was retired 2026-11-12. Rows it left unfinished (until
@@ -6499,6 +6504,7 @@ function _irRunnerChip(i) {
 }
 
 async function loadIssueReports() {
+  _irStartPoll();
   _irPaintMode();
   if (_irMode === 'board') return loadIssueBoard();
   const tbody = document.getElementById('ir-tbody');
@@ -6514,9 +6520,6 @@ async function loadIssueReports() {
     if (filters) filters.innerHTML = chip('', 'All', total) + IR_STATUSES.map(s => chip(s, IR_STATUS_LABEL[s], counts[s] || 0)).join('');
 
     const issues = d.issues || [];
-    _updatePassAllBtn(issues);
-    _updateMoveAllToBacklogBtn(issues);
-    _updateMoveAllToDeveloperBtn(issues);
     _updateMergeAllBtns(issues);
     if (tbody) tbody.innerHTML = issues.map(i => `
       <tr class="border-t border-gray-50 hover:bg-gray-50 transition">
@@ -6542,7 +6545,8 @@ async function openIssuePanel(id) {
   try {
     const d = await api(`${IR_API}?id=${id}`);
     const i = d.issue;
-    document.getElementById('ir-panel-title').textContent = `Issue #${i.id}`;
+    _irOpenId = i.id;
+    document.getElementById('ir-panel-title').innerHTML = `Issue #${Number(i.id)}${_irClaudeWorking(i) ? ` ${IR_CLAUDE_PILL}` : ''}`;
     const messages = (d.messages || []).map(m => `
       <div class="rounded-xl p-3 text-sm ${m.authorType === 'admin' ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50 border border-gray-100'}">
         <div class="flex items-center justify-between mb-1">
@@ -6624,7 +6628,29 @@ async function openIssuePanel(id) {
   }
 }
 
-function closeIssuePanel() { document.getElementById('ir-detail-panel').classList.add('hidden'); }
+function closeIssuePanel() { _irOpenId = null; document.getElementById('ir-detail-panel').classList.add('hidden'); }
+
+// Auto-refresh (owner, 2026-11-13): when Claude moves a ticket from its session, the board and the open
+// ticket update by themselves. A cheap version check every 15 s while the Fix pipeline is on screen;
+// the full reload only when something changed, and the open ticket is not redrawn while you type in it.
+let _irOpenId = null, _irVersion = null, _irPollTimer = null;
+function _irStartPoll() {
+  if (_irPollTimer) return;
+  _irPollTimer = setInterval(async () => {
+    const view = document.getElementById('view-issue-reports');
+    if (!view || view.classList.contains('hidden') || document.visibilityState !== 'visible') return;
+    try {
+      const { version } = await api(`${IR_API}?action=version`);
+      if (_irVersion !== null && version !== _irVersion) {
+        loadIssueReports();
+        const panel = document.getElementById('ir-detail-panel');
+        const typing = panel && panel.contains(document.activeElement) && /^(TEXTAREA|INPUT|SELECT)$/.test(document.activeElement.tagName);
+        if (_irOpenId && panel && !panel.classList.contains('hidden') && !typing) openIssuePanel(_irOpenId);
+      }
+      _irVersion = version;
+    } catch { /* next tick */ }
+  }, 15000);
+}
 
 // Reveal the roadmap priority picker only when "On Roadmap" is the chosen status.
 function irOnStatusChange() {
@@ -6662,52 +6688,19 @@ async function submitIssueDescription(id) {
   } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
-// ── "Pass to Developer" AI auto-fix handoff ──────────────────────────────────
-// Renders the handoff state and, when actionable, the button that starts the AI fix:
-// Claude Code in GitHub Actions (.github/workflows/ai-fix.yml, src/utils/issue-ai-fix.ts).
+// ── Developer (Claude, from an interactive session: scripts/fix-tickets.ts) ──────────────────
+// Read-only: what Claude wrote about the fix and its pull request. The cloud AI developer and its
+// "Pass to Developer" button were removed on 2026-11-13 (docs/fix-pipeline-interactive.md).
 function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function _irHandoffCard(i) {
-  i = _irNoLaptop(i);
-  const s = i.devHandoffStatus || null;
-  const passBtn = (label) =>
-    `<button onclick="passToDeveloper(${i.id})" class="btn-primary w-full px-4 py-2.5 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2">
-       <span>🤖</span> ${label}
-     </button>`;
+  if (!i.devResult && !i.devPrUrl) return '';
   const resultBlock = i.devResult
     ? `<div class="bg-white/70 border border-gray-200 rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap max-h-48 overflow-auto">${_esc(i.devResult)}</div>` : '';
   const prLink = i.devPrUrl
     ? `<a href="${_esc(i.devPrUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-sm font-bold text-violet-700 hover:underline">View pull request →</a>` : '';
-
-  let inner;
-  if (s === 'in_progress') {
-    // Always the cloud workflow (src/utils/issue-ai-fix.ts): the app follows the run and marks a
-    // stuck one failed itself, so there is nothing to re-queue here.
-    inner = `<div class="space-y-2">
-        <div class="flex items-center gap-2 text-sm font-semibold text-violet-700"><span class="animate-pulse">●</span> The AI developer is working on a fix…</div>
-        <div class="text-xs text-violet-600">☁️ Running in <b>GitHub Actions</b> · usually 5–20 minutes. Reopen the issue to refresh.</div>
-        ${resultBlock}
-      </div>`;
-  } else if (s === 'completed') {
-    inner = `<div class="space-y-2">
-        <div class="flex items-center gap-2 text-sm font-semibold text-emerald-700">✅ AI auto-fix completed.</div>
-        ${prLink}${resultBlock}
-        ${passBtn('Pass to Developer again')}
-      </div>`;
-  } else if (s === 'failed') {
-    inner = `<div class="space-y-2">
-        <div class="flex items-center gap-2 text-sm font-semibold text-amber-700">⚠️ The AI auto-fix could not complete.</div>
-        ${resultBlock}
-        ${passBtn('Try again')}
-      </div>`;
-  } else {
-    inner = `<div class="space-y-2">
-        <p class="text-xs text-gray-500">Hand this issue to an AI developer (Claude Code, running in GitHub Actions). It fixes it on a branch and opens a pull request into staging for you to review and merge.</p>
-        ${passBtn('Pass to Developer')}
-      </div>`;
-  }
   return `<div class="border border-violet-200 bg-violet-50 rounded-xl p-4 space-y-3">
-      <span class="text-xs font-bold uppercase text-violet-600">AI Auto-Fix</span>
-      ${inner}
+      <span class="text-xs font-bold uppercase text-violet-600">The fix</span>
+      ${prLink}${resultBlock}
     </div>`;
 }
 
@@ -6734,109 +6727,6 @@ function _irIncidentBlock(i) {
       </div>`;
 }
 
-// "Pass all to Developer" — shown on the Reported tab when there are issues that
-// haven't been handed off yet (not already queued or being fixed).
-function _updatePassAllBtn(issues) {
-  const btn = document.getElementById('ir-pass-all-btn');
-  if (!btn) return;
-  const eligible = (issues || []).filter(i =>
-    i.status === 'reported' && i.source !== 'suspected' && i.devHandoffStatus !== 'queued' && i.devHandoffStatus !== 'in_progress');
-  if (_irFilter === 'reported' && eligible.length > 0) {
-    btn.dataset.count = eligible.length;
-    btn.disabled = false;
-    btn.textContent = `🤖 Pass all ${eligible.length} to Developer`;
-    btn.classList.remove('hidden');
-  } else {
-    btn.classList.add('hidden');
-  }
-}
-
-async function passAllToDeveloper() {
-  const btn = document.getElementById('ir-pass-all-btn');
-  const n = Number(btn?.dataset.count || 0);
-  if (!(await window.confirmModal(`Each is fixed by Claude Code in GitHub Actions on its own branch, with a pull request opened for review. Up to 10 start per click.`, { title: `Pass all ${window.escapeHtml(n)} reported issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
-  if (btn) { btn.disabled = true; btn.textContent = '🤖 Starting…'; }
-  try {
-    const r = await api(`${IR_API}?action=handoff-all`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    });
-    // Up to 10 start per click; a partial failure names the first reason.
-    if (r && (r.error || r.note)) window.showToast?.(r.error ? `${r.queued} started. ${r.error}` : r.note, { icon: r.error ? '⚠️' : '🤖' });
-  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
-  finally { loadIssueReports(); }
-}
-
-// "Move all to Backlog" — shown on the Reported tab when there are issues still
-// sitting in Reported, as a quick alternative to handing them to the AI developer.
-function _updateMoveAllToBacklogBtn(issues) {
-  const btn = document.getElementById('ir-backlog-all-btn');
-  if (!btn) return;
-  const eligible = (issues || []).filter(i => i.status === 'reported');
-  if (_irFilter === 'reported' && eligible.length > 0) {
-    btn.dataset.count = eligible.length;
-    btn.disabled = false;
-    btn.textContent = `📥 Move All (${eligible.length}) to Backlog`;
-    btn.classList.remove('hidden');
-  } else {
-    btn.classList.add('hidden');
-  }
-}
-
-async function moveAllToBacklog() {
-  const btn = document.getElementById('ir-backlog-all-btn');
-  const n = Number(btn?.dataset.count || 0);
-  if (!(await window.confirmModal(``, { title: `Move all ${window.escapeHtml(n)} reported issue${n === 1 ? '' : 's'} to the Backlog?` }))) return;
-  if (btn) { btn.disabled = true; btn.textContent = 'Moving…'; }
-  try {
-    await api(`${IR_API}?action=backlog-all`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    });
-  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
-  finally { loadIssueReports(); }
-}
-
-// "Move all to a Developer" — shown on the Backlog tab when there are backlog issues
-// not already queued or being fixed, so admins can hand off a deferred batch in one click.
-function _updateMoveAllToDeveloperBtn(issues) {
-  const btn = document.getElementById('ir-backlog-dev-all-btn');
-  if (!btn) return;
-  const eligible = (issues || []).filter(i =>
-    i.status === 'backlog' && i.source !== 'suspected' && i.devHandoffStatus !== 'queued' && i.devHandoffStatus !== 'in_progress');
-  if (_irFilter === 'backlog' && eligible.length > 0) {
-    btn.dataset.count = eligible.length;
-    btn.disabled = false;
-    btn.textContent = `🤖 Move All (${eligible.length}) to a Developer`;
-    btn.classList.remove('hidden');
-  } else {
-    btn.classList.add('hidden');
-  }
-}
-
-async function moveBacklogAllToDeveloper() {
-  const btn = document.getElementById('ir-backlog-dev-all-btn');
-  const n = Number(btn?.dataset.count || 0);
-  if (!(await window.confirmModal(`Each is fixed by Claude Code in GitHub Actions on its own branch, with a pull request opened for review. Up to 10 start per click.`, { title: `Pass all ${window.escapeHtml(n)} backlog issue${n === 1 ? '' : 's'} to the AI developer?` }))) return;
-  if (btn) { btn.disabled = true; btn.textContent = '🤖 Starting…'; }
-  try {
-    const r = await api(`${IR_API}?action=handoff-backlog-all`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    });
-    // Up to 10 start per click; a partial failure names the first reason.
-    if (r && (r.error || r.note)) window.showToast?.(r.error ? `${r.queued} started. ${r.error}` : r.note, { icon: r.error ? '⚠️' : '🤖' });
-  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
-  finally { loadIssueReports(); }
-}
-
-async function passToDeveloper(id) {
-  if (!(await window.confirmModal('It will be fixed on a branch and a pull request opened for review.', { title: 'Pass this issue to the AI developer?' }))) return;
-  try {
-    await api(`${IR_API}?id=${id}&action=handoff`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    });
-    await openIssuePanel(id);
-    if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
-  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
-}
 
 // ── Run AI-proposed migration SQL against staging Neon, from inside the ticket ─
 // Only shown when the fix shipped a DB migration. The status only advances to
@@ -6905,19 +6795,15 @@ function _irMergeCard(i) {
   const mergeBtn = isSuper
     ? `<button onclick="requestMerge(${i.id})" ${sqlPending ? 'disabled' : ''} class="w-full px-4 py-2.5 ${sqlPending ? 'bg-gray-300 text-white cursor-not-allowed' : 'btn-primary'} text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔀</span> Merge to staging</button>`
     : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can merge to staging.</p>`;
-  // Replaces "Investigate & fix conflicts": the AI fix workflow writes the fix again on current staging.
-  const redoBtn = isSuper
-    ? `<button onclick="requestRedoFix(${i.id})" class="btn-secondary w-full px-4 py-2.5 border-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔁</span> Redo fix on latest staging</button>`
-    : '';
 
   let chip, inner;
   if (ms === 'ready' || ms === 'failed') {
     const failed = ms === 'failed';
     chip = failed ? ['bg-red-100 text-red-700', 'Last merge failed'] : ['bg-amber-100 text-amber-800', 'Ready to merge'];
     inner = `<p class="text-xs text-gray-500">${failed
-        ? 'The merge attempt failed — see why below. Try the merge again, or have the AI developer write the fix again on the latest staging (the new version needs reviewing).'
+        ? 'The merge attempt failed — see why below. Try the merge again, or ask Claude to redo the fix on the latest staging.'
         : 'The fix is on a branch with an open pull request. Merge it to <b>staging</b> to make it live and move the issue to “Fixed &amp; Ready to Test”.'}${sqlPending ? ' <b class="text-amber-700">Run the database migration above first.</b>' : ''}</p>
-      ${prLink}${failed ? resultBlock : ''}${failed ? redoBtn : ''}${mergeBtn}`;
+      ${prLink}${failed ? resultBlock : ''}${mergeBtn}`;
   } else if (ms === 'merging') {
     // A merge takes seconds; one nothing has confirmed for IR_RUNNER_STALL_MS can be force-restarted
     // (the workflow treats an already-merged PR as success). A 'merging' row the retired laptop
@@ -6966,7 +6852,7 @@ function _irProofList(proof) {
   const tone = { ok: 'text-emerald-800', warn: 'text-amber-800', fail: 'text-red-700', wait: 'text-gray-600' };
   return `<ul class="space-y-1.5">${proof.items.map((c) => `
       <li class="text-xs ${tone[c.state] || ''}"><span class="mr-1">${icon[c.state] || '•'}</span><b>${_escH(c.label)}:</b> ${_escH(c.detail)}</li>`).join('')}</ul>
-    ${proof.row && proof.row.devRootCause ? `<details class="text-xs text-gray-700"><summary class="cursor-pointer font-semibold">What the AI developer found</summary><div class="mt-1 whitespace-pre-wrap">${_escH(proof.row.devRootCause)}</div></details>` : ''}`;
+    ${proof.row && proof.row.devRootCause ? `<details class="text-xs text-gray-700"><summary class="cursor-pointer font-semibold">What Claude found</summary><div class="mt-1 whitespace-pre-wrap">${_escH(proof.row.devRootCause)}</div></details>` : ''}`;
 }
 function _irProofCard(i, proof) {
   const ps = i.devProdStatus || null;
@@ -7103,21 +6989,6 @@ async function requestProdPromote(id) {
   }
 }
 
-async function requestRedoFix(id) {
-  if (!(await window.confirmModal('Claude Code checks out the latest staging in GitHub Actions and writes the fix again, updating the pull request. It is a new version of the fix, so review it again before merging.', { title: 'Redo this fix on the latest staging?' }))) return;
-  const btn = event?.target?.closest('button');
-  if (btn) { btn.disabled = true; btn.textContent = 'Starting…'; }
-  try {
-    await api(`${IR_API}?id=${id}&action=redo-fix`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    });
-    await openIssuePanel(id);
-    if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
-  } catch (e) {
-    if (btn) { btn.disabled = false; }
-    window.showToast?.(e.message, { icon: '⚠️' });
-  }
-}
 
 // ── "Merge all to staging" (super-admin only) ──────────────────────────────────
 // On the Merge tab, merge every ready fix PR in one go instead of opening each
@@ -7326,6 +7197,9 @@ const frColumnOf = (it) => FR_COLUMN_OF_STATUS[it.status] || 'review';
 function frBoardCard(it) {
   const parent = it.parentId ? _frItems.find(x => x.id === it.parentId) : null;
   const badges = [
+    // Claude building it from a session (scripts/feature-requests.ts; src/utils/claude-work.ts).
+    it.claudeWorking ? IR_CLAUDE_PILL : '',
+    (!it.claudeWorking && it.devPrUrl) ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">PR open</span>' : '',
     `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${FR_PRIORITY_CLS[it.priority] || 'bg-gray-100 text-gray-600'}">${_esc(FR_PRIORITY_LABEL[it.priority] || it.priority)}</span>`,
     (it.itemType && it.itemType !== 'feature') ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${FR_ITEM_TYPE_CLS[it.itemType] || 'bg-gray-100 text-gray-600'}">${_esc(FR_ITEM_TYPE_LABEL[it.itemType] || it.itemType)}</span>` : '',
     it.status === 'brief_ready' ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">Brief ready</span>' : '',
@@ -7459,6 +7333,14 @@ function openRoadmapEdit(id) {
   _frFillSelect(document.getElementById('fr-form-status'), FR_STATUSES, FR_STATUS_LABEL, it.status);
   document.getElementById('fr-form-status-wrap').classList.remove('hidden');
   document.getElementById('fr-form-brief-wrap').classList.remove('hidden');
+  // Claude's notes and pull request (read-only; scripts/feature-requests.ts writes them).
+  const dev = document.getElementById('fr-form-dev');
+  if (dev) {
+    const pr = it.devPrUrl ? `<a href="${_esc(it.devPrUrl)}" target="_blank" rel="noopener" class="font-bold text-violet-700 hover:underline">View pull request →</a>` : '';
+    dev.innerHTML = (it.devNotes || pr || it.claudeWorking)
+      ? `<div class="border border-violet-200 bg-violet-50 rounded-xl p-3 space-y-2"><div class="flex items-center gap-2"><span class="text-xs font-bold uppercase text-violet-600">Claude's work</span>${it.claudeWorking ? IR_CLAUDE_PILL : ''}</div>${pr}${it.devNotes ? `<div class="text-xs text-gray-700 whitespace-pre-wrap max-h-56 overflow-auto bg-white border border-gray-200 rounded-lg p-2">${_esc(it.devNotes)}</div>` : ''}</div>`
+      : '';
+  }
   _frResetEnhance();
   document.getElementById('fr-form').classList.remove('hidden');
   document.getElementById('fr-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -8246,6 +8128,7 @@ async function openTicketPanel(tid) {
     const d = await api(`/.netlify/functions/admin-helpdesk?ticketId=${tid}`);
     const t = d.ticket; const replies = d.replies || [];
     document.getElementById('ticket-panel-title').textContent = `#${t.id} — ${t.subject}`;
+    _tkDraft = d.draft || null;
     body.innerHTML = `
       <!-- Metadata bar -->
       <div class="grid grid-cols-2 gap-3 text-sm">
@@ -8294,8 +8177,13 @@ async function openTicketPanel(tid) {
           <button id="reply-tab-public" onclick="setReplyMode(false)" class="btn-secondary flex-1 py-2 text-xs font-bold border">Public Reply</button>
           <button id="reply-tab-internal" onclick="setReplyMode(true)" class="flex-1 py-2 text-xs font-semibold text-gray-500 hover:bg-yellow-50 transition">Internal Note</button>
         </div>
-        <textarea id="reply-body" rows="4" placeholder="Type your reply…"
-          class="w-full px-4 py-3 text-sm text-gray-800 focus:outline-none resize-none border-0"></textarea>
+        ${_tkDraft ? `<div class="px-4 py-3 bg-violet-50 border-b border-violet-100 text-xs text-violet-800 space-y-1">
+            <div class="flex items-center justify-between gap-2"><b>✍️ Draft by Claude: review and edit it, then press Send Reply. Nothing has been sent.</b>
+              <button onclick="discardTicketDraft(${t.id})" class="text-violet-700 font-semibold hover:underline shrink-0">Discard draft</button></div>
+            ${_tkDraft.note ? `<div class="whitespace-pre-wrap text-violet-700">${_esc(_tkDraft.note)}</div>` : ''}
+          </div>` : ''}
+        <textarea id="reply-body" rows="${_tkDraft ? 10 : 4}" placeholder="Type your reply…"
+          class="w-full px-4 py-3 text-sm text-gray-800 focus:outline-none resize-none border-0">${_tkDraft ? _esc(_tkDraft.reply) : ''}</textarea>
         <div class="px-4 py-3 bg-gray-50 flex justify-end">
           <button onclick="submitReply(${t.id})" class="btn-golive px-4 py-2 text-sm font-bold rounded-lg transition">Send Reply</button>
         </div>
@@ -8303,6 +8191,15 @@ async function openTicketPanel(tid) {
   } catch(e) {
     body.innerHTML = `<p class="text-red-500">${e.message}</p>`;
   }
+}
+
+// Claude's draft reply for the open ticket (scripts/inbox-drafts.ts). Sending a public reply clears it.
+let _tkDraft = null;
+async function discardTicketDraft(tid) {
+  try {
+    await api(`/.netlify/functions/admin-helpdesk?ticketId=${tid}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'discard-draft' }) });
+    await openTicketPanel(tid);
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 function closeTicketPanel() { document.getElementById('ticket-detail-panel').classList.add('hidden'); _ticketPanelId = null; }

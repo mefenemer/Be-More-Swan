@@ -154,21 +154,17 @@ test('the new columns are not declared to Drizzle (an INSERT would name them bef
 });
 
 test('nobody is told about an automatic incident', async () => {
-    await notifyIssueUser({} as any, { userId: null, issueId: 1, status: 'backlog' }); // would throw on the fake db if it tried
+    await notifyIssueUser({} as any, { userId: null, issueId: 1, status: 'on_hold' }); // would throw on the fake db if it tried
 });
 
-test('users never see one; Support inbox and "Pass all" leave them out', () => {
+test('users never see one; the Support inbox leaves them out', () => {
     assert.match(read('netlify/functions/issue-reports.ts'), /\.where\(eq\(issueReports\.userId, userId\)\)/);
     const inbox = read('src/utils/support-inbox.ts');
     assert.match(inbox, /\n\s+JOIN users u ON u\.id = i\.user_id/);
     assert.match(inbox, /An automatic report has no customer to answer/);
-    const admin = read('netlify/functions/admin-issue-reports.ts');
-    // Both bulk hand-offs go through bulkHandoff (src/utils/issue-ai-fix.ts era), which filters suspected once.
-    const bulk = admin.slice(admin.indexOf('async function bulkHandoff'), admin.indexOf('const bulkReply'));
-    assert.equal((bulk.match(/\.\.\.\(await notSuspected\(db\)\)/g) ?? []).length, 1, 'the shared bulk hand-off filters suspected');
-    assert.ok(admin.includes("bulkHandoff(db, 'reported'") && admin.includes("bulkHandoff(db, 'backlog'"), 'both bulk hand-offs use it');
+    // The bulk "Pass all to Developer" went with the cloud AI developer (2026-11-13).
+    assert.ok(!read('netlify/functions/admin-issue-reports.ts').includes('bulkHandoff'));
     const html = read('admin.html');
-    assert.equal((html.match(/i\.source !== 'suspected'/g) ?? []).length, 2, 'both bulk buttons count without suspected');
     assert.ok(html.includes('_irSourceChip(i)') && html.includes('${_irIncidentBlock(i)}'));
 });
 

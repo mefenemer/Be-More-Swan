@@ -1,94 +1,35 @@
-// src/utils/issue-fix-proof.ts — Fix pipeline: proof before production (docs/fix-pipeline-proof-plan.md).
+// src/utils/issue-fix-proof.ts — Fix pipeline: proof before production (docs/fix-pipeline-proof-plan.md,
+// docs/fix-pipeline-interactive.md).
 //
-// Owner decisions 2026-11-12: nothing reaches prod until the owner clicks "Approve for production",
-// and the ticket first shows, in plain words:
-//   • ROOT CAUSE   confirmed (the fix's repro test FAILED on the old code and PASSES with the fix),
-//                  guessed (a cause was named but not reproduced) or not found.
-//   • SQL          none, or additive (the only kind run unattended), applied on staging and checked.
-//   • STAGING      CI passed on the merge commit (it runs the repro test too) and the staging deploy
-//                  contains the fix.
-// Approve then runs the SAME SQL (hash-matched) on prod and starts the one-fix hotfix with auto-merge.
+// Owner decisions 2026-11-12/13: nothing reaches prod until the owner ships it, and the ticket first shows,
+// in plain words, whether the root cause was CONFIRMED (a repro test failed on the old code and passes with
+// the fix), GUESSED or NOT FOUND; whether the SQL is additive and applied on staging (and prod); whether
+// staging CI passed on the merge commit; and whether the staging deploy contains the fix.
 //
-// Where each piece comes from:
-//   ai-fix.yml writes a proof block into the PR body (root cause, repro before/after, run id);
-//   saveFixProof stores it when the PR is read (issue-ai-fix.ts applyAiFixState);
-//   ensureStagingSql runs before "Merge to staging"; syncStagingProof follows staging CI and deploy;
-//   importProofImages copies the repro run's before/after screenshots into the ticket thread;
-//   approveForProduction is the owner's click.
+// Claude records the root cause and repro result from its session (scripts/fix-tickets.ts). This module:
+//   ensureStagingSql runs before "Merge to staging"; syncStagingProof follows staging CI and the deploy;
+//   productionChecklist is what the ticket shows; approveForProduction is the owner's click.
 //
 // The columns come from db/z-issue-fix-proof.sql and are NOT in db/schema.ts (see that file), so
 // everything here is raw SQL behind proofColumnsReady().
 
 import { sql } from 'drizzle-orm';
-import { inflateRawSync } from 'node:zlib';
 import type { getDb } from '../../db/client';
 import { classifySql, sqlHash, runAdditiveSql, pipelineDbUrls, type SqlSafety, type SqlRunResult } from './issue-sql';
-import { ghHeaders, readToken, repoOf } from './issue-ai-fix';
+import { ghHeaders, readToken, repoOf } from './issue-github';
 import { checkFixDeployed, isFullSha, parsePrNumber } from './issue-fix-live';
 
 type Db = ReturnType<typeof getDb>;
-type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; redirect?: string }) => Promise<{ ok: boolean; status: number; json: () => Promise<any>; text?: () => Promise<string>; arrayBuffer?: () => Promise<ArrayBuffer> }>;
+type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; json: () => Promise<any>; text?: () => Promise<string> }>;
 
-export const PROOF_START = '<!-- ai-fix:proof:start -->';
-export const PROOF_END = '<!-- ai-fix:proof:end -->';
 /** The staging site, whose deploy must contain the fix. */
 export const STAGING_SITE_URL = process.env.STAGING_SITE_URL || 'https://staging--bemoreswan.netlify.app';
 /** main's required checks; the same jobs run on every push to staging. */
 export const STAGING_REQUIRED_CHECKS = ['Typecheck + tests', 'RLS tenant-isolation (Postgres)'];
-/** Screenshots larger than this are not copied into the thread. */
-export const MAX_PROOF_IMAGE_BYTES = 1_500_000;
-
 export type RootCauseStatus = 'confirmed' | 'guessed' | 'not_found';
 export interface ReproRun { exit: number | null; tail?: string }
-export interface Proof {
-    /** What Claude said about its own finding. */
-    claimed: 'identified' | 'unsure' | null;
-    rootCause: string;
-    /** flags: 'source_scan' (it reads source files) / 'missing_code' (it failed only because new code was missing): not proof. */
-    repro: { test: string | null; kind: 'node' | 'browser' | null; before: ReproRun | null; after: ReproRun | null; error?: string | null; flags?: string[]; screenshots?: number };
-    runId: number | null;
-}
-
-// ── Reading the proof ───────────────────────────────────────────────────────────────────────────
-
-/** The proof block from the PR body, or null. Never throws. */
-export function parseProof(body: string | null | undefined): Proof | null {
-    const b = String(body || '');
-    const a = b.indexOf(PROOF_START), e = b.indexOf(PROOF_END);
-    if (a === -1 || e <= a) return null;
-    const raw = b.slice(a + PROOF_START.length, e).trim().replace(/^`{3,}[a-z]*\s*\n?/i, '').replace(/\n?`{3,}\s*$/, '').trim();
-    try {
-        const j = JSON.parse(raw);
-        const run = (r: any): ReproRun | null => (r && typeof r === 'object' ? { exit: Number.isInteger(r.exit) ? r.exit : null, tail: typeof r.tail === 'string' ? r.tail.slice(0, 4000) : undefined } : null);
-        const repro = j?.repro || {};
-        return {
-            claimed: j?.claimed === 'identified' || j?.claimed === 'unsure' ? j.claimed : null,
-            rootCause: typeof j?.rootCause === 'string' ? j.rootCause.slice(0, 6000) : '',
-            repro: {
-                test: typeof repro.test === 'string' && repro.test ? repro.test.slice(0, 200) : null,
-                kind: repro.kind === 'node' || repro.kind === 'browser' ? repro.kind : null,
-                before: run(repro.before),
-                after: run(repro.after),
-                error: typeof repro.error === 'string' ? repro.error.slice(0, 2000) : null,
-                flags: Array.isArray(repro.flags) ? repro.flags.filter((f: unknown) => typeof f === 'string').slice(0, 5) : [],
-                screenshots: Number.isInteger(repro.screenshots) ? repro.screenshots : 0,
-            },
-            runId: Number.isSafeInteger(j?.runId) ? j.runId : null,
-        };
-    } catch {
-        return null;
-    }
-}
-
-/** Confirmed ONLY when the repro test failed before the fix and passes after it. */
-export function rootCauseStatus(p: Proof | null): RootCauseStatus {
-    if (!p) return 'not_found';
-    const before = p.repro.before?.exit, after = p.repro.after?.exit;
-    if (p.repro.test && typeof before === 'number' && before !== 0 && after === 0 && !(p.repro.flags || []).length) return 'confirmed';
-    if (p.claimed === 'unsure' || !p.rootCause.trim()) return 'not_found';
-    return 'guessed';
-}
-
+/** flags: 'source_scan' / 'missing_code' mark a "repro" that proves nothing. */
+export interface Repro { test: string | null; kind: 'node' | 'browser' | null; before: ReproRun | null; after: ReproRun | null; error?: string | null; flags?: string[] }
 let readyCache: { ready: boolean; at: number } | null = null;
 /** Has db/z-issue-fix-proof.sql reached this database? Cached; a "no" is re-checked every 5 minutes. */
 export async function proofColumnsReady(db: Db): Promise<boolean> {
@@ -105,25 +46,6 @@ export async function proofColumnsReady(db: Db): Promise<boolean> {
 }
 export function resetProofColumnsCache(): void { readyCache = null; }
 
-/** Store a new fix's proof and SQL facts; clears every later stage (a redo starts the proof again). */
-export async function saveFixProof(db: Db, issueId: number, prBody: string | null | undefined, sqlText: string | null): Promise<void> {
-    if (!(await proofColumnsReady(db))) return;
-    const proof = parseProof(prBody);
-    const status = rootCauseStatus(proof);
-    const { safety } = classifySql(sqlText);
-    await db.execute(sql`
-        UPDATE issue_reports
-           SET dev_root_cause_status = ${status}, dev_root_cause = ${proof?.rootCause || null},
-               dev_repro = ${proof ? JSON.stringify(proof.repro) : null}::jsonb,
-               dev_sql_safety = ${safety}, dev_sql_hash = ${sqlText ? sqlHash(sqlText) : null},
-               dev_staging_sql_status = NULL, dev_staging_sql_result = NULL, dev_staging_sql_hash = NULL, dev_staging_sql_ran_at = NULL,
-               dev_staging_ci_status = NULL, dev_staging_ci_url = NULL, dev_staging_live_at = NULL,
-               dev_prod_sql_status = NULL, dev_prod_sql_result = NULL, dev_prod_sql_ran_at = NULL,
-               dev_prod_approved_by = NULL, dev_prod_approved_at = NULL,
-               dev_proof_run_id = ${proof?.runId ?? null}, dev_proof_images_at = NULL
-         WHERE id = ${issueId}`);
-}
-
 // ── SQL on staging (before "Merge to staging") ─────────────────────────────────────────────────
 
 export interface ProofRow {
@@ -135,7 +57,7 @@ export interface ProofRow {
     devProdStatus: string | null;
     devRootCauseStatus: RootCauseStatus | null;
     devRootCause: string | null;
-    devRepro: Proof['repro'] | null;
+    devRepro: Repro | null;
     devSqlSafety: SqlSafety | null;
     devSqlHash: string | null;
     devStagingSqlStatus: string | null;
@@ -288,7 +210,7 @@ export async function syncStagingProof(db: Db, row: Pick<ProofRow, 'id' | 'devPr
     }
 }
 
-/** Follow every merged fix still waiting for its staging proof or screenshots (capped). */
+/** Follow every merged fix still waiting for its staging proof (capped). */
 export async function syncOpenProofs(db: Db, opts: { token?: string; repo?: string; fetchImpl?: FetchLike; limit?: number } = {}): Promise<number> {
     if (!(await proofColumnsReady(db))) return 0;
     const token = opts.token ?? readToken();
@@ -305,83 +227,10 @@ export async function syncOpenProofs(db: Db, opts: { token?: string; repo?: stri
         for (const r of merged) {
             if (await syncStagingProof(db, { id: Number(r.id), devPrUrl: r.dev_pr_url, devStagingCiStatus: r.dev_staging_ci_status, devStagingLiveAt: r.dev_staging_live_at }, { ...opts, token, stagingCommit })) n++;
         }
-        const shots = await db.execute(sql`
-            SELECT id, dev_proof_run_id FROM issue_reports
-             WHERE dev_proof_run_id IS NOT NULL AND dev_proof_images_at IS NULL
-             ORDER BY id DESC LIMIT 5`) as Array<{ id: number; dev_proof_run_id: number }>;
-        for (const r of shots) {
-            if (await importProofImages(db, Number(r.id), Number(r.dev_proof_run_id), { ...opts, token })) n++;
-        }
     } catch (e) {
         console.error('[issue-fix-proof] syncOpenProofs failed:', e instanceof Error ? e.message : e);
     }
     return n;
-}
-
-// ── Screenshots from the repro run ─────────────────────────────────────────────────────────────
-
-/** Files in a zip (stored or deflated). Enough for a GitHub Actions artifact. */
-export function unzip(buf: Buffer): Map<string, Buffer> {
-    const files = new Map<string, Buffer>();
-    let eocd = -1;
-    for (let i = buf.length - 22; i >= Math.max(0, buf.length - 65_557); i--) {
-        if (buf.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
-    }
-    if (eocd === -1) throw new Error('not a zip');
-    const count = buf.readUInt16LE(eocd + 10);
-    let p = buf.readUInt32LE(eocd + 16);
-    for (let k = 0; k < count; k++) {
-        if (buf.readUInt32LE(p) !== 0x02014b50) throw new Error('bad central directory');
-        const method = buf.readUInt16LE(p + 10);
-        const csize = buf.readUInt32LE(p + 20);
-        const nameLen = buf.readUInt16LE(p + 28), extraLen = buf.readUInt16LE(p + 30), commentLen = buf.readUInt16LE(p + 32);
-        const local = buf.readUInt32LE(p + 42);
-        const name = buf.toString('utf8', p + 46, p + 46 + nameLen);
-        const lName = buf.readUInt16LE(local + 26), lExtra = buf.readUInt16LE(local + 28);
-        const start = local + 30 + lName + lExtra;
-        const data = buf.subarray(start, start + csize);
-        if (!name.endsWith('/')) files.set(name, method === 8 ? inflateRawSync(data) : method === 0 ? Buffer.from(data) : Buffer.alloc(0));
-        p += 46 + nameLen + extraLen + commentLen;
-    }
-    return files;
-}
-
-const isPng = (b: Buffer) => b.length > 8 && b.readUInt32BE(0) === 0x89504e47;
-
-/**
- * Copy the repro run's before/after screenshots (artifact "ai-fix-proof", shots/*.png) into the
- * ticket thread. Marks the issue done even when there are none, so it isn't fetched again.
- */
-export async function importProofImages(db: Db, issueId: number, runId: number, opts: { token?: string; repo?: string; fetchImpl?: FetchLike } = {}): Promise<boolean> {
-    const token = opts.token ?? readToken();
-    if (!token) return false;
-    const f = opts.fetchImpl || (fetch as unknown as FetchLike);
-    const done = () => db.execute(sql`UPDATE issue_reports SET dev_proof_images_at = now() WHERE id = ${issueId} AND dev_proof_images_at IS NULL RETURNING id`);
-    try {
-        const list = await f(`https://api.github.com/repos/${repoOf(opts.repo)}/actions/runs/${runId}/artifacts?name=ai-fix-proof`, { headers: ghHeaders(token) });
-        if (!list.ok) return false;
-        const art = ((await list.json())?.artifacts || []).find((a: any) => a.name === 'ai-fix-proof' && !a.expired);
-        if (!art) { await done(); return true; }
-        const zip = await f(String(art.archive_download_url), { headers: ghHeaders(token) });
-        if (!zip.ok || !zip.arrayBuffer) return false;
-        const files = unzip(Buffer.from(await zip.arrayBuffer()));
-        const shots = [...files.entries()]
-            .filter(([n, b]) => /^shots\/(before|after)[-\w]*\.png$/.test(n) && isPng(b) && b.length <= MAX_PROOF_IMAGE_BYTES)
-            .sort(([a], [b]) => (a.startsWith('shots/before') === b.startsWith('shots/before') ? a.localeCompare(b) : a.startsWith('shots/before') ? -1 : 1))
-            .slice(0, 4);
-        const claimed = await done() as unknown[];
-        if (!claimed.length) return false;                     // another run got here first
-        for (const [name, b] of shots) {
-            const when = name.startsWith('shots/before') ? 'BEFORE the fix (staging as it was)' : 'AFTER the fix';
-            await db.execute(sql`
-                INSERT INTO issue_report_messages (issue_id, author_type, author_id, body, status, image_data, image_mime)
-                VALUES (${issueId}, 'admin', NULL, ${`📸 Repro test screenshot, ${when}.`}, NULL, ${b.toString('base64')}, 'image/png')`);
-        }
-        return true;
-    } catch (e) {
-        console.error('[issue-fix-proof] screenshot import failed:', e instanceof Error ? e.message : e);
-        return false;
-    }
 }
 
 // ── The checklist the owner reads, and the approval ────────────────────────────────────────────
@@ -423,6 +272,13 @@ export function productionChecklist(r: ProofRow): { items: CheckItem[]; ready: b
         state: stagingSqlOk ? 'ok' : r.devStagingSqlStatus === 'failed' ? 'fail' : 'wait',
         detail: !hasSql ? 'None needed.' : r.devStagingSqlResult || 'Runs automatically when the fix merges to staging.',
     });
+    if (hasSql) items.push({
+        key: 'sql_prod', label: 'SQL on production',
+        state: r.devProdSqlStatus === 'applied' ? 'ok' : r.devProdSqlStatus === 'failed' ? 'fail' : 'wait',
+        detail: r.devProdSqlStatus === 'applied' ? (r.devProdSqlResult || 'Applied on production.')
+            : r.devProdSqlStatus === 'failed' ? (r.devProdSqlResult || 'FAILED on production.')
+            : 'Runs when you press Approve for production (or just before a release merges, on your word).',
+    });
     items.push({
         key: 'tests_staging', label: 'Tests on staging',
         state: r.devStagingCiStatus === 'passed' ? 'ok' : r.devStagingCiStatus === 'failed' ? 'fail' : 'wait',
@@ -435,7 +291,7 @@ export function productionChecklist(r: ProofRow): { items: CheckItem[]; ready: b
         state: r.devStagingLiveAt ? 'ok' : 'wait',
         detail: r.devStagingLiveAt ? `The staging deploy contains the fix (seen ${r.devStagingLiveAt.slice(0, 16)} UTC).` : 'Waiting for the staging deploy.',
     });
-    const blocking = items.filter((i) => i.key !== 'root_cause' && i.key !== 'repro');
+    const blocking = items.filter((i) => i.key !== 'root_cause' && i.key !== 'repro' && !(i.key === 'sql_prod' && i.state === 'wait'));
     const ready = r.devMergeStatus === 'merged' && blocking.every((i) => i.state === 'ok');
     return { items, ready, warnings: items.some((i) => i.state === 'warn') };
 }
@@ -493,7 +349,10 @@ export async function approveForProduction(db: Db, issueId: number, adminId: num
     let sqlLine = 'No database change.';
     if (text) {
         if (sqlHash(text) !== row.devStagingSqlHash) return fail('The SQL differs from what passed on staging. Merge to staging again so the same SQL runs there first.');
-        const res = await (opts.run || runAdditiveSql)(urls.production, text, 'production');
+        // Already run on prod (scripts/fix-tickets.ts prod-sql, same text as staging): don't run it twice.
+        const res = row.devProdSqlStatus === 'applied'
+            ? { ok: true, outcome: row.devProdSqlResult || '✓ Already applied on production.' }
+            : await (opts.run || runAdditiveSql)(urls.production, text, 'production');
         await db.execute(sql`
             UPDATE issue_reports SET dev_prod_sql_status = ${res.ok ? 'applied' : 'failed'}, dev_prod_sql_result = ${res.outcome}, dev_prod_sql_ran_at = now()
              WHERE id = ${issueId}`);

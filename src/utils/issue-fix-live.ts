@@ -30,7 +30,6 @@ import { issueReportMessages } from '../../db/schema';
 import { BUILD_COMMIT } from '../generated/build-commit';
 import { notifyIssueUser } from './issue-reports';
 import { syncOpenHotfixes, hotfixPrFromResult } from './issue-hotfix';
-import { syncOpenAiFixes } from './issue-ai-fix';
 import { syncOpenProofs } from './issue-fix-proof';
 
 type Db = ReturnType<typeof getDb>;
@@ -164,8 +163,6 @@ export interface FixLiveResult {
     autoClosed: number;
     /** Hotfix PRs whose GitHub state changed this run (issue-hotfix.ts). */
     hotfixesSynced?: number;
-    /** Cloud AI fixes whose run or PR changed this run (issue-ai-fix.ts). */
-    aiFixesSynced?: number;
     /** Merged fixes whose staging proof or screenshots changed this run (issue-fix-proof.ts). */
     proofsSynced?: number;
 }
@@ -188,9 +185,6 @@ export async function runFixLiveCheck(db: Db, opts: {
     const deployedSha = opts.deployedSha ?? BUILD_COMMIT;
     const token = opts.token ?? process.env.GITHUB_FIX_CHECK_TOKEN ?? '';
     const repo = opts.repo || process.env.GITHUB_REPO || DEFAULT_REPO;
-
-    // AI fixes running in GitHub Actions: record finished runs and their PRs (uses its own token).
-    result.aiFixesSynced = await syncOpenAiFixes(db, { repo, fetchImpl: opts.fetchImpl, ...(opts.token ? { token: opts.token } : {}) });
 
     // Proof before production: staging CI and deploy for merged fixes, and repro screenshots.
     result.proofsSynced = await syncOpenProofs(db, { repo, fetchImpl: opts.fetchImpl as any, ...(opts.token ? { token: opts.token } : {}) });

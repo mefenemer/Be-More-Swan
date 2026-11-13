@@ -15,6 +15,7 @@ import {
     productUpdateImageUrl, verifyImageSignature, whatsNewUnsubscribeUrl, verifyUnsubscribeSignature, LIMITS,
 } from '../src/utils/product-update-email';
 import { PREF_CATEGORIES, isEmailEnabled } from '../src/utils/notification-prefs';
+import { EXCLUDED_RECIPIENT_EMAILS } from '../src/utils/product-update-recipients';
 import { landmark } from './landmark';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -161,6 +162,14 @@ check('recipients: active customer accounts, not staff, not mid-deletion, not un
     assert.match(RECIP, /eq\(users\.role, 'user'\)/);
     assert.match(RECIP, /pendingDeletion/);
     assert.match(RECIP, /->>'whats_new', 'true'\) <> 'false'/);
+});
+
+check('recipients: test, app-review and owner accounts are excluded by address, case-insensitively', () => {
+    for (const e of ['bmsreview.test@gmail.com', 'meta-review@bemoreswan.com', 'mefenemer@hotmail.com', 'mefenemer@googlemail.com']) {
+        assert.ok(EXCLUDED_RECIPIENT_EMAILS.includes(e), `${e} is excluded`);
+    }
+    assert.ok(EXCLUDED_RECIPIENT_EMAILS.every(e => e === e.toLowerCase().trim()), 'stored lower case');
+    assert.match(RECIP, /notInArray\(sql`lower\(\$\{users\.email\}\)`, \[\.\.\.EXCLUDED_RECIPIENT_EMAILS\]\)/);
 });
 
 check('unsubscribe: GET only shows a button (link scanners), POST merges whats_new=false', () => {

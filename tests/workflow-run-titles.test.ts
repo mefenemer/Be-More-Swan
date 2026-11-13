@@ -7,7 +7,6 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { aiFixRunTitle } from '../src/utils/issue-ai-fix';
 import { mergeRunTitle } from '../src/utils/issue-cloud-merge';
 import { hotfixRunTitle } from '../src/utils/issue-hotfix';
 
@@ -19,7 +18,6 @@ function check(name: string, fn: () => void) {
 }
 
 const cases: Array<[string, (id: number) => string]> = [
-    ['ai-fix.yml', aiFixRunTitle],
     ['merge-to-staging.yml', mergeRunTitle],
     ['hotfix-pr.yml', hotfixRunTitle],
 ];
