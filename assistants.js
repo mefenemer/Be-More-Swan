@@ -7879,6 +7879,28 @@ window._setStrategyAgentEntitled = function (entitled) {
 // The Posting Schedule controls (days, times, timezone, draft horizon) painted from a context — on load
 // (_detailHydrate) and when the chat changes the schedule (assistant:scheduleChanged below), so the form
 // and the in-memory context never disagree and the next autosave cannot undo the chat's change.
+// Issue #48: the Posting Schedule offered only the 12 curated zones, so Europe/Athens (offered in My
+// Account) could not be chosen. Keep the curated zones on top and add every other zone the browser knows
+// under "All timezones", once. Browsers without Intl.supportedValuesOf keep the curated list.
+function _ensureAllTimezones(sel) {
+    if (!sel || sel.dataset?.allZones === '1') return;
+    let zones = [];
+    try { zones = Intl.supportedValuesOf('timeZone'); } catch { zones = []; }
+    const have = new Set(Array.from(sel.options).map((o) => o.value));
+    const rest = zones.filter((z) => !have.has(z));
+    if (rest.length) {
+        const group = document.createElement('optgroup');
+        group.label = 'All timezones';
+        for (const z of rest) {
+            const opt = document.createElement('option');
+            opt.value = z; opt.textContent = z.replace(/_/g, ' ');
+            group.appendChild(opt);
+        }
+        sel.appendChild(group);
+    }
+    if (sel.dataset) sel.dataset.allZones = '1';
+}
+
 function _paintPostingSchedule(ctx, data) {
     const _days = (Array.isArray(ctx.posting_days) && ctx.posting_days.length)
         ? ctx.posting_days.map(d => String(d).toLowerCase().slice(0, 3))
@@ -7892,6 +7914,7 @@ function _paintPostingSchedule(ctx, data) {
     const tzSel = document.getElementById('edit_timezone');
     const tzVal = ctx.posting_timezone || _POSTING_DEFAULT_TZ;
     if (tzSel) {
+        _ensureAllTimezones(tzSel);
         if (!Array.from(tzSel.options).some(o => o.value === tzVal)) {
             const opt = document.createElement('option');
             opt.value = tzVal; opt.textContent = tzVal;
