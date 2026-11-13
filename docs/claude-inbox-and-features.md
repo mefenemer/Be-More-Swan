@@ -21,7 +21,12 @@ Three kinds of customer request, three places (support-inbox.ts already routes t
 - The tool never notifies the submitter or voters. When the owner moves a card on the board, the board's own
   notifications still apply.
 
+- PR pills (Staging PR / Prod PR, links to GitHub) on the card and in the edit panel; `prod-pr <id> --pr <url>`
+  records a PR into main. `ask-approval <id> --pr <url> [--file why.md]` shows **✅ Approve PR #N**; the owner's
+  click merges it on GitHub (see docs/fix-pipeline-interactive.md) and, for a PR into main, moves the request to
+  **Released without notifying anyone**. `withdraw-approval <id>` hides the button.
+
 ## Setup
-- `db/z-claude-drafts-and-features.sql` on BOTH databases (additive).
+- `db/z-claude-drafts-and-features.sql` and `db/z-pr-approval.sql` on BOTH databases (additive).
 - Allow rules for prod: `Bash(npx tsx scripts/inbox-drafts.ts --env prod:*)` and
   `Bash(npx tsx scripts/feature-requests.ts --env prod:*)`.

@@ -32,6 +32,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { ensureStagingSql, proofColumnsReady, loadProofRow, productionChecklist, approveForProduction, syncStagingProof } from '../../src/utils/issue-fix-proof';
 import { pipelineDbUrls, sqlHash } from '../../src/utils/issue-sql';
+import { approveTicketPr, loadPrFields, NO_PR_FIELDS } from '../../src/utils/pr-approval';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -132,6 +133,18 @@ export default withLambda(async (event) => {
         });
         if (!r.ok) return json(r.status || 400, { error: r.error, ...(r.needsConfirm ? { needsConfirm: true } : {}) });
         return json(200, { ok: true, message: r.message });
+    }
+
+    // ── POST ?action=approve-pr: the owner approves the PR Claude asked about ────────
+    // Approves it on GitHub where GitHub allows (never your own PR), merges it (or turns on auto-merge while
+    // its checks run), moves the ticket on and clears the request (src/utils/pr-approval.ts).
+    if (event.httpMethod === 'POST' && action === 'approve-pr' && id) {
+        if (!hasPermission(admin.role, 'deploy_code')) {
+            return json(403, { error: 'Approving a pull request requires the deploy_code privilege.' });
+        }
+        const r = await approveTicketPr(db, 'issue', id);
+        if (!r.ok) return json(r.status, { error: r.error });
+        return json(200, r);
     }
 
     // ── POST ?action=request-merge: merge the fix PR to staging ───────────────────
@@ -409,10 +422,12 @@ export default withLambda(async (event) => {
             : await db.select().from(issueReportMessages)
                 .where(eq(issueReportMessages.issueId, id))
                 .orderBy(asc(issueReportMessages.createdAt));
+        const prFields = (await loadPrFields(db, 'issue', [issue.id])).get(issue.id) ?? NO_PR_FIELDS;
         return json(200, {
             proof,
             issue: {
                 ...issue,
+                ...prFields,
                 statusLabel: ISSUE_STATUS_LABEL[issue.status as IssueStatus] || issue.status,
                 reporterName: issue.userId == null ? 'Automatic (Be More Swan)' : [reporter?.firstName, reporter?.lastName].filter(Boolean).join(' ') || reporter?.email || `User #${issue.userId}`,
                 reporterEmail: reporter?.email || null,
@@ -472,6 +487,8 @@ export default withLambda(async (event) => {
         // Severity (issue-severity.ts) and what the reporter's workspace pays (org-plan-value.ts).
         const severities = await loadSeverities(db, rows.map((r) => r.id));
         const planValues = await loadOrgPlanValues(db, rows.map((r) => r.organisationId));
+        // Staging / prod PR pills and the Approve button (src/utils/pr-approval.ts).
+        const prFields = await loadPrFields(db, 'issue', rows.map((r) => r.id));
 
         return json(200, {
             issues: rows.map((r) => ({
@@ -503,6 +520,7 @@ export default withLambda(async (event) => {
                 planName: r.organisationId != null ? (planValues.get(r.organisationId)?.planName ?? 'No plan') : null,
                 planMonthlyGbp: r.organisationId != null ? (planValues.get(r.organisationId)?.monthlyGbp ?? 0) : 0,
                 paying: r.organisationId != null ? !!planValues.get(r.organisationId)?.paying : false,
+                ...(prFields.get(r.id) ?? NO_PR_FIELDS),
             })),
             counts: Object.fromEntries(counts.map((c) => [c.status, c.n])),
         });

@@ -37,6 +37,20 @@ kept for what it is good at: holding the ticket, its status and the evidence.
 - The Fix pipeline screen refreshes itself within about 15 seconds of any change (it checks a version stamp;
   the open ticket is not redrawn while you are typing in it).
 
+## PR pills and the Approve button (owner, 2026-11-13)
+
+- **Pills**: "Staging PR #N" (`dev_pr_url`, set by `pr`) and "Prod PR #N" (`prod_pr_url`, or a hotfix PR) show on
+  the board card and at the top of the open ticket as soon as they are recorded; each opens the PR on GitHub.
+  `prod-pr <id> --pr <url>` records a PR into main (e.g. the staging → main release that carries the fix).
+- **Approve**: when Claude wants the owner to approve a PR, `ask-approval <id> --pr <url> [--file why.md]`. The
+  card and ticket then show **✅ Approve prod|staging PR #N**. The click approves it on GitHub where GitHub allows
+  (never on your own PR, which is every PR Claude opens as you; main needs 0 reviews, so the merge is the gate),
+  merges it (or turns on auto-merge while checks run), moves the ticket on (staging → merged to staging; main →
+  "Merged to prod", then the live check moves it to Fixed & Ready to Test) and hides the button.
+  `withdraw-approval <id>` hides it without merging. A fix's SQL must already be on that PR's database.
+- Setup: `db/z-pr-approval.sql` on BOTH DBs; Netlify `GITHUB_PR_APPROVE_TOKEN` (fine-grained, this repo:
+  Contents + Pull requests read/write), else it falls back to `GITHUB_HOTFIX_TOKEN`. Code: `src/utils/pr-approval.ts`.
+
 ## Rules
 
 - **Claude never contacts the reporter.** Its notes have no author, so the reporter's Issues page never
