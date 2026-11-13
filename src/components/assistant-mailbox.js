@@ -5,8 +5,8 @@
  *   window.AssistantMailbox.refresh()                                     (each time the tab opens)
  *
  * Reads netlify/functions/mailboxes.ts — the SIGNED-IN person's own mailboxes only. Phase 1 is read-only:
- * connect an Outlook mailbox, see email sorted into categories with a priority and a one-line summary,
- * open one (its text is fetched from Outlook then and not stored), move it to another category (in this
+ * connect an Outlook or Gmail mailbox, see email sorted into categories with a priority and a one-line
+ * summary, open one (its text is fetched from the mailbox then and not stored), move it to another category (in this
  * list only; the sender is remembered), mark senders private (never sent to AI), refresh, disconnect.
  * Renders into the Data Hub's own hosts (#datahub-toolbar, #datahub-table-host), which this tab owns.
  */
@@ -25,11 +25,11 @@
   };
   // Connect outcomes coming back from mailbox-oauth.ts (?mailbox=connected / ?mailbox_error=…).
   const CONNECT_ERRORS = {
-    access_denied: 'You cancelled the Microsoft sign-in, so nothing was connected.',
-    admin_approval_needed: 'Your organisation needs an administrator to approve Be More Swan before you can connect this mailbox. Ask your Microsoft 365 admin to approve the app, then try again.',
-    scope_missing: 'Microsoft did not give permission to read this mailbox, so it was not connected. Try again and accept every permission on the Microsoft screen.',
+    access_denied: 'The sign-in was cancelled, so nothing was connected. (With Gmail, this also happens while Google is still reviewing the app and your address is not on its list of test users.)',
+    admin_approval_needed: 'Your organisation needs an administrator to approve Be More Swan before you can connect this mailbox. Ask your Microsoft 365 or Google Workspace admin to allow the app, then try again.',
+    scope_missing: 'Permission to read this mailbox was not given, so it was not connected. Try again and tick every permission on the sign-in screen.',
     not_available: 'The Email Assistant is not switched on for this workspace yet.',
-    not_configured: 'Connecting Outlook is not set up on this site yet.',
+    not_configured: 'Connecting this kind of mailbox is not set up on this site yet.',
     csrf_fail: 'That sign-in link had expired or was started by someone else. Please press Connect again.',
   };
 
@@ -41,8 +41,12 @@
     return days < 7 ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
   }
 
-  function connectUrl() {
-    return `/api/mailbox-oauth/outlook/connect?assistantId=${encodeURIComponent(state.assistantId)}`;
+  const PROVIDER_NAME = { outlook: 'Outlook', gmail: 'Gmail' };
+  const providerName = (p) => PROVIDER_NAME[p] || 'your email';
+
+  function connectUrl(provider) {
+    const p = provider === 'gmail' ? 'gmail' : 'outlook';
+    return `/api/mailbox-oauth/${p}/connect?assistantId=${encodeURIComponent(state.assistantId)}`;
   }
 
   function showConnectOutcome() {
@@ -68,7 +72,7 @@
   function privacyNote() {
     return `<p class="text-xs text-gray-600 leading-relaxed">Only you can see this mailbox in Be More Swan — not your workspace's owner or admins.
       We keep each email's sender, subject, date and our one-line summary. We don't keep the text of your emails or any attachments:
-      we fetch an email's text from Outlook when you open it or when it's being sorted. Nothing in your mailbox is changed.</p>`;
+      we fetch an email's text from your mailbox when you open it or when it's being sorted. Nothing in your mailbox is changed.</p>`;
   }
 
   function renderConnect() {
@@ -79,8 +83,9 @@
         <p class="text-sm text-gray-700">Your Email Assistant reads your inbox, puts each email in a category, says what needs you today, and sums each one up in a line.</p>
         ${privacyNote()}
         <div class="flex flex-wrap items-center gap-3">
-          <a href="${esc(connectUrl())}" class="btn-primary inline-flex items-center px-4 py-2 text-sm font-bold rounded-lg" data-mailbox-connect>Connect Outlook</a>
-          <span class="text-xs text-gray-500">Microsoft 365 and Outlook.com. Gmail is coming soon.</span>
+          ${(state.data.providers || {}).outlook !== false ? `<a href="${esc(connectUrl('outlook'))}" class="btn-primary inline-flex items-center px-4 py-2 text-sm font-bold rounded-lg" data-mailbox-connect="outlook">Connect Outlook</a>` : ''}
+          ${(state.data.providers || {}).gmail ? `<a href="${esc(connectUrl('gmail'))}" class="btn-primary inline-flex items-center px-4 py-2 text-sm font-bold rounded-lg" data-mailbox-connect="gmail">Connect Gmail</a>` : ''}
+          <span class="text-xs text-gray-500">${(state.data.providers || {}).gmail ? 'Outlook: Microsoft 365 and Outlook.com. Gmail: Gmail and Google Workspace.' : 'Microsoft 365 and Outlook.com. Gmail is coming soon.'}</span>
         </div>
       </div>`;
   }
@@ -119,6 +124,7 @@
     const pr = state.data.priorities || {};
     const chip = m.priority ? `<span class="inline-flex px-2 py-0.5 text-[11px] font-bold rounded-full ${PRIORITY_CHIP[m.priority] || ''}">${esc(pr[m.priority] || m.priority)}</span>` : '<span class="inline-flex px-2 py-0.5 text-[11px] font-semibold rounded-full bg-gray-100 text-gray-500">Sorting…</span>';
     const open = state.open.has(m.id);
+    const prov = providerName(((state.data.mailboxes || []).find((b) => b.id === m.mailboxId) || {}).provider);
     const body = state.bodies.get(m.id);
     const select = `<label class="sr-only" for="mbx-cat-${m.id}">Category</label>
       <select id="mbx-cat-${m.id}" data-mbx-cat="${m.id}" class="text-xs border border-gray-200 rounded-md px-1.5 py-1 bg-white" style="max-width:11rem">
@@ -141,9 +147,9 @@
       </div>
       ${open ? `<div class="px-4 pb-4 space-y-2">
         <div class="sm:hidden">${select}</div>
-        <div class="text-sm text-gray-800 whitespace-pre-wrap break-words bg-gray-50 border border-gray-100 rounded-lg p-3 max-h-64 overflow-y-auto">${body == null ? 'Fetching this email from Outlook…' : esc(body)}</div>
+        <div class="text-sm text-gray-800 whitespace-pre-wrap break-words bg-gray-50 border border-gray-100 rounded-lg p-3 max-h-64 overflow-y-auto">${body == null ? `Fetching this email from ${esc(prov)}…` : esc(body)}</div>
         <div class="flex flex-wrap gap-3 text-xs">
-          ${m.webLink ? `<a class="tab-link" href="${esc(m.webLink)}" target="_blank" rel="noopener noreferrer">Open in Outlook</a>` : ''}
+          ${m.webLink ? `<a class="tab-link" href="${esc(m.webLink)}" target="_blank" rel="noopener noreferrer">Open in ${esc(prov)}</a>` : ''}
           ${m.fromAddress && m.category !== 'private' ? `<button type="button" class="tab-link" data-mbx-private="${esc(m.fromAddress)}">Keep this sender private</button>` : ''}
         </div>
       </div>` : ''}
@@ -175,7 +181,7 @@
     const list = filtered(msgs);
     const lastRead = box.lastSyncAt ? `Last read ${when(box.lastSyncAt)}.` : 'Reading your inbox for the first time…';
     const problem = box.status !== 'active'
-      ? `<div class="mx-4 mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">Outlook asked for this mailbox to be connected again. <a class="font-bold underline" href="${esc(connectUrl())}">Reconnect</a></div>`
+      ? `<div class="mx-4 mt-3 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">${esc(providerName(box.provider))} asked for this mailbox to be connected again. <a class="font-bold underline" href="${esc(connectUrl(box.provider))}">Reconnect</a></div>`
       : box.lastError ? `<p class="tab-help text-amber-700">${esc(box.lastError)}</p>` : '';
     const empty = state.pill === 'needs'
       ? 'Nothing needs you right now. 🎉'
@@ -188,7 +194,7 @@
           </div>
           <div class="tab-pillbar-actions"><button type="button" class="tab-link" data-mbx-disconnect>Disconnect</button></div>
         </div>
-        <p class="tab-help">${esc(lastRead)} Sorted emails stay in your Outlook inbox — nothing there is moved or changed.</p>
+        <p class="tab-help">${esc(lastRead)} Sorted emails stay in your ${esc(providerName(box.provider))} inbox — nothing there is moved or changed.</p>
         ${problem}
         ${list.length ? `<ul class="mt-2">${list.map(rowHtml).join('')}</ul>` : `<p class="px-4 py-8 text-sm text-gray-600 text-center">${empty}</p>`}
       </div>`;
@@ -248,7 +254,7 @@
       }
       if (t.hasAttribute('data-mbx-disconnect')) {
         const box = (state.data.mailboxes || []).find((m) => m.id === state.mailboxId);
-        const ok = window.confirmModal ? await window.confirmModal(`Disconnect ${box ? box.address : 'this mailbox'}? Your Email Assistant stops reading it, and everything Be More Swan stored from it is deleted straight away. Your emails in Outlook are not touched.`, { title: 'Disconnect mailbox', confirmLabel: 'Disconnect', tone: 'destructive' }) : window.confirm('Disconnect this mailbox?');
+        const ok = window.confirmModal ? await window.confirmModal(`Disconnect ${box ? box.address : 'this mailbox'}? Your Email Assistant stops reading it, and everything Be More Swan stored from it is deleted straight away. Your emails in ${box ? providerName(box.provider) : 'your mailbox'} are not touched.`, { title: 'Disconnect mailbox', confirmLabel: 'Disconnect', tone: 'destructive' }) : window.confirm('Disconnect this mailbox?');
         if (!ok) return;
         state.busy = true;
         try { const out = await post({ action: 'disconnect', mailboxId: state.mailboxId }); state.mailboxId = null; state.open.clear(); state.bodies.clear(); await refresh(); if (window.alertModal) window.alertModal(out.message, { title: 'Mailbox disconnected' }); }

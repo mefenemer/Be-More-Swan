@@ -33,6 +33,21 @@ export const EMAIL_ASSISTANT_ROLE = 'email_assistant';
  */
 export const OUTLOOK_MAILBOX_SCOPE = 'offline_access https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read';
 
+/**
+ * Google scope for the Email Assistant (plan §3.1) — the SEPARATE "Be More Swan Mail" Google project
+ * (GMAIL_MAIL_CLIENT_ID / _SECRET), never the approved send-only project (GMAIL_CLIENT_ID). gmail.modify
+ * is restricted: until Google approves it only the project's listed test users can connect.
+ *
+ * ⚠️ Must match the consent screen's scopes exactly (docs/email-assistant-phase0.md §6.2) — the
+ * 2026-08-26 rejection was a code/console mismatch. No gmail.send: gmail.modify covers send and drafts.
+ */
+export const GMAIL_MAILBOX_SCOPE = 'openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify';
+
+/** Gmail can be connected on this site: the mail project's client is configured. */
+export function gmailMailboxConfigured(): boolean {
+    return Boolean(process.env.GMAIL_MAIL_CLIENT_ID && process.env.GMAIL_MAIL_CLIENT_SECRET);
+}
+
 export type MailboxRow = typeof mailboxes.$inferSelect;
 export type MailboxKind = 'business' | 'personal';
 
@@ -104,6 +119,28 @@ async function refreshOutlookMailboxToken(refreshToken: string): Promise<Mailbox
     };
 }
 
+/** Exchange a refresh token at Google (the mail project). Google does NOT rotate refresh tokens. */
+async function refreshGmailMailboxToken(refreshToken: string): Promise<MailboxToken> {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            client_id: process.env.GMAIL_MAIL_CLIENT_ID ?? '',
+            client_secret: process.env.GMAIL_MAIL_CLIENT_SECRET ?? '',
+            refresh_token: refreshToken,
+        }),
+    });
+    const data: { access_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+    if (!res.ok || !data.access_token) {
+        // 400 invalid_grant: revoked, password changed, or (while unverified) the 7-day test-user token
+        // expiry. The user must reconnect. 5xx / network: transient, never marks the mailbox broken.
+        if (res.status === 400 || res.status === 401) throw new MailboxError('needs_reconnect', 'Gmail asked for this mailbox to be connected again.');
+        throw new Error(`Gmail token refresh failed (${res.status}).`);
+    }
+    return { accessToken: data.access_token, refreshToken, expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : null };
+}
+
 /**
  * A usable access token for a mailbox, refreshing it when it is about to expire.
  *
@@ -116,7 +153,7 @@ export async function getMailboxAccessToken(db: Db, mailbox: Pick<MailboxRow, 'i
     const secret = await getSecret(db as never, mailbox.vaultRefKey).catch(() => null) as MailboxToken | null;
     if (!secret?.accessToken) throw new MailboxError('needs_reconnect', 'This mailbox needs to be connected again.');
     if (!secret.expiresAt || secret.expiresAt - REFRESH_SKEW_MS > Date.now()) return secret.accessToken;
-    if (mailbox.provider !== 'outlook') throw new MailboxError('not_configured', 'Only Outlook mailboxes can be read so far.');
+    if (mailbox.provider !== 'outlook' && mailbox.provider !== 'gmail') throw new MailboxError('not_configured', 'This kind of mailbox can\'t be read.');
 
     return singleFlight(`mailbox-refresh:${mailbox.id}`, async () => {
         try {
@@ -129,14 +166,16 @@ export async function getMailboxAccessToken(db: Db, mailbox: Pick<MailboxRow, 'i
                 if (!now?.accessToken) throw new MailboxError('needs_reconnect', 'This mailbox needs to be connected again.');
                 if (now.expiresAt && now.expiresAt - REFRESH_SKEW_MS > Date.now()) return now.accessToken;
                 if (!now.refreshToken) throw new MailboxError('needs_reconnect', 'This mailbox needs to be connected again.');
-                const fresh = await refreshOutlookMailboxToken(now.refreshToken);
+                const fresh = mailbox.provider === 'gmail'
+                    ? await refreshGmailMailboxToken(now.refreshToken)
+                    : await refreshOutlookMailboxToken(now.refreshToken);
                 await storeMailboxToken(tx, row.vaultRefKey, fresh);
                 return fresh.accessToken;
             });
         } catch (err) {
             // Written after the transaction, so it survives the rollback.
             if (err instanceof MailboxError && err.code === 'needs_reconnect') {
-                await db.update(mailboxes).set({ status: 'needs_reconnect', lastError: 'Outlook asked for this mailbox to be connected again.', updatedAt: new Date() })
+                await db.update(mailboxes).set({ status: 'needs_reconnect', lastError: err.message, updatedAt: new Date() })
                     .where(eq(mailboxes.id, mailbox.id)).catch(() => undefined);
             }
             throw err;
@@ -157,6 +196,17 @@ const sqlLockTimeout = sql`SET LOCAL lock_timeout = '10s'`;
 export async function disconnectMailbox(db: Db, organisationId: number, userId: number, mailboxId: number): Promise<boolean> {
     const row = await getOwnMailbox(db, organisationId, userId, mailboxId);
     if (!row) return false;
+    // Google: revoke the grant at Google too, so the app disappears from the user's Google account at
+    // once. Microsoft has no per-app revoke for a delegated grant (the user is told where to remove it).
+    if (row.provider === 'gmail') {
+        const tok = await getSecret(db as never, row.vaultRefKey).catch(() => null) as MailboxToken | null;
+        const token = tok?.refreshToken ?? tok?.accessToken;
+        if (token) {
+            await fetch('https://oauth2.googleapis.com/revoke', {
+                method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token }),
+            }).catch(() => undefined); // best effort: deleting our copy below is what matters
+        }
+    }
     await deleteSecret(db as never, row.vaultRefKey).catch((err) => {
         console.error('[mailboxes] vault delete failed on disconnect', { mailboxId, err: err instanceof Error ? err.message : err });
     });

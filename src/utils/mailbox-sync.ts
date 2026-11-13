@@ -3,7 +3,7 @@
 // Woken by mailbox-sync-background.ts: right after a mailbox connects, and every 10 minutes by
 // poll-mailboxes.ts. One run:
 //   1. takes the mailbox's lease (sync_lock_until) — ONE reader at a time per mailbox, across instances;
-//   2. reads the inbox's changes from the saved cursor (Graph delta), stores headers, marks removals;
+//   2. reads the inbox's changes from the saved cursor (Graph delta / Gmail history), stores headers, marks removals;
 //   3. sorts what is still pending: private senders, the user's sender rules, headers, then AI;
 //   4. saves the cursor and releases the lease.
 // Never throws to its caller. Nothing here writes to the mailbox (Phase 1 is read-only).
@@ -15,7 +15,7 @@ import { gatewayGenerate } from '../lib/ai-gateway';
 import { resolveBaseUrl } from './base-url';
 import { isFeatureEnabled } from './feature-flags';
 import { EMAIL_ASSISTANT_FLAG, MailboxError, getMailboxAccessToken, parseMailboxSettings, type MailboxRow } from './mailboxes';
-import { GraphError, getGraphBodyText, getGraphHeaders, listGraphChanges } from './mail-reader/graph';
+import { cursorExpired, providerHttpError, readerFor } from './mail-reader';
 import {
     buildTriageSystem, buildTriageUser, headerSort, parseTriageResponse, privateSort, senderRuleSort, trimEmailBody,
     type SortResult, type TriageInput,
@@ -88,18 +88,20 @@ export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOut
     let lastError: string | null = null;
     try {
         if (!(await isFeatureEnabled(box.organisationId, EMAIL_ASSISTANT_FLAG))) return out;
-        if (box.provider !== 'outlook') return out; // Gmail: Phase 3
+        const reader = readerFor(box.provider);
+        if (!reader) return out;
 
         const token = await getMailboxAccessToken(db, box);
 
         // ── 1. Read changes ──────────────────────────────────────────────────────────────────────
         let changes;
         try {
-            changes = await listGraphChanges(token, box.syncCursor, Date.now() + READ_BUDGET_MS);
+            changes = await reader.listChanges(token, box.address, box.syncCursor, Date.now() + READ_BUDGET_MS);
         } catch (err) {
-            // 410 / syncStateNotFound: the saved delta link expired. Start again from the 14-day window.
-            if (err instanceof GraphError && (err.status === 410 || err.status === 400) && box.syncCursor) {
-                changes = await listGraphChanges(token, null, Date.now() + READ_BUDGET_MS);
+            // The saved cursor expired (Graph 410, Gmail 404): start again from the 14-day window.
+            const http = providerHttpError(err);
+            if (http && box.syncCursor && cursorExpired(box.provider, http.status)) {
+                changes = await reader.listChanges(token, box.address, null, Date.now() + READ_BUDGET_MS);
             } else throw err;
         }
         for (const m of changes.messages) {
@@ -139,11 +141,11 @@ export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOut
         for (const msg of pending) {
             const free = privateSort(msg.fromAddress, settings.privateSenders) ?? senderRuleSort(msg.fromAddress, settings.senderRules);
             if (free) { await save(msg.id, free); continue; }
-            const headers = await getGraphHeaders(token, msg.providerMessageId).catch(() => ({} as Record<string, string>));
+            const headers = await reader.getHeaders(token, msg.providerMessageId).catch(() => ({} as Record<string, string>));
             const byHeaders = headerSort({ fromAddress: msg.fromAddress, providerFolderHint: null }, headers);
             if (byHeaders) { await save(msg.id, byHeaders); continue; }
             if (forAi.length >= aiLeft) continue; // over today's ceiling: stays pending until tomorrow
-            const body = await getGraphBodyText(token, msg.providerMessageId).then((b) => trimEmailBody(b.text)).catch(() => '');
+            const body = await reader.getBody(token, msg.providerMessageId).then((b) => trimEmailBody(b.text)).catch(() => '');
             forAi.push({ id: msg.id, input: { ref: forAi.length + 1, fromName: msg.fromName, fromAddress: msg.fromAddress, subject: msg.subject, receivedAt: msg.receivedAt, body } });
         }
 
@@ -173,11 +175,11 @@ export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOut
         }
     } catch (err) {
         if (err instanceof MailboxError) lastError = err.message;
-        else if (err instanceof GraphError && err.status === 401) {
-            lastError = 'Outlook asked for this mailbox to be connected again.';
+        else if (providerHttpError(err)?.status === 401) {
+            lastError = `${providerName(box.provider)} asked for this mailbox to be connected again.`;
             await db.update(mailboxes).set({ status: 'needs_reconnect' }).where(eq(mailboxes.id, box.id)).catch(() => undefined);
-        } else if (err instanceof GraphError && err.status === 429) {
-            lastError = 'Outlook asked us to slow down; trying again shortly.';
+        } else if (providerHttpError(err)?.status === 429) {
+            lastError = `${providerName(box.provider)} asked us to slow down; trying again shortly.`;
         } else {
             lastError = 'Reading this mailbox failed; trying again shortly.';
             console.error('[mailbox-sync] run failed', { mailboxId: box.id, err: err instanceof Error ? err.message : err });
@@ -188,6 +190,11 @@ export async function runMailboxSync(db: Db, mailboxId: number): Promise<SyncOut
             .where(eq(mailboxes.id, box.id)).catch(() => undefined);
     }
     return out;
+}
+
+/** The provider's name, for messages the user reads. Pure. */
+export function providerName(provider: string): string {
+    return provider === 'gmail' ? 'Gmail' : provider === 'outlook' ? 'Outlook' : 'Your email provider';
 }
 
 /** How many of this mailbox's emails the AI sorted since midnight UTC. */

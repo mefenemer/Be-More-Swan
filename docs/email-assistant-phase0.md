@@ -258,9 +258,15 @@ The Google Cloud sub-processor notice (§3.3, decided) goes out separately under
    - `https://www.googleapis.com/auth/gmail.modify`
 5. Audience → **Testing**, test users: our own mailboxes only (max 100). Do **not** submit for
    verification yet: that waits for the privacy page (§4) and the Phase 3 demo.
-6. Credentials → OAuth client ID, Web application, redirect URIs for staging and prod (same callback
-   path pattern as the existing Gmail client). Put the id/secret in Netlify as `GMAIL_MAIL_CLIENT_ID`
-   / `GMAIL_MAIL_CLIENT_SECRET` on both sites (owner adds; never paste them into a chat).
+6. Credentials → **Create credentials → OAuth client ID** → **Web application**, with these
+   **Authorised redirect URIs** (the code builds exactly these — mailbox-oauth.ts):
+   - `https://staging--bemoreswan.netlify.app/api/mailbox-oauth/gmail/callback`
+   - `https://bemoreswan.com/api/mailbox-oauth/gmail/callback` (prod; add now, harmless until used)
+   Put the id/secret in Netlify as `GMAIL_MAIL_CLIENT_ID` / `GMAIL_MAIL_CLIENT_SECRET` — **staging only
+   for now**: the Emails tab shows "Connect Gmail" wherever both are set, and until Google approves,
+   only test users could finish the sign-in. Never paste them into a chat.
+   ⚠️ Unverified apps: Google expires test users' refresh tokens after 7 days, so a test mailbox will
+   need reconnecting weekly until approval (the tab says so and shows Reconnect).
 7. Later (Phase 3): Pub/Sub topic `gmail-push`, grant
    `gmail-api-push@system.gserviceaccount.com` the **Pub/Sub Publisher** role on it, push subscription
    to `https://<site>/.netlify/functions/mail-push-gmail` with authentication (service account OIDC

@@ -34,6 +34,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, blogPosts, newsletterIssues, videoProjects, visualBriefs, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { buildMailboxSnapshot } from '../../src/utils/mailbox-snapshot';
+import { gmailMailboxConfigured } from '../../src/utils/mailboxes';
 import { appendFooter } from '../../src/utils/disclosure-footer';
 import { resolvePostFooter } from '../../src/utils/post-disclosure';
 import { logAiUsage } from '../../src/utils/ai-usage';
@@ -2203,11 +2204,11 @@ or
                 `You are this business's Email Assistant. You look after the owner's mailbox so they stay — and feel — organised: every new email is sorted into a category (Needs a reply, Customers, New enquiries, Money, Bookings & meetings, Suppliers & partners, Newsletters & offers, Notifications, Cold pitches, Other) with a priority (Now, Today, This week, Whenever) and a one-line summary. You help them see what needs them, find an email, and understand where things stand.
 
 ${urgent ? `What counts as urgent for them (from set-up): ${String(urgent).slice(0, 500)}` : ''}
-${provider === 'gmail' ? 'They said at set-up that their business email is Gmail. Gmail can\'t be connected yet (it is coming soon): if no mailbox is connected, tell them so plainly, and that Outlook works now.' : ''}
+${provider === 'gmail' && !gmailMailboxConfigured() ? 'They said at set-up that their business email is Gmail. Gmail can\'t be connected yet (it is coming soon): if no mailbox is connected, tell them so plainly, and that Outlook works now.' : ''}
 
 ${rc.mailboxSnapshot ?? 'Their email could not be read this turn. Do not guess what is in their inbox: say so, and suggest they look at the "Emails" tab.'}
 
-HOW TO ANSWER. "What needs me today?" → the Now and Today emails above, most urgent first, one short line each (who, what they want). "Anything from Jo?" → search the lists above by name, address and subject; if nothing matches, say you can only see the last 14 days of the inbox and suggest searching in Outlook. Quote senders and subjects exactly as listed; never invent an email, a date, an amount or what an email says beyond its summary. You only see each email's sender, subject, date, category and one-line summary, never its full text: to read one, they open it on the "Emails" tab.
+HOW TO ANSWER. "What needs me today?" → the Now and Today emails above, most urgent first, one short line each (who, what they want). "Anything from Jo?" → search the lists above by name, address and subject; if nothing matches, say you can only see the last 14 days of the inbox and suggest searching in their mailbox (Outlook or Gmail). Quote senders and subjects exactly as listed; never invent an email, a date, an amount or what an email says beyond its summary. You only see each email's sender, subject, date, category and one-line summary, never its full text: to read one, they open it on the "Emails" tab.
 
 WHAT YOU CAN'T DO YET. You can't send, reply to, delete, archive or move emails, in chat or anywhere: nothing in their mailbox is changed. Drafting replies and clean-ups (always approved by them first) are coming next. On the "Emails" tab they can: move an email to another category (the sender is remembered for next time), mark a sender private (never sent to AI, not even the subject), press Refresh to read new mail now, and Disconnect (which deletes everything stored from that mailbox). From this chat, tell them where those buttons are; never say you did one.
 

@@ -11,7 +11,7 @@
 import { and, desc, isNull, ne, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { mailboxMessages } from '../../db/schema';
-import { listOwnMailboxes } from './mailboxes';
+import { gmailMailboxConfigured, listOwnMailboxes } from './mailboxes';
 import { PRIORITY_LABELS, categoryLabel, PRIVATE_CATEGORY, type Priority } from './email-sort';
 
 type Db = ReturnType<typeof getDb>;
@@ -40,7 +40,9 @@ export function formatMailboxSnapshot(
     countsOnly: boolean,
 ): string {
     if (!boxes.length) {
-        return 'YOUR MAILBOXES: none connected yet. To start, the user opens the "Emails" tab and presses "Connect Outlook" (Microsoft 365 or Outlook.com; Gmail is coming soon). You cannot connect it from this chat.';
+        return gmailMailboxConfigured()
+            ? 'YOUR MAILBOXES: none connected yet. To start, the user opens the "Emails" tab and presses "Connect Outlook" (Microsoft 365 or Outlook.com) or "Connect Gmail" (Gmail or Google Workspace). You cannot connect it from this chat.'
+            : 'YOUR MAILBOXES: none connected yet. To start, the user opens the "Emails" tab and presses "Connect Outlook" (Microsoft 365 or Outlook.com; Gmail is coming soon). You cannot connect it from this chat.';
     }
     const head = boxes.map((b) => `- ${b.address}: ${b.status === 'active' ? 'connected' : 'needs reconnecting (a Reconnect link is on the Emails tab)'}, last read ${b.lastSyncAt ? b.lastSyncAt.toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'not yet (first sort in progress)'}`).join('\n');
     if (countsOnly) {

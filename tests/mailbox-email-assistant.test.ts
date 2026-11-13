@@ -18,11 +18,13 @@ import {
     DEFAULT_CATEGORIES, EMAIL_SPECIAL_CATEGORY_CLAUSE, buildTriageSystem, buildTriageUser, headerSort, parseTriageResponse,
     privateSort, senderMatches, senderRuleSort, trimEmailBody,
 } from '../src/utils/email-sort';
-import { mailboxAccess, parseMailboxSettings, OUTLOOK_MAILBOX_SCOPE } from '../src/utils/mailboxes';
+import { mailboxAccess, parseMailboxSettings, OUTLOOK_MAILBOX_SCOPE, GMAIL_MAILBOX_SCOPE } from '../src/utils/mailboxes';
 import { formatMailboxSnapshot, type SnapshotMessage } from '../src/utils/mailbox-snapshot';
 import { initialDeltaUrl, normaliseGraphMessage, FIRST_SORT_DAYS } from '../src/utils/mail-reader/graph';
 import { withSpecialCategoryClause, specialCategoryClauseFor, SPECIAL_CATEGORY_MARKER } from '../src/utils/special-category-clause';
-import { mailboxConsentError, mailboxReturnUrl } from '../netlify/functions/mailbox-oauth';
+import { grantCoversReading, mailboxAuthUrl, mailboxConsentError, mailboxReturnUrl } from '../netlify/functions/mailbox-oauth';
+import { applyGmailHistory, decodeGmailCursor, encodeGmailCursor, firstSortQuery, gmailBodyText, normaliseGmailMessage, parseFromHeader } from '../src/utils/mail-reader/gmail';
+import { cursorExpired, readerFor } from '../src/utils/mail-reader';
 import { mayPoll } from '../netlify/functions/poll-mailboxes';
 import { normaliseSenderEntry } from '../netlify/functions/mailboxes';
 import { ASSISTANT_BUILD } from '../src/config/assistant-build-manifest';
@@ -146,7 +148,7 @@ check('impersonating support staff get counts only — never an email', () => {
     assert.strictEqual(mailboxAccess({ impersonation: { realAdminId: 1 } }), 'counts_only');
     const fn = code('netlify/functions/mailboxes.ts');
     assert.ok(/if \(access !== 'owner'\) return json\(403, \{ error: 'Email content is only shown to the mailbox owner\.' \}\)/.test(fn));
-    assert.ok(/if \(access !== 'owner'\) return json\(200, \{ available, access, mailboxes: cards, stats, messages: \[\] \}\)/.test(fn));
+    assert.ok(/if \(access !== 'owner'\) return json\(200, \{ available, access, providers, mailboxes: cards, stats, messages: \[\] \}\)/.test(fn));
     assert.ok(/if \(access !== 'owner'\) return json\(403, \{ error: 'Only the mailbox owner can change it\.' \}\)/.test(fn));
 });
 
@@ -183,8 +185,9 @@ check('chat snapshot query leaves private senders\' email out entirely', () => {
 check('sorting never sends a private sender to AI: private and sender rules run before any fetch', () => {
     const src = code('src/utils/mailbox-sync.ts');
     const loop = src.slice(src.indexOf('for (const msg of pending)'), src.indexOf('if (forAi.length)'));
-    assert.ok(loop.indexOf('privateSort(') < loop.indexOf('getGraphHeaders('));
-    assert.ok(loop.indexOf('privateSort(') < loop.indexOf('getGraphBodyText('));
+    assert.ok(loop.indexOf('privateSort(') >= 0);
+    assert.ok(loop.indexOf('privateSort(') < loop.indexOf('reader.getHeaders('));
+    assert.ok(loop.indexOf('privateSort(') < loop.indexOf('reader.getBody('));
 });
 
 check('worker logs carry counts only — never a subject, sender or address', () => {
@@ -232,7 +235,8 @@ check('the callback must be finished by the person who started it, and checks th
     const src = code('netlify/functions/mailbox-oauth.ts');
     assert.ok(/String\(ctx\.userId\) !== st\.userId/.test(src));
     assert.ok(/Number\(stored\.organisationId\) !== ctx\.organisationId/.test(src));
-    assert.ok(/granted\.includes\('mail\.readwrite'\)/.test(src));
+    assert.ok(/const got = await exchangeCode\(provider, qp\.code, redirectUri\)/.test(src));
+    assert.ok(grantCoversReading('outlook', 'Mail.ReadWrite Mail.Send') && !grantCoversReading('outlook', 'Mail.Send User.Read'));
     assert.ok(/isFeatureEnabled\(ctx\.organisationId, EMAIL_ASSISTANT_FLAG\)/.test(src));
 });
 
@@ -269,6 +273,96 @@ check('token refresh: single flight + row lock, re-read under the lock (no doubl
     assert.ok(/singleFlight\(`mailbox-refresh:\$\{mailbox\.id\}`/.test(src));
     assert.ok(/\.for\('update'\)/.test(src));
     assert.ok(/refreshToken: data\.refresh_token \?\? refreshToken/.test(src), 'Microsoft rotates refresh tokens');
+});
+
+
+console.log('\nGmail (Phase 3a)');
+
+check('Gmail uses the SEPARATE mail project and gmail.modify only — never the approved send project', () => {
+    assert.strictEqual(GMAIL_MAILBOX_SCOPE, 'openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify');
+    assert.ok(!/gmail\.send|mail\.google\.com|gmail\.settings|gmail\.metadata/.test(GMAIL_MAILBOX_SCOPE), 'no wider or extra Gmail scope');
+    for (const f of ['netlify/functions/mailbox-oauth.ts', 'src/utils/mailboxes.ts']) {
+        assert.ok(!/process\.env\.GMAIL_CLIENT_(ID|SECRET)\b/.test(code(f)), `${f} must use GMAIL_MAIL_CLIENT_*`);
+    }
+    const u = new URL(mailboxAuthUrl('gmail', 'cid', 'https://x/api/mailbox-oauth/gmail/callback', 'st'));
+    assert.strictEqual(u.searchParams.get('scope'), GMAIL_MAILBOX_SCOPE);
+    assert.strictEqual(u.searchParams.get('access_type'), 'offline');
+    assert.ok((u.searchParams.get('prompt') ?? '').includes('consent'), 'Google gives a refresh token only on consent');
+    assert.ok(grantCoversReading('gmail', 'openid https://www.googleapis.com/auth/gmail.modify'));
+    assert.ok(!grantCoversReading('gmail', 'openid https://www.googleapis.com/auth/userinfo.email'));
+});
+
+check('Google Workspace admin block is told apart; the CSRF key and state carry the provider', () => {
+    assert.strictEqual(mailboxConsentError('admin_policy_enforced', ''), 'admin_approval_needed');
+    const src = code('netlify/functions/mailbox-oauth.ts');
+    assert.ok(/`mailbox_csrf:\$\{ctx\.userId\}:\$\{provider\}`/.test(src));
+    assert.ok(/st\.provider !== provider/.test(src));
+    assert.ok(/never overwrite a good one with null/.test(read('netlify/functions/mailbox-oauth.ts')));
+});
+
+check('From header: "Name <addr>", bare address, and name-only', () => {
+    assert.deepStrictEqual(parseFromHeader('"Jo Bloggs" <JO@X.com>'), { name: 'Jo Bloggs', address: 'jo@x.com' });
+    assert.deepStrictEqual(parseFromHeader('jo@x.com'), { name: null, address: 'jo@x.com' });
+    assert.deepStrictEqual(parseFromHeader('Mailer'), { name: 'Mailer', address: null });
+    assert.deepStrictEqual(parseFromHeader(undefined), { name: null, address: null });
+});
+
+check('a Gmail message: read flag from UNREAD, link for the right account, Promotions as a hint', () => {
+    const m = normaliseGmailMessage({ id: 'abc', threadId: 't1', internalDate: '1762934400000', labelIds: ['INBOX', 'UNREAD', 'CATEGORY_PROMOTIONS'],
+        payload: { headers: [{ name: 'From', value: 'Shop <news@shop.com>' }, { name: 'Subject', value: 'Sale' }] } }, 'me@biz.com');
+    assert.strictEqual(m.isRead, false);
+    assert.strictEqual(m.fromAddress, 'news@shop.com');
+    assert.strictEqual(m.providerFolderHint, 'other');
+    assert.strictEqual(m.receivedAt!.toISOString(), '2025-11-12T08:00:00.000Z');
+    assert.ok(m.webLink!.includes('authuser=me%40biz.com') && m.webLink!.endsWith('#all/abc'));
+});
+
+check('history: only the INBOX label moves an email in or out; later entries win', () => {
+    const r = applyGmailHistory([
+        { messagesAdded: [{ message: { id: 'a', labelIds: ['INBOX'] } }, { message: { id: 'sent', labelIds: ['SENT'] } }] },
+        { labelsRemoved: [{ message: { id: 'a' }, labelIds: ['INBOX'] }] },          // archived
+        { labelsAdded: [{ message: { id: 'b' }, labelIds: ['STARRED'] }] },          // not an inbox move
+        { labelsAdded: [{ message: { id: 'c' }, labelIds: ['INBOX'] }] },            // moved back to inbox
+        { messagesDeleted: [{ message: { id: 'd' } }] },
+    ]);
+    assert.deepStrictEqual(r.added.sort(), ['c']);
+    assert.deepStrictEqual(r.removed.sort(), ['a', 'd']);
+});
+
+check('the cursor holds the historyId (and a page token mid first sort); junk is "start again"', () => {
+    assert.deepStrictEqual(decodeGmailCursor(encodeGmailCursor({ historyId: '123' })), { historyId: '123', pageToken: null });
+    assert.deepStrictEqual(decodeGmailCursor(encodeGmailCursor({ historyId: '9', pageToken: 'pg' })), { historyId: '9', pageToken: 'pg' });
+    assert.strictEqual(decodeGmailCursor('https://graph.microsoft.com/...'), null, 'an Outlook delta link is not a Gmail cursor');
+    assert.strictEqual(decodeGmailCursor('gmail:{"h":"x"}'), null);
+    assert.strictEqual(firstSortQuery(), `in:inbox newer_than:${FIRST_SORT_DAYS}d`);
+});
+
+check('an expired cursor reads the 14-day window again: Gmail 404, Graph 410', () => {
+    assert.ok(cursorExpired('gmail', 404) && !cursorExpired('gmail', 410));
+    assert.ok(cursorExpired('outlook', 410) && !cursorExpired('outlook', 404));
+    assert.ok(readerFor('gmail') && readerFor('outlook') && !readerFor('yahoo'));
+});
+
+check('body text: text/plain preferred; HTML has its tags and styles taken out', () => {
+    const b64 = (t: string) => Buffer.from(t).toString('base64url');
+    assert.strictEqual(gmailBodyText({ mimeType: 'multipart/alternative', parts: [
+        { mimeType: 'text/plain', body: { data: b64('Hello Jo') } }, { mimeType: 'text/html', body: { data: b64('<b>Hello</b>') } }] }), 'Hello Jo');
+    const html = gmailBodyText({ mimeType: 'text/html', body: { data: b64('<style>p{}</style><p>Hi&nbsp;there</p><script>x()</script>') } });
+    assert.ok(html.includes('Hi there') && !html.includes('p{}') && !html.includes('x()') && !html.includes('<'));
+});
+
+check('disconnecting a Gmail mailbox revokes the grant at Google before our copy is deleted', () => {
+    const src = code('src/utils/mailboxes.ts');
+    const fn = src.slice(src.indexOf('export async function disconnectMailbox'), src.indexOf('export interface MailboxSettings'));
+    assert.ok(fn.indexOf("oauth2.googleapis.com/revoke") > 0 && fn.indexOf("oauth2.googleapis.com/revoke") < fn.indexOf('deleteSecret('));
+});
+
+check('the sync and the open-email path go through the provider\'s reader, never Graph directly', () => {
+    for (const f of ['src/utils/mailbox-sync.ts', 'netlify/functions/mailboxes.ts']) {
+        const src = code(f);
+        assert.ok(/readerFor\(/.test(src), f);
+        assert.ok(!/getGraphBodyText|getGraphHeaders|listGraphChanges/.test(src), `${f} still calls Graph directly`);
+    }
 });
 
 console.log('\nThe role');
