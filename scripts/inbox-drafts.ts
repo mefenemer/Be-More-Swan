@@ -40,14 +40,14 @@ async function main() {
             console.log(`\n${waiting.length} question(s) waiting on us (${env}).`);
         } else if (cmd === 'show') {
             const [t] = await sql`
-                SELECT t.*, u.email, u.first_name, o.name AS org_name
+                SELECT t.*, t.draft_at::text AS draft_at_text, t.created_at::text AS created_text, u.email, u.first_name, o.name AS org_name
                   FROM support_tickets t LEFT JOIN users u ON u.id = t.user_id LEFT JOIN organisations o ON o.id = t.organisation_id
                  WHERE t.id = ${id}`;
             if (!t) throw new Error(`No ticket #${id}.`);
-            console.log(`#${t.id} [${t.status}] ${t.subject}\nFrom: ${t.first_name || ''} (workspace ${t.organisation_id ?? '-'} ${t.org_name || ''})  Category: ${t.category}  Created: ${String(t.created_at)}\n\n${t.description}`);
+            console.log(`#${t.id} [${t.status}] ${t.subject}\nFrom: ${t.first_name || ''} (workspace ${t.organisation_id ?? '-'} ${t.org_name || ''})  Category: ${t.category}  Created: ${String(t.created_text).slice(0, 16)}\n\n${t.description}`);
             const replies = await sql`SELECT created_at::text AS at, author_id, is_internal, body FROM ticket_replies WHERE ticket_id = ${id} ORDER BY created_at`;
             for (const r of replies) console.log(`\n── ${r.at.slice(0, 16)} ${r.is_internal ? 'INTERNAL NOTE' : r.author_id === t.user_id ? 'customer' : 'us'}\n${r.body}`);
-            if (t.draft_reply) console.log(`\n── Current draft (${String(t.draft_at).slice(0, 16)}):\n${t.draft_reply}${t.draft_note ? `\n[note] ${t.draft_note}` : ''}`);
+            if (t.draft_reply) console.log(`\n── Current draft (${String(t.draft_at_text).slice(0, 16)} UTC):\n${t.draft_reply}${t.draft_note ? `\n[note] ${t.draft_note}` : ''}`);
         } else if (cmd === 'draft') {
             const file = arg(rest, '--file');
             if (!id || !file) throw new Error('draft <id> --file <reply.md> [--note <why.md>]');

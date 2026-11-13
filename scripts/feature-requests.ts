@@ -35,8 +35,9 @@ async function main() {
     // Append to the request's notes and refresh the "Claude working" heartbeat.
     const note = (text: string, keepWorking = true) => sql`
         UPDATE feature_requests
-           SET dev_notes = concat_ws(E'\n\n', dev_notes, ${`[${stamp()} UTC] ${text}`}),
-               dev_runner_id = ${keepWorking ? RUNNER_ID : null}, dev_runner_heartbeat = ${keepWorking ? sql`now()` : null},
+           SET dev_notes = concat_ws(E'\n\n', dev_notes, ${`[${stamp()} UTC] ${text}`}::text),
+               dev_runner_id = ${keepWorking ? RUNNER_ID : null}::text,
+               dev_runner_heartbeat = CASE WHEN ${keepWorking}::boolean THEN now() ELSE NULL END,
                updated_at = now()
          WHERE id = ${id} RETURNING id`;
     const readFile = (what: string) => { const f = arg(rest, '--file'); if (!f) throw new Error(`--file <path> with the ${what} is required.`); return readFileSync(f, 'utf8').trim(); };
