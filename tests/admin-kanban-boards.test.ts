@@ -37,8 +37,8 @@ check('Fix pipeline: statuses and dev fields land in the right column', () => {
     const c = ctx.irColumnOf;
     assert.strictEqual(c({ status: 'reported' }), 'new');
     assert.strictEqual(c({ status: 'more_info_required' }), 'new');
-    assert.strictEqual(c({ status: 'backlog' }), 'backlog');
-    assert.strictEqual(c({ status: 'on_hold' }), 'backlog');
+    assert.strictEqual(c({ status: 'on_hold' }), 'waiting');        // shown as Waiting on Others; Backlog removed 2026-11-13
+    assert.strictEqual(c({ status: 'investigating' }), 'fixing');
     assert.strictEqual(c({ status: 'fix_in_progress', devHandoffStatus: 'in_progress' }), 'fixing');
     assert.strictEqual(c({ status: 'reported', devHandoffStatus: 'queued' }), 'fixing');
     assert.strictEqual(c({ status: 'fix_in_progress', devHandoffStatus: 'completed', devMergeStatus: 'ready' }), 'review');
@@ -61,14 +61,15 @@ check('Feature requests: nine statuses fold into six columns, and each column ha
     }
 });
 
-check('Fix pipeline drops: only triage, hand-off and close; pipeline columns refuse with a reason', () => {
+check('Fix pipeline drops: only Waiting on others and close; Claude moves the rest (2026-11-13)', () => {
     const rules = between('canDrop: (i, to) => {', 'onDrop: async (i, to) => {');
     assert.ok(rules.includes("if (to === 'review') return 'Moves here by itself"));
     assert.ok(rules.includes("if (to === 'golive') return 'Moves here by itself"));
     assert.ok(rules.includes("if (to === 'live') return 'Moves here by itself"));
-    assert.ok(rules.includes("if (to === 'fixing') return ['new', 'backlog'].includes(from)"));
+    assert.ok(rules.includes("if (to === 'fixing') return 'Claude moves a ticket here"));
+    assert.ok(rules.includes("if (to === 'waiting') return ['new', 'fixing'].includes(from)"));
     const drop = between("onDrop: async (i, to) => {", 'onOpen: (i) => openIssuePanel(i.id)');
-    assert.ok(drop.includes('action=handoff') && drop.includes('window.confirmModal'));
+    assert.ok(!drop.includes('action=handoff') && drop.includes('window.confirmModal') && drop.includes("'on_hold'"));
 });
 
 check('Feature requests: Released and Declined ask first (they notify voters)', () => {

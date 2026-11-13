@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PgDialect } from 'drizzle-orm/pg-core';
-import { CLOUD_RUNNER_ID, type AiFixRun } from '../src/utils/issue-ai-fix';
+import { CLOUD_RUNNER_ID, type WorkflowRun as AiFixRun } from '../src/utils/issue-github';
 import {
     dispatchCloudMerge, getMergePr, nextMergeState, syncCloudMerge, mergeRunTitle, MERGE_NO_RUN_MINS, MERGE_STUCK_MINS, type MergePr,
 } from '../src/utils/issue-cloud-merge';

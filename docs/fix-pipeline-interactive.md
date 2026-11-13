@@ -1,7 +1,7 @@
 # Fix pipeline: worked by Claude in an interactive session (owner decision, 2026-11-13)
 
-Replaces passing issues to the GitHub Actions "AI developer" (`ai-fix.yml`), which could only read code and
-mostly guessed. Claude in an interactive session can see the real system (deployed commits, the databases,
+Replaces the GitHub Actions "AI developer" (`ai-fix.yml`, "Pass to Developer", "Redo fix"), which could only
+read code and mostly guessed. It was **removed on 2026-11-13** (owner: inferior). Claude in an interactive session can see the real system (deployed commits, the databases,
 GitHub, the browser), run the tests and iterate, so the quality matches a normal session. The pipeline is
 kept for what it is good at: holding the ticket, its status and the evidence.
 
@@ -20,7 +20,8 @@ kept for what it is good at: holding the ticket, its status and the evidence.
    - Opens a PR into staging, then `pr <id>` → **Merge** (PR, summary and any SQL recorded).
    - `staging-sql <id>` puts additive SQL on the staging DB and checks it (ticket row "SQL on staging").
    - Merges the PR into staging, then `merged <id>`; `sync <id>` follows staging CI and the staging deploy.
-   - Can't fix it? `status <id> more_info_required|backlog|on_hold|closed --file <why>`.
+   - Can't fix it? `status <id> more_info_required|on_hold|closed --file <why>` (`on_hold` shows as **Waiting on
+     Others**: blocked on someone outside, e.g. Meta).
 4. **The ticket's "Ready for production?" checklist** then shows root cause, repro test, SQL safety, SQL on
    staging, tests on staging and live on staging.
 5. **The owner ships to production.** Prod SQL first ("SQL on production" row): Approve for production runs
@@ -50,6 +51,12 @@ kept for what it is good at: holding the ticket, its status and the evidence.
 The hourly live check (`src/utils/issue-fix-live.ts`) still tells the reporter "fixed and live" when the
 prod deploy contains the fix, and closes a ticket 7 days later with a last notification. Those are the
 system's messages, not Claude's.
+
+## Statuses (owner, 2026-11-13)
+
+Reported → Investigation In Progress → Fix In Progress → Merge → (Fixed & Ready to Test, set by the live check)
+→ Closed. Side states: More Info Required (waiting on the reporter), Waiting on Others (`on_hold`: waiting on
+someone outside), On Roadmap. **Backlog was removed** (`db/z-issue-remove-backlog.sql` moves any to Reported).
 
 ## Database
 

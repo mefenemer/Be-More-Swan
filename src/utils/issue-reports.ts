@@ -17,8 +17,7 @@ type Db = ReturnType<typeof getDb>;
 export const ISSUE_STATUSES = [
     'reported',
     'investigating',   // db/z-issue-investigating.sql (owner 2026-11-13): looking for the cause
-    'backlog',
-    'on_hold',
+    'on_hold',         // shown as "Waiting on Others" (owner 2026-11-13); 'backlog' removed (db/z-issue-remove-backlog.sql)
     'fix_in_progress',
     'merge',
     'fixed_ready_to_test',
@@ -37,8 +36,7 @@ export function isIssueStatus(v: unknown): v is IssueStatus {
 export const ISSUE_STATUS_LABEL: Record<IssueStatus, string> = {
     reported: 'Reported',
     investigating: 'Investigation In Progress',
-    backlog: 'Backlog',
-    on_hold: 'On Hold',
+    on_hold: 'Waiting on Others',
     fix_in_progress: 'Fix In Progress',
     merge: 'Merge',
     fixed_ready_to_test: 'Fixed & Ready to Test',
@@ -119,8 +117,7 @@ export async function notifyIssueUser(
         status === 'more_info_required'  ? "We'd love to help, but we need a bit more detail from you first." :
         status === 'investigating'       ? "We're looking into this now to find out what's causing it." :
         status === 'fix_in_progress'     ? "We've picked this up and are working on a fix now." :
-        status === 'backlog'             ? "We've added this to our backlog and will investigate as soon as we can." :
-        status === 'on_hold'             ? "We're putting this on hold for now while we weigh it up against other work — we'll come back to it." :
+        status === 'on_hold'             ? "We're waiting on someone outside Be More Swan (such as a partner like Meta) before we can go further. We'll pick it straight back up as soon as we hear back." :
         status === 'merge'               ? "The fix is done and queued to be merged to staging — nearly there!" :
         status === 'roadmap'             ? "We've added your request to our roadmap — we'll get to it as soon as we can." :
         status === 'closed'              ? "We've closed this one out. Thanks again for flagging it!" :
@@ -132,8 +129,7 @@ export async function notifyIssueUser(
         status === 'fixed_ready_to_test' ? `✅ Issue #${issueId} fixed — ready to test` :
         status === 'more_info_required'  ? `❓ Issue #${issueId} — more info needed` :
         status === 'investigating'       ? `🔎 Issue #${issueId}: we're investigating` :
-        status === 'backlog'             ? `🗂️ Issue #${issueId} added to the backlog` :
-        status === 'on_hold'             ? `⏸️ Issue #${issueId} placed on hold` :
+        status === 'on_hold'             ? `⏸️ Issue #${issueId}: waiting on others` :
         status === 'roadmap'             ? `🗺️ Issue #${issueId} added to our roadmap` :
         `🔧 Issue #${issueId} updated: ${label}`;
 
@@ -145,7 +141,6 @@ export async function notifyIssueUser(
         fixed_ready_to_test: 'issue_fixed_ready_to_test',
         more_info_required:  'issue_more_info_required',
         fix_in_progress:     'issue_fix_in_progress',
-        backlog:             'issue_backlog',
         on_hold:             'issue_on_hold',
         merge:               'issue_merge',
         roadmap:             'issue_roadmap',

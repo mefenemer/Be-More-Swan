@@ -37,7 +37,7 @@ check('issues: new = us, asked/ready-to-test = them, pipeline = being fixed, and
     assert.strictEqual(issueWaitingOn('reported', false), 'us');
     assert.strictEqual(issueWaitingOn('more_info_required', false), 'customer');
     assert.strictEqual(issueWaitingOn('fixed_ready_to_test', false), 'customer');
-    for (const s of ['backlog', 'on_hold', 'fix_in_progress', 'merge']) assert.strictEqual(issueWaitingOn(s, false), 'fixing', s);
+    for (const s of ['investigating', 'on_hold', 'fix_in_progress', 'merge']) assert.strictEqual(issueWaitingOn(s, false), 'fixing', s);
     assert.strictEqual(issueWaitingOn('fix_in_progress', true), 'us', 'their newest message needs reading');
     assert.strictEqual(issueWaitingOn('more_info_required', true), 'us', 'they answered our question');
     for (const s of ['closed', 'roadmap']) assert.strictEqual(issueWaitingOn(s, true), 'done', s);

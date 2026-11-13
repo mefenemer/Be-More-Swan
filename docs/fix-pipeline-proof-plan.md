@@ -1,5 +1,9 @@
 # Fix pipeline: proof before production — BUILT on staging (2026-11-12)
 
+> ⚠️ 2026-11-13: the cloud AI developer (ai-fix.yml, its prove/publish jobs, screenshots from the repro run) was
+> removed. Claude records the root cause and repro result from a session (docs/fix-pipeline-interactive.md).
+> The checklist, staging SQL, Approve for production and the hotfix auto-merge below still apply.
+
 Owner decisions (2026-11-12):
 - **Proof = a reproduction test.** Claude writes a test that reproduces the reported fault. It must FAIL on
   the code before the fix and PASS after it. Only that upgrades the root cause from "Guessed" to "Confirmed".

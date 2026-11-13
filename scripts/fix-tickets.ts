@@ -23,7 +23,7 @@
 //   npx tsx scripts/fix-tickets.ts --env prod sync <id>            (staging CI + staging deploy → checklist)
 //   npx tsx scripts/fix-tickets.ts --env prod prod-sql <id>        (only on the owner's word, before a release merges)
 //   npx tsx scripts/fix-tickets.ts --env prod release <id>         (clear the "Claude working" pill)
-//   npx tsx scripts/fix-tickets.ts --env prod status <id> <more_info_required|backlog|on_hold|closed> --file <why.md>
+//   npx tsx scripts/fix-tickets.ts --env prod status <id> <more_info_required|on_hold|closed>  (on_hold = Waiting on Others) --file <why.md>
 //
 // DB: --env prod → DATABASE_URL_PROD; --env staging → NETLIFY_DATABASE_URL (staging). The staging DB for
 // SQL is always NETLIFY_DATABASE_URL. GitHub: `gh auth token`.
@@ -38,7 +38,7 @@ import { classifySql, sqlHash, runAdditiveSql } from '../src/utils/issue-sql';
 import { ensureStagingSql, loadProofRow, productionChecklist, syncStagingProof, resetProofColumnsCache, type RootCauseStatus } from '../src/utils/issue-fix-proof';
 
 export const RUNNER_ID = 'Claude (interactive)';
-const ALLOWED_STATUSES = ['more_info_required', 'backlog', 'on_hold', 'closed'] as const;
+const ALLOWED_STATUSES = ['more_info_required', 'on_hold', 'closed'] as const;
 
 function arg(args: string[], name: string): string | undefined {
     const i = args.indexOf(name);
@@ -143,7 +143,7 @@ async function main() {
             const found = readText(arg(rest, '--file'), 'finding');
             await db.execute(sql`
                 UPDATE issue_reports SET status = 'fix_in_progress', dev_runner_id = ${RUNNER_ID}, dev_runner_heartbeat = now(), updated_at = now()
-                 WHERE id = ${id} AND status IN ('reported', 'investigating', 'backlog', 'on_hold', 'more_info_required', 'fix_in_progress')`);
+                 WHERE id = ${id} AND status IN ('reported', 'investigating', 'on_hold', 'more_info_required', 'fix_in_progress')`);
             await note(id, `Cause found, writing the fix.\n\n${found}`);
             console.log(`#${id} → Fix In Progress.`);
         } else if (cmd === 'note') {

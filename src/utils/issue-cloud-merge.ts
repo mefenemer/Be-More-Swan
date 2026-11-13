@@ -11,15 +11,15 @@
 //
 // The heartbeat is NOT refreshed while a cloud merge runs: it is the start time this module and the
 // panel read; this module reports a stuck run itself, and a super-admin can force a restart after
-// STALE_MERGE_MINS. A failed merge is redone by the AI fix workflow on the latest staging
-// (?action=redo-fix). The old laptop runner's 'queued' state is no longer set by anything.
+// STALE_MERGE_MINS. A failed merge is redone on the latest staging by Claude from a session
+// (docs/fix-pipeline-interactive.md). The old laptop runner's 'queued' state is no longer set by anything.
 //
-// Tokens: as issue-ai-fix.ts (GITHUB_AI_FIX_TOKEN or GITHUB_HOTFIX_TOKEN: Actions read/write,
+// Tokens: as issue-github.ts (GITHUB_AI_FIX_TOKEN or GITHUB_HOTFIX_TOKEN: Actions read/write,
 // Pull requests read, Checks read optional).
 
 import { sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { CLOUD_RUNNER_ID, ghHeaders, writeToken, readToken, repoOf, ms, findWorkflowRun, findRunFailureReason, type AiFixRun } from './issue-ai-fix';
+import { CLOUD_RUNNER_ID, ghHeaders, writeToken, readToken, repoOf, ms, findWorkflowRun, findRunFailureReason, type WorkflowRun as AiFixRun } from './issue-github';
 import { parsePrNumber } from './issue-fix-live';
 import { maybeAdvanceToReadyToTest, triggerStagingDeployIfDrained } from './issue-reports';
 

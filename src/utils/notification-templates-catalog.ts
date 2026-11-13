@@ -1935,11 +1935,11 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
     },
     {
         templateKey: 'issue_on_hold',
-        name: 'Issue placed on hold',
+        name: 'Issue waiting on others',
         category: 'Support',
         type: 'issue_update',
-        title: '⏸️ Issue #{{issue.id}} placed on hold',
-        message: 'We\'re putting this on hold for now while we weigh it up against other work — we\'ll come back to it.{{issue.admin_message}}',
+        title: '⏸️ Issue #{{issue.id}}: waiting on others',
+        message: 'We\'re waiting on someone outside Be More Swan (such as a partner like Meta) before we can go further. We\'ll pick it straight back up as soon as we hear back.{{issue.admin_message}}',
         variables: [
             v('issue.id', 'Issue ID', '129'),
             v('issue.admin_message', 'Admin note (may be empty)', ''),
