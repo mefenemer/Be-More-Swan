@@ -117,7 +117,7 @@ import { buildMyContentBlock } from '../../src/utils/chat-my-content';
 import { buildReviewsBlock, isReviewsUiElement, resolveReviewsCard, type ReviewsCard } from '../../src/utils/chat-reviews';
 import { buildMyAccountBlock } from '../../src/utils/chat-my-account';
 import { LEAD_EMAIL_WORDING_BUDGET, LEAD_EMAIL_WORDING_RULE, LEAD_SENT_EMAILS_SHOWN, quoteLeadEmails, type LeadEmailLine } from '../../src/utils/lead-email-wording';
-import { CARD_FORMAT_RETRY, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
+import { CARD_FORMAT_RETRY, cardRetryTimeoutMs, confirmCardReply, droppedCardRecord, firstCard, missingCardReply, MORE_CARDS_NOTE, pictureReply, proseReplyLostItsCard, replyClaimsPicture, siteNoCardReply } from '../../src/utils/confirm-card-reply';
 import { blogBlockEditFromUiElement, type BlogBlockEditCard } from '../../src/utils/blog-block-edit';
 import { normaliseSitePictureCard, SITE_PICTURE_TYPE, MAX_PICTURE_SECTIONS } from '../../src/utils/site-picture-card';
 import { emailPartCardFromUiElement, isEmailPartType, EMAIL_PICTURE_TYPE, type EmailPartCard } from '../../src/utils/chat-email-parts';
@@ -3080,6 +3080,7 @@ export default withLambda(async (event) => {
 });
 
 async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]>[0]) {
+    const requestStartedAt = Date.now();   // the card-format retry fits in what is left of the 26 s (cardRetryTimeoutMs)
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -3811,14 +3812,15 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         // (confirm-card-reply.ts proseReplyLostItsCard). Kept only if the second reply brings a card; a
         // failed retry leaves the first reply exactly as it was, and the missing-card note below still applies.
         // Only with time to spare inside the 26s request: the reply above took under 10s, and the retry gets 10s at most.
-        if (route.parseResponse === parseStructuredReply && Date.now() - replyStartedAt < 10_000 && proseReplyLostItsCard(raw, parsed)) {
+        const retryMs = cardRetryTimeoutMs({ requestElapsedMs: Date.now() - requestStartedAt, replyElapsedMs: Date.now() - replyStartedAt });
+        if (route.parseResponse === parseStructuredReply && retryMs > 0 && proseReplyLostItsCard(raw, parsed)) {
             try {
                 const retry = await anthropic.messages.create(adaptForModel({
                     model: chatModel,
                     max_tokens: route.maxTokens,
                     system: sanitizeForModel(system),
                     messages: sanitizeForModel([...llmMessages, { role: 'assistant' as const, content: raw }, { role: 'user' as const, content: CARD_FORMAT_RETRY }]),
-                }, chatModel, 'off') as Anthropic.MessageCreateParamsNonStreaming, { timeout: 10_000, maxRetries: 0 });
+                }, chatModel, 'off') as Anthropic.MessageCreateParamsNonStreaming, { timeout: retryMs, maxRetries: 0 });
                 await logAiUsage({ workspaceId: orgId, userId, assistantId: assistantRow.id, model: chatModel, inputTokens: retry.usage.input_tokens, outputTokens: retry.usage.output_tokens, sessionId: `chat:${session.id}:card-retry`, dataCategories: ['business_context'] });
                 const again = extractAssistantNote(replyText(retry.content)).text;
                 const reparsed = route.parseResponse(again);
