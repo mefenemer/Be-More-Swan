@@ -7,18 +7,29 @@
 // active, is not in its 24-hour deletion cooling-off, and has not turned "What's new" emails off
 // (user_profiles.email_preferences.whats_new = false, written by the unsubscribe link or the
 // account Notification Preferences matrix). No profile row = never chose = default ON.
+// Test, app-review and the owner's own accounts are role 'user' too, so they are excluded by
+// address (owner, 2026-11-13).
 
-import { and, asc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, notInArray, sql } from 'drizzle-orm';
 import { users, userProfiles } from '../../db/schema';
 import type { getDb } from '../../db/client';
 
 type Db = ReturnType<typeof getDb>;
+
+/** Never sent the "What's new" email. Lower case; compared against lower(users.email). */
+export const EXCLUDED_RECIPIENT_EMAILS: readonly string[] = [
+    'bmsreview.test@gmail.com',   // Review Tester
+    'meta-review@bemoreswan.com', // Meta app reviewer
+    'mefenemer@hotmail.com',      // owner
+    'mefenemer@googlemail.com',   // owner
+];
 
 const isRecipient = and(
     eq(users.status, 'active'),
     eq(users.role, 'user'),
     sql`coalesce(${users.pendingDeletion}, false) = false`,
     sql`coalesce(${userProfiles.emailPreferences}->>'whats_new', 'true') <> 'false'`,
+    notInArray(sql`lower(${users.email})`, [...EXCLUDED_RECIPIENT_EMAILS]),
 );
 
 export async function countRecipients(db: Db): Promise<number> {
