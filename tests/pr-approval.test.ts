@@ -8,6 +8,8 @@ import { readFileSync } from 'node:fs';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { approveAndMergePr, approveTicketPr, hotfixUrlFromResult, loadPrFields, resetPrApprovalCache } from '../src/utils/pr-approval';
 import { resetProofColumnsCache } from '../src/utils/issue-fix-proof';
+import { resetFeatureProofCache } from '../src/utils/feature-proof';
+import { sqlHash } from '../src/utils/issue-sql';
 
 const dialect = new PgDialect();
 let passed = 0;
@@ -35,7 +37,7 @@ function fakeGh(o: { base?: string; state?: string; merged?: boolean; review?: n
 }
 
 /** A db that answers by SQL text and records every statement. */
-function fakeDb(opts: { approval?: string | null; ready?: boolean; claim?: boolean; proof?: Record<string, unknown> | null } = {}) {
+function fakeDb(opts: { approval?: string | null; ready?: boolean; claim?: boolean; proof?: Record<string, unknown> | null; feature?: Record<string, unknown> } = {}) {
     const ran: Array<{ q: string; params: unknown[] }> = [];
     return {
         ran,
@@ -49,11 +51,12 @@ function fakeDb(opts: { approval?: string | null; ready?: boolean; claim?: boole
             if (/SELECT approval_pr_url, approval_note FROM/.test(q)) return [{ approval_pr_url: opts.approval === undefined ? PR : opts.approval, approval_note: null }];
             if (/SET approval_pr_url = NULL WHERE/.test(q)) return opts.claim === false ? [] : [{ id: 7 }];
             if (/FROM issue_reports WHERE id/.test(q) && /dev_sql/.test(q)) return opts.proof ? [{ id: 7, ...opts.proof }] : [];
+            if (/FROM feature_requests WHERE id/.test(q) && /dev_sql/.test(q)) return opts.feature ? [{ id: 7, status: 'in_progress', ...opts.feature }] : [];
             return [];
         },
     } as any;
 }
-const reset = () => { resetPrApprovalCache(); resetProofColumnsCache(); };
+const reset = () => { resetPrApprovalCache(); resetProofColumnsCache(); resetFeatureProofCache(); };
 
 (async () => {
     await check('GitHub: own-PR review refused (422) still merges', async () => {
@@ -110,9 +113,42 @@ const reset = () => { resetPrApprovalCache(); resetProofColumnsCache(); };
         assert.strictEqual(gh.calls.length, 0);
     });
 
-    await check('feature, prod PR: merged → Released, prod_pr_url set, request cleared, NO broadcast', async () => {
+    await check('feature, prod PR (proof SQL on): merged into main but NOT Released until the prod deploy has it', async () => {
         reset();
         const db = fakeDb();
+        const r = await approveTicketPr(db, 'feature', 7, { token: 't', fetchImpl: fakeGh({ base: 'main' }).fetchImpl as any });
+        assert.ok(r.ok && r.merged && r.base === 'main');
+        assert.ok(!db.ran.some((x: any) => /status = 'released'/.test(x.q)), 'not released yet');
+        const upd = db.ran.find((x: any) => /dev_prod_merged_at = coalesce/.test(x.q));
+        assert.ok(upd, 'dev_prod_merged_at stamped');
+        assert.match(upd.q, /prod_pr_url = \$1/);
+        assert.match(r.message, /once the production deploy contains it/);
+        assert.ok(!db.ran.some((x: any) => /notifications|feature_request_votes/.test(x.q)));
+    });
+    await check('feature, prod PR: SQL not on production → blocked before any merge', async () => {
+        reset();
+        const s = 'ALTER TABLE x ADD COLUMN IF NOT EXISTS y TEXT;';
+        const db = fakeDb({ feature: { dev_sql: s, dev_staging_sql_status: 'applied', dev_staging_sql_hash: sqlHash(s), dev_prod_sql_status: null } });
+        const gh = fakeGh({ base: 'main' });
+        const r = await approveTicketPr(db, 'feature', 7, { token: 't', fetchImpl: gh.fetchImpl as any });
+        assert.ok(!r.ok && r.status === 409 && /not on the production database/.test(r.error));
+        assert.ok(!gh.calls.some((c) => c.url.endsWith('/merge')), 'no merge');
+        assert.ok(db.ran.some((x: any) => /SET approval_pr_url = \$1 WHERE id = \$2 AND approval_pr_url IS NULL/.test(x.q)), 'button restored');
+    });
+    await check('feature, staging PR: SQL not on staging → blocked; on staging → merged and dev_merged_at stamped', async () => {
+        reset();
+        const s = 'ALTER TABLE x ADD COLUMN IF NOT EXISTS y TEXT;';
+        const blocked = await approveTicketPr(fakeDb({ feature: { dev_sql: s } }), 'feature', 7, { token: 't', fetchImpl: fakeGh({ base: 'staging' }).fetchImpl as any });
+        assert.ok(!blocked.ok && /not on the staging database/.test(blocked.error));
+        reset();
+        const db = fakeDb({ feature: { dev_sql: s, dev_staging_sql_status: 'applied', dev_staging_sql_hash: sqlHash(s) } });
+        const ok = await approveTicketPr(db, 'feature', 7, { token: 't', fetchImpl: fakeGh({ base: 'staging' }).fetchImpl as any });
+        assert.ok(ok.ok && ok.base === 'staging');
+        assert.ok(db.ran.some((x: any) => /dev_merged_at = coalesce/.test(x.q)));
+    });
+    await check('feature, prod PR before the proof SQL: old behaviour (Released at once), NO broadcast', async () => {
+        reset();
+        const db = fakeDb({ proof: null });
         const r = await approveTicketPr(db, 'feature', 7, { token: 't', fetchImpl: fakeGh({ base: 'main' }).fetchImpl as any });
         assert.ok(r.ok && r.merged && r.base === 'main');
         const upd = db.ran.find((x: any) => /status = 'released'/.test(x.q));

@@ -6981,6 +6981,22 @@ function _irProofList(proof) {
       <li class="text-xs ${tone[c.state] || ''}"><span class="mr-1">${icon[c.state] || '•'}</span><b>${_escH(c.label)}:</b> ${_escH(c.detail)}</li>`).join('')}</ul>
     ${proof.row && proof.row.devRootCause ? `<details class="text-xs text-gray-700"><summary class="cursor-pointer font-semibold">What Claude found</summary><div class="mt-1 whitespace-pre-wrap">${_escH(proof.row.devRootCause)}</div></details>` : ''}`;
 }
+// Feature requests: the same "Ready for production?" checklist as a fix (src/utils/feature-proof.ts
+// featureChecklist, owner 2026-11-13). Read-only: the owner ships with the Approve button, which refuses a
+// merge until the SQL is on that PR's database; Released follows the production deploy.
+function _frProofCard(proof) {
+  if (!proof) return '';
+  const chip = proof.liveAt ? ['bg-emerald-100 text-emerald-700', 'Live ✓']
+    : proof.prodMergedAt ? ['bg-indigo-100 text-indigo-700', 'In main, waiting for the deploy']
+    : proof.ready ? ['bg-emerald-100 text-emerald-700', proof.warnings ? 'Ready (with warnings)' : 'Ready'] : ['bg-gray-100 text-gray-700', 'Not ready yet'];
+  return `<div class="border border-gray-200 bg-white rounded-xl p-3 space-y-2" data-fr-proof>
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase text-gray-600">Ready for production?</span>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${chip[0]}">${chip[1]}</span>
+      </div>
+      ${_irProofList(proof)}
+    </div>`;
+}
 function _irProofCard(i, proof) {
   const ps = i.devProdStatus || null;
   const merged = i.devMergeStatus === 'merged';
@@ -7465,8 +7481,8 @@ function openRoadmapEdit(id) {
   const dev = document.getElementById('fr-form-dev');
   if (dev) {
     const pr = prBlock('feature', it);
-    dev.innerHTML = (it.devNotes || pr || it.claudeWorking)
-      ? `<div class="border border-violet-200 bg-violet-50 rounded-xl p-3 space-y-2"><div class="flex items-center gap-2"><span class="text-xs font-bold uppercase text-violet-600">Claude's work</span>${it.claudeWorking ? IR_CLAUDE_PILL : ''}</div>${pr}${it.devNotes ? `<div class="text-xs text-gray-700 whitespace-pre-wrap max-h-56 overflow-auto bg-white border border-gray-200 rounded-lg p-2">${_esc(it.devNotes)}</div>` : ''}</div>`
+    dev.innerHTML = (it.devNotes || pr || it.claudeWorking || it.proof)
+      ? `<div class="border border-violet-200 bg-violet-50 rounded-xl p-3 space-y-2"><div class="flex items-center gap-2"><span class="text-xs font-bold uppercase text-violet-600">Claude's work</span>${it.claudeWorking ? IR_CLAUDE_PILL : ''}</div>${pr}${_frProofCard(it.proof)}${it.devNotes ? `<div class="text-xs text-gray-700 whitespace-pre-wrap max-h-56 overflow-auto bg-white border border-gray-200 rounded-lg p-2">${_esc(it.devNotes)}</div>` : ''}</div>`
       : '';
   }
   _frResetEnhance();
