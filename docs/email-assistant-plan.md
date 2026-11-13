@@ -568,8 +568,9 @@ Proposed task costs (new keys in `task-weights.ts`, set in Admin → Money → T
 
 **Phase 0: paperwork that sets the timeline (started 2026-11-12, no code)** — `docs/email-assistant-phase0.md`
 - ✅ Scopes confirmed on Google's and Microsoft's docs.
-- ⚠️ Azure verified publisher: repo has no `microsoft-identity-association.json`, so probably not
-  verified; owner checks Branding & properties, then the steps in the pack (§6.1).
+- ✅ Azure verified publisher (owner checked Branding & properties, 2026-11-13): MPN ID 7137838,
+  publisher domain bemoreswan.com, display name "Be More Swan". Nothing to do for pack §6.1 except
+  adding the mail permission and redirect URIs.
 - Create the "Be More Swan Mail" Google project, consent screen, scopes (owner; steps §6.2); send the
   two CASA quote requests (drafted, §7).
 - ✅ Drafted: privacy policy sub-section (§4), DPA 1.2 (§5), DPIA (§8). Owner approves; privacy goes
@@ -669,8 +670,9 @@ The owner chose the name, then said "go with your recommendations on D2–D12".
 12. **D12. CASA lab.** ✅ TAC Security at Google's negotiated rate, if the quote holds (about
     $540–720/year); still get a second quote to compare. Cost shared with Part B.
 
-**Still open:** none of the owner's. Phase 0 checks remain: Azure verified publisher, and confirming
-on Google's API reference that `gmail.modify` covers `messages.send` and `drafts.create`.
+**Still open:** none of the owner's. Both Phase 0 checks are done: the Azure app is a verified publisher
+(2026-11-13), and Google's API reference confirms `gmail.modify` covers `messages.send` and
+`drafts.create` (2026-11-12).
 
 ---
 

@@ -6,7 +6,7 @@ approve**: nothing has been published, sent, created in a console or changed in 
 | Phase 0 item | State |
 | --- | --- |
 | Confirm the scopes on Google's and Microsoft's own docs | ✅ Done (§1) |
-| Azure verified publisher | ⚠️ **Probably not verified**; owner must check in the Entra portal (§2, §6.1) |
+| Azure verified publisher | ✅ **Verified** (owner checked 2026-11-13: MPN ID 7137838, domain bemoreswan.com) — §2 |
 | Google "Be More Swan Mail" project, consent screen, scopes | Steps written (§6.2); owner creates it |
 | Two CASA quotes | Request emails drafted (§7); owner sends |
 | Privacy policy wording (Limited Use) | Drafted (§4) |
@@ -28,7 +28,13 @@ approve**: nothing has been published, sent, created in a console or changed in 
 | Outlook permission for notifications | `Mail.Read` or `Mail.ReadBasic` (delegated), so `Mail.ReadWrite` covers it. | … subscription-post-subscriptions |
 | Can work tenants block unverified apps? | Admins can make publisher verification part of their user-consent policy, and with Microsoft's **risk-based step-up consent**, users "can't consent to most newly registered multitenant apps that aren't publisher verified" when the app asks for more than sign-in and profile. Mail permissions are more than that. | learn.microsoft.com … publisher-verification-overview |
 
-## 2. Azure verified publisher: what the repo shows
+## 2. Azure verified publisher
+
+✅ **Verified** (owner checked Branding & properties, 2026-11-13): MPN ID 7137838, publisher domain
+bemoreswan.com, publisher display name "Be More Swan". The repo-based guess below was wrong: the domain
+was proven another way (DNS on the tenant), not by a hosted file. §6.1's partner steps are not needed.
+
+What the repo showed (kept for the record):
 
 - Publisher verification needs a **publisher domain** on the app, proven either by a file at
   `https://<domain>/.well-known/microsoft-identity-association.json` or by a DNS-verified custom domain
