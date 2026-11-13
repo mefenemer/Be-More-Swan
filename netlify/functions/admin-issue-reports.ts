@@ -554,6 +554,15 @@ export default withLambda(async (event) => {
     // Staging is rebuilt automatically once no merge is left in flight — see
     // triggerStagingDeployIfDrained(), called when syncCloudMerge records a merge outcome.
 
+    // ── GET ?action=version: has anything changed? (the board's auto-refresh polls this) ──
+    if (event.httpMethod === 'GET' && action === 'version') {
+        const [v] = await db.execute(sql`
+            SELECT coalesce(max(updated_at)::text, '') || '|' || count(*)::text || '|' ||
+                   (SELECT coalesce(max(id), 0)::text FROM issue_report_messages) AS version
+              FROM issue_reports`) as Array<{ version: string }>;
+        return json(200, { version: v?.version || '' });
+    }
+
     // ── GET single issue (with thread + screenshot) ──────────────────────────────
     if (event.httpMethod === 'GET' && id) {
         let [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);

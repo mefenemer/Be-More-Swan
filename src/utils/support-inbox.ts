@@ -52,7 +52,7 @@ export function issueWaitingOn(status: string, lastFromUser: boolean): WaitingOn
     if (lastFromUser) return 'us';
     if (status === 'reported') return 'us';
     if (status === 'more_info_required' || status === 'fixed_ready_to_test') return 'customer';
-    return 'fixing';   // backlog · on_hold · fix_in_progress · merge
+    return 'fixing';   // investigating · backlog · on_hold · fix_in_progress · merge
 }
 
 /**

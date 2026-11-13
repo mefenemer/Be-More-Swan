@@ -423,6 +423,13 @@ export function productionChecklist(r: ProofRow): { items: CheckItem[]; ready: b
         state: stagingSqlOk ? 'ok' : r.devStagingSqlStatus === 'failed' ? 'fail' : 'wait',
         detail: !hasSql ? 'None needed.' : r.devStagingSqlResult || 'Runs automatically when the fix merges to staging.',
     });
+    if (hasSql) items.push({
+        key: 'sql_prod', label: 'SQL on production',
+        state: r.devProdSqlStatus === 'applied' ? 'ok' : r.devProdSqlStatus === 'failed' ? 'fail' : 'wait',
+        detail: r.devProdSqlStatus === 'applied' ? (r.devProdSqlResult || 'Applied on production.')
+            : r.devProdSqlStatus === 'failed' ? (r.devProdSqlResult || 'FAILED on production.')
+            : 'Runs when you press Approve for production (or just before a release merges, on your word).',
+    });
     items.push({
         key: 'tests_staging', label: 'Tests on staging',
         state: r.devStagingCiStatus === 'passed' ? 'ok' : r.devStagingCiStatus === 'failed' ? 'fail' : 'wait',
@@ -435,7 +442,7 @@ export function productionChecklist(r: ProofRow): { items: CheckItem[]; ready: b
         state: r.devStagingLiveAt ? 'ok' : 'wait',
         detail: r.devStagingLiveAt ? `The staging deploy contains the fix (seen ${r.devStagingLiveAt.slice(0, 16)} UTC).` : 'Waiting for the staging deploy.',
     });
-    const blocking = items.filter((i) => i.key !== 'root_cause' && i.key !== 'repro');
+    const blocking = items.filter((i) => i.key !== 'root_cause' && i.key !== 'repro' && !(i.key === 'sql_prod' && i.state === 'wait'));
     const ready = r.devMergeStatus === 'merged' && blocking.every((i) => i.state === 'ok');
     return { items, ready, warnings: items.some((i) => i.state === 'warn') };
 }
@@ -493,7 +500,10 @@ export async function approveForProduction(db: Db, issueId: number, adminId: num
     let sqlLine = 'No database change.';
     if (text) {
         if (sqlHash(text) !== row.devStagingSqlHash) return fail('The SQL differs from what passed on staging. Merge to staging again so the same SQL runs there first.');
-        const res = await (opts.run || runAdditiveSql)(urls.production, text, 'production');
+        // Already run on prod (scripts/fix-tickets.ts prod-sql, same text as staging): don't run it twice.
+        const res = row.devProdSqlStatus === 'applied'
+            ? { ok: true, outcome: row.devProdSqlResult || '✓ Already applied on production.' }
+            : await (opts.run || runAdditiveSql)(urls.production, text, 'production');
         await db.execute(sql`
             UPDATE issue_reports SET dev_prod_sql_status = ${res.ok ? 'applied' : 'failed'}, dev_prod_sql_result = ${res.outcome}, dev_prod_sql_ran_at = now()
              WHERE id = ${issueId}`);

@@ -10,20 +10,31 @@ kept for what it is good at: holding the ticket, its status and the evidence.
 1. **Issues are reported** (by users or automatically) and land in Admin ▸ Fix pipeline as **Reported**.
 2. **The owner tells Claude to work them**, in a Claude Code session ("work the Reported tickets", or a list).
 3. **Claude works each ticket**, recording everything on it as it goes, with `scripts/fix-tickets.ts`:
-   - `start <id>`: Reported → **Fix In Progress**, held by "Claude (interactive)".
+   - `start <id>`: Reported → **Investigation In Progress** (the reporter sees this), held by "Claude (interactive)".
    - Investigates against the real system. `note <id>` records findings.
+   - `fixing <id>`: cause found → **Fix In Progress**.
    - Writes the fix **and a repro test** (`tests/repro-issue-<id>.test.ts`, or `e2e/repro-issue-<id>.spec.ts`
      when a page shows the fault), runs it **before and after** the fix, and records the result:
      `proof <id> --root-cause confirmed|guessed|not_found --test … --before … --after …`.
      "Confirmed" is refused unless the test failed before and passes after.
    - Opens a PR into staging, then `pr <id>` → **Merge** (PR, summary and any SQL recorded).
-   - `staging-sql <id>` puts additive SQL on the staging DB and checks it.
+   - `staging-sql <id>` puts additive SQL on the staging DB and checks it (ticket row "SQL on staging").
    - Merges the PR into staging, then `merged <id>`; `sync <id>` follows staging CI and the staging deploy.
    - Can't fix it? `status <id> more_info_required|backlog|on_hold|closed --file <why>`.
 4. **The ticket's "Ready for production?" checklist** then shows root cause, repro test, SQL safety, SQL on
    staging, tests on staging and live on staging.
-5. **The owner ships to production**: **Approve for production** on the ticket (runs the same SQL on prod,
+5. **The owner ships to production.** Prod SQL first ("SQL on production" row): Approve for production runs
+   it itself; for a staging → main release, Claude runs `prod-sql <id>` only when the owner says to ship,
+   just before the merge (additive SQL is safe ahead of the code).
+6. **The owner ships the code**: **Approve for production** on the ticket (runs the same SQL on prod,
    then merges the one fix into main once its checks pass), or a staging → main release PR.
+
+## What the admin sees
+
+- A pulsing **🛠️ Claude working** pill on the board card and the open ticket while Claude holds it (every step
+  refreshes it; it clears after the merge to staging, on `status`, on `release`, or 30 minutes after the last step).
+- The Fix pipeline screen refreshes itself within about 15 seconds of any change (it checks a version stamp;
+  the open ticket is not redrawn while you are typing in it).
 
 ## Rules
 
@@ -39,6 +50,11 @@ kept for what it is good at: holding the ticket, its status and the evidence.
 The hourly live check (`src/utils/issue-fix-live.ts`) still tells the reporter "fixed and live" when the
 prod deploy contains the fix, and closes a ticket 7 days later with a last notification. Those are the
 system's messages, not Claude's.
+
+## Database
+
+`db/z-issue-investigating.sql` adds the Investigation In Progress status (both DBs, run by the owner). Until it
+runs, `start` uses Fix In Progress and says so.
 
 ## Access
 

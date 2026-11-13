@@ -12,7 +12,8 @@
 // Usage (always name the database; there is no default, so prod is never hit by accident):
 //   npx tsx scripts/fix-tickets.ts --env prod list [--status reported]
 //   npx tsx scripts/fix-tickets.ts --env prod show <id> [--screenshot <file.png>]
-//   npx tsx scripts/fix-tickets.ts --env prod start <id>
+//   npx tsx scripts/fix-tickets.ts --env prod start <id>              (→ Investigation In Progress)
+//   npx tsx scripts/fix-tickets.ts --env prod fixing <id> --file <found.md>  (cause found → Fix In Progress)
 //   npx tsx scripts/fix-tickets.ts --env prod note <id> --file <note.md>
 //   npx tsx scripts/fix-tickets.ts --env prod proof <id> --root-cause confirmed|guessed|not_found --file <evidence.md>
 //                                         [--test <path> --before <exit> --after <exit>]
@@ -20,6 +21,8 @@
 //   npx tsx scripts/fix-tickets.ts --env prod staging-sql <id>     (additive SQL → staging DB, checked)
 //   npx tsx scripts/fix-tickets.ts --env prod merged <id>          (after Claude merges the PR to staging)
 //   npx tsx scripts/fix-tickets.ts --env prod sync <id>            (staging CI + staging deploy → checklist)
+//   npx tsx scripts/fix-tickets.ts --env prod prod-sql <id>        (only on the owner's word, before a release merges)
+//   npx tsx scripts/fix-tickets.ts --env prod release <id>         (clear the "Claude working" pill)
 //   npx tsx scripts/fix-tickets.ts --env prod status <id> <more_info_required|backlog|on_hold|closed> --file <why.md>
 //
 // DB: --env prod → DATABASE_URL_PROD; --env staging → NETLIFY_DATABASE_URL (staging). The staging DB for
@@ -31,7 +34,7 @@ import { execFileSync } from 'node:child_process';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { sql } from 'drizzle-orm';
-import { classifySql, sqlHash } from '../src/utils/issue-sql';
+import { classifySql, sqlHash, runAdditiveSql } from '../src/utils/issue-sql';
 import { ensureStagingSql, loadProofRow, productionChecklist, syncStagingProof, resetProofColumnsCache, type RootCauseStatus } from '../src/utils/issue-fix-proof';
 
 export const RUNNER_ID = 'Claude (interactive)';
@@ -65,9 +68,20 @@ async function main() {
     const db = drizzle({ client }) as any;
     resetProofColumnsCache();
 
-    const note = (issueId: number, body: string) => db.execute(sql`
-        INSERT INTO issue_report_messages (issue_id, author_type, author_id, body, status)
-        VALUES (${issueId}, 'admin', NULL, ${`🛠️ Claude (developer): ${body}`}, NULL)`);
+    // Every note also bumps updated_at, so the admin board's auto-refresh picks it up.
+    const note = async (issueId: number, body: string) => {
+        await db.execute(sql`
+            INSERT INTO issue_report_messages (issue_id, author_type, author_id, body, status)
+            VALUES (${issueId}, 'admin', NULL, ${`🛠️ Claude (developer): ${body}`}, NULL)`);
+        await db.execute(sql`UPDATE issue_reports SET updated_at = now() WHERE id = ${issueId}`);
+    };
+    // "Claude working" pill: hold the ticket and refresh the heartbeat (unless the cloud fixer holds it).
+    const touch = (issueId: number) => db.execute(sql`
+        UPDATE issue_reports SET dev_runner_id = ${RUNNER_ID}, dev_runner_heartbeat = now()
+         WHERE id = ${issueId} AND (dev_runner_id IS NULL OR dev_runner_id = ${RUNNER_ID})`);
+    const release = (issueId: number) => db.execute(sql`
+        UPDATE issue_reports SET dev_runner_id = NULL, dev_runner_heartbeat = NULL, updated_at = now()
+         WHERE id = ${issueId} AND dev_runner_id = ${RUNNER_ID}`);
     const ghToken = () => { try { return execFileSync('gh', ['auth', 'token'], { encoding: 'utf8' }).trim(); } catch { return ''; } };
     const printChecklist = async (issueId: number) => {
         const row = await loadProofRow(db, issueId);
@@ -104,21 +118,42 @@ async function main() {
             await printChecklist(id);
         } else if (cmd === 'start') {
             need(id, 'start <id>');
-            const r = await db.execute(sql`
-                UPDATE issue_reports SET status = 'fix_in_progress', dev_handoff_status = 'in_progress', dev_handoff_at = now(),
+            // Investigation In Progress; before db/z-issue-investigating.sql the status rule refuses it
+            // (23514), so it falls back to Fix In Progress and says so.
+            const claim = (status: string) => db.execute(sql`
+                UPDATE issue_reports SET status = ${status}, dev_handoff_status = 'in_progress', dev_handoff_at = now(),
                        dev_runner_id = ${RUNNER_ID}, dev_runner_heartbeat = now(), updated_at = now()
                  WHERE id = ${id} AND status NOT IN ('closed', 'roadmap')
                    AND (dev_handoff_status IS DISTINCT FROM 'in_progress' OR dev_runner_id = ${RUNNER_ID})
-                RETURNING id`) as unknown[];
+                RETURNING id`) as Promise<unknown[]>;
+            let status = 'investigating';
+            let r: unknown[];
+            try { r = await claim(status); }
+            catch (e: any) {
+                if ((e?.code ?? e?.cause?.code) !== '23514') throw e;
+                status = 'fix_in_progress';
+                console.log('(db/z-issue-investigating.sql has not run on this DB: using Fix In Progress.)');
+                r = await claim(status);
+            }
             if (!r.length) throw new Error(`#${id} is closed, on the roadmap, or held by another runner.`);
             await note(id, 'Started investigating.');
-            console.log(`#${id} → Fix In Progress (held by ${RUNNER_ID}).`);
+            console.log(`#${id} → ${status === 'investigating' ? 'Investigation In Progress' : 'Fix In Progress'} (held by ${RUNNER_ID}).`);
+        } else if (cmd === 'fixing') {
+            need(id, 'fixing <id> --file <what was found>');
+            const found = readText(arg(rest, '--file'), 'finding');
+            await db.execute(sql`
+                UPDATE issue_reports SET status = 'fix_in_progress', dev_runner_id = ${RUNNER_ID}, dev_runner_heartbeat = now(), updated_at = now()
+                 WHERE id = ${id} AND status IN ('reported', 'investigating', 'backlog', 'on_hold', 'more_info_required', 'fix_in_progress')`);
+            await note(id, `Cause found, writing the fix.\n\n${found}`);
+            console.log(`#${id} → Fix In Progress.`);
         } else if (cmd === 'note') {
             need(id, 'note <id> --file <path>');
+            await touch(id);
             await note(id, readText(arg(rest, '--file'), 'note'));
             console.log(`Internal note added to #${id}.`);
         } else if (cmd === 'proof') {
             need(id, 'proof <id> ...');
+            await touch(id);
             const rc = need(arg(rest, '--root-cause'), '--root-cause confirmed|guessed|not_found') as RootCauseStatus;
             if (!['confirmed', 'guessed', 'not_found'].includes(rc)) throw new Error('--root-cause must be confirmed, guessed or not_found.');
             const evidence = readText(arg(rest, '--file'), 'root-cause evidence');
@@ -152,7 +187,7 @@ async function main() {
                        dev_merge_status = 'ready', dev_merged_at = NULL, dev_merge_result = NULL,
                        dev_staging_sql_status = NULL, dev_staging_sql_result = NULL, dev_staging_sql_hash = NULL, dev_staging_sql_ran_at = NULL,
                        dev_staging_ci_status = NULL, dev_staging_ci_url = NULL, dev_staging_live_at = NULL,
-                       dev_runner_id = NULL, dev_runner_heartbeat = NULL, updated_at = now()
+                       dev_runner_id = ${RUNNER_ID}, dev_runner_heartbeat = now(), updated_at = now()
                  WHERE id = ${id}`);
             await note(id, `Fix ready: ${prUrl}${branch ? ` (branch ${branch})` : ''}.${sqlText ? ` Needs SQL (${safety}).` : ' No database change.'}\n\n${summary}`);
             console.log(`#${id} → Merge (PR recorded${sqlText ? `, SQL ${safety}` : ''}).`);
@@ -160,6 +195,7 @@ async function main() {
         } else if (cmd === 'staging-sql') {
             need(id, 'staging-sql <id>');
             const stagingUrl = need(process.env.NETLIFY_DATABASE_URL, 'NETLIFY_DATABASE_URL (staging) is not set in .env.');
+            await touch(id);
             const wait = await ensureStagingSql(db, id, { urls: { staging: stagingUrl, production: undefined, onProdSite: true } });
             console.log(wait ? `Not done: ${wait}` : `#${id}: SQL is on staging (or none was needed).`);
             await printChecklist(id);
@@ -180,6 +216,30 @@ async function main() {
             await note(id, `Merged into staging: ${row.devPrUrl}. Waiting for staging CI and the staging deploy.`);
             console.log(`#${id}: merged into staging.`);
             await syncStagingProof(db, { id, devPrUrl: row.devPrUrl, devStagingCiStatus: null, devStagingLiveAt: null }, { token: ghToken() });
+            await release(id);   // Claude's part is done; the checklist waits on staging CI / deploy, then the owner
+            await printChecklist(id);
+        } else if (cmd === 'release') {
+            need(id, 'release <id>');
+            await release(id);
+            console.log(`#${id}: no longer marked as Claude working.`);
+        } else if (cmd === 'prod-sql') {
+            // Only when the owner says to ship (just before a staging → main release merges). Approve for
+            // production runs it itself, so this is for the release-PR route. Additive only, same text as staging.
+            need(id, 'prod-sql <id>');
+            if (env !== 'prod') throw new Error('prod-sql is for a prod ticket: --env prod.');
+            const row = await loadProofRow(db, id);
+            const text = (row?.devSql || '').trim();
+            if (!row || !text) { console.log(`#${id} has no SQL.`); return; }
+            if (row.devStagingSqlStatus !== 'applied' || row.devStagingSqlHash !== sqlHash(text)) throw new Error('This SQL has not passed on staging yet (run staging-sql first).');
+            if (row.devProdSqlStatus === 'applied') { console.log(`#${id}: SQL already applied on production.`); return; }
+            const res = await runAdditiveSql(url, text, 'production');
+            await db.execute(sql`
+                UPDATE issue_reports SET dev_prod_sql_status = ${res.ok ? 'applied' : 'failed'}, dev_prod_sql_result = ${res.outcome},
+                       dev_prod_sql_ran_at = now(), updated_at = now()
+                 WHERE id = ${id}`);
+            await note(id, `${res.ok ? 'Database change applied on PRODUCTION.' : 'Database change FAILED on production.'}\n\n${res.outcome}`);
+            console.log(res.outcome);
+            if (!res.ok) process.exitCode = 1;
             await printChecklist(id);
         } else if (cmd === 'sync') {
             need(id, 'sync <id>');
@@ -202,7 +262,7 @@ async function main() {
             await note(id, `Moved to ${s.replace(/_/g, ' ')}.\n\n${why}`);
             console.log(`#${id} → ${s}.`);
         } else {
-            console.error('Commands: list, show, start, note, proof, pr, staging-sql, merged, sync, status (see the header).');
+            console.error('Commands: list, show, start, fixing, note, proof, pr, staging-sql, merged, sync, prod-sql, release, status (see the header).');
             process.exitCode = 2;
         }
     } catch (e) {

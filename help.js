@@ -69,6 +69,7 @@
     let _myReports = [];
     const STATUS_BADGE = {
         reported:            ['Reported', 'bg-gray-100 text-gray-700'],
+        investigating:       ['Investigation In Progress', 'bg-sky-100 text-sky-700'],
         backlog:             ['Backlog', 'bg-slate-100 text-slate-700'],
         on_hold:             ['On Hold', 'bg-orange-100 text-orange-700'],
         fix_in_progress:     ['Fix In Progress', 'bg-blue-100 text-blue-700'],

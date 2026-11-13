@@ -6231,14 +6231,14 @@ document.addEventListener('click', async (e) => {
 
 // ── Issue Reports (Testing) ──────────────────────────────────────────────────
 const IR_API = '/.netlify/functions/admin-issue-reports';
-const IR_STATUSES = ['reported','backlog','on_hold','fix_in_progress','merge','fixed_ready_to_test','more_info_required','closed','roadmap'];
+const IR_STATUSES = ['reported','investigating','backlog','on_hold','fix_in_progress','merge','fixed_ready_to_test','more_info_required','closed','roadmap'];
 const IR_STATUS_LABEL = {
-  reported: 'Reported', backlog: 'Backlog', on_hold: 'On Hold', fix_in_progress: 'Fix In Progress', merge: 'Merge',
+  reported: 'Reported', investigating: 'Investigation In Progress', backlog: 'Backlog', on_hold: 'On Hold', fix_in_progress: 'Fix In Progress', merge: 'Merge',
   fixed_ready_to_test: 'Fixed & Ready to Test', more_info_required: 'More Info Required', closed: 'Closed',
   roadmap: 'On Roadmap',
 };
 const IR_STATUS_CLS = {
-  reported: 'bg-gray-100 text-gray-700', backlog: 'bg-slate-100 text-slate-700',
+  reported: 'bg-gray-100 text-gray-700', investigating: 'bg-sky-100 text-sky-700', backlog: 'bg-slate-100 text-slate-700',
   on_hold: 'bg-orange-100 text-orange-700',
   fix_in_progress: 'bg-blue-100 text-blue-700', merge: 'bg-indigo-100 text-indigo-700',
   fixed_ready_to_test: 'bg-emerald-100 text-emerald-700', more_info_required: 'bg-amber-100 text-amber-800',
@@ -6256,7 +6256,7 @@ let _irFilter = '';
 const IR_BOARD_COLUMNS = [
   { key: 'new', label: 'New', hint: 'Reported, or waiting on the customer' },
   { key: 'backlog', label: 'Backlog', hint: 'Triaged; On hold is a badge' },
-  { key: 'fixing', label: 'Fixing', hint: 'With the AI developer' },
+  { key: 'fixing', label: 'Investigating & fixing', hint: 'Claude is finding the cause or writing the fix' },
   { key: 'review', label: 'Review & merge', hint: 'PR, SQL or merge waiting on you' },
   { key: 'golive', label: 'Waiting to go live', hint: 'Merged; moves when the deploy has it' },
   { key: 'live', label: 'Live, awaiting reply', hint: 'Closes itself after 7 quiet days' },
@@ -6270,7 +6270,7 @@ function irColumnOf(i) {
   if (st === 'more_info_required') return 'new';
   if (i.devMergeStatus === 'merged' && i.devSqlStatus !== 'pending') return 'golive';
   if (st === 'merge' || i.devHandoffStatus === 'completed' || i.devSqlStatus === 'pending' || IR_REVIEW_MERGE.includes(i.devMergeStatus)) return 'review';
-  if (st === 'fix_in_progress' || i.devHandoffStatus === 'queued' || i.devHandoffStatus === 'in_progress') return 'fixing';
+  if (st === 'investigating' || st === 'fix_in_progress' || i.devHandoffStatus === 'queued' || i.devHandoffStatus === 'in_progress') return 'fixing';
   if (st === 'backlog' || st === 'on_hold') return 'backlog';
   return 'new';
 }
@@ -6290,9 +6290,18 @@ const _irDaysLeft = (i) => {
   if (!i.fixedAt) return null;
   return Math.max(0, Math.ceil((new Date(i.fixedAt).getTime() + 7 * 864e5 - Date.now()) / 864e5));
 };
+// "Claude working" (owner, 2026-11-13): scripts/fix-tickets.ts holds a ticket as 'Claude (interactive)' and
+// touches dev_runner_heartbeat on every step, so a recent heartbeat means Claude is on it right now.
+const IR_CLAUDE_RUNNER = 'Claude (interactive)';
+function _irClaudeWorking(i) {
+  if (i.devRunnerId !== IR_CLAUDE_RUNNER || !i.devRunnerHeartbeat) return false;
+  return Date.now() - new Date(i.devRunnerHeartbeat).getTime() < 30 * 60e3;
+}
+const IR_CLAUDE_PILL = '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-sky-600 text-white animate-pulse" title="Claude is working on this ticket right now">🛠️ Claude working</span>';
 function irBoardCard(i) {
   const first = String(i.description || '').split('\n')[0].trim() || '(no description)';
   const badges = [];
+  if (_irClaudeWorking(i)) badges.push(IR_CLAUDE_PILL);
   if (i.severity === 'critical') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700">Critical</span>');
   if (i.severity === 'high') badges.push('<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">High</span>');
   if (i.paying) badges.push(`<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700" title="What this workspace pays (list price)">${_escH(i.planName || 'Paid')} · £${Math.round(Number(i.planMonthlyGbp) || 0)}/mo</span>`);
@@ -6499,6 +6508,7 @@ function _irRunnerChip(i) {
 }
 
 async function loadIssueReports() {
+  _irStartPoll();
   _irPaintMode();
   if (_irMode === 'board') return loadIssueBoard();
   const tbody = document.getElementById('ir-tbody');
@@ -6542,7 +6552,8 @@ async function openIssuePanel(id) {
   try {
     const d = await api(`${IR_API}?id=${id}`);
     const i = d.issue;
-    document.getElementById('ir-panel-title').textContent = `Issue #${i.id}`;
+    _irOpenId = i.id;
+    document.getElementById('ir-panel-title').innerHTML = `Issue #${Number(i.id)}${_irClaudeWorking(i) ? ` ${IR_CLAUDE_PILL}` : ''}`;
     const messages = (d.messages || []).map(m => `
       <div class="rounded-xl p-3 text-sm ${m.authorType === 'admin' ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50 border border-gray-100'}">
         <div class="flex items-center justify-between mb-1">
@@ -6624,7 +6635,29 @@ async function openIssuePanel(id) {
   }
 }
 
-function closeIssuePanel() { document.getElementById('ir-detail-panel').classList.add('hidden'); }
+function closeIssuePanel() { _irOpenId = null; document.getElementById('ir-detail-panel').classList.add('hidden'); }
+
+// Auto-refresh (owner, 2026-11-13): when Claude moves a ticket from its session, the board and the open
+// ticket update by themselves. A cheap version check every 15 s while the Fix pipeline is on screen;
+// the full reload only when something changed, and the open ticket is not redrawn while you type in it.
+let _irOpenId = null, _irVersion = null, _irPollTimer = null;
+function _irStartPoll() {
+  if (_irPollTimer) return;
+  _irPollTimer = setInterval(async () => {
+    const view = document.getElementById('view-issue-reports');
+    if (!view || view.classList.contains('hidden') || document.visibilityState !== 'visible') return;
+    try {
+      const { version } = await api(`${IR_API}?action=version`);
+      if (_irVersion !== null && version !== _irVersion) {
+        loadIssueReports();
+        const panel = document.getElementById('ir-detail-panel');
+        const typing = panel && panel.contains(document.activeElement) && /^(TEXTAREA|INPUT|SELECT)$/.test(document.activeElement.tagName);
+        if (_irOpenId && panel && !panel.classList.contains('hidden') && !typing) openIssuePanel(_irOpenId);
+      }
+      _irVersion = version;
+    } catch { /* next tick */ }
+  }, 15000);
+}
 
 // Reveal the roadmap priority picker only when "On Roadmap" is the chosen status.
 function irOnStatusChange() {
