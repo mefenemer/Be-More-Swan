@@ -1218,7 +1218,10 @@ export async function projectView(db: Db, orgId: number, row: typeof videoProjec
     if (ids.length) {
         const assets = await db.select({ id: contentAssets.id, storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl })
             .from(contentAssets).where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
-        for (const a of assets) thumbs[a.id] = a.storageKey ? await presignR2Get(a.storageKey).catch(() => null) : a.externalUrl;
+        // Stable for 30 min, like outputUrl below: the Videos tab re-reads a working project every 5 s, and a
+        // fresh signature each time gave every scene <video> a new address, so a big own-footage file
+        // restarted loading on every redraw and the box never showed a picture (issue #50).
+        for (const a of assets) thumbs[a.id] = a.storageKey ? await presignR2Get(a.storageKey, 3600, { stableWindowSec: 1800 }).catch(() => null) : a.externalUrl;
     }
     const sb = row.storyboard as Storyboard | null;
     let outputUrl: string | null = null;
