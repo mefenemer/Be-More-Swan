@@ -169,9 +169,31 @@ export async function issueMergeBlocker(db: Db, issueId: number, base: string): 
     return null;
 }
 
-export async function approveTicketPr(db: Db, kind: PrTicketKind, id: number, opts: {
-    token?: string; repo?: string; fetchImpl?: FetchLike; adminName?: string;
-} = {}): Promise<{ ok: true; message: string; base: string; merged: boolean; autoMerge: boolean } | { ok: false; error: string; status: number }> {
+export type ApproveTicketResult = { ok: true; message: string; base: string; merged: boolean; autoMerge: boolean } | { ok: false; error: string; status: number };
+type ApproveTicketOpts = { token?: string; repo?: string; fetchImpl?: FetchLike; adminName?: string; log?: (line: string) => void };
+
+/**
+ * The owner's Approve click. Every outcome is written to the function log ([approve-pr] …), so a failed
+ * click can be diagnosed from Netlify's logs, not only from the message the owner saw (2026-11-13: a click
+ * on release #576 failed while its checks ran, and nothing recorded why). An unexpected throw becomes a 500
+ * with its message instead of a bare crash.
+ */
+export async function approveTicketPr(db: Db, kind: PrTicketKind, id: number, opts: ApproveTicketOpts = {}): Promise<ApproveTicketResult> {
+    const log = opts.log || ((line: string) => (line.includes('FAILED') ? console.error : console.log)(line));
+    const who = `[approve-pr] ${kind} #${id}`;
+    let r: ApproveTicketResult;
+    try {
+        r = await approveTicketPrOnce(db, kind, id, opts);
+    } catch (e) {
+        r = { ok: false, status: 500, error: `Approve failed unexpectedly: ${e instanceof Error ? e.message : String(e)}` };
+    }
+    log(r.ok
+        ? `${who} → ok: ${r.merged ? 'merged' : r.autoMerge ? 'auto-merge on' : 'done'} into ${r.base}`
+        : `${who} → FAILED (${r.status}): ${r.error.replace(/\s+/g, ' ')}`);
+    return r;
+}
+
+async function approveTicketPrOnce(db: Db, kind: PrTicketKind, id: number, opts: ApproveTicketOpts): Promise<ApproveTicketResult> {
     if (!(await prApprovalColumnsReady(db))) return { ok: false, status: 400, error: 'Run db/z-pr-approval.sql on this database first.' };
     const table = sql.raw(TABLE[kind]);
     const [row] = await db.execute(sql`SELECT approval_pr_url, approval_note FROM ${table} WHERE id = ${id}`) as Array<{ approval_pr_url: string | null; approval_note: string | null }>;
