@@ -1549,7 +1549,7 @@ node_bundler = "esbuild"
 # this never runs there — .github/workflows/staging-crons.yml pokes run-fix-live-check
 # instead, which calls the same function. The two must stay in step.
 [functions.check-fixes-live]
-  schedule = "0 * * * *"
+  schedule = "*/30 * * * *"
 
 # The Leads tab's bulk delete (assistant-records DELETE { ids }) writes a ledger event per lead.
 # Batched since 2026-10-03, but a full chunk still needs more than the 10s default — a timeout here

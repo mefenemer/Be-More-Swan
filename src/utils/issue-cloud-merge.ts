@@ -5,7 +5,7 @@
 //      starts .github/workflows/merge-to-staging.yml with the issue id and the fix PR number.
 //   2. The workflow checks the PR is this issue's fix branch into staging and merges it.
 //   3. syncCloudMerge follows the PR and the run — when the admin opens the issue, when the list
-//      loads, and on every hourly live-check run — and records the outcome:
+//      loads, and on every 30-minute live-check run — and records the outcome:
 //      dev_merge_status 'merged' (or 'failed' with GitHub's reason), a thread message,
 //      maybeAdvanceToReadyToTest, and the staging rebuild once no merge is left in flight.
 //
@@ -158,7 +158,7 @@ export async function syncCloudMerge(db: Db, row: MergeRow, opts: { token?: stri
     }
 }
 
-/** Follow every cloud merge still in flight (capped). Used by the list and the hourly live check. */
+/** Follow every cloud merge still in flight (capped). Used by the list and the 30-minute live check. */
 export async function syncOpenCloudMerges(db: Db, opts: { token?: string; repo?: string; fetchImpl?: FetchLike; limit?: number } = {}): Promise<number> {
     if (!(opts.token ?? readToken())) return 0;
     try {
