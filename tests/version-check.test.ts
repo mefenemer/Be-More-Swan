@@ -194,6 +194,21 @@ await check('an open dialog blocks the automatic reload', async () => {
     assert.strictEqual(t.reloads(), 0);
 });
 
+await check('a visible role-less full-screen overlay (the app\'s usual modal) blocks the automatic reload', async () => {
+    const t = load({ hidden: true });
+    const overlay = t.makeEl('div');
+    overlay.id = 'plan-gate-modal';
+    t.page.dialogs.push(overlay);
+    await t.vc.check(true);
+    assert.strictEqual(t.reloads(), 0);
+    overlay.getClientRects = () => [];   // closed (display:none)
+    assert.strictEqual(t.vc.maybeAutoReload(), true);
+});
+
+await check('the source treats .fixed.inset-0 overlays as dialogs', () => {
+    assert.ok(SRC.includes(".fixed.inset-0'"), 'selector includes .fixed.inset-0');
+});
+
 await check('a write request in flight blocks the automatic reload until it finishes', async () => {
     const t = load({ hidden: true });
     t.window.fetch('/.netlify/functions/chat', { method: 'POST' });

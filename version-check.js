@@ -63,9 +63,11 @@
         return false;
     }
 
+    // Most of the app's modals are plain `fixed inset-0` overlays with no role (measured on staging
+    // 2026-11-13: #plan-gate-modal), so a visible full-screen overlay counts as a dialog too.
     function dialogOpen() {
         if (document.querySelector('dialog[open]')) return true;
-        for (const el of Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"]'))) {
+        for (const el of Array.from(document.querySelectorAll('[role="dialog"], [aria-modal="true"], .fixed.inset-0'))) {
             if (el.id === BANNER_ID) continue;
             if (!el.classList.contains('hidden') && el.getClientRects().length > 0) return true;
         }
