@@ -163,7 +163,9 @@ export function setupChecklist(d: MentorSnapshotData): ChecklistItem[] {
                 : 'No product or service has a price yet (Business Information ▸ Products & Services).' },
         { key: 'offer', label: 'What your business offers', done: !!d.offerKinds?.length, optional: false, tab: 'products',
             why: 'Decides which details your assistants ask for and use.',
-            gap: '"What does your business offer?" hasn\'t been answered (Business Information).' },
+            // Names the tab and the unsaved guess (issue #44: the Mentor sent an owner to "Business Profile"
+            // for a text field; an unanswered workspace is shown our guess pre-ticked, issue #46).
+            gap: '"What does your business offer?" hasn\'t been answered (the tick boxes at the top of Business Information ▸ Products & Services). If boxes there already look ticked, that is our guess and it isn\'t saved: the owner presses "That\'s right, save it" under them, or changes a tick.' },
         { key: 'website', label: 'Website', done: !!d.business.website?.trim(), optional: false, tab: 'profile',
             why: 'Assistants link to it and read it for your details.',
             gap: 'No website address (Business Information).' },
@@ -172,7 +174,7 @@ export function setupChecklist(d: MentorSnapshotData): ChecklistItem[] {
             gap: 'No industry set (Business Information).' },
         { key: 'intro_offer', label: 'Free trial or intro offer', done: d.introOfferAnswered, optional: true, tab: 'products',
             why: 'Optional. Used in outreach and posts when you have one.',
-            gap: 'The free trial / intro offer question hasn\'t been answered (optional).' },
+            gap: 'The free trial / intro offer question hasn\'t been answered (optional; Business Information ▸ Products & Services).' },
         ...offerCtaItem(d),
     ];
 }
