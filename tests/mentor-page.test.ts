@@ -148,7 +148,7 @@ test('one server action: the card and the Overview tab both call mentor.ts (§14
     const tab = read('src/components/assistant-mentor-overview.js');
     assert.match(tab, /const API = '\/\.netlify\/functions\/mentor';/);
     assert.match(tab, /action: 'bring_back'/);
-    assert.match(tab, /\['mentor:changed', 'bizinfo:profileChanged', 'bizinfo:productsChanged', 'assistant:settingsChanged'\]/);
+    assert.match(tab, /\['mentor:changed', 'bizinfo:profileChanged', 'bizinfo:productsChanged', 'bizinfo:offer', 'bizinfo:introOffer', 'bizinfo:callToAction', 'assistant:settingsChanged'\]/);
 });
 
 test('the decision is org-scoped and can\'t reopen an answered suggestion', () => {

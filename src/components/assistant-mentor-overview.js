@@ -396,7 +396,9 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     document.getElementById(`mentor-stage-${state.stage}`)?.focus();
   });
   // A card applied or dismissed in chat, or Business Information saved: repaint from the server.
-  ['mentor:changed', 'bizinfo:profileChanged', 'bizinfo:productsChanged', 'assistant:settingsChanged'].forEach((ev) =>
+  // bizinfo:offer / introOffer / callToAction are the offer, intro-offer and call-to-action saves
+  // (chat-session.js) — each answers a Set-up checklist item, so missing them left it saying "To do".
+  ['mentor:changed', 'bizinfo:profileChanged', 'bizinfo:productsChanged', 'bizinfo:offer', 'bizinfo:introOffer', 'bizinfo:callToAction', 'assistant:settingsChanged'].forEach((ev) =>
     document.addEventListener(ev, () => { if (state.assistantId && host()) load(); }));
 
   // The chat panel beside the list, as on the landing tab of the other assistants (owner, 2026-11-06). The
