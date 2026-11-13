@@ -2,7 +2,8 @@
 //
 // Confirms merged fixes are inside the commit this deploy was built from, tells each reporter once
 // their fix is live, and closes issues nobody replied to 7 days later. The same tick closes support
-// tickets left waiting on the customer for 7 days (src/utils/ticket-auto-close.ts). All the logic and its safety
+// tickets left waiting on the customer for 7 days (src/utils/ticket-auto-close.ts), and moves merged feature
+// requests to Released once this deploy contains them (src/utils/feature-proof.ts). All the logic and its safety
 // notes are in src/utils/issue-fix-live.ts.
 //
 // ⚠️ Netlify fires scheduled functions ONLY on the production deploy. Staging is a branch deploy, so
@@ -17,8 +18,10 @@ import { getDb } from '../../db/client';
 import { runFixLiveCheck, type FixLiveResult } from '../../src/utils/issue-fix-live';
 import { syncOpenCloudMerges } from '../../src/utils/issue-cloud-merge';
 import { autoCloseQuietTickets } from '../../src/utils/ticket-auto-close';
+import { runFeatureLiveCheck, type FeatureLiveResult } from '../../src/utils/feature-proof';
+import { BUILD_COMMIT } from '../../src/generated/build-commit';
 
-export async function runFixesLiveCheck(): Promise<FixLiveResult & { mergesSynced?: number; ticketsAutoClosed: number }> {
+export async function runFixesLiveCheck(): Promise<FixLiveResult & { mergesSynced?: number; ticketsAutoClosed: number; features: FeatureLiveResult }> {
     const db = getDb();
     // Merges to staging running in GitHub Actions first, so one that just landed is checked below.
     const mergesSynced = await syncOpenCloudMerges(db);
@@ -26,7 +29,11 @@ export async function runFixesLiveCheck(): Promise<FixLiveResult & { mergesSynce
     if (result.skipped) console.warn(`[check-fixes-live] live check skipped: ${result.skipped}`);
     // Support tickets follow the same 7-quiet-days rule (src/utils/ticket-auto-close.ts) on the same tick.
     const ticketsAutoClosed = await autoCloseQuietTickets(db);
-    return { ...result, ticketsAutoClosed };
+    // Feature requests: staging CI/deploy for merged features, and Released only once THIS deploy contains
+    // them (src/utils/feature-proof.ts). Silent: no submitter or voter is notified. Never throws.
+    const features = await runFeatureLiveCheck(db, { deployedSha: BUILD_COMMIT, token: process.env.GITHUB_FIX_CHECK_TOKEN || undefined });
+    if (features.skipped) console.warn(`[check-fixes-live] feature live check skipped: ${features.skipped}`);
+    return { ...result, ticketsAutoClosed, features };
 }
 
 export default withLambda(async () => {

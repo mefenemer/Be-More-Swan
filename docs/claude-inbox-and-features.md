@@ -23,10 +23,37 @@ Three kinds of customer request, three places (support-inbox.ts already routes t
 
 - PR pills (Staging PR / Prod PR, links to GitHub) on the card and in the edit panel; `prod-pr <id> --pr <url>`
   records a PR into main. `ask-approval <id> --pr <url> [--file why.md]` shows **✅ Approve PR #N**; the owner's
-  click merges it on GitHub (see docs/fix-pipeline-interactive.md) and, for a PR into main, moves the request to
-  **Released without notifying anyone**. `withdraw-approval <id>` hides the button.
+  click merges it on GitHub (see docs/fix-pipeline-interactive.md); for a PR into main the request moves to
+  **Released, without notifying anyone, once the production deploy contains it** (see below). `withdraw-approval <id>` hides the button.
+
+## Feature requests use the Fix pipeline's checks (owner, 2026-11-13)
+
+"It must do the same thing before I start using it." So a feature Claude builds goes through the same steps as
+a fix (`src/utils/feature-proof.ts`, `db/z-feature-pipeline-proof.sql`):
+
+1. `start <id>` → In progress. Claude builds it.
+2. `proof <id> --test <path> --before <exit> --after <exit> --file why.md`: a test of the new behaviour that
+   **fails on the old code and passes with the feature** (the feature's version of a repro test).
+3. Opens a PR into staging, then `pr <id> --pr <url> --file summary.md [--sql change.sql]`. The SQL is recorded,
+   hashed and classified; only **additive** SQL runs unattended. A new PR resets every later check.
+4. `staging-sql <id>`: the SQL goes on the staging DB and is checked. Not-additive SQL: the owner runs it by hand
+   and tells Claude, who records it with `sql-done <id> staging|production` (owner's word only).
+5. The PR merges into staging (Claude, or the owner's Approve button), then `merged <id>`. Staging CI on the
+   merge commit and the staging deploy are followed (`sync <id>`, and every 30 minutes automatically).
+6. The request's edit panel shows **Ready for production?**: proof test, SQL safety, SQL on staging, SQL on
+   production, tests on staging, live on staging, live on production.
+7. When the owner says to ship: `prod-sql <id>` (same SQL that passed on staging), just before the merge into main.
+8. The owner merges into main (Approve button, or a staging → main release). **Approve refuses to merge while
+   the SQL is not on that PR's database** (staging PR → staging DB; PR into main → prod DB).
+9. **Go-live**: the request moves to **Released only once the production deploy contains it** (the 30-minute
+   Issues live check, `check-fixes-live`), with a note and no notification. Claude never sets Released itself.
+
+`inspect --file q.sql` runs one read-only SELECT for investigating, as in the Fix pipeline.
+Before `db/z-feature-pipeline-proof.sql` reaches a database, none of this shows there and Approve on a PR into
+main still moves the request straight to Released (the old behaviour); `pr --sql` is refused there.
 
 ## Setup
+- `db/z-feature-pipeline-proof.sql` on BOTH databases (additive), for the checks above.
 - `db/z-claude-drafts-and-features.sql` and `db/z-pr-approval.sql` on BOTH databases (additive).
 - Allow rules for prod: `Bash(npx tsx scripts/inbox-drafts.ts --env prod:*)` and
   `Bash(npx tsx scripts/feature-requests.ts --env prod:*)`.
