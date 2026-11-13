@@ -125,7 +125,7 @@ async function main() {
                 UPDATE issue_reports SET status = ${status}, dev_handoff_status = 'in_progress', dev_handoff_at = now(),
                        dev_runner_id = ${RUNNER_ID}, dev_runner_heartbeat = now(), updated_at = now()
                  WHERE id = ${id} AND status NOT IN ('closed', 'roadmap')
-                   AND (dev_handoff_status IS DISTINCT FROM 'in_progress' OR dev_runner_id = ${RUNNER_ID})
+                   AND (dev_handoff_status IS DISTINCT FROM 'in_progress' OR dev_runner_id IS NULL OR dev_runner_id = ${RUNNER_ID})
                 RETURNING id`) as Promise<unknown[]>;
             let status = 'investigating';
             let r: unknown[];

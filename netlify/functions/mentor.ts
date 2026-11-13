@@ -185,7 +185,10 @@ export default withLambda(async (event) => {
             if (body.action === 'strategy_save' || body.action === 'strategy_approve' || body.action === 'strategy_draft') {
                 if (!isStrategyKind(body.kind)) return json(400, { error: 'Which document?' });
                 if (body.action === 'strategy_save') {
-                    const r = await saveStrategyDraft(db, orgId, ctx.userId, body.kind, { sections: body.sections, assumptions: body.assumptions });
+                    // The first draft starts from the Plan tab's pre-fill, so a chat card's one section doesn't empty the rest (#52).
+                    const sources = await loadPrefillSources(db, orgId).catch(() => null);
+                    const startFrom = sources ? prefillStrategy(body.kind, sources) : null;
+                    const r = await saveStrategyDraft(db, orgId, ctx.userId, body.kind, { sections: body.sections, assumptions: body.assumptions }, { startFrom });
                     return r.ok ? json(200, { doc: docView(r.doc) }) : json(r.status, { error: r.error });
                 }
                 if (body.action === 'strategy_approve') {
