@@ -6,7 +6,7 @@
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanDomainInput, customDomainsConfig, DETAIL_DNS_RIGHT_PREFIX, DETAIL_OUR_SIDE, dnsPointsAtUs, dnsRecordsFor, domainPhase, isRegistrable, NETLIFY_APEX_IP } from '../src/utils/site-domains';
+import { cleanDomainInput, customDomainsConfig, DETAIL_DNS_RIGHT_PREFIX, DETAIL_HELD_ELSEWHERE, DETAIL_OUR_SIDE, dnsHostFromNameservers, dnsPointsAtUs, dnsRecordsFor, domainPhase, heldByAnotherNetlifySite, isRegistrable, lookupDomainRegistry, rdapBaseFor, NETLIFY_APEX_IP, NetlifyApiError, notPointingDetail, parseRdap, summariseRegistry } from '../src/utils/site-domains';
 import { assessProviders } from '../src/utils/provider-balance';
 import { siteSlugProblem } from '../src/utils/site-hosting';
 
@@ -142,6 +142,66 @@ const read = (p: string) => readFileSync(join(__dirname, '..', p), 'utf8');
         assert.deepStrictEqual(assessProviders({ ...base, netlifyDomains: { status: 'error', message: 'timeout' } }), []);
         assert.deepStrictEqual(assessProviders({ ...base, netlifyDomains: { status: 'ok' } }), []);
         assert.ok(read('netlify/functions/check-provider-balances.ts').includes('probeDomainsAccess(),'));
+    });
+
+    console.log('\nAnother Netlify site, and who manages the domain');
+
+    await check('still pointing at another Netlify site: says change the record AND take it off that site', () => {
+        const row = { domain: 'www.restorativefutures.co.uk', altDomain: 'restorativefutures.co.uk' };
+        const t = notPointingDetail(row, 'CNAME restorative-futures.netlify.app', 'bms-domains.netlify.app');
+        assert.ok(t.includes('another Netlify website (restorative-futures.netlify.app)') && t.includes('remove restorativefutures.co.uk from that site') && t.includes('Check now straight away'));
+        assert.ok(notPointingDetail(row, 'CNAME old.webador.com', 'bms-domains.netlify.app').startsWith("www.restorativefutures.co.uk doesn't point here yet (found: CNAME old.webador.com)"));
+        assert.ok(notPointingDetail(row, 'nothing yet', 'bms-domains.netlify.app').includes('we check every 10 minutes'));
+    });
+    await check('DNS right but held by another Netlify site: its own phase and words, not "our fault"', () => {
+        assert.strictEqual(heldByAnotherNetlifySite(new NetlifyApiError(422, 'Domain already in use by another site')), true);
+        assert.strictEqual(heldByAnotherNetlifySite(new NetlifyApiError(422, 'Invalid SSL request')), false);
+        assert.strictEqual(heldByAnotherNetlifySite(new NetlifyApiError(401, 'Access Denied')), false);
+        const detail = DETAIL_HELD_ELSEWHERE('restorativefutures.co.uk');
+        assert.ok(detail.startsWith('Your DNS is right, but restorativefutures.co.uk is still attached to another Netlify website'));
+        assert.strictEqual(domainPhase({ status: 'pending_dns', statusDetail: detail }), 'held_elsewhere');
+        const d = read('src/utils/site-domains.ts');
+        assert.ok(d.indexOf('if (heldByAnotherNetlifySite(err)) {') < d.indexOf('if (row.statusDetail !== DETAIL_OUR_SIDE) {'), 'checked before the our-side message');
+    });
+    await check('nameservers → whose DNS panel; a reseller on a wholesale registrar wins (Webador on Openprovider)', () => {
+        assert.strictEqual(dnsHostFromNameservers(['ns05.domaincontrol.com.']), 'GoDaddy');
+        assert.strictEqual(dnsHostFromNameservers(['kate.ns.cloudflare.com']), 'Cloudflare');
+        assert.strictEqual(dnsHostFromNameservers(['dns1.p04.nsone.net']), 'Netlify DNS');
+        assert.strictEqual(dnsHostFromNameservers(['ns.unknown-host.example']), null);
+        // The real Nominet answer for restorativefutures.co.uk, trimmed.
+        const rdap = parseRdap({ entities: [
+            { roles: ['registrar'], vcardArray: ['vcard', [['fn', {}, 'text', 'Hosting Concepts B.V.']]] },
+            { roles: ['registrant'], vcardArray: ['vcard', [['fn', {}, 'text', '']]] },
+            { roles: ['reseller'], vcardArray: ['vcard', [['fn', {}, 'text', ''], ['org', {}, 'text', 'Webador']]] },
+        ], events: [{ eventAction: 'registration', eventDate: '2026-06-14T15:26:20Z' }, { eventAction: 'expiration', eventDate: '2027-06-14T15:26:20Z' }] });
+        assert.deepStrictEqual(rdap, { reseller: 'Webador', registrar: 'Hosting Concepts B.V.', expiresAt: '2027-06-14T15:26:20.000Z' });
+        assert.deepStrictEqual(summariseRegistry(['ns1.openprovider.nl.'], rdap), { dnsManagedBy: 'Webador', boughtThrough: 'Webador', expiresAt: '2027-06-14T15:26:20.000Z', netlifyDns: false });
+        assert.strictEqual(summariseRegistry(['ns1.domaincontrol.com'], { reseller: null, registrar: 'GoDaddy.com, LLC', expiresAt: null }).dnsManagedBy, 'GoDaddy');
+        assert.deepStrictEqual(parseRdap(null), { reseller: null, registrar: null, expiresAt: null });
+    });
+    await check('the lookup never throws, asks the registrable domain, and is cached', async () => {
+        let calls = 0;
+        const deps = { resolveNs: async (h: string) => { calls++; assert.strictEqual(h, 'cache-test.co.uk'); return ['ns1.openprovider.nl']; }, fetchJson: async (u: string) => { if (u.includes('data.iana.org')) return { services: [[['uk'], ['https://rdap.nominet.uk/uk/']]] }; assert.strictEqual(u, 'https://rdap.nominet.uk/uk/domain/cache-test.co.uk'); return { entities: [{ roles: ['reseller'], vcardArray: ['vcard', [['org', {}, 'text', 'Webador']]] }] }; } };
+        const a = await lookupDomainRegistry('www.cache-test.co.uk', deps);
+        const b = await lookupDomainRegistry('cache-test.co.uk', deps);
+        assert.strictEqual(a?.dnsManagedBy, 'Webador'); assert.deepStrictEqual(a, b); assert.strictEqual(calls, 1, 'second call served from cache');
+        const none = await lookupDomainRegistry('broken-test.com', { resolveNs: async () => { throw new Error('SERVFAIL'); }, fetchJson: async () => { throw new Error('RDAP 500'); } });
+        assert.strictEqual(none, null);
+    });
+    await check('the RDAP server comes from IANA\'s list for the ending; none for an ending without RDAP', () => {
+        const services: Array<[string[], string[]]> = [[['uk'], ['https://rdap.nominet.uk/uk/']], [['com', 'net'], ['http://x.example/', 'https://rdap.verisign.com/com/v1/']]];
+        assert.strictEqual(rdapBaseFor('restorativefutures.co.uk', services), 'https://rdap.nominet.uk/uk/');
+        assert.strictEqual(rdapBaseFor('github.com', services), 'https://rdap.verisign.com/com/v1/', 'https preferred');
+        assert.strictEqual(rdapBaseFor('startup.io', services), null);
+        assert.ok(!read('src/utils/site-domains.ts').includes('https://rdap.org/'), 'not the middleman that 403s Node');
+    });
+    await check('the panel names the DNS host, warns before renewal, and says keep the old site until Live', () => {
+        const ed = read('src/components/assistant-site-editor.js');
+        assert.ok(ed.includes('${whereToEdit(d)}') && ed.includes("is managed by <strong>${esc(r.dnsManagedBy)}</strong>"));
+        assert.ok(ed.includes('const soon = days != null && days <= 60;') && ed.includes('your website goes offline'));
+        assert.ok(ed.includes('Keep it running until this says <strong>Live</strong>'));
+        assert.ok(ed.includes("phase === 'held_elsewhere' ? 'Still attached to another Netlify site'"));
+        assert.ok(read('netlify/functions/sites.ts').includes('registry: ownDomain ? await lookupDomainRegistry(ownDomain.altDomain || ownDomain.domain) : null'));
     });
 
     console.log(`\n${passed}/${total} passed\n`);

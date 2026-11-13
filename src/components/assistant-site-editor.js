@@ -2257,6 +2257,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     return phase === 'live' ? 'Live'
       : phase === 'securing' ? 'Setting up https'
       : phase === 'connecting' ? 'DNS is right — connecting'
+      : phase === 'held_elsewhere' ? 'Still attached to another Netlify site'
       : 'Waiting for your DNS settings';
   }
   // After "Check now": say what the check found, not just that it ran.
@@ -2265,8 +2266,28 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const phase = d.phase || d.status;
     if (phase === 'live') return `Live — ${d.domain} now shows your website.`;
     if (phase === 'securing') return 'Your DNS is right and the domain is connected. The secure (https) connection is being set up — we\'ll email you when it\'s live.';
+    if (phase === 'held_elsewhere') return 'Your DNS is right, but another Netlify site still has this domain. Remove it there, then press Check now.';
     if (phase === 'connecting') return 'Your DNS is right. We\'re finishing the connection and keep checking every 10 minutes — no need to press again.';
     return 'Not pointing here yet. DNS changes can take a few hours — we keep checking every 10 minutes for 3 days and email you when it\'s live.';
+  }
+  // Who manages the domain (site-domains.ts lookupDomainRegistry): say where to go, not "where you bought it".
+  function whereToEdit(d) {
+    const name = esc(d.altDomain || d.domain);
+    const r = d.registry || {};
+    if (r.netlifyDns) return `<strong>${name}</strong>'s DNS is on <strong>Netlify DNS</strong>. In the Netlify account that holds it, open <strong>Domains → ${name}</strong> and add:`;
+    if (r.dnsManagedBy) return `<strong>${name}</strong>'s DNS is managed by <strong>${esc(r.dnsManagedBy)}</strong>. Log in to ${esc(r.dnsManagedBy)}, open the domain's <strong>DNS</strong> settings (sometimes "Manage DNS" or "DNS records") and add:`;
+    return `Where you bought <strong>${name}</strong>, open its <strong>DNS</strong> settings and add:`;
+  }
+  // Bought through / renews by — and a warning when renewal is close, so a lapsed domain doesn't take the site down.
+  function registryLine(d) {
+    const r = d.registry || {};
+    if (!r.boughtThrough && !r.expiresAt) return '';
+    const exp = r.expiresAt ? new Date(r.expiresAt) : null;
+    const days = exp ? Math.round((exp.getTime() - Date.now()) / 86400000) : null;
+    const when = exp ? exp.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+    const parts = [r.boughtThrough ? `Registered through ${esc(r.boughtThrough)}` : '', exp ? `renews by ${esc(when)}` : ''].filter(Boolean).join(' · ');
+    const soon = days != null && days <= 60;
+    return `<p class="text-xs mt-2 ${soon ? 'text-amber-800 font-bold' : 'text-gray-500'}">${parts}${soon ? ` — ${days <= 0 ? 'it has expired' : `${days} day${days === 1 ? '' : 's'} left`}. If it lapses, your website goes offline: renew it with ${esc(r.boughtThrough || 'whoever you bought it from')}.` : '.'}</p>`;
   }
   function domainBlock() {
     const d = state.data.site.customDomain || {};
@@ -2285,18 +2306,20 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const tone = phase === 'live' ? 'text-green-700' : 'text-amber-800';
     const label = domainLabel(phase);
     const records = phase === 'needs_dns' || (d.status === 'live' && d.altDomain && /without www/.test(d.detail || ''))
-      ? `<p class="text-xs text-gray-700 mt-3">Where you bought <strong>${esc(d.altDomain || d.domain)}</strong>, open its <strong>DNS</strong> settings and add:</p>
+      ? `<p class="text-xs text-gray-700 mt-3">${whereToEdit(d)}</p>
          <div class="overflow-x-auto mt-1"><table class="text-xs w-full border border-gray-200 rounded-lg" style="border-collapse:separate">
            <tr class="bg-gray-50 text-gray-600"><th class="text-left px-2 py-1">Type</th><th class="text-left px-2 py-1">Name / Host</th><th class="text-left px-2 py-1">Value / Points to</th></tr>
            ${(d.records || []).map((r) => `<tr><td class="px-2 py-1 font-bold">${esc(r.type)}</td><td class="px-2 py-1 font-mono">${esc(r.name)}</td><td class="px-2 py-1 font-mono">${esc(r.value)} <span class="ml-1">${btn(`data-site-copy="${esc(r.value)}"`, 'Copy')}</span></td></tr>
              <tr><td></td><td colspan="2" class="px-2 pb-1 text-gray-500">${esc(r.note)}</td></tr>`).join('')}
          </table></div>
-         <p class="text-xs text-gray-500 mt-1">Some providers call Name "Host" and want it left blank or "@" for the bare domain. Changes can take from a few minutes to a few hours.</p>`
+         <p class="text-xs text-gray-500 mt-1">Some providers call Name "Host" and want it left blank or "@" for the bare domain. Changes can take from a few minutes to a few hours.</p>
+         <p class="text-xs text-gray-700 mt-2"><strong>Moving from another website?</strong> Keep it running until this says <strong>Live</strong> — visitors see the old one until then, and the new one straight after. Then you can cancel it.</p>`
       : '';
     return `${head}
       <p class="text-xs mt-1"><strong>${esc(d.domain)}</strong>${d.altDomain ? ` <span class="text-gray-500">(and ${esc(d.altDomain)})</span>` : ''} · <span class="font-bold ${tone}">${esc(label)}</span></p>
       ${d.detail ? `<p class="text-xs text-gray-600 mt-1">${esc(d.detail)}</p>` : ''}
       ${records}
+      ${registryLine(d)}
       ${canEdit ? `<div class="flex flex-wrap gap-2 mt-3">${d.status !== 'live' ? btn('data-site-domain-check', 'Check now', true) : ''}${btn('data-site-domain-remove', 'Remove domain')}</div>` : ''}`;
   }
 
