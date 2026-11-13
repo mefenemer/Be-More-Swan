@@ -2470,6 +2470,7 @@
               </div>
             </div>
           </div>
+          <div id="fr-form-dev"></div>
           <div id="fr-form-brief-wrap" class="hidden">
             <div class="flex items-center justify-between mb-1">
               <label class="block text-xs font-bold uppercase text-gray-400">Brief (for Claude to execute)</label>
@@ -7196,6 +7197,9 @@ const frColumnOf = (it) => FR_COLUMN_OF_STATUS[it.status] || 'review';
 function frBoardCard(it) {
   const parent = it.parentId ? _frItems.find(x => x.id === it.parentId) : null;
   const badges = [
+    // Claude building it from a session (scripts/feature-requests.ts; src/utils/claude-work.ts).
+    it.claudeWorking ? IR_CLAUDE_PILL : '',
+    (!it.claudeWorking && it.devPrUrl) ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">PR open</span>' : '',
     `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${FR_PRIORITY_CLS[it.priority] || 'bg-gray-100 text-gray-600'}">${_esc(FR_PRIORITY_LABEL[it.priority] || it.priority)}</span>`,
     (it.itemType && it.itemType !== 'feature') ? `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${FR_ITEM_TYPE_CLS[it.itemType] || 'bg-gray-100 text-gray-600'}">${_esc(FR_ITEM_TYPE_LABEL[it.itemType] || it.itemType)}</span>` : '',
     it.status === 'brief_ready' ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">Brief ready</span>' : '',
@@ -7329,6 +7333,14 @@ function openRoadmapEdit(id) {
   _frFillSelect(document.getElementById('fr-form-status'), FR_STATUSES, FR_STATUS_LABEL, it.status);
   document.getElementById('fr-form-status-wrap').classList.remove('hidden');
   document.getElementById('fr-form-brief-wrap').classList.remove('hidden');
+  // Claude's notes and pull request (read-only; scripts/feature-requests.ts writes them).
+  const dev = document.getElementById('fr-form-dev');
+  if (dev) {
+    const pr = it.devPrUrl ? `<a href="${_esc(it.devPrUrl)}" target="_blank" rel="noopener" class="font-bold text-violet-700 hover:underline">View pull request →</a>` : '';
+    dev.innerHTML = (it.devNotes || pr || it.claudeWorking)
+      ? `<div class="border border-violet-200 bg-violet-50 rounded-xl p-3 space-y-2"><div class="flex items-center gap-2"><span class="text-xs font-bold uppercase text-violet-600">Claude's work</span>${it.claudeWorking ? IR_CLAUDE_PILL : ''}</div>${pr}${it.devNotes ? `<div class="text-xs text-gray-700 whitespace-pre-wrap max-h-56 overflow-auto bg-white border border-gray-200 rounded-lg p-2">${_esc(it.devNotes)}</div>` : ''}</div>`
+      : '';
+  }
   _frResetEnhance();
   document.getElementById('fr-form').classList.remove('hidden');
   document.getElementById('fr-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -8116,6 +8128,7 @@ async function openTicketPanel(tid) {
     const d = await api(`/.netlify/functions/admin-helpdesk?ticketId=${tid}`);
     const t = d.ticket; const replies = d.replies || [];
     document.getElementById('ticket-panel-title').textContent = `#${t.id} — ${t.subject}`;
+    _tkDraft = d.draft || null;
     body.innerHTML = `
       <!-- Metadata bar -->
       <div class="grid grid-cols-2 gap-3 text-sm">
@@ -8164,8 +8177,13 @@ async function openTicketPanel(tid) {
           <button id="reply-tab-public" onclick="setReplyMode(false)" class="btn-secondary flex-1 py-2 text-xs font-bold border">Public Reply</button>
           <button id="reply-tab-internal" onclick="setReplyMode(true)" class="flex-1 py-2 text-xs font-semibold text-gray-500 hover:bg-yellow-50 transition">Internal Note</button>
         </div>
-        <textarea id="reply-body" rows="4" placeholder="Type your reply…"
-          class="w-full px-4 py-3 text-sm text-gray-800 focus:outline-none resize-none border-0"></textarea>
+        ${_tkDraft ? `<div class="px-4 py-3 bg-violet-50 border-b border-violet-100 text-xs text-violet-800 space-y-1">
+            <div class="flex items-center justify-between gap-2"><b>✍️ Draft by Claude: review and edit it, then press Send Reply. Nothing has been sent.</b>
+              <button onclick="discardTicketDraft(${t.id})" class="text-violet-700 font-semibold hover:underline shrink-0">Discard draft</button></div>
+            ${_tkDraft.note ? `<div class="whitespace-pre-wrap text-violet-700">${_esc(_tkDraft.note)}</div>` : ''}
+          </div>` : ''}
+        <textarea id="reply-body" rows="${_tkDraft ? 10 : 4}" placeholder="Type your reply…"
+          class="w-full px-4 py-3 text-sm text-gray-800 focus:outline-none resize-none border-0">${_tkDraft ? _esc(_tkDraft.reply) : ''}</textarea>
         <div class="px-4 py-3 bg-gray-50 flex justify-end">
           <button onclick="submitReply(${t.id})" class="btn-golive px-4 py-2 text-sm font-bold rounded-lg transition">Send Reply</button>
         </div>
@@ -8173,6 +8191,15 @@ async function openTicketPanel(tid) {
   } catch(e) {
     body.innerHTML = `<p class="text-red-500">${e.message}</p>`;
   }
+}
+
+// Claude's draft reply for the open ticket (scripts/inbox-drafts.ts). Sending a public reply clears it.
+let _tkDraft = null;
+async function discardTicketDraft(tid) {
+  try {
+    await api(`/.netlify/functions/admin-helpdesk?ticketId=${tid}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'discard-draft' }) });
+    await openTicketPanel(tid);
+  } catch (e) { window.showToast?.(e.message, { icon: '⚠️' }); }
 }
 
 function closeTicketPanel() { document.getElementById('ticket-detail-panel').classList.add('hidden'); _ticketPanelId = null; }

@@ -18,6 +18,7 @@
 // Replaces the old admin-feature-roadmap.ts (unified into feature_requests).
 
 import { loadFeatureRevenue } from '../../src/utils/feature-revenue';
+import { loadFeatureDev } from '../../src/utils/claude-work';
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import jwt from 'jsonwebtoken';
@@ -362,10 +363,13 @@ export default withLambda(async (event) => {
         // Revenue behind each idea (src/utils/feature-revenue.ts): the monthly list price of every
         // distinct workspace that asked for it or voted for it. A signal next to votes, never instead.
         const revenue = await loadFeatureRevenue(db, rows.map((r) => ({ id: r.id, organisationId: r.organisationId })));
+        // Claude's work on a request (scripts/feature-requests.ts): notes, PR, "working now".
+        const dev = await loadFeatureDev(db, rows.map((r) => r.id));
 
         return json(200, {
             requests: rows.map((r) => ({
                 ...r,
+                ...(dev.get(r.id) ?? { claudeWorking: false, devPrUrl: null, devNotes: null }),
                 revenueGbp: revenue.get(r.id)?.monthlyGbp ?? 0,
                 payingWorkspaces: revenue.get(r.id)?.payingWorkspaces ?? 0,
                 categoryLabel: FR_CATEGORY_LABEL[r.category as keyof typeof FR_CATEGORY_LABEL] || r.category,
