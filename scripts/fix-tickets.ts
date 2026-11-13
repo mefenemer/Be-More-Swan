@@ -23,6 +23,7 @@
 //   npx tsx scripts/fix-tickets.ts --env prod sync <id>            (staging CI + staging deploy → checklist)
 //   npx tsx scripts/fix-tickets.ts --env prod prod-sql <id>        (only on the owner's word, before a release merges)
 //   npx tsx scripts/fix-tickets.ts --env prod release <id>         (clear the "Claude working" pill)
+//   npx tsx scripts/fix-tickets.ts --env prod inspect --file <query.sql>   (READ-ONLY: one SELECT, to investigate)
 //   npx tsx scripts/fix-tickets.ts --env prod status <id> <more_info_required|on_hold|closed>  (on_hold = Waiting on Others) --file <why.md>
 //
 // DB: --env prod → DATABASE_URL_PROD; --env staging → NETLIFY_DATABASE_URL (staging). The staging DB for
@@ -218,6 +219,17 @@ async function main() {
             await syncStagingProof(db, { id, devPrUrl: row.devPrUrl, devStagingCiStatus: null, devStagingLiveAt: null }, { token: ghToken() });
             await release(id);   // Claude's part is done; the checklist waits on staging CI / deploy, then the owner
             await printChecklist(id);
+        } else if (cmd === 'inspect') {
+            // Investigation only: one statement inside a READ ONLY transaction (Postgres refuses any write),
+            // capped at 20 s and 200 rows. For finding the cause of a ticket, never for changing data.
+            const q = readText(arg(rest, '--file'), 'SELECT');
+            if (!/^\s*(select|with)\b/i.test(q) || /;\s*\S/.test(q.replace(/;\s*$/, ''))) throw new Error('inspect runs ONE SELECT (or WITH … SELECT).');
+            const rows = await client.begin('READ ONLY', async (tx: any) => {
+                await tx.unsafe("SET LOCAL statement_timeout = '20s'");
+                return tx.unsafe(q.replace(/;\s*$/, ''));
+            }) as any[];
+            for (const r of rows.slice(0, 200)) console.log(JSON.stringify(r, (_k, v) => (typeof v === 'string' && v.length > 1500 ? `${v.slice(0, 1500)}…` : v)));
+            console.log(`(${rows.length} row(s)${rows.length > 200 ? ', first 200 shown' : ''})`);
         } else if (cmd === 'release') {
             need(id, 'release <id>');
             await release(id);
