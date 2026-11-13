@@ -9221,7 +9221,10 @@ async function loadFeatureFlags() {
         </td>
         <td class="px-4 py-3 text-xs text-gray-500">${tiers}</td>
         <td class="px-4 py-3">
-          <button onclick="openFlagEditor('${f.key}', ${f.enabled}, ${f.rolloutPercentage}, ${JSON.stringify(JSON.stringify(f.allowedTiers||[]))}, ${JSON.stringify(JSON.stringify(f.allowedWorkspaceIds||[]))})"
+          <!-- ⚠️ Every value here is HTML-escaped: JSON.stringify gives double-quoted strings, and an unescaped
+               " ended this double-quoted attribute early, so Edit threw a syntax error and did nothing for EVERY
+               flag (found 2026-11-13). The browser decodes &quot; back before running the handler. -->
+          <button onclick="openFlagEditor(${escapeHtmlJs(JSON.stringify(f.key))}, ${!!f.enabled}, ${Number(f.rolloutPercentage) || 0}, ${escapeHtmlJs(JSON.stringify(JSON.stringify(f.allowedTiers||[])))}, ${escapeHtmlJs(JSON.stringify(JSON.stringify(f.allowedWorkspaceIds||[])))})"
             class="text-xs text-indigo-600 hover:underline font-semibold">Edit</button>
           ${canDelete ? `<button onclick='openCascadeDeleteSheet("feature_flags",${JSON.stringify(f.key)},${JSON.stringify(f.key)},loadFeatureFlags)'
             class="ml-2 text-xs text-red-500 hover:underline font-semibold">Delete</button>` : ''}
