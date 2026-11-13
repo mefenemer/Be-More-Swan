@@ -67,6 +67,9 @@
       <label class="inline-flex items-start gap-2 text-sm"><input type="checkbox" data-op-offer value="stays" class="mt-1"> Guests stay with us (holiday lets, B&amp;B or guest house rooms)</label>
     </div>
     <p id="op-offer-note" class="text-xs mt-1.5"></p>
+    <!-- Issue #46: a guess is pre-ticked and looks like an answer, and a tick only saves when a box
+         changes, so agreeing with the guess saved nothing. This saves it as it stands. -->
+    <button type="button" id="op-offer-confirm" class="hidden mt-2 btn-primary text-sm font-bold px-3 py-1.5 rounded-md">That's right, save it</button>
   </div>
   <!-- "Do you offer a free trial or an introductory offer?" (src/utils/intro-offer.ts) — every
        assistant uses the answer (org-products.ts loadProductsBlock). The question and the order of
@@ -163,7 +166,8 @@
       box.querySelectorAll('[data-op-offer]').forEach((c) => { c.checked = offers(c.value); });
       const note = byId('op-offer-note');
       note.className = `text-xs mt-1.5 ${offer.answered ? 'text-gray-500' : 'text-amber-700'}`;
-      note.textContent = offer.answered ? '' : 'We guessed this from your business details. Tick what\'s true and it\'s saved.';
+      note.textContent = offer.answered ? '' : 'Not saved yet: these ticks are our guess from your business details. Change any that are wrong, or save them as they are.';
+      byId('op-offer-confirm').classList.toggle('hidden', !!offer.answered);
       window.BizOffer.set(offer);
       refreshIntroChoices();
     }
@@ -659,6 +663,7 @@
       if (!t) return;
       const id = Number(t.closest('.op-card')?.dataset.id);
       if (t.id === 'op-add') return openEditor(null);
+      if (t.id === 'op-offer-confirm') { t.disabled = true; await saveOffer(); t.disabled = false; return; }
       if (t.id === 'op-intro-save') return saveIntro(introFromForm());
       if (t.id === 'op-cancel') return closeEditor();
       if (t.id === 'op-save') return save();
