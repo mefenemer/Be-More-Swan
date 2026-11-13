@@ -83,7 +83,7 @@ async function main() {
             const status = arg(rest, '--status') || 'reported';
             const rows = await client`
                 SELECT id, status, created_at::text AS created, organisation_id AS org, source_location,
-                       left(regexp_replace(coalesce(description, ''), '\s+', ' ', 'g'), 140) AS what
+                       left(regexp_replace(coalesce(description, ''), '[[:space:]]+', ' ', 'g'), 140) AS what
                   FROM issue_reports WHERE status = ${status} ORDER BY created_at`;
             for (const r of rows) console.log(`#${r.id}  ${r.created.slice(0, 16)}  org ${r.org ?? '-'}  ${r.source_location ?? ''}\n      ${r.what}`);
             console.log(`\n${rows.length} at '${status}' (${env}).`);
