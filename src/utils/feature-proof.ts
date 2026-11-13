@@ -9,8 +9,11 @@
 //   • the Approve button refuses to merge until the SQL is on that PR's database (featureMergeBlocker);
 //   • after the merge to staging: staging CI on the merge commit and the staging deploy are followed;
 //   • "Ready for production?" checklist on the request (featureChecklist);
-//   • go-live: a request moves to Released only once the PRODUCTION deploy contains it (confirmLiveFeatures,
-//     every 30 minutes with the Issues live check), never just because a PR merged into main.
+//   • go-live: a request moves to Released only once the PRODUCTION deploy contains it (runFeatureLiveCheck,
+//     every 30 minutes with the Issues live check), never just because a PR merged into main;
+//   • hold (db/z-feature-go-live-hold.sql): a feature that ships SWITCHED OFF (waiting on LinkedIn / Google
+//     approval, or in beta) carries go_live_hold; the live check leaves it at In Progress until the owner
+//     switches it on and Claude clears the hold.
 // ⚠️ Nothing here notifies the submitter or voters; the owner does all communication.
 //
 // Columns from db/z-feature-pipeline-proof.sql, read raw behind featureProofColumnsReady() (not in
@@ -44,7 +47,21 @@ export async function featureProofColumnsReady(db: Db): Promise<boolean> {
     }
     return readyCache.ready;
 }
-export function resetFeatureProofCache(): void { readyCache = null; }
+let holdCache: { ready: boolean; at: number } | null = null;
+/** Has db/z-feature-go-live-hold.sql reached this database? Same caching as above. */
+export async function featureHoldColumnReady(db: Db): Promise<boolean> {
+    if (holdCache && (holdCache.ready || Date.now() - holdCache.at < 5 * 60_000)) return holdCache.ready;
+    try {
+        const rows = await db.execute(sql`
+            SELECT 1 FROM information_schema.columns
+             WHERE table_name = 'feature_requests' AND column_name = 'go_live_hold' LIMIT 1`) as unknown[];
+        holdCache = { ready: rows.length > 0, at: Date.now() };
+    } catch {
+        holdCache = { ready: false, at: Date.now() };
+    }
+    return holdCache.ready;
+}
+export function resetFeatureProofCache(): void { readyCache = null; holdCache = null; }
 
 export interface FeatureProofRow {
     id: number;
@@ -65,13 +82,18 @@ export interface FeatureProofRow {
     devProdSqlResult: string | null;
     devProdMergedAt: string | null;
     liveAt: string | null;
+    /** Why the feature is held at In Progress though it may be deployed (switched off). null = not held. */
+    goLiveHold?: string | null;
 }
 
-const SELECT_COLS = sql`
+const BASE_COLS = sql`
     id, status, dev_pr_url, prod_pr_url, dev_repro, dev_sql, dev_sql_safety,
     dev_staging_sql_status, dev_staging_sql_result, dev_staging_sql_hash, dev_merged_at::text AS dev_merged_at,
     dev_staging_ci_status, dev_staging_ci_url, dev_staging_live_at::text AS dev_staging_live_at,
     dev_prod_sql_status, dev_prod_sql_result, dev_prod_merged_at::text AS dev_prod_merged_at, live_at::text AS live_at`;
+const selectCols = async (db: Db) => (await featureHoldColumnReady(db))
+    ? sql`${BASE_COLS}, go_live_hold`
+    : sql`${BASE_COLS}, NULL::text AS go_live_hold`;
 
 function toRow(r: Record<string, any>): FeatureProofRow {
     return {
@@ -81,14 +103,14 @@ function toRow(r: Record<string, any>): FeatureProofRow {
         devStagingSqlStatus: r.dev_staging_sql_status ?? null, devStagingSqlResult: r.dev_staging_sql_result ?? null, devStagingSqlHash: r.dev_staging_sql_hash ?? null,
         devMergedAt: r.dev_merged_at ?? null, devStagingCiStatus: r.dev_staging_ci_status ?? null, devStagingCiUrl: r.dev_staging_ci_url ?? null,
         devStagingLiveAt: r.dev_staging_live_at ?? null, devProdSqlStatus: r.dev_prod_sql_status ?? null, devProdSqlResult: r.dev_prod_sql_result ?? null,
-        devProdMergedAt: r.dev_prod_merged_at ?? null, liveAt: r.live_at ?? null,
+        devProdMergedAt: r.dev_prod_merged_at ?? null, liveAt: r.live_at ?? null, goLiveHold: r.go_live_hold ?? null,
     };
 }
 
 /** One request's proof fields, or null before the SQL or for an unknown id. */
 export async function loadFeatureProof(db: Db, id: number): Promise<FeatureProofRow | null> {
     if (!(await featureProofColumnsReady(db))) return null;
-    const rows = await db.execute(sql`SELECT ${SELECT_COLS} FROM feature_requests WHERE id = ${id}`) as Array<Record<string, any>>;
+    const rows = await db.execute(sql`SELECT ${await selectCols(db)} FROM feature_requests WHERE id = ${id}`) as Array<Record<string, any>>;
     return rows[0] ? toRow(rows[0]) : null;
 }
 
@@ -100,9 +122,9 @@ export async function loadFeatureProofs(db: Db, ids: number[]): Promise<Map<numb
     try {
         if (!(await featureProofColumnsReady(db))) return out;
         const rows = await db.execute(sql`
-            SELECT ${SELECT_COLS} FROM feature_requests
+            SELECT ${await selectCols(db)} FROM feature_requests
              WHERE id IN ${sql.raw(`(${list.join(',')})`)}
-               AND (dev_pr_url IS NOT NULL OR dev_repro IS NOT NULL OR dev_sql IS NOT NULL)`) as Array<Record<string, any>>;
+               AND (dev_pr_url IS NOT NULL OR prod_pr_url IS NOT NULL OR dev_repro IS NOT NULL OR dev_sql IS NOT NULL)`) as Array<Record<string, any>>;
         for (const r of rows) out.set(Number(r.id), toRow(r));
     } catch (e) {
         console.error('[feature-proof] loadFeatureProofs failed:', e instanceof Error ? e.message : e);
@@ -159,6 +181,7 @@ export function featureChecklist(r: FeatureProofRow): { items: CheckItem[]; read
         key: 'live_prod', label: 'Live on production',
         state: r.liveAt ? 'ok' : 'wait',
         detail: r.liveAt ? `The production deploy contains it (seen ${r.liveAt.slice(0, 16)} UTC). Moved to Released; no one was notified.`
+            : r.goLiveHold ? `Held at In Progress (switched off): ${r.goLiveHold} It moves to Released only after it is switched on and the hold is cleared.`
             : r.devProdMergedAt ? 'Merged into main. Moves to Released once the production deploy contains it.'
             : 'Not in main yet.',
     });
@@ -298,9 +321,11 @@ export async function runFeatureLiveCheck(db: Db, opts: { deployedSha: string; t
         }
 
         if (!isFullSha(opts.deployedSha)) return { ...result, skipped: 'no_commit' };
+        // Held (switched off until approval / in beta) features are never released by the deploy.
+        const notHeld = (await featureHoldColumnReady(db)) ? sql`AND go_live_hold IS NULL` : sql``;
         const rows = await db.execute(sql`
             SELECT id, dev_pr_url, prod_pr_url FROM feature_requests
-             WHERE live_at IS NULL AND status NOT IN ('released', 'declined', 'duplicate')
+             WHERE live_at IS NULL AND status NOT IN ('released', 'declined', 'duplicate') ${notHeld}
                AND (dev_merged_at IS NOT NULL OR dev_prod_merged_at IS NOT NULL)
              ORDER BY coalesce(dev_prod_merged_at, dev_merged_at) ASC
              LIMIT ${MAX_FEATURE_LIVE_CHECKS}`) as Array<{ id: number; dev_pr_url: string | null; prod_pr_url: string | null }>;
@@ -321,7 +346,7 @@ export async function runFeatureLiveCheck(db: Db, opts: { deployedSha: string; t
             const claimed = await db.execute(sql`
                 UPDATE feature_requests SET status = 'released', released_at = coalesce(released_at, now()), live_at = now(),
                        dev_runner_id = NULL, dev_runner_heartbeat = NULL, updated_at = now()
-                 WHERE id = ${row.id} AND live_at IS NULL AND status NOT IN ('released', 'declined', 'duplicate')
+                 WHERE id = ${row.id} AND live_at IS NULL AND status NOT IN ('released', 'declined', 'duplicate') ${notHeld}
                 RETURNING id`) as unknown[];
             if (!claimed.length) continue;
             result.released++;

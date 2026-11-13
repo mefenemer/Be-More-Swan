@@ -386,7 +386,7 @@ export default withLambda(async (event) => {
                 ...r,
                 ...(dev.get(r.id) ?? { claudeWorking: false, devPrUrl: null, devNotes: null }),
                 ...(prFields.get(r.id) ?? NO_PR_FIELDS),
-                proof: proofs.has(r.id) ? { ...featureChecklist(proofs.get(r.id)!), prodMergedAt: proofs.get(r.id)!.devProdMergedAt, liveAt: proofs.get(r.id)!.liveAt } : null,
+                proof: proofs.has(r.id) ? { ...featureChecklist(proofs.get(r.id)!), prodMergedAt: proofs.get(r.id)!.devProdMergedAt, liveAt: proofs.get(r.id)!.liveAt, goLiveHold: proofs.get(r.id)!.goLiveHold ?? null } : null,
                 revenueGbp: revenue.get(r.id)?.monthlyGbp ?? 0,
                 payingWorkspaces: revenue.get(r.id)?.payingWorkspaces ?? 0,
                 categoryLabel: FR_CATEGORY_LABEL[r.category as keyof typeof FR_CATEGORY_LABEL] || r.category,

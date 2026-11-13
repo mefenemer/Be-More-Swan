@@ -48,12 +48,22 @@ a fix (`src/utils/feature-proof.ts`, `db/z-feature-pipeline-proof.sql`):
 9. **Go-live**: the request moves to **Released only once the production deploy contains it** (the 30-minute
    Issues live check, `check-fixes-live`), with a note and no notification. Claude never sets Released itself.
 
+**Switched off until approval (hold).** Some features ship with their code in production but switched off
+(waiting on LinkedIn or Google to approve an app, or in beta). `hold <id> --file why.md` keeps such a request at
+In Progress: the go-live check skips it and the checklist shows **⏸️ Switched off (held)** with the reason.
+`unhold <id>` only when the owner has switched it on; the next live check then moves it to Released.
+Needs `db/z-feature-go-live-hold.sql` on both databases.
+
+**Work already in main** (built before these checks, or committed straight to staging and released):
+`shipped <id> --pr <PR into main> --file note.md` records the PR into main, the merge to staging, CI on the
+released commit and whether staging has it. Hold a switched-off feature BEFORE running it.
+
 `inspect --file q.sql` runs one read-only SELECT for investigating, as in the Fix pipeline.
 Before `db/z-feature-pipeline-proof.sql` reaches a database, none of this shows there and Approve on a PR into
 main still moves the request straight to Released (the old behaviour); `pr --sql` is refused there.
 
 ## Setup
-- `db/z-feature-pipeline-proof.sql` on BOTH databases (additive), for the checks above.
+- `db/z-feature-pipeline-proof.sql` and `db/z-feature-go-live-hold.sql` on BOTH databases (additive), for the checks above.
 - `db/z-claude-drafts-and-features.sql` and `db/z-pr-approval.sql` on BOTH databases (additive).
 - Allow rules for prod: `Bash(npx tsx scripts/inbox-drafts.ts --env prod:*)` and
   `Bash(npx tsx scripts/feature-requests.ts --env prod:*)`.
