@@ -25,6 +25,7 @@ import type { getDb } from '../../db/client';
 import { parsePrNumber } from './issue-fix-live';
 import { loadProofRow } from './issue-fix-proof';
 import { sqlHash } from './issue-sql';
+import { featureMergeBlocker, featureProofColumnsReady } from './feature-proof';
 
 type Db = ReturnType<typeof getDb>;
 type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<{ ok: boolean; status: number; json: () => Promise<any> }>;
@@ -210,15 +211,15 @@ async function approveTicketPrOnce(db: Db, kind: PrTicketKind, id: number, opts:
     if (!claimed.length) return { ok: false, status: 409, error: 'This PR is already being approved.' };
     const restore = () => db.execute(sql`UPDATE ${table} SET approval_pr_url = ${url} WHERE id = ${id} AND approval_pr_url IS NULL`);
 
-    // A fix's SQL goes first. The PR's base decides which database, so look it up before merging.
-    if (kind === 'issue') {
+    // A fix's or feature's SQL goes first. The PR's base decides which database, so look it up before merging.
+    {
         const f = opts.fetchImpl || (fetch as unknown as FetchLike);
         let base = '';
         try {
             const r = await f(`https://api.github.com/repos/${repoOf(opts.repo)}/pulls/${prNumber}`, { headers: ghHeaders(token) });
             if (r.ok) base = String((await r.json())?.base?.ref || '');
         } catch { /* approveAndMergePr reports GitHub trouble */ }
-        const blocker = base ? await issueMergeBlocker(db, id, base) : null;
+        const blocker = !base ? null : kind === 'issue' ? await issueMergeBlocker(db, id, base) : await featureMergeBlocker(db, id, base);
         if (blocker) { await restore(); return { ok: false, status: 409, error: blocker }; }
     }
 
@@ -255,7 +256,17 @@ async function approveTicketPrOnce(db: Db, kind: PrTicketKind, id: number, opts:
             VALUES (${id}, 'admin', NULL, ${`${message}\n${pr.url}`}, NULL)`);
     } else {
         const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
-        if (pr.base === 'main') {
+        // Go-live like a fix (owner, 2026-11-13): a PR into main no longer means Released. After
+        // db/z-feature-pipeline-proof.sql the request moves to Released only once the PRODUCTION deploy
+        // contains it (feature-proof.ts runFeatureLiveCheck); before that SQL, the old immediate move stays.
+        const proofReady = await featureProofColumnsReady(db);
+        if (pr.base === 'main' && proofReady) {
+            await db.execute(sql`
+                UPDATE feature_requests SET prod_pr_url = ${pr.url}, dev_prod_merged_at = coalesce(dev_prod_merged_at, now()),
+                       dev_runner_id = NULL, dev_runner_heartbeat = NULL, approval_note = NULL, approval_requested_at = NULL, updated_at = now()
+                 WHERE id = ${id}`);
+            message = `✅ Prod PR #${pr.number} approved${who} and ${how} into main. Moves to Released once the production deploy contains it (no one is notified).`;
+        } else if (pr.base === 'main') {
             await db.execute(sql`
                 UPDATE feature_requests SET prod_pr_url = ${pr.url}, status = 'released', released_at = coalesce(released_at, now()),
                        dev_runner_id = NULL, dev_runner_heartbeat = NULL, approval_note = NULL, approval_requested_at = NULL, updated_at = now()
@@ -267,7 +278,10 @@ async function approveTicketPrOnce(db: Db, kind: PrTicketKind, id: number, opts:
                        status = CASE WHEN status IN ('open', 'planned', 'brief_ready') THEN 'in_progress' ELSE status END,
                        approval_note = NULL, approval_requested_at = NULL, updated_at = now()
                  WHERE id = ${id}`);
-            message = `✅ ${pr.base === 'staging' ? 'Staging PR' : 'PR'} #${pr.number} approved${who} and ${how} into ${pr.base}.`;
+            if (proofReady && pr.base === 'staging') {
+                await db.execute(sql`UPDATE feature_requests SET dev_merged_at = coalesce(dev_merged_at, now()) WHERE id = ${id}`);
+            }
+            message = `✅ ${pr.base === 'staging' ? 'Staging PR' : 'PR'} #${pr.number} approved${who} and ${how} into ${pr.base}.${pr.base === 'staging' && proofReady ? ' The "Ready for production?" checklist now follows staging\'s tests and deploy.' : ''}`;
         }
         await db.execute(sql`
             UPDATE feature_requests SET dev_notes = concat_ws(E'\n\n', dev_notes, ${`[${stamp} UTC] ${message}\n${pr.url}`}::text) WHERE id = ${id}`);

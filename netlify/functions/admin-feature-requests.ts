@@ -20,6 +20,7 @@
 import { loadFeatureRevenue } from '../../src/utils/feature-revenue';
 import { loadFeatureDev } from '../../src/utils/claude-work';
 import { approveTicketPr, loadPrFields, NO_PR_FIELDS } from '../../src/utils/pr-approval';
+import { featureChecklist, loadFeatureProofs } from '../../src/utils/feature-proof';
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import jwt from 'jsonwebtoken';
@@ -377,12 +378,15 @@ export default withLambda(async (event) => {
         const dev = await loadFeatureDev(db, rows.map((r) => r.id));
         // Staging / prod PR pills and the Approve button (src/utils/pr-approval.ts).
         const prFields = await loadPrFields(db, 'feature', rows.map((r) => r.id));
+        // "Ready for production?" checklist, as on the Fix pipeline (src/utils/feature-proof.ts).
+        const proofs = await loadFeatureProofs(db, rows.map((r) => r.id));
 
         return json(200, {
             requests: rows.map((r) => ({
                 ...r,
                 ...(dev.get(r.id) ?? { claudeWorking: false, devPrUrl: null, devNotes: null }),
                 ...(prFields.get(r.id) ?? NO_PR_FIELDS),
+                proof: proofs.has(r.id) ? { ...featureChecklist(proofs.get(r.id)!), prodMergedAt: proofs.get(r.id)!.devProdMergedAt, liveAt: proofs.get(r.id)!.liveAt } : null,
                 revenueGbp: revenue.get(r.id)?.monthlyGbp ?? 0,
                 payingWorkspaces: revenue.get(r.id)?.payingWorkspaces ?? 0,
                 categoryLabel: FR_CATEGORY_LABEL[r.category as keyof typeof FR_CATEGORY_LABEL] || r.category,
