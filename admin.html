@@ -6987,6 +6987,7 @@ function _irProofList(proof) {
 function _frProofCard(proof) {
   if (!proof) return '';
   const chip = proof.liveAt ? ['bg-emerald-100 text-emerald-700', 'Live ✓']
+    : proof.goLiveHold ? ['bg-amber-100 text-amber-800', '⏸️ Switched off (held)']
     : proof.prodMergedAt ? ['bg-indigo-100 text-indigo-700', 'In main, waiting for the deploy']
     : proof.ready ? ['bg-emerald-100 text-emerald-700', proof.warnings ? 'Ready (with warnings)' : 'Ready'] : ['bg-gray-100 text-gray-700', 'Not ready yet'];
   return `<div class="border border-gray-200 bg-white rounded-xl p-3 space-y-2" data-fr-proof>

@@ -23,6 +23,10 @@
 //   npx tsx scripts/feature-requests.ts --env prod prod-sql <id>                 (ONLY on the owner's word, before the merge into main)
 //   npx tsx scripts/feature-requests.ts --env prod sql-done <id> staging|production   (owner ran not-additive SQL by hand and said so)
 //   npx tsx scripts/feature-requests.ts --env prod inspect --file <query.sql>    (READ-ONLY: one SELECT)
+//   npx tsx scripts/feature-requests.ts --env prod hold <id> --file <why.md>     (ships SWITCHED OFF: never auto-Released)
+//   npx tsx scripts/feature-requests.ts --env prod unhold <id>                   (ONLY when the owner has switched it on)
+//   npx tsx scripts/feature-requests.ts --env prod shipped <id> --pr <url into main> --file <note.md>
+//                                         (record work already merged into main, e.g. built before these checks)
 //   npx tsx scripts/feature-requests.ts --env prod status <id> <planned|brief_ready|in_progress|released|declined|duplicate|open> --file <why.md>
 //   npx tsx scripts/feature-requests.ts --env prod release <id>                  (clear the pill)
 //   npx tsx scripts/feature-requests.ts --env prod prod-pr <id> --pr <url>       (record the PR into main: "Prod PR" pill)
@@ -37,7 +41,8 @@ import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { dbUrlFor, RUNNER_ID } from './fix-tickets';
 import { classifySql, sqlHash } from '../src/utils/issue-sql';
-import { ensureFeatureStagingSql, featureChecklist, loadFeatureProof, recordManualFeatureSql, resetFeatureProofCache, runFeatureProdSql, syncFeatureStaging } from '../src/utils/feature-proof';
+import { stagingCiState, fetchStagingCommit } from '../src/utils/issue-fix-proof';
+import { ensureFeatureStagingSql, featureChecklist, featureHoldColumnReady, loadFeatureProof, recordManualFeatureSql, resetFeatureProofCache, runFeatureProdSql, syncFeatureStaging } from '../src/utils/feature-proof';
 
 const arg = (a: string[], n: string) => { const i = a.indexOf(n); return i !== -1 ? a[i + 1] : undefined; };
 const STATUSES = ['open', 'planned', 'brief_ready', 'in_progress', 'released', 'declined', 'duplicate'];
@@ -155,6 +160,54 @@ async function main() {
             await syncFeatureStaging(db, { id, devPrUrl: row.devPrUrl, devStagingCiStatus: null, devStagingLiveAt: null }, { token: ghToken() });
             console.log(`#${id}: merged into staging.`);
             await printChecklist();
+        } else if (cmd === 'hold') {
+            // A feature that ships switched off (waiting on LinkedIn / Google approval, or in beta): the go-live
+            // check must never move it to Released just because the production deploy contains its code.
+            await needProof();
+            if (!(await featureHoldColumnReady(db))) throw new Error('Run db/z-feature-go-live-hold.sql on this DB first.');
+            const why = readFile('reason');
+            await sql`UPDATE feature_requests SET go_live_hold = ${why}, go_live_hold_at = now(), updated_at = now() WHERE id = ${id}`;
+            await note(`⏸️ Held at In Progress (switched off): ${why}`, false);
+            console.log(`#${id}: held. The live check will not release it.`);
+            await printChecklist();
+        } else if (cmd === 'unhold') {
+            // Only when the owner has switched the feature on. The next live check then releases it (silently).
+            if (!(await featureHoldColumnReady(db))) throw new Error('Run db/z-feature-go-live-hold.sql on this DB first.');
+            await sql`UPDATE feature_requests SET go_live_hold = NULL, go_live_hold_at = NULL, updated_at = now() WHERE id = ${id}`;
+            await note('▶️ Hold cleared: the owner switched it on. It moves to Released at the next live check if production has it.', false);
+            console.log(`#${id}: hold cleared.`);
+            await printChecklist();
+        } else if (cmd === 'shipped') {
+            // Work already merged into main (built before these checks, or committed straight to staging and
+            // released). Records the PR into main, the merge to staging, staging CI on the released commit, and
+            // whether the staging deploy contains it. If the feature is switched off, hold it FIRST.
+            const row = await needProof();
+            const pr = arg(rest, '--pr');
+            const m = pr ? /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/(\d+)$/.exec(pr) : null;
+            if (!pr || !m) throw new Error('--pr must be a GitHub pull request URL.');
+            const why = readFile('note');
+            const info = JSON.parse(execFileSync('gh', ['pr', 'view', m[1], '--json', 'state,baseRefName,headRefOid'], { encoding: 'utf8' }));
+            if (info.state !== 'MERGED' || info.baseRefName !== 'main') throw new Error(`PR #${m[1]} is "${info.state} ${info.baseRefName}", not merged into main.`);
+            if (row.devSql && !(row.devStagingSqlStatus === 'applied' && row.devStagingSqlHash === sqlHash(row.devSql))) throw new Error('The SQL is not recorded on staging yet (staging-sql or sql-done staging first).');
+            if (row.devSql && row.devProdSqlStatus !== 'applied') throw new Error('The SQL is not recorded on production yet (prod-sql or sql-done production first).');
+            const token = ghToken();
+            const ci = token ? await stagingCiState({ sha: info.headRefOid, token }) : 'error';
+            const stagingCommit = await fetchStagingCommit();
+            let onStaging = false;
+            if (stagingCommit) {
+                try { execFileSync('git', ['fetch', '-q', 'origin', 'staging']); execFileSync('git', ['merge-base', '--is-ancestor', info.headRefOid, stagingCommit]); onStaging = true; } catch { onStaging = false; }
+            }
+            await sql`
+                UPDATE feature_requests SET prod_pr_url = ${pr}, dev_pr_url = coalesce(dev_pr_url, ${pr}),
+                       dev_merged_at = coalesce(dev_merged_at, now()), dev_prod_merged_at = coalesce(dev_prod_merged_at, now()),
+                       dev_staging_ci_status = ${ci === 'error' ? null : ci.state}, dev_staging_ci_url = ${ci === 'error' ? null : ci.url},
+                       dev_staging_live_at = CASE WHEN ${onStaging}::boolean THEN coalesce(dev_staging_live_at, now()) ELSE dev_staging_live_at END,
+                       updated_at = now()
+                 WHERE id = ${id}`;
+            await note(`Already in main: ${pr}.\n\n${why}`, false);
+            const held = (await loadFeatureProof(db, id))?.goLiveHold;
+            console.log(`#${id}: recorded as merged into main (PR #${m[1]}).${held ? ' Held: it stays In Progress.' : ' ⚠️ NOT held: the next live check moves it to Released if production has it.'}`);
+            await printChecklist();
         } else if (cmd === 'sync') {
             const row = await needProof();
             const changed = await syncFeatureStaging(db, row, { token: ghToken() });
@@ -228,7 +281,7 @@ async function main() {
             await sql`UPDATE feature_requests SET dev_runner_id = NULL, dev_runner_heartbeat = NULL, updated_at = now() WHERE id = ${id}`;
             console.log(`#${id}: no longer marked as Claude working.`);
         } else {
-            console.error('Commands: list, show, start, note, proof, pr, staging-sql, merged, sync, prod-sql, sql-done, inspect, prod-pr, ask-approval, withdraw-approval, status, release (see the header).');
+            console.error('Commands: list, show, start, note, proof, pr, staging-sql, merged, sync, prod-sql, sql-done, inspect, hold, unhold, shipped, prod-pr, ask-approval, withdraw-approval, status, release (see the header).');
             process.exitCode = 2;
         }
     } catch (e) {

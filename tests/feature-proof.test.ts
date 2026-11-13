@@ -144,14 +144,36 @@ function fakeGh(cmp: string | number) {
         resetFeatureProofCache();
         assert.strictEqual((await runFeatureLiveCheck(fakeDb(), { deployedSha: 'dev', token: 't' })).skipped, 'no_commit');
     });
+    await check('hold: the live check never releases a held (switched-off) feature', async () => {
+        resetFeatureProofCache();
+        const db = fakeDb({ live: [] });
+        const r = await runFeatureLiveCheck(db, { deployedSha: SHA, token: 't', fetchImpl: fakeGh('ahead') as any });
+        assert.strictEqual(r.released, 0);
+        const pick = db.ran.find((x: any) => /^select id, dev_pr_url, prod_pr_url/i.test(x.q.trim()));
+        assert.ok(pick && /go_live_hold IS NULL/.test(pick.q), 'selection skips held rows');
+    });
+    await check('hold: the release claim also refuses a row held meanwhile', async () => {
+        resetFeatureProofCache();
+        const db = fakeDb({ live: [{ id: 7, dev_pr_url: PR, prod_pr_url: null }] });
+        await runFeatureLiveCheck(db, { deployedSha: SHA, token: 't', fetchImpl: fakeGh('ahead') as any });
+        const claim = db.ran.find((x: any) => /SET status = 'released'/.test(x.q));
+        assert.ok(claim && /go_live_hold IS NULL/.test(claim.q));
+    });
+    await check('hold: checklist says it is switched off and why', () => {
+        const r = { ...base, devMergedAt: 'x', devProdMergedAt: 'y', goLiveHold: 'Waiting for LinkedIn to approve.' };
+        const live = featureChecklist(r).items.find((i) => i.key === 'live_prod')!;
+        assert.strictEqual(live.state, 'wait');
+        assert.match(live.detail, /switched off.*Waiting for LinkedIn/);
+    });
     await check('wiring: live-check tick, board API, panel and script all use it', () => {
         assert.ok(readFileSync('netlify/functions/check-fixes-live.ts', 'utf8').includes('runFeatureLiveCheck(db'));
         const api = readFileSync('netlify/functions/admin-feature-requests.ts', 'utf8');
         assert.ok(api.includes('loadFeatureProofs(db') && api.includes('featureChecklist('));
         const html = readFileSync('admin.html', 'utf8');
         assert.ok(html.includes('${_frProofCard(it.proof)}') && html.includes('function _frProofCard(proof)'));
+        assert.ok(html.includes("proof.goLiveHold ? ['bg-amber-100 text-amber-800', '⏸️ Switched off (held)']"));
         const script = readFileSync('scripts/feature-requests.ts', 'utf8');
-        for (const cmd of ["cmd === 'proof'", "cmd === 'staging-sql'", "cmd === 'merged'", "cmd === 'sync'", "cmd === 'prod-sql'", "cmd === 'sql-done'", "cmd === 'inspect'"]) assert.ok(script.includes(cmd), cmd);
+        for (const cmd of ["cmd === 'hold'", "cmd === 'unhold'", "cmd === 'shipped'", "cmd === 'proof'", "cmd === 'staging-sql'", "cmd === 'merged'", "cmd === 'sync'", "cmd === 'prod-sql'", "cmd === 'sql-done'", "cmd === 'inspect'"]) assert.ok(script.includes(cmd), cmd);
         assert.ok(readFileSync('src/utils/pr-approval.ts', 'utf8').includes('featureMergeBlocker(db, id, base)'));
     });
     console.log(`\n${passed} passed.`);
