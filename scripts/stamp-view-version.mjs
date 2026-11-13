@@ -16,7 +16,11 @@ import { dirname, resolve } from 'node:path';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // admin.html since 2026-11-13: its VIEW_VERSION is read by version-check.js (it fetches no view
 // partials), and stamping also cache-busts its local <script> tags like the workspace's.
-const TARGETS = ['workspace.html', 'admin.html'];
+// The standalone signed-in pages people may leave open (2026-11-13) — same reason.
+const TARGETS = [
+  'workspace.html', 'admin.html',
+  'assistant-chat.html', 'onboarding.html', 'onboarding-social-media.html', 'assistant-setup.html',
+];
 
 function resolveVersion() {
   // Netlify build env exposes the deployed commit on COMMIT_REF.
