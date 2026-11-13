@@ -197,6 +197,28 @@ async function r2Bytes(key: string): Promise<Buffer> {
     return Buffer.from(await res.arrayBuffer());
 }
 
+// ── A still for a footage scene (issues #49/#50) ────────────────────────────────────────────────
+// A footage scene's box on the Videos tab was a <video> of the whole file with no poster, and some browsers
+// (Safari above all) paint nothing until it plays. Its poster is now the frame read at analysis nearest the
+// scene's start: small JPEGs already in R2, so no video is decoded on the server.
+
+/** Pure: the frame nearest `t` seconds (frames as stored: [{ t, data }]). */
+export function nearestFrame<T extends { t: number }>(frames: T[], t: number): T | null {
+    let best: T | null = null;
+    for (const f of frames) if (!best || Math.abs(f.t - t) < Math.abs(best.t - t)) best = f;
+    return best;
+}
+
+/** The JPEG still nearest `t` in one of this workspace's own videos, or null (not analysed, not theirs). */
+export async function footageFrameAt(db: Db, orgId: number, assetId: number, t: number): Promise<Buffer | null> {
+    const [row] = await db.select({ framesKey: footageAnalyses.framesKey }).from(footageAnalyses)
+        .where(and(eq(footageAnalyses.assetId, assetId), eq(footageAnalyses.organisationId, orgId))).limit(1);
+    if (!row?.framesKey) return null;
+    const stored = JSON.parse((await r2Bytes(row.framesKey)).toString('utf8')) as Array<{ t: number; data: string }> | { frames: Array<{ t: number; data: string }> };
+    const frame = nearestFrame(Array.isArray(stored) ? stored : stored.frames ?? [], Number.isFinite(t) ? t : 0);
+    return frame ? Buffer.from(frame.data, 'base64') : null;
+}
+
 /** Transcribe and shot-list one prepared video. Throws with a message the owner can act on. */
 async function analyseOne(db: Db, row: typeof footageAnalyses.$inferSelect, ctx: { orgId: number; assistantId: number | null; model: Awaited<ReturnType<typeof gatewayRoleModel>>; language: string; businessName: string }): Promise<void> {
     let words: SpokenWord[] = [];

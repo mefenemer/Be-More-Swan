@@ -163,6 +163,28 @@ const reset = () => { resetPrApprovalCache(); resetProofColumnsCache(); };
         assert.ok(upd); assert.match(upd.q, /prod_pr_url = \$1/);
     });
 
+    await check('every outcome is logged: a failure with its reason, a success with where it went', async () => {
+        reset();
+        const lines: string[] = [];
+        await approveTicketPr(fakeDb(), 'feature', 7, { token: 't', fetchImpl: fakeGh({ merge: 405, graphqlErr: 'Auto merge is not allowed' }).fetchImpl as any, log: (l) => lines.push(l) });
+        reset();
+        await approveTicketPr(fakeDb({ proof: { dev_sql: null } }), 'issue', 9, { token: 't', fetchImpl: fakeGh({ base: 'main' }).fetchImpl as any, log: (l) => lines.push(l) });
+        assert.match(lines[0], /^\[approve-pr\] feature #7 → FAILED \(409\): .*Auto merge is not allowed/);
+        assert.strictEqual(lines[1], '[approve-pr] issue #9 → ok: merged into main');
+    });
+    await check('an unexpected throw becomes a 500 with its message, and is logged', async () => {
+        reset();
+        const lines: string[] = [];
+        const db = { execute: async (q: any) => {
+            if (/information_schema/.test(dialect.sqlToQuery(q).sql)) return [{ n: 2 }];
+            throw new Error('connection reset');
+        } } as any;
+        const r = await approveTicketPr(db, 'issue', 3, { token: 't', log: (l) => lines.push(l) });
+        assert.ok(!r.ok && r.status === 500);
+        assert.match(r.error, /connection reset/);
+        assert.match(lines[0], /issue #3 → FAILED \(500\)/);
+    });
+
     await check('loadPrFields: hotfix PR counts as the prod PR', async () => {
         reset();
         const db = {
