@@ -4197,6 +4197,12 @@ function formatCurrency(amount, currency) {
       history.replaceState(null, '', window.location.pathname);
       const tabParam = qs.get('tab');
       if (tabParam) window._assistantDetailInitialTab = tabParam;
+      // ?mailbox=connected / ?mailbox_error=… arrive from the Email Assistant's mailbox sign-in
+      // (mailbox-oauth.ts). Lifted onto a global for the same reason as ?welcome=1 below:
+      // replaceState above drops the query string. Consumed once by assistant-mailbox.js.
+      if (qs.get('mailbox') || qs.get('mailbox_error')) {
+        window._mailboxConnectOutcome = { connected: qs.get('mailbox') === 'connected', error: qs.get('mailbox_error') };
+      }
       // ?welcome=1 arrives from a just-completed onboarding (onboarding-social-media.html) —
       // lift it onto a global (replaceState above drops the query string) so the detail page
       // greets the freshly-hired assistant's owner in character. Consumed once by assistants.js.

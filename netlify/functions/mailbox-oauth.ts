@@ -53,7 +53,9 @@ function decodeState(raw: string): Record<string, string> | null {
 export function mailboxReturnUrl(assistantId: string | null | undefined, outcome: { ok: true } | { error: string }): string {
     const id = assistantId && /^\d+$/.test(assistantId) && Number(assistantId) > 0 ? assistantId : null;
     const q = 'ok' in outcome ? 'mailbox=connected' : `mailbox_error=${encodeURIComponent(outcome.error)}`;
-    return id ? `/workspace.html?assistantId=${id}&tab=datahub&${q}` : `/integrations.html?${q}`;
+    // view=assistant-detail is what makes workspace.html open the assistant (and its Emails tab); without
+    // it the page showed the Dashboard and the outcome was lost.
+    return id ? `/workspace.html?view=assistant-detail&assistantId=${id}&tab=datahub&${q}` : `/integrations.html?${q}`;
 }
 
 /**
