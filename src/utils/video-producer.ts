@@ -1392,9 +1392,10 @@ export async function buildVideosSnapshot(db: Db, orgId: number, assistantId: nu
         const cost = sb && (r.status === 'planned' || r.status === 'failed') ? ` · would use ${n} ${unit} to make` : '';
         const note = r.note ? ` · note: ${r.note.slice(0, 160)}` : '';
         const from = ORIGIN_LABELS[r.origin] ? ` · ${ORIGIN_LABELS[r.origin]}` : '';
-        // Its scenes, once it can still be changed: "make the opening punchier" needs the words.
-        const lines = sb && (r.status === 'planned' || r.status === 'failed')
-            ? sb.scenes.map((s, i) => `\n    • scene ${i + 1} (${s.beat}, ${s.source}): voiceover "${(s.voiceover || '').slice(0, 240)}"${s.onScreenText ? `; on screen "${s.onScreenText}"${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).length ? ` (${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).join(', ')})` : ''}` : ''}${s.nameCaption ? `; name caption "${s.nameCaption.name}${s.nameCaption.role ? ` · ${s.nameCaption.role}` : ''}"` : ''}${s.tightened ? `; tightened: ${describeTightening(s.tightened)}` : s.tighten === false ? '; kept as filmed' : ''}`).join('')
+        // Its scenes: a storyboard to check, AND a finished video (issue #51: a READY video listed no scenes, so the
+        // chat couldn't tell what "scene 1" or "the words on screen" were and sent the customer to the tab).
+        const lines = sb && ['planned', 'failed', 'ready', 'render_failed', 'rendering'].includes(r.status)
+            ? sb.scenes.map((s, i) => `\n    • scene ${i + 1} (${s.beat}, ${s.source}${s.source === 'own_video' && s.assetId ? ` — their video ${s.assetId}${s.inS != null ? ` ${mmss(Number(s.inS))}–${mmss(Number(s.outS))}` : ''}` : ''}): voiceover "${(s.voiceover || '').slice(0, 240)}"${s.onScreenText ? `; on screen "${s.onScreenText}"${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).length ? ` (${[s.textPos, s.textWhen && `when ${s.textWhen}`, s.textStyle, s.textAnim].filter(Boolean).join(', ')})` : ''}` : ''}${s.nameCaption ? `; name caption "${s.nameCaption.name}${s.nameCaption.role ? ` · ${s.nameCaption.role}` : ''}"` : ''}${s.tightened ? `; tightened: ${describeTightening(s.tightened)}` : s.tighten === false ? '; kept as filmed' : ''}`).join('')
             : '';
         const fr = r.footageReview as FootageReview | null;
         const own = brief.footageAssetIds?.length ? ` · from their own footage (videos ${brief.footageAssetIds.join(', ')})` : '';

@@ -64,7 +64,8 @@ check('the card is only for this workspace\'s video, while it can still be chang
 });
 
 check('the model sees the scenes it is asked to change', () => {
-    assert.ok(read('src/utils/video-producer.ts').includes('• scene ${i + 1} (${s.beat}, ${s.source}): voiceover'));
+    // Issue #51: own-footage scenes also name the video and section, and READY videos list their scenes.
+    assert.ok(read('src/utils/video-producer.ts').includes('• scene ${i + 1} (${s.beat}, ${s.source}${s.source === \'own_video\''));
 });
 
 check('a chat card never spends: the click is `edit_scene`, and only that', () => {

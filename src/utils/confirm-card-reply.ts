@@ -44,6 +44,9 @@ const POINTS_AT_CARD = new RegExp([
     /\bcard\s+(?:is|really is|should be|will be)\s+(?:below|above|here)\b/.source,
     /\b(?:the|a|this)\s+card\s+(?:that|which)\b/.source,
     /\bbelow is a card\b/.source,
+    // "Here's the card to confirm" over no card (issue #51, Video Producer, prod 2026-11-12).
+    /\bhere(?:'|’)?s (?:the|a|your) card\b/.source,
+    /\bthe card to (?:confirm|approve|send|check|accept)\b/.source,
     /\btap (?:the|an?) (?:button|answer) below\b/.source,
     // "Here it is now, and nothing is saved until you confirm on it" over no card (prod 2026-11-07, org 40).
     /\bhere it is now\b[^\n]{0,80}\bconfirm\b/.source,
