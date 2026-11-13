@@ -1551,6 +1551,12 @@ node_bundler = "esbuild"
 [functions.check-fixes-live]
   schedule = "*/30 * * * *"
 
+# Customer domains on their way (src/utils/site-domains.ts checkDueDomains): every 10 minutes, so DNS
+# that has propagated and certificates that have been issued are picked up without "Check now"; the
+# owner is emailed when live. Staging is poked via run-site-domain-checks (staging-crons.yml).
+[functions.check-site-domains]
+  schedule = "3-59/10 * * * *"
+
 # The Leads tab's bulk delete (assistant-records DELETE { ids }) writes a ledger event per lead.
 # Batched since 2026-10-03, but a full chunk still needs more than the 10s default — a timeout here
 # comes back as a bare gateway error after part of the chunk is already done.

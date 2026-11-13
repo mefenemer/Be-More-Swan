@@ -261,7 +261,7 @@ export async function readElevenLabsBalance(fetchImpl: typeof fetch = fetch): Pr
 }
 
 export interface ProviderProblem {
-    provider: 'fal' | 'fal_media' | 'anthropic' | 'stability' | 'openai' | 'elevenlabs';
+    provider: 'fal' | 'fal_media' | 'anthropic' | 'stability' | 'openai' | 'elevenlabs' | 'netlify_domains';
     /** 'down' = customers are affected now; 'low' = they will be soon. */
     severity: 'down' | 'low';
     headline: string;
@@ -288,6 +288,8 @@ export function assessProviders(input: {
     /** Optional so existing callers and tests that predate it are unchanged. */
     elevenlabs?: ElevenLabsBalance;
     elevenLabsLowBalanceChars?: number;
+    /** Can our Netlify token still edit the custom-domains project (site-domains.ts probeDomainsAccess)? Optional, like the rest. */
+    netlifyDomains?: { status: 'ok' | 'not_configured' | 'key_rejected' | 'error'; httpStatus?: number; message?: string };
 }): ProviderProblem[] {
     const problems: ProviderProblem[] = [];
     const low = input.falLowBalanceUsd ?? DEFAULT_FAL_LOW_BALANCE_USD;
@@ -363,6 +365,15 @@ export function assessProviders(input: {
     } else if (el?.status === 'ok' && el.remaining < elLow) {
         problems.push({ provider: 'elevenlabs', severity: 'low', headline: `ElevenLabs characters are low — ${el.remaining} left (~${Math.floor(el.remaining / 450)} voiceovers)`,
             lines: [`Below the ${elLow}-character warning line${el.resetsAt ? `; resets ${el.resetsAt}` : ''}. A 30-second voiceover is about 450 characters.`, elFallback, elTopUp] });
+    }
+    // ── Netlify (customers' own domains) ────────────────────────────────────────────────────────
+    // Only a rejected token is a problem; a transient error is not (same rule as the others). An
+    // expired token once broke domain connections for a paying customer with no alert (2026-11-13).
+    if (input.netlifyDomains?.status === 'key_rejected') {
+        problems.push({ provider: 'netlify_domains', severity: 'down', headline: 'Netlify rejected our API token — customers can\'t connect their own domains',
+            lines: [`The custom-domains project answered HTTP ${input.netlifyDomains.httpStatus ?? '?'}.`,
+                'Make a new token at https://app.netlify.com/user/applications#personal-access-tokens (choose no expiry), set it as NETLIFY_API_TOKEN for Production on the bemoreswan project, then redeploy.',
+                'Domains already live keep working; new ones stay stuck until then and are picked up automatically afterwards.'] });
     }
     problems.push(...assessMediaFailures(input.mediaFailures ?? []));
     return problems;
