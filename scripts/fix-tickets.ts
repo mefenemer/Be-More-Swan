@@ -23,6 +23,7 @@
 //   npx tsx scripts/fix-tickets.ts --env prod sync <id>            (staging CI + staging deploy → checklist)
 //   npx tsx scripts/fix-tickets.ts --env prod prod-sql <id>        (only on the owner's word, before a release merges)
 //   npx tsx scripts/fix-tickets.ts --env prod release <id>         (clear the "Claude working" pill)
+//   npx tsx scripts/fix-tickets.ts --env prod restore <id> <status> --file <why.md>   (undo a bookkeeping mistake)
 //   npx tsx scripts/fix-tickets.ts --env prod prod-pr <id> --pr <url>     (record the PR into main: "Prod PR" pill)
 //   npx tsx scripts/fix-tickets.ts --env prod ask-approval <id> --pr <url> [--file <why.md>]
 //                                         (shows the owner an "Approve PR #N" button; their click merges it and moves the ticket on)
@@ -129,7 +130,8 @@ async function main() {
             const claim = (status: string) => db.execute(sql`
                 UPDATE issue_reports SET status = ${status}, dev_handoff_status = 'in_progress', dev_handoff_at = now(),
                        dev_runner_id = ${RUNNER_ID}, dev_runner_heartbeat = now(), updated_at = now()
-                 WHERE id = ${id} AND status NOT IN ('closed', 'roadmap')
+                 WHERE id = ${id} AND status NOT IN ('closed', 'roadmap', 'merge', 'fixed_ready_to_test')
+                   AND (dev_pr_url IS NULL OR ${rest.includes('--again')}::boolean)
                    AND (dev_handoff_status IS DISTINCT FROM 'in_progress' OR dev_runner_id IS NULL OR dev_runner_id = ${RUNNER_ID})
                 RETURNING id`) as Promise<unknown[]>;
             let status = 'investigating';
@@ -141,7 +143,9 @@ async function main() {
                 console.log('(db/z-issue-investigating.sql has not run on this DB: using Fix In Progress.)');
                 r = await claim(status);
             }
-            if (!r.length) throw new Error(`#${id} is closed, on the roadmap, or held by another runner.`);
+            // A ticket that already has a fix (a PR, or at Merge / Fixed) is never restarted by accident: that knocked
+            // #50 back from "promoted" to Investigating (2026-11-13). Pass --again to redo one on purpose.
+            if (!r.length) throw new Error(`#${id} is closed, on the roadmap, already has a fix (use --again to redo it), or is held by another runner.`);
             await note(id, 'Started investigating.');
             console.log(`#${id} → ${status === 'investigating' ? 'Investigation In Progress' : 'Fix In Progress'} (held by ${RUNNER_ID}).`);
         } else if (cmd === 'fixing') {
@@ -235,6 +239,19 @@ async function main() {
             }) as any[];
             for (const r of rows.slice(0, 200)) console.log(JSON.stringify(r, (_k, v) => (typeof v === 'string' && v.length > 1500 ? `${v.slice(0, 1500)}…` : v)));
             console.log(`(${rows.length} row(s)${rows.length > 200 ? ', first 200 shown' : ''})`);
+        } else if (cmd === 'restore') {
+            // Put a ticket back after a bookkeeping mistake (e.g. a wrong start). Never contacts anyone.
+            const st = extra;
+            const ok = ['reported', 'investigating', 'fix_in_progress', 'merge', 'fixed_ready_to_test', 'more_info_required', 'on_hold'];
+            if (!st || !ok.includes(st)) throw new Error(`restore <id> <${ok.join('|')}> --file <why>`);
+            const why = readText(arg(rest, '--file'), 'reason');
+            await db.execute(sql`
+                UPDATE issue_reports SET status = ${st},
+                       dev_handoff_status = CASE WHEN dev_pr_url IS NOT NULL THEN 'completed' ELSE NULL END,
+                       dev_runner_id = NULL, dev_runner_heartbeat = NULL, updated_at = now()
+                 WHERE id = ${id}`);
+            await note(id, `Status put back to ${st.replace(/_/g, ' ')}.\n\n${why}`);
+            console.log(`#${id} restored to ${st}.`);
         } else if (cmd === 'release') {
             need(id, 'release <id>');
             await release(id);

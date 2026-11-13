@@ -580,7 +580,7 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     const shape = (v.brief && v.brief.shape) || '9:16';
     const ratio = shape === '16:9' ? '16 / 9' : shape === '1:1' ? '1 / 1' : '9 / 16';
     const width = shape === '16:9' ? 224 : shape === '1:1' ? 144 : 112;   // px: the prebuilt CSS has no w-56 / w-36
-    const bg = thumb ? (isVideo ? `<video src="${esc(thumb)}" muted playsinline loop autoplay preload="metadata" class="absolute inset-0 w-full h-full object-cover"></video>` : `<img src="${esc(thumb)}" alt="" class="absolute inset-0 w-full h-full object-cover">`) : '';
+    const bg = thumb ? (isVideo ? `<video src="${esc(thumb)}"${s.source === 'own_video' && s.assetId ? ` poster="${esc(footagePosterUrl(s.assetId, s.inS))}"` : ''} muted playsinline loop autoplay preload="metadata" class="absolute inset-0 w-full h-full object-cover"></video>` : `<img src="${esc(thumb)}" alt="" class="absolute inset-0 w-full h-full object-cover">`) : '';
     const cap = captionsOf(v);
     const words = (o.text || '').trim();
     const font = state.brand.font === 'Impact' ? `'Anton', Impact, 'Arial Narrow Bold', sans-serif` : `${state.brand.font}, sans-serif`;
@@ -647,13 +647,19 @@ window.taskCost = window.taskCost || ((kind, fallback) => fallback || '1 task');
     f.querySelector('[data-vid-text-clash]')?.classList.toggle('hidden', !(cap.on && o.pos === cap.pos));
   }
 
+  // Issues #49/#50: a still for a footage scene's box (footage.ts ?frame=), so every browser shows a picture
+  // before the clip plays (Safari paints nothing for a preload="metadata" video until it does).
+  function footagePosterUrl(assetId, t) {
+    return `${FOOTAGE_API}?frame=${encodeURIComponent(assetId)}&t=${encodeURIComponent(Number(t) || 0)}`;
+  }
+
   function sceneHtml(v, s, i) {
     const editable = v.status === 'planned' || v.status === 'failed';
     const thumb = v.sceneThumbs && v.sceneThumbs[s.id];
     const isVideo = s.source === 'stock_video' || s.source === 'ai_video' || s.source === 'own_video';
     const at = s.source === 'own_video' && s.inS != null ? `#t=${Number(s.inS)}` : '';
     const media = thumb
-      ? (isVideo ? `<video src="${esc(thumb)}${at}" muted playsinline loop preload="metadata" data-vid-hoverplay title="Moving footage — point at it, or tap, to play" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0 cursor-pointer"></video>` : `<img src="${esc(thumb)}" alt="" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0">`)
+      ? (isVideo ? `<video src="${esc(thumb)}${at}"${s.source === 'own_video' && s.assetId ? ` poster="${esc(footagePosterUrl(s.assetId, s.inS))}"` : ''} muted playsinline loop preload="metadata" data-vid-hoverplay title="Moving footage — point at it, or tap, to play" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0 cursor-pointer"></video>` : `<img src="${esc(thumb)}" alt="" class="w-14 h-24 object-cover rounded-md bg-gray-100 shrink-0">`)
       : `<div class="w-14 h-24 rounded-md bg-gray-100 shrink-0 flex items-center justify-center text-[10px] text-gray-400 text-center px-1">${esc(SOURCE[s.source] || s.source)}</div>`;
     const editing = state.editing && state.editing.id === v.id && state.editing.sceneId === s.id;
     if (editing) {
