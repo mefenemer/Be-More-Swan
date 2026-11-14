@@ -3,7 +3,9 @@
 // What every assistant's chat knows, reads, can do, can't do and must follow — the SAME six sections in
 // the same order for every assistant, so they can be compared and nothing is missing:
 //   1. Expertise   2. What it reads   3. What it can see and change   4. What it can do
-//   5. What it can't do   6. Rules it follows
+//   5. What it can't do   6. Rules it follows   7. Gaps and next best actions
+// and, at the top, the platform's next best actions (owner, 2026-11-14: "highlight where there are potential
+// gaps or improvements … and suggest next best actions"). Gaps are derived in chatGapsFor().
 // The data comes from admin-assistants.ts ?chatCapabilities=1, which builds it from the chat code
 // (src/config/chat-capabilities.generated.ts) plus the words in src/utils/assistant-chat-capabilities.ts.
 // tests/assistant-chat-capabilities.test.ts fails when the two drift apart.
@@ -58,6 +60,11 @@
 .cc-no li::before{content:'✕ ';color:#dc2626;font-weight:700}
 .cc-yes li::before{content:'✓ ';color:#16a34a;font-weight:700}
 @media (max-width:640px){.cc-hide-sm{display:none}}
+.cc-sv-high{background:#fee2e2;color:#991b1b}.cc-sv-medium{background:#ffedd5;color:#9a3412}.cc-sv-low{background:#e0f2fe;color:#075985}.cc-sv-info{background:#f3f4f6;color:#4b5563}
+.cc-gap{border:1px solid #f3f4f6;border-radius:12px;padding:10px 12px;margin-top:8px;font-size:13px;line-height:1.45}
+.cc-gap.cc-accepted{opacity:.6}
+.cc-gap p{margin:4px 0 0}.cc-act{color:#111827}.cc-act::before{content:'→ ';font-weight:700;color:#be185d}
+.cc-link{color:#be185d;font-weight:600;cursor:pointer;text-decoration:underline;background:none;border:0;padding:0;font:inherit}
 `;
     const el = document.createElement('style');
     el.id = 'cc-styles';
@@ -79,6 +86,9 @@
   }
 
   const statusPill = (s) => { const [l, c] = STATUS[s] || [s, 'cc-st-off']; return `<span class="cc-pill ${c}">${esc(l)}</span>`; };
+  const SEV_LABEL = { high: 'High', medium: 'Medium', low: 'Low', info: 'Note' };
+  const sevPill = (s) => `<span class="cc-pill cc-sv-${esc(s)}">${esc(SEV_LABEL[s] || s)}</span>`;
+  const openGaps = (r) => (r.gaps || []).filter((g) => !g.accepted && g.severity !== 'info');
   const levelPill = (lv) => `<span class="cc-pill ${LEVEL_CLASS[lv] || 'cc-lv-gen'}">${esc(lv)}</span>`;
 
   function itemLi(i) {
@@ -95,7 +105,7 @@
       <div class="cc-sec"><h4>1 · Expertise</h4>
         <p style="font-size:13px">${levelPill(exp.level)} <b>${esc(exp.field)}</b></p>
         <p class="cc-small cc-muted" style="margin-top:4px">${esc(exp.levelMeans)}</p>
-        ${exp.craft.length ? `<h5>Craft standards in its prompts</h5>${list(exp.craft.map((k) => `<li><b>${esc(k.title)}</b> — used by ${esc(k.usedBy)} <span class="cc-mono">${esc(k.source)}</span></li>`))}` : ''}
+        ${exp.craft.length ? `<h5>Craft standards in its prompts</h5>${list(exp.craft.map((k) => `<li><b>${esc(k.title)}</b> — used by ${esc(k.usedBy)} ${k.inChat ? '<span class="cc-pill cc-st-live">in its chat</span>' : '<span class="cc-pill cc-st-soon">not in its chat</span>'} <span class="cc-mono">${esc(k.source)}</span></li>`))}` : ''}
       </div>
       <div class="cc-sec"><h4>2 · What it reads <span class="cc-muted" style="text-transform:none;font-weight:600;letter-spacing:0">— read again for every message, never from memory</span></h4>
         <h5>Its own data</h5>${list(c.reads.ownData.map(itemLi))}
@@ -116,6 +126,12 @@
         ${c.doesNotRead.length ? `<h5>Data it does not read (so it must not claim to know it)</h5><ul class="cc-list cc-grid cc-no">${c.doesNotRead.map((s) => `<li>${esc(s)}</li>`).join('')}</ul>` : ''}
       </div>
       <div class="cc-sec"><h4>6 · Rules it follows</h4>${list(c.rules.map(itemLi))}</div>
+      <div class="cc-sec"><h4>7 · Gaps and next best actions</h4>
+        ${(r.gaps || []).length ? r.gaps.map((g) => `<div class="cc-gap${g.accepted ? ' cc-accepted' : ''}">${sevPill(g.severity)} <b>${esc(g.title)}</b>${g.accepted ? ' <span class="cc-pill cc-st-off">Accepted</span>' : ''}
+          <p class="cc-muted">${esc(g.why)}</p>
+          ${g.accepted ? `<p class="cc-small cc-muted">Accepted: ${esc(g.accepted)}</p>` : `<p class="cc-act">${esc(g.action)}</p>`}</div>`).join('')
+          : '<p class="cc-small cc-muted">No gaps found.</p>'}
+      </div>
       <p class="cc-small cc-muted" style="margin-top:12px">Chat model: <b>${esc(r.chatModel || `${data.chatDefaultModel || 'code default'} (code default)`)}</b>${c.reply.maxTokens ? ` · reply limit ${esc(c.reply.maxTokens)} tokens` : ''} · role key <span class="cc-mono">${esc(r.roleKey)}</span></p>`;
   }
 
@@ -137,6 +153,24 @@
     </div>`;
   }
 
+  function nextActionsBox(d) {
+    const live = d.roles.filter((r) => r.status === 'live' || r.status === 'beta');
+    const count = (sev) => live.reduce((n, r) => n + openGaps(r).filter((g) => g.severity === sev).length, 0);
+    const acts = d.nextActions || [];
+    return `<div class="cc-box" style="margin-top:12px">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:6px">
+        <p style="font-size:14px;font-weight:700;margin:0">Next best actions</p>
+        <span class="cc-small cc-muted">Open gaps on live and beta assistants:</span>
+        ${sevPill('high')} ${count('high')} ${sevPill('medium')} ${count('medium')} ${sevPill('low')} ${count('low')}
+      </div>
+      ${acts.length ? `<ol style="margin:0;padding-left:20px">${acts.map((a) => `<li style="margin-top:8px;font-size:13px;line-height:1.45">${sevPill(a.severity)} <b>${esc(a.title)}</b>
+        <span class="cc-muted"> — ${a.roles.map((x) => `<button type="button" class="cc-link" data-cc-jump="${esc(x.roleKey)}">${esc(x.name)}</button>`).join(', ')}${a.workspaces ? ` · ${esc(a.workspaces)} workspace${a.workspaces === 1 ? '' : 's'}` : ''}</span>
+        <p class="cc-act" style="margin:2px 0 0">${esc(a.action)}</p></li>`).join('')}</ol>`
+        : '<p class="cc-small cc-muted">Nothing high or medium is open on a live or beta assistant. Low-priority ideas are under each assistant (section 7).</p>'}
+      <p class="cc-small cc-muted" style="margin-top:10px">Worked out from the code on every load: a gap disappears once the code changes. Grouped when the same fix covers several assistants; ordered by severity, then workspaces affected.</p>
+    </div>`;
+  }
+
   function visibleRoles(d) {
     const q = state.q.trim().toLowerCase();
     return d.roles.filter((r) => (state.filter === 'all' || (state.filter === 'live' ? (r.status === 'live' || r.status === 'beta') : !(r.status === 'live' || r.status === 'beta')))
@@ -151,13 +185,14 @@
     const chip = (k, label) => `<button type="button" class="cc-chip" data-cc-filter="${k}" aria-pressed="${state.filter === k}">${esc(label)}</button>`;
     m.innerHTML = `
       ${freshnessBox(d)}
+      ${nextActionsBox(d)}
       <div class="cc-box" style="margin-top:12px">
         <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">
           <div class="cc-chips">${chip('live', 'Live & beta')}${chip('other', 'Not live')}${chip('all', 'All')}</div>
           <input type="search" data-cc-search placeholder="Search name or role key" value="${esc(state.q)}" style="margin-left:auto;border:1px solid #e5e7eb;border-radius:8px;padding:6px 10px;font-size:13px;min-width:0;width:220px;max-width:100%">
         </div>
         <div style="overflow-x:auto"><table class="cc-table">
-          <thead><tr><th>Assistant</th><th>Expertise</th><th class="cc-num">Own data</th><th class="cc-num">Can change</th><th class="cc-num">Cards</th><th class="cc-num">Can't do</th><th class="cc-num cc-hide-sm">Doesn't read</th></tr></thead>
+          <thead><tr><th>Assistant</th><th>Expertise</th><th class="cc-num">Own data</th><th class="cc-num">Can change</th><th class="cc-num">Cards</th><th class="cc-num">Can't do</th><th class="cc-num cc-hide-sm">Doesn't read</th><th>Gaps</th></tr></thead>
           <tbody>${roles.map((r) => `<tr class="cc-row" data-cc-jump="${esc(r.roleKey)}">
             <td><b>${esc(r.name)}</b> ${statusPill(r.status)}${r.caps.described ? '' : ' <span class="cc-pill cc-st-soon">no words</span>'}</td>
             <td>${levelPill(r.caps.expertise.level)}</td>
@@ -165,7 +200,8 @@
             <td class="cc-num">${r.caps.controls.length}</td>
             <td class="cc-num">${r.caps.canDo.cards.length}</td>
             <td class="cc-num">${r.caps.cannot.length}</td>
-            <td class="cc-num cc-hide-sm">${r.caps.doesNotRead.length}</td></tr>`).join('') || '<tr><td colspan="7" class="cc-muted">No assistants match.</td></tr>'}</tbody>
+            <td class="cc-num cc-hide-sm">${r.caps.doesNotRead.length}</td>
+            <td style="white-space:nowrap">${openGaps(r).length ? `${sevPill(openGaps(r)[0].severity)} ${openGaps(r).length}` : '<span class="cc-small cc-muted">none</span>'}</td></tr>`).join('') || '<tr><td colspan="8" class="cc-muted">No assistants match.</td></tr>'}</tbody>
         </table></div>
       </div>
       ${roles.map((r) => `<details class="cc-role" id="cc-role-${esc(r.roleKey)}">

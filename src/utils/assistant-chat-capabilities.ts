@@ -34,6 +34,7 @@ export interface RouteManifest {
     offersOwnCards: boolean;
     maxTokens: number;
     cards: string[];
+    craftInChat: string[];
 }
 export interface ChatManifest {
     routes: Record<string, RouteManifest>;
@@ -392,7 +393,7 @@ export interface ChatCapabilities {
     roleKey: string;
     hasRoute: boolean;
     described: boolean;
-    expertise: { level: ExpertiseLevel; levelMeans: string; field: string; craft: { title: string; usedBy: string; source: string }[] };
+    expertise: { level: ExpertiseLevel; levelMeans: string; field: string; craft: { key: string; title: string; usedBy: string; source: string; inChat: boolean }[] };
     /** Data in its prompt, read again for every message. */
     reads: { everyAssistant: CapabilityItem[]; ownData: CapabilityItem[]; sometimes: CapabilityItem[] };
     /** Things it can see AND propose changing (each through a card the user confirms). */
@@ -410,6 +411,9 @@ function isShared(s: ChatSource): boolean {
         .every(([roleKey, route]) => s.applies({ roleKey, route }));
 }
 
+/** Its rules reach its chat as binding: the rules block, or the rules list ("ON rules are the ones you follow"). */
+const rulesReachChat = (c: RoleCtx) => PROMPT_BLOCK_SOURCES.rulesBlock.applies(c) || PROMPT_BLOCK_SOURCES.rulesListBlock.applies(c);
+
 const item = (s: ChatSource): CapabilityItem => ({ label: s.label, sees: s.sees, source: s.source, ...(s.when ? { when: s.when } : {}) });
 
 /** The one consistent list for a role. Pure; reads only the generated manifest and the words above. */
@@ -417,7 +421,8 @@ export function chatCapabilitiesFor(roleKey: string): ChatCapabilities {
     const route = CHAT_MANIFEST.routes[roleKey] ?? null;
     const c: RoleCtx = { roleKey, route };
     const profile = ROLE_PROFILES[roleKey];
-    const craft = promptLayersFor(roleKey).filter((l) => l.kind === 'craft').map((l) => ({ title: l.title, usedBy: l.usedBy, source: l.source }));
+    const craft = promptLayersFor(roleKey).filter((l) => l.kind === 'craft')
+        .map((l) => ({ key: l.key, title: l.title, usedBy: l.usedBy, source: l.source, inChat: !!route?.craftInChat.includes(l.key) }));
     const level: ExpertiseLevel = !route ? 'General' : craft.length ? 'Expert' : 'Specialist';
 
     const everyAssistant: CapabilityItem[] = [];
@@ -468,7 +473,7 @@ export function chatCapabilitiesFor(roleKey: string): ChatCapabilities {
         if (!route.flags.includes('acceptsAttachments')) cannot.push('Take pictures or documents attached to the chat');
     }
     cannot.push('Remember anything outside this conversation except what the data above holds');
-    if (!RULE_READING_ROLES.has(roleKey)) cannot.push("Follow its own Do's and don'ts in chat: they are not in its chat prompt");
+    if (!rulesReachChat(c)) cannot.push("Follow its Do's and don'ts in chat: neither its rules nor its rules list is in its chat prompt");
 
     return {
         roleKey,
@@ -499,7 +504,9 @@ export interface CatalogueRole {
 }
 
 export interface ChatCapabilitiesPage {
-    roles: (CatalogueRole & { caps: ChatCapabilities })[];
+    roles: (CatalogueRole & { caps: ChatCapabilities; gaps: Gap[] })[];
+    /** The few things worth doing next, across live and beta assistants. */
+    nextActions: NextAction[];
     /** Chat routes in the code with no catalogue row (cannot be hired, but exist). */
     routesNotInCatalogue: string[];
     /** Live or beta roles with no words in ROLE_PROFILES: shown as a warning on the page. */
@@ -517,9 +524,13 @@ export interface ChatCapabilitiesPage {
 /** Everything the page shows, for the catalogue rows given. Pure. */
 export function chatCapabilitiesPage(rows: readonly CatalogueRole[], commit: string | null = null): ChatCapabilitiesPage {
     const known = new Set(rows.map((r) => r.roleKey));
-    const roles = rows.map((r) => ({ ...r, caps: chatCapabilitiesFor(r.roleKey) }));
+    const roles = rows.map((r) => {
+        const caps = chatCapabilitiesFor(r.roleKey);
+        return { ...r, caps, gaps: chatGapsFor(r.roleKey, r.status, r.hiredCount, caps) };
+    });
     return {
         roles,
+        nextActions: nextBestActions(roles),
         routesNotInCatalogue: Object.keys(CHAT_MANIFEST.routes).filter((k) => !known.has(k)),
         undescribedLive: roles.filter((r) => (r.status === 'live' || r.status === 'beta') && !r.caps.described).map((r) => r.roleKey),
         levels: EXPERTISE_LEVELS,
@@ -534,4 +545,125 @@ export function chatCapabilitiesPage(rows: readonly CatalogueRole[], commit: str
             generator: 'scripts/chat-capabilities-manifest.ts',
         },
     };
+}
+
+// ── Gaps and next best actions (owner, 2026-11-14: "highlight where there are potential gaps or improvements
+// … and suggest next best actions") ─────────────────────────────────────────────────────────────────────────
+// Every finding is derived from the same code-read data as the list above, so a gap closes itself the moment
+// the code changes (and the generated manifest is rewritten). Nothing here is a judgement typed by hand except
+// ACCEPTED_GAPS: a gap the owner has decided to live with, with the reason (the test fails when one no longer
+// matches a real finding, so an acceptance cannot outlive the gap).
+
+export type GapSeverity = 'high' | 'medium' | 'low' | 'info';
+export type GapKey =
+    | 'not_described' | 'no_chat_route' | 'craft_not_in_chat' | 'no_craft_standard'
+    | 'rules_not_in_chat' | 'blind_to_own_work' | 'no_attachments_with_media' | 'hired_but_not_live';
+
+export interface Gap {
+    key: GapKey;
+    severity: GapSeverity;
+    title: string;
+    /** Why it matters: what the assistant may get wrong. */
+    why: string;
+    /** The concrete next step, naming the file to change. */
+    action: string;
+    /** Set when the owner accepted this gap (ACCEPTED_GAPS). Accepted gaps are shown, never suggested. */
+    accepted?: string;
+}
+
+/** A craft layer whose output its CHAT also produces, via this card: without the layer, chat drafts are held to a lower standard. */
+export const CRAFT_ALSO_DRAFTED_IN_CHAT: Record<string, string> = {
+    platform_craft: 'social_post_draft',
+    email_craft: 'newsletter_issue_draft',
+    blog_craft: 'blog_block_edit',
+};
+
+/** `${roleKey}:${gapKey}` (craft gaps: `${roleKey}:craft_not_in_chat:${layerKey}`) → why the owner accepts it. */
+export const ACCEPTED_GAPS: Record<string, string> = {};
+
+const LIVE = (status: string) => status === 'live' || status === 'beta';
+const OWN_WORK_FLAGS = new Set(['usesKnowledgeBase', 'usesLeadSnapshot', 'usesCampaignSnapshot', 'usesBriefsSnapshot', 'usesVideosSnapshot',
+    'usesMailboxSnapshot', 'usesSiteAuditSnapshot', 'usesMentorSnapshot', 'usesSiteSnapshot', 'usesAudienceSnapshot']);
+export const GAP_WEIGHT: Record<GapSeverity, number> = { high: 3, medium: 2, low: 1, info: 0 };
+
+/** The gaps for one role, most severe first. `status` and `hiredCount` come from the catalogue. Pure. */
+export function chatGapsFor(roleKey: string, status: string, hiredCount = 0, caps: ChatCapabilities = chatCapabilitiesFor(roleKey)): Gap[] {
+    const route = CHAT_MANIFEST.routes[roleKey] ?? null;
+    const live = LIVE(status);
+    const out: (Gap & { acceptKey: string })[] = [];
+    const add = (g: Gap, acceptKey: string = g.key) => out.push({ ...g, acceptKey });
+
+    if (!caps.described) add({ key: 'not_described', severity: live ? 'high' : 'low', title: 'Not described yet',
+        why: 'Its field, skills, limits and own rules are missing from this page, so nobody can check what it should and should not say.',
+        action: `Add a ROLE_PROFILES entry for ${roleKey} in src/utils/assistant-chat-capabilities.ts.` });
+
+    if (!route) {
+        if (live || status === 'coming_soon') add({ key: 'no_chat_route', severity: live ? 'high' : 'info', title: 'Its chat can only talk',
+            why: live ? 'Customers can hire it, but its chat has no route: it cannot save, change or look at anything, and may promise work it cannot do.'
+                : 'It is on the waitlist. Before it goes live it needs a chat route, or its chat will only talk.',
+            action: `Build a ${roleKey} route in ROUTES (netlify/functions/chat-orchestrator.ts)${live ? ', or move it off Live until it has one' : ''}.` });
+    } else {
+        for (const k of caps.expertise.craft.filter((c) => !c.inChat)) {
+            const card = CRAFT_ALSO_DRAFTED_IN_CHAT[k.key];
+            const draftsInChat = !!card && caps.canDo.cards.some((c) => c.type === card);
+            add({ key: 'craft_not_in_chat', severity: draftsInChat ? 'medium' : 'low',
+                title: draftsInChat ? `Chat drafts without its "${k.title}" standard` : `"${k.title}" reaches ${k.usedBy.toLowerCase()} only`,
+                why: draftsInChat
+                    ? `Its background work is held to ${k.title}, but its chat also writes the same thing (${CARD_LABELS[card].toLowerCase()}) without it, so a chat draft can be weaker than an autopilot one.`
+                    : `The standard shapes ${k.usedBy.toLowerCase()}, not its chat. Advice it gives in chat about that work is not held to the same standard.`,
+                action: `Add the standard from ${k.source} to the ${roleKey} route prompt in netlify/functions/chat-orchestrator.ts.` }, `craft_not_in_chat:${k.key}`);
+        }
+        if (caps.expertise.level === 'Specialist') add({ key: 'no_craft_standard', severity: live ? 'medium' : 'low', title: 'No written expert standard',
+            why: 'The owner asked that every assistant work as an expert in its role. Without a written craft standard its quality rests on the role instructions alone.',
+            action: `Write a craft constant for ${roleKey} (src/constants/), add it to its route prompt and list it in src/config/assistant-prompt-layers.ts.` });
+        if (!rulesReachChat({ roleKey, route })) add({ key: 'rules_not_in_chat', severity: live ? 'medium' : 'low', title: "Its chat does not follow its Do's and don'ts",
+            why: "Neither its rules nor its rules list is in its chat prompt, so its chat can break a rule its page says it follows.",
+            action: `Add ${roleKey} to RULE_READING_ROLES in src/utils/assistant-rules-prompt.ts, or let its route offer cards so it gets the rules list.` });
+        if (!route.flags.some((f) => OWN_WORK_FLAGS.has(f)) && !route.contentSnapshot) add({ key: 'blind_to_own_work', severity: live ? 'medium' : 'low', title: 'Its chat cannot see its own saved work',
+            why: 'It reads no snapshot of what it has made or saved, so "what did you do last week?" is answered from the conversation only, or guessed.',
+            action: `Add a snapshot route switch for ${roleKey} that reads its saved records (pattern: usesLeadSnapshot in netlify/functions/chat-orchestrator.ts).` });
+        if (roleKey in MY_CONTENT_ROLES && !route.flags.includes('acceptsAttachments')) add({ key: 'no_attachments_with_media', severity: 'low', title: 'No attachments in its chat',
+            why: 'Its page works with pictures and files (My Content), but its chat cannot take one: the user has to upload elsewhere and describe it.',
+            action: `Set acceptsAttachments on the ${roleKey} route (netlify/functions/chat-orchestrator.ts), as the Website Assistant does.` });
+    }
+    if (!live && hiredCount > 0 && (status === 'hidden' || status === 'retired')) add({ key: 'hired_but_not_live', severity: 'info', title: `${hiredCount} workspace${hiredCount === 1 ? '' : 's'} still use it`,
+        why: 'It is not in the catalogue, but its chat still answers in those workspaces, so this list still matters.',
+        action: 'Keep its words current, or plan how those workspaces move off it.' });
+
+    return out.map(({ acceptKey, ...g }) => {
+        const reason = ACCEPTED_GAPS[`${roleKey}:${acceptKey}`];
+        return reason ? { ...g, accepted: reason } : g;
+    }).sort((a, b) => GAP_WEIGHT[b.severity] - GAP_WEIGHT[a.severity]);
+}
+
+export interface NextAction {
+    key: GapKey;
+    severity: GapSeverity;
+    title: string;
+    action: string;
+    /** The live or beta roles it applies to, with names. */
+    roles: { roleKey: string; name: string }[];
+    /** Workspaces affected (sum of hired counts). */
+    workspaces: number;
+}
+
+/** The platform's next best actions: open (not accepted) high and medium gaps on live or beta roles, the same gap
+ *  across several roles grouped into one action, most severe and most workspaces first. Pure. */
+export function nextBestActions(roles: readonly { roleKey: string; name: string; status: string; hiredCount: number; gaps: Gap[] }[], max = 6): NextAction[] {
+    const groups = new Map<string, NextAction>();
+    for (const r of roles) {
+        if (!LIVE(r.status)) continue;
+        for (const g of r.gaps) {
+            if (g.accepted || GAP_WEIGHT[g.severity] < GAP_WEIGHT.medium) continue;
+            const id = `${g.key}|${g.severity}|${g.key === 'craft_not_in_chat' ? g.title : ''}`;
+            const had = groups.get(id);
+            if (had) { had.roles.push({ roleKey: r.roleKey, name: r.name }); had.workspaces += r.hiredCount; continue; }
+            groups.set(id, { key: g.key, severity: g.severity, title: g.title, action: g.action, roles: [{ roleKey: r.roleKey, name: r.name }], workspaces: r.hiredCount });
+        }
+    }
+    return [...groups.values()].map((a) => (a.roles.length > 1
+        ? { ...a, action: a.action.split(a.roles[0].roleKey).join(a.roles.map((x) => x.roleKey).join(', ')) }
+        : a))
+        .sort((a, b) => GAP_WEIGHT[b.severity] - GAP_WEIGHT[a.severity] || b.workspaces - a.workspaces || b.roles.length - a.roles.length)
+        .slice(0, max);
 }
