@@ -27,6 +27,7 @@ drawer, health checks and cost figures. There's no second registry of systems an
 | Who the Campaign Assistant can order | `ORCHESTRATABLE_ROLE_KEYS` in `src/constants/roles.ts`, already checked by a test | None. Reuse it to draw those lines |
 | Hand-offs that actually happened | `campaign_orders`, `orchestration_runs` (status `handed_off`/`skipped`), `video_projects.scheduled_post_id`, `mentor_outcomes.job_id`, `scenario_jobs` (lead → CRM). `src/utils/requested-by.ts` already explains each route | No single place lists the routes, so nothing can say a route is missing |
 | Links the customer set up | `orchestration_links` (source assistant, `source_event`, target assistant, free-text `target_action`) | Only visible inside each workspace |
+| What each CHAT knows, reads, can and can't do | Admin ▸ Assistants ▸ Chat capabilities (FR#17, 2026-11-14): `src/utils/assistant-chat-capabilities.ts` + `src/config/chat-capabilities.generated.ts`, kept true by `tests/assistant-chat-capabilities.test.ts` | None for chat. The Assistant drawer should link to it rather than repeat it; `ROLE_NEEDS` stays about systems and hand-offs |
 
 **The real gap:** the hand-off routes between assistants live in separate files (`video-handoff.ts`,
 `lead-handoff.ts`, `newsletter-from-post.ts`, `orchestration.ts`, the Mentor). A map drawn from memory would be out of

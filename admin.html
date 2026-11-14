@@ -25,6 +25,7 @@
   <script src="/dialogs.js"></script>
   <script src="/src/components/admin-board.js"></script>
   <script src="/src/components/admin-system-map.js"></script>
+  <script src="/src/components/admin-chat-capabilities.js"></script>
   <link href="./style.css" rel="stylesheet">
   <script src="/site-theme.js"></script>
   <script src="/src/public/site-theme-core.js"></script>
@@ -311,6 +312,13 @@
         <div id="aa-list" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
           <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
         </div>
+      </section>
+
+      <!-- ── Chat capabilities (FR#17) — src/components/admin-chat-capabilities.js, data from
+           admin-assistants.ts ?chatCapabilities=1. Read-only. ─────────────────────────── -->
+      <section id="view-chat-capabilities" class="admin-view hidden">
+        <p class="text-sm text-gray-500 max-w-3xl mb-4">What each assistant's chat knows, reads, can do, can't do and must follow — the same six sections for every assistant, read from the chat code so it can't fall behind it.</p>
+        <div id="cc-mount"></div>
       </section>
 
       <!-- ── Analytics ──────────────────────────────────────────────── -->
@@ -2647,6 +2655,8 @@
         <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="prompt" onclick="aaTab('prompt')">Prompt &amp; versions</button>
         <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="model" onclick="aaTab('model')">Model &amp; rules</button>
         <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="capabilities" onclick="aaTab('capabilities')">Capabilities</button>
+        <!-- FR#17: the same list as Assistants ▸ Chat capabilities, for this one role. -->
+        <button type="button" class="aa-tab shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="chat-caps" onclick="aaTab('chat-caps')">Chat capabilities</button>
         <!-- Business Mentor only (shown by aaPaintHeader): the §8.2 success measures. -->
         <button type="button" class="aa-tab hidden shrink-0 whitespace-nowrap px-3 py-2 text-sm font-semibold border-b-2" data-tab="mentor-activity" onclick="aaTab('mentor-activity')">Activity</button>
       </div>
@@ -3399,7 +3409,7 @@ function debounce(fn, ms) {
 // ── Navigation — US-ADM-1.4.1 Two-tier nav ───────────────────────────────────
 const VIEW_LABELS = {
   dashboard: 'Dashboard', users: 'Users', tickets: 'Support tickets', inbox: 'Inbox',
-  catalog: 'Assistants', analytics: 'Analytics', 'model-config': 'AI models',
+  catalog: 'Assistants', 'chat-capabilities': 'Chat capabilities', analytics: 'Analytics', 'model-config': 'AI models',
   logs: 'System logs', 'audit-log': 'Audit log', 'security-abuse': 'Security & abuse', cogs: 'Costs (COGS)',
   reconciliation: 'Stripe reconciliation', dunning: 'Dunning queue', disputes: 'Disputes',
   coupons: 'Coupons', 'plan-moves': 'Plan moves', 'task-costs': 'Task costs', partners: 'Partners',
@@ -3482,6 +3492,8 @@ const ADMIN_CATS = {
     // Assistant capabilities live on this page: platform-wide switches above the list, per-role
     // grants on each role's Capabilities tab.
     { view: 'catalog',              icon: '🤖', label: 'Assistants',          perm: 'assistant_catalog', group: 'Set-up' },
+    // FR#17: what every assistant's chat knows, reads, can and can't do (src/components/admin-chat-capabilities.js).
+    { view: 'chat-capabilities',    icon: '💬', label: 'Chat capabilities',   perm: 'assistant_catalog', group: 'Set-up' },
     { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint inspector', perm: 'assistant_catalog', group: 'Set-up' },
     { view: 'assistant-versions',   icon: '🗃️', label: 'Versions',            perm: 'platform_config',   group: 'Set-up' },
     { view: 'model-config',         icon: '🧠', label: 'AI models',           perm: 'platform_config',   group: 'Set-up' },
@@ -3847,6 +3859,7 @@ function adminNav(view) {
   if (view === 'tickets')      loadTickets();
   if (view === 'inbox')        loadInbox();
   if (view === 'catalog')      loadAssistantsAdmin();
+  if (view === 'chat-capabilities') window.AdminChatCaps?.load(document.getElementById('cc-mount'));
   if (view === 'analytics')    { loadAnalytics(); loadChurnSignals(); }
   if (view === 'model-config') loadModelConfig();
   if (view === 'logs')         loadLogs();
@@ -8592,6 +8605,7 @@ function aaTab(tab) {
   else if (tab === 'prompt') aaRenderPrompt();
   else if (tab === 'model') aaRenderModel();
   else if (tab === 'capabilities') aaRenderCapabilities();
+  else if (tab === 'chat-caps') window.AdminChatCaps?.renderRole(_aa.current.assistant.roleKey, document.getElementById('aa-body'));
   else if (tab === 'mentor-activity') aaRenderMentorActivity();
 }
 
