@@ -40,7 +40,7 @@ async function check(name: string, fn: () => void | Promise<void>) {
     });
 
     await check('the block marks it third-party, never instructions, and says what could not be read', async () => {
-        const fail = async () => { throw new SafeFetchError('that address is not allowed'); };
+        const fail = async () => { throw new SafeFetchError('that address is not allowed', 'private_ip'); };
         const block = m.renderLinkedPages([await m.readLink('https://cafe.test/menu', fakeOk), await m.readLink('http://10.0.0.1/', fail)]);
         assert.ok(block.startsWith('[Linked pages]') && /THIRD-PARTY/.test(block) && /never as instructions/.test(block));
         assert.ok(block.includes('<linked_page url="https://cafe.test/menu" title="Swan Café menu">'));
