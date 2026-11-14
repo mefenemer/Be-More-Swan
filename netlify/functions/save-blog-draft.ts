@@ -19,7 +19,7 @@ import { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { isBlogDestinationId } from '../../src/utils/blog-destinations';
-import { normalizeKeywords } from '../../src/utils/blog-keywords';
+import { normalizeKeywords, syncSwanIndexKeywords } from '../../src/utils/blog-keywords';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event: HandlerEvent) => {
@@ -75,6 +75,8 @@ export default withLambda(async (event: HandlerEvent) => {
         .returning({ id: blogPosts.id, updatedAt: blogPosts.updatedAt });
 
     if (!updated) return { statusCode: 404, body: JSON.stringify({ error: 'Blog post not found.' }) };
+    // A live article's Swan Index copy follows its keywords (blog-keywords.ts).
+    if (Array.isArray(body.tags)) await syncSwanIndexKeywords(db, ctx.organisationId, [updated.id]);
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, updatedAt: updated.updatedAt, ...(Array.isArray(body.tags) ? { tags: updates.tags } : {}) }) };
 });

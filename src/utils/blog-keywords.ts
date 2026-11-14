@@ -99,6 +99,7 @@ export async function renameBlogKeyword(db: Db, organisationId: number, from: un
            AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(p.tags) e WHERE lower(btrim(e)) = ${f})
         RETURNING p.id`);
     const rows: any[] = Array.isArray(r) ? r : r?.rows || [];
+    if (rows.length) await syncSwanIndexKeywords(db, organisationId, rows.map((x) => Number(x.id)));
     return { ok: true, articles: rows.length };
 }
 
@@ -117,5 +118,32 @@ export async function removeBlogKeyword(db: Db, organisationId: number, keyword:
            AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(p.tags) e WHERE lower(btrim(e)) = ${k})
         RETURNING p.id`);
     const rows: any[] = Array.isArray(r) ? r : r?.rows || [];
+    if (rows.length) await syncSwanIndexKeywords(db, organisationId, rows.map((x) => Number(x.id)));
     return { ok: true, articles: rows.length };
+}
+
+/**
+ * The Swan Index keeps its own copy of a syndicated article, keywords included (swan_index_posts.tags,
+ * copied at submit). Without this, a keyword changed on the blog stayed old there for good. Copies the
+ * article's CURRENT keywords onto its Swan Index row — only the keywords: the section, slug and every
+ * editorial choice are the editors' and stay as they are. `postIds` null = every article in the
+ * workspace (a blog-wide rename/remove). Never throws: the blog change already succeeded, and a
+ * workspace never syndicated has no rows to touch.
+ */
+export async function syncSwanIndexKeywords(db: Db, organisationId: number, postIds: number[] | null): Promise<void> {
+    if (postIds && !postIds.length) return;
+    try {
+        const only = postIds ? sql`AND p.id IN (${sql.join(postIds.map((id) => sql`${id}`), sql`, `)})` : sql``;
+        await db.execute(sql`
+            UPDATE swan_index_posts s
+               SET tags = p.tags, updated_at = now()
+              FROM blog_posts p
+             WHERE s.blog_post_id = p.id
+               AND p.organisation_id = ${organisationId}
+               AND s.organisation_id = ${organisationId}
+               AND s.tags IS DISTINCT FROM p.tags
+               ${only}`);
+    } catch (err) {
+        console.error('[blog-keywords] could not update the Swan Index copy (non-fatal)', err);
+    }
 }

@@ -22,7 +22,7 @@ import { excerpt } from './markdown-render';
 import { currentDatePromptBlock } from './current-date-prompt';
 import { parseModelJson } from './model-json';
 import { adaptForModel, replyText } from '../config/model-options';
-import { MAX_KEYWORDS, normalizeKeywords } from './blog-keywords';
+import { MAX_KEYWORDS, normalizeKeywords, syncSwanIndexKeywords } from './blog-keywords';
 import { derivedPillarNames, listPillars } from './content-pillars-store';
 
 type Db = ReturnType<typeof getDb>;
@@ -162,6 +162,8 @@ export async function generateBlogSeo(
     if (urlSlug) updates.slug = urlSlug;
     await db.update(blogPosts).set(updates)
         .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, organisationId)));
+    // Regenerate SEO on a published article rewrites its keywords — its Swan Index copy follows.
+    await syncSwanIndexKeywords(db, organisationId, [id]);
 
     return { metaTitle, metaDescription, urlSlug, tags };
 }
