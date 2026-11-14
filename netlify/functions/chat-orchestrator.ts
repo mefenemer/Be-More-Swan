@@ -4577,7 +4577,7 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
         let droppedCard: ReturnType<typeof droppedCardRecord> | null = null;
         {
             const fixed = missingCardReply(content, !!uiElement);
-            if (fixed !== content) {
+            if (!uiElement && fixed !== content) {
                 // Kept as a hidden system row in the transaction below (Fix pipeline #33): the log line alone was gone before anyone looked.
                 droppedCard = droppedCardRecord({ route: assistantRow.roleKey && ROUTES[assistantRow.roleKey] ? assistantRow.roleKey : 'default', roleKey: assistantRow.roleKey ?? null, sentUiElement: parsed.uiElement, raw });
                 // Which way the card was lost: the model sent none, sent a shape the server refused, or wrote prose, not JSON.
