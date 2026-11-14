@@ -15,7 +15,8 @@ import { and, desc, eq, gte, inArray, lte, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, blogPosts } from '../../db/schema';
 import { ASSISTANT_DRAFT_REASON } from '../../src/utils/blog-ai-assisted';
-import { MAX_BODY_CHARS, MAX_TAGS, MAX_TAG_CHARS } from '../../src/utils/blog-chat-draft';
+import { MAX_BODY_CHARS } from '../../src/utils/blog-chat-draft';
+import { normalizeKeywords } from '../../src/utils/blog-keywords';
 import { requireTenant } from '../../src/utils/tenant';
 import { notStillGenerating } from '../../src/utils/blog-still-generating';
 import { requesterNamesForBlogPosts } from '../../src/utils/requested-by';
@@ -147,11 +148,8 @@ export default withLambda(async (event: HandlerEvent) => {
         // article in hand and nothing to gain from an empty row plus a follow-up autosave.
         // Blog Studio's own "New draft" button still posts a title alone and is unaffected.
         const bodyMarkdown = typeof body.bodyMarkdown === 'string' ? body.bodyMarkdown.trim().slice(0, MAX_BODY_CHARS) : '';
-        const tags = Array.isArray(body.tags)
-            ? [...new Set(body.tags.filter((t: unknown): t is string => typeof t === 'string')
-                .map((t: string) => t.trim().replace(/^#/, '').slice(0, MAX_TAG_CHARS))
-                .filter(Boolean))].slice(0, MAX_TAGS)
-            : [];
+        // Stored as keywords, cleaned and capped like every other writer (src/utils/blog-keywords.ts).
+        const tags = normalizeKeywords(Array.isArray(body.tags) ? body.tags.filter((t: unknown): t is string => typeof t === 'string') : []);
 
         // Optional authoring assistant — the post inherits its voice (blog-tone.ts). Validate org ownership.
         let assistantId: number | null = null;

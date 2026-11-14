@@ -24,6 +24,11 @@
 // Blog Studio does (schedule-blog, reject-blog-post; blog-posts DELETE for remove), so their gates apply here too. Nothing here
 // writes.
 //
+// "keywords" (2026-11-14) sets one article's keywords (blog_posts.tags — src/utils/blog-keywords.ts):
+// the card shows the keywords the article has now, read from the row, beside the new ones, and the
+// click calls save-blog-draft { tags }, the endpoint Blog Studio's keyword box uses. Renaming or
+// removing a keyword on EVERY article is a separate card (src/utils/chat-blog-keywords.ts).
+//
 // There is no "publish now" action, deliberately: going live at once is the one step the chat
 // leaves to Blog Studio, where the user is looking at the article.
 //
@@ -33,11 +38,12 @@ import { and, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
 import { bodyHasPicture } from './blog-picture-swap';
+import { normalizeKeywords } from './blog-keywords';
 
 type Db = ReturnType<typeof getDb>;
 
 export const BLOG_ACTION_PROPOSAL_TYPE = 'blog_action_proposal';
-export const BLOG_ACTIONS = ['approve', 'schedule', 'unschedule', 'reject', 'remove', 'shorter', 'longer', 'revise', 'pictures'] as const;
+export const BLOG_ACTIONS = ['approve', 'schedule', 'unschedule', 'reject', 'remove', 'shorter', 'longer', 'revise', 'pictures', 'keywords'] as const;
 export type BlogAction = typeof BLOG_ACTIONS[number];
 
 /** Which statuses each action applies to. Mirrors the Blogs tab's columns (assistants.js). */
@@ -60,6 +66,9 @@ const ACTIONABLE: Record<BlogAction, readonly string[]> = {
     revise: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused'],
     // Blog Studio's "Add pictures" (generate-blog { addImages }) — same live-article rule.
     pictures: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'failed', 'paused'],
+    // save-blog-draft { tags } — any article but one publishing right now or archived. On a LIVE
+    // article the new keywords show on the blog straight away (the card says so).
+    keywords: ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'published', 'failed', 'paused', 'rejected'],
 };
 
 /** Said on the card when the article is not in a state the action applies to. */
@@ -73,6 +82,7 @@ const NOT_NOW: Record<BlogAction, string> = {
     longer: 'This article can’t be rewritten now: it is live or publishing (unpublish it first), or it was turned down or archived.',
     revise: 'This article can’t be rewritten now: it is live or publishing (unpublish it first), or it was turned down or archived.',
     pictures: 'Pictures can’t be added now: the article is live or publishing (unpublish it first), or it was turned down or archived.',
+    keywords: 'This article’s keywords can’t be changed right now: it is publishing at this moment, or it has been archived.',
 };
 
 const TITLE_MAX = 200;
@@ -92,6 +102,8 @@ export interface BlogActionRequest {
     source?: 'stock' | 'ai' | null;
     /** Pictures: replace THIS picture (asset id, the one the owner selected) instead of adding. */
     replaceAsset?: number;
+    /** Keywords: the article's whole new list, cleaned (blog-keywords.ts normalizeKeywords). */
+    keywords?: string[];
 }
 
 /** Shape check on the model's output. Pure. Null when it is not a usable proposal. */
@@ -109,6 +121,10 @@ export function blogActionFromUiElement(uiElement: unknown): BlogActionRequest |
     const instruction = str(ui.instruction, REASON_MAX);
     // Nor is a revise with nothing to change.
     if (action === 'revise' && !instruction) return null;
+    // Nor a keywords card with no keywords: clearing them all leaves the article out of every
+    // category, which nobody asks for — the card is for replacing them.
+    const keywords = action === 'keywords' ? normalizeKeywords(ui.keywords) : [];
+    if (action === 'keywords' && !keywords.length) return null;
     return {
         action,
         postId,
@@ -119,6 +135,8 @@ export function blogActionFromUiElement(uiElement: unknown): BlogActionRequest |
         ...(action === 'pictures' ? { source: (ui.source === 'ai' ? 'ai' : 'stock') as 'stock' | 'ai' } : {}),
         // Only when replacing, so an "add pictures" card keeps its shape.
         ...(action === 'pictures' && replaceAssetOf(ui.replaceAsset) ? { replaceAsset: replaceAssetOf(ui.replaceAsset) as number } : {}),
+        // Only on a keywords card, so every other action's shape is unchanged.
+        ...(action === 'keywords' ? { keywords } : {}),
     };
 }
 
@@ -126,6 +144,26 @@ export function blogActionFromUiElement(uiElement: unknown): BlogActionRequest |
 function replaceAssetOf(v: unknown): number | null {
     const n = Number(String(v ?? '').replace(/^\s*(?:asset\s*=\s*|#)/i, '').trim());
     return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * The keywords an article has now, as the card shows them. Not capped at MAX_KEYWORDS: an older
+ * article may carry more (the SEO step once wrote up to six), and the card must show what is really
+ * there — saving the new list is what brings it down to three.
+ */
+function normalizeKeywordsLoose(v: unknown): string[] {
+    const list = Array.isArray(v) ? v : [];
+    const out: string[] = [];
+    for (const raw of list) {
+        const k = normalizeKeywords([raw])[0];
+        if (k && !out.includes(k)) out.push(k);
+    }
+    return out;
+}
+
+/** Same keywords, in any order. Pure. */
+export function sameKeywords(a: string[], b: string[]): boolean {
+    return a.length === b.length && a.every((k) => b.includes(k));
 }
 
 export interface BlogActionCard {
@@ -146,6 +184,9 @@ export interface BlogActionCard {
     source?: 'stock' | 'ai' | null;
     /** Pictures only, when replacing the selected picture: its asset id. */
     replaceAsset?: number;
+    /** Keywords only: the new list, and the list the article has NOW (read from the row). */
+    keywords?: string[];
+    currentKeywords?: string[];
     /** Set when the action does not apply; the card says it and offers no button. */
     blocked: string | null;
     settled?: boolean;
@@ -165,7 +206,7 @@ export async function resolveBlogActionProposal(
     try {
         const [post] = await db.select({
             id: blogPosts.id, status: blogPosts.status, title: blogPosts.title, publishDate: blogPosts.publishDate,
-            bodyMarkdown: blogPosts.bodyMarkdown,
+            bodyMarkdown: blogPosts.bodyMarkdown, tags: blogPosts.tags,
         })
             .from(blogPosts)
             .where(and(eq(blogPosts.id, req.postId), eq(blogPosts.organisationId, organisationId), eq(blogPosts.assistantId, aiAssistantId)))
@@ -187,8 +228,12 @@ export async function resolveBlogActionProposal(
             instruction: req.instruction ?? null,
             ...(req.action === 'pictures' ? { source: req.source ?? 'stock' } : {}),
             ...(req.action === 'pictures' && req.replaceAsset ? { replaceAsset: req.replaceAsset } : {}),
+            ...(req.action === 'keywords' ? { keywords: req.keywords ?? [], currentKeywords: normalizeKeywordsLoose(post.tags) } : {}),
             blocked: ACTIONABLE[req.action].includes(post.status) ? null : NOT_NOW[req.action],
         };
+        if (!card.blocked && req.action === 'keywords' && sameKeywords(card.currentKeywords ?? [], card.keywords ?? [])) {
+            card.blocked = 'This article already has exactly these keywords, so there is nothing to change.';
+        }
         if (!card.blocked && req.replaceAsset && !bodyHasPicture(String(post.bodyMarkdown ?? ''), req.replaceAsset)) {
             card.blocked = 'That picture isn’t in this article any more. Select it again in Blog Studio and ask once more.';
         }
@@ -234,13 +279,18 @@ export async function refreshBlogActionCards<M extends { uiElement: unknown }>(
         const req = blogActionFromUiElement(ui);
         if (!req) return m;
         try {
-            const [post] = await db.select({ id: blogPosts.id, status: blogPosts.status })
+            const [post] = await db.select({ id: blogPosts.id, status: blogPosts.status, tags: blogPosts.tags })
                 .from(blogPosts)
                 .where(and(eq(blogPosts.id, req.postId), eq(blogPosts.organisationId, organisationId), eq(blogPosts.assistantId, aiAssistantId)))
                 .limit(1);
             if (!post) return { ...m, uiElement: { ...ui, settled: true, blocked: 'This article no longer exists.' } };
             if (!ACTIONABLE[req.action].includes(post.status)) {
                 return { ...m, uiElement: { ...ui, status: post.status, settled: true, blocked: `Already dealt with — this article is now ${NOW_WORDS[post.status] ?? post.status}.` } };
+            }
+            // A keywords card's article doesn't change state when it's used, so "already dealt with"
+            // is read from the keywords themselves: once the article has them, the button is gone.
+            if (req.action === 'keywords' && sameKeywords(normalizeKeywordsLoose(post.tags), req.keywords ?? [])) {
+                return { ...m, uiElement: { ...ui, status: post.status, settled: true, blocked: 'Done — this article has these keywords.' } };
             }
             const at = typeof ui.scheduleAt === 'string' ? new Date(ui.scheduleAt) : null;
             if (req.action === 'schedule' && at && at.getTime() <= now.getTime()) {

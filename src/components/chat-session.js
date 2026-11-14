@@ -1157,6 +1157,13 @@
           } finally {
             document.dispatchEvent(new CustomEvent('blog:rewriteFinished', { detail: { postId: d.postId, outcome } }));
           }
+        } else if (d.action === 'keywords') {
+          // Blog Studio's keyword box: save-blog-draft { tags } cleans and caps them the same way.
+          const r = await postActionCall('save-blog-draft', { id: d.postId, tags: Array.isArray(d.keywords) ? d.keywords : [] });
+          const saved = Array.isArray(r.tags) ? r.tags : (d.keywords || []);
+          message = `Keywords saved: ${saved.join(', ')}.`;
+          // An open Blog Studio on this article shows the new keywords rather than saving the old ones back.
+          document.dispatchEvent(new CustomEvent('blog:keywordsChanged', { detail: { postId: d.postId, tags: saved } }));
         } else {
           throw new Error('Unknown action.');
         }
@@ -1168,6 +1175,23 @@
       window.detailRqRefresh?.();
       window._detailRqRefreshColumnCounts?.();
       document.dispatchEvent(new CustomEvent('posts:changed', { detail: { assistantId } }));
+    }
+
+    // A keyword on every article → blog-keywords, the endpoint Blog setup ▸ Keywords uses.
+    async function onBlogKeywords(e) {
+      const d = e.detail || {};
+      const respond = typeof d.respond === 'function' ? d.respond : () => {};
+      try {
+        const r = await postActionCall('blog-keywords', d.op === 'remove'
+          ? { action: 'remove', keyword: d.from }
+          : { action: 'rename', from: d.from, to: d.to });
+        const n = Number(r.articles) || 0;
+        const on = `${n} article${n === 1 ? '' : 's'}`;
+        respond({ ok: true, message: d.op === 'remove' ? `Removed “${d.from}” from ${on}.` : `${d.merge ? 'Merged' : 'Renamed'} “${d.from}” to “${d.to}” on ${on}.` });
+        document.dispatchEvent(new CustomEvent('blog:keywordsChanged', { detail: { postId: null } }));
+      } catch (err) {
+        respond({ ok: false, error: err.message });
+      }
     }
 
     // Email action cards → newsletter-issues, the Email Studio's own endpoint (approve, reject), so its
@@ -2586,6 +2610,7 @@
     container.addEventListener('video:sceneEdit', onVideoSceneEdit);
     container.addEventListener('post:action', onPostAction);
     container.addEventListener('blog:action', onBlogAction);
+    container.addEventListener('blog:keywords', onBlogKeywords);
     container.addEventListener('email:action', onEmailAction);
     container.addEventListener('audience:action', onAudienceAction);
     container.addEventListener('lead:action', onLeadAction);
@@ -2713,6 +2738,7 @@
         container.removeEventListener('video:sceneEdit', onVideoSceneEdit);
         container.removeEventListener('post:action', onPostAction);
         container.removeEventListener('blog:action', onBlogAction);
+        container.removeEventListener('blog:keywords', onBlogKeywords);
         container.removeEventListener('email:action', onEmailAction);
         container.removeEventListener('audience:action', onAudienceAction);
         container.removeEventListener('lead:action', onLeadAction);
