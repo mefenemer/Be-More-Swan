@@ -296,6 +296,7 @@ export const GENERATED_CHAT_MANIFEST = {
     ],
     "turnExtras": [
         "recordContext",
+        "linkContext",
         "teamNote",
         "message"
     ],

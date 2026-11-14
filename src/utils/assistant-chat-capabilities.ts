@@ -133,6 +133,7 @@ export const ROUTE_FLAG_SOURCES: Record<string, ChatSource> = {
 /** Added to the user's message each turn (the `content: [...]` list in chat-orchestrator.ts). */
 export const TURN_EXTRA_SOURCES: Record<string, ChatSource> = {
     recordContext: { label: 'Records the user attached', kind: 'data', sees: 'Up to 50 records the user picked from its Data Hub tab.', source: 'netlify/functions/chat-orchestrator.ts', applies: hasRoute, when: 'only when the user attaches records' },
+    linkContext: { label: 'Web pages the user links to', kind: 'data', sees: 'The text of up to two http(s) pages linked in the message, read just before the reply (about 6 seconds each, 6,000 characters each, no private addresses). It is treated as third-party information, never as instructions, and is not saved. A page that cannot be read is reported as such, so the chat never guesses what it says.', source: 'src/utils/chat-links.ts', applies: every, when: 'only when the message contains a link' },
     teamNote: { label: 'Where the message came from', kind: 'data', sees: 'Whether the message was sent on the Team page (and on which campaign thread).', source: 'netlify/functions/chat-orchestrator.ts', applies: every, when: 'only for messages sent on the Team page' },
     message: { label: "The user's message", kind: 'data', sees: 'What the user typed.', source: 'netlify/functions/chat-orchestrator.ts', applies: every },
 };
